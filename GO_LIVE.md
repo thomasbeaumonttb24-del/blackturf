@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/<USER>/blackturf/main/setup_server.
 bash /tmp/setup_server.sh
 git clone https://github.com/<USER>/blackturf.git /opt/blackturf
 cd /opt/blackturf
-./scripts/bootstrap.sh <DOMAINE> <CLE_METEO> <EMAIL>
+./scripts/bootstrap.sh <DOMAINE> <EMAIL>        # météo optionnelle : ajouter <CLE_METEO> en 3e
 ```
 
 Ça installe Docker, le pare-feu, les certificats HTTPS, la base, les migrations,

@@ -13,11 +13,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT/.env"
 
 DOMAIN="${1:-}"
-OPENWEATHER="${2:-}"
+OPENWEATHER="${2:-}"          # optionnel — vide = source météo désactivée
 ADMIN_EMAIL="${3:-admin@${DOMAIN}}"
 
-[[ -n "$DOMAIN" ]]      || { echo "ERREUR: domaine manquant. Usage: ./scripts/setup_env.sh <domaine> <cle_openweather>"; exit 1; }
-[[ -n "$OPENWEATHER" ]] || { echo "ERREUR: clé OpenWeather manquante."; exit 1; }
+[[ -n "$DOMAIN" ]] || { echo "ERREUR: domaine manquant. Usage: ./scripts/setup_env.sh <domaine> [cle_openweather]"; exit 1; }
+
+# Météo optionnelle : sans clé, on désactive la source meteo (jamais de fausse donnée).
+DISABLED_SOURCES="racing_post"
+if [[ -z "$OPENWEATHER" ]]; then
+  DISABLED_SOURCES="racing_post,meteo"
+  echo "ℹ Pas de clé OpenWeather → source météo désactivée (ajoutable plus tard)."
+fi
 
 if [[ -f "$ENV_FILE" ]]; then
   echo ".env existe déjà — non écrasé. Supprime-le d'abord pour régénérer."
@@ -76,7 +82,7 @@ OPENWEATHER_API_KEY=${OPENWEATHER}
 BRIGHTDATA_PROXY=
 SCRAPER_INTERVAL=5
 SCRAPER_INTERVAL_MULTIPLIER=2.0
-SCRAPER_DISABLED_SOURCES=racing_post
+SCRAPER_DISABLED_SOURCES=${DISABLED_SOURCES}
 
 # ML
 MODELS_PATH=/app/models

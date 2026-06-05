@@ -15,14 +15,14 @@ cd "$ROOT"
 COMPOSE="docker compose -f docker-compose.prod.yml"
 
 DOMAIN="${1:-}"
-OPENWEATHER="${2:-}"
-EMAIL="${3:-}"
+EMAIL="${2:-}"
+OPENWEATHER="${3:-}"          # optionnel — météo désactivée si absent
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 die() { echo "[ERREUR] $*" >&2; exit 1; }
 
-[[ -n "$DOMAIN" && -n "$OPENWEATHER" && -n "$EMAIL" ]] || \
-  die "Usage: ./scripts/bootstrap.sh <domaine> <cle_openweather> <email>"
+[[ -n "$DOMAIN" && -n "$EMAIL" ]] || \
+  die "Usage: ./scripts/bootstrap.sh <domaine> <email> [cle_openweather]"
 command -v docker >/dev/null 2>&1 || die "Docker non installé."
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 requis."
 
