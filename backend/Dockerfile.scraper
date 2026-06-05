@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+# bookworm (Debian 12) : Playwright 1.44 --with-deps y trouve ses libs/polices
+# (trixie/Debian 13 a renommé ttf-ubuntu-font-family / ttf-unifont → échec).
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
