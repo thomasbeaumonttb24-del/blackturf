@@ -171,10 +171,8 @@ class PmuScraper(BaseScraper):
 
     async def enrich_partants(self, reunion_id: str, course_num: int) -> list[PartantScrape]:
         """Récupère les données complètes des partants pour une course."""
-        url = (
-            f"{BASE}/reunion/{reunion_id}/course/{course_num}"
-            f"/participants?specialisation=INTERNET"
-        )
+        d = date.today().strftime("%d%m%Y")
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/participants?specialisation=INTERNET"
         await human_delay(0.3, 0.8)
 
         data = await self._fetch_json(url)
@@ -186,10 +184,8 @@ class PmuScraper(BaseScraper):
 
     async def get_rapports_definitifs(self, reunion_id: str, course_num: int) -> Optional[ResultatScrape]:
         """Récupère les résultats officiels après la course."""
-        url = (
-            f"{BASE}/reunion/{reunion_id}/course/{course_num}"
-            f"/rapports-definitifs?specialisation=INTERNET"
-        )
+        d = date.today().strftime("%d%m%Y")
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/rapports-definitifs?specialisation=INTERNET"
         data = await self._fetch_json(url)
         if not data:
             return None
@@ -233,10 +229,8 @@ class PmuScraper(BaseScraper):
         Récupère les cotes en temps réel.
         Retourne {numero_partant: cote}.
         """
-        url = (
-            f"{BASE}/reunion/{reunion_id}/course/{course_num}"
-            f"/participants?specialisation=INTERNET"
-        )
+        d = date.today().strftime("%d%m%Y")
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/participants?specialisation=INTERNET"
         data = await self._fetch_json(url)
         if not data:
             return {}

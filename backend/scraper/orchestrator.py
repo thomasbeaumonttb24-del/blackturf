@@ -150,12 +150,24 @@ class BlackTurfOrchestrator:
             async with AsyncSessionLocal() as session:
                 nb_partants_total = 0
                 for course in courses:
+                    r_id = course.reunion_id
+                    c_num = int(course.course_id.split("C")[-1])
+
+                    # Enrichir les partants (endpoint /participants — programme seul
+                    # ne les contient pas). Attache avant la sauvegarde.
+                    try:
+                        partants = await pmu.enrich_partants(r_id, c_num)
+                        if partants:
+                            course.partants = partants
+                            course.nb_partants = len(partants)
+                    except Exception as e:
+                        log.warning("orchestrator.enrich_partants_failed",
+                                    course_id=course.course_id, err=str(e))
+
                     await save_course_to_db(session, course)
                     nb_partants_total += len(course.partants)
 
                     # Tenter de récupérer les résultats des courses terminées
-                    r_id = course.reunion_id
-                    c_num = int(course.course_id.split("C")[-1])
                     if course.date_heure:  # Si course passée
                         resultat = await pmu.get_rapports_definitifs(r_id, c_num)
                         if resultat and resultat.ordre_arrivee:
