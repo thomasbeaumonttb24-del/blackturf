@@ -1,0 +1,32 @@
+{
+  "name": "BlackTurf — Terminal IA Hippique",
+  "short_name": "BlackTurf",
+  "description": "Votre conseiller expert en paris hippiques. Value bets IA en temps réel.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050A18",
+  "theme_color": "#F59E0B",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icons/icon-72.png",  "sizes": "72x72",   "type": "image/png" },
+    { "src": "/icons/icon-96.png",  "sizes": "96x96",   "type": "image/png" },
+    { "src": "/icons/icon-128.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "/icons/icon-144.png", "sizes": "144x144", "type": "image/png" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Programme du jour",
+      "url": "/programme",
+      "description": "Voir les courses du jour"
+    },
+    {
+      "name": "Value Bets live",
+      "url": "/value-bets",
+      "description": "Signaux value bets en cours"
+    }
+  ],
+  "categories": ["sports", "finance"],
+  "lang": "fr-FR"
+}

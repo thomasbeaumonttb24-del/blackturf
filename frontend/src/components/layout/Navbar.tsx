@@ -1,0 +1,408 @@
+"use client";
+
+import Link from "next/link";
+import Image from "next/image";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useCallback } from "react";
+import useSWR from "swr";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Brain, Search, BarChart2, Sun, Moon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/hooks/useAuth";
+import { planLabel, cn } from "@/lib/utils";
+
+const NAV_LINKS_PUBLIC = [
+  { href: "/programme", label: "Programme" },
+  { href: "/value-bets", label: "Value Bets" },
+  { href: "/bankroll", label: "Bankroll" },
+  { href: "/assistant", label: "IA Chat" },
+  { href: "/tarifs", label: "Tarifs" },
+];
+
+const NAV_LINKS_AUTH: Array<{ href: string; label: string; icon?: LucideIcon }> = [
+  { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+  { href: "/programme", label: "Programme" },
+  { href: "/value-bets", label: "Value Bets" },
+  { href: "/bankroll", label: "Bankroll" },
+  { href: "/assistant", label: "IA Chat" },
+];
+
+// ── Search palette ──────────────────────────────────────────────────────────
+function SearchPalette({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const { data: results } = useSWR(
+    debouncedQ.length >= 2 ? `/api/v1/recherche?q=${encodeURIComponent(debouncedQ)}&limit=8` : null,
+    (url) => fetch(url).then((r) => r.json()),
+    { dedupingInterval: 500 },
+  );
+
+  const TYPE_ICONS: Record<string, string> = { cheval: "🐴", jockey: "👤", hippodrome: "📍", course: "🏇" };
+  const TYPE_LINKS: Record<string, (id: string) => string> = {
+    cheval: (id) => `/chevaux/${id}`,
+    jockey: (id) => `/jockeys/${id}`,
+    hippodrome: (id) => `/programme?hippodrome=${encodeURIComponent(id)}`,
+    course: (id) => `/courses/${id}`,
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-start justify-center pt-16 px-4" onClick={onClose}>
+      <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+          <Search className="h-4 w-4 text-gray-400 flex-shrink-0" />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Rechercher un cheval, jockey, hippodrome..."
+            className="flex-1 outline-none text-sm bg-transparent text-gray-900 placeholder-gray-400"
+          />
+          <kbd className="text-[10px] text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Esc</kbd>
+        </div>
+        {results && results.length > 0 ? (
+          <ul className="py-2 max-h-80 overflow-y-auto">
+            {results.map((r: { type: string; id: string; label: string; sub: string }, i: number) => (
+              <li key={i}>
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left transition-colors"
+                  onClick={() => { router.push(TYPE_LINKS[r.type]?.(r.id) ?? "/"); onClose(); }}
+                >
+                  <span className="text-base flex-shrink-0">{TYPE_ICONS[r.type] ?? "🔍"}</span>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate">{r.label}</div>
+                    <div className="text-xs text-gray-400 truncate">{r.sub}</div>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : debouncedQ.length >= 2 ? (
+          <div className="py-8 text-center text-sm text-gray-400">Aucun résultat pour "{debouncedQ}"</div>
+        ) : (
+          <div className="py-6 text-center text-xs text-gray-400">Tape au moins 2 caractères</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function Navbar() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { user, logout } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Dark mode persistence
+  useEffect(() => {
+    const saved = localStorage.getItem("blackturf-dark");
+    if (saved === "true" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+      document.documentElement.classList.add("dark");
+      setDarkMode(true);
+    }
+  }, []);
+
+  const toggleDark = useCallback(() => {
+    const next = !darkMode;
+    setDarkMode(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("blackturf-dark", String(next));
+  }, [darkMode]);
+
+  // Keyboard shortcut ⌘K / Ctrl+K
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Notification unread count
+  const { data: notifData } = useSWR(
+    user ? "/api/v1/notifications/count-unread" : null,
+    (url) => fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem("access_token")}` } })
+      .then((r) => r.ok ? r.json() : { count: 0 }),
+    { refreshInterval: 60000 },
+  );
+
+  return (
+    <nav className="sticky top-0 z-50 border-b border-border bg-white/90 backdrop-blur-md shadow-sm shadow-black/[0.04]">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="flex h-16 items-center justify-between">
+
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-2.5 flex-shrink-0" aria-label="BlackTurf — Accueil">
+            <Image
+              src="/logo.png"
+              alt="BlackTurf"
+              width={36}
+              height={36}
+              className="rounded-lg object-contain"
+              priority
+            />
+            <span className="text-xl font-bold tracking-tight text-gray-900">
+              Black<span className="text-brand-gold-deep">Turf</span>
+            </span>
+          </Link>
+
+          {/* Desktop nav */}
+          <div className="hidden md:flex items-center gap-0.5">
+            {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => {
+              const Icon = (link as { icon?: LucideIcon }).icon;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={cn(
+                    "px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5",
+                    pathname === link.href
+                      ? "bg-brand-gold-tint text-brand-gold-dark font-semibold"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                  )}
+                >
+                  {Icon && <Icon className="h-3.5 w-3.5" />}
+                  {link.label}
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* Right side */}
+          <div className="flex items-center gap-1.5">
+            {/* Search button (tous) */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Rechercher (⌘K)"
+            >
+              <Search className="h-4 w-4" />
+            </Button>
+
+            {/* Dark mode toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+              onClick={toggleDark}
+              aria-label="Basculer mode sombre"
+            >
+              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+
+            {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} />}
+
+            {user ? (
+              <>
+                {/* Alerts bell with unread count */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+                  aria-label="Notifications"
+                  onClick={() => router.push("/notifications")}
+                >
+                  <Bell className="h-4 w-4" />
+                  {notifData?.count > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center">
+                      {notifData.count > 9 ? "9+" : notifData.count}
+                    </span>
+                  )}
+                </Button>
+
+                {/* User menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm hover:border-brand-gold/40 hover:bg-brand-gold-tint/50 transition-all"
+                    aria-expanded={userMenuOpen}
+                    aria-haspopup="true"
+                  >
+                    <div className="h-6 w-6 rounded-full bg-brand-gold-tint flex items-center justify-center ring-1 ring-brand-gold/30">
+                      <User className="h-3 w-3 text-brand-gold-deep" />
+                    </div>
+                    <span className="hidden sm:block max-w-[100px] truncate text-gray-700 font-medium">
+                      {user.prenom || user.email.split("@")[0]}
+                    </span>
+                    <Badge
+                      variant={
+                        ["pro", "expert"].includes(user.plan)
+                          ? "expert"
+                          : ["starter", "standard"].includes(user.plan)
+                          ? "gold"
+                          : "secondary"
+                      }
+                      className="hidden sm:flex text-[10px] px-1.5 py-0"
+                    >
+                      {planLabel(user.plan)}
+                    </Badge>
+                    <ChevronDown className="h-3 w-3 text-gray-400" />
+                  </button>
+
+                  {userMenuOpen && (
+                    <div className="absolute right-0 top-11 w-48 rounded-2xl border border-gray-200 bg-white shadow-xl shadow-black/10 z-50">
+                      <div className="p-1.5">
+                        <Link
+                          href="/profil"
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <User className="h-4 w-4 text-gray-400" /> Mon profil
+                        </Link>
+                        <Link
+                          href="/statistiques"
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <BarChart2 className="h-4 w-4 text-blue-400" /> Mes statistiques
+                        </Link>
+                        <Link
+                          href="/notifications"
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <Bell className="h-4 w-4 text-gray-400" /> Notifications
+                          {notifData?.count > 0 && (
+                            <span className="ml-auto h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center">
+                              {notifData.count > 9 ? "9+" : notifData.count}
+                            </span>
+                          )}
+                        </Link>
+                        {["free", "decouverte"].includes(user.plan) && (
+                          <Link
+                            href="/tarifs"
+                            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-brand-gold-deep font-medium hover:bg-brand-gold-tint/60 transition-colors"
+                            onClick={() => setUserMenuOpen(false)}
+                          >
+                            <Zap className="h-4 w-4" /> Passer Standard
+                          </Link>
+                        )}
+                        {user.is_admin && (
+                          <>
+                            <Link
+                              href="/admin"
+                              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                              onClick={() => setUserMenuOpen(false)}
+                            >
+                              Admin
+                            </Link>
+                            <Link
+                              href="/admin/algorithme"
+                              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                              onClick={() => setUserMenuOpen(false)}
+                            >
+                              <Brain className="h-4 w-4 text-blue-400" /> Monitoring IA
+                            </Link>
+                          </>
+                        )}
+                        <div className="my-1 h-px bg-gray-100" />
+                        <button
+                          onClick={() => { setUserMenuOpen(false); logout(); }}
+                          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <LogOut className="h-4 w-4" /> Déconnexion
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="hidden md:flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                  onClick={() => router.push("/login")}
+                >
+                  Connexion
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold shadow-sm shadow-brand-gold/25 transition-all"
+                  onClick={() => router.push("/inscription")}
+                >
+                  Essai gratuit
+                </Button>
+              </div>
+            )}
+
+            {/* Mobile hamburger */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden text-gray-600 hover:bg-gray-100"
+              onClick={() => setMenuOpen(!menuOpen)}
+              aria-label={menuOpen ? "Fermer le menu" : "Ouvrir le menu"}
+            >
+              {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile menu */}
+      {menuOpen && (
+        <div className="md:hidden border-t border-gray-100 bg-white p-4 space-y-1 shadow-lg">
+          {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "block rounded-xl px-4 py-2.5 text-sm font-medium transition-colors",
+                pathname === link.href
+                  ? "bg-brand-gold-tint text-brand-gold-dark"
+                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+              )}
+              onClick={() => setMenuOpen(false)}
+            >
+              {link.label}
+            </Link>
+          ))}
+          {!user && (
+            <div className="pt-2 flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="flex-1 text-gray-600 hover:bg-gray-100"
+                onClick={() => { router.push("/login"); setMenuOpen(false); }}
+              >
+                Connexion
+              </Button>
+              <Button
+                size="sm"
+                className="flex-1 bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold"
+                onClick={() => { router.push("/inscription"); setMenuOpen(false); }}
+              >
+                Essai gratuit
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </nav>
+  );
+}

@@ -1,0 +1,52 @@
+# docker-compose.dev.yml — Override pour développement local
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Démarre seulement: db + redis + api (scraper/nginx non nécessaires en dev)
+# Frontend tourne en local avec: npm run dev
+
+version: "3.9"
+
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    command: redis-server  # Pas de mot de passe en dev
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://blackturf:blackturf_secret@db:5432/blackturf
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=dev-secret-key-change-in-production-must-be-64-chars
+      - ENVIRONMENT=development
+      - FRONTEND_URL=http://localhost:3001
+      - ALLOWED_ORIGINS=["http://localhost:3001","http://localhost:3000"]
+    volumes:
+      - ./backend:/app  # hot-reload du code Python
+      - ml_models:/app/models
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+
+  # Worker dev (ML tasks)
+  worker:
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://blackturf:blackturf_secret@db:5432/blackturf
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=development
+
+  # Désactiver nginx en dev (frontend tourne directement)
+  nginx:
+    profiles:
+      - production
+
+  # Désactiver scraper par défaut en dev (lancer manuellement)
+  scraper:
+    profiles:
+      - with-scraper

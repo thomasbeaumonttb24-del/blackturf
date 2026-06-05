@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+Allow: /programme
+Allow: /tarifs
+Allow: /mentions-legales
+Allow: /cgu
+Allow: /confidentialite
+
+Disallow: /api/
+Disallow: /admin/
+Disallow: /profil
+Disallow: /bankroll
+Disallow: /strategies
+Disallow: /assistant
+
+Sitemap: https://blackturf.fr/sitemap.xml

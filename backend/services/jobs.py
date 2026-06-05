@@ -1,0 +1,248 @@
+"""
+Tâches planifiées BlackTurf — APScheduler.
+Registered at FastAPI startup. Lightweight triggers only;
+heavy work (retrain) is enqueued to RQ.
+"""
+import structlog
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+log = structlog.get_logger()
+_scheduler: AsyncIOScheduler | None = None
+
+
+# ─────────────────────────────────────────────
+# Job functions
+# ─────────────────────────────────────────────
+async def job_morning_digest() -> None:
+    """07:00 Paris — envoie le digest email aux abonnés."""
+    log.info("jobs.morning_digest.start")
+    try:
+        from db.database import AsyncSessionLocal
+        from services.alerts import send_morning_digest
+        async with AsyncSessionLocal() as session:
+            await send_morning_digest(session)
+        log.info("jobs.morning_digest.done")
+    except Exception as e:
+        log.error("jobs.morning_digest.error", error=str(e))
+
+
+async def job_retrain_trigger() -> None:
+    """02:00 UTC — enqueue ML retrain in RQ worker (heavy CPU, don't run in API process)."""
+    log.info("jobs.retrain.trigger")
+    try:
+        import redis as sync_redis
+        from rq import Queue
+        from api.config import get_settings
+        settings = get_settings()
+
+        r = sync_redis.from_url(settings.redis_url)
+        q = Queue("ml", connection=r, default_timeout=3600)
+        job = q.enqueue("ml.pipeline.retrain_if_needed", result_ttl=86400)
+        log.info("jobs.retrain.enqueued", job_id=job.id)
+    except Exception as e:
+        log.error("jobs.retrain.error", error=str(e))
+
+
+async def job_meta_learner_retrain() -> None:
+    """
+    03:00 UTC (après nightly retrain) — réentraîne le meta-learner contextuel.
+
+    Le meta-learner apprend des biais systématiques (terrain/hippodrome/heure)
+    sur les 6 derniers mois de race_learning_log. Nécessite ≥ 200 courses analysées.
+    """
+    log.info("jobs.meta_learner_retrain.start")
+    try:
+        from db.database import AsyncSessionLocal
+        from ml.meta_learner import get_meta_learner
+        async with AsyncSessionLocal() as session:
+            ml = get_meta_learner()
+            result = await ml.train(session)
+            if result.get("status") == "trained":
+                ml.save()
+                log.info(
+                    "jobs.meta_learner_retrain.done",
+                    n_samples=result.get("n_samples"),
+                    auc=result.get("auc_roc"),
+                )
+            else:
+                log.info(
+                    "jobs.meta_learner_retrain.skipped",
+                    reason=result.get("status"),
+                    n_samples=result.get("n_samples", 0),
+                )
+    except Exception as e:
+        log.error("jobs.meta_learner_retrain.error", error=str(e))
+
+
+async def job_drift_check() -> None:
+    """
+    Toutes les heures (10h-22h) — vérifie l'état du drift detector.
+    Si drift critique détecté → déclenche retraining incrémental.
+    """
+    log.info("jobs.drift_check.start")
+    try:
+        from ml.drift_detector import get_drift_detector
+        dd = get_drift_detector()
+        report = dd.get_drift_report()
+        severity = report.get("status", "healthy")
+
+        if severity == "critical":
+            log.warning("jobs.drift_check.critical", report=report)
+            # Déclencher retraining incrémental en tâche de fond
+            import asyncio
+            from ml.pipeline import run_incremental_retraining
+            asyncio.create_task(run_incremental_retraining())
+        else:
+            log.info("jobs.drift_check.ok", status=severity, brier_mean=report.get("brier_mean"))
+    except Exception as e:
+        log.error("jobs.drift_check.error", error=str(e))
+
+
+async def job_resultats_poll() -> None:
+    """Toutes les 3 minutes — poll résultats courses en cours."""
+    try:
+        from scraper.orchestrator import BlackTurfOrchestrator
+        orch = BlackTurfOrchestrator()
+        await orch.poll_resultats()
+    except Exception as e:
+        log.error("jobs.resultats_poll.error", error=str(e))
+
+
+async def job_vb_notify() -> None:
+    """Toutes les 10 minutes — notifie nouveaux value bets non notifiés."""
+    try:
+        from db.database import AsyncSessionLocal
+        from db.models import ValueBet, Participation, Cheval, Course, User
+        from services.alerts import notify_value_bet
+        from sqlalchemy import select, and_
+        from datetime import datetime, timedelta, timezone
+
+        async with AsyncSessionLocal() as session:
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=12)
+            q = (
+                select(ValueBet, Participation, Cheval, Course)
+                .join(Participation, Participation.participation_id == ValueBet.participation_id)
+                .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+                .join(Course, Course.course_id == ValueBet.course_id)
+                .where(
+                    and_(
+                        ValueBet.actif == True,
+                        ValueBet.notifie == False,
+                        ValueBet.created_at >= cutoff,
+                    )
+                )
+                .limit(20)
+            )
+            rows = (await session.execute(q)).all()
+            if not rows:
+                return
+
+            # Get all paid users
+            users_res = await session.execute(
+                select(User.user_id).where(
+                    User.plan.in_(["starter", "standard", "pro", "expert"]),
+                    User.is_active == True,
+                )
+            )
+            user_ids = [r[0] for r in users_res.fetchall()]
+            if not user_ids:
+                return
+
+            for vb, part, cheval, course in rows:
+                vb_data = {
+                    "vb_id": vb.vb_id,
+                    "nom_cheval": cheval.nom,
+                    "hippodrome": course.hippodrome_nom,
+                    "cote": part.cote_pmu,
+                    "ev": vb.ev_max,
+                    "niveau": vb.niveau,
+                    "course_id": vb.course_id,
+                    "heure_depart": course.date_heure.isoformat() if course.date_heure else None,
+                }
+                await notify_value_bet(session, user_ids, vb_data)
+                vb.notifie = True
+
+            await session.commit()
+            log.info("jobs.vb_notify.done", nb_vbs=len(rows))
+    except Exception as e:
+        log.error("jobs.vb_notify.error", error=str(e))
+
+
+# ─────────────────────────────────────────────
+# Scheduler lifecycle
+# ─────────────────────────────────────────────
+def get_scheduler() -> AsyncIOScheduler:
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = AsyncIOScheduler(timezone="UTC")
+    return _scheduler
+
+
+def start_scheduler() -> None:
+    scheduler = get_scheduler()
+
+    # Morning digest — 07:00 Paris (= 05:00 UTC in winter, 06:00 UTC in summer)
+    # Use Europe/Paris timezone for correct DST handling
+    scheduler.add_job(
+        job_morning_digest,
+        CronTrigger(hour=7, minute=0, timezone="Europe/Paris"),
+        id="morning_digest",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+
+    # Model retrain trigger — 02:00 UTC
+    scheduler.add_job(
+        job_retrain_trigger,
+        CronTrigger(hour=2, minute=0, timezone="UTC"),
+        id="retrain_trigger",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    # Results polling — every 3 minutes between 10:00 and 22:00 Paris
+    scheduler.add_job(
+        job_resultats_poll,
+        CronTrigger(minute="*/3", hour="10-22", timezone="Europe/Paris"),
+        id="resultats_poll",
+        replace_existing=True,
+        misfire_grace_time=60,
+    )
+
+    # Value bet notifications — every 10 minutes
+    scheduler.add_job(
+        job_vb_notify,
+        CronTrigger(minute="*/10"),
+        id="vb_notify",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+
+    # Meta-learner retrain — 03:00 UTC (after nightly retrain finishes)
+    scheduler.add_job(
+        job_meta_learner_retrain,
+        CronTrigger(hour=3, minute=0, timezone="UTC"),
+        id="meta_learner_retrain",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+
+    # Drift check — every hour during racing hours (10h-22h Paris)
+    scheduler.add_job(
+        job_drift_check,
+        CronTrigger(minute=0, hour="10-22", timezone="Europe/Paris"),
+        id="drift_check",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+
+    scheduler.start()
+    log.info("jobs.scheduler.started", nb_jobs=len(scheduler.get_jobs()))
+
+
+def stop_scheduler() -> None:
+    global _scheduler
+    if _scheduler and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+        log.info("jobs.scheduler.stopped")

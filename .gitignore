@@ -1,0 +1,69 @@
+# Environment — NEVER commit
+.env
+.env.*
+!.env.production.template
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+*.cover
+
+# ML models (large binaries)
+backend/models/*.pkl
+backend/models/*.joblib
+backend/models/*.cbm
+backend/models/*.json
+!backend/models/.gitkeep
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Docker volumes (local dev)
+postgres_data/
+redis_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright
+backend/scraper/.auth/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+logs/
+
+# Artefacts entraînement
+catboost_info/
+backend/catboost_info/
+*.log
+nginx/nginx.runtime.conf
