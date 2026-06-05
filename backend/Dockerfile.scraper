@@ -9,11 +9,12 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Playwright browsers
-RUN pip install --no-cache-dir playwright && playwright install chromium --with-deps
-
+# Dépendances d'abord (épingle playwright==1.44.0), PUIS le navigateur correspondant.
+# Sinon : on installe le chromium du dernier playwright, puis requirements rétrograde
+# playwright → mismatch de version → "chromium-XXXX doesn't exist".
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install chromium --with-deps
 
 COPY . .
 
