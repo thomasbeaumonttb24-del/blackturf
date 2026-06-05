@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Search, User, MapPin, Clock, Loader2, ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -29,7 +29,7 @@ const RUNNING_STYLE_EMOJIS: Record<string, string> = {
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-export default function RecherchePage() {
+function RechercheContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [q, setQ] = useState(searchParams.get("q") || "");
@@ -130,5 +130,13 @@ export default function RecherchePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function RecherchePage() {
+  return (
+    <Suspense fallback={null}>
+      <RechercheContent />
+    </Suspense>
   );
 }
