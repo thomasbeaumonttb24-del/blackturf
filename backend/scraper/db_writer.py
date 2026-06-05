@@ -300,11 +300,8 @@ async def _save_equipement(
             if prev_oeilleres in (None, "Sans", "") and partant.oeilleres not in (None, "Sans", ""):
                 premieres_oeilleres = True
 
-    equip = Equipement(
-        equipement_id=gen_uuid(),
-        participation_id=participation_id,
-        cheval_id=cheval_id,
-        course_id=course_id,
+    # Upsert sur participation_id (unique) — évite la violation au re-scrape.
+    vals = dict(
         deferre=_t(partant.deferre, 30),
         oeilleres=_t(partant.oeilleres, 30),
         plaques=_t(partant.plaques, 50),
@@ -318,7 +315,14 @@ async def _save_equipement(
         premier_deferre=premier_deferre,
         premieres_oeilleres=premieres_oeilleres,
     )
-    session.add(equip)
+    stmt = pg_insert(Equipement).values(
+        equipement_id=gen_uuid(),
+        participation_id=participation_id,
+        cheval_id=cheval_id,
+        course_id=course_id,
+        **vals,
+    ).on_conflict_do_update(index_elements=["participation_id"], set_=vals)
+    await session.execute(stmt)
 
 
 async def save_resultat_to_db(session: AsyncSession, resultat: ResultatScrape) -> None:
