@@ -14,7 +14,9 @@ RUN apt-get update && apt-get install -y \
 # playwright → mismatch de version → "chromium-XXXX doesn't exist".
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install chromium --with-deps
+# apt-get update car les listes ont été purgées au-dessus ; --with-deps installe
+# les libs système du navigateur via apt.
+RUN apt-get update && playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
