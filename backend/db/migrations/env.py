@@ -33,10 +33,18 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
-        with context.begin_transaction():
-            context.run_migrations()
+    # AUTOCOMMIT : chaque statement DDL se valide seul. Plusieurs migrations
+    # utilisent `try/except: pass` autour de DDL « peut déjà exister » ; en
+    # transaction unique, un échec rattrapé laisse la transaction PostgreSQL
+    # avortée et casse tout le reste. En autocommit, l'échec rattrapé est isolé.
+    with connectable.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            transactional_ddl=False,
+        )
+        context.run_migrations()
     connectable.dispose()
 
 

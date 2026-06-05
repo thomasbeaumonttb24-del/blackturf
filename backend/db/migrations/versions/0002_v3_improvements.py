@@ -14,36 +14,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # model_versions: walk_forward metrics
-    op.add_column("model_versions", sa.Column("walk_forward_auc", sa.Float(), nullable=True))
-    op.add_column("model_versions", sa.Column("walk_forward_variance", sa.Float(), nullable=True))
-
-    # users: profil_risque field (already in v1 model but may be missing from initial migration)
-    try:
-        op.add_column("users", sa.Column("profil_risque", sa.String(20), nullable=True, server_default="equilibre"))
-    except Exception:
-        pass  # Column may already exist
-
-    # users: allow decouverte as plan value (no schema change needed — it's a String field)
-    # Update existing 'free' users to stay 'free' — no change needed for backwards compat
-
-    # value_bets: SPI fields
-    try:
-        op.add_column("value_bets", sa.Column("spi_detected", sa.Boolean(), nullable=False, server_default="false"))
-        op.add_column("value_bets", sa.Column("spi_score", sa.Float(), nullable=True))
-    except Exception:
-        pass
-
-    # Add index on subscriptions for faster plan lookups
-    try:
-        op.create_index("ix_users_plan", "users", ["plan"])
-    except Exception:
-        pass
-
-    try:
-        op.create_index("ix_subscriptions_statut", "subscriptions", ["statut"])
-    except Exception:
-        pass
+    # IF NOT EXISTS partout : idempotent et SANS empoisonner la transaction
+    # (un try/except autour d'un DDL qui échoue laisse la transaction PostgreSQL
+    # avortée — tout le reste de la migration casse alors).
+    op.execute("ALTER TABLE model_versions ADD COLUMN IF NOT EXISTS walk_forward_auc DOUBLE PRECISION")
+    op.execute("ALTER TABLE model_versions ADD COLUMN IF NOT EXISTS walk_forward_variance DOUBLE PRECISION")
+    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS profil_risque VARCHAR(20) DEFAULT 'equilibre'")
+    op.execute("ALTER TABLE value_bets ADD COLUMN IF NOT EXISTS spi_detected BOOLEAN NOT NULL DEFAULT false")
+    op.execute("ALTER TABLE value_bets ADD COLUMN IF NOT EXISTS spi_score DOUBLE PRECISION")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_users_plan ON users (plan)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_subscriptions_statut ON subscriptions (statut)")
 
 
 def downgrade() -> None:
