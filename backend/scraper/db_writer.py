@@ -121,6 +121,10 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
         # PMU renvoie "FEMELLES"/"MALES"/"HONGRES" → code court (colonne VARCHAR(5)).
         sexe=((partant.sexe or "")[:1].upper() or None),
         entraineur_actuel=_t(partant.entraineur, 100),
+        # Généalogie (API PMU participants)
+        pere=_t(getattr(partant, "pere", None), 100),
+        mere=_t(getattr(partant, "mere", None), 100),
+        eleveur=_t(getattr(partant, "eleveur", None), 100),
     )
     session.add(cheval)
 
@@ -128,6 +132,9 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
     perf = PerformanceCarriere(
         cheval_id=cheval.cheval_id,
         gains_carriere_total=partant.gain_carriere or 0,
+        nb_courses_total=getattr(partant, "nb_courses", None) or 0,
+        nb_victoires_total=partant.nb_victoires or 0,
+        nb_places_total=partant.nb_places or 0,
     )
     session.add(perf)
 
@@ -290,9 +297,9 @@ async def _save_equipement(
         participation_id=participation_id,
         cheval_id=cheval_id,
         course_id=course_id,
-        deferre=partant.deferre,
-        oeilleres=partant.oeilleres,
-        plaques=partant.plaques,
+        deferre=_t(partant.deferre, 30),
+        oeilleres=_t(partant.oeilleres, 30),
+        plaques=_t(partant.plaques, 50),
         muserolle=partant.muserolle,
         langue_attachee=partant.langue_attachee,
         visiere=partant.visiere,

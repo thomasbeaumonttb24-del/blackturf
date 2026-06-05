@@ -296,51 +296,49 @@ class PmuScraper(BaseScraper):
     def _parse_partants(self, raw: list) -> list[PartantScrape]:
         partants = []
         for i, p in enumerate(raw):
-            # Cote
-            rapport_direct = p.get("dernierRapportDirect") or {}
-            cote = rapport_direct.get("rapport")
+            # Cote (dernier rapport direct E_SIMPLE_GAGNANT)
+            cote = (p.get("dernierRapportDirect") or {}).get("rapport")
 
-            # Gains en centimes
-            gains_raw = p.get("gainsCarriere")
-            gains = int(gains_raw * 100) if gains_raw and isinstance(gains_raw, float) else gains_raw
+            # Gains carrière (centimes) — gainsParticipant.gainsCarriere
+            gp = p.get("gainsParticipant") or {}
+            gains = gp.get("gainsCarriere")
 
-            # Entraîneur
-            entraineur_obj = p.get("entraineur", {})
-            entraineur = entraineur_obj.get("nom") if isinstance(entraineur_obj, dict) else entraineur_obj
-
-            # Driver ou Jockey
+            # Jockey/driver + entraîneur (chaînes directes côté API PMU)
             jockey = p.get("driver") or p.get("jockey") or ""
+            if isinstance(jockey, dict):
+                jockey = jockey.get("nom", "")
+            entraineur = p.get("entraineur")
+            if isinstance(entraineur, dict):
+                entraineur = entraineur.get("nom")
 
-            # Équipement
-            equip = p.get("equipementsCourse", {}) or {}
-            deferre = equip.get("deferre")
-            oeilleres = equip.get("oeilleres")
-            plaques = equip.get("plaques")
+            # Réduction kilométrique : PMU la donne en millièmes de seconde/km
+            rk_raw = p.get("reductionKilometrique")
+            reduction_km = round(rk_raw / 1000.0, 2) if isinstance(rk_raw, (int, float)) and rk_raw else None
 
             partant = PartantScrape(
                 numero=p.get("numPmu", i + 1),
                 nom=p.get("nom", ""),
                 cote_pmu=float(cote) if cote else None,
-                jockey=jockey if isinstance(jockey, str) else jockey.get("nom", "") if isinstance(jockey, dict) else "",
+                jockey=jockey if isinstance(jockey, str) else "",
                 entraineur=entraineur,
                 proprietaire=p.get("proprietaire"),
                 age=p.get("age"),
                 sexe=p.get("sexe"),
-                poids=p.get("poidsJockey"),
+                poids=p.get("poidsConditionMonte") or p.get("poidsJockey"),
                 decharge=p.get("handicapPoids"),
                 musique=p.get("musique"),
-                nb_victoires=p.get("nbVictoires"),
-                nb_places=p.get("nbPlaces"),
+                nb_victoires=p.get("nombreVictoires"),
+                nb_places=p.get("nombrePlaces"),
+                nb_courses=p.get("nombreCourses"),
                 gain_carriere=gains,
-                deferre=deferre,
-                oeilleres=oeilleres,
-                plaques=plaques,
-                muserolle=equip.get("muserolle"),
-                langue_attachee=equip.get("langueAttachee"),
-                visiere=equip.get("visiere"),
-                blinkers=equip.get("blinkers"),
-                valeur_indice=p.get("indiceSynthese"),
-                retard_gains=p.get("retardAuxGains"),
+                # Équipement (champs top-level côté API PMU)
+                deferre=p.get("deferre"),
+                oeilleres=p.get("oeilleres"),
+                # Généalogie
+                pere=p.get("nomPere"),
+                mere=p.get("nomMere"),
+                eleveur=p.get("eleveur") or None,
+                reduction_km=reduction_km,
                 rang_pronostic_pmu=p.get("ordreArriveePronostic"),
                 source="pmu",
             )

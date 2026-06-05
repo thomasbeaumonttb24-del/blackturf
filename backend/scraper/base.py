@@ -150,6 +150,12 @@ class PartantScrape:
     valeur_indice: Optional[int] = None
     retard_gains: Optional[int] = None
     rang_pronostic_pmu: Optional[int] = None
+    # Généalogie + carrière + dynamique (API PMU participants)
+    pere: Optional[str] = None
+    mere: Optional[str] = None
+    eleveur: Optional[str] = None
+    nb_courses: Optional[int] = None
+    reduction_km: Optional[float] = None  # secondes/km
     source: str = "pmu"
     scraped_at: str = ""
 
