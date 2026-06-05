@@ -107,10 +107,18 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
         # Mise à jour des champs si nouvelles données
         if partant.age and not existing.age:
             existing.age = partant.age
-        if partant.sexe and not existing.sexe:
-            existing.sexe = partant.sexe
+        sx = (partant.sexe or "")[:1].upper() or None  # code court (évite overflow VARCHAR(5))
+        if sx and not existing.sexe:
+            existing.sexe = sx
         if partant.entraineur:
-            existing.entraineur_actuel = partant.entraineur
+            existing.entraineur_actuel = _t(partant.entraineur, 100)
+        # Généalogie : remplir si manquante (API PMU)
+        if getattr(partant, "pere", None) and not existing.pere:
+            existing.pere = _t(partant.pere, 100)
+        if getattr(partant, "mere", None) and not existing.mere:
+            existing.mere = _t(partant.mere, 100)
+        if getattr(partant, "eleveur", None) and not existing.eleveur:
+            existing.eleveur = _t(partant.eleveur, 100)
         existing.updated_at = datetime.now()
         return existing.cheval_id
 
