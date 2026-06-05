@@ -396,7 +396,7 @@ class BlackTurfOrchestrator:
             async with AsyncSessionLocal() as session:
                 from sqlalchemy import select as sa_select
                 from db.models import Jockey, Entraineur, StatsJockey, StatsEntraineur
-                from sqlalchemy.dialects.postgresql import insert as pg_ins
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
                 from datetime import datetime as dt
 
                 saison = dt.now().year
