@@ -147,35 +147,39 @@ class BlackTurfOrchestrator:
             courses = await pmu.get_programme_today()
             self._courses_today = courses
 
-            async with AsyncSessionLocal() as session:
-                nb_partants_total = 0
-                for course in courses:
-                    r_id = course.reunion_id
-                    c_num = int(course.course_id.split("C")[-1])
+            nb_partants_total = 0
+            for course in courses:
+                r_id = course.reunion_id
+                c_num = int(course.course_id.split("C")[-1])
 
-                    # Enrichir les partants (endpoint /participants — programme seul
-                    # ne les contient pas). Attache avant la sauvegarde.
-                    try:
-                        partants = await pmu.enrich_partants(r_id, c_num)
-                        if partants:
-                            course.partants = partants
-                            course.nb_partants = len(partants)
-                    except Exception as e:
-                        log.warning("orchestrator.enrich_partants_failed",
-                                    course_id=course.course_id, err=str(e))
+                # Enrichir les partants (endpoint /participants — programme seul
+                # ne les contient pas). Attache avant la sauvegarde.
+                try:
+                    partants = await pmu.enrich_partants(r_id, c_num)
+                    if partants:
+                        course.partants = partants
+                        course.nb_partants = len(partants)
+                except Exception as e:
+                    log.warning("orchestrator.enrich_partants_failed",
+                                course_id=course.course_id, err=str(e))
 
-                    await save_course_to_db(session, course)
+                # Session + commit PAR COURSE : isole une course fautive et
+                # commit toutes les bonnes (sinon 1 erreur avorte tout le cycle).
+                try:
+                    async with AsyncSessionLocal() as session:
+                        await save_course_to_db(session, course)
+                        if course.date_heure:
+                            resultat = await pmu.get_rapports_definitifs(r_id, c_num)
+                            if resultat and resultat.ordre_arrivee:
+                                await save_resultat_to_db(session, resultat)
+                        await session.commit()
                     nb_partants_total += len(course.partants)
+                except Exception as e:
+                    log.error("orchestrator.course_save_failed",
+                              course_id=course.course_id, err=str(e)[:200])
 
-                    # Tenter de récupérer les résultats des courses terminées
-                    if course.date_heure:  # Si course passée
-                        resultat = await pmu.get_rapports_definitifs(r_id, c_num)
-                        if resultat and resultat.ordre_arrivee:
-                            await save_resultat_to_db(session, resultat)
-                            log.info("orchestrator.resultat_saved", course_id=course.course_id)
-
-                await session.commit()
-                duree = int((time.time() - t0) * 1000)
+            duree = int((time.time() - t0) * 1000)
+            async with AsyncSessionLocal() as session:
                 await log_scrape_result(
                     session, "pmu", "ok",
                     nb_courses=len(courses),
