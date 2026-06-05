@@ -30,6 +30,11 @@ from scraper.validation import valid_cote, valid_penetrometre
 log = structlog.get_logger()
 
 
+def _t(v, n: int):
+    """Tronque une chaîne à n caractères (sécurité longueur colonne). None inchangé."""
+    return v[:n] if isinstance(v, str) and len(v) > n else v
+
+
 def gen_uuid() -> str:
     return str(uuid.uuid4())
 
@@ -149,18 +154,18 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         course_id=course.course_id,
         reunion_id=course.reunion_id,
         numero=int(course.course_id.split("C")[-1]) if "C" in course.course_id else 1,
-        nom=course.nom,
+        nom=_t(course.nom, 200),
         date_heure=date_heure,
-        hippodrome_nom=course.hippodrome,
-        discipline=course.discipline,
+        hippodrome_nom=_t(course.hippodrome, 100),
+        discipline=_t(course.discipline, 20),
         distance=course.distance,
-        terrain_officiel=course.terrain,
+        terrain_officiel=_t(course.terrain, 30),
         terrain_code=course.terrain_code,
-        corde=course.corde,
+        corde=_t(course.corde, 15),
         nb_partants=course.nb_partants,
         allocation=course.dotation,
-        niveau_course=course.niveau_course,
-        type_depart=course.type_depart,
+        niveau_course=_t(course.niveau_course, 30),
+        type_depart=_t(course.type_depart, 5),
         est_quinte=course.est_quinte,
         est_quarte=course.est_quarte,
         est_tierce=course.est_tierce,
@@ -199,7 +204,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             cote_geny=partant.cote_geny,
             cote_bzh=partant.cote_bzh,
             rang_pronostic_pmu=partant.rang_pronostic_pmu,
-            musique=partant.musique,
+            musique=_t(partant.musique, 50),
             non_partant=False,
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
