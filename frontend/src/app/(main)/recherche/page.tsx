@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Search, Horse, User, MapPin, Clock, Loader2, ArrowRight } from "lucide-react";
+import { Search, User, MapPin, Clock, Loader2, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";

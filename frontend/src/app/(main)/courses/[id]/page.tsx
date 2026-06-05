@@ -336,7 +336,7 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
 
   // Ne montrer que les sources qui ont ≥1 cote non-null
   const activeSources = sources.filter((s) =>
-    actifs.some((p) => (p as Record<string, unknown>)[s.key] != null)
+    actifs.some((p) => (p as unknown as Record<string, unknown>)[s.key] != null)
   );
   if (activeSources.length <= 1) return null;
 
@@ -365,7 +365,7 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
                   {p.nom_cheval}
                 </td>
                 {activeSources.map((s) => {
-                  const val = (p as Record<string, unknown>)[s.key] as number | null;
+                  const val = (p as unknown as Record<string, unknown>)[s.key] as number | null;
                   const isBest = val != null && coteMin != null && val === coteMin;
                   return (
                     <td key={s.key} className="px-3 py-2 text-right">
