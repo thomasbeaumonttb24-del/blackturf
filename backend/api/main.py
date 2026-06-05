@@ -75,9 +75,13 @@ app.add_middleware(
 )
 
 if settings.environment == "production":
+    # localhost/127.0.0.1 requis pour le healthcheck Docker (curl interne) + sondes.
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["api.blackturf.fr", "blackturf.fr"],
+        allowed_hosts=[
+            "api.blackturf.fr", "blackturf.fr", "www.blackturf.fr",
+            "localhost", "127.0.0.1",
+        ],
     )
 
 # Routes
