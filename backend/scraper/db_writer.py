@@ -120,6 +120,17 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
         if getattr(partant, "eleveur", None) and not existing.eleveur:
             existing.eleveur = _t(partant.eleveur, 100)
         existing.updated_at = datetime.now()
+        # MAJ stats carrière (victoires/places/courses/gains)
+        perf = await session.get(PerformanceCarriere, existing.cheval_id)
+        if perf:
+            if partant.nb_victoires is not None:
+                perf.nb_victoires_total = partant.nb_victoires
+            if partant.nb_places is not None:
+                perf.nb_places_total = partant.nb_places
+            if getattr(partant, "nb_courses", None) is not None:
+                perf.nb_courses_total = partant.nb_courses
+            if partant.gain_carriere:
+                perf.gains_carriere_total = partant.gain_carriere
         return existing.cheval_id
 
     cheval = Cheval(
