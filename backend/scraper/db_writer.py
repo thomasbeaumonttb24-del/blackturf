@@ -78,7 +78,7 @@ async def upsert_jockey(session: AsyncSession, nom: str, pmu_id: str | None = No
     existing = result.scalar_one_or_none()
     if existing:
         return existing.jockey_id
-    j = Jockey(jockey_id=gen_uuid(), nom=nom, pmu_id=pmu_id)
+    j = Jockey(jockey_id=gen_uuid(), nom=_t(nom, 100), pmu_id=pmu_id)
     session.add(j)
     return j.jockey_id
 
@@ -92,7 +92,7 @@ async def upsert_entraineur(session: AsyncSession, nom: str, pmu_id: str | None 
     existing = result.scalar_one_or_none()
     if existing:
         return existing.entraineur_id
-    e = Entraineur(entraineur_id=gen_uuid(), nom=nom, pmu_id=pmu_id)
+    e = Entraineur(entraineur_id=gen_uuid(), nom=_t(nom, 100), pmu_id=pmu_id)
     session.add(e)
     return e.entraineur_id
 
@@ -116,10 +116,11 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
 
     cheval = Cheval(
         cheval_id=gen_uuid(),
-        nom=partant.nom,
+        nom=_t(partant.nom, 100),
         age=partant.age,
-        sexe=partant.sexe,
-        entraineur_actuel=partant.entraineur,
+        # PMU renvoie "FEMELLES"/"MALES"/"HONGRES" → code court (colonne VARCHAR(5)).
+        sexe=((partant.sexe or "")[:1].upper() or None),
+        entraineur_actuel=_t(partant.entraineur, 100),
     )
     session.add(cheval)
 
