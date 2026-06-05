@@ -253,10 +253,8 @@ class PmuScraper(BaseScraper):
         """
         from scraper.base import PoolPMUScrape
         c_num = int(course_id.split("C")[-1]) if "C" in str(course_id) else 1
-        url = (
-            f"{BASE}/reunion/{reunion_id}/course/{c_num}"
-            f"/rapports-simples?specialisation=INTERNET"
-        )
+        d = date.today().strftime("%d%m%Y")
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{c_num}/rapports-simples?specialisation=INTERNET"
         data = await self._fetch_json(url)
         if not data:
             return None
