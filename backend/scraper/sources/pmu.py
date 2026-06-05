@@ -299,31 +299,27 @@ class PmuScraper(BaseScraper):
         from scraper.base import PoolPMUScrape
         c_num = int(course_id.split("C")[-1]) if "C" in str(course_id) else 1
         d = date.today().strftime("%d%m%Y")
-        url = f"{BASE}/programme/{d}/R{reunion_id}/C{c_num}/rapports-simples?specialisation=INTERNET"
+        # Endpoint masse-enjeu : liste de {typePari, totalEnjeu (centimes)}.
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{c_num}/masse-enjeu"
         data = await self._fetch_json(url)
         if not data:
             return None
 
         try:
-            # PMU expose les fonds de pool dans les rapports simples
+            items = data if isinstance(data, list) else data.get("rapports", [])
             pool_total = None
             pool_gagnant = None
             pool_place = None
-
-            for rapport in data.get("rapports", data if isinstance(data, list) else []):
-                type_pari = rapport.get("typePari", "").upper()
-                fond = rapport.get("fondMise")  # en centimes
-                if fond is None:
-                    # Parfois sous forme d'entier en euros — convertir
-                    fond_euros = rapport.get("montantMise") or rapport.get("masse")
-                    fond = int(fond_euros * 100) if fond_euros else None
-
-                if fond:
-                    pool_total = (pool_total or 0) + fond
-                    if "SIMPLE_GAGNANT" in type_pari or type_pari == "GAGNANT":
-                        pool_gagnant = fond
-                    elif "SIMPLE_PLACE" in type_pari or type_pari == "PLACE":
-                        pool_place = fond
+            for it in items:
+                type_pari = (it.get("typePari") or "").upper()
+                fond = it.get("totalEnjeu")  # centimes
+                if not fond:
+                    continue
+                pool_total = (pool_total or 0) + fond
+                if "SIMPLE_GAGNANT" in type_pari:
+                    pool_gagnant = fond
+                elif "SIMPLE_PLACE" in type_pari:
+                    pool_place = fond
 
             if pool_total is None:
                 return None
