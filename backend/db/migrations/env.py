@@ -10,7 +10,9 @@ from api.config import get_settings
 
 settings = get_settings()
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url_sync or settings.database_url.replace("+asyncpg", ""))
+# Le moteur de migration est ASYNC (async_engine_from_config) → il faut une URL
+# avec driver async (asyncpg). On garde le fallback sync uniquement pour l'offline.
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
