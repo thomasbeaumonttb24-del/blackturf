@@ -7,7 +7,7 @@ import structlog
 from typing import Optional
 from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.models import (
