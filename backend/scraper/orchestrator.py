@@ -42,6 +42,7 @@ from scraper.sources.racing_post import RacingPostScraper
 from scraper.db_writer import (
     save_course_to_db,
     save_resultat_to_db,
+    save_historique_pmu,
     save_meteo_to_db,
     log_scrape_result,
     save_cote_bookmaker,
@@ -174,6 +175,18 @@ class BlackTurfOrchestrator:
                                 await save_resultat_to_db(session, resultat)
                         await session.commit()
                     nb_partants_total += len(course.partants)
+
+                    # Historique détaillé des partants (courses passées) →
+                    # alimente features ML + confrontations directes (robuste PMU).
+                    try:
+                        histo = await pmu.get_historique_chevaux(r_id, c_num)
+                        async with AsyncSessionLocal() as hs:
+                            for h in histo:
+                                await save_historique_pmu(hs, h["cheval_nom"], h["courses"])
+                            await hs.commit()
+                    except Exception as e:
+                        log.warning("orchestrator.historique_failed",
+                                    course_id=course.course_id, err=str(e)[:120])
                 except Exception as e:
                     log.error("orchestrator.course_save_failed",
                               course_id=course.course_id, err=str(e)[:200])

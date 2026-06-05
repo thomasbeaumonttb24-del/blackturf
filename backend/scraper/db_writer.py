@@ -35,6 +35,59 @@ def _t(v, n: int):
     return v[:n] if isinstance(v, str) and len(v) > n else v
 
 
+async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: list) -> int:
+    """
+    Sauvegarde l'historique des courses passées d'un cheval (endpoint PMU
+    performances-detaillees). Alimente historique_courses → features ML +
+    confrontations directes. Dédup sur (cheval_id, date, hippodrome).
+    Retourne le nb de lignes ajoutées.
+    """
+    from db.models import HistoriqueCourse, Cheval
+    from datetime import datetime as _dt
+
+    # Trouver le cheval (doit exister depuis la sauvegarde des partants)
+    r = await session.execute(select(Cheval.cheval_id).where(Cheval.nom == cheval_nom))
+    row = r.first()
+    if not row:
+        return 0
+    cheval_id = row[0]
+
+    added = 0
+    for c in courses or []:
+        dms = c.get("date_ms")
+        if not dms:
+            continue
+        d_course = _dt.fromtimestamp(dms / 1000.0).date()
+        hippo = _t(c.get("hippodrome"), 100) or "?"
+
+        # Dédup
+        exist = await session.execute(text("""
+            SELECT 1 FROM historique_courses
+            WHERE cheval_id = :cid AND date_course = :d AND hippodrome = :h LIMIT 1
+        """), {"cid": cheval_id, "d": d_course, "h": hippo})
+        if exist.first():
+            continue
+
+        ecart = c.get("ecart")
+        session.add(HistoriqueCourse(
+            historique_id=gen_uuid(),
+            cheval_id=cheval_id,
+            course_id=None,                       # course externe (passée)
+            date_course=d_course,
+            hippodrome=hippo,
+            discipline=_t(c.get("discipline"), 20) or "?",
+            distance=c.get("distance") or 0,
+            nb_partants=c.get("nb_partants"),
+            position_arrivee=c.get("position"),
+            ecart_longueurs=float(ecart) if isinstance(ecart, (int, float)) else None,
+            allocation=c.get("allocation"),
+            jockey_course=_t(c.get("jockey"), 100),
+            reduction_km=c.get("reduction_km"),
+        ))
+        added += 1
+    return added
+
+
 def gen_uuid() -> str:
     return str(uuid.uuid4())
 

@@ -182,6 +182,51 @@ class PmuScraper(BaseScraper):
         participants = data if isinstance(data, list) else data.get("participants", [])
         return self._parse_partants(participants)
 
+    async def get_historique_chevaux(self, reunion_id: str, course_num: int) -> list[dict]:
+        """
+        Historique détaillé de chaque partant (courses passées) via l'endpoint
+        PMU /performances-detaillees/pretty. Pour chaque cheval, ses dernières
+        courses avec : date, hippodrome, discipline, distance, position d'arrivée,
+        écart, réduction km, ET la liste des autres chevaux (→ confrontations).
+
+        Retourne : [{"cheval_nom": str, "courses": [
+            {date_ms, hippodrome, discipline, distance, allocation, nb_partants,
+             position, ecart, reduction_km, jockey, adversaires:[noms]}, ...]}]
+        """
+        d = date.today().strftime("%d%m%Y")
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/performances-detaillees/pretty"
+        await human_delay(0.3, 0.8)
+        data = await self._fetch_json(url)
+        if not data:
+            return []
+
+        out = []
+        for part in data.get("participants", []):
+            courses = []
+            for c in part.get("coursesCourues", []) or []:
+                pps = c.get("participants", []) or []
+                # Le cheval concerné est marqué itsHim=True
+                moi = next((pp for pp in pps if pp.get("itsHim")), None)
+                place = (moi or {}).get("place") or {}
+                rk = (moi or {}).get("reductionKilometrique")
+                courses.append({
+                    "date_ms": c.get("date"),
+                    "hippodrome": c.get("hippodrome"),
+                    "discipline": c.get("discipline"),
+                    "distance": c.get("distance"),
+                    "allocation": c.get("allocation"),
+                    "nb_partants": c.get("nbParticipants"),
+                    "position": place.get("place") if isinstance(place, dict) else None,
+                    "ecart": (moi or {}).get("distanceAvecPrecedent"),
+                    "reduction_km": round(rk / 1000.0, 2) if isinstance(rk, (int, float)) and rk else None,
+                    "jockey": (moi or {}).get("nomJockey"),
+                    "adversaires": [pp.get("nomCheval") for pp in pps
+                                    if not pp.get("itsHim") and pp.get("nomCheval")],
+                })
+            if courses:
+                out.append({"cheval_nom": part.get("nomCheval"), "courses": courses})
+        return out
+
     async def get_rapports_definitifs(self, reunion_id: str, course_num: int) -> Optional[ResultatScrape]:
         """Récupère les résultats officiels après la course."""
         d = date.today().strftime("%d%m%Y")
