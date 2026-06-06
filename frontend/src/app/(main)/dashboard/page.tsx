@@ -91,9 +91,16 @@ export default function DashboardPage() {
 
   // flatten today's courses from programme reunions
   const reunions: Reunion[] = programme?.reunions ?? [];
-  const todayCourses = reunions.flatMap((r: Reunion) =>
+  const allCourses = reunions.flatMap((r: Reunion) =>
     (r.courses ?? []).map((c) => ({ ...c, hippodrome: r.hippodrome_nom, discipline: r.discipline }))
-  ).slice(0, 6);
+  );
+  // Prochaines courses : à venir / en cours d'abord, triées par heure.
+  // Si tout est terminé (soirée), on retombe sur les dernières courses.
+  const upcoming = allCourses
+    .filter((c) => c.statut === "a_venir" || c.statut === "en_cours")
+    .sort((a, b) => (a.heure ?? "").localeCompare(b.heure ?? ""));
+  const todayCourses = (upcoming.length > 0 ? upcoming : allCourses.slice(-6)).slice(0, 6);
+  const aDesProchaines = upcoming.length > 0;
 
   const topVbs = summary?.top_vbs ?? [];
   const equityPoints: Array<{ date: string; bankroll: number }> = equity?.points ?? [];
@@ -304,7 +311,7 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-blue-400" />
-                    Programme du jour
+                    {aDesProchaines ? "Prochaines courses" : "Programme du jour"}
                   </CardTitle>
                   <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
                     <Link href="/programme">
@@ -322,7 +329,7 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {todayCourses.map((c: {
                       course_id: string; nom?: string; heure?: string;
-                      nb_partants?: number; statut?: string;
+                      nb_partants?: number; statut?: string; est_quinte?: boolean;
                       hippodrome?: string; discipline?: string;
                     }) => (
                       <Link
@@ -330,32 +337,37 @@ export default function DashboardPage() {
                         href={`/courses/${c.course_id}`}
                         className="flex items-center gap-3 p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
                       >
+                        {c.heure && (
+                          <span className="flex h-9 w-12 flex-shrink-0 flex-col items-center justify-center rounded-md bg-muted/50 font-mono text-xs font-bold text-amber-500 tabular-nums">
+                            {c.heure}
+                          </span>
+                        )}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            {c.heure && (
-                              <span className="text-xs font-mono text-amber-400 shrink-0">{c.heure}</span>
-                            )}
-                            <span className="text-xs text-foreground font-medium truncate">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate text-xs font-medium text-foreground">
                               {c.hippodrome ?? c.nom ?? "—"}
                             </span>
+                            {c.est_quinte && (
+                              <span className="shrink-0 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700">Quinté+</span>
+                            )}
                           </div>
-                          <div className="flex items-center gap-1.5 mt-0.5">
+                          <div className="mt-0.5 flex items-center gap-1.5">
                             {c.discipline && (
-                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-4">{c.discipline}</Badge>
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{c.discipline}</Badge>
                             )}
                             {c.nb_partants && (
-                              <span className="text-xs text-muted-foreground">{c.nb_partants} partants</span>
+                              <span className="text-[10px] text-muted-foreground">{c.nb_partants} partants</span>
                             )}
                           </div>
                         </div>
-                        {c.statut === "en_cours" && (
-                          <span className="flex items-center gap-1 text-xs text-emerald-400 shrink-0">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            En direct
+                        {c.statut === "en_cours" ? (
+                          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-500">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />En direct
                           </span>
-                        )}
-                        {c.statut === "termine" && (
-                          <span className="text-xs text-muted-foreground shrink-0">Terminée</span>
+                        ) : c.statut === "termine" ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">Terminée</span>
+                        ) : (
+                          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 group-hover:text-brand-gold transition-colors" />
                         )}
                       </Link>
                     ))}
