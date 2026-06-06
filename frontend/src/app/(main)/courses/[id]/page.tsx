@@ -598,6 +598,83 @@ function MiseCalculatorWidget({
   );
 }
 
+// ─── Résultats officiels (course terminée) ──────────────────────────────────────
+function ResultatsSection({ resultats }: {
+  resultats: {
+    classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
+    rapports: Record<string, number> | null;
+    temps_gagnant: string | null;
+    commentaire: string | null;
+    duree_course: number | null;
+  };
+}) {
+  const podium = [...(resultats.classement || [])].sort((a, b) => a.position - b.position);
+  const medal = (pos: number) => (pos === 1 ? "🥇" : pos === 2 ? "🥈" : pos === 3 ? "🥉" : `${pos}e`);
+  const rapportLabel: Record<string, string> = {
+    e_simple_gagnant: "Gagnant", e_simple_place: "Placé", e_couple_gagnant: "Couplé G.",
+    e_couple_place: "Couplé P.", e_tierce: "Tiercé", e_quarte_plus: "Quarté+", e_quinte_plus: "Quinté+",
+    e_2sur4: "2sur4", e_multi: "Multi",
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-brand-emerald/30 bg-brand-emerald/5 p-4">
+      <h2 className="mb-3 flex items-center gap-2 text-base font-bold">
+        🏁 Arrivée officielle
+        {resultats.temps_gagnant && (
+          <span className="text-xs font-normal text-muted-foreground">
+            · Chrono gagnant {resultats.temps_gagnant}s
+            {resultats.duree_course ? ` · durée ${(resultats.duree_course / 1000).toFixed(1)}s` : ""}
+          </span>
+        )}
+      </h2>
+
+      {/* Classement */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground border-b">
+              <th className="py-1 pr-2">Pos.</th><th className="py-1 pr-2">N°</th>
+              <th className="py-1 pr-2">Cheval</th><th className="py-1 pr-2 text-right">Réd. km</th>
+            </tr>
+          </thead>
+          <tbody>
+            {podium.map((c) => (
+              <tr key={c.numero} className={c.position <= 3 ? "font-semibold" : ""}>
+                <td className="py-1 pr-2">{medal(c.position)}</td>
+                <td className="py-1 pr-2 tabular-nums">{c.numero}</td>
+                <td className="py-1 pr-2">{c.nom}</td>
+                <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground">
+                  {c.reduction_km != null ? `${c.reduction_km}` : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Rapports */}
+      {resultats.rapports && Object.keys(resultats.rapports).length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {Object.entries(resultats.rapports).map(([k, v]) => (
+            <span key={k} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">
+              <span className="text-muted-foreground">{rapportLabel[k] ?? k}</span>
+              <span className="font-semibold tabular-nums">{Number(v).toFixed(2)}€</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Commentaire narratif post-course */}
+      {resultats.commentaire && (
+        <div className="mt-3 rounded-lg bg-white/60 p-3 text-sm leading-relaxed text-foreground">
+          <p className="mb-1 text-xs font-semibold text-muted-foreground">📝 Analyse de course</p>
+          {resultats.commentaire}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CoursePage() {
   const { id } = useParams<{ id: string }>();
@@ -630,6 +707,14 @@ export default function CoursePage() {
     };
   } | null>(null);
 
+  const [resultats, setResultats] = useState<{
+    classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
+    rapports: Record<string, number> | null;
+    temps_gagnant: string | null;
+    commentaire: string | null;
+    duree_course: number | null;
+  } | null>(null);
+
   const { partants: liveCotes, connected: wsConnected } = useCotesLive(
     id,
     course?.statut === "en_cours"
@@ -659,6 +744,14 @@ export default function CoursePage() {
       .then((res) => setAnalysis(res.data))
       .catch(() => {}); // fail silently
   }, [id, user, course, predictions]); // refresh après prédictions
+
+  // Load results once course is finished (arrivée + rapports + commentaire)
+  useEffect(() => {
+    if (!course || course.statut !== "termine") return;
+    coursesApi.resultats(id)
+      .then((res) => setResultats(res.data))
+      .catch(() => setResultats(null));
+  }, [id, course]);
 
   // Load cotes historique for chart
   useEffect(() => {
@@ -786,13 +879,18 @@ export default function CoursePage() {
           </div>
 
           {/* Confidence meter */}
-          {confGlobal !== null && (
+          {confGlobal !== null && course.statut !== "termine" && (
             <div className="text-right">
               <p className="text-xs text-muted-foreground mb-1">Score IA</p>
               <ConfidenceMeter score={confGlobal} size="md" />
             </div>
           )}
         </div>
+
+        {/* Résultats officiels (course terminée) */}
+        {course.statut === "termine" && resultats && (
+          <ResultatsSection resultats={resultats} />
+        )}
 
         {/* Alert value bet exceptionnel */}
         {topVB && (
