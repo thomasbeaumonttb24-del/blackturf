@@ -94,6 +94,8 @@ class BlackTurfOrchestrator:
         self._last_scrape: dict[str, float] = {}
         base_intervals = {
             "pmu":           3 * 60,    # 3 min  — CRITIQUE
+            "resultats":     3 * 60,    # 3 min  — poll arrivées (courses finies)
+            "predictions":   8 * 60,    # 8 min  — (re)calcul prédictions/value bets du jour
             "zeturf":        5 * 60,    # 5 min  — VB
             "bookmakers":    5 * 60,    # 5 min  — Winamax/Betclic/Unibet/Betfair
             "pool_pmu":      5 * 60,    # 5 min  — smart money
@@ -810,6 +812,16 @@ class BlackTurfOrchestrator:
             # Enrichissement post-PMU (jours_depuis_derniere, changement_jockey)
             await self.run_enrichissement_participations()
 
+            # ── RÉSULTATS : poll des arrivées des courses finies ─────────
+            if self._should_run("resultats"):
+                await self.poll_resultats()
+                self._mark_done("resultats")
+
+            # ── PRÉDICTIONS : (re)calcul algo pour les courses du jour ───
+            if self._should_run("predictions"):
+                await self.run_predictions_cycle()
+                self._mark_done("predictions")
+
             # ── HAUTE (toutes les 5 min) ─────────────────────────────────
             if self._should_run("zeturf"):
                 await self.run_zeturf_cycle(context)
@@ -874,6 +886,36 @@ class BlackTurfOrchestrator:
                 log.error("orchestrator.daemon_error", error=str(e))
             await asyncio.sleep(interval_minutes * 60)
 
+    async def run_predictions_cycle(self) -> None:
+        """(Re)calcule prédictions + value bets + recommandations pour les courses
+        du jour qui ont des partants. Idempotent (upsert). Tourne automatiquement
+        afin que l'utilisateur n'ait rien à lancer manuellement."""
+        from ml.pipeline import predict_course
+        from sqlalchemy import text
+
+        async with AsyncSessionLocal() as session:
+            r = await session.execute(text("""
+                SELECT c.course_id
+                FROM courses c
+                WHERE c.statut = 'a_venir'
+                  AND c.date_heure::date = current_date
+                  AND EXISTS (
+                      SELECT 1 FROM participations p
+                      WHERE p.course_id = c.course_id AND p.non_partant = false
+                  )
+                ORDER BY c.date_heure
+            """))
+            course_ids = [row[0] for row in r.fetchall()]
+
+        ok = 0
+        for cid in course_ids:
+            try:
+                if await predict_course(cid):
+                    ok += 1
+            except Exception as e:
+                log.error("orchestrator.predict_error", course_id=cid, error=str(e)[:200])
+        log.info("orchestrator.predictions_cycle", total=len(course_ids), ok=ok)
+
     async def poll_resultats(self) -> None:
         """Polling résultats toutes les 3 minutes pour courses en cours."""
         pmu = PmuScraper()
@@ -884,14 +926,14 @@ class BlackTurfOrchestrator:
                 from datetime import datetime, timedelta
 
                 now = datetime.now()
-                # Courses qui auraient dû finir il y a <2h
+                # Courses qui auraient dû finir (fenêtre 36h pour rattraper hier)
                 result = await session.execute(
                     select(DBCourse)
                     .where(
                         and_(
                             DBCourse.statut == "a_venir",
                             DBCourse.date_heure < now,
-                            DBCourse.date_heure > now - timedelta(hours=2),
+                            DBCourse.date_heure > now - timedelta(hours=36),
                         )
                     )
                 )
