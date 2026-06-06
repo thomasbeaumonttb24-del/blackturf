@@ -362,16 +362,17 @@ async def _do_retraining(mois: int, label: str) -> None:
             log.warning("pipeline.retrain.insufficient_data", nb_rows=len(features_rows))
             return
 
-        X, y = build_training_dataset(features_rows, resultats_dict)
+        X, y, y_win = build_training_dataset(features_rows, resultats_dict)
         if X.empty:
             log.error("pipeline.retrain.empty_dataset")
             return
 
-        log.info("pipeline.retrain.dataset_ready", n=len(X), pos_rate=float(y.mean()))
+        log.info("pipeline.retrain.dataset_ready", n=len(X),
+                 pos_rate=float(y.mean()), win_rate=float(y_win.mean()) if len(y_win) else 0.0)
 
-        # Entraîner l'ensemble
+        # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
         model = BlackTurfEnsemble()
-        metrics = model.train(X, y)
+        metrics = model.train(X, y, y_win)
 
         # Récupérer le modèle actuel pour comparaison
         current = BlackTurfEnsemble.load_current()
@@ -574,8 +575,21 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         p3_arr = np.clip(np.asarray(probas_top3, dtype=float), 1e-4, 0.999)
         n = len(p3_arr)
 
-        # P(top1) ∝ P(top3)^gamma (γ>1 : les favoris concentrent davantage la victoire)
-        raw_p1 = p3_arr ** 1.6
+        # P(top1) : modèle de VICTOIRE dédié (APPRIS sur label arrivé-1er) si dispo,
+        # sinon fallback heuristique P(top3)^gamma. Le modèle appris capte des
+        # signaux propres à la victoire (vs simple placement), bien plus fiable que
+        # l'exposant fixe. Normalisé Σ=1 par course (1 seul gagnant).
+        p_win_raw = None
+        try:
+            p_win_raw = model.predict_win_proba(X)
+        except Exception as e:
+            log.warning("pipeline.win_model_skip", err=str(e)[:140])
+        if p_win_raw is not None and len(p_win_raw) == n and float(np.sum(p_win_raw)) > 0:
+            raw_p1 = np.clip(np.asarray(p_win_raw, dtype=float), 1e-6, 0.999)
+            log.info("pipeline.win_model_used", course_id=course_id)
+        else:
+            # Fallback : P(top1) ∝ P(top3)^gamma (favoris concentrent la victoire)
+            raw_p1 = p3_arr ** 1.6
         s1 = float(raw_p1.sum())
         probas_top1 = (raw_p1 / s1) if s1 > 0 else np.full(n, 1.0 / n)
 

@@ -552,6 +552,19 @@ async def get_model_version(db: AsyncSession = Depends(get_db)):
         return {"version": None}
     # Métriques fiables : précision réelle observée + ROI masqué si aberrant.
     m_real = await real_model_metrics(db, mv)
+    # Modèle de victoire dédié (P(top1) apprise) — présence + métriques de holdout.
+    win_model_actif = False
+    win_auc = None
+    win_brier = None
+    try:
+        from ml.models import BlackTurfEnsemble
+        _m = BlackTurfEnsemble.load_current()
+        if _m is not None and getattr(_m, "win_model", None) is not None:
+            win_model_actif = True
+            win_auc = round(float(getattr(_m, "win_auc", 0.0)), 4) or None
+            win_brier = round(float(getattr(_m, "win_brier", 0.0)), 4) or None
+    except Exception:
+        pass
     return {
         "version_num": mv.version_num,
         "auc_roc": round(mv.auc_roc, 4),
@@ -560,5 +573,8 @@ async def get_model_version(db: AsyncSession = Depends(get_db)):
         "roi_simule": m_real["roi_simule"],
         "nb_courses_evaluees": m_real["nb_courses_evaluees"],
         "nb_courses_train": mv.nb_courses_train,
+        "win_model_actif": win_model_actif,
+        "win_auc": win_auc,
+        "win_brier": win_brier,
         "created_at": mv.created_at,
     }

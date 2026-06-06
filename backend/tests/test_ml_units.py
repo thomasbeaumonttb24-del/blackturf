@@ -535,9 +535,10 @@ def test_build_training_dataset_structure():
         "course_1": {"ch1": 1, "ch2": 3}
     }
     # Without course_id in features, should return empty or handle gracefully
-    X, y = build_training_dataset(features_rows, resultats)
+    X, y, y_win = build_training_dataset(features_rows, resultats)
     assert isinstance(X, pd.DataFrame)
     assert isinstance(y, pd.Series)
+    assert isinstance(y_win, pd.Series)
 
 
 def test_model_stacking_meta_learner():

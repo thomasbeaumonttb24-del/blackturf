@@ -75,6 +75,11 @@ class BlackTurfEnsemble:
         # Input: [p_xgb, p_lgbm, p_cb, + STACKING_FEATURES]
         self.meta_learner: Optional[LGBMClassifier] = None
         self._stacking_trained: bool = False
+        # Modèle de VICTOIRE dédié (label = arrivé 1er) — donne une P(top1) APPRISE
+        # au lieu de la dériver de P(top3) par un exposant heuristique (p3**1.6).
+        self.win_model: Optional[CalibratedClassifierCV] = None
+        self.win_auc: float = 0.0
+        self.win_brier: float = 1.0
         self.feature_names: list[str] = []
         self.stacking_feature_names: list[str] = []
         self.scaler = StandardScaler()
@@ -88,10 +93,11 @@ class BlackTurfEnsemble:
         self.trained_at: Optional[datetime] = None
         self._catboost_available: bool = False
 
-    def train(self, X: pd.DataFrame, y: pd.Series) -> dict:
+    def train(self, X: pd.DataFrame, y: pd.Series, y_win: Optional[pd.Series] = None) -> dict:
         """
-        Entraîne l'ensemble. Split temporel 80/20.
+        Entraîne l'ensemble (top-3). Split temporel 80/20.
         Walk-forward validation sur 6 fenêtres.
+        Si y_win fourni, entraîne aussi le modèle de VICTOIRE dédié (P(top1) apprise).
         """
         self.feature_names = [c for c in X.columns if c not in META_COLS]
         X_feat = X[self.feature_names].fillna(0)
@@ -284,6 +290,34 @@ class BlackTurfEnsemble:
         except Exception:
             pass  # SHAP optional (requires shap package)
 
+        # ── Modèle de VICTOIRE dédié (label = arrivé 1er) ─────────────────
+        # Donne une P(top1) APPRISE (vs heuristique p3**1.6). Fortement déséquilibré
+        # (~1 gagnant / nb_partants) → scale_pos_weight + calibration isotonique.
+        if y_win is not None and len(y_win) == n:
+            try:
+                yw_train, yw_test = y_win.iloc[:split], y_win.iloc[split:]
+                if yw_train.nunique() > 1:
+                    pos_w_win = float((yw_train == 0).sum()) / max(float((yw_train == 1).sum()), 1)
+                    win_base = XGBClassifier(
+                        n_estimators=500, max_depth=5, learning_rate=0.04,
+                        subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
+                        scale_pos_weight=pos_w_win, use_label_encoder=False,
+                        eval_metric="logloss", tree_method="hist",
+                        random_state=42, n_jobs=-1,
+                    )
+                    self.win_model = CalibratedClassifierCV(win_base, method="isotonic", cv=3)
+                    self.win_model.fit(X_train, yw_train)
+                    if yw_test.nunique() > 1:
+                        p_win_test = self.win_model.predict_proba(X_test)[:, 1]
+                        self.win_auc = float(roc_auc_score(yw_test, p_win_test))
+                        self.win_brier = float(brier_score_loss(yw_test, p_win_test))
+                    log.info("model.win_model_trained",
+                             win_auc=round(self.win_auc, 4), win_brier=round(self.win_brier, 4),
+                             pos_rate=round(float(yw_train.mean()), 4))
+            except Exception as e:
+                log.warning("model.win_model_failed", err=str(e)[:160])
+                self.win_model = None
+
         # Brier threshold check
         if self.brier_score > BRIER_THRESHOLD:
             log.warning("model.brier_too_high", brier=self.brier_score, threshold=BRIER_THRESHOLD)
@@ -296,7 +330,11 @@ class BlackTurfEnsemble:
             roi=round(self.roi_simule, 4),
             stacking=self._stacking_trained,
             catboost=self._catboost_available,
+            win_model=self.win_model is not None,
+            win_auc=round(self.win_auc, 4),
         )
+        metrics["win_auc"] = self.win_auc
+        metrics["win_brier"] = self.win_brier
         return metrics
 
     def _get_l0_predictions(self, X_feat: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -391,6 +429,21 @@ class BlackTurfEnsemble:
         mean_l0 = stack.mean(axis=1) + 1e-8
         rel_unc = np.clip(std_l0 / mean_l0, 0.0, 1.0)
         return probas, confidence, rel_unc
+
+    def predict_win_proba(self, X: pd.DataFrame) -> Optional[np.ndarray]:
+        """
+        P(victoire) APPRISE par le modèle de victoire dédié (brute, non normalisée).
+        Retourne None si le modèle de victoire n'est pas disponible (anciens pickles)
+        → l'appelant retombe alors sur l'heuristique p3**gamma.
+        """
+        if self.win_model is None:
+            return None
+        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+        try:
+            return self.win_model.predict_proba(X_feat)[:, 1]
+        except Exception as e:
+            log.warning("model.predict_win_failed", err=str(e)[:140])
+            return None
 
     def _walk_forward_validation(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 6) -> list[float]:
         """Walk-forward validation pour détecter l'instabilité du modèle."""
@@ -533,35 +586,37 @@ class BlackTurfEnsemble:
         log.info("model.deployed", version=version_num)
 
 
-def build_training_dataset(features_list: list[dict], resultats: dict[str, dict]) -> tuple[pd.DataFrame, pd.Series]:
+def build_training_dataset(
+    features_list: list[dict], resultats: dict[str, dict]
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """
-    Construit X et y pour le training.
+    Construit X, y_top3 et y_win pour le training.
     resultats : {course_id: {cheval_id: position}}
+
+    Retourne (X, y_top3, y_win) :
+      - y_top3 = arrivé dans les 3 premiers (label historique de l'ensemble)
+      - y_win  = arrivé 1er (label du modèle de VICTOIRE dédié)
     """
     rows = []
-    labels = []
+    labels_top3 = []
+    labels_win = []
 
     for feat in features_list:
-        pid = feat.get("participation_id")
         cid = feat.get("course_id")
-
-        # Trouver le label (est-ce que ce partant est arrivé dans le top-3 ?)
         if cid not in resultats:
             continue
-
-        # On a besoin du cheval_id pour savoir sa position — on l'ajoute dans les features
         cheval_id = feat.get("cheval_id")
         pos = resultats[cid].get(cheval_id)
         if pos is None:
             continue
 
-        label = int(pos <= 3 and pos > 0)
         rows.append(feat)
-        labels.append(label)
+        labels_top3.append(int(pos <= 3 and pos > 0))
+        labels_win.append(int(pos == 1))
 
     if not rows:
-        return pd.DataFrame(), pd.Series([], dtype=int)
+        empty = pd.Series([], dtype=int)
+        return pd.DataFrame(), empty, empty
 
     X = pd.DataFrame(rows)
-    y = pd.Series(labels, name="label")
-    return X, y
+    return X, pd.Series(labels_top3, name="label"), pd.Series(labels_win, name="win")
