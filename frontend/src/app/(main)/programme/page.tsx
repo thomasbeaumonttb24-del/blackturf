@@ -13,7 +13,8 @@ import { coursesApi, predictionsApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { disciplineIcon, formatTime, cn } from "@/lib/utils";
+import { formatTime, cn } from "@/lib/utils";
+import { DisciplineIcon, DisciplineGlyph, disciplineMeta } from "@/components/ui/DisciplineIcon";
 
 /* ─── Types ─────────────────────────────────────────────── */
 interface CourseSummary {
@@ -141,19 +142,8 @@ function CourseRow({ course, reunionNum, vbCount }: { course: CourseSummary; reu
           )}
         </div>
 
-        {/* Course number circle */}
-        <div
-          className={cn(
-            "h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ring-1",
-            course.est_quinte
-              ? "bg-amber-50 text-amber-600 ring-amber-200"
-              : isLive
-              ? "bg-emerald-50 text-emerald-600 ring-emerald-200"
-              : "bg-gray-100 text-gray-600 ring-gray-200",
-          )}
-        >
-          {course.numero}
-        </div>
+        {/* Logo cheval selon l'épreuve */}
+        <DisciplineIcon discipline={course.discipline} size="md" />
 
         {/* Main info */}
         <div className="flex-1 min-w-0">
@@ -185,7 +175,7 @@ function CourseRow({ course, reunionNum, vbCount }: { course: CourseSummary; reu
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5 flex-wrap">
-            <span>{disciplineIcon(course.discipline)} {course.discipline}</span>
+            <span className="font-medium" style={{ color: disciplineMeta(course.discipline).color }}>{course.discipline}</span>
             <span className="text-gray-200">·</span>
             <span>{course.distance}m</span>
             <span className="text-gray-200">·</span>
@@ -336,8 +326,8 @@ function ReunionCard({
               </>
             )}
             {Object.entries(discBreakdown).map(([disc, n]) => (
-              <span key={disc} className="hidden sm:inline text-gray-300">
-                · {disciplineIcon(disc)} {n}
+              <span key={disc} className="hidden sm:inline-flex items-center gap-0.5" style={{ color: disciplineMeta(disc).color }}>
+                · <DisciplineGlyph discipline={disc} className="h-3 w-4" /> {n}
               </span>
             ))}
             {/* Pénétromètre de la réunion */}
@@ -447,6 +437,7 @@ function ChronoView({
                     <span className={cn("text-sm font-bold tabular-nums w-11 flex-shrink-0", isLive ? "text-emerald-600" : isDone ? "text-gray-400" : "text-gray-900")}>
                       {formatTime(course.date_heure)}
                     </span>
+                    <DisciplineIcon discipline={course.discipline} size="sm" />
                     <CourseCode reunionNum={reunionNum} courseNum={course.numero}
                       variant={course.est_quinte ? "quinte" : isLive ? "live" : "default"} />
                     <div className="flex-1 min-w-0">
@@ -456,7 +447,7 @@ function ChronoView({
                         {course.nom || `Course ${course.numero}`}
                       </p>
                       <p className="text-xs text-gray-400 truncate">
-                        {disciplineIcon(course.discipline)} {course.discipline} · {course.distance}m · {course.nb_partants} partants
+                        <span className="font-medium" style={{ color: disciplineMeta(course.discipline).color }}>{course.discipline}</span> · {course.distance}m · {course.nb_partants} partants
                       </p>
                     </div>
                     {course.est_quinte && (
@@ -615,8 +606,8 @@ export default function ProgrammePage() {
           )}
 
           {Object.entries(discCounts).map(([disc, n]) => (
-            <span key={disc} className="text-gray-400 text-xs">
-              {disciplineIcon(disc)} {n} {disc}
+            <span key={disc} className="inline-flex items-center gap-1 text-xs" style={{ color: disciplineMeta(disc).color }}>
+              <DisciplineGlyph discipline={disc} className="h-3.5 w-4" /> {n} {disc}
             </span>
           ))}
 
@@ -674,7 +665,7 @@ export default function ProgrammePage() {
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200",
                   )}
                 >
-                  {d !== "Tous" && disciplineIcon(d)}
+                  {d !== "Tous" && <DisciplineGlyph discipline={d} className="h-3.5 w-4" />}
                   {d}
                   {count > 0 && (
                     <span
