@@ -484,7 +484,9 @@ class ValueBet(Base):
     vb_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     prediction_id: Mapped[str] = mapped_column(ForeignKey("predictions.prediction_id"), index=True)
     course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), index=True)
-    participation_id: Mapped[str] = mapped_column(ForeignKey("participations.participation_id"))
+    participation_id: Mapped[str] = mapped_column(
+        ForeignKey("participations.participation_id"), unique=True
+    )  # unique → upsert ON CONFLICT (un value bet actif par partant)
 
     ev_pmu: Mapped[float | None] = mapped_column(Float)
     ev_geny: Mapped[float | None] = mapped_column(Float)
