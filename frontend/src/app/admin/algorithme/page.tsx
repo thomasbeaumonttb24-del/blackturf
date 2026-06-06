@@ -226,6 +226,53 @@ export default function AlgorithmeMonitoringPage() {
           </Card>
         </div>
 
+        {/* Calibrations & apprentissage réellement appliqués à l'inférence */}
+        {alState?.calibration && (
+          <Card className="border-border/60">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Cpu className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm font-medium">Calibrations appliquées à l&apos;inférence</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded bg-muted/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Calibration isotonique</span>
+                    <Badge className={`text-[10px] ${alState.calibration.isotonique?.actif ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+                      {alState.calibration.isotonique?.actif ? "active" : "en attente"}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {alState.calibration.isotonique?.n_points ?? 0} points · {alState.calibration.isotonique?.n_obs ?? 0} obs
+                  </div>
+                </div>
+                <div className="rounded bg-muted/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Calibration longshots</span>
+                    <Badge className={`text-[10px] ${alState.calibration.longshots?.actif ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+                      {alState.calibration.longshots?.actif ? "active" : "en attente"}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {alState.calibration.longshots?.n_obs ?? 0} obs
+                  </div>
+                </div>
+                <div className="rounded bg-muted/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Tilt poids features</span>
+                    <Badge className={`text-[10px] ${alState.calibration.feature_weight_tilt?.actif ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+                      {alState.calibration.feature_weight_tilt?.actif ? "actif" : "en attente"}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {alState.calibration.feature_weight_tilt?.courses_apprises ?? 0}/{alState.calibration.feature_weight_tilt?.courses_requises ?? 0} courses
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Drift signals */}
         {(dd.adwin_triggered || dd.ph_triggered) && (
           <Card className="border-amber-500/40 bg-amber-500/5">

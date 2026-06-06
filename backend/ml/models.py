@@ -370,6 +370,28 @@ class BlackTurfEnsemble:
         confidence = 0.6 * accord_l0 + 0.4 * market_confidence
         return probas, confidence
 
+    def predict_with_uncertainty(
+        self, X: pd.DataFrame
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Retourne (probas, confidence, incertitude_relative).
+
+        incertitude_relative = std(p_xgb, p_lgbm, p_cb) / mean  ∈ [0, 1] : c'est le
+        DÉSACCORD entre les 3 modèles de base (incertitude épistémique). Sert à
+        construire un intervalle de confiance autour de la proba finale : plus les
+        modèles divergent sur un partant, plus la bande est large. Honnête : mesure
+        un vrai désaccord, pas une marge inventée.
+        """
+        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+        p_xgb, p_lgbm, p_cb = self._get_l0_predictions(X_feat)
+        probas, confidence = self.predict_with_confidence(X)
+
+        stack = np.stack([p_xgb, p_lgbm, p_cb], axis=1)
+        std_l0 = stack.std(axis=1)
+        mean_l0 = stack.mean(axis=1) + 1e-8
+        rel_unc = np.clip(std_l0 / mean_l0, 0.0, 1.0)
+        return probas, confidence, rel_unc
+
     def _walk_forward_validation(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 6) -> list[float]:
         """Walk-forward validation pour détecter l'instabilité du modèle."""
         n = len(X)

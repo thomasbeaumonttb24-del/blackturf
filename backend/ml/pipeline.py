@@ -316,6 +316,13 @@ async def run_nightly_retraining() -> None:
             await compute_and_store(cal_session)
     except Exception as e:
         log.warning("pipeline.nightly_calibration_skip", err=str(e)[:140])
+    # Recalcule la calibration isotonique (proba_top1 finale → fréquence réelle)
+    try:
+        from ml.isotonic_calibration import compute_and_store as _iso_compute
+        async with AsyncSessionLocal() as iso_session:
+            await _iso_compute(iso_session)
+    except Exception as e:
+        log.warning("pipeline.nightly_isotonic_skip", err=str(e)[:140])
 
 
 async def _do_retraining(mois: int, label: str) -> None:
@@ -442,9 +449,10 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 )
                 await session.execute(stmt)
 
-        # Prédictions avec confiance (accord entre les 3 modèles)
+        # Prédictions avec confiance (accord entre les 3 modèles) + incertitude
+        # relative (désaccord L0) pour l'intervalle de confiance sur la proba.
         X = pd.DataFrame(features_list)
-        probas_top3_raw, confidence_scores = model.predict_with_confidence(X)
+        probas_top3_raw, confidence_scores, rel_uncertainty = model.predict_with_uncertainty(X)
 
         # ── Calibration adaptative (temperature scaling + biais contextuel) ──
         al = get_adaptive_learning()
@@ -524,6 +532,15 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                     float(probas_calibrated[i]), ctx, bias_correction
                 )
 
+        # ── Feature-weight tilt : applique les POIDS APPRIS des groupes de features
+        # sur la proba finale (les poids adaptatifs étaient appris mais jamais utilisés
+        # à l'inférence — un modèle à arbres est invariant à l'échelle des features).
+        # Marginal, borné, inactif tant que < TILT_MIN_RACES courses apprises.
+        try:
+            probas_top3 = al.apply_feature_weight_tilt(probas_top3, features_list)
+        except Exception as e:
+            log.warning("pipeline.feature_weight_tilt_skip", err=str(e)[:140])
+
         # ── Normalisation probabiliste PAR COURSE (cohérence) ───────────────────
         # Sans ça, le modèle peut donner P(top3)~0.7 à plusieurs chevaux (dont des
         # outsiders) → P(top1) absurde (ex. 0.20 sur un 219/1) → faux value bets.
@@ -588,6 +605,19 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.longshot_calibration_skip", err=str(e)[:140])
 
+        # ── Calibration isotonique RÉSIDUELLE : ajuste la proba_top1 finale pour
+        # qu'elle colle à la fréquence de victoire réelle (régression monotone apprise
+        # sur les vraies courses, recalc nightly). Dernière étape de calibration —
+        # ferme la boucle après temperature/blend marché/longshots. Identité si peu
+        # de données. Renormalise Σ=1.
+        try:
+            from ml.isotonic_calibration import load_curve, apply_calibration as _iso_apply
+            _iso_curve = await load_curve(session)
+            if _iso_curve:
+                probas_top1 = _iso_apply(probas_top1, _iso_curve)
+        except Exception as e:
+            log.warning("pipeline.isotonic_calibration_skip", err=str(e)[:140])
+
         # Purge des value bets de la course avant recalcul : un partant qui n'est
         # PLUS un value bet (recalibré) doit disparaître, sinon des paris obsolètes
         # (ex. ancien EV gonflé) restent affichés. save_value_bet ne fait qu'upsert.
@@ -613,6 +643,16 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         for _k, _idx in enumerate(_order):
             _rang_by_index[int(_idx)] = _k + 1
 
+        # ── Intervalle de confiance sur proba_top1 ───────────────────────────────
+        # Bande = proba × (1 ± K × incertitude_relative), où l'incertitude relative
+        # est le désaccord entre les 3 modèles de base (std/mean). Bornes par cheval
+        # (pas une distribution → pas de renormalisation). Plus les modèles divergent,
+        # plus l'intervalle est large. K_CI borné pour rester lisible.
+        K_CI = 0.6
+        _ru = np.asarray(rel_uncertainty, dtype=float)
+        _ci_low = np.clip(_p1_arr * (1.0 - K_CI * _ru), 1e-4, 0.999)
+        _ci_high = np.clip(_p1_arr * (1.0 + K_CI * _ru), 1e-4, 0.999)
+
         predictions = []
         for i, feat in enumerate(features_list):
             pid = feat.get("participation_id")
@@ -624,6 +664,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
 
             # Sauvegarder prédiction
             confidence = float(confidence_scores[i])
+            ci_low = float(_ci_low[i])
+            ci_high = float(_ci_high[i])
             pred_id = str(uuid.uuid4())
             stmt = pg_insert(PredictionModel).values(
                 prediction_id=pred_id,
@@ -632,6 +674,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 model_version_id=mv_id,
                 proba_top1=proba_t1,
                 proba_top3=proba_t3,
+                proba_top1_low=ci_low,
+                proba_top1_high=ci_high,
                 rang_predit=rang,
                 confidence_score=round(confidence * 100, 2),  # accord des 3 modèles
                 created_at=datetime.now(),
@@ -640,6 +684,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 set_={
                     "proba_top1": proba_t1,
                     "proba_top3": proba_t3,
+                    "proba_top1_low": ci_low,
+                    "proba_top1_high": ci_high,
                     "rang_predit": rang,
                     "confidence_score": round(confidence * 100, 2),
                 },
@@ -733,6 +779,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 "nom": feat.get("nom", ""),
                 "proba_top3": proba_t3,
                 "proba_top1": proba_t1,
+                "proba_top1_low": ci_low,
+                "proba_top1_high": ci_high,
                 "cote_pmu": cote_pmu,
                 "cote_geny": cote_geny,
                 "ev_max": ev_max,

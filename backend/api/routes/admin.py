@@ -2,6 +2,7 @@
 Admin routes — BlackTurf back-office.
 Accès admin uniquement.
 """
+import json
 import structlog
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -431,18 +432,58 @@ async def list_alertes(
 
 @router.get("/adaptive-learning/state")
 async def get_adaptive_learning_state(
+    db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
     """
     Retourne l'état courant du moteur d'apprentissage adaptatif.
     Température, poids features, métriques EMA, alertes calibration.
-    Inclut l'état du détecteur de drift (ADWIN + Page-Hinkley).
+    Inclut l'état du détecteur de drift (ADWIN + Page-Hinkley) et le statut des
+    calibrations (isotonique + longshots) réellement appliquées à l'inférence.
     """
+    from ml.adaptive_learning import TILT_MIN_RACES
     al = get_adaptive_learning()
     dd = get_drift_detector()
+
+    # ── Statut calibration isotonique (proba_top1 finale → fréquence réelle) ──
+    isotonic = {"actif": False, "n_points": 0, "n_obs": 0, "updated_at": None}
+    try:
+        r = await db.execute(text(
+            "SELECT curve, n_obs, updated_at FROM isotonic_calibration WHERE id = 1"))
+        row = r.fetchone()
+        if row and row[0]:
+            curve = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+            n_pts = len(curve.get("x") or [])
+            isotonic = {"actif": n_pts >= 2, "n_points": n_pts,
+                        "n_obs": int(row[1] or 0),
+                        "updated_at": row[2].isoformat() if row[2] else None}
+    except Exception:
+        pass
+
+    # ── Statut calibration longshots (par bucket de cote) ──
+    longshot = {"actif": False, "n_obs": 0, "updated_at": None}
+    try:
+        r = await db.execute(text(
+            "SELECT n_obs, updated_at FROM longshot_calibration WHERE id = 1"))
+        row = r.fetchone()
+        if row:
+            longshot = {"actif": True, "n_obs": int(row[0] or 0),
+                        "updated_at": row[1].isoformat() if row[1] else None}
+    except Exception:
+        pass
+
     return {
         **al.get_state_summary(),
         "drift_detector": dd.get_drift_report(),
+        "calibration": {
+            "isotonique": isotonic,
+            "longshots": longshot,
+            "feature_weight_tilt": {
+                "actif": al.n_races_processed >= TILT_MIN_RACES,
+                "courses_requises": TILT_MIN_RACES,
+                "courses_apprises": al.n_races_processed,
+            },
+        },
     }
 
 

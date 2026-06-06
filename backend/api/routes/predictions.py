@@ -32,6 +32,8 @@ class PredictionOut(BaseModel):
     nom_cheval: str
     proba_top1: float
     proba_top3: float
+    proba_top1_low: Optional[float] = None
+    proba_top1_high: Optional[float] = None
     rang_predit: int
     confidence_score: Optional[float]
     cote_pmu: Optional[float]
@@ -112,6 +114,8 @@ async def get_predictions(
             nom_cheval=cheval.nom,
             proba_top1=round(pred.proba_top1, 4),
             proba_top3=round(pred.proba_top3, 4),
+            proba_top1_low=round(pred.proba_top1_low, 4) if pred.proba_top1_low is not None else None,
+            proba_top1_high=round(pred.proba_top1_high, 4) if pred.proba_top1_high is not None else None,
             rang_predit=pred.rang_predit,
             confidence_score=pred.confidence_score,
             cote_pmu=part.cote_pmu,

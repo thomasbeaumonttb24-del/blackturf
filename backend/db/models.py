@@ -490,6 +490,9 @@ class Prediction(Base):
 
     proba_top1: Mapped[float] = mapped_column(Float)
     proba_top3: Mapped[float] = mapped_column(Float)
+    # Intervalle de confiance sur proba_top1 (désaccord des 3 modèles de base)
+    proba_top1_low: Mapped[float | None] = mapped_column(Float)
+    proba_top1_high: Mapped[float | None] = mapped_column(Float)
     rang_predit: Mapped[int] = mapped_column(Integer)
     score_borda: Mapped[float | None] = mapped_column(Float)
     confidence_score: Mapped[float | None] = mapped_column(Float)  # 0-100

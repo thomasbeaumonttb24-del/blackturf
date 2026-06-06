@@ -125,6 +125,60 @@ FEATURE_TO_GROUP: dict[str, str] = {
 # Ajustement max par feature en une seule update (évite l'instabilité)
 WEIGHT_CLIP = 0.05
 
+# ── Features "plus haut = meilleure chance" par groupe, pour le TILT d'inférence ──
+# Sous-ensemble CURÉ de FEATURE_TO_GROUP : uniquement les features dont une valeur
+# élevée signale objectivement une meilleure chance (orientation monotone connue).
+# On EXCLUT les features ambiguës/inverses (surmenage_score, draw_bias_score, cote_*)
+# pour ne jamais tilter dans le mauvais sens. Les arbres du modèle sont invariants à
+# l'échelle d'une feature : multiplier une feature par un poids ne change rien aux
+# splits. Le tilt agit donc sur la PROBA finale (post-modèle), pondéré par le poids
+# adaptatif APPRIS du groupe — c'est ainsi que les feature_weights influencent
+# réellement l'inférence (avant : appris mais jamais utilisés en prédiction).
+POSITIVE_TILT_FEATURES: dict[str, str] = {
+    # elo
+    "elo_global": "elo", "elo_discipline": "elo", "elo_vs_moyenne": "elo",
+    "delta_elo_5courses": "elo", "velocity_elo": "elo", "elo_trend_30j": "elo",
+    # forme
+    "forme_1_course": "forme", "forme_5_courses": "forme", "forme_tendance": "forme",
+    "regularite": "forme", "taux_top3": "forme", "taux_victoire_5c": "forme",
+    "time_decay_form": "forme",
+    # repos (fraîcheur uniquement — surmenage est inverse, exclu)
+    "fraicheur_score": "repos",
+    # distance / stamina
+    "pref_distance_actuelle": "distance", "stamina_index": "distance",
+    # terrain
+    "pref_terrain_actuel": "terrain", "running_style_terrain_fit": "terrain",
+    # hippodrome
+    "pref_hippodrome": "hippodrome", "record_hippodrome": "hippodrome",
+    # signaux avancés marché (orientés positivement)
+    "spi_score": "signaux_avances", "valeur_latente": "signaux_avances",
+    "pool_gagnant_ratio": "signaux_avances",
+    # équipement
+    "equipement_score": "equip", "premier_deferre": "equip", "premieres_oeilleres": "equip",
+    # jockey / entraîneur
+    "jockey_taux_victoire_global": "jockey", "jockey_forme_30j": "jockey",
+    "jockey_roi": "jockey", "asso_jockey_entraineur_taux": "jockey",
+    "entraineur_taux_global": "entraineur", "combo_jockey_entraineur": "entraineur",
+    "trainer_return_bonus": "entraineur",
+    # cheval / synergie / fingerprint
+    "career_win_rate": "cheval", "jockey_cheval_synergy_score": "synergy",
+    "course_fingerprint_score": "fingerprint",
+    # classe / career
+    "class_drop_ratio": "classe", "class_jump_score": "classe",
+    "career_momentum": "career", "form_vs_career_rate": "career",
+    # dynamique de course
+    "dyn_finit_fort": "dynamique", "dyn_taux_accelere": "dynamique",
+    "dyn_reduction_km_best": "dynamique",
+    # confrontations directes
+    "conf_bilan_net": "confrontation", "conf_taux_victoire": "confrontation",
+    "conf_nb_rivaux_battus": "confrontation",
+}
+
+# Tilt d'inférence : échelle + bornes (effet marginal, jamais dominant)
+TILT_SCALE = 0.04          # pente du tilt log par unité de (poids-1)×signal_z
+TILT_LOG_CLIP = 0.15       # |log-tilt| max par cheval → multiplicateur ∈ [0.86 ; 1.16]
+TILT_MIN_RACES = 30        # avant N courses apprises, poids peu fiables → tilt inactif
+
 # Tags causaux (PostRaceAnalyzer) → groupes de features sous-pondérés à renforcer.
 # Quand une cause récurrente révèle un angle mort du modèle, on booste le groupe.
 CAUSAL_TAG_TO_GROUPS = {
@@ -466,6 +520,85 @@ class AdaptiveLearning:
         p_calibrated = np.clip(p_calibrated, 0.01, 0.95)
 
         return p_calibrated
+
+    def apply_feature_weight_tilt(
+        self,
+        probas: np.ndarray,
+        features_list: list[dict],
+    ) -> np.ndarray:
+        """
+        Applique les POIDS APPRIS des groupes de features sur les probas de la course.
+
+        Pour chaque groupe, on calcule un signal z (standardisé sur le champ) à partir
+        des features positives présentes, puis on tilte la proba de chaque cheval :
+
+            log_tilt_i = TILT_SCALE × Σ_groupe (poids_groupe − 1) × signal_z(groupe, i)
+            proba_i   *= exp(clip(log_tilt_i, ±TILT_LOG_CLIP))   puis renormalisation
+
+        Effet : un groupe que l'apprentissage a sur-pondéré (poids > 1, p.ex. après
+        une série de gagnants "qui finissent fort") pousse les chevaux forts sur ce
+        groupe ; un groupe sous-pondéré les pousse moins. Marginal et borné — le
+        modèle reste maître, mais ses angles morts appris corrigent la proba finale.
+
+        Inactif tant que < TILT_MIN_RACES courses apprises (poids non fiables) ou si
+        aucun poids ne dévie de son défaut. Aucune valeur inventée : un groupe sans
+        feature exploitable (toutes NaN / champ constant) a un signal nul.
+        """
+        n = len(features_list)
+        probas = np.asarray(probas, dtype=float)
+        if n < 2 or probas.size != n:
+            return probas
+        if self.n_races_processed < TILT_MIN_RACES:
+            return probas
+
+        # Groupes dont le poids dévie réellement du défaut (sinon aucun effet)
+        active_groups = {
+            g: w for g, w in self.feature_weights.items()
+            if abs(w - DEFAULT_FEATURE_WEIGHTS.get(g, 1.0)) > 1e-3
+        }
+        if not active_groups:
+            return probas
+
+        # Features positives groupées (uniquement les groupes actifs)
+        feats_by_group: dict[str, list[str]] = {}
+        for fkey, grp in POSITIVE_TILT_FEATURES.items():
+            if grp in active_groups:
+                feats_by_group.setdefault(grp, []).append(fkey)
+
+        log_tilt = np.zeros(n, dtype=float)
+        for grp, fkeys in feats_by_group.items():
+            weight_dev = active_groups[grp] - 1.0
+            if abs(weight_dev) < 1e-3:
+                continue
+            # Signal z du groupe = moyenne des z-scores des features positives présentes
+            group_signal = np.zeros(n, dtype=float)
+            n_feats_used = np.zeros(n, dtype=float)
+            for fkey in fkeys:
+                col = np.array(
+                    [float(f.get(fkey)) if f.get(fkey) is not None else np.nan
+                     for f in features_list],
+                    dtype=float,
+                )
+                valid = ~np.isnan(col)
+                if valid.sum() < 2:
+                    continue
+                mu = float(col[valid].mean())
+                sd = float(col[valid].std())
+                if sd < 1e-9:
+                    continue
+                z = np.where(valid, (col - mu) / sd, 0.0)
+                group_signal += z
+                n_feats_used += valid.astype(float)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                group_signal = np.where(n_feats_used > 0, group_signal / n_feats_used, 0.0)
+            log_tilt += TILT_SCALE * weight_dev * group_signal
+
+        log_tilt = np.clip(log_tilt, -TILT_LOG_CLIP, TILT_LOG_CLIP)
+        tilted = probas * np.exp(log_tilt)
+        s = float(tilted.sum())
+        if s > 0:
+            tilted = tilted * (float(probas.sum()) / s)  # conserve la masse totale
+        return tilted
 
     async def get_bias_correction(
         self, session: AsyncSession, discipline: str, terrain: str, hippodrome: str

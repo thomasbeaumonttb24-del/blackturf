@@ -75,6 +75,8 @@ interface Prediction {
   nom_cheval: string;
   proba_top1: number;
   proba_top3: number;
+  proba_top1_low: number | null;
+  proba_top1_high: number | null;
   rang_predit: number;
   confidence_score: number | null;
   cote_pmu: number | null;
@@ -1911,6 +1913,14 @@ export default function CoursePage() {
                             <span className="text-[10px] text-muted-foreground">
                               {(p.proba_top3 * 100).toFixed(0)}% top-3
                             </span>
+                            <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
+                              {(p.proba_top1 * 100).toFixed(0)}% gagnant
+                              {p.proba_top1_low != null && p.proba_top1_high != null && (
+                                <span className="text-muted-foreground/70">
+                                  {" "}[{(p.proba_top1_low * 100).toFixed(0)}–{(p.proba_top1_high * 100).toFixed(0)}%]
+                                </span>
+                              )}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -1919,7 +1929,7 @@ export default function CoursePage() {
                   <div className="pt-2 border-t border-border/50">
                     <p className="text-[10px] text-muted-foreground flex gap-1.5">
                       <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
-                      Confiance = accord des 3 modèles. Outil d&apos;aide à la décision, aucune garantie.
+                      Confiance = accord des 3 modèles. L&apos;intervalle [x–y%] sur la proba gagnant reflète leur désaccord. Outil d&apos;aide à la décision, aucune garantie.
                     </p>
                   </div>
                 </div>
