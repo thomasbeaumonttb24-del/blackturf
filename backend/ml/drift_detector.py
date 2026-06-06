@@ -43,9 +43,8 @@ from typing import Any, Optional
 
 import numpy as np
 import structlog
-from sqlalchemy import Column, DateTime, Integer, String, Text, select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import DeclarativeBase
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -85,35 +84,15 @@ DRIFT_WARMUP_MIN: int = 200
 
 logger = structlog.get_logger(__name__)
 
+# Persistence note
 # ---------------------------------------------------------------------------
-# SQLAlchemy ORM — minimal base for the state persistence table
-# ---------------------------------------------------------------------------
-
-
-class _Base(DeclarativeBase):
-    pass
-
-
-class DriftDetectorState(_Base):
-    """
-    Persisted state for the DriftDetector singleton.
-
-    A single row (id=1) stores the full detector state as a JSON blob so that
-    it survives process restarts without losing accumulated statistics.
-    """
-
-    __tablename__ = "drift_detector_state"
-
-    id: int = Column(Integer, primary_key=True, default=1)
-    state_json: str = Column(Text, nullable=False, default="{}")
-    updated_at: datetime = Column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-    drift_count: int = Column(Integer, nullable=False, default=0)
-    last_drift_type: Optional[str] = Column(String(64), nullable=True)
-
+# The detector state lives in the ``drift_detector_state`` table, defined
+# canonically by ``backend/db/models.py`` (singleton row keyed by
+# ``state_id = 'singleton'``: state_json, severity, n_updates, last_drift_at,
+# updated_at). save_state()/load_state() below talk to it via raw SQL — there
+# is intentionally NO local ORM model here. A previous local model declared an
+# ``id`` integer PK that never existed in the real table, which broke
+# initialisation; do not reintroduce one.
 
 # ---------------------------------------------------------------------------
 # Internal algorithm helpers
