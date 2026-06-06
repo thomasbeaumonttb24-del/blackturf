@@ -141,11 +141,19 @@ class PmuScraper(BaseScraper):
 
                 partants = self._parse_partants(c_data.get("participants", []))
 
-                # Désignations
+                # Désignations jackpot — déduites des PARIS RÉELLEMENT proposés par le
+                # PMU (champ `paris[].codePari`), pas du texte des conditions (qui ne
+                # mentionne jamais Tiercé/Quarté/Quinté). Sans ça, est_quinte/quarte/
+                # tierce restaient TOUJOURS False → la couverture jackpot ne se
+                # déclenchait jamais.
                 conditions = c_data.get("conditions", "")
-                est_quinte = "QUINTE" in conditions.upper()
-                est_quarte = "QUARTE" in conditions.upper()
-                est_tierce = "TIERCE" in conditions.upper()
+                pari_codes = {
+                    (p.get("codePari") or p.get("typePari") or "").upper()
+                    for p in (c_data.get("paris") or [])
+                }
+                est_tierce = any("TIERCE" in c for c in pari_codes)
+                est_quarte = any(("QUARTE" in c) or ("SUPER_QUATRE" in c) for c in pari_codes)
+                est_quinte = any("QUINTE" in c for c in pari_codes)
 
                 # Terrain
                 terrain_code = c_data.get("conditionPiste")
