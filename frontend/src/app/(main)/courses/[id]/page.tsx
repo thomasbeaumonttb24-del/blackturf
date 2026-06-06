@@ -341,7 +341,11 @@ function MusiqueDisplay({ musique }: { musique: string | null }) {
   if (!musique || !musique.trim()) {
     return <span className="text-xs text-muted-foreground/50">Aucune musique</span>;
   }
-  const tokens = musique.trim().split(/\s+/).filter((t) => !t.startsWith("(")).slice(0, 10);
+  // La musique PMU est souvent collée ("0a0aRa") : on découpe chaque sortie
+  // (résultat + lettre de discipline) + les marqueurs d'année (25). Max 10.
+  const tokens = (musique.match(/\(\d{2,4}\)|[0-9A-Za-z][a-z]/g) || [])
+    .filter((t) => !t.startsWith("("))
+    .slice(0, 10);
   const headOf = (t: string) => t[0];
   const cls = (h: string) =>
     h === "1" ? "bg-amber-100 text-amber-700 ring-amber-300"
@@ -352,8 +356,9 @@ function MusiqueDisplay({ musique }: { musique: string | null }) {
     const h = headOf(t);
     const disc = DISCIPLINE_MUSIQUE[t.slice(-1).toLowerCase()];
     const place =
-      h === "1" ? "Vainqueur" : h === "0" ? "Hors top 10"
+      h === "1" ? "Vainqueur" : h === "0" ? "Non classé (hors des places)"
       : h === "D" ? "Disqualifié" : h === "T" ? "Tombé" : h === "A" ? "Arrêté"
+      : h === "R" ? "Rétrogradé / non classé" : h === "N" ? "Non partant"
       : /[2-9]/.test(h) ? `${h}ᵉ` : t;
     return disc ? `${place} · ${disc}` : place;
   };
