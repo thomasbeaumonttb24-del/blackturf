@@ -30,11 +30,14 @@ EV_SEUILS = {
     4: 0.30,   # ⭐⭐⭐⭐ Exceptionnel
 }
 
+# Seuils de confiance sur la PROBA DE VICTOIRE (proba_top1, normalisée Σ=1).
+# Un value bet "gagnant" oppose la cote gagnant à P(victoire) : ces seuils évitent
+# de flagger un outsider (faible P(win)) juste parce que sa cote est énorme.
 CONFIANCE_SEUILS = {
-    1: 0.50,
-    2: 0.55,
-    3: 0.60,
-    4: 0.65,
+    1: 0.10,   # ≥10% de victoire
+    2: 0.14,
+    3: 0.18,
+    4: 0.22,   # favori net
 }
 
 # Poids des sources pour le calcul de la cote marché de référence

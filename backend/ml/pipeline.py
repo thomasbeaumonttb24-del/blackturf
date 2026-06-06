@@ -477,9 +477,24 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                     float(probas_calibrated[i]), ctx, bias_correction
                 )
 
-        # P(top1) = P(top3) × (3 / nb_partants) — calibration basée sur le champ
+        # ── Normalisation probabiliste PAR COURSE (cohérence) ───────────────────
+        # Sans ça, le modèle peut donner P(top3)~0.7 à plusieurs chevaux (dont des
+        # outsiders) → P(top1) absurde (ex. 0.20 sur un 219/1) → faux value bets.
+        # Contraintes réelles : exactement 1 gagnant (Σ P(top1)=1) et 3 placés
+        # (Σ P(top3)=min(3, nb_partants)). On renormalise donc le champ.
         nb_partants = max(course.nb_partants or len(features_list), 3)
-        probas_top1 = probas_top3 * (3.0 / nb_partants)
+        p3_arr = np.clip(np.asarray(probas_top3, dtype=float), 1e-4, 0.999)
+        n = len(p3_arr)
+
+        # P(top1) ∝ P(top3)^gamma (γ>1 : les favoris concentrent davantage la victoire)
+        raw_p1 = p3_arr ** 1.6
+        s1 = float(raw_p1.sum())
+        probas_top1 = (raw_p1 / s1) if s1 > 0 else np.full(n, 1.0 / n)
+
+        # P(top3) renormalisé pour sommer à min(3, nb_partants), borné à 0.99
+        target_sum3 = float(min(3.0, nb_partants))
+        s3 = float(p3_arr.sum())
+        probas_top3 = np.clip(p3_arr * (target_sum3 / s3), 0.0, 0.99) if s3 > 0 else p3_arr
 
         # Récupérer version modèle active
         mv_result = await session.execute(
@@ -567,8 +582,10 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             # Fetch cote history for SPI
             cotes_history = await _get_cotes_history(session, pid) if pid else None
 
+            # Value bet GAGNANT : EV = cote_gagnant × P(victoire). On passe proba_t1
+            # (proba de victoire normalisée), pas proba_t3 (placé) — sinon EV gonflé.
             vb = detect_value_bet(
-                proba_t3,
+                proba_t1,
                 cote_pmu=cote_pmu,
                 cote_geny=cote_geny,
                 cote_bzh=cote_bzh,
