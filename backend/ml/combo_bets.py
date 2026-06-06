@@ -302,20 +302,28 @@ def enumerate_bet_candidates(
     est_quarte = bool(course_info.get("est_quarte"))
     est_tierce = bool(course_info.get("est_tierce"))
 
-    # ── 2-3 SIMPLE GAGNANT (favori + value + surprise) ──
-    for rank, i in enumerate(by_p1[:3]):
-        niv = "rendement" if rank == 0 else "rendement"
-        p_win = float(p1[i])
-        # rapport simple = cote gagnant réelle ; EV = cote × p_win − 1
-        rap = float(cotes[i])
-        if rap * p_win - 1 > -0.5:  # éviter les paris franchement négatifs
-            cands.append({
-                "niveau": niv, "type_pari": "Simple Gagnant", "chevaux": [H(i)],
-                "proba_gain": round(p_win, 4), "rapport_estime": round(rap, 1),
-                "ev": round(rap * p_win - 1, 3), "edge": round(float(edge_by_idx[i]), 4),
-                "texte_explication": f"N°{numeros[i]} {noms[i]} — {p_win*100:.0f}% de gagner, cote {cotes[i]:.1f}.",
-            })
-            seen.add(("Simple Gagnant", (i,)))
+    # ── SIMPLE GAGNANT — uniquement sur cote >= 3. Sous 3, le gain est trop
+    # faible pour le risque (surtout en petite mise) : un favori court se joue
+    # mieux en Couplé/Trio comme base. On privilégie la VALEUR : edge positif
+    # (modèle > marché) d'abord, puis proba modèle.
+    SG_COTE_MIN = 3.0
+    sg_pool = [i for i in by_p1 if cotes[i] >= SG_COTE_MIN]
+    sg_pool.sort(key=lambda i: (1 if edge_by_idx[i] > 0 else 0, p1[i]), reverse=True)
+    for i in sg_pool[:3]:
+        p_win = float(p1[i]); rap = float(cotes[i])
+        ev = rap * p_win - 1
+        if ev <= -0.45:                 # franchement perdant → on évite
+            continue
+        has_edge = edge_by_idx[i] > 0
+        niv = "coup" if (rap >= 10 and not has_edge) else "rendement"
+        cands.append({
+            "niveau": niv, "type_pari": "Simple Gagnant", "chevaux": [H(i)],
+            "proba_gain": round(p_win, 4), "rapport_estime": round(rap, 1),
+            "ev": round(ev, 3), "edge": round(float(edge_by_idx[i]), 4),
+            "texte_explication": f"N°{numeros[i]} {noms[i]} — {p_win*100:.0f}% de gagner, cote {cotes[i]:.1f}"
+                                 + (" · valeur détectée (modèle > marché)" if has_edge else "") + ".",
+        })
+        seen.add(("Simple Gagnant", (i,)))
     if out1 is not None and ("Simple Gagnant", (out1,)) not in seen:
         p_win = float(p1[out1]); rap = float(cotes[out1])
         cands.append({
