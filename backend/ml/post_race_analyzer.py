@@ -452,10 +452,16 @@ class PostRaceAnalyzer:
                     nb_partants=ctx.get("nb_partants"),
                     feature_autopsy=fa,
                 ))
-            await session.flush()
+            # COMMIT propre : le log d'apprentissage est la donnée la plus importante,
+            # on le persiste immédiatement pour qu'aucune étape ultérieure (biais,
+            # adaptatif) ne puisse l'annuler en empoisonnant la transaction.
+            await session.commit()
         except Exception as e:
             log.error("post_race.save_log_error", err=str(e))
-            await session.rollback()
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
         return log_id
 
