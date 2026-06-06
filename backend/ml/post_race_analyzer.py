@@ -233,21 +233,25 @@ class PostRaceAnalyzer:
         # Features "surprise indicators" — les signaux que le modèle n'a pas assez valorisé
         snapshot = winner.get("features_snapshot") or {}
         if not snapshot:
-            # Lire depuis la DB si snapshot disponible
+            # Lire le snapshot des features depuis features_ml (pas predictions :
+            # cette table n'a pas de colonne features_snapshot → l'ancienne requête
+            # plantait et empoisonnait toute la transaction d'apprentissage).
             try:
                 r = await session.execute(text("""
-                    SELECT features_snapshot FROM predictions
-                    WHERE participation_id IN (
-                        SELECT participation_id FROM participations
-                        WHERE course_id = :cid AND numero = :num
-                    )
-                    ORDER BY created_at DESC LIMIT 1
+                    SELECT fm.features FROM features_ml fm
+                    JOIN participations pa ON pa.participation_id = fm.participation_id
+                    WHERE pa.course_id = :cid AND pa.numero = :num
+                    LIMIT 1
                 """), {"cid": course_id, "num": gagnant_numero})
                 row = r.fetchone()
                 if row and row[0]:
                     snapshot = row[0] if isinstance(row[0], dict) else json.loads(row[0])
             except Exception as e:
                 log.debug("autopsy.no_snapshot", err=str(e))
+                try:
+                    await session.rollback()  # désempoisonner la transaction
+                except Exception:
+                    pass
 
         autopsy: dict = {}
 
