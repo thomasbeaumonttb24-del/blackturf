@@ -283,7 +283,12 @@ async def get_pari_du_jour(
         return None
     vb, pred, part, cheval, course = best
     cid = course.course_id
-    code = cid[8:] if len(cid) > 8 and "R" in cid[8:] else cid  # "R6C6"
+    # Code public R{réunion}C{course} : réunion = numExterne (numero_reunion) pour
+    # matcher pmu.fr ; fallback sur le suffixe du course_id (numOfficiel) si absent.
+    if course.numero_reunion:
+        code = f"R{course.numero_reunion}C{part.numero}"
+    else:
+        code = cid[8:] if len(cid) > 8 and "R" in cid[8:] else cid
     proba = float(pred.proba_top1 or 0)
     conf = round(float(pred.confidence_score or 0))
     return {
