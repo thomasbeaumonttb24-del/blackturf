@@ -132,19 +132,12 @@ class PmuScraper(BaseScraper):
             hippodrome = reunion.get("hippodrome", {}).get("libelleLong", "Inconnu")
             pays = reunion.get("hippodrome", {}).get("pays", {}).get("code", "FR")
 
-            # Date réelle de la réunion (sinon aujourd'hui) → préfixe de l'ID
-            r_date = today_str
-            dr = reunion.get("dateReunion")
-            if isinstance(dr, (int, float)):  # epoch ms
-                try:
-                    from datetime import datetime as _dt, timezone as _tz
-                    r_date = _dt.fromtimestamp(dr / 1000, tz=_tz.utc).strftime("%d%m%Y")
-                except Exception:
-                    r_date = today_str
-
+            # Préfixe = date INTERROGÉE (today_str). On vient de demander
+            # /programme/{today_str}, donc toutes ces réunions sont de ce jour.
+            # (dateReunion = minuit Paris → en UTC il bascule la veille : à éviter.)
             for c_data in reunion.get("courses", []):
                 c_num = c_data.get("numOrdre", 0)
-                c_id = make_course_id(r_date, r_id, c_num)
+                c_id = make_course_id(today_str, r_id, c_num)
 
                 partants = self._parse_partants(c_data.get("participants", []))
 
