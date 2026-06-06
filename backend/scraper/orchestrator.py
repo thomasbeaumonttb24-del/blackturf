@@ -90,8 +90,19 @@ async def _detect_smart_money(session, course_id: str) -> None:
 class BlackTurfOrchestrator:
     """Orchestre tous les scrapers avec retry et monitoring."""
 
+    # Backoff adaptatif par source : après N échecs consécutifs, l'intervalle
+    # effectif est multiplié par BACKOFF_BASE**N (plafonné à BACKOFF_MAX_MULT).
+    # Une source bannie/down se met donc en retrait au lieu d'être martelée à
+    # pleine cadence (ce qui accélère les bans).
+    BACKOFF_BASE: int = 2
+    BACKOFF_MAX_MULT: int = 8  # ex : pmu 3 min → jusqu'à 24 min en cas d'échecs
+
     def __init__(self):
         self._last_scrape: dict[str, float] = {}
+        # Nb d'échecs consécutifs par source (drive le backoff exponentiel).
+        self._consecutive_errors: dict[str, int] = {}
+        # Sources ayant échoué pendant le run_once courant (reset à chaque cycle).
+        self._failed_this_cycle: set[str] = set()
         base_intervals = {
             "pmu":           3 * 60,    # 3 min  — CRITIQUE
             "resultats":     3 * 60,    # 3 min  — poll arrivées (courses finies)
@@ -130,15 +141,54 @@ class BlackTurfOrchestrator:
 
         self._courses_today: list = []
 
+    def _backoff_mult(self, source: str) -> int:
+        """Multiplicateur d'intervalle selon le nb d'échecs consécutifs (plafonné)."""
+        streak = self._consecutive_errors.get(source, 0)
+        if streak <= 0:
+            return 1
+        return min(self.BACKOFF_BASE ** streak, self.BACKOFF_MAX_MULT)
+
     def _should_run(self, source: str) -> bool:
         if source in self._disabled:
             return False
         last = self._last_scrape.get(source, 0)
-        interval = self._intervals.get(source, 300)
+        interval = self._intervals.get(source, 300) * self._backoff_mult(source)
         return (time.time() - last) >= interval
 
     def _mark_done(self, source: str) -> None:
+        """Met à jour le timestamp + l'état de backoff selon l'issue du cycle.
+
+        Lit ``_failed_this_cycle`` (alimenté par ``_log_error``) : échec →
+        incrémente la série d'erreurs (backoff plus long) ; succès → reset.
+        """
         self._last_scrape[source] = time.time()
+        if source in self._failed_this_cycle:
+            self._consecutive_errors[source] = self._consecutive_errors.get(source, 0) + 1
+            log.warning(
+                "orchestrator.source_backoff",
+                source=source,
+                consecutive_errors=self._consecutive_errors[source],
+                next_interval_mult=self._backoff_mult(source),
+            )
+        else:
+            if self._consecutive_errors.get(source, 0) > 0:
+                log.info("orchestrator.source_recovered", source=source)
+            self._consecutive_errors[source] = 0
+
+    async def _log_error(self, source: str, exc: Exception) -> None:
+        """Enregistre l'échec d'un cycle : marque la source (backoff) + trace
+        une ligne ``erreur`` dans ``scrape_log`` (visible côté /admin).
+
+        Centralise le logging d'erreur — avant, la plupart des cycles ne
+        traçaient que les succès, rendant les bans invisibles dans /scrape-status.
+        """
+        self._failed_this_cycle.add(source)
+        try:
+            async with AsyncSessionLocal() as session:
+                await log_scrape_result(session, source, "erreur", erreur=str(exc)[:500])
+                await session.commit()
+        except Exception as log_exc:  # ne jamais laisser le logging casser le cycle
+            log.error("orchestrator.log_error_failed", source=source, err=str(log_exc)[:120])
 
     async def run_pmu_cycle(self) -> None:
         """Cycle PMU : récupère programme + cotes live + résultats."""
@@ -208,9 +258,7 @@ class BlackTurfOrchestrator:
 
         except Exception as e:
             log.error("orchestrator.pmu_error", error=str(e))
-            async with AsyncSessionLocal() as session:
-                await log_scrape_result(session, "pmu", "erreur", erreur=str(e))
-                await session.commit()
+            await self._log_error("pmu", e)
         finally:
             await pmu.close()
 
@@ -259,6 +307,7 @@ class BlackTurfOrchestrator:
 
         except Exception as e:
             log.error("orchestrator.geny_error", error=str(e))
+            await self._log_error("geny", e)
         finally:
             await page.close()
 
@@ -298,6 +347,7 @@ class BlackTurfOrchestrator:
 
         except Exception as e:
             log.error("orchestrator.meteo_error", error=str(e))
+            await self._log_error("meteo", e)
         finally:
             await meteo_scraper.close()
 
@@ -352,6 +402,7 @@ class BlackTurfOrchestrator:
                 await session.commit()
         except Exception as e:
             log.error("orchestrator.zeturf_error", error=str(e))
+            await self._log_error("zeturf", e)
         finally:
             await page.close()
 
@@ -404,6 +455,7 @@ class BlackTurfOrchestrator:
                 await session.commit()
         except Exception as e:
             log.error("orchestrator.letrot_error", error=str(e))
+            await self._log_error("letrot", e)
         finally:
             await page.close()
 
@@ -495,6 +547,7 @@ class BlackTurfOrchestrator:
                 await session.commit()
         except Exception as e:
             log.error("orchestrator.turfoo_error", error=str(e))
+            await self._log_error("turfoo", e)
         finally:
             await page.close()
 
@@ -566,6 +619,7 @@ class BlackTurfOrchestrator:
 
             except Exception as e:
                 log.error(f"orchestrator.{source_name}_error", error=str(e))
+                await self._log_error(source_name, e)
             finally:
                 await page.close()
 
@@ -591,6 +645,7 @@ class BlackTurfOrchestrator:
                 await session.commit()
         except Exception as e:
             log.error("orchestrator.pool_pmu_error", error=str(e))
+            await self._log_error("pool_pmu", e)
         finally:
             await pmu.close()
 
@@ -654,9 +709,7 @@ class BlackTurfOrchestrator:
 
         except Exception as e:
             log.error("orchestrator.france_galop_error", error=str(e))
-            async with AsyncSessionLocal() as session:
-                await log_scrape_result(session, "france_galop", "erreur", erreur=str(e))
-                await session.commit()
+            await self._log_error("france_galop", e)
         finally:
             await page.close()
 
@@ -697,6 +750,7 @@ class BlackTurfOrchestrator:
 
         except Exception as e:
             log.error("orchestrator.paris_turf_error", error=str(e))
+            await self._log_error("paris_turf", e)
         finally:
             await page.close()
 
@@ -748,6 +802,7 @@ class BlackTurfOrchestrator:
 
         except Exception as e:
             log.error("orchestrator.racing_post_error", error=str(e))
+            await self._log_error("racing_post", e)
         finally:
             await page.close()
 
@@ -767,6 +822,7 @@ class BlackTurfOrchestrator:
                 await session.commit()
         except Exception as e:
             log.error("orchestrator.associations_error", error=str(e))
+            await self._log_error("associations", e)
 
     async def run_enrichissement_participations(self) -> None:
         """
@@ -804,6 +860,9 @@ class BlackTurfOrchestrator:
 
     async def run_once(self) -> None:
         """Exécute un cycle complet de scraping."""
+        # Repart d'une ardoise propre : seules les sources qui échouent dans
+        # CE run_once seront mises en backoff par les _mark_done() suivants.
+        self._failed_this_cycle = set()
         playwright, browser, context = await make_stealth_browser(
             proxy=getattr(settings, "brightdata_proxy", None)
         )
@@ -958,6 +1017,9 @@ class BlackTurfOrchestrator:
                         rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
 
                 await session.commit()
+        except Exception as e:
+            log.error("orchestrator.resultats_error", error=str(e))
+            await self._log_error("resultats", e)
         finally:
             await pmu.close()
 
