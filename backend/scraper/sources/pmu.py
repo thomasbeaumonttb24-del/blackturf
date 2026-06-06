@@ -175,7 +175,7 @@ class PmuScraper(BaseScraper):
                     est_quinte=est_quinte,
                     est_quarte=est_quarte,
                     est_tierce=est_tierce,
-                    nom=c_data.get("libelle"),
+                    nom=re.sub(r"\s+", " ", c_data.get("libelle") or "").strip() or None,
                     conditions_texte=conditions or None,
                     categorie_particularite=c_data.get("categorieParticularite"),
                     montant_offert_1er=c_data.get("montantOffert1er"),
