@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 import { CHART_PALETTE, axisTick, axisLine, tickLine, GRID, ChartTooltip } from "@/components/charts/chart-kit";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
@@ -938,6 +938,143 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
   );
 }
 
+// ─── Marché des cotes (live, style bourse) ─────────────────────────────────────
+// Affiché uniquement avant/pendant la course. Poll toutes les 30s. Montre TOUTES
+// les cotes des partants qui fluctuent, + un ticker par cheval (cote + variation).
+function Sparkline({ data, color }: { data: number[]; color: string }) {
+  if (data.length < 2) return <div className="h-[18px]" />;
+  const w = 72, h = 18;
+  const min = Math.min(...data), max = Math.max(...data);
+  const rng = max - min || 1;
+  const pts = data
+    .map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / rng) * h}`)
+    .join(" ");
+  return (
+    <svg width={w} height={h} className="overflow-visible">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MarcheCotes({ courseId, partants, statut }: { courseId: string; partants: Partant[]; statut: string }) {
+  const [chartData, setChartData] = useState<Array<Record<string, number | string>>>([]);
+  const isLive = statut !== "termine";
+
+  const nameByNum: Record<number, string> = {};
+  for (const p of partants) nameByNum[p.numero] = p.nom_cheval;
+
+  useEffect(() => {
+    let alive = true;
+    const pidToNum: Record<string, number> = {};
+    for (const p of partants) pidToNum[p.participation_id] = p.numero;
+    const load = () => {
+      api.get(`/courses/${courseId}/cotes-historique`)
+        .then((res) => {
+          if (!alive) return;
+          const map: Record<string, Record<string, number>> = {};
+          for (const r of res.data) {
+            const t = new Date(r.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+            const num = pidToNum[r.participation_id];
+            if (num == null) continue;
+            (map[t] ||= {})[`N°${num}`] = r.cote;
+          }
+          setChartData(Object.entries(map).map(([time, vals]) => ({ time, ...vals })));
+        })
+        .catch(() => {});
+    };
+    load();
+    const iv = isLive ? setInterval(load, 30000) : undefined;
+    return () => { alive = false; if (iv) clearInterval(iv); };
+  }, [courseId, partants, isLive]);
+
+  if (chartData.length < 2) return null;
+
+  const last = chartData[chartData.length - 1];
+  const keys = Object.keys(last).filter((k) => k !== "time" && typeof last[k] === "number");
+  const runners = keys.map((k) => {
+    const series = chartData.map((d) => d[k]).filter((v): v is number => typeof v === "number");
+    const open = series[0] ?? 0;
+    const cur = series[series.length - 1] ?? 0;
+    const delta = open ? (cur - open) / open : 0;
+    const num = parseInt(k.replace("N°", ""), 10);
+    return { key: k, num, nom: nameByNum[num] ?? "", open, cur, delta, series };
+  }).sort((a, b) => a.cur - b.cur);
+
+  const colorFor = (delta: number) => (delta < -0.001 ? "#10B981" : delta > 0.001 ? "#EF4444" : "#9CA3AF");
+
+  return (
+    <Card>
+      <CardHeader className="pb-1">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-brand-gold" />
+          Marché des cotes
+          {isLive ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              </span>
+              EN DIRECT
+            </span>
+          ) : (
+            <span className="text-xs font-normal text-muted-foreground">— final</span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {/* Graphe toutes cotes (style bourse) */}
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={chartData} margin={{ top: 12, right: 16, left: 4, bottom: 4 }}>
+            <CartesianGrid {...GRID} />
+            <XAxis dataKey="time" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={48} padding={{ left: 8, right: 8 }} />
+            <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={40} tickCount={6} allowDecimals={false}
+              tickFormatter={(v) => `${Math.round(v)}`} domain={["dataMin - 1", "dataMax + 1"]} />
+            <Tooltip
+              content={<ChartTooltip labelMap={Object.fromEntries(runners.map((r) => [r.key, `N°${r.num} ${r.nom}`]))} valueFormatter={(v) => `${v.toFixed(1)}`} />}
+              cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
+            />
+            {runners.map((r, i) => (
+              <Line key={r.key} type="monotone" dataKey={r.key} name={r.key}
+                stroke={CHART_PALETTE[i % CHART_PALETTE.length]} strokeWidth={1.75}
+                strokeOpacity={0.85} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }} isAnimationActive={false} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+
+        {/* Ticker — toutes les cotes, triées par cote (favoris d'abord) */}
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {runners.map((r) => {
+            const c = colorFor(r.delta);
+            const up = r.delta > 0.001;
+            const flat = Math.abs(r.delta) <= 0.001;
+            return (
+              <div key={r.key} className="flex items-center gap-2.5 rounded-lg border border-border bg-white px-2.5 py-2">
+                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-gray-900 text-xs font-bold text-white tabular-nums">{r.num}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold leading-tight">{r.nom}</p>
+                  <Sparkline data={r.series} color={c} />
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-base font-bold tabular-nums leading-none">{r.cur.toFixed(1)}</p>
+                  <p className="mt-0.5 text-[11px] font-semibold tabular-nums" style={{ color: c }}>
+                    {flat ? "—" : `${up ? "▲" : "▼"} ${Math.abs(r.delta * 100).toFixed(0)}%`}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="mt-3 text-[10px] text-muted-foreground/70">
+          <span className="font-semibold text-emerald-600">▼ vert</span> = cote en baisse (cheval de plus en plus joué) ·
+          <span className="font-semibold text-rose-500"> ▲ rouge</span> = cote qui monte (délaissé).
+          {isLive && " Mise à jour automatique toutes les 30 s."}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CoursePage() {
   const { id } = useParams<{ id: string }>();
@@ -947,7 +1084,6 @@ export default function CoursePage() {
   const [loadingCourse, setLoadingCourse] = useState(true);
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
-  const [cotesHisto, setCotesHisto] = useState<Array<{ time: string; [k: string]: number | string }>>([]);
   const [analysis, setAnalysis] = useState<{
     narrative: string;
     market_signals: Array<{ numero: number; nom: string; signal: string; detail: string; score: number }>;
@@ -1023,26 +1159,6 @@ export default function CoursePage() {
       .catch(() => setResultats(null));
   }, [id, course]);
 
-  // Load cotes historique for chart
-  useEffect(() => {
-    if (!user || ["free", "decouverte"].includes(user.plan) || !course) return;
-    api.get(`/courses/${id}/cotes-historique`)
-      .then((res) => {
-        // Pivot: [{time, N°1: cote, N°2: cote, ...}] — clé par vrai numéro de partant
-        const pidToNum: Record<string, number> = {};
-        for (const p of course.partants) pidToNum[p.participation_id] = p.numero;
-        const map: Record<string, Record<string, number>> = {};
-        for (const r of res.data) {
-          const t = new Date(r.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-          if (!map[t]) map[t] = {};
-          const num = pidToNum[r.participation_id];
-          const key = num != null ? `N°${num}` : `N°${r.participation_id.slice(-2)}`;
-          map[t][key] = r.cote;
-        }
-        setCotesHisto(Object.entries(map).map(([time, vals]) => ({ time, ...vals })));
-      })
-      .catch(() => {});
-  }, [id, user, course]);
 
   async function handleTriggerPred() {
     setTriggeringPred(true);
@@ -1416,67 +1532,9 @@ export default function CoursePage() {
             <PronosticsPresse pronostics={course.pronostics_presse} />
           )}
 
-          {cotesHisto.length > 2 && (() => {
-            // Sélection des favoris (cote finale la plus basse) + labels noms
-            const last = cotesHisto[cotesHisto.length - 1] || {};
-            const keys = Object.keys(last)
-              .filter((k) => k !== "time" && typeof last[k] === "number")
-              .sort((a, b) => (last[a] as number) - (last[b] as number))
-              .slice(0, 5);
-            const nameByKey: Record<string, string> = {};
-            for (const p of course.partants) nameByKey[`N°${p.numero}`] = `N°${p.numero} ${p.nom_cheval}`;
-            return (
-            <Card>
-              <CardHeader className="pb-1">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-brand-gold" />
-                  Évolution des cotes
-                  <span className="text-xs font-normal text-muted-foreground">— favoris, 2h avant départ</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={cotesHisto} margin={{ top: 16, right: 20, left: 4, bottom: 12 }}>
-                    <CartesianGrid {...GRID} />
-                    <XAxis
-                      dataKey="time" tick={axisTick} axisLine={axisLine} tickLine={tickLine}
-                      minTickGap={44} padding={{ left: 12, right: 12 }} dy={6}
-                    />
-                    <YAxis
-                      tick={axisTick} axisLine={axisLine} tickLine={tickLine}
-                      width={42} tickCount={6} allowDecimals={false}
-                      tickFormatter={(v) => `${Math.round(v)}`}
-                      domain={["dataMin - 1", "dataMax + 1"]}
-                    />
-                    <Tooltip
-                      content={<ChartTooltip labelMap={nameByKey} valueFormatter={(v) => `${v.toFixed(1)}`} />}
-                      cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
-                    />
-                    <Legend
-                      verticalAlign="bottom" height={34} iconType="circle" iconSize={9}
-                      wrapperStyle={{ paddingTop: 12 }}
-                      formatter={(value) => (
-                        <span className="text-[11px] font-medium text-gray-500 mr-1">{value}</span>
-                      )}
-                    />
-                    {keys.map((k, i) => (
-                      <Line
-                        key={k} type="monotone" dataKey={k} name={k}
-                        strokeWidth={i === 0 ? 3 : 2}
-                        stroke={CHART_PALETTE[i % CHART_PALETTE.length]}
-                        dot={false}
-                        activeDot={{ r: 5, strokeWidth: 2, stroke: "#fff" }}
-                      />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-                <p className="mt-2 text-[10px] text-muted-foreground/70">
-                  Cote en baisse (courbe qui descend) = cheval de plus en plus joué.
-                </p>
-              </CardContent>
-            </Card>
-            );
-          })()}
+          {course.statut !== "termine" && (
+            <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} />
+          )}
 
         </div>
 
