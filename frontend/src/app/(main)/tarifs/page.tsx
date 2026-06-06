@@ -8,12 +8,12 @@ const FEATURES_COMPARISON = [
   { label: "Programme PMU du jour", free: true, standard: true, expert: true },
   { label: "Cotes publiques", free: true, standard: true, expert: true },
   { label: "Prédictions IA complètes", free: false, standard: true, expert: true },
-  { label: "Value Bets en temps réel", free: false, standard: true, expert: true },
+  { label: "Paris de valeur en temps réel", free: false, standard: true, expert: true },
   { label: "Calculateur de mise personnalisé", free: false, standard: true, expert: true },
-  { label: "Alertes email + push", free: false, standard: true, expert: true },
-  { label: "Bankroll tracker", free: false, standard: true, expert: true },
+  { label: "Alertes e-mail + notifications", free: false, standard: true, expert: true },
+  { label: "Suivi de capital", free: false, standard: true, expert: true },
   { label: "Historique 6 mois", free: false, standard: true, expert: true },
-  { label: "Steam Money Indicator (SPI)", free: false, standard: false, expert: true },
+  { label: "Indicateur de mouvement de cote (SPI)", free: false, standard: false, expert: true },
   { label: "Assistant IA (Claude Opus)", free: false, standard: false, expert: true },
   { label: "Créateur de stratégies", free: false, standard: false, expert: true },
   { label: "Historique 18 mois", free: false, standard: false, expert: true },
@@ -31,7 +31,7 @@ export default function TarifsPage() {
           Des tarifs <span className="text-gradient">simples et transparents</span>
         </h1>
         <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-          Commencez gratuitement. Upgradez quand vous êtes convaincu.
+          Commencez gratuitement. Passez à l&apos;offre supérieure quand vous êtes convaincu.
           Annulez à tout moment.
         </p>
         <div className="mt-4 inline-flex items-center gap-2 text-sm text-brand-gold">
@@ -52,7 +52,7 @@ export default function TarifsPage() {
               <span className="text-muted-foreground">/mois</span>
             </div>
             <ul className="space-y-3 mb-8">
-              {["Programme PMU du jour", "Cotes publiques", "Classement IA (limité)", "1 alerte/jour"].map((f) => (
+              {["Programme PMU du jour", "Cotes publiques", "Classement IA (limité)", "1 alerte par jour"].map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm">
                   <Check className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   {f}
@@ -80,10 +80,10 @@ export default function TarifsPage() {
             <ul className="space-y-3 mb-8">
               {[
                 { label: "Prédictions IA complètes", icon: null },
-                { label: "Value Bets illimités", icon: null },
+                { label: "Paris de valeur illimités", icon: null },
                 { label: "Calculateur de mise", icon: <Calculator className="h-3 w-3" /> },
-                { label: "Alertes email + push", icon: null },
-                { label: "Bankroll tracker", icon: null },
+                { label: "Alertes e-mail + notifications", icon: null },
+                { label: "Suivi de capital", icon: null },
                 { label: "Historique 6 mois", icon: null },
               ].map((f) => (
                 <li key={f.label} className="flex items-center gap-2 text-sm">
@@ -114,7 +114,7 @@ export default function TarifsPage() {
             <ul className="space-y-3 mb-8">
               {[
                 "Tout Standard",
-                "Steam Money Indicator",
+                "Indicateur de mouvement de cote",
                 "Assistant IA (Claude Opus)",
                 "Créateur de stratégies",
                 "Historique 18 mois",

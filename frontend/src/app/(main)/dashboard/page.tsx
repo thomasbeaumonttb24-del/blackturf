@@ -145,12 +145,12 @@ export default function DashboardPage() {
                   {roi > 0 ? "+" : ""}{roi}%
                 </span>
               </div>
-              <div className="text-2xl font-bold text-foreground">
+              <div className="text-2xl font-bold text-foreground tabular-nums">
                 {bankrollStats
                   ? `€${((bankrollStats.bankroll_initiale ?? 0) + (bankrollStats.gains_totaux ?? 0) - (bankrollStats.pertes_totales ?? 0)).toFixed(0)}`
                   : "—"}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Bankroll totale</div>
+              <div className="text-xs text-muted-foreground mt-1">Capital total</div>
             </CardContent>
           </Card>
 
@@ -163,10 +163,10 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-xs text-muted-foreground">{bankrollStats?.nb_paris ?? 0} paris</span>
               </div>
-              <div className={`text-2xl font-bold ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {bankrollStats ? `${bankrollStats.roi_ia_only > 0 ? "+" : ""}${bankrollStats.roi_ia_only}%` : "—"}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">ROI paris IA</div>
+              <div className="text-xs text-muted-foreground mt-1">Rendement paris IA</div>
             </CardContent>
           </Card>
 
@@ -183,10 +183,10 @@ export default function DashboardPage() {
                   </Badge>
                 )}
               </div>
-              <div className="text-2xl font-bold text-foreground">
+              <div className="text-2xl font-bold text-foreground tabular-nums">
                 {summary?.nb_vbs_actifs ?? "—"}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Value Bets actifs</div>
+              <div className="text-xs text-muted-foreground mt-1">Paris de valeur actifs</div>
             </CardContent>
           </Card>
 
@@ -204,7 +204,7 @@ export default function DashboardPage() {
                   </span>
                 )}
               </div>
-              <div className="text-2xl font-bold text-foreground">
+              <div className="text-2xl font-bold text-foreground tabular-nums">
                 {summary?.nb_courses_jour ?? "—"}
               </div>
               <div className="text-xs text-muted-foreground mt-1">Courses aujourd&apos;hui</div>
@@ -224,7 +224,7 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Zap className="w-4 h-4 text-amber-400" />
-                    Top Value Bets du moment
+                    Meilleurs paris de valeur du moment
                   </CardTitle>
                   <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
                     <Link href="/value-bets">
@@ -239,7 +239,7 @@ export default function DashboardPage() {
                     <Star className="w-8 h-8 text-amber-400 mx-auto mb-2" />
                     <p className="text-sm font-medium text-foreground mb-1">Fonctionnalité Premium</p>
                     <p className="text-xs text-muted-foreground mb-3">
-                      Accédez aux value bets en temps réel à partir de Standard.
+                      Accédez aux paris de valeur en temps réel à partir de Standard.
                     </p>
                     <Button asChild variant="brand" size="sm">
                       <Link href="/tarifs">Passer Premium</Link>
@@ -247,7 +247,7 @@ export default function DashboardPage() {
                   </div>
                 ) : topVbs.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground text-sm">
-                    Aucun value bet actif pour le moment
+                    Aucun pari de valeur actif pour le moment
                   </div>
                 ) : (
                   topVbs.map((vb: {
@@ -283,8 +283,8 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className={`text-sm font-bold ${vb.ev > 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            EV {vb.ev > 0 ? "+" : ""}{vb.ev}%
+                          <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            Espérance {vb.ev > 0 ? "+" : ""}{vb.ev}%
                           </div>
                           {vb.cote && (
                             <div className="text-xs text-muted-foreground">Cote {vb.cote}</div>
@@ -316,7 +316,7 @@ export default function DashboardPage() {
               <CardContent>
                 {todayCourses.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    Aucune course disponible
+                    Aucune donnée pour le moment
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -351,7 +351,7 @@ export default function DashboardPage() {
                         {c.statut === "en_cours" && (
                           <span className="flex items-center gap-1 text-xs text-emerald-400 shrink-0">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            Live
+                            En direct
                           </span>
                         )}
                         {c.statut === "termine" && (
@@ -377,13 +377,13 @@ export default function DashboardPage() {
                     Performance IA
                   </CardTitle>
                   {equity?.is_real ? (
-                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">Live</Badge>
+                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">En direct</Badge>
                   ) : (
                     <Badge variant="secondary" className="text-xs">Simulation</Badge>
                   )}
                 </div>
                 {equityPoints.length > 1 && (
-                  <div className={`text-lg font-bold mt-1 ${equityGain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  <div className={`text-lg font-bold tabular-nums mt-1 ${equityGain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {equityGain >= 0 ? "+" : ""}€{equityGain.toFixed(0)}
                     <span className="text-xs font-normal text-muted-foreground ml-2">depuis le début</span>
                   </div>
@@ -392,32 +392,33 @@ export default function DashboardPage() {
               <CardContent className="pt-0">
                 {equityPoints.length < 2 ? (
                   <div className="h-32 flex items-center justify-center text-sm text-muted-foreground">
-                    Pas encore de données
+                    Aucune donnée pour le moment
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height={130}>
                     <AreaChart data={equityPoints} onMouseLeave={() => setEquityHover(null)}>
                       <defs>
                         <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                          <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="#059669" stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <XAxis dataKey="date" hide />
                       <YAxis hide domain={["auto", "auto"]} />
                       <Tooltip
-                        contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                        formatter={(v: number) => [`€${v.toFixed(0)}`, "Bankroll"]}
+                        cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
+                        contentStyle={{ background: "#ffffff", border: "1px solid #E5E7EB", borderRadius: 12, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}
+                        formatter={(v: number) => [`€${v.toFixed(0)}`, "Capital"]}
                         labelFormatter={(l) => l}
                       />
                       <Area
                         type="monotone"
                         dataKey="bankroll"
-                        stroke="#10b981"
-                        strokeWidth={2}
+                        stroke="#059669"
+                        strokeWidth={2.5}
                         fill="url(#equityGrad)"
                         dot={false}
-                        activeDot={{ r: 4, fill: "#10b981" }}
+                        activeDot={{ r: 4, fill: "#059669", stroke: "#fff", strokeWidth: 2 }}
                       />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -444,11 +445,11 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground mb-1">AUC-ROC</div>
-                    <div className="text-base font-bold text-foreground">0.71</div>
+                    <div className="text-base font-bold text-foreground tabular-nums">0.71</div>
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
-                    <div className="text-xs text-muted-foreground mb-1">Top-3 précision</div>
-                    <div className="text-base font-bold text-foreground">59%</div>
+                    <div className="text-xs text-muted-foreground mb-1">Précision Top-3</div>
+                    <div className="text-base font-bold text-foreground tabular-nums">59%</div>
                   </div>
                 </div>
 
@@ -470,7 +471,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {[
-                  { href: "/bankroll", label: "Suivi bankroll", icon: Wallet },
+                  { href: "/bankroll", label: "Suivi du capital", icon: Wallet },
                   { href: "/strategies", label: "Mes stratégies", icon: BarChart3 },
                   { href: "/assistant", label: "Assistant IA", icon: Cpu },
                 ].map(({ href, label, icon: Icon }) => (

@@ -50,7 +50,7 @@ type FilterTab = "tous" | "value_bet" | "resultat" | "systeme";
 
 const TAB_LABELS: Record<FilterTab, string> = {
   tous: "Tous",
-  value_bet: "Value Bets",
+  value_bet: "Paris de valeur",
   resultat: "Résultats",
   systeme: "Système",
 };
@@ -248,7 +248,7 @@ export default function NotificationsPage() {
                 <p className="text-sm font-medium text-foreground">Aucune notification</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {tab === "tous"
-                    ? "Vous recevrez des alertes ici dès qu'un value bet ou un résultat arrive."
+                    ? "Vous recevrez des alertes ici dès qu'un pari de valeur ou un résultat arrive."
                     : `Aucune notification de type "${TAB_LABELS[tab]}".`}
                 </p>
               </div>
@@ -331,7 +331,7 @@ export default function NotificationsPage() {
             {/* VB niveau min */}
             <div>
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                Value Bets
+                Paris de valeur
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {([1, 2, 3, 4] as const).map((n) => {
@@ -371,7 +371,7 @@ export default function NotificationsPage() {
                 })}
               </div>
               <p className="text-[11px] text-muted-foreground mt-2">
-                Seuil minimum : vous serez alerté pour les VBs avec ce niveau ou plus.
+                Seuil minimum : vous serez alerté pour les paris de valeur de ce niveau ou plus.
               </p>
             </div>
 

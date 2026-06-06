@@ -23,8 +23,8 @@ const FEATURES = [
   },
   {
     icon: Brain,
-    title: "IA Ensemble XGBoost + LightGBM + CatBoost",
-    desc: "3 modèles combinés. 80+ features par partant. Calibration isotonique (Brier < 0.18). ELO 4 dimensions.",
+    title: "IA d'ensemble XGBoost + LightGBM + CatBoost",
+    desc: "3 modèles combinés. 80+ variables par partant. Calibration isotonique (Brier < 0.18). ELO 4 dimensions.",
     badge: undefined,
     color: "#7C3AED",
     bg: "#F5F3FF",
@@ -32,8 +32,8 @@ const FEATURES = [
   },
   {
     icon: Zap,
-    title: "Value Bets en temps réel",
-    desc: "EV = (Cote × Proba) - 1. Détection automatique 4 niveaux ★. Triangulation PMU / Geny / BZH. Steam money indicator.",
+    title: "Paris de valeur en temps réel",
+    desc: "Espérance (EV) = (Cote × Proba) − 1. Détection automatique 4 niveaux ★. Triangulation PMU / Geny / BZH. Indicateur d'afflux de mises.",
     badge: undefined,
     color: "#059669",
     bg: "#ECFDF5",
@@ -41,8 +41,8 @@ const FEATURES = [
   },
   {
     icon: TrendingUp,
-    title: "Kelly Criterion & Bankroll",
-    desc: "Mise optimale calculée automatiquement. Demi-Kelly, plafond 5%. ROI personnel vs ROI modèle en temps réel.",
+    title: "Critère de Kelly & Capital",
+    desc: "Mise optimale calculée automatiquement. Demi-Kelly, plafond 5%. Rendement personnel vs rendement du modèle en temps réel.",
     badge: undefined,
     color: "#2563EB",
     bg: "#EFF6FF",
@@ -51,7 +51,7 @@ const FEATURES = [
   {
     icon: Shield,
     title: "ELO hippique 4 dimensions",
-    desc: "Scores ELO global / plat / trot / obstacle. Velocity ELO (vitesse de progression). Mis à jour après chaque course.",
+    desc: "Scores ELO global / plat / trot / obstacle. ELO de progression (vitesse d'évolution). Mis à jour après chaque course.",
     badge: undefined,
     color: "#D97706",
     bg: "#FFFBEB",
@@ -78,7 +78,7 @@ const PLANS = [
       "Programme du jour",
       "Cotes publiques",
       "1 prédiction/jour",
-      "Stats modèle publiques",
+      "Statistiques publiques du modèle",
     ],
     cta: "Commencer gratuitement",
     href: "/inscription",
@@ -92,11 +92,11 @@ const PLANS = [
     badge: "Populaire",
     features: [
       "5 prédictions/jour",
-      "Top 3 value bets (délai 15min)",
+      "Top 3 paris de valeur (délai 15 min)",
       "Calculateur de mise standard",
-      "Bankroll tracker + stats",
-      "Alertes push & email",
-      "Backtest 7 jours",
+      "Suivi du capital + statistiques",
+      "Alertes push & e-mail",
+      "Test sur historique 7 jours",
     ],
     cta: "Essayer 7 jours gratuit",
     href: "/inscription?plan=standard",
@@ -109,12 +109,12 @@ const PLANS = [
     desc: "Pour les parieurs sérieux",
     features: [
       "Prédictions illimitées",
-      "Value bets temps réel ★★★★",
+      "Paris de valeur en temps réel ★★★★",
       "Calculateur Kelly avancé",
       "Assistant IA illimité",
-      "Backtest 365 jours",
+      "Test sur historique 365 jours",
       "Créateur de stratégies 30+ filtres",
-      "Export données + API",
+      "Export des données + API",
     ],
     cta: "Passer Expert",
     href: "/inscription?plan=expert",
@@ -214,7 +214,7 @@ export default async function HomePage() {
             avec mise exacte, gain potentiel et probabilités calculées par l&apos;IA.
           </p>
           <p className="text-sm text-gray-400 max-w-xl mx-auto mb-10 font-mono tracking-tight">
-            XGBoost + LightGBM + CatBoost · 80+ features · Value bets temps réel · Kelly Criterion
+            XGBoost + LightGBM + CatBoost · 80+ variables · Paris de valeur en temps réel · Critère de Kelly
           </p>
 
           {/* CTA */}
@@ -265,7 +265,7 @@ export default async function HomePage() {
             {[
               { value: parseStatNum(stats.auc_roc), label: "AUC-ROC", sub: "Précision modèle", suffix: "", decimals: 2 },
               { value: parseStatNum(stats.precision_top3), label: "Précision Top-3", sub: "vs 33% aléatoire", suffix: "%", decimals: 0 },
-              { value: parseStatNum(stats.roi_simule_6mois), label: "ROI simulé 6 mois", sub: "10€ flat / value bet ★★★+", suffix: "%", decimals: 1, prefix: "+" },
+              { value: parseStatNum(stats.roi_simule_6mois), label: "Rendement simulé 6 mois", sub: "10€ fixe / pari de valeur ★★★+", suffix: "%", decimals: 1, prefix: "+" },
               { value: 12450, label: "Courses analysées", sub: "Données historiques", suffix: "+", decimals: 0 },
             ].map((s, i) => (
               <ScrollReveal key={s.label} delay={i * 80} className="text-center">
@@ -319,14 +319,14 @@ export default async function HomePage() {
               {
                 step: "03",
                 title: "Suivez vos résultats",
-                desc: "BlackTurf enregistre les résultats, met à jour votre ROI personnel et améliore ses prédictions.",
+                desc: "BlackTurf enregistre les résultats, met à jour votre rendement personnel et améliore ses prédictions.",
                 color: "#2563EB",
                 bg: "#EFF6FF",
                 border: "rgba(37,99,235,0.2)",
               },
             ].map((s, i) => (
               <ScrollReveal key={s.step} delay={i * 100}>
-                <div className="glass-card rounded-2xl p-7 text-center h-full">
+                <div className="glass-card rounded-2xl p-7 text-center h-full ring-1 ring-border shadow-sm hover:shadow-md transition-shadow">
                   <div
                     className="h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mx-auto mb-5"
                     style={{ background: s.bg, border: `1px solid ${s.border}`, color: s.color }}
@@ -365,7 +365,7 @@ export default async function HomePage() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
             {FEATURES.map((f, i) => (
               <ScrollReveal key={f.title} delay={i * 80}>
-                <div className="glass-card rounded-2xl p-6 h-full bg-white">
+                <div className="glass-card rounded-2xl p-6 h-full bg-white ring-1 ring-border shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between mb-4">
                     <div
                       className="icon-box h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -402,7 +402,7 @@ export default async function HomePage() {
                 Nos résultats, chiffres réels
               </h2>
               <p className="text-gray-500 text-sm max-w-lg mx-auto">
-                Calculés en simulant 10€ flat sur chaque value bet ★★★+ sur les courses passées.
+                Calculés en simulant 10€ fixes sur chaque pari de valeur ★★★+ sur les courses passées.
                 Source de vérité : résultats PMU officiels. Mis à jour chaque nuit.
               </p>
             </div>
@@ -413,7 +413,7 @@ export default async function HomePage() {
             <ScrollReveal direction="left">
               <div className="space-y-3">
                 {[
-                  { label: "ROI simulé 6 mois", value: stats.roi_simule_6mois, sub: "10€ flat sur value bets ★★★+", color: "#059669" },
+                  { label: "Rendement simulé 6 mois", value: stats.roi_simule_6mois, sub: "10€ fixes sur paris de valeur ★★★+", color: "#059669" },
                   { label: "Précision Top-3",   value: stats.precision_top3,    sub: "vs 33% pour un choix aléatoire",         color: "#D97706" },
                   { label: "AUC-ROC modèle",    value: stats.auc_roc,           sub: "Calibration isotonique (Brier < 0.18)", color: "#2563EB" },
                   { label: "Courses analysées", value: stats.nb_courses_analysees, sub: "Données historiques vérifiables",   color: "#7C3AED" },
@@ -451,7 +451,7 @@ export default async function HomePage() {
                     })()}
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mb-5">10€ flat par value bet ★★★+ · Derniers 12 mois</p>
+                <p className="text-xs text-gray-500 mb-5">10€ fixes par pari de valeur ★★★+ · 12 derniers mois</p>
                 <div className="relative h-44">
                   <svg viewBox="0 0 400 140" className="w-full h-full" preserveAspectRatio="none">
                     {[0, 1, 2, 3].map(i => (

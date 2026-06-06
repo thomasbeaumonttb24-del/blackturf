@@ -23,8 +23,8 @@ export default function ConfidentialitePage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">2. Données collectées</h2>
         <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-          <li>Informations de compte : email, prénom, nom (optionnel)</li>
-          <li>Données d'utilisation : courses consultées, paris enregistrés, bankroll</li>
+          <li>Informations de compte : e-mail, prénom, nom (optionnel)</li>
+          <li>Données d'utilisation : courses consultées, paris enregistrés, capital</li>
           <li>Données de paiement : gérées exclusivement par Stripe (nous ne stockons aucun numéro de carte)</li>
           <li>Données de navigation : adresse IP, navigateur, logs d'accès (fins de sécurité)</li>
           <li>Préférences push : token de notification si activé</li>
@@ -38,7 +38,7 @@ export default function ConfidentialitePage() {
           <li>Gestion des abonnements et facturation (via Stripe)</li>
           <li>Amélioration du modèle ML (données agrégées et anonymisées)</li>
           <li>Sécurité de la plateforme</li>
-          <li>Envoi d'alertes value bets (avec consentement)</li>
+          <li>Envoi d'alertes paris de valeur (avec consentement)</li>
         </ul>
       </section>
 

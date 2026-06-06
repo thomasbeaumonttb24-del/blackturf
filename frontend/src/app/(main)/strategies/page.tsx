@@ -85,7 +85,7 @@ function StrategieCard({
             className="flex-1"
             onClick={() => onBacktest(strat.strategie_id)}
           >
-            <Play className="h-3 w-3" /> Backtest
+            <Play className="h-3 w-3" /> Simuler
           </Button>
           <Button
             variant="ghost"
@@ -158,7 +158,7 @@ export default function StrategiesPage() {
       });
       setBacktest(res.data);
     } catch {
-      toast.error("Erreur backtest");
+      toast.error("Erreur lors de la simulation");
     } finally {
       setBacktestLoading(false);
     }
@@ -182,7 +182,7 @@ export default function StrategiesPage() {
         <TrendingUp className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
         <h1 className="text-3xl font-bold mb-3">Créateur de stratégies</h1>
         <p className="text-muted-foreground mb-8">
-          Créez des filtres multi-critères, backtestez sur 18 mois de données, configurez des alertes automatiques.
+          Créez des filtres multi-critères, simulez sur 18 mois de données, configurez des alertes automatiques.
           Réservé au plan <strong className="text-brand-gold">Expert</strong>.
         </p>
         <Button variant="brand" size="lg" asChild>
@@ -198,7 +198,7 @@ export default function StrategiesPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold">Stratégies</h1>
-          <p className="text-muted-foreground text-sm mt-1">Filtres automatiques + backtest sur données historiques</p>
+          <p className="text-muted-foreground text-sm mt-1">Filtres automatiques + simulation sur données historiques</p>
         </div>
         <Button variant="brand" onClick={() => setShowForm(!showForm)}>
           <Plus className="h-4 w-4" /> Nouvelle stratégie
@@ -332,14 +332,14 @@ export default function StrategiesPage() {
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-brand-gold" />
-              Résultat backtest — 90 derniers jours
+              Résultat de la simulation — 90 derniers jours
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               {[
                 { label: "Paris joués", value: backtest.nb_paris },
-                { label: "ROI", value: `${backtest.roi_pct >= 0 ? "+" : ""}${backtest.roi_pct}%`, color: backtest.roi_pct >= 0 ? "text-brand-emerald" : "text-destructive" },
+                { label: "Rendement", value: `${backtest.roi_pct >= 0 ? "+" : ""}${backtest.roi_pct}%`, color: backtest.roi_pct >= 0 ? "text-brand-emerald" : "text-destructive" },
                 { label: "Réussite", value: `${backtest.taux_reussite}%` },
                 { label: "Série perdante max", value: `${backtest.serie_max_perdante}` },
               ].map((m) => (
@@ -353,11 +353,12 @@ export default function StrategiesPage() {
             {backtest.courbe.length > 1 && (
               <ResponsiveContainer width="100%" height={160}>
                 <LineChart data={backtest.courbe}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 47% 18%)" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(215 20% 60%)" }} />
-                  <YAxis tick={{ fontSize: 10, fill: "hsl(215 20% 60%)" }} />
-                  <Tooltip contentStyle={{ background: "hsl(222 47% 11%)", border: "1px solid hsl(222 47% 18%)", borderRadius: 8 }} />
-                  <Line type="monotone" dataKey="bankroll" stroke={backtest.roi_pct >= 0 ? "#4ade80" : "#ef4444"} strokeWidth={2} dot={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9ca3af" }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} tickLine={false} axisLine={false} tickFormatter={(v) => `€${v}`} width={48} />
+                  <Tooltip contentStyle={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 12 }}
+                    formatter={(v: number) => [`${v}€`, "Capital"]} />
+                  <Line type="monotone" dataKey="bankroll" stroke={backtest.roi_pct >= 0 ? "#059669" : "#ef4444"} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: backtest.roi_pct >= 0 ? "#059669" : "#ef4444", stroke: "#fff", strokeWidth: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             )}

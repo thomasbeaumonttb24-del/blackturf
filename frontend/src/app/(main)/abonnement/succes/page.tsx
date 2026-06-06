@@ -28,8 +28,8 @@ function AbonnementSuccesContent() {
   const planLabel = plan === "expert" ? "Expert" : "Standard";
   const planDesc =
     plan === "expert"
-      ? "Prédictions illimitées, assistant IA, créateur de stratégies, backtest 365 jours."
-      : "5 prédictions/jour, value bets, calculateur de mise, alertes push & email.";
+      ? "Prédictions illimitées, assistant IA, créateur de stratégies, simulation sur 365 jours."
+      : "5 prédictions par jour, paris de valeur, calculateur de mise, alertes notifications & e-mail.";
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4">
@@ -61,7 +61,7 @@ function AbonnementSuccesContent() {
                 </p>
                 {[
                   { icon: "🏇", text: "Consultez le programme du jour et ses analyses IA" },
-                  { icon: "⭐", text: "Repérez les value bets en temps réel" },
+                  { icon: "⭐", text: "Repérez les paris de valeur en temps réel" },
                   plan === "expert"
                     ? { icon: "🤖", text: "Testez l'assistant IA — posez vos questions en langage naturel" }
                     : { icon: "💰", text: "Utilisez le calculateur de mise personnalisé" },
@@ -93,7 +93,7 @@ function AbonnementSuccesContent() {
                 </Button>
               )}
               <Button variant="outline" size="lg" asChild>
-                <Link href="/value-bets">Value Bets live</Link>
+                <Link href="/value-bets">Paris de valeur en direct</Link>
               </Button>
             </div>
 

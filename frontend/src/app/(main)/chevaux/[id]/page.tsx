@@ -108,7 +108,7 @@ function eloColor(elo: number) {
 }
 
 function eloTier(elo: number) {
-  if (elo >= 1700) return "Elite";
+  if (elo >= 1700) return "Élite";
   if (elo >= 1550) return "Confirmé";
   if (elo >= 1400) return "Correct";
   return "Débutant";

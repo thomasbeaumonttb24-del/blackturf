@@ -228,7 +228,7 @@ export default function JockeyPage() {
               color={s.taux_victoire >= 0.2 ? "#10B981" : undefined}
             />
             <StatBox
-              label="ROI"
+              label="Rendement"
               value={`${s.roi > 0 ? "+" : ""}${(s.roi * 100).toFixed(1)}%`}
               color={s.roi > 0 ? "#10B981" : s.roi < -0.1 ? "#EF4444" : undefined}
             />

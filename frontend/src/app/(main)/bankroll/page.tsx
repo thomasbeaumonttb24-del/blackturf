@@ -184,7 +184,7 @@ export default function BankrollPage() {
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a"); a.href = url; a.download = "blackturf_bankroll.csv"; a.click();
       URL.revokeObjectURL(url);
-    } catch { toast.error("Erreur lors de l'export"); }
+    } catch { toast.error("Erreur lors de l'exportation"); }
   }
 
   const toggleSort = useCallback((col: typeof sortCol) => {
@@ -207,13 +207,13 @@ export default function BankrollPage() {
       <div className="flex flex-col sm:flex-row sm:items-start gap-4">
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Wallet className="w-6 h-6 text-amber-500" />Bankroll Tracker
+            <Wallet className="w-6 h-6 text-amber-500" />Suivi du capital
           </h1>
           {entries && <p className="text-sm text-gray-400 mt-0.5">{stats?.nb_paris ?? 0} paris enregistrés</p>}
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleExport} className="text-gray-600 border-gray-200">
-            <Download className="w-4 h-4 mr-1.5" />Export
+            <Download className="w-4 h-4 mr-1.5" />Exporter
           </Button>
           <Button size="sm" onClick={() => setShowForm((v) => !v)}
             className={cn("gap-1.5 font-semibold transition-all", showForm ? "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200" : "bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-200")}>
@@ -270,11 +270,11 @@ export default function BankrollPage() {
       {/* KPIs */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KPICard label="Bankroll actuelle" value={formatEuro(analytics?.currentBalance ?? (stats.bankroll_initiale ?? 0))}
-            sub={`Initiale : ${formatEuro(stats.bankroll_initiale ?? 0)}`} trend={netBalance >= 0 ? "up" : "down"} icon={Wallet} color="gold" />
-          <KPICard label="ROI global" value={`${stats.roi_global >= 0 ? "+" : ""}${stats.roi_global}%`}
+          <KPICard label="Capital actuel" value={formatEuro(analytics?.currentBalance ?? (stats.bankroll_initiale ?? 0))}
+            sub={`Initial : ${formatEuro(stats.bankroll_initiale ?? 0)}`} trend={netBalance >= 0 ? "up" : "down"} icon={Wallet} color="gold" />
+          <KPICard label="Rendement global" value={`${stats.roi_global >= 0 ? "+" : ""}${stats.roi_global}%`}
             sub={`Solde net : ${formatEuro(netBalance)}`} trend={stats.roi_global >= 0 ? "up" : "down"} icon={BarChart2} color={stats.roi_global >= 0 ? "green" : "gold"} />
-          <KPICard label="ROI suivi IA" value={`${stats.roi_ia_only >= 0 ? "+" : ""}${stats.roi_ia_only}%`}
+          <KPICard label="Rendement suivi IA" value={`${stats.roi_ia_only >= 0 ? "+" : ""}${stats.roi_ia_only}%`}
             sub={`vs global : ${stats.roi_ia_only >= stats.roi_global ? "▲ meilleur" : "▼ inférieur"}`} trend={stats.roi_ia_only >= 0 ? "up" : "down"} icon={Brain} color="blue" />
           <KPICard label="Taux de réussite" value={`${stats.taux_reussite}%`}
             sub={`${stats.nb_gagnants}G · ${stats.nb_perdants}P · ${stats.nb_paris} paris`} icon={Target} color="purple" />
@@ -303,7 +303,7 @@ export default function BankrollPage() {
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-amber-500" />Évolution de la bankroll
+                <TrendingUp className="w-4 h-4 text-amber-500" />Évolution du capital
               </CardTitle>
               <div className="flex rounded-lg border border-gray-200 overflow-hidden">
                 {(["7j", "30j", "3m", "tout"] as Period[]).map((p) => (
@@ -339,7 +339,7 @@ export default function BankrollPage() {
                 <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} tickLine={false} axisLine={false}
                   domain={[chartMin, chartMax]} tickFormatter={(v) => `€${v.toFixed(0)}`} width={52} />
                 <Tooltip contentStyle={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number) => [formatEuro(v), "Bankroll"]} />
+                  formatter={(v: number) => [formatEuro(v), "Capital"]} />
                 <Area type="monotone" dataKey="bankroll" stroke={isPositive ? "#10b981" : "#ef4444"} strokeWidth={2}
                   fill="url(#bg)" dot={false} activeDot={{ r: 4, fill: isPositive ? "#10b981" : "#ef4444", stroke: "#fff", strokeWidth: 2 }} />
               </AreaChart>

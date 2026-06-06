@@ -16,7 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 const schema = z.object({
   prenom: z.string().min(1, "Prénom requis"),
   nom: z.string().optional(),
-  email: z.string().email("Email invalide"),
+  email: z.string().email("E-mail invalide"),
   password: z.string().min(8, "8 caractères minimum"),
 });
 
@@ -25,7 +25,7 @@ type FormData = z.infer<typeof schema>;
 const PERKS = [
   "Programme PMU du jour",
   "Prédictions IA (limité)",
-  "Bankroll tracker",
+  "Suivi de capital",
   "7 jours d'essai Standard offert",
 ];
 
@@ -134,7 +134,7 @@ function InscriptionContent() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1.5">Email</label>
+                <label className="block text-sm font-medium mb-1.5">E-mail</label>
                 <input
                   {...register("email")}
                   type="email"

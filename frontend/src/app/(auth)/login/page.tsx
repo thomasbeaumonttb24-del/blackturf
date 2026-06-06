@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 
 const schema = z.object({
-  email: z.string().email("Email invalide"),
+  email: z.string().email("E-mail invalide"),
   password: z.string().min(6, "Mot de passe requis"),
 });
 
@@ -69,7 +69,7 @@ function LoginContent() {
         <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-xl shadow-black/[0.06]">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1.5">Email</label>
+              <label className="block text-sm font-medium mb-1.5">E-mail</label>
               <input
                 {...register("email")}
                 type="email"

@@ -28,8 +28,8 @@ const NIVEAU_BORDERS: Record<number, string> = {
 };
 const DISCIPLINES = ["Tous", "Plat", "Trot", "Haies", "Steeple", "Cross"];
 const SORT_OPTIONS = [
-  { value: "ev_desc", label: "EV ↓" },
-  { value: "ev_asc", label: "EV ↑" },
+  { value: "ev_desc", label: "Espérance ↓" },
+  { value: "ev_asc", label: "Espérance ↑" },
   { value: "cote_desc", label: "Cote ↓" },
   { value: "cote_asc", label: "Cote ↑" },
   { value: "heure", label: "Heure" },
@@ -65,10 +65,10 @@ const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 const SPI_METHOD_LABELS: Record<string, string> = {
-  cotes_history: "⚡ SPI historique",
-  betclic_steam: "🔥 Steam Betclic",
-  betfair_gap:   "🎯 Gap Betfair",
-  market_gap:    "📈 Gap marché",
+  cotes_history: "⚡ Afflux historique",
+  betclic_steam: "🔥 Afflux Betclic",
+  betfair_gap:   "🎯 Écart Betfair",
+  market_gap:    "📈 Écart marché",
 };
 
 // ─── sub-components ──────────────────────────────────────────
@@ -117,7 +117,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
               <span className="font-semibold text-sm truncate">{vb.nom_cheval}</span>
               {isExpert && vb.spi_detected && (
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-400 text-amber-400 shrink-0">
-                  ⚡ SPI
+                  ⚡ Afflux
                 </Badge>
               )}
             </div>
@@ -145,7 +145,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
               </div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-muted-foreground">EV</div>
+              <div className="text-xs text-muted-foreground">Espérance</div>
               <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {formatEV(vb.ev_max)}
               </div>
@@ -193,7 +193,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             <div className="flex flex-col items-end gap-1">
               {isExpert && vb.spi_detected && vb.spi_method && (
                 <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-400 text-amber-400 gap-0.5">
-                  {SPI_METHOD_LABELS[vb.spi_method] ?? "⚡ SPI"}
+                  {SPI_METHOD_LABELS[vb.spi_method] ?? "⚡ Afflux"}
                 </Badge>
               )}
               {vb.jockey_suspendu && (
@@ -221,7 +221,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           {/* Metrics — 3 colonnes si mouvement dispo */}
           <div className={cn("grid gap-2 mt-3", vb.mouvement_cote_pct != null && Math.abs(vb.mouvement_cote_pct) >= 5 ? "grid-cols-3" : "grid-cols-2")}>
             <div className="rounded-lg bg-muted/50 p-2 text-center">
-              <div className="text-[10px] text-muted-foreground">EV</div>
+              <div className="text-[10px] text-muted-foreground">Espérance</div>
               <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {formatEV(vb.ev_max)}
               </div>
@@ -253,7 +253,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
               <span className="text-cyan-400 font-semibold">Betfair: {vb.cote_betfair_exchange.toFixed(1)}</span>
               <span className="text-muted-foreground">PMU: {vb.cote_pmu?.toFixed(1)}</span>
               <span className="text-cyan-400 font-bold">
-                +{(((vb.cote_pmu / vb.cote_betfair_exchange) - 1) * 100).toFixed(0)}% gap
+                +{(((vb.cote_pmu / vb.cote_betfair_exchange) - 1) * 100).toFixed(0)}% d&apos;écart
               </span>
             </div>
           )}
@@ -321,9 +321,9 @@ export default function ValueBetsPage() {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center">
         <Lock className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-        <h1 className="text-2xl font-bold mb-2">Value Bets IA</h1>
+        <h1 className="text-2xl font-bold mb-2">Paris de valeur IA</h1>
         <p className="text-muted-foreground mb-6">
-          Connectez-vous pour accéder aux value bets détectés en temps réel.
+          Connectez-vous pour accéder aux paris de valeur détectés en temps réel.
         </p>
         <Button variant="brand" asChild>
           <Link href="/login?redirect=/value-bets">Se connecter</Link>
@@ -337,22 +337,22 @@ export default function ValueBetsPage() {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center">
         <Zap className="h-12 w-12 mx-auto mb-4 text-brand-gold" />
-        <h1 className="text-2xl font-bold mb-3">Value Bets en temps réel</h1>
+        <h1 className="text-2xl font-bold mb-3">Paris de valeur en temps réel</h1>
         <p className="text-muted-foreground mb-2">
-          Détection automatique EV {">"} 0 · 4 niveaux d&apos;étoiles · Triangulation 3 sources.
+          Détection automatique espérance {">"} 0 · 4 niveaux d&apos;étoiles · Triangulation 3 sources.
         </p>
         <p className="text-muted-foreground mb-8">
           Disponible dès le plan <strong>Standard</strong> (19€/mois).
         </p>
         <div className="grid sm:grid-cols-3 gap-4 mb-8 text-left max-w-xl mx-auto">
-          {["Alertes temps réel", "EV > 0 garanti", "4 niveaux de confiance"].map((f) => (
+          {["Alertes en temps réel", "Espérance > 0 garantie", "4 niveaux de confiance"].map((f) => (
             <div key={f} className="flex items-center gap-2 text-sm">
               <span className="text-emerald-400">✓</span>{f}
             </div>
           ))}
         </div>
         <Button variant="brand" size="lg" asChild>
-          <Link href="/tarifs">Débloquer les Value Bets — 19€/mois</Link>
+          <Link href="/tarifs">Débloquer les paris de valeur — 19€/mois</Link>
         </Button>
       </div>
     );
@@ -366,10 +366,10 @@ export default function ValueBetsPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Zap className="h-6 w-6 text-brand-gold" />
-            Value Bets
+            Paris de valeur
             {connected && (
               <span className="flex items-center gap-1 text-sm font-normal text-emerald-400 ml-2">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />Live
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />En direct
               </span>
             )}
           </h1>
@@ -414,7 +414,7 @@ export default function ValueBetsPage() {
       {/* ── Stats bar ─────────────────────────── */}
       <div className="flex items-center gap-6 text-sm mb-4 pb-4 border-b border-border/40">
         <span className="text-muted-foreground">
-          <span className="font-semibold text-foreground">{rawBets.length}</span> value bet{rawBets.length !== 1 ? "s" : ""} actifs
+          <span className="font-semibold text-foreground">{rawBets.length}</span> pari{rawBets.length !== 1 ? "s" : ""} de valeur actif{rawBets.length !== 1 ? "s" : ""}
         </span>
         {nbPremium > 0 && (
           <span className="text-amber-400 flex items-center gap-1">
@@ -425,7 +425,7 @@ export default function ValueBetsPage() {
         {avgEV && (
           <span className="text-muted-foreground flex items-center gap-1">
             <TrendingUp className="w-3 h-3 text-emerald-400" />
-            EV moyen : <span className="font-semibold text-emerald-400">+{avgEV}%</span>
+            Espérance moyenne : <span className="font-semibold text-emerald-400">+{avgEV}%</span>
           </span>
         )}
       </div>
@@ -520,14 +520,14 @@ export default function ValueBetsPage() {
       ) : bets.length === 0 ? (
         <div className="text-center py-20 text-muted-foreground">
           <Zap className="h-12 w-12 mx-auto mb-4 opacity-20" />
-          <p className="font-medium">Aucun value bet{discipline !== "Tous" ? ` en ${discipline}` : ""} pour le moment.</p>
+          <p className="font-medium">Aucun pari de valeur{discipline !== "Tous" ? ` en ${discipline}` : ""} pour le moment.</p>
           <p className="text-xs mt-2">
             {discipline !== "Tous" ? "Essayez une autre discipline ou " : ""}
             Revenez lors des courses du jour.
           </p>
           {discipline !== "Tous" && (
             <button onClick={() => setDiscipline("Tous")} className="mt-3 text-xs text-brand-gold hover:underline flex items-center gap-1 mx-auto">
-              <Filter className="w-3 h-3" /> Voir tous les value bets
+              <Filter className="w-3 h-3" /> Voir tous les paris de valeur
             </button>
           )}
         </div>
@@ -543,7 +543,7 @@ export default function ValueBetsPage() {
 
       {/* ── Disclaimer ────────────────────────── */}
       <div className="mt-10 p-4 rounded-xl border border-border bg-muted/30 text-xs text-muted-foreground text-center">
-        ⚠️ <strong>EV = (Cote × Probabilité IA) − 1.</strong> Espérance positive à long terme uniquement.
+        ⚠️ <strong>Espérance = (Cote × Probabilité IA) − 1.</strong> Espérance positive à long terme uniquement.
         Aucune garantie de gain sur un pari individuel. Pariez de façon responsable.
       </div>
     </div>

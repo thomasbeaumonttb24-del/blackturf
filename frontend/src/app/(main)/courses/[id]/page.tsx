@@ -192,7 +192,7 @@ function PlanMiseDisplay({ plan, onClose }: { plan: MisePlan; onClose: () => voi
           <p className="text-2xl font-bold tabular-nums text-brand-gold">{plan.montant_total}€</p>
         </div>
         <div className="text-right">
-          <p className="text-xs text-muted-foreground">EV global estimé</p>
+          <p className="text-xs text-muted-foreground">Espérance globale estimée</p>
           <p className={cn(
             "text-xl font-bold tabular-nums",
             plan.ev_global > 0 ? "text-brand-emerald" : "text-brand-red"
@@ -843,8 +843,8 @@ export default function CoursePage() {
                 {course.statut === "en_cours" ? "🔴 En cours" : course.statut === "termine" ? "✓ Terminée" : "⏳ À venir"}
               </Badge>
               {wsConnected && (
-                <span className="flex items-center gap-1 text-[10px] text-brand-emerald">
-                  <span className="h-1.5 w-1.5 rounded-full bg-brand-emerald animate-pulse" /> Live
+                <span className="flex items-center gap-1 text-[10px] font-semibold text-brand-emerald">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand-emerald animate-pulse" /> En direct
                 </span>
               )}
             </div>
@@ -897,8 +897,8 @@ export default function CoursePage() {
           <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand-gold/30 bg-brand-gold/5 px-3 py-2 text-sm">
             <Zap className="h-4 w-4 text-brand-gold flex-shrink-0" />
             <span>
-              <strong>Value bet exceptionnel</strong> — N°{topVB.numero} {topVB.nom_cheval} ·{" "}
-              {etoiles(topVB.value_bet!.niveau)} · EV <EVBadge ev={topVB.value_bet!.ev_max} />
+              <strong>Pari de valeur exceptionnel</strong> — N°{topVB.numero} {topVB.nom_cheval} ·{" "}
+              {etoiles(topVB.value_bet!.niveau)} · Espérance <EVBadge ev={topVB.value_bet!.ev_max} />
             </span>
           </div>
         )}
@@ -915,7 +915,7 @@ export default function CoursePage() {
                 Partants
                 {predictions && (
                   <span className="text-xs font-normal text-muted-foreground ml-1">
-                    — Proba IA · Cote juste · EV
+                    — Proba IA · Cote juste · Espérance
                   </span>
                 )}
               </CardTitle>
@@ -924,15 +924,15 @@ export default function CoursePage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border text-[11px] text-muted-foreground">
-                      <th className="text-left px-3 py-2 w-8">N°</th>
-                      <th className="text-left px-3 py-2">Cheval</th>
-                      <th className="text-left px-3 py-2 hidden md:table-cell">Jockey</th>
-                      <th className="text-right px-3 py-2">ELO</th>
-                      <th className="text-right px-3 py-2">Cote PMU</th>
-                      {predictions && <th className="text-right px-3 py-2">Cote IA</th>}
-                      {predictions && <th className="text-right px-3 py-2">Top-3</th>}
-                      {predictions && <th className="text-right px-3 py-2">EV</th>}
+                    <tr className="border-b border-border bg-muted/30 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <th className="text-left px-3 py-2.5 w-8">N°</th>
+                      <th className="text-left px-3 py-2.5">Cheval</th>
+                      <th className="text-left px-3 py-2.5 hidden md:table-cell">Jockey</th>
+                      <th className="text-right px-3 py-2.5">ELO</th>
+                      <th className="text-right px-3 py-2.5">Cote PMU</th>
+                      {predictions && <th className="text-right px-3 py-2.5">Cote IA</th>}
+                      {predictions && <th className="text-right px-3 py-2.5">Top-3</th>}
+                      {predictions && <th className="text-right px-3 py-2.5">Espérance</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1108,8 +1108,8 @@ export default function CoursePage() {
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-emerald-600" />
-                <h3 className="text-sm font-semibold text-gray-900">Dutch Bet conseillé</h3>
-                <span className="ml-auto text-xs font-bold text-emerald-700">
+                <h3 className="text-sm font-semibold text-gray-900">Mise répartie conseillée</h3>
+                <span className="ml-auto text-xs font-bold text-emerald-700 tabular-nums">
                   +{analysis.dutch_bet.roi_garanti}% garanti
                 </span>
               </div>

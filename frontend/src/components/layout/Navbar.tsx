@@ -13,18 +13,18 @@ import { planLabel, cn } from "@/lib/utils";
 
 const NAV_LINKS_PUBLIC = [
   { href: "/programme", label: "Programme" },
-  { href: "/value-bets", label: "Value Bets" },
-  { href: "/bankroll", label: "Bankroll" },
-  { href: "/assistant", label: "IA Chat" },
+  { href: "/value-bets", label: "Paris de valeur" },
+  { href: "/bankroll", label: "Capital" },
+  { href: "/assistant", label: "Assistant IA" },
   { href: "/tarifs", label: "Tarifs" },
 ];
 
 const NAV_LINKS_AUTH: Array<{ href: string; label: string; icon?: LucideIcon }> = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/programme", label: "Programme" },
-  { href: "/value-bets", label: "Value Bets" },
-  { href: "/bankroll", label: "Bankroll" },
-  { href: "/assistant", label: "IA Chat" },
+  { href: "/value-bets", label: "Paris de valeur" },
+  { href: "/bankroll", label: "Capital" },
+  { href: "/assistant", label: "Assistant IA" },
 ];
 
 // ── Search palette ──────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
         ) : debouncedQ.length >= 2 ? (
           <div className="py-8 text-center text-sm text-gray-400">Aucun résultat pour "{debouncedQ}"</div>
         ) : (
-          <div className="py-6 text-center text-xs text-gray-400">Tape au moins 2 caractères</div>
+          <div className="py-6 text-center text-xs text-gray-400">Saisissez au moins 2 caractères</div>
         )}
       </div>
     </div>
@@ -314,7 +314,7 @@ export function Navbar() {
                               className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                               onClick={() => setUserMenuOpen(false)}
                             >
-                              <Brain className="h-4 w-4 text-blue-400" /> Monitoring IA
+                              <Brain className="h-4 w-4 text-blue-400" /> Supervision IA
                             </Link>
                           </>
                         )}
@@ -342,7 +342,7 @@ export function Navbar() {
                 </Button>
                 <Button
                   size="sm"
-                  className="bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold shadow-sm shadow-brand-gold/25 transition-all"
+                  className="bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 transition-all"
                   onClick={() => router.push("/inscription")}
                 >
                   Essai gratuit

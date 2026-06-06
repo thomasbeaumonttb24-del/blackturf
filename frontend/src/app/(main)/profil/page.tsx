@@ -29,56 +29,56 @@ type ProfileForm = z.infer<typeof profileSchema>;
 const PLAN_FEATURES: Record<string, { label: string; included: boolean }[]> = {
   free: [
     { label: "Programme complet", included: true },
-    { label: "Value bets (3/jour)", included: true },
-    { label: "Bankroll tracker", included: true },
-    { label: "Value bets illimités", included: false },
+    { label: "Paris de valeur (3/jour)", included: true },
+    { label: "Suivi de capital", included: true },
+    { label: "Paris de valeur illimités", included: false },
     { label: "Analyse IA détaillée", included: false },
     { label: "Assistant IA", included: false },
-    { label: "Notifications push", included: false },
+    { label: "Notifications", included: false },
   ],
   decouverte: [
     { label: "Programme complet", included: true },
-    { label: "Value bets (3/jour)", included: true },
-    { label: "Bankroll tracker", included: true },
-    { label: "Value bets illimités", included: false },
+    { label: "Paris de valeur (3/jour)", included: true },
+    { label: "Suivi de capital", included: true },
+    { label: "Paris de valeur illimités", included: false },
     { label: "Analyse IA détaillée", included: false },
     { label: "Assistant IA", included: false },
-    { label: "Notifications push", included: false },
+    { label: "Notifications", included: false },
   ],
   standard: [
     { label: "Programme complet", included: true },
-    { label: "Value bets illimités", included: true },
-    { label: "Bankroll tracker", included: true },
+    { label: "Paris de valeur illimités", included: true },
+    { label: "Suivi de capital", included: true },
     { label: "Analyse IA détaillée", included: true },
-    { label: "Notifications push", included: true },
+    { label: "Notifications", included: true },
     { label: "Assistant IA", included: false },
     { label: "Stratégies avancées", included: false },
   ],
   starter: [
     { label: "Programme complet", included: true },
-    { label: "Value bets illimités", included: true },
-    { label: "Bankroll tracker", included: true },
+    { label: "Paris de valeur illimités", included: true },
+    { label: "Suivi de capital", included: true },
     { label: "Analyse IA détaillée", included: true },
-    { label: "Notifications push", included: true },
+    { label: "Notifications", included: true },
     { label: "Assistant IA", included: false },
     { label: "Stratégies avancées", included: false },
   ],
   pro: [
     { label: "Programme complet", included: true },
-    { label: "Value bets illimités", included: true },
-    { label: "Bankroll tracker avancé", included: true },
+    { label: "Paris de valeur illimités", included: true },
+    { label: "Suivi de capital avancé", included: true },
     { label: "Analyse IA détaillée", included: true },
     { label: "Assistant IA", included: true },
-    { label: "Notifications push", included: true },
+    { label: "Notifications", included: true },
     { label: "Stratégies avancées", included: true },
   ],
   expert: [
     { label: "Programme complet", included: true },
-    { label: "Value bets illimités", included: true },
-    { label: "Bankroll tracker avancé", included: true },
+    { label: "Paris de valeur illimités", included: true },
+    { label: "Suivi de capital avancé", included: true },
     { label: "Analyse IA détaillée", included: true },
     { label: "Assistant IA", included: true },
-    { label: "Notifications push", included: true },
+    { label: "Notifications", included: true },
     { label: "Stratégies avancées", included: true },
   ],
 };
@@ -97,7 +97,7 @@ const RISK_OPTIONS = [
     value: "equilibre" as const,
     icon: "⚖️",
     label: "Équilibré",
-    desc: "Rapport risque/rendement optimal",
+    desc: "Rapport risque / rendement optimal",
     color: "text-amber-600",
     activeBorder: "border-amber-400 bg-amber-50",
   },
@@ -105,7 +105,7 @@ const RISK_OPTIONS = [
     value: "agressif" as const,
     icon: "🚀",
     label: "Agressif",
-    desc: "Mises maximisées, ROI prioritaire",
+    desc: "Mises maximisées, rendement prioritaire",
     color: "text-red-600",
     activeBorder: "border-red-400 bg-red-50",
   },
@@ -195,7 +195,7 @@ export default function ProfilPage() {
       });
       await authApi.savePushSub(sub.toJSON());
       setPushEnabled(true);
-      toast.success("Notifications push activées !");
+      toast.success("Notifications activées !");
     } catch {
       toast.error("Erreur lors de l'activation");
     }
@@ -304,11 +304,11 @@ export default function ProfilPage() {
                   </Field>
                 </div>
 
-                <Field label="Email">
+                <Field label="E-mail">
                   <input value={user.email} disabled className={inputCls} />
                 </Field>
 
-                <Field label="Bankroll initiale (€)">
+                <Field label="Capital initial (€)">
                   <input
                     {...register("bankroll_initiale", { valueAsNumber: true })}
                     type="number"
@@ -435,7 +435,7 @@ export default function ProfilPage() {
                       <p className="font-semibold text-amber-800">Débloquez toutes les fonctionnalités</p>
                     </div>
                     <p className="text-sm text-amber-700">
-                      Passez Standard pour accéder aux value bets illimités, à l&apos;assistant IA et aux notifications en temps réel.
+                      Passez Standard pour accéder aux paris de valeur illimités, à l&apos;assistant IA et aux notifications en temps réel.
                     </p>
                     <Link
                       href="/tarifs"
@@ -464,13 +464,13 @@ export default function ProfilPage() {
             <div>
               <div className="px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Notifications</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Recevez les alertes value bets en temps réel</p>
+                <p className="text-xs text-gray-500 mt-0.5">Recevez les alertes paris de valeur en temps réel</p>
               </div>
               <div className="px-6 py-5 space-y-4">
                 <div className="flex items-center justify-between rounded-2xl border border-gray-200 p-4">
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">Notifications push</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Alertes valeur instantanées sur votre appareil</p>
+                    <p className="text-sm font-semibold text-gray-800">Notifications</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Alertes de valeur instantanées sur votre appareil</p>
                   </div>
                   {isFree ? (
                     <span className="flex items-center gap-1 text-xs text-gray-400 bg-gray-100 rounded-full px-3 py-1.5">
@@ -493,7 +493,7 @@ export default function ProfilPage() {
                 </div>
                 {isFree && (
                   <p className="text-xs text-gray-400">
-                    Les notifications push sont disponibles à partir du plan Standard.{" "}
+                    Les notifications sont disponibles à partir du plan Standard.{" "}
                     <Link href="/tarifs" className="text-amber-600 font-medium hover:underline">
                       Voir les offres →
                     </Link>
@@ -515,7 +515,7 @@ export default function ProfilPage() {
                 {/* Email verified row */}
                 <div className="flex items-center justify-between rounded-2xl border border-gray-200 p-4">
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">Email vérifié</p>
+                    <p className="text-sm font-semibold text-gray-800">E-mail vérifié</p>
                     <p className="text-xs text-gray-400 mt-0.5">{user.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -532,7 +532,7 @@ export default function ProfilPage() {
                           onClick={async () => {
                             try {
                               await api.post("/auth/resend-verification");
-                              toast.success("Email renvoyé");
+                              toast.success("E-mail renvoyé");
                             } catch {
                               toast.error("Erreur");
                             }

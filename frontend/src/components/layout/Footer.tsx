@@ -22,25 +22,25 @@ export function Footer() {
               </span>
             </div>
             <p className="text-xs text-gray-500 leading-relaxed">
-              Le Terminal IA des Parieurs Gagnants.<br />
+              Le terminal IA des parieurs gagnants.<br />
               Analyses propulsées par XGBoost + LightGBM + CatBoost.
             </p>
           </div>
 
           {/* Produit */}
           <div>
-            <h4 className="text-sm font-semibold text-gray-900 mb-3">Produit</h4>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">Produit</h4>
             <ul className="space-y-2 text-sm text-gray-500">
               <li><Link href="/programme" className="hover:text-gray-900 transition-colors">Programme du jour</Link></li>
-              <li><Link href="/value-bets" className="hover:text-gray-900 transition-colors">Value Bets</Link></li>
-              <li><Link href="/bankroll" className="hover:text-gray-900 transition-colors">Bankroll tracker</Link></li>
+              <li><Link href="/value-bets" className="hover:text-gray-900 transition-colors">Paris de valeur</Link></li>
+              <li><Link href="/bankroll" className="hover:text-gray-900 transition-colors">Suivi du capital</Link></li>
               <li><Link href="/assistant" className="hover:text-gray-900 transition-colors">Assistant IA</Link></li>
             </ul>
           </div>
 
           {/* Plans */}
           <div>
-            <h4 className="text-sm font-semibold text-gray-900 mb-3">Plans</h4>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">Plans</h4>
             <ul className="space-y-2 text-sm text-gray-500">
               <li><Link href="/tarifs" className="hover:text-gray-900 transition-colors">Gratuit</Link></li>
               <li><Link href="/tarifs" className="hover:text-gray-900 transition-colors">Standard — 19€/mois</Link></li>
@@ -50,7 +50,7 @@ export function Footer() {
 
           {/* Légal */}
           <div>
-            <h4 className="text-sm font-semibold text-gray-900 mb-3">Légal</h4>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">Légal</h4>
             <ul className="space-y-2 text-sm text-gray-500">
               <li><Link href="/mentions-legales" className="hover:text-gray-900 transition-colors">Mentions légales</Link></li>
               <li><Link href="/confidentialite" className="hover:text-gray-900 transition-colors">Confidentialité</Link></li>

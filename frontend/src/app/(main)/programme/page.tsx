@@ -72,9 +72,9 @@ function useCountdown(targetDate: string, statut: string) {
 function StatutBadge({ statut }: { statut: string }) {
   if (statut === "en_cours")
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600 ring-1 ring-emerald-200">
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600 ring-1 ring-emerald-200">
         <Radio className="h-2.5 w-2.5 animate-pulse" />
-        LIVE
+        En direct
       </span>
     );
   if (statut === "termine")
@@ -176,8 +176,8 @@ function CourseRow({ course, vbCount }: { course: CourseSummary; vbCount?: numbe
             {course.pool_total_eur != null && course.pool_total_eur > 0 && (
               <>
                 <span className="text-gray-200">·</span>
-                <span className="text-violet-600 font-medium">
-                  Pool {course.pool_total_eur >= 1_000_000
+                <span className="text-violet-600 font-medium tabular-nums">
+                  Cagnotte {course.pool_total_eur >= 1_000_000
                     ? `${(course.pool_total_eur / 1_000_000).toFixed(1)}M€`
                     : `${Math.round(course.pool_total_eur / 1_000)}k€`}
                 </span>
@@ -200,9 +200,9 @@ function CourseRow({ course, vbCount }: { course: CourseSummary; vbCount?: numbe
           </div>
           <div className="flex items-center gap-1.5">
             {vbCount !== undefined && vbCount > 0 && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 ring-1 ring-amber-200">
                 <Zap className="h-2.5 w-2.5" />
-                {vbCount} VB
+                {vbCount} <span className="hidden sm:inline">de valeur</span>
               </span>
             )}
             <StatutBadge statut={course.statut} />
@@ -297,9 +297,9 @@ function ReunionCard({
               </span>
             )}
             {liveCount > 0 && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0 text-[9px] font-bold text-emerald-700">
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0 text-[9px] font-bold uppercase tracking-wide text-emerald-700">
                 <Radio className="h-2 w-2 animate-pulse" />
-                LIVE
+                En direct
               </span>
             )}
           </div>
@@ -508,16 +508,16 @@ export default function ProgrammePage() {
           ))}
 
           {isPaid && totalVbs > 0 ? (
-            <span className="ml-auto flex items-center gap-1 text-xs font-bold text-amber-600">
+            <span className="ml-auto flex items-center gap-1 text-xs font-bold text-amber-600 tabular-nums">
               <Zap className="h-3 w-3" />
-              {totalVbs} value bet{totalVbs > 1 ? "s" : ""}
+              {totalVbs} pari{totalVbs > 1 ? "s" : ""} de valeur
             </span>
           ) : !isPaid && isToday ? (
             <Link
               href="/tarifs"
               className="ml-auto flex items-center gap-1 text-xs font-semibold text-amber-600 hover:underline"
             >
-              <Zap className="h-3 w-3" /> Débloquer les value bets
+              <Zap className="h-3 w-3" /> Débloquer les paris de valeur
             </Link>
           ) : null}
         </div>
@@ -571,7 +571,7 @@ export default function ProgrammePage() {
               )}
             >
               <Zap className="h-3 w-3" />
-              VB seulement
+              Paris de valeur
             </button>
           )}
 
@@ -658,7 +658,7 @@ export default function ProgrammePage() {
       {!isPaid && isToday && programme && programme.nb_courses > 0 && (
         <div className="flex items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 px-5 py-4">
           <div>
-            <p className="text-sm font-semibold text-amber-800">🔐 Value bets non accessibles</p>
+            <p className="text-sm font-semibold text-amber-800">🔐 Paris de valeur non accessibles</p>
             <p className="text-xs text-amber-600 mt-0.5">
               Passez Standard pour voir les opportunités détectées par l&apos;IA sur chaque course.
             </p>

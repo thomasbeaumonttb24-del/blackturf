@@ -27,7 +27,7 @@ export default function AssistantPage() {
       id: "welcome",
       role: "assistant",
       content:
-        "Bonjour ! Je suis BlackTurf IA, votre expert en courses hippiques. Posez-moi n'importe quelle question sur les courses du jour, les value bets, ou la gestion de votre bankroll.\n\n⚠️ Je suis un outil d'aide à la décision — aucune garantie de gain.",
+        "Bonjour ! Je suis BlackTurf IA, votre expert en courses hippiques. Posez-moi n'importe quelle question sur les courses du jour, les paris de valeur, ou la gestion de votre capital.\n\n⚠️ Je suis un outil d'aide à la décision — aucune garantie de gain.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -149,14 +149,14 @@ export default function AssistantPage() {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">BlackTurf IA</h1>
           <p className="text-gray-500 leading-relaxed">
             Posez vos questions en langage naturel. L&apos;IA accède aux données en temps réel :
-            programme du jour, value bets, prédictions, indicateurs de mouvement.
+            programme du jour, paris de valeur, prédictions, indicateurs de mouvement.
           </p>
         </div>
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-5 space-y-3 text-left">
           {[
-            "\"Quels sont les meilleurs value bets aujourd'hui ?\"",
+            "\"Quels sont les meilleurs paris de valeur aujourd'hui ?\"",
             "\"Analyse le cheval N°4 de la R3 Vincennes\"",
-            "\"Ma bankroll est de 500€, comment répartir mes mises ?\"",
+            "\"Mon capital est de 500€, comment répartir mes mises ?\"",
           ].map((ex) => (
             <p key={ex} className="text-sm text-amber-800 font-medium flex items-start gap-2">
               <span className="text-amber-400 mt-0.5">›</span> {ex}
@@ -191,7 +191,7 @@ export default function AssistantPage() {
             <h1 className="font-bold text-gray-900 text-sm">BlackTurf IA</h1>
             <div className="flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-gray-400">Claude Sonnet · Données live</span>
+              <span className="text-xs text-gray-400">Claude Sonnet · Données en direct</span>
             </div>
           </div>
         </div>

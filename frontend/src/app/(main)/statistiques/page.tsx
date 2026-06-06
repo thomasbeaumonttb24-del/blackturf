@@ -149,9 +149,9 @@ function PnlTooltip({ active, payload, label }: {
   if (!active || !payload?.length) return null;
   const val = payload[0].value;
   return (
-    <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-xl bg-white ring-1 ring-border px-3 py-2 text-xs shadow-md">
       <div className="font-medium text-foreground mb-1">{label}</div>
-      <div className={cn("font-bold", val >= 0 ? "text-emerald-400" : "text-red-400")}>
+      <div className={cn("font-bold tabular-nums", val >= 0 ? "text-emerald-600" : "text-red-500")}>
         {val >= 0 ? "+" : ""}{val.toFixed(2)}€
       </div>
     </div>
@@ -217,14 +217,14 @@ export default function StatistiquesPage() {
             iconBg="bg-amber-500/10"
           />
           <KpiCard
-            label="ROI global"
+            label="Rendement global"
             value={`${roiPositive ? "+" : ""}${data.roi}%`}
             positive={roiPositive}
             icon={BarChart3}
             iconBg="bg-blue-500/10"
           />
           <KpiCard
-            label="Win rate"
+            label="Taux de réussite"
             value={`${data.win_rate}%`}
             sub={`Cote moy. ${data.cote_moyenne}`}
             positive={data.win_rate >= 20}
@@ -248,32 +248,32 @@ export default function StatistiquesPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-amber-400" />
-                P&amp;L mensuel (12 derniers mois)
+                Gains et pertes par mois (12 derniers mois)
               </CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={data.monthly_pnl} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                   <XAxis
                     dataKey="mois"
-                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                    tick={{ fontSize: 10, fill: "#9CA3AF" }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                    tick={{ fontSize: 10, fill: "#9CA3AF" }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(v) => `${v}€`}
                   />
-                  <Tooltip content={<PnlTooltip />} />
-                  <Bar dataKey="gain_perte" radius={[4, 4, 0, 0]}>
+                  <Tooltip content={<PnlTooltip />} cursor={{ fill: "#F59E0B", fillOpacity: 0.06 }} />
+                  <Bar dataKey="gain_perte" radius={[6, 6, 0, 0]} maxBarSize={36}>
                     {data.monthly_pnl.map((entry, i) => (
                       <Cell
                         key={i}
-                        fill={entry.gain_perte >= 0 ? "#f59e0b" : "#ef4444"}
-                        opacity={0.85}
+                        fill={entry.gain_perte >= 0 ? "#059669" : "#EF4444"}
+                        opacity={0.9}
                       />
                     ))}
                   </Bar>
@@ -287,13 +287,13 @@ export default function StatistiquesPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-blue-400" />
-                ROI par discipline
+                Rendement par discipline
               </CardTitle>
             </CardHeader>
             <CardContent>
               {data.roi_par_discipline.length === 0 ? (
                 <div className="h-32 flex items-center justify-center text-sm text-muted-foreground">
-                  Pas encore de données
+                  Aucune donnée pour le moment
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -319,7 +319,7 @@ export default function StatistiquesPage() {
                           />
                         </div>
                         <div className="text-[10px] text-muted-foreground mt-0.5">
-                          {d.nb_paris} paris · {d.win_rate}% win rate
+                          {d.nb_paris} paris · {d.win_rate}% de réussite
                         </div>
                       </div>
                     );
@@ -390,10 +390,10 @@ export default function StatistiquesPage() {
                 <div className={cn("text-xl font-bold tabular-nums",
                   data.suivi_ia.roi_ia >= 0 ? "text-emerald-400" : "text-red-400"
                 )}>
-                  ROI {data.suivi_ia.roi_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_ia}%
+                  Rendement {data.suivi_ia.roi_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_ia}%
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {data.suivi_ia.win_rate_ia}% win rate
+                  {data.suivi_ia.win_rate_ia}% de réussite
                 </div>
               </div>
 
@@ -406,10 +406,10 @@ export default function StatistiquesPage() {
                 <div className={cn("text-xl font-bold tabular-nums",
                   data.suivi_ia.roi_non_ia >= 0 ? "text-emerald-400" : "text-red-400"
                 )}>
-                  ROI {data.suivi_ia.roi_non_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_non_ia}%
+                  Rendement {data.suivi_ia.roi_non_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_non_ia}%
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {data.suivi_ia.win_rate_non_ia}% win rate
+                  {data.suivi_ia.win_rate_non_ia}% de réussite
                 </div>
               </div>
             </div>
@@ -423,7 +423,7 @@ export default function StatistiquesPage() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border/60 text-sm text-muted-foreground hover:text-foreground hover:border-brand-gold/40 transition-all"
           >
             <Wallet className="w-4 h-4" />
-            Gérer ma bankroll
+            Gérer mon capital
             <ChevronRight className="w-3 h-3" />
           </Link>
           <Link
@@ -431,7 +431,7 @@ export default function StatistiquesPage() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border/60 text-sm text-muted-foreground hover:text-foreground hover:border-brand-gold/40 transition-all"
           >
             <TrendingUp className="w-4 h-4" />
-            Track-record IA
+            Palmarès de l&apos;IA
             <ChevronRight className="w-3 h-3" />
           </Link>
         </div>

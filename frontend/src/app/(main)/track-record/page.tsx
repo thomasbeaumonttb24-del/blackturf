@@ -82,10 +82,10 @@ function AccuracyTooltip({ active, payload, label }: {
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-xl bg-white ring-1 ring-border px-3 py-2 text-xs shadow-md">
       <div className="font-medium text-foreground mb-1">{label}</div>
       {payload.map((p) => (
-        <div key={p.name} className="text-amber-400 font-bold">{p.value}% précision top-3</div>
+        <div key={p.name} className="font-bold tabular-nums" style={{ color: "#F59E0B" }}>{p.value}% de précision Top-3</div>
       ))}
     </div>
   );
@@ -102,7 +102,7 @@ export default function TrackRecordPage() {
   if (isLoading || !data) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-muted-foreground text-sm animate-pulse">Chargement du track-record…</div>
+        <div className="text-muted-foreground text-sm animate-pulse">Chargement du palmarès…</div>
       </div>
     );
   }
@@ -117,7 +117,7 @@ export default function TrackRecordPage() {
         <div className="max-w-7xl mx-auto px-4 py-14 sm:py-20">
           <div className="text-center max-w-2xl mx-auto">
             <Badge className="mb-4 bg-amber-500/20 text-amber-400 border-amber-500/30 px-3 py-1">
-              Track-record IA — Données réelles
+              Palmarès de l&apos;IA — Données réelles
             </Badge>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-foreground mb-4 leading-tight">
               L&apos;IA BlackTurf prouve ses résultats
@@ -179,33 +179,33 @@ export default function TrackRecordPage() {
           <CardContent>
             {data.by_month.every((m) => m.nb_predictions === 0) ? (
               <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">
-                Pas encore de données mensuelles
+                Aucune donnée mensuelle pour le moment
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={data.by_month} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                   <XAxis
                     dataKey="mois"
-                    tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                    tick={{ fontSize: 11, fill: "#9CA3AF" }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                    tick={{ fontSize: 11, fill: "#9CA3AF" }}
                     axisLine={false}
                     tickLine={false}
                     domain={[0, 100]}
                     tickFormatter={(v) => `${v}%`}
                   />
-                  <Tooltip content={<AccuracyTooltip />} />
+                  <Tooltip content={<AccuracyTooltip />} cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }} />
                   <Line
                     type="monotone"
                     dataKey="accuracy_top3"
-                    stroke="#f59e0b"
-                    strokeWidth={2.5}
-                    dot={{ r: 4, fill: "#f59e0b", strokeWidth: 0 }}
-                    activeDot={{ r: 6, fill: "#f59e0b" }}
+                    stroke="#F59E0B"
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: "#F59E0B", stroke: "#fff", strokeWidth: 2 }}
+                    activeDot={{ r: 6, fill: "#F59E0B", stroke: "#fff", strokeWidth: 2 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -221,22 +221,22 @@ export default function TrackRecordPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Zap className="w-4 h-4 text-amber-400" />
-                Performance Value Bets par niveau
+                Performance des paris de valeur par niveau
               </CardTitle>
             </CardHeader>
             <CardContent>
               {data.vb_performance.every((v) => v.nb_vbs === 0) ? (
                 <div className="py-6 text-center text-sm text-muted-foreground">
-                  Pas encore de value bets résolus
+                  Aucun pari de valeur résolu pour le moment
                 </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/40">
                       <th className="text-left py-2 text-xs font-medium text-muted-foreground">Niveau</th>
-                      <th className="text-right py-2 text-xs font-medium text-muted-foreground">VBs</th>
-                      <th className="text-right py-2 text-xs font-medium text-muted-foreground">Win rate</th>
-                      <th className="text-right py-2 text-xs font-medium text-muted-foreground">ROI</th>
+                      <th className="text-right py-2 text-xs font-medium text-muted-foreground">Paris</th>
+                      <th className="text-right py-2 text-xs font-medium text-muted-foreground">Réussite</th>
+                      <th className="text-right py-2 text-xs font-medium text-muted-foreground">Rendement</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/30">
@@ -286,7 +286,7 @@ export default function TrackRecordPage() {
             <CardContent>
               {data.by_discipline.length === 0 ? (
                 <div className="py-6 text-center text-sm text-muted-foreground">
-                  Pas encore de données
+                  Aucune donnée pour le moment
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -334,7 +334,7 @@ export default function TrackRecordPage() {
           <CardContent>
             {data.best_pronostics.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
-                Pas encore de pronostics haute cote archivés
+                Aucun pronostic à haute cote archivé pour le moment
               </div>
             ) : (
               <div className="space-y-2">
@@ -367,8 +367,8 @@ export default function TrackRecordPage() {
                     </div>
                     <div className="flex items-center gap-4 shrink-0 ml-3">
                       <div className="text-right">
-                        <div className="text-sm font-bold text-foreground">
-                          {p.proba_top1}% proba
+                        <div className="text-sm font-bold text-foreground tabular-nums">
+                          {p.proba_top1}% de probabilité
                         </div>
                         {p.cote && (
                           <div className="text-xs text-muted-foreground">Cote {p.cote}</div>
