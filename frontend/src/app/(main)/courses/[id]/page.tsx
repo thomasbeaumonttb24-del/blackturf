@@ -9,8 +9,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from "recharts";
+import { CHART_PALETTE, axisTick, axisLine, tickLine, GRID, ChartTooltip } from "@/components/charts/chart-kit";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -802,12 +803,16 @@ export default function CoursePage() {
     if (!user || ["free", "decouverte"].includes(user.plan) || !course) return;
     api.get(`/courses/${id}/cotes-historique`)
       .then((res) => {
-        // Pivot: [{time, N°1: cote, N°2: cote, ...}]
+        // Pivot: [{time, N°1: cote, N°2: cote, ...}] — clé par vrai numéro de partant
+        const pidToNum: Record<string, number> = {};
+        for (const p of course.partants) pidToNum[p.participation_id] = p.numero;
         const map: Record<string, Record<string, number>> = {};
         for (const r of res.data) {
           const t = new Date(r.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
           if (!map[t]) map[t] = {};
-          map[t][`N°${r.participation_id.slice(-2)}`] = r.cote;
+          const num = pidToNum[r.participation_id];
+          const key = num != null ? `N°${num}` : `N°${r.participation_id.slice(-2)}`;
+          map[t][key] = r.cote;
         }
         setCotesHisto(Object.entries(map).map(([time, vals]) => ({ time, ...vals })));
       })
@@ -1184,30 +1189,62 @@ export default function CoursePage() {
             <PronosticsPresse pronostics={course.pronostics_presse} />
           )}
 
-          {cotesHisto.length > 2 && (
+          {cotesHisto.length > 2 && (() => {
+            // Sélection des favoris (cote finale la plus basse) + labels noms
+            const last = cotesHisto[cotesHisto.length - 1] || {};
+            const keys = Object.keys(last)
+              .filter((k) => k !== "time" && typeof last[k] === "number")
+              .sort((a, b) => (last[a] as number) - (last[b] as number))
+              .slice(0, 5);
+            const nameByKey: Record<string, string> = {};
+            for (const p of course.partants) nameByKey[`N°${p.numero}`] = `N°${p.numero} ${p.nom_cheval}`;
+            return (
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Évolution des cotes — 2h avant départ</CardTitle>
+              <CardHeader className="pb-1">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-brand-gold" />
+                  Évolution des cotes
+                  <span className="text-xs font-normal text-muted-foreground">— favoris, 2h avant départ</span>
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={160}>
-                  <LineChart data={cotesHisto}>
-                    <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="time" tick={{ fontSize: 9, fill: "hsl(215 20% 55%)" }} />
-                    <YAxis tick={{ fontSize: 9, fill: "hsl(215 20% 55%)" }} reversed />
-                    <Tooltip
-                      contentStyle={{ background: "hsl(231 50% 10%)", border: "1px solid hsl(222 35% 17%)", borderRadius: 8, fontSize: 11 }}
-                      labelStyle={{ color: "white" }}
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={cotesHisto} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid {...GRID} />
+                    <XAxis dataKey="time" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={28} />
+                    <YAxis
+                      tick={axisTick} axisLine={axisLine} tickLine={tickLine} reversed
+                      width={38} tickFormatter={(v) => `${v}`}
+                      domain={["dataMin - 2", "dataMax + 2"]}
                     />
-                    {Object.keys(cotesHisto[0] || {}).filter(k => k !== "time").slice(0, 5).map((k, i) => (
-                      <Line key={k} type="monotone" dataKey={k} strokeWidth={1.5} dot={false}
-                        stroke={["#F59E0B","#10B981","#3B82F6","#A78BFA","#F87171"][i % 5]} />
+                    <Tooltip
+                      content={<ChartTooltip labelMap={nameByKey} valueFormatter={(v) => `${v.toFixed(1)}`} />}
+                      cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
+                    />
+                    <Legend
+                      verticalAlign="bottom" height={28} iconType="circle" iconSize={8}
+                      formatter={(value) => (
+                        <span className="text-[11px] text-gray-500">{nameByKey[value] ?? value}</span>
+                      )}
+                    />
+                    {keys.map((k, i) => (
+                      <Line
+                        key={k} type="monotone" dataKey={k} name={k}
+                        strokeWidth={i === 0 ? 3 : 2}
+                        stroke={CHART_PALETTE[i % CHART_PALETTE.length]}
+                        dot={false}
+                        activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }}
+                      />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
+                <p className="mt-1 text-[10px] text-muted-foreground/70">
+                  Axe inversé : une cote qui <strong>descend</strong> (ligne qui monte) = cheval de plus en plus joué.
+                </p>
               </CardContent>
             </Card>
-          )}
+            );
+          })()}
 
           {/* ── Confrontations directes (head-to-head) ── */}
           {confront && confront.nb_paires_avec_duel > 0 && (

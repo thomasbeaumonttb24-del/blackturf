@@ -40,6 +40,27 @@ CONFIANCE_SEUILS = {
     4: 0.22,   # favori net
 }
 
+# ── Garde-fous calibration longshot ──────────────────────────────────────────
+# Au-delà de ce ratio proba_modèle / proba_marché_implicite, le "value" est
+# presque toujours une erreur de calibration sur outsider (le modèle sur-évalue
+# les grosses cotes), PAS un edge réel. On refuse → pas de faux signal.
+# NOTE : valeur conservatrice ; à recaler avec scripts/calibration_longshots.py
+# (proba prédite vs fréquence réelle observée par bucket de cote).
+# Le gate ne s'applique qu'AU-DELÀ de LONGSHOT_COTE_MIN : sur les favoris (cote
+# basse) le modèle est bien calibré et un fort écart au marché peut être un vrai
+# edge ; c'est uniquement sur les grosses cotes que l'écart trahit le sur-fit.
+MAX_MODEL_MARKET_RATIO = 2.5
+LONGSHOT_COTE_MIN = 8.0
+
+# Cote max retenue pour le calcul de l'EV = médiane marché × ce facteur.
+# Anti winner's curse : empêche de calculer l'EV sur une cote isolée très
+# au-dessus du marché (quasi toujours stale/erronée parmi les 7 sources).
+COTE_CEIL_FACTOR = 1.15
+
+# Cote gagnant max absolue pour un value bet. Au-delà, le modèle est trop peu
+# fiable (cf. biais longshot) pour qu'un edge soit crédible.
+COTE_MAX_VB = 25.0
+
 # Poids des sources pour le calcul de la cote marché de référence
 # Betfair Exchange = marché sans marge bookmaker → poids le plus élevé
 SOURCE_WEIGHTS = {
@@ -199,14 +220,34 @@ def detect_value_bet(
     if not evs:
         return None
 
-    # Garde-fou outsiders extrêmes : un "value bet" sur une cote > 50 est presque
-    # toujours une erreur de modèle (proba surestimée), pas un vrai edge. On refuse
-    # pour protéger la bankroll de l'utilisateur (intégrité : pas de faux signal).
+    # Garde-fou outsiders extrêmes : au-delà de COTE_MAX_VB le modèle est trop peu
+    # fiable (biais longshot) pour qu'un edge soit crédible. On refuse pour protéger
+    # la bankroll de l'utilisateur (intégrité : pas de faux signal).
     cote_meilleure = cotes.get(meilleure_source) or 0.0
-    if cote_meilleure > 50.0:
+    if cote_meilleure > COTE_MAX_VB:
         return None
 
-    ev_max = evs[meilleure_source]
+    # ── Garde-fou calibration : ratio proba modèle / proba marché ────────────
+    # Si le modèle attribue une proba > MAX_MODEL_MARKET_RATIO × la proba marché
+    # implicite (1/cote_juste), c'est quasi toujours une surestimation d'outsider,
+    # pas un vrai edge. C'est la source des EV absurdes (+296% sur des 37/1).
+    if cote_marche and cote_marche >= LONGSHOT_COTE_MIN:
+        implied_marche = 1.0 / cote_marche
+        if proba_top3 > MAX_MODEL_MARKET_RATIO * implied_marche:
+            log.info("valuebets.longshot_rejected",
+                     proba=round(proba_top3, 4), cote_marche=round(cote_marche, 2),
+                     ratio=round(proba_top3 / implied_marche, 2))
+            return None
+
+    # ── EV anti winner's curse ───────────────────────────────────────────────
+    # ev_max calculé sur une cote PLAFONNÉE à la médiane marché × facteur, pas sur
+    # la cote la plus haute des 7 sources (souvent isolée/stale → EV gonflée).
+    # On parie quand même sur meilleure_source, mais l'EV affichée reste crédible.
+    cotes_valides = [c for c in cotes.values() if c and c > 1.0]
+    cote_mediane = statistics.median(cotes_valides) if cotes_valides else cote_meilleure
+    cote_ev = min(cote_meilleure, cote_mediane * COTE_CEIL_FACTOR)
+    ev_max = calculer_ev(cote_ev, proba_top3)
+
     niveau = determine_niveau(ev_max, proba_top3)
     if niveau is None:
         return None

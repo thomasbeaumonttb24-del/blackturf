@@ -3,9 +3,10 @@
 import { useState } from "react";
 import useSWR from "swr";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   LineChart, Line, ReferenceLine, Cell,
 } from "recharts";
+import { axisTick, axisLine, tickLine, GRID } from "@/components/charts/chart-kit";
 import {
   AlertTriangle, CheckCircle, Activity, Thermometer, Brain,
   BarChart3, RefreshCw, ChevronDown, ChevronUp, Clock, Cpu,
@@ -276,9 +277,10 @@ export default function AlgorithmeMonitoringPage() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={histPoints}>
+                  <LineChart data={histPoints} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid {...GRID} />
                     <XAxis dataKey="date" hide />
-                    <YAxis domain={[0, 0.5]} tick={{ fontSize: 10 }} tickFormatter={(v) => v.toFixed(2)} />
+                    <YAxis domain={[0, 0.5]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={40} tickFormatter={(v) => v.toFixed(2)} />
                     <Tooltip
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }}
                       formatter={(v: number) => [v.toFixed(4), "Brier"]}
@@ -324,8 +326,9 @@ export default function AlgorithmeMonitoringPage() {
               ) : (
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={topFeatures} layout="vertical" margin={{ left: 0, right: 8 }}>
-                    <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(v) => v.toFixed(2)} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={100} />
+                    <CartesianGrid {...GRID} horizontal={false} vertical />
+                    <XAxis type="number" tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => v.toFixed(2)} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: "#9CA3AF" }} axisLine={axisLine} tickLine={tickLine} width={100} />
                     <Tooltip
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }}
                       formatter={(v: number) => [v.toFixed(4), "Poids adaptatif"]}

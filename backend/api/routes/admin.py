@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, and_, text
 
+from api.model_metrics import plausible_roi, real_model_metrics
 from api.routes.auth import require_admin
 from db.database import get_db
 from db.models import (
@@ -53,6 +54,8 @@ async def dashboard(
         select(ModelVersion).where(ModelVersion.est_actif == True)
     )
     mv = mv_res.scalar_one_or_none()
+    # Métriques fiables : précision réelle observée (vs métadonnée d'entraînement).
+    mv_metrics = await real_model_metrics(db, mv)
 
     # Cours 24h
     since_24h = now - timedelta(hours=24)
@@ -76,7 +79,8 @@ async def dashboard(
         "modele": {
             "version": mv.version_num if mv else None,
             "auc_roc": round(mv.auc_roc, 4) if mv else None,
-            "precision_top3": round(mv.precision_top3, 4) if mv else None,
+            "precision_top3": mv_metrics["precision_top3"],
+            "nb_courses_evaluees": mv_metrics["nb_courses_evaluees"],
             "trained_at": mv.created_at if mv else None,
         },
         "courses_24h": courses_24h,
@@ -263,6 +267,11 @@ async def list_models(
         select(ModelVersion).order_by(desc(ModelVersion.version_num)).limit(20)
     )).scalars().all()
 
+    def _roi(m: ModelVersion) -> float | None:
+        # ROI masqué si hors plage plausible (métadonnée train non fiable).
+        roi = plausible_roi(m.roi_simule)
+        return round(roi, 4) if roi is not None else None
+
     return [
         {
             "version_id": m.version_id,
@@ -270,7 +279,7 @@ async def list_models(
             "auc_roc": round(m.auc_roc, 4),
             "brier_score": round(m.brier_score, 4),
             "precision_top3": round(m.precision_top3, 4),
-            "roi_simule": round(m.roi_simule, 4),
+            "roi_simule": _roi(m),
             "walk_forward_auc": round(m.walk_forward_auc, 4) if m.walk_forward_auc else None,
             "walk_forward_variance": round(m.walk_forward_variance, 6) if m.walk_forward_variance else None,
             "nb_courses_train": m.nb_courses_train,
@@ -587,6 +596,8 @@ async def ml_health(
         select(ModelVersion).where(ModelVersion.est_actif == True)
     )
     mv = mv_res.scalar_one_or_none()
+    # Métriques fiables : précision réelle observée + ROI masqué si aberrant.
+    mv_metrics = await real_model_metrics(db, mv)
 
     al_res = await db.execute(
         select(AdaptiveLearningState).where(AdaptiveLearningState.state_id == "singleton")
@@ -603,8 +614,9 @@ async def ml_health(
             "version_num": mv.version_num if mv else None,
             "auc_roc": round(mv.auc_roc, 4) if mv else None,
             "brier_score": round(mv.brier_score, 4) if mv else None,
-            "precision_top3": round(mv.precision_top3, 4) if mv else None,
-            "roi_simule": round(mv.roi_simule, 4) if mv else None,
+            "precision_top3": mv_metrics["precision_top3"],
+            "roi_simule": mv_metrics["roi_simule"],
+            "nb_courses_evaluees": mv_metrics["nb_courses_evaluees"],
             "nb_courses_train": mv.nb_courses_train if mv else None,
             "trained_at": mv.created_at if mv else None,
         },

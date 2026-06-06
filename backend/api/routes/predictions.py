@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func
 
+from api.model_metrics import real_model_metrics
 from api.routes.auth import get_current_user, require_pro
 from db.database import get_db
 from db.models import (
@@ -461,12 +462,15 @@ async def get_model_version(db: AsyncSession = Depends(get_db)):
     mv = result.scalar_one_or_none()
     if not mv:
         return {"version": None}
+    # Métriques fiables : précision réelle observée + ROI masqué si aberrant.
+    m_real = await real_model_metrics(db, mv)
     return {
         "version_num": mv.version_num,
         "auc_roc": round(mv.auc_roc, 4),
         "brier_score": round(mv.brier_score, 4),
-        "precision_top3": round(mv.precision_top3, 4),
-        "roi_simule": round(mv.roi_simule, 4),
+        "precision_top3": m_real["precision_top3"],
+        "roi_simule": m_real["roi_simule"],
+        "nb_courses_evaluees": m_real["nb_courses_evaluees"],
         "nb_courses_train": mv.nb_courses_train,
         "created_at": mv.created_at,
     }

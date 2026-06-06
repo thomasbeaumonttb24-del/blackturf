@@ -184,7 +184,7 @@ export default function TrackRecordPage() {
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={data.by_month} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F6" vertical={false} />
                   <XAxis
                     dataKey="mois"
                     tick={{ fontSize: 11, fill: "#9CA3AF" }}

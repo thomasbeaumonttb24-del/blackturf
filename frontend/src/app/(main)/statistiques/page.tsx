@@ -254,7 +254,7 @@ export default function StatistiquesPage() {
             <CardContent>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={data.monthly_pnl} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F6" vertical={false} />
                   <XAxis
                     dataKey="mois"
                     tick={{ fontSize: 10, fill: "#9CA3AF" }}

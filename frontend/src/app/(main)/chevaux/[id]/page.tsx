@@ -9,8 +9,9 @@ import {
   Trophy, BarChart2, MapPin, Timer, Star,
 } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
+import { axisTick, axisLine, tickLine, GRID, ChartTooltip, BRAND_GOLD } from "@/components/charts/chart-kit";
 import { coursesApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -510,39 +511,49 @@ export default function ChevalPage() {
           <CardContent>
             {chartData.length > 1 ? (
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <AreaChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
+                  <defs>
+                    <linearGradient id="eloGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={BRAND_GOLD} stopOpacity={0.22} />
+                      <stop offset="95%" stopColor={BRAND_GOLD} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid {...GRID} />
                   <XAxis
                     dataKey="date"
-                    tick={{ fill: "#6B7280", fontSize: 10 }}
+                    tick={axisTick}
+                    axisLine={axisLine}
+                    tickLine={tickLine}
                     tickFormatter={(v) => v.slice(5)}
                   />
                   <YAxis
-                    tick={{ fill: "#6B7280", fontSize: 10 }}
+                    tick={axisTick}
+                    axisLine={axisLine}
+                    tickLine={tickLine}
                     domain={["auto", "auto"]}
                     width={44}
                   />
                   <Tooltip
-                    contentStyle={{
-                      background: "#1c1c2e",
-                      border: "1px solid rgba(255,255,255,0.1)",
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                    formatter={(v: number, name: string) => [
-                      name === "elo" ? Math.round(v) : (v > 0 ? "+" : "") + Math.round(v),
-                      name === "elo" ? "ELO" : "Delta",
-                    ]}
+                    content={
+                      <ChartTooltip
+                        valueFormatter={(v, name) =>
+                          name === "elo" ? `${Math.round(v)}` : `${v > 0 ? "+" : ""}${Math.round(v)}`
+                        }
+                        labelMap={{ elo: "ELO", delta: "Delta" }}
+                      />
+                    }
+                    cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
                   />
-                  <Line
+                  <Area
                     type="monotone"
                     dataKey="elo"
-                    stroke="#F59E0B"
+                    stroke={BRAND_GOLD}
                     strokeWidth={2.5}
-                    dot={{ fill: "#F59E0B", r: 4, strokeWidth: 0 }}
-                    activeDot={{ r: 6 }}
+                    fill="url(#eloGrad)"
+                    dot={{ fill: BRAND_GOLD, r: 3, strokeWidth: 0 }}
+                    activeDot={{ r: 5, stroke: "#fff", strokeWidth: 2 }}
                   />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-8">

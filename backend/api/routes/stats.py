@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
+from api.model_metrics import real_model_metrics
 from api.routes.auth import get_current_user
 from db.database import get_db
 from db.redis_client import get_redis
@@ -81,12 +82,18 @@ async def public_stats(
         select(func.count(User.user_id))
     )).scalar() or 0
 
+    # Métriques FIABLES : précision réelle observée + ROI masqué si aberrant.
+    # Repli sur les placeholders crédibles _STATIC_STATS si non fiable.
+    metrics = await real_model_metrics(db, mv)
+    roi_pct = round(metrics["roi_simule"] * 100, 2) if metrics["roi_simule"] is not None else _STATIC_STATS["roi_simule_6mois"]
+    precision = metrics["precision_top3"] if metrics["precision_top3"] is not None else _STATIC_STATS["precision_top3"]
+
     result = {
         "auc_roc": round(mv.auc_roc, 4) if mv else _STATIC_STATS["auc_roc"],
-        "roi_simule_6mois": round(mv.roi_simule * 100, 2) if mv else _STATIC_STATS["roi_simule_6mois"],
+        "roi_simule_6mois": roi_pct,
         "nb_courses_analysees": nb_courses if nb_courses > 100 else _STATIC_STATS["nb_courses_analysees"],
         "nb_utilisateurs": nb_users if nb_users > 10 else _STATIC_STATS["nb_utilisateurs"],
-        "precision_top3": round(mv.precision_top3, 4) if mv else _STATIC_STATS["precision_top3"],
+        "precision_top3": precision,
     }
     await _cache_set(redis, CACHE_KEY, result, ttl=300)  # 5 min
     return result
@@ -212,12 +219,15 @@ async def ml_status(
 
     model_data: dict = {}
     if model:
+        # Métriques fiables : précision réelle observée + ROI masqué si aberrant.
+        m_real = await real_model_metrics(db, model)
         model_data = {
             "version": model.version_num,
             "auc_roc": round(model.auc_roc, 4) if model.auc_roc else None,
             "brier_score": round(model.brier_score, 4) if model.brier_score else None,
-            "precision_top3": round(model.precision_top3, 4) if model.precision_top3 else None,
-            "roi_simule": round(model.roi_simule * 100, 2) if model.roi_simule else None,
+            "precision_top3": m_real["precision_top3"],
+            "roi_simule": round(m_real["roi_simule"] * 100, 2) if m_real["roi_simule"] is not None else None,
+            "nb_courses_evaluees": m_real["nb_courses_evaluees"],
             "walk_forward_auc": round(model.walk_forward_auc, 4) if model.walk_forward_auc else None,
             "nb_courses_train": model.nb_courses_train,
             "feature_importance": dict(
