@@ -658,15 +658,16 @@ async def get_bilan_pronostic(
     )[:3]]
     gagnant_reel = actual_top3[0] if actual_top3 else None
 
-    # Top-3 prédit par le modèle (rang_predit 1-2-3, non-partants exclus)
-    predicted = [p for p in preds if not p.get("non_partant") and p.get("rang_predit")]
-    predicted.sort(key=lambda p: p["rang_predit"])
+    # Top-3 prédit par le modèle — ordonné par PROBABILITÉ (proba_top1 puis top3),
+    # c.-à-d. la même base que le plan de mise (cohérence bilan ↔ paris).
+    predicted = [p for p in preds if not p.get("non_partant")]
+    predicted.sort(key=lambda p: (-(p.get("proba_top1") or 0.0), -(p.get("proba_top3") or 0.0)))
     predicted_top3 = [p["numero"] for p in predicted[:3]]
-    rang_predit_gagnant = pos_predit = None
+    rang_predit_gagnant = None
     if gagnant_reel is not None:
-        for p in preds:
+        for idx, p in enumerate(predicted, start=1):
             if p["numero"] == gagnant_reel:
-                rang_predit_gagnant = p.get("rang_predit")
+                rang_predit_gagnant = idx
                 break
     overlap_top3 = len(set(predicted_top3) & set(actual_top3))
 
