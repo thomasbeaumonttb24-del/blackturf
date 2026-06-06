@@ -148,11 +148,12 @@ def build_combo_proposals(
     def add(niveau, type_pari, sel_idx, p_model, p_market, mise, nb_combi, texte):
         if p_model <= 0:
             return
-        # Rapport pari-mutuel ≈ TRJ / proba_marché de la combinaison (le pool
-        # redistribue ~TRJ proportionnellement aux gagnants). Plancher = mise base.
+        # Rapport pari-mutuel ≈ TRJ / proba_marché de la combinaison. On plancher la
+        # proba marché (1e-3) et on plafonne le rapport : sinon une proba simulée
+        # minuscule fait exploser le rapport → EV absurde (+19000%) non crédible.
         trj = TRJ.get(type_pari, 0.70)
-        rapport = trj / max(p_market, 1e-5)
-        rapport = max(rapport, 1.1)
+        rapport = trj / max(p_market, 1e-3)
+        rapport = float(min(max(rapport, 1.1), 5000.0))
         ev = _ev(p_model, rapport)
         proposals.append({
             "niveau": niveau,
