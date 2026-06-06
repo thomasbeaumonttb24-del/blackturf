@@ -718,11 +718,6 @@ export default function CoursePage() {
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
   const [cotesHisto, setCotesHisto] = useState<Array<{ time: string; [k: string]: number | string }>>([]);
-  const [confront, setConfront] = useState<{
-    nb_paires_avec_duel: number;
-    paires: Array<{ a_numero: number; a_nom: string; b_numero: number; b_nom: string; nb_rencontres: number; a_victoires: number; b_victoires: number; ecart_moyen_longueurs: number | null; derniere_rencontre: { date: string; hippodrome: string; a_position: number; b_position: number } | null }>;
-    par_cheval: Array<{ numero: number; nom: string; bilan: string; victoires: number; defaites: number; nb_adversaires_connus: number }>;
-  } | null>(null);
   const [analysis, setAnalysis] = useState<{
     narrative: string;
     market_signals: Array<{ numero: number; nom: string; signal: string; detail: string; score: number }>;
@@ -818,14 +813,6 @@ export default function CoursePage() {
       })
       .catch(() => {});
   }, [id, user, course]);
-
-  // Confrontations directes (head-to-head) entre partants
-  useEffect(() => {
-    if (!course) return;
-    api.get(`/courses/${id}/confrontations`)
-      .then((res) => setConfront(res.data))
-      .catch(() => {});
-  }, [id, course]);
 
   async function handleTriggerPred() {
     setTriggeringPred(true);
@@ -1246,51 +1233,6 @@ export default function CoursePage() {
             );
           })()}
 
-          {/* ── Confrontations directes (head-to-head) ── */}
-          {confront && confront.nb_paires_avec_duel > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">
-                  Confrontations directes
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    {confront.nb_paires_avec_duel} duel{confront.nb_paires_avec_duel > 1 ? "s" : ""} entre partants
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-muted-foreground border-b">
-                        <th className="py-2 font-medium">Duel</th>
-                        <th className="font-medium">Bilan</th>
-                        <th className="font-medium">Écart moy.</th>
-                        <th className="font-medium">Dernière rencontre</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {confront.paires.slice(0, 15).map((p, i) => (
-                        <tr key={i} className="border-b last:border-0">
-                          <td className="py-2">
-                            <span className="font-medium">N°{p.a_numero} {p.a_nom}</span>
-                            <span className="text-muted-foreground"> vs </span>
-                            <span className="font-medium">N°{p.b_numero} {p.b_nom}</span>
-                          </td>
-                          <td>{p.a_victoires}–{p.b_victoires}{p.nb_rencontres > 1 ? ` (${p.nb_rencontres})` : ""}</td>
-                          <td>{p.ecart_moyen_longueurs != null ? `${p.ecart_moyen_longueurs} L` : "—"}</td>
-                          <td className="text-muted-foreground">
-                            {p.derniere_rencontre
-                              ? `${p.derniere_rencontre.date} · ${p.derniere_rencontre.hippodrome} (${p.derniere_rencontre.a_position}–${p.derniere_rencontre.b_position})`
-                              : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {/* ── RIGHT SIDEBAR ── */}

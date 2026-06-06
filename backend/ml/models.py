@@ -439,25 +439,38 @@ class BlackTurfEnsemble:
 
         return correct / total if total > 0 else 0.0
 
+    # ROI sim : garde-fous anti-aberration (un seul outsider gagnant à grosse cote
+    # sur un petit set faisait exploser le ROI ex. +602%, métadonnée non crédible).
+    _ROI_MAX_COTE = 30.0   # au-delà : pari non réaliste en flat-stake, ignoré
+    _ROI_MIN_BETS = 20     # sous ce nombre de value bets, ROI non significatif
+
     def _simulate_roi(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray) -> float:
-        """Simule le ROI si on joue tous les value bets (EV > 0.05)."""
+        """
+        Simule le ROI si on joue tous les value bets (EV > 0.05), en flat-stake.
+
+        Garde-fous : on ignore les cotes > _ROI_MAX_COTE (bruit non tradeable) et on
+        exige au moins _ROI_MIN_BETS paris, sinon le ROI n'est pas significatif et
+        on renvoie 0.0 — on ne stocke jamais une valeur aberrante.
+        """
         if "cote_pmu" not in X.columns:
             return 0.0
 
         mise_totale = 0.0
         gains_totaux = 0.0
+        nb_bets = 0
 
-        for i, (proba, label, cote) in enumerate(zip(probas, y.values, X["cote_pmu"].values)):
-            if not cote or cote <= 1.0:
+        for proba, label, cote in zip(probas, y.values, X["cote_pmu"].values):
+            if not cote or cote <= 1.0 or cote > self._ROI_MAX_COTE:
                 continue
             ev = (cote * proba) - 1
             if ev > 0.05:
                 mise = 1.0
                 mise_totale += mise
+                nb_bets += 1
                 if label == 1:
                     gains_totaux += mise * cote
 
-        if mise_totale == 0:
+        if mise_totale == 0 or nb_bets < self._ROI_MIN_BETS:
             return 0.0
         return float((gains_totaux - mise_totale) / mise_totale)
 
