@@ -450,7 +450,7 @@ async def compute_features_for_participation(
         "steam_move_betclic": float(steam_move_betclic),
         "ratio_pmu_geny": cote / max(float(cote_geny or cote), 0.01),
         "mouvement_30min": mouvement_30min,
-        "mouvement_bm_pct": float(np.clip(mouvement_bm_pct / 100, -1.0, 1.0)),
+        "mouvement_bm_pct": float(np.clip(mouvement_bm_pct, -1.0, 1.0)),  # déjà un ratio (direct-ref)/ref
         "rang_cote": rang_cote,
         "est_favori": est_favori,
         "prob_implicite": prob_implicite,
@@ -683,7 +683,7 @@ async def compute_features_for_participation(
         "steam_move_betclic": steam_move_betclic,
         "gap_pmu_betfair": float(np.clip(gap_pmu_betfair, -2.0, 2.0)),
         "spread_bookmakers": float(np.clip(spread_bookmakers, 0.0, 2.0)),
-        "mouvement_bm_pct": float(np.clip(mouvement_bm_pct / 100, -1.0, 1.0)),
+        "mouvement_bm_pct": float(np.clip(mouvement_bm_pct, -1.0, 1.0)),  # déjà un ratio (direct-ref)/ref
     }
 
     # ── O. Velocity ELO — vitesse de progression sur 30 jours ─────────────
@@ -1208,7 +1208,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             -- Équipement
             eq.deferre_change, eq.premier_deferre, eq.oeilleres_change, eq.equipement_nouveau,
             -- Association J×E
-            aje.taux_victoire AS asso_win, aje.nb_courses AS asso_nb
+            aje.taux_victoire AS asso_win, aje.nb_courses AS asso_nb,
+            -- Avis entraîneur + tendance cote (enrichissements PMU, en fin pour ne pas
+            -- décaler les index positionnels existants)
+            p.avis_entraineur, p.tendance_force
         FROM participations p
         JOIN courses c ON c.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
@@ -1398,7 +1401,13 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         e_win, e_place, e_roi, e_vic_s,
         deferre_change, premier_deferre, oeilleres_change, equipement_nouveau,
         asso_win, asso_nb,
+        avis_entraineur_raw, tendance_force_raw,
     ) = row
+
+    # Avis entraîneur PMU → score numérique (POSITIF=1, NEUTRE=0.5, NEGATIF=0)
+    _avis_map = {"POSITIF": 1.0, "TRES_POSITIF": 1.0, "NEUTRE": 0.5, "NEGATIF": 0.0, "TRES_NEGATIF": 0.0}
+    avis_entraineur_score = _avis_map.get((avis_entraineur_raw or "").upper(), 0.5)
+    tendance_force_val = float(tendance_force_raw) if isinstance(tendance_force_raw, (int, float)) else 0.0
 
     nb_partants_int = int(nb_partants or 10)
     disc_lower = (discipline or "plat").lower()
@@ -1542,7 +1551,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     cote_min = min(all_cotes) if all_cotes else cote
     spread_bm = (max(all_cotes) - min(all_cotes)) / max(cote_min, 0.01) if len(all_cotes) >= 2 else 0.0
     gap_pmu_bf = (cote - float(cote_betfair)) / float(cote_betfair) if cote_betfair and cote_betfair > 1.0 else 0.0
-    steam_bm = float(np.clip(float(mouvement_bm_raw or 0) / 100, -1.0, 1.0))
+    steam_bm = float(np.clip(float(mouvement_bm_raw or 0), -1.0, 1.0))  # déjà ratio (direct-ref)/ref
     steam_betclic = 0.0
     if cote_betclic_ouv and cote_betclic and cote_betclic_ouv > 1.0:
         steam_betclic = float(np.clip((cote_betclic_ouv - float(cote_betclic)) / cote_betclic_ouv, -1.0, 1.0))
@@ -1882,6 +1891,12 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "composite_confidence": float(composite_confidence),
     }
 
+    # ── Enrichissements PMU (avis entraîneur, ampleur tendance cote) ──────────
+    feat_pmu = {
+        "avis_entraineur_score": float(avis_entraineur_score),
+        "tendance_cote_force": float(np.clip(tendance_force_val, 0.0, 50.0)),
+    }
+
     # ── Assemblage final ──────────────────────────────────────────────────────
     return {
         "participation_id": participation_id, "course_id": course_id,
@@ -1891,7 +1906,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         **feat_field, **feat_temporal, **feat_pace_conflict, **feat_pedigree,
         **feat_synergy, **feat_fingerprint, **feat_advanced, **feat_pace,
         **feat_class, **feat_bounce, **feat_draw, **feat_trainer,
-        **feat_career, **feat_confidence,
+        **feat_career, **feat_confidence, **feat_pmu,
     }
 
 
