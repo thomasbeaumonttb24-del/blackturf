@@ -524,11 +524,13 @@ function MiseCalculatorWidget({
   userPlan,
   profil,
   predictions,
+  statut,
 }: {
   courseId: string;
   userPlan: string | undefined;
   profil: string;
   predictions: Prediction[] | null;
+  statut?: string;
 }) {
   const [montant, setMontant] = useState("");
   const [plan, setPlan] = useState<MisePlan | null>(null);
@@ -572,7 +574,9 @@ function MiseCalculatorWidget({
     return (
       <div className="text-center py-6 text-muted-foreground text-sm">
         <Brain className="h-8 w-8 mx-auto mb-2 opacity-40" />
-        Lancez l&apos;analyse IA d&apos;abord pour activer le calculateur.
+        {statut === "termine"
+          ? "Course non analysée par l'IA — calculateur indisponible."
+          : "Lancez l'analyse IA d'abord pour activer le calculateur."}
       </div>
     );
   }
@@ -1596,13 +1600,23 @@ export default function CoursePage() {
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : !predictions ? (
-                <div className="text-center py-4">
-                  <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                  <p className="text-sm text-muted-foreground mb-3">Aucune analyse disponible</p>
-                  <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
-                    {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse IA"}
-                  </Button>
-                </div>
+                course.statut === "termine" ? (
+                  <div className="text-center py-4">
+                    <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                    <p className="text-sm font-medium text-muted-foreground">Course non analysée par l&apos;IA</p>
+                    <p className="text-xs text-muted-foreground/70 mt-1">
+                      Cette course (souvent étrangère) n&apos;a pas été couverte par le modèle.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                    <p className="text-sm text-muted-foreground mb-3">Aucune analyse disponible</p>
+                    <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
+                      {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse IA"}
+                    </Button>
+                  </div>
+                )
               ) : (
                 <div className="space-y-3">
                   <p className="text-[11px] font-medium text-muted-foreground">
@@ -1661,6 +1675,7 @@ export default function CoursePage() {
                 userPlan={user?.plan}
                 profil={profil}
                 predictions={predictions}
+                statut={course.statut}
               />
             </CardContent>
           </Card>
