@@ -210,6 +210,7 @@ async def run_post_course(course_id: str) -> None:
                 }
 
                 analyzer = PostRaceAnalyzer()
+                analyzer.adaptive_learning = get_adaptive_learning()  # câbler le signal d'apprentissage
                 adaptive_learning_result = await analyzer.analyze_race(
                     session=al_session,
                     course_id=course_id,
@@ -217,22 +218,37 @@ async def run_post_course(course_id: str) -> None:
                     resultat=resultat_for_analysis,
                 )
 
-                # Persister l'état adaptatif mis à jour
-                al = get_adaptive_learning()
-                await al.save_state(al_session)
+                # COMMIT IMMÉDIAT : persiste race_learning_log + bias_matrix AVANT
+                # les étapes suivantes. Sinon une erreur d'un step ultérieur
+                # empoisonne la transaction → le commit final devient un rollback
+                # silencieux et race_learning_log reste vide.
+                await al_session.commit()
 
-                # ── Drift detection ────────────────────────────────────────
+                # ── État adaptatif (commit séparé, isolé) ──────────────────
                 brier_val = float(adaptive_learning_result.get("brier_score") or 0.20)
                 was_surp = bool(adaptive_learning_result.get("was_surprise", False))
-                drift_det = get_drift_detector()
-                drift_result = drift_det.update(
-                    brier_score=brier_val,
-                    was_surprise=was_surp,
-                    prediction_confidence=float(
-                        adaptive_learning_result.get("gagnant_proba_ia") or 0.3
-                    ),
-                )
-                await drift_det.save_state(al_session)
+                try:
+                    al = get_adaptive_learning()
+                    await al.save_state(al_session)
+                    await al_session.commit()
+                except Exception as e:
+                    await al_session.rollback()
+                    log.warning("pipeline.adaptive_save_skip", course_id=course_id, err=str(e)[:140])
+
+                # ── Drift detection (commit séparé, isolé) ─────────────────
+                drift_result = {}
+                try:
+                    drift_det = get_drift_detector()
+                    drift_result = drift_det.update(
+                        brier_score=brier_val,
+                        was_surprise=was_surp,
+                        prediction_confidence=float(adaptive_learning_result.get("gagnant_proba_ia") or 0.3),
+                    )
+                    await drift_det.save_state(al_session)
+                    await al_session.commit()
+                except Exception as e:
+                    await al_session.rollback()
+                    log.warning("pipeline.drift_save_skip", course_id=course_id, err=str(e)[:140])
 
                 # Si drift critique → déclencher retraining immédiat
                 if drift_result.get("severity") == "critical":
@@ -244,8 +260,6 @@ async def run_post_course(course_id: str) -> None:
                         triggering_retrain=True,
                     )
                     asyncio.create_task(_async_retrain_wrapper())
-
-                await al_session.commit()
 
                 log.info(
                     "pipeline.adaptive_learning.updated",
@@ -1039,7 +1053,7 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
             nb_partants=course.nb_partants,
             position_arrivee=entry.get("position"),
             incident=entry.get("incident"),
-            temps_officiel=entry.get("temps"),
+            temps_officiel=(str(entry.get("temps")) if entry.get("temps") is not None else None),
             allocation=course.allocation,
             niveau_course=course.niveau_course,
             jockey_course=jockey_nom,
