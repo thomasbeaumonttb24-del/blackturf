@@ -26,14 +26,19 @@ import { formatEuro, formatDateTime, cn } from "@/lib/utils";
 interface Entry {
   entry_id: string; date: string; type_pari: string;
   course_id: string | null;
+  numero_reunion: number | null;
   chevaux: string | null; mise: number; cote: number | null;
   resultat: string | null; gain_perte: number | null;
   suivi_reco_ia: boolean; notes: string | null;
 }
 
-// Extrait le code R{réunion}C{course} depuis le course_id daté (ddmmyyyyR..C..)
-function rcCode(courseId: string | null | undefined): string | null {
+// Code R{réunion}C{course} affiché : on privilégie le n° de réunion PUBLIC
+// (numero_reunion = numExterne PMU) pour matcher pmu.fr ; fallback sur le suffixe
+// du course_id (numOfficiel) si non disponible.
+function rcCode(courseId: string | null | undefined, numeroReunion?: number | null): string | null {
   if (!courseId) return null;
+  const suffix = courseId.match(/R\d+C(\d+)$/);
+  if (numeroReunion && suffix) return `R${numeroReunion}C${suffix[1]}`;
   return courseId.match(/R\d+C\d+$/)?.[0] ?? null;
 }
 interface Stats {
@@ -438,9 +443,9 @@ export default function BankrollPage() {
                       <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{formatDateTime(e.date)}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="text-xs font-medium text-gray-700">{e.type_pari}</div>
-                        {rcCode(e.course_id) && (
+                        {rcCode(e.course_id, e.numero_reunion) && (
                           <Link href={`/courses/${e.course_id}`} className="mt-0.5 inline-flex items-center rounded bg-gray-900 px-1.5 py-0 text-[10px] font-bold text-white hover:bg-gray-700 transition-colors">
-                            {rcCode(e.course_id)}
+                            {rcCode(e.course_id, e.numero_reunion)}
                           </Link>
                         )}
                       </td>

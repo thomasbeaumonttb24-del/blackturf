@@ -51,6 +51,7 @@ class EntryUpdate(BaseModel):
 class EntryOut(BaseModel):
     entry_id: str
     course_id: Optional[str]
+    numero_reunion: Optional[int] = None  # n° réunion public (PMU numExterne) pour le code R
     reco_id: Optional[str]
     bankroll_id: Optional[str]
     date: datetime
@@ -107,10 +108,11 @@ class BankrollOut(BaseModel):
 # ─────────────────────────────────────────────
 # Helper
 # ─────────────────────────────────────────────
-def _entry_to_out(e: BankrollEntry) -> EntryOut:
+def _entry_to_out(e: BankrollEntry, numero_reunion: Optional[int] = None) -> EntryOut:
     return EntryOut(
         entry_id=e.entry_id,
         course_id=e.course_id,
+        numero_reunion=numero_reunion,
         reco_id=e.reco_id,
         bankroll_id=e.bankroll_id,
         date=e.date,
@@ -209,7 +211,19 @@ async def list_entries(
 
     q = q.order_by(desc(BankrollEntry.date)).limit(limit).offset(offset)
     rows = (await db.execute(q)).scalars().all()
-    return [_entry_to_out(e) for e in rows]
+
+    # Récupère le n° de réunion PUBLIC (numExterne) des courses concernées en un lot,
+    # pour afficher le bon code R (cohérent avec pmu.fr) au lieu du numOfficiel parsé.
+    from db.models import Course as _Course
+    cids = [e.course_id for e in rows if e.course_id]
+    num_by_cid: dict[str, int] = {}
+    if cids:
+        nr = await db.execute(
+            select(_Course.course_id, _Course.numero_reunion).where(_Course.course_id.in_(cids))
+        )
+        num_by_cid = {cid: nrv for cid, nrv in nr.fetchall() if nrv is not None}
+
+    return [_entry_to_out(e, num_by_cid.get(e.course_id)) for e in rows]
 
 
 @router.post("/bankroll/entries", response_model=EntryOut, status_code=201)
