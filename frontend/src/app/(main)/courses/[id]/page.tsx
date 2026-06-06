@@ -642,8 +642,9 @@ function ResultatsSection({ resultats }: {
   const medal = (pos: number) => (pos === 1 ? "🥇" : pos === 2 ? "🥈" : pos === 3 ? "🥉" : `${pos}e`);
   const rapportLabel: Record<string, string> = {
     e_simple_gagnant: "Gagnant", e_simple_place: "Placé", e_couple_gagnant: "Couplé G.",
-    e_couple_place: "Couplé P.", e_tierce: "Tiercé", e_quarte_plus: "Quarté+", e_quinte_plus: "Quinté+",
-    e_2sur4: "2sur4", e_multi: "Multi",
+    e_couple_place: "Couplé P.", e_trio: "Trio", e_tierce: "Tiercé",
+    e_quarte_plus: "Quarté+", e_quinte_plus: "Quinté+",
+    e_2sur4: "2sur4", e_super_quatre: "2sur4", e_multi: "Multi",
   };
 
   return (
@@ -1268,7 +1269,7 @@ export default function CoursePage() {
                 <span>🏆 {course.montant_offert_1er.toLocaleString("fr-FR")}€ au gagnant</span>
               )}
               {course.categorie_particularite && (
-                <span className="capitalize">🏷️ {course.categorie_particularite.toLowerCase()}</span>
+                <span className="capitalize">🏷️ {course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
               )}
               {course.meteo?.temperature && (
                 <span><Cloud className="h-3 w-3 inline" /> {course.meteo.temperature}°C</span>
@@ -1678,7 +1679,7 @@ export default function CoursePage() {
               {course.niveau_course && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Niveau</span>
-                  <span className="font-medium">{course.niveau_course}</span>
+                  <span className="font-medium">{course.niveau_course.replace(/_/g, " ")}</span>
                 </div>
               )}
               {course.terrain_officiel && (

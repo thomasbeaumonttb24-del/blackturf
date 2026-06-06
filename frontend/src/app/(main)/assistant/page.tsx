@@ -20,6 +20,15 @@ interface Message {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Rendu léger du markdown **gras** (le moteur renvoie du markdown simple).
+function renderRich(text: string) {
+  return text.split(/\*\*(.+?)\*\*/g).map((part, i) =>
+    i % 2 === 1
+      ? <strong key={i} className="font-semibold text-gray-900">{part}</strong>
+      : <span key={i}>{part}</span>
+  );
+}
+
 export default function AssistantPage() {
   const { user, loading: authLoading } = useRequireAuth();
   const [messages, setMessages] = useState<Message[]>([
@@ -250,7 +259,7 @@ export default function AssistantPage() {
                   ))}
                 </div>
               ) : (
-                <div className="whitespace-pre-wrap">{msg.content}</div>
+                <div className="whitespace-pre-wrap">{renderRich(msg.content)}</div>
               )}
             </div>
           </div>
