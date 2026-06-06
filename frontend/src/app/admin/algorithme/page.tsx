@@ -52,14 +52,15 @@ function SeverityCard({ severity }: { severity: string }) {
   );
 }
 
-function TemperatureGauge({ temp }: { temp: number }) {
-  const pct = Math.min(Math.max(((temp - 0.5) / 1.5) * 100, 0), 100);
-  const color = temp < 0.85 ? "#3b82f6" : temp > 1.2 ? "#ef4444" : "#10b981";
+function TemperatureGauge({ temp }: { temp?: number | null }) {
+  const t = typeof temp === "number" && isFinite(temp) ? temp : 1.0;
+  const pct = Math.min(Math.max(((t - 0.5) / 1.5) * 100, 0), 100);
+  const color = t < 0.85 ? "#3b82f6" : t > 1.2 ? "#ef4444" : "#10b981";
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">Froide (sharpens)</span>
-        <span className="font-mono font-bold" style={{ color }}>{temp.toFixed(4)}</span>
+        <span className="font-mono font-bold" style={{ color }}>{t.toFixed(4)}</span>
         <span className="text-muted-foreground">Chaude (flattens)</span>
       </div>
       <div className="h-3 rounded-full bg-muted/50 overflow-hidden">
@@ -476,16 +477,16 @@ export default function AlgorithmeMonitoringPage() {
                         <td className="px-4 py-2 text-muted-foreground">{row.terrain ?? "—"}</td>
                         <td className="px-4 py-2 text-right">{row.nb_courses}</td>
                         <td className="px-4 py-2 text-right text-amber-400">
-                          {(row.taux_surprise * 100).toFixed(1)}%
+                          {(((row.taux_surprise ?? 0) * 100)).toFixed(1)}%
                         </td>
                         <td className="px-4 py-2 text-right font-mono">
                           {row.brier_moyen?.toFixed(4) ?? "—"}
                         </td>
                         <td className="px-4 py-2 text-right">
                           <span
-                            className={`font-bold font-mono ${Math.abs(row.correction_factor) > 0.08 ? (row.correction_factor > 0 ? "text-red-400" : "text-blue-400") : "text-muted-foreground"}`}
+                            className={`font-bold font-mono ${Math.abs(row.correction_factor ?? 0) > 0.08 ? ((row.correction_factor ?? 0) > 0 ? "text-red-400" : "text-blue-400") : "text-muted-foreground"}`}
                           >
-                            {row.correction_factor > 0 ? "+" : ""}{row.correction_factor.toFixed(4)}
+                            {(row.correction_factor ?? 0) > 0 ? "+" : ""}{(row.correction_factor ?? 0).toFixed(4)}
                           </span>
                         </td>
                       </tr>
