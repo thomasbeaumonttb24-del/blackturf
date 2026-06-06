@@ -769,7 +769,13 @@ async def compute_and_save_jockey_entraineur_assoc(
             FROM participations p
             JOIN courses c ON p.course_id = c.course_id
             LEFT JOIN (
-                SELECT participation_id, (classement->0->>'numero')::int = numero AS position_finale
+                -- Vraie position d'arrivée : on cherche l'entrée du cheval (par numéro)
+                -- dans le tableau JSON du classement et on lit sa position.
+                SELECT p2.participation_id,
+                       (SELECT (elem->>'position')::int
+                        FROM jsonb_array_elements(r2.classement::jsonb) elem
+                        WHERE (elem->>'numero')::int = p2.numero
+                        LIMIT 1) AS position_finale
                 FROM resultats r2
                 JOIN participations p2 ON r2.course_id = p2.course_id
             ) r ON r.participation_id = p.participation_id

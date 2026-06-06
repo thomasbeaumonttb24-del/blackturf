@@ -492,39 +492,34 @@ class PostRaceAnalyzer:
         hippodrome = ctx.get("hippodrome", "inconnu")
 
         try:
-            # Mise à jour upsert du compteur de biais
+            # Upsert aligné au schéma réel (bias_id, nb_courses, nb_surprises,
+            # correction_factor). On suit le taux de surprise par contexte ;
+            # si trop élevé sur assez de courses → correction négative de confiance.
             await session.execute(text("""
                 INSERT INTO bias_matrix (
-                    bias_key, discipline, terrain, hippodrome,
-                    nb_courses, nb_top3_ok, nb_surprises,
-                    taux_erreur, correction_factor,
-                    updated_at
+                    bias_id, bias_key, discipline, terrain, hippodrome,
+                    nb_courses, nb_surprises, correction_factor, updated_at
                 ) VALUES (
-                    :key, :discipline, :terrain, :hippodrome,
-                    1, :top3_ok, :surprise,
-                    CASE WHEN :top3_ok THEN 0.0 ELSE 1.0 END, 0.0,
-                    NOW()
+                    :bid, :key, :discipline, :terrain, :hippodrome,
+                    1, :surprise, 0.0, NOW()
                 )
                 ON CONFLICT (bias_key) DO UPDATE SET
                     nb_courses = bias_matrix.nb_courses + 1,
-                    nb_top3_ok = bias_matrix.nb_top3_ok + :top3_ok,
                     nb_surprises = bias_matrix.nb_surprises + :surprise,
-                    taux_erreur = 1.0 - (bias_matrix.nb_top3_ok + :top3_ok)::float /
-                                  (bias_matrix.nb_courses + 1),
                     correction_factor = CASE
                         WHEN (bias_matrix.nb_courses + 1) >= :seuil_courses
-                             AND 1.0 - (bias_matrix.nb_top3_ok + :top3_ok)::float /
+                             AND (bias_matrix.nb_surprises + :surprise)::float /
                                  (bias_matrix.nb_courses + 1) > :seuil_erreur
-                        THEN -0.05  -- Réduction de 5% de confiance dans ce contexte
+                        THEN -0.05
                         ELSE 0.0
                     END,
                     updated_at = NOW()
             """), {
+                "bid": str(uuid.uuid4()),
                 "key": f"{discipline}|{terrain}|{hippodrome}",
                 "discipline": discipline,
                 "terrain": terrain,
                 "hippodrome": hippodrome,
-                "top3_ok": int(top3_precision),
                 "surprise": int(was_surprise),
                 "seuil_courses": BIAIS_SEUIL_COURSES,
                 "seuil_erreur": BIAIS_SEUIL_ERREUR,
@@ -532,6 +527,10 @@ class PostRaceAnalyzer:
             await session.flush()
         except Exception as e:
             log.error("post_race.bias_update_error", err=str(e))
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
     async def get_performance_summary(
         self,

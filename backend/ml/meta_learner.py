@@ -255,13 +255,13 @@ class MetaLearner:
             result = await session.execute(text("""
                 SELECT
                     rll.course_id,
-                    rll.top3_precision,
-                    rll.winner_proba_ia          AS base_proba,
+                    (rll.gagnant_rang_predit <= 3)  AS top3_precision,
+                    rll.gagnant_proba_ia            AS base_proba,
                     rll.discipline,
                     rll.terrain,
                     rll.hippodrome,
                     rll.nb_partants,
-                    rll.brier_course,
+                    rll.brier_score                 AS brier_course,
                     rll.was_surprise,
                     c.date_heure,
                     c.est_quinte,
@@ -279,18 +279,18 @@ class MetaLearner:
                 FROM race_learning_log rll
                 JOIN courses c ON c.course_id = rll.course_id
                 JOIN participations p ON p.course_id = rll.course_id
-                WHERE rll.created_at >= :cutoff
-                  AND rll.top3_precision IS NOT NULL
-                  AND rll.winner_proba_ia IS NOT NULL
+                WHERE rll.analyzed_at >= :cutoff
+                  AND rll.gagnant_rang_predit IS NOT NULL
+                  AND rll.gagnant_proba_ia IS NOT NULL
                 GROUP BY
                     rll.course_id,
-                    rll.top3_precision,
-                    rll.winner_proba_ia,
+                    rll.gagnant_rang_predit,
+                    rll.gagnant_proba_ia,
                     rll.discipline,
                     rll.terrain,
                     rll.hippodrome,
                     rll.nb_partants,
-                    rll.brier_course,
+                    rll.brier_score,
                     rll.was_surprise,
                     c.date_heure,
                     c.est_quinte,

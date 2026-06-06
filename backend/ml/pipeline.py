@@ -710,6 +710,29 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         }
         recos = generer_recommandations_course(predictions, course_info, bankroll=user_bankroll)
 
+        # ── Remplacer les EV/probas HARDCODÉS des paris combinés par les valeurs
+        # RÉELLES du moteur Plackett-Luce (intégrité : aucune valeur inventée). ──
+        try:
+            from ml.combo_bets import build_combo_proposals
+            combo = build_combo_proposals(predictions, course_info, bankroll=user_bankroll)
+            props = combo.get("proposals", [])
+            combo_full = {c["type_pari"].lower(): c for c in props}            # ex "couplé placé"
+            combo_cat = {}
+            for c in props:                                                     # 1er par catégorie
+                combo_cat.setdefault(c["type_pari"].split()[0].lower(), c)
+            for reco in recos:
+                t = reco["type_pari"]
+                if t in ("Simple Gagnant", "Simple Placé"):
+                    continue  # paris simples : EV déjà réel (ev_max du value bet)
+                cp = combo_full.get(t.lower()) or combo_cat.get(t.split()[0].lower())
+                if cp:
+                    reco["ev_calcule"] = cp["ev"]            # EV réelle (P × rapport − 1)
+                    reco["confidence"] = cp["proba_gain"]    # proba simulée
+                    if cp.get("cout_total"):
+                        reco["cout_total"] = cp["cout_total"]
+        except Exception as e:
+            log.warning("pipeline.combo_ev_override_failed", course_id=course_id, err=str(e)[:140])
+
         # Sauvegarder recommandations en DB
         for reco in recos:
             r = Recommandation(
