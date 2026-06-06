@@ -530,8 +530,21 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # modèle avec la proba implicite (1/cote, overround retiré). Ça calibre les
         # probas ET empêche un modèle imparfait d'attribuer 13% de victoire à un
         # 239/1 (proba implicite ~0.4%). ALPHA = confiance accordée au modèle.
-        ALPHA_MODELE = 0.55
+        #
+        # ALPHA ADAPTATIF (calibration empirique scripts/calibration_longshots.py) :
+        # le modèle est bien calibré jusqu'à cote ~12 (ratio proba/réel 0.7-1.0) puis
+        # sur-évalue les outsiders (ratio 1.76 sur cote 20-40) et "plafonne" ~0.043
+        # quand le marché continue de décroître. On dégrade donc ALPHA avec la cote :
+        # au-delà du seuil, le marché (mieux calibré) domine progressivement.
+        ALPHA_MAX = 0.55          # confiance modèle sur favoris (cote ≤ ALPHA_FULL_COTE)
+        ALPHA_MIN = 0.15          # plancher : sur gros outsiders le marché domine
+        ALPHA_FULL_COTE = 12.0    # en-deçà : modèle de confiance
+        ALPHA_DECAY = 0.022       # pente de décroissance par unité de cote au-delà du seuil
         cotes_pmu = np.array([float(f.get("cote_pmu") or 0.0) for f in features_list])
+        alpha = np.clip(
+            ALPHA_MAX - ALPHA_DECAY * np.maximum(cotes_pmu - ALPHA_FULL_COTE, 0.0),
+            ALPHA_MIN, ALPHA_MAX,
+        )
         implied = np.where(cotes_pmu > 1.0, 1.0 / cotes_pmu, 0.0)
         si = float(implied.sum())
         if si > 0:
@@ -539,7 +552,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             # si une cote manque (implied=0), on garde la proba modèle pour ce cheval
             blend = np.where(
                 implied > 0,
-                ALPHA_MODELE * probas_top1 + (1 - ALPHA_MODELE) * implied_norm,
+                alpha * probas_top1 + (1.0 - alpha) * implied_norm,
                 probas_top1,
             )
             bs = float(blend.sum())

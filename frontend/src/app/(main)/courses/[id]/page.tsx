@@ -1195,23 +1195,28 @@ export default function CoursePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={240}>
-                  <LineChart data={cotesHisto} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={cotesHisto} margin={{ top: 16, right: 20, left: 4, bottom: 12 }}>
                     <CartesianGrid {...GRID} />
-                    <XAxis dataKey="time" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={28} />
+                    <XAxis
+                      dataKey="time" tick={axisTick} axisLine={axisLine} tickLine={tickLine}
+                      minTickGap={44} padding={{ left: 12, right: 12 }} dy={6}
+                    />
                     <YAxis
-                      tick={axisTick} axisLine={axisLine} tickLine={tickLine} reversed
-                      width={38} tickFormatter={(v) => `${v}`}
-                      domain={["dataMin - 2", "dataMax + 2"]}
+                      tick={axisTick} axisLine={axisLine} tickLine={tickLine}
+                      width={42} tickCount={6} allowDecimals={false}
+                      tickFormatter={(v) => `${Math.round(v)}`}
+                      domain={["dataMin - 1", "dataMax + 1"]}
                     />
                     <Tooltip
                       content={<ChartTooltip labelMap={nameByKey} valueFormatter={(v) => `${v.toFixed(1)}`} />}
                       cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
                     />
                     <Legend
-                      verticalAlign="bottom" height={28} iconType="circle" iconSize={8}
+                      verticalAlign="bottom" height={34} iconType="circle" iconSize={9}
+                      wrapperStyle={{ paddingTop: 12 }}
                       formatter={(value) => (
-                        <span className="text-[11px] text-gray-500">{nameByKey[value] ?? value}</span>
+                        <span className="text-[11px] font-medium text-gray-500 mr-1">{value}</span>
                       )}
                     />
                     {keys.map((k, i) => (
@@ -1220,13 +1225,13 @@ export default function CoursePage() {
                         strokeWidth={i === 0 ? 3 : 2}
                         stroke={CHART_PALETTE[i % CHART_PALETTE.length]}
                         dot={false}
-                        activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }}
+                        activeDot={{ r: 5, strokeWidth: 2, stroke: "#fff" }}
                       />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
-                <p className="mt-1 text-[10px] text-muted-foreground/70">
-                  Axe inversé : une cote qui <strong>descend</strong> (ligne qui monte) = cheval de plus en plus joué.
+                <p className="mt-2 text-[10px] text-muted-foreground/70">
+                  Cote en baisse (courbe qui descend) = cheval de plus en plus joué.
                 </p>
               </CardContent>
             </Card>

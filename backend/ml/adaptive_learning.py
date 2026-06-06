@@ -441,12 +441,18 @@ class AdaptiveLearning:
 
         Retourne les probas calibrées et normalisées.
         """
-        # ── Temperature scaling ──────────────────────────────────────────
-        # logit puis division par T, puis sigmoid
+        # ── Temperature scaling CENTRÉ sur la moyenne du champ ───────────
+        # Le scaling standard (logits / T) tire toute proba < 0.5 VERS 0.5 → il
+        # GONFLE les longshots (un outsider à 0.05 devient ~0.09 à T=1.3) et nourrit
+        # les value bets à EV absurde. En centrant sur la moyenne des logits de la
+        # COURSE, T>1 réduit l'écart favori↔champ (corrige la sur-confiance sur les
+        # favoris, le vrai problème) SANS propulser les outsiders vers 0.5.
         eps = 1e-7
         p_clipped = np.clip(probas, eps, 1 - eps)
         logits = np.log(p_clipped / (1 - p_clipped))
-        scaled_logits = logits / max(self.temperature, 0.1)
+        T = max(self.temperature, 0.1)
+        mean_logit = float(logits.mean()) if logits.size else 0.0
+        scaled_logits = mean_logit + (logits - mean_logit) / T
         p_calibrated = 1.0 / (1.0 + np.exp(-scaled_logits))
 
         # ── Correction contextuelle biais ────────────────────────────────
