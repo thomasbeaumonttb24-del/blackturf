@@ -206,7 +206,7 @@ class AdaptiveLearning:
                     (state_id, temperature, feature_weights_json, n_races,
                      brier_ema, surprise_ema, updated_at)
                 VALUES
-                    (:sid, :temp, :fw::jsonb, :n, :brier, :surp, NOW())
+                    (:sid, :temp, CAST(:fw AS JSONB), :n, :brier, :surp, NOW())
                 ON CONFLICT (state_id) DO UPDATE SET
                     temperature = EXCLUDED.temperature,
                     feature_weights_json = EXCLUDED.feature_weights_json,

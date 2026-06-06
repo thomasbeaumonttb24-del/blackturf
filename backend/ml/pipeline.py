@@ -134,7 +134,8 @@ async def run_post_course(course_id: str) -> None:
 
                     if all_feats and gagnant_features:
                         import pandas as _pd
-                        loser_avg = _pd.DataFrame(all_feats).mean().to_dict()
+                        # numeric_only : éviter de moyenner course_id/participation_id (str)
+                        loser_avg = _pd.DataFrame(all_feats).mean(numeric_only=True).to_dict()
 
                         # Vérifier si modèle avait prédit le gagnant
                         was_correct = False
@@ -165,6 +166,20 @@ async def run_post_course(course_id: str) -> None:
     # d'apprentissage à AdaptiveLearning (calibration température + poids).
     try:
         async with AsyncSessionLocal() as al_session:
+            # ── Init paresseuse : le worker RQ n'a PAS de hook de démarrage,
+            # donc DriftDetector / AdaptiveLearning ne sont jamais initialisés et
+            # analyze_race échouait → commit sauté → race_learning_log vide.
+            from ml.drift_detector import get_drift_detector, initialize_drift_detector
+            from ml.adaptive_learning import initialize_adaptive_learning as _init_al
+            try:
+                get_drift_detector()
+            except Exception:
+                await initialize_drift_detector(al_session)
+            try:
+                get_adaptive_learning()
+            except Exception:
+                await _init_al(al_session)
+
             # Charger les prédictions sauvegardées pour cette course
             pred_result = await al_session.execute(text("""
                 SELECT p.participation_id, p.proba_top3, p.proba_top1,
