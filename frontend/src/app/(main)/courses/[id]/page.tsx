@@ -633,19 +633,33 @@ function MiseCalculatorWidget({
 }
 
 // ─── Résultats officiels (course terminée) ──────────────────────────────────────
-const RAPPORT_META: Record<string, { label: string; emoji: string; ordre: number }> = {
-  e_simple_gagnant: { label: "Gagnant", emoji: "🏆", ordre: 1 },
-  e_simple_place:   { label: "Placé", emoji: "🎖️", ordre: 2 },
-  e_couple_gagnant: { label: "Couplé Gagnant", emoji: "🔗", ordre: 3 },
-  e_couple_place:   { label: "Couplé Placé", emoji: "🔗", ordre: 4 },
-  e_2sur4:          { label: "2 sur 4", emoji: "🎯", ordre: 5 },
-  e_super_quatre:   { label: "2 sur 4", emoji: "🎯", ordre: 5 },
-  e_trio:           { label: "Trio", emoji: "🥉", ordre: 6 },
-  e_tierce:         { label: "Tiercé", emoji: "3️⃣", ordre: 7 },
-  e_quarte_plus:    { label: "Quarté+", emoji: "4️⃣", ordre: 8 },
-  e_quinte_plus:    { label: "Quinté+", emoji: "5️⃣", ordre: 9 },
-  e_multi:          { label: "Multi", emoji: "✳️", ordre: 10 },
+// Badge custom par type de pari (monogramme coloré — pas les logos PMU, qui sont
+// des marques déposées). Couvre toutes les clés de rapports réellement publiées.
+const RAPPORT_META: Record<string, { label: string; abbr: string; color: string; ordre: number }> = {
+  e_simple_gagnant:            { label: "Simple Gagnant", abbr: "SG", color: "#059669", ordre: 1 },
+  simple_gagnant_international: { label: "Simple Gagnant (int.)", abbr: "SG", color: "#059669", ordre: 2 },
+  e_simple_place:              { label: "Simple Placé", abbr: "SP", color: "#0EA5E9", ordre: 3 },
+  simple_place_international:   { label: "Simple Placé (int.)", abbr: "SP", color: "#0EA5E9", ordre: 4 },
+  e_couple_gagnant:            { label: "Couplé Gagnant", abbr: "CG", color: "#7C3AED", ordre: 5 },
+  e_couple_place:              { label: "Couplé Placé", abbr: "CP", color: "#8B5CF6", ordre: 6 },
+  e_couple_ordre:              { label: "Couplé Ordre", abbr: "CO", color: "#6D28D9", ordre: 7 },
+  couple_ordre_international:   { label: "Couplé Ordre (int.)", abbr: "CO", color: "#6D28D9", ordre: 8 },
+  e_deux_sur_quatre:           { label: "2 sur 4", abbr: "2/4", color: "#F59E0B", ordre: 9 },
+  e_super_quatre:              { label: "Super 4", abbr: "S4", color: "#F59E0B", ordre: 10 },
+  e_trio:                      { label: "Trio", abbr: "TRI", color: "#EA580C", ordre: 11 },
+  e_trio_ordre:                { label: "Trio Ordre", abbr: "TRO", color: "#C2410C", ordre: 12 },
+  e_tierce:                    { label: "Tiercé", abbr: "TIE", color: "#DC2626", ordre: 13 },
+  e_quarte_plus:               { label: "Quarté+", abbr: "Q4", color: "#DB2777", ordre: 14 },
+  e_quinte_plus:               { label: "Quinté+", abbr: "Q5", color: "#BE185D", ordre: 15 },
+  e_multi:                     { label: "Multi", abbr: "MUL", color: "#0891B2", ordre: 16 },
+  e_mini_multi:                { label: "Mini Multi", abbr: "mM", color: "#06B6D4", ordre: 17 },
+  e_pick5:                     { label: "Pick 5", abbr: "P5", color: "#4F46E5", ordre: 18 },
+  eb5:                         { label: "Pick 5 Bonus", abbr: "B5", color: "#6366F1", ordre: 19 },
 };
+
+function _rapportAbbr(key: string): string {
+  return key.replace(/^e_/, "").split("_").map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 3) || "•";
+}
 
 function ResultatsSection({ resultats, partants }: {
   resultats: {
@@ -730,11 +744,18 @@ function ResultatsSection({ resultats, partants }: {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {rapportsTries.map(([k, v]) => {
               const meta = RAPPORT_META[k];
+              const abbr = meta?.abbr ?? _rapportAbbr(k);
+              const color = meta?.color ?? "#6B7280";
+              const label = meta?.label ?? k.replace(/^e_/, "").replace(/_/g, " ");
               return (
-                <div key={k} className="flex items-center justify-between gap-1 rounded-lg border border-border bg-white px-2.5 py-1.5">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>{meta?.emoji ?? "•"}</span>{meta?.label ?? k}
+                <div key={k} className="flex items-center gap-2 rounded-lg border border-border bg-white px-2 py-1.5">
+                  <span
+                    className="flex h-6 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded px-1 text-[10px] font-bold tracking-tight text-white"
+                    style={{ background: color }}
+                  >
+                    {abbr}
                   </span>
+                  <span className="flex-1 truncate text-xs text-muted-foreground capitalize">{label}</span>
                   <span className="font-bold tabular-nums text-brand-emerald">{Number(v).toFixed(2)}€</span>
                 </div>
               );
