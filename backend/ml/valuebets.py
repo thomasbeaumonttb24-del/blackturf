@@ -199,6 +199,13 @@ def detect_value_bet(
     if not evs:
         return None
 
+    # Garde-fou outsiders extrêmes : un "value bet" sur une cote > 50 est presque
+    # toujours une erreur de modèle (proba surestimée), pas un vrai edge. On refuse
+    # pour protéger la bankroll de l'utilisateur (intégrité : pas de faux signal).
+    cote_meilleure = cotes.get(meilleure_source) or 0.0
+    if cote_meilleure > 50.0:
+        return None
+
     ev_max = evs[meilleure_source]
     niveau = determine_niveau(ev_max, proba_top3)
     if niveau is None:

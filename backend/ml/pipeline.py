@@ -496,6 +496,34 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         s3 = float(p3_arr.sum())
         probas_top3 = np.clip(p3_arr * (target_sum3 / s3), 0.0, 0.99) if s3 > 0 else p3_arr
 
+        # ── Calibration par le marché (blend modèle × proba implicite PMU) ───────
+        # Le marché PMU est un prior fort et bien calibré. On mélange la proba
+        # modèle avec la proba implicite (1/cote, overround retiré). Ça calibre les
+        # probas ET empêche un modèle imparfait d'attribuer 13% de victoire à un
+        # 239/1 (proba implicite ~0.4%). ALPHA = confiance accordée au modèle.
+        ALPHA_MODELE = 0.55
+        cotes_pmu = np.array([float(f.get("cote_pmu") or 0.0) for f in features_list])
+        implied = np.where(cotes_pmu > 1.0, 1.0 / cotes_pmu, 0.0)
+        si = float(implied.sum())
+        if si > 0:
+            implied_norm = implied / si  # overround retiré, Σ=1
+            # si une cote manque (implied=0), on garde la proba modèle pour ce cheval
+            blend = np.where(
+                implied > 0,
+                ALPHA_MODELE * probas_top1 + (1 - ALPHA_MODELE) * implied_norm,
+                probas_top1,
+            )
+            bs = float(blend.sum())
+            if bs > 0:
+                probas_top1 = blend / bs
+
+        # Purge des value bets de la course avant recalcul : un partant qui n'est
+        # PLUS un value bet (recalibré) doit disparaître, sinon des paris obsolètes
+        # (ex. ancien EV gonflé) restent affichés. save_value_bet ne fait qu'upsert.
+        await session.execute(
+            text("DELETE FROM value_bets WHERE course_id = :cid"), {"cid": course_id}
+        )
+
         # Récupérer version modèle active
         mv_result = await session.execute(
             select(ModelVersion).where(ModelVersion.est_actif == True)
