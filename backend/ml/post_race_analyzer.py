@@ -412,6 +412,10 @@ class PostRaceAnalyzer:
 
         log_id = str(uuid.uuid4())
         date_heure = ctx.get("date_heure")
+        # Rang prédit du gagnant réel (1/2/3 si dans le top-3 modèle, sinon 99).
+        # Alimente accuracy_top1 / accuracy_top3 du palmarès public.
+        wp = list(winner_predicted)
+        gagnant_rang_predit = (wp.index(gagnant_numero) + 1) if gagnant_numero in wp else 99
         fa = dict(feature_autopsy or {})
         fa["_meta"] = {
             "winner_actual": gagnant_numero,
@@ -432,6 +436,7 @@ class PostRaceAnalyzer:
                 existing.log_loss = round(log_loss_course, 6)
                 existing.was_surprise = was_surprise
                 existing.gagnant_proba_ia = round(gagnant_proba_ia, 4)
+                existing.gagnant_rang_predit = gagnant_rang_predit
                 existing.feature_autopsy = fa
                 existing.discipline = ctx.get("discipline")
                 existing.terrain = ctx.get("terrain")
@@ -446,6 +451,7 @@ class PostRaceAnalyzer:
                     log_loss=round(log_loss_course, 6),
                     was_surprise=was_surprise,
                     gagnant_proba_ia=round(gagnant_proba_ia, 4),
+                    gagnant_rang_predit=gagnant_rang_predit,
                     discipline=ctx.get("discipline"),
                     terrain=ctx.get("terrain"),
                     hippodrome=ctx.get("hippodrome"),
