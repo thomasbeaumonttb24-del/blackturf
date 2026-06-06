@@ -22,7 +22,7 @@ from api.middleware.rate_limit import rate_limit_assistant
 from db.database import get_db
 from db.models import (
     User, Course, Prediction, ValueBet, Participation, Cheval,
-    ModelVersion, BankrollEntry
+    ModelVersion, BankrollEntry, RaceLearningLog
 )
 
 settings = get_settings()
@@ -188,12 +188,27 @@ async def _execute_tool(
             )).scalar_one_or_none()
             if not mv:
                 return json.dumps({"error": "Pas de modèle actif."})
-            return json.dumps({
-                "auc_roc": round(mv.auc_roc, 4),
-                "precision_top3": f"{mv.precision_top3 * 100:.1f}%",
-                "roi_simule": f"+{mv.roi_simule * 100:.1f}%",
+            # Précision RÉELLE observée (race_learning_log), pas la métadonnée d'entraînement
+            rll_total = (await db.execute(
+                select(func.count(RaceLearningLog.id))
+            )).scalar() or 0
+            rll_top3 = (await db.execute(
+                select(func.count(RaceLearningLog.id)).where(
+                    RaceLearningLog.gagnant_rang_predit <= 3
+                )
+            )).scalar() or 0
+            out: dict = {
+                "auc_roc": round(float(mv.auc_roc), 4) if mv.auc_roc else None,
                 "nb_courses_train": mv.nb_courses_train,
-            })
+                "nb_courses_evaluees": rll_total,
+            }
+            if rll_total >= 10:
+                out["precision_top3_reelle"] = f"{rll_top3 / rll_total * 100:.0f}%"
+            # ROI simulé : n'afficher que s'il est plausible (sinon métadonnée non fiable)
+            roi = float(mv.roi_simule) if mv.roi_simule is not None else None
+            if roi is not None and -0.5 <= roi <= 1.0:
+                out["roi_simule"] = f"{roi * 100:+.1f}%"
+            return json.dumps(out)
 
         elif tool_name == "get_bankroll_stats":
             entries = (await db.execute(
@@ -324,15 +339,20 @@ async def _answer_metrics(db: AsyncSession, user: User) -> str:
     data = json.loads(await _execute_tool("get_model_metrics", {}, db, user))
     if isinstance(data, dict) and data.get("error"):
         return "Pas de modèle IA actif pour le moment." + DISCLAIMER
-    return (
-        "📊 **Modèle IA actif** :\n"
-        f"• AUC-ROC : **{data['auc_roc']}** (pouvoir discriminant, >0.7 = bon)\n"
-        f"• Précision top-3 : **{data['precision_top3']}**\n"
-        f"• ROI simulé : **{data['roi_simule']}**\n"
-        f"• Entraîné sur **{data['nb_courses_train']}** courses\n\n"
-        "Le modèle se ré-entraîne chaque nuit avec les résultats du jour (apprentissage continu)."
-        + DISCLAIMER
-    )
+    lines = ["📊 **Modèle IA actif** :"]
+    if data.get("auc_roc"):
+        lines.append(f"• AUC-ROC : **{data['auc_roc']}** (pouvoir discriminant, >0.7 = bon)")
+    if data.get("precision_top3_reelle"):
+        lines.append(f"• Précision top-3 réelle observée : **{data['precision_top3_reelle']}** "
+                     f"(sur {data.get('nb_courses_evaluees', 0)} courses évaluées)")
+    elif data.get("nb_courses_evaluees", 0) < 10:
+        lines.append("• Précision réelle : en cours de mesure (pas assez de courses évaluées)")
+    if data.get("roi_simule"):
+        lines.append(f"• ROI simulé : **{data['roi_simule']}**")
+    if data.get("nb_courses_train"):
+        lines.append(f"• Entraîné sur **{data['nb_courses_train']}** courses")
+    lines.append("\nLe modèle se ré-entraîne chaque nuit avec les résultats du jour (apprentissage continu).")
+    return "\n".join(lines) + DISCLAIMER
 
 
 async def _answer_bankroll(db: AsyncSession, user: User) -> str:
