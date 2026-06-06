@@ -1031,9 +1031,6 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
   const [chartData, setChartData] = useState<Array<Record<string, number | string>>>([]);
   const isLive = statut !== "termine";
 
-  const nameByNum: Record<number, string> = {};
-  for (const p of partants) nameByNum[p.numero] = p.nom_cheval;
-
   useEffect(() => {
     let alive = true;
     const pidToNum: Record<string, number> = {};
@@ -1093,20 +1090,33 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
 
   if (chartData.length < 2) return null;
 
+  // Séries de cote par numéro (chevaux ayant une cote publiée)
+  const seriesByNum: Record<number, number[]> = {};
   const last = chartData[chartData.length - 1];
-  const keys = Object.keys(last).filter((k) => k !== "time" && typeof last[k] === "number");
-  const runners = keys.map((k) => {
-    const series = chartData.map((d) => d[k]).filter((v): v is number => typeof v === "number");
-    const open = series[0] ?? 0;
-    const cur = series[series.length - 1] ?? 0;
-    const delta = open ? (cur - open) / open : 0;
+  for (const k of Object.keys(last)) {
+    if (k === "time" || typeof last[k] !== "number") continue;
     const num = parseInt(k.replace("N°", ""), 10);
-    return {
-      key: k, num, nom: nameByNum[num] ?? "", open, cur, delta, series,
-      lo: Math.min(...series), hi: Math.max(...series),
-    };
-  }).sort((a, b) => a.cur - b.cur);
+    seriesByNum[num] = chartData.map((d) => d[k]).filter((v): v is number => typeof v === "number");
+  }
 
+  // TOUS les partants — ceux sans cote publiée affichés en "non publiée" (pas d'invention)
+  const runners = partants.map((p) => {
+    const series = seriesByNum[p.numero];
+    if (series && series.length >= 2) {
+      const open = series[0];
+      const cur = series[series.length - 1];
+      return {
+        num: p.numero, nom: p.nom_cheval, hasData: true, series, open, cur,
+        delta: open ? (cur - open) / open : 0, lo: Math.min(...series), hi: Math.max(...series),
+      };
+    }
+    return { num: p.numero, nom: p.nom_cheval, hasData: false, series: [] as number[], open: 0, cur: 0, delta: 0, lo: 0, hi: 0 };
+  }).sort((a, b) => {
+    if (a.hasData !== b.hasData) return a.hasData ? -1 : 1;
+    return a.hasData ? a.cur - b.cur : a.num - b.num;
+  });
+
+  const nbSansCote = runners.filter((r) => !r.hasData).length;
   const colorFor = (delta: number) => (delta < -0.001 ? "#10B981" : delta > 0.001 ? "#EF4444" : "#9CA3AF");
 
   return (
@@ -1132,11 +1142,24 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
         {/* Une carte par cheval — graphe individuel d'évolution de la cote */}
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
           {runners.map((r) => {
+            if (!r.hasData) {
+              return (
+                <div key={r.num} className="rounded-xl border border-dashed border-border bg-muted/20 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-300 text-xs font-bold text-white tabular-nums">{r.num}</span>
+                    <p className="truncate text-sm font-semibold text-muted-foreground">{r.nom}</p>
+                  </div>
+                  <div className="mt-3 flex h-11 items-center justify-center text-[11px] text-muted-foreground/60">
+                    Cote non publiée par le PMU
+                  </div>
+                </div>
+              );
+            }
             const c = colorFor(r.delta);
             const up = r.delta > 0.001;
             const flat = Math.abs(r.delta) <= 0.001;
             return (
-              <div key={r.key} className="rounded-xl border border-border bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
+              <div key={r.num} className="rounded-xl border border-border bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-900 text-xs font-bold text-white tabular-nums">{r.num}</span>
@@ -1165,6 +1188,7 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
           <span className="font-semibold text-emerald-600">▼ vert</span> = cote en baisse (cheval de plus en plus joué) ·
           <span className="font-semibold text-rose-500"> ▲ rouge</span> = cote qui monte (délaissé).
           {isLive && " Cotes PMU en direct — rafraîchies toutes les 5 s."}
+          {nbSansCote > 0 && ` ${nbSansCote} partant${nbSansCote > 1 ? "s" : ""} sans cote publiée par le PMU.`}
         </p>
       </CardContent>
     </Card>
