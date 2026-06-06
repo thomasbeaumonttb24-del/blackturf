@@ -314,7 +314,7 @@ export default function ValueBetsPage() {
 
   // Stats
   const nbPremium = rawBets.filter((v) => v.niveau >= 3).length;
-  const avgEV = rawBets.length ? (rawBets.reduce((s, v) => s + v.ev_max, 0) / rawBets.length).toFixed(1) : null;
+  const avgEV = rawBets.length ? ((rawBets.reduce((s, v) => s + v.ev_max, 0) / rawBets.length) * 100).toFixed(1) : null;
 
   // ── unauthenticated ──
   if (!user) {

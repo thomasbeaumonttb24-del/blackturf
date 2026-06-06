@@ -284,7 +284,7 @@ export default function DashboardPage() {
                       <div className="flex items-center gap-3">
                         <div className="text-right">
                           <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            Espérance {vb.ev > 0 ? "+" : ""}{vb.ev}%
+                            Espérance {vb.ev > 0 ? "+" : ""}{(vb.ev * 100).toFixed(0)}%
                           </div>
                           {vb.cote && (
                             <div className="text-xs text-muted-foreground">Cote {vb.cote}</div>
