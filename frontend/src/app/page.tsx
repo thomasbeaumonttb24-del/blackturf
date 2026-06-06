@@ -122,19 +122,14 @@ const PLANS = [
   },
 ];
 
-const STATIC_CURVE = [
-  { m: "Jan", k: 1000 }, { m: "Fév", k: 1048 }, { m: "Mar", k: 1032 },
-  { m: "Avr", k: 1091 }, { m: "Mai", k: 1074 }, { m: "Jun", k: 1118 },
-  { m: "Jul", k: 1103 }, { m: "Aoû", k: 1142 }, { m: "Sep", k: 1138 },
-  { m: "Oct", k: 1165 }, { m: "Nov", k: 1152 }, { m: "Déc", k: 1184 },
-];
-
+// Placeholders HONNÊTES si l'API stats est indisponible : on n'invente AUCUN chiffre
+// (règle d'intégrité). "—" = inconnu, jamais une valeur marketing fabriquée.
 const STATIC_STATS = {
-  auc_roc: "0.71",
-  roi_simule_6mois: "+8,4%",
-  nb_courses_analysees: "12 450+",
-  nb_utilisateurs: "487",
-  precision_top3: "59%",
+  auc_roc: "—",
+  roi_simule_6mois: "—",
+  nb_courses_analysees: "—",
+  nb_utilisateurs: "—",
+  precision_top3: "—",
 };
 
 async function fetchStats() {
@@ -168,13 +163,16 @@ export default async function HomePage() {
       }
     : STATIC_STATS;
 
-  const rawCurve = curveData.status === "fulfilled" && curveData.value?.is_real && curveData.value.points.length >= 10
+  // Courbe RÉELLE uniquement (backtest 10€ sur value bets ★★★+ + vrais résultats).
+  // Si pas assez d'historique réel, on N'AFFICHE PAS de courbe fabriquée (intégrité)
+  // → état "en construction".
+  const isCurveReal = curveData.status === "fulfilled" && curveData.value?.is_real
+    && Array.isArray(curveData.value.points) && curveData.value.points.length >= 10;
+  const BACKTEST_CURVE = isCurveReal
     ? curveData.value.points.map((p: { date: string; bankroll: number }) => ({ m: p.date.slice(5, 7), k: p.bankroll }))
-    : STATIC_CURVE;
-
-  const BACKTEST_CURVE = rawCurve;
-  const maxK = Math.max(...BACKTEST_CURVE.map((d: { m: string; k: number }) => d.k));
-  const minK = Math.min(...BACKTEST_CURVE.map((d: { m: string; k: number }) => d.k));
+    : [];
+  const maxK = BACKTEST_CURVE.length ? Math.max(...BACKTEST_CURVE.map((d: { m: string; k: number }) => d.k)) : 0;
+  const minK = BACKTEST_CURVE.length ? Math.min(...BACKTEST_CURVE.map((d: { m: string; k: number }) => d.k)) : 0;
   const range = maxK - minK;
 
   const parseStatNum = (v: string) => parseFloat(v.replace(",", ".").replace(/[^0-9.]/g, ""));
@@ -266,12 +264,19 @@ export default async function HomePage() {
               { value: parseStatNum(stats.auc_roc), label: "AUC-ROC", sub: "Précision modèle", suffix: "", decimals: 2 },
               { value: parseStatNum(stats.precision_top3), label: "Précision Top-3", sub: "vs 33% aléatoire", suffix: "%", decimals: 0 },
               { value: parseStatNum(stats.roi_simule_6mois), label: "Rendement simulé 6 mois", sub: "10€ fixe / pari de valeur ★★★+", suffix: "%", decimals: 1, prefix: "+" },
-              { value: 12450, label: "Courses analysées", sub: "Données historiques", suffix: "+", decimals: 0 },
+              { value: parseStatNum(stats.nb_courses_analysees), label: "Courses analysées", sub: "Données réelles PMU", suffix: "+", decimals: 0 },
             ].map((s, i) => (
               <ScrollReveal key={s.label} delay={i * 80} className="text-center">
                 <div className="text-4xl font-extrabold font-display tabular-nums" style={{ color: "#D97706" }}>
-                  {s.prefix}
-                  <AnimatedCounter end={s.value} duration={2000 + i * 200} decimals={s.decimals} suffix={s.suffix} />
+                  {/* Aucun chiffre inventé : "—" si la donnée réelle est indisponible */}
+                  {Number.isNaN(s.value) ? (
+                    <span>—</span>
+                  ) : (
+                    <>
+                      {s.prefix}
+                      <AnimatedCounter end={s.value} duration={2000 + i * 200} decimals={s.decimals} suffix={s.suffix} />
+                    </>
+                  )}
                 </div>
                 <div className="text-sm font-semibold text-gray-900 mt-1.5">{s.label}</div>
                 <div className="text-xs text-gray-500 mt-0.5">{s.sub}</div>
@@ -438,9 +443,19 @@ export default async function HomePage() {
               </div>
             </ScrollReveal>
 
-            {/* Equity curve */}
+            {/* Equity curve — affichée UNIQUEMENT si historique réel suffisant */}
             <ScrollReveal direction="right">
               <div className="glass-card rounded-2xl p-6 bg-white">
+              {!isCurveReal ? (
+                <div className="flex flex-col items-center justify-center text-center h-64">
+                  <p className="text-sm font-semibold text-gray-900 mb-1">Courbe de performance — en construction</p>
+                  <p className="text-xs text-gray-500 max-w-xs">
+                    Le backtest réel (10€ par pari de valeur ★★★+) s&apos;affichera dès que
+                    l&apos;historique des courses sera suffisant. Aucune courbe fabriquée — uniquement du vérifié.
+                  </p>
+                </div>
+              ) : (
+                <>
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-sm font-semibold text-gray-900">Courbe simulée — Capital 1 000€</p>
                   <span className="text-[10px] font-mono font-bold" style={{ color: "#059669" }}>
@@ -451,7 +466,7 @@ export default async function HomePage() {
                     })()}
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mb-5">10€ fixes par pari de valeur ★★★+ · 12 derniers mois</p>
+                <p className="text-xs text-gray-500 mb-5">10€ fixes par pari de valeur ★★★+ · backtest sur résultats réels</p>
                 <div className="relative h-44">
                   <svg viewBox="0 0 400 140" className="w-full h-full" preserveAspectRatio="none">
                     {[0, 1, 2, 3].map(i => (
@@ -516,6 +531,8 @@ export default async function HomePage() {
                     })()}
                   </span>
                 </div>
+                </>
+              )}
               </div>
             </ScrollReveal>
           </div>
@@ -613,7 +630,7 @@ export default async function HomePage() {
               {" "}?
             </h2>
             <p className="text-gray-600 text-lg mb-10 max-w-xl mx-auto">
-              Rejoignez {stats.nb_utilisateurs} parieurs qui utilisent déjà BlackTurf pour optimiser leurs mises hippiques.
+              Optimisez vos mises hippiques avec une IA entraînée sur les résultats réels du PMU.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button

@@ -1,5 +1,7 @@
 "use client";
 
+// Aperçu ILLUSTRATIF de l'interface (pas des pronostics en direct — ceux-ci sont
+// réservés aux abonnés). Marqué "Exemple" pour ne tromper personne (intégrité).
 const TICKER_ITEMS = [
   { hippodrome: "DEAUVILLE",  course: "R4-C5", cheval: "PALADIN NOIR",   top3: 78, niveau: "★★★★", ev: "+14.2%" },
   { hippodrome: "LONGCHAMP",  course: "R2-C3", cheval: "BELLA VISTA",    top3: 65, niveau: "★★★",  ev: "+9.1%"  },
@@ -12,8 +14,11 @@ const TICKER_ITEMS = [
 export function LiveTicker() {
   const items = [...TICKER_ITEMS, ...TICKER_ITEMS];
   return (
-    <div className="border-y border-gray-200 bg-amber-50/60 py-2.5 overflow-hidden select-none">
-      <div className="flex items-center gap-0 ticker-track">
+    <div className="relative border-y border-gray-200 bg-amber-50/60 py-2.5 overflow-hidden select-none">
+      <span className="absolute left-0 top-0 bottom-0 z-10 flex items-center px-3 bg-gray-900 text-white text-[9px] font-bold uppercase tracking-wider">
+        Exemple
+      </span>
+      <div className="flex items-center gap-0 ticker-track pl-20">
         {items.map((item, i) => (
           <span key={i} className="flex items-center gap-3 px-6 shrink-0">
             <span className="text-amber-700 font-bold text-[10px] tracking-wider font-mono">{item.hippodrome}</span>
