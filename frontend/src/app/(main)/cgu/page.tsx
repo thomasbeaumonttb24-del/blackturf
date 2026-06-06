@@ -39,8 +39,8 @@ export default function CguPage() {
         <h2 className="text-lg font-semibold">3. Description du service</h2>
         <p className="text-sm text-muted-foreground">
           BlackTurf propose des prédictions hippiques générées par un ensemble de modèles d'apprentissage
-          automatique (XGBoost, LightGBM, CatBoost), la détection de value bets, un outil de gestion
-          de bankroll et un assistant IA. Ces informations sont fournies à titre indicatif uniquement.
+          automatique (XGBoost, LightGBM, CatBoost), la détection de paris de valeur, un outil de gestion
+          de capital et un assistant IA. Ces informations sont fournies à titre indicatif uniquement.
         </p>
       </section>
 

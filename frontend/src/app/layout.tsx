@@ -23,11 +23,11 @@ export const metadata: Metadata = {
     template: "%s | BlackTurf",
   },
   description:
-    "Entrez votre mise → BlackTurf génère votre plan de pari personnalisé. Value bets IA en temps réel. XGBoost + LightGBM + CatBoost. Précision top-3 : 59%. ROI simulé : +8,4%.",
+    "Entrez votre mise → BlackTurf génère votre plan de pari personnalisé. Paris de valeur détectés par IA en temps réel. XGBoost + LightGBM + CatBoost. Précision Top-3 : 59%. Rendement simulé : +8,4%.",
   keywords: [
-    "pronostics hippiques", "value bet", "intelligence artificielle",
-    "PMU", "analyse hippique", "tiercé", "quinté", "kelly criterion",
-    "conseiller paris", "bankroll hippique",
+    "pronostics hippiques", "pari de valeur", "intelligence artificielle",
+    "PMU", "analyse hippique", "tiercé", "quinté", "critère de Kelly",
+    "conseiller paris", "capital hippique",
   ],
   metadataBase: new URL("https://blackturf.fr"),
   manifest: "/manifest.json",
@@ -44,13 +44,13 @@ export const metadata: Metadata = {
     siteName: "BlackTurf",
     title: "BlackTurf — Votre Conseiller Expert en Paris Hippiques",
     description:
-      "Plan de mise personnalisé. Value bets détectés par IA. Programme PMU du jour analysé.",
+      "Plan de mise personnalisé. Paris de valeur détectés par IA. Programme PMU du jour analysé.",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "BlackTurf" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "BlackTurf — IA Hippique",
-    description: "Plan de mise personnalisé. Value bets en temps réel.",
+    description: "Plan de mise personnalisé. Paris de valeur en temps réel.",
   },
   robots: { index: true, follow: true },
 };
