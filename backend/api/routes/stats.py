@@ -82,18 +82,18 @@ async def public_stats(
         select(func.count(User.user_id))
     )).scalar() or 0
 
-    # Métriques FIABLES : précision réelle observée + ROI masqué si aberrant.
-    # Repli sur les placeholders crédibles _STATIC_STATS si non fiable.
+    # Métriques 100% RÉELLES (règle d'intégrité : aucune valeur inventée). Une donnée
+    # non fiable/indisponible renvoie null → le front affiche "—", jamais un placeholder
+    # marketing. Plus de _STATIC_STATS (487 users / 12 450 courses / roi 8,4% fictifs).
     metrics = await real_model_metrics(db, mv)
-    roi_pct = round(metrics["roi_simule"] * 100, 2) if metrics["roi_simule"] is not None else _STATIC_STATS["roi_simule_6mois"]
-    precision = metrics["precision_top3"] if metrics["precision_top3"] is not None else _STATIC_STATS["precision_top3"]
+    roi_pct = round(metrics["roi_simule"] * 100, 2) if metrics["roi_simule"] is not None else None
 
     result = {
-        "auc_roc": round(mv.auc_roc, 4) if mv else _STATIC_STATS["auc_roc"],
+        "auc_roc": round(mv.auc_roc, 4) if mv else None,
         "roi_simule_6mois": roi_pct,
-        "nb_courses_analysees": nb_courses if nb_courses > 100 else _STATIC_STATS["nb_courses_analysees"],
-        "nb_utilisateurs": nb_users if nb_users > 10 else _STATIC_STATS["nb_utilisateurs"],
-        "precision_top3": precision,
+        "nb_courses_analysees": nb_courses,          # vrai nombre de courses terminées
+        "nb_utilisateurs": nb_users,                 # vrai nombre d'utilisateurs
+        "precision_top3": metrics["precision_top3"], # réelle (race_learning_log) ou null
     }
     await _cache_set(redis, CACHE_KEY, result, ttl=300)  # 5 min
     return result
