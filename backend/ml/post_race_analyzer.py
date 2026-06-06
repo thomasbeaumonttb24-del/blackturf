@@ -72,7 +72,9 @@ class PostRaceAnalyzer:
             return {}
 
         # ── 1. Construire le mapping numéro → résultat réel ──────────────
-        arrivee = resultat.get("ordre_arrivee", [])
+        # La course en DB stocke l'arrivée sous "classement" ; le scraper sous
+        # "ordre_arrivee". On accepte les deux (sinon arrivée vide → pas d'apprentissage).
+        arrivee = resultat.get("ordre_arrivee") or resultat.get("classement") or []
         position_reelle: dict[int, int] = {}
         for entry in arrivee:
             num = entry.get("numero")
