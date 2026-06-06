@@ -169,16 +169,14 @@ async def run_post_course(course_id: str) -> None:
             # ── Init paresseuse : le worker RQ n'a PAS de hook de démarrage,
             # donc DriftDetector / AdaptiveLearning ne sont jamais initialisés et
             # analyze_race échouait → commit sauté → race_learning_log vide.
-            from ml.drift_detector import get_drift_detector, initialize_drift_detector
+            # On RECHARGE TOUJOURS l'état depuis la DB avant d'apprendre : le worker
+            # RQ fork un process par job, donc le singleton mémoire repart à zéro à
+            # chaque course. Sans load_state, n_races/temperature/brier_ema seraient
+            # remis à 0 et écraseraient l'historique réel (bug : "1 course analysée").
+            from ml.drift_detector import initialize_drift_detector
             from ml.adaptive_learning import initialize_adaptive_learning as _init_al
-            try:
-                get_drift_detector()
-            except Exception:
-                await initialize_drift_detector(al_session)
-            try:
-                get_adaptive_learning()
-            except Exception:
-                await _init_al(al_session)
+            await initialize_drift_detector(al_session)
+            await _init_al(al_session)
 
             # ── Idempotence : une course déjà apprise ne doit JAMAIS être
             # ré-injectée dans le drift detector / l'état adaptatif. Sinon le
