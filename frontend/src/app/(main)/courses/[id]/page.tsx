@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Fragment } from "react";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
@@ -52,6 +52,12 @@ interface Partant {
   changement_jockey: boolean;
   jours_depuis_derniere: number | null;
   poids_reel_pesee: number | null;
+  handicap_poids: number | null;
+  poids_prevu: number | null;
+  numero_corde: number | null;
+  gains_carriere: number | null;
+  nb_victoires: number | null;
+  nb_courses: number | null;
   pere: string | null;
   mere: string | null;
   pere_de_mere: string | null;
@@ -321,6 +327,48 @@ function RunningStyleBadge({ style }: { style: string | null }) {
     <span className={cn("inline-flex items-center rounded-full px-1.5 py-0 text-[9px] font-semibold ring-1 uppercase tracking-wide", cfg.bg, cfg.color)}>
       {cfg.label}
     </span>
+  );
+}
+
+/* ─── Musique (forme codée, max 10 perfs) ────────────────────────────────────
+   Chiffre = place (1=victoire, 0=hors top 10) · lettre = discipline
+   (a=attelé, m=monté, p=plat, h=haies, s=steeple, c=cross) · D=disqualifié,
+   T=tombé, A=arrêté, Ret=rétrogradé. (24) = changement d'année. */
+const DISCIPLINE_MUSIQUE: Record<string, string> = {
+  a: "attelé", m: "monté", p: "plat", h: "haies", s: "steeple", c: "cross", e: "épreuve",
+};
+function MusiqueDisplay({ musique }: { musique: string | null }) {
+  if (!musique || !musique.trim()) {
+    return <span className="text-xs text-muted-foreground/50">Aucune musique</span>;
+  }
+  const tokens = musique.trim().split(/\s+/).filter((t) => !t.startsWith("(")).slice(0, 10);
+  const headOf = (t: string) => t[0];
+  const cls = (h: string) =>
+    h === "1" ? "bg-amber-100 text-amber-700 ring-amber-300"
+    : h === "2" || h === "3" ? "bg-blue-50 text-blue-700 ring-blue-200"
+    : /[4-9]/.test(h) ? "bg-gray-100 text-gray-600 ring-gray-200"
+    : "bg-rose-50 text-rose-600 ring-rose-200"; // 0, D, T, A, Ret...
+  const titleOf = (t: string) => {
+    const h = headOf(t);
+    const disc = DISCIPLINE_MUSIQUE[t.slice(-1).toLowerCase()];
+    const place =
+      h === "1" ? "Vainqueur" : h === "0" ? "Hors top 10"
+      : h === "D" ? "Disqualifié" : h === "T" ? "Tombé" : h === "A" ? "Arrêté"
+      : /[2-9]/.test(h) ? `${h}ᵉ` : t;
+    return disc ? `${place} · ${disc}` : place;
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {tokens.map((t, i) => {
+        const h = headOf(t);
+        return (
+          <span key={i} title={titleOf(t)}
+            className={cn("inline-flex h-5 min-w-[1.45rem] items-center justify-center rounded px-1 text-[10px] font-bold ring-1", cls(h))}>
+            {t}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1206,6 +1254,7 @@ export default function CoursePage() {
   const [loadingCourse, setLoadingCourse] = useState(true);
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
+  const [expandedPartant, setExpandedPartant] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<{
     narrative: string;
     market_signals: Array<{ numero: number; nom: string; signal: string; detail: string; score: number }>;
@@ -1442,11 +1491,9 @@ export default function CoursePage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 Partants
-                {predictions && (
-                  <span className="text-xs font-normal text-muted-foreground ml-1">
-                    — Proba IA · Cote juste · Espérance
-                  </span>
-                )}
+                <span className="text-xs font-normal text-muted-foreground ml-1">
+                  — cliquez un cheval pour musique, équipement, poids, carrière
+                </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -1476,14 +1523,17 @@ export default function CoursePage() {
                         const rang = pred?.rang_predit;
                         const coteMoved = liveCote && partant.cote_pmu && liveCote < partant.cote_pmu;
 
+                        const isExp = expandedPartant === partant.participation_id;
                         return (
+                          <Fragment key={partant.participation_id}>
                           <tr
-                            key={partant.participation_id}
+                            onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
                             className={cn(
-                              "border-b border-border/40 transition-colors hover:bg-accent/20",
+                              "cursor-pointer border-b border-border/40 transition-colors hover:bg-accent/20",
                               rang === 1 && "row-top1",
                               rang === 2 && "row-top2",
                               rang === 3 && "row-top3",
+                              isExp && "bg-accent/20",
                             )}
                           >
                             <td className="px-3 py-2.5 font-bold text-muted-foreground text-center">
@@ -1592,6 +1642,72 @@ export default function CoursePage() {
                               </td>
                             )}
                           </tr>
+                          {isExp && (
+                            <tr className="bg-muted/20">
+                              <td colSpan={predictions ? 8 : 5} className="px-3 pb-3 pt-1">
+                                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                  {/* Musique */}
+                                  <div className="rounded-lg border border-border bg-white p-2.5 sm:col-span-2 lg:col-span-3">
+                                    <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">🎵 Musique (10 dernières sorties)</p>
+                                    <MusiqueDisplay musique={partant.musique} />
+                                  </div>
+                                  {/* Jockey / Entraîneur */}
+                                  <div className="rounded-lg border border-border bg-white p-2.5">
+                                    <p className="mb-1 text-[11px] font-semibold text-muted-foreground">👤 Jockey / Entraîneur</p>
+                                    <p className="text-sm font-medium">{partant.jockey || "—"}</p>
+                                    <p className="text-xs text-muted-foreground">Entr. {partant.entraineur || "—"}</p>
+                                    {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && (
+                                      <p className="mt-1 text-[11px] text-violet-600">Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% de réussite ({partant.asso_jockey_entraineur_nb} courses)</p>
+                                    )}
+                                  </div>
+                                  {/* Carrière */}
+                                  <div className="rounded-lg border border-border bg-white p-2.5">
+                                    <p className="mb-1 text-[11px] font-semibold text-muted-foreground">🏆 Carrière</p>
+                                    {partant.nb_courses ? (
+                                      <p className="text-sm">
+                                        <span className="font-bold">{partant.nb_victoires ?? 0}</span> victoire{(partant.nb_victoires ?? 0) > 1 ? "s" : ""} / {partant.nb_courses} courses
+                                        <span className="text-muted-foreground"> ({Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%)</span>
+                                      </p>
+                                    ) : <p className="text-xs text-muted-foreground">—</p>}
+                                    {partant.gains_carriere ? (
+                                      <p className="text-xs text-muted-foreground">Gains : {partant.gains_carriere.toLocaleString("fr-FR")}€</p>
+                                    ) : null}
+                                  </div>
+                                  {/* Équipement */}
+                                  <div className="rounded-lg border border-border bg-white p-2.5">
+                                    <p className="mb-1 text-[11px] font-semibold text-muted-foreground">🔧 Équipement</p>
+                                    <p className="text-sm">Déferré : <span className="font-medium">{partant.deferre || "Non"}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] text-brand-gold">★ 1ʳᵉ fois</span>}</p>
+                                    <p className="text-sm">Œillères : <span className="font-medium">{partant.oeilleres || "Non"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] text-brand-blue">★ 1ʳᵉ fois</span>}</p>
+                                  </div>
+                                  {/* Poids / Handicap / Corde */}
+                                  {(partant.handicap_poids || partant.poids_prevu || partant.numero_corde || partant.poids_reel_pesee) && (
+                                    <div className="rounded-lg border border-border bg-white p-2.5">
+                                      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">⚖️ Poids / Départ</p>
+                                      {(partant.handicap_poids || partant.poids_prevu) != null && (
+                                        <p className="text-sm">Poids : <span className="font-medium">{(partant.handicap_poids ?? partant.poids_prevu)}kg</span></p>
+                                      )}
+                                      {partant.poids_reel_pesee != null && (
+                                        <p className="text-xs text-muted-foreground">Pesée réelle : {partant.poids_reel_pesee}kg</p>
+                                      )}
+                                      {partant.numero_corde != null && (
+                                        <p className="text-sm">Corde : <span className="font-medium">{partant.numero_corde}</span></p>
+                                      )}
+                                    </div>
+                                  )}
+                                  {/* Généalogie */}
+                                  {(partant.pere || partant.mere) && (
+                                    <div className="rounded-lg border border-border bg-white p-2.5">
+                                      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">🧬 Origines</p>
+                                      {partant.pere && <p className="text-xs">Père : <span className="font-medium">{partant.pere}</span></p>}
+                                      {partant.mere && <p className="text-xs">Mère : <span className="font-medium">{partant.mere}</span></p>}
+                                      {partant.pere_de_mere && <p className="text-xs text-muted-foreground">Père de mère : {partant.pere_de_mere}</p>}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
                         );
                       })}
                   </tbody>

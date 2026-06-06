@@ -69,6 +69,14 @@ class PartantOut(BaseModel):
     changement_jockey: bool = False           # jockey différent de la dernière course
     jours_depuis_derniere: Optional[int]      # freshness
     poids_reel_pesee: Optional[float]         # post-pesée officielle
+    # Handicap / poids / corde (selon discipline)
+    handicap_poids: Optional[float] = None    # poids porté en handicap (kg)
+    poids_prevu: Optional[float] = None        # poids prévu (kg)
+    numero_corde: Optional[int] = None         # position au départ (plat)
+    # Carrière
+    gains_carriere: Optional[int] = None
+    nb_victoires: Optional[int] = None
+    nb_courses: Optional[int] = None
     # Généalogie
     pere: Optional[str]
     mere: Optional[str]
@@ -266,6 +274,14 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             changement_jockey=p.changement_jockey or False,
             jours_depuis_derniere=p.jours_depuis_derniere,
             poids_reel_pesee=p.poids_reel_pesee,
+            # Handicap / poids / corde
+            handicap_poids=p.handicap_poids,
+            poids_prevu=p.poids_prevu,
+            numero_corde=p.numero_corde,
+            # Carrière
+            gains_carriere=ch.gains_carriere_total,
+            nb_victoires=ch.nb_victoires_total,
+            nb_courses=ch.nb_courses_total,
             # Généalogie
             pere=ch.pere,
             mere=ch.mere,
