@@ -400,12 +400,21 @@ async def _do_retraining(mois: int, label: str) -> None:
         # inférieur. Seuil : MIN_RELIABLE_TRAIN courses réelles.
         MIN_RELIABLE_TRAIN = 800
         current_unreliable = (not current_is_synth) and current_train_n < MIN_RELIABLE_TRAIN
+        new_train_n = len(X)
+
+        # ── Saut de DONNÉES : le walk-forward n'est comparable qu'à taille d'entraînement
+        # comparable. Sur peu de données il est OPTIMISTE (folds petits/faciles → ex. v7 :
+        # 2054 lignes → wf 0.826). Un modèle entraîné sur BEAUCOUP plus de données (≥1.5×)
+        # généralise mieux : on le déploie même si son wf (mesuré sur des folds plus durs)
+        # est légèrement inférieur, tant qu'il reste sain (tolérance élargie 8%).
+        data_jump = (new_train_n >= 1.5 * max(current_train_n, 1)
+                     and new_wf >= current_wf - 0.08 and new_wf >= 0.6)
 
         # Déployer si : prior synthétique, OU pas de modèle, OU actif non fiable (peu de
-        # données), OU walk-forward au moins aussi bon (tolérance 0.5%).
+        # données), OU saut de données massif, OU walk-forward au moins aussi bon (tol 0.5%).
         seuil_regression = 0.005
         if (current_is_synth or current is None or current_mv is None
-                or current_unreliable or new_wf >= current_wf - seuil_regression):
+                or current_unreliable or data_jump or new_wf >= current_wf - seuil_regression):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
 
@@ -440,7 +449,9 @@ async def _do_retraining(mois: int, label: str) -> None:
                 auc=round(metrics["auc_roc"], 4),
                 wf_auc=round(new_wf, 4),
                 prev_wf_auc=round(current_wf, 4),
-                reason=("synth" if current_is_synth else "unreliable_active" if current_unreliable else "better_wf"),
+                reason=("synth" if current_is_synth else "unreliable_active" if current_unreliable
+                        else "data_jump" if data_jump else "better_wf"),
+                train_n=new_train_n,
             )
         else:
             log.warning(
