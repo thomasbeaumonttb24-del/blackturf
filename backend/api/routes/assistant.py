@@ -190,10 +190,10 @@ async def _execute_tool(
                 return json.dumps({"error": "Pas de modèle actif."})
             # Précision RÉELLE observée (race_learning_log), pas la métadonnée d'entraînement
             rll_total = (await db.execute(
-                select(func.count(RaceLearningLog.id))
+                select(func.count(RaceLearningLog.log_id))
             )).scalar() or 0
             rll_top3 = (await db.execute(
-                select(func.count(RaceLearningLog.id)).where(
+                select(func.count(RaceLearningLog.log_id)).where(
                     RaceLearningLog.gagnant_rang_predit <= 3
                 )
             )).scalar() or 0
@@ -292,8 +292,9 @@ async def _answer_value_bets(db: AsyncSession, user: User) -> str:
             f"• **{v['cheval']}** — {v['hippodrome']} {v['heure']} · cote {v['cote']} · "
             f"EV **+{v['ev']}%** {v['niveau']}"
         )
-    lines.append("\nL'EV (espérance) mesure l'avantage estimé vs le marché. Priorise les ⭐⭐⭐+ "
-                 "avec une mise raisonnable (≤5% bankroll).")
+    lines.append("\nL'EV (espérance) mesure l'avantage estimé vs le marché. Une EV très élevée "
+                 "concerne souvent un outsider à grosse cote : fort potentiel mais variance élevée. "
+                 "Priorise les ⭐⭐⭐+ avec une mise raisonnable (≤5% bankroll).")
     return "\n".join(lines) + DISCLAIMER
 
 
