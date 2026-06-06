@@ -20,7 +20,7 @@ from db.models import (
     Jockey, Entraineur, Equipement, MeteoCourse, Resultat,
     Prediction as PredictionModel,
     SuspensionProfessionnel, PronosticPresse, TempsPassage,
-    AssociationJockeyEntraineur, PenetrometreLog,
+    AssociationJockeyEntraineur, PenetrometreLog, PerformanceCarriere,
 )
 from db.models import User
 from ml.portfolio import BetPortfolioEngine
@@ -183,11 +183,12 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     suspendus: dict[str, str] = {r.nom.lower(): r.type_pro for r in susp_res.fetchall()}
 
     q = (
-        select(Participation, Cheval, Jockey, Entraineur, Equipement)
+        select(Participation, Cheval, Jockey, Entraineur, Equipement, PerformanceCarriere)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
         .outerjoin(Jockey, Jockey.jockey_id == Participation.jockey_id)
         .outerjoin(Entraineur, Entraineur.entraineur_id == Participation.entraineur_id)
         .outerjoin(Equipement, Equipement.participation_id == Participation.participation_id)
+        .outerjoin(PerformanceCarriere, PerformanceCarriere.cheval_id == Cheval.cheval_id)
         .where(Participation.course_id == course_id)
         .order_by(Participation.numero)
     )
@@ -215,7 +216,7 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
         log.warning("courses.asso_map_failed", error=str(e))
 
     partants = []
-    for p, ch, j, en, eq in rows:
+    for p, ch, j, en, eq, pc in rows:
         # Cotes disponibles
         cotes = [c for c in [p.cote_pmu, p.cote_geny, p.cote_winamax,
                               p.cote_betclic, p.cote_unibet, p.cote_betfair_exchange]
@@ -278,10 +279,10 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             handicap_poids=p.handicap_poids,
             poids_prevu=p.poids_prevu,
             numero_corde=p.numero_corde,
-            # Carrière
-            gains_carriere=ch.gains_carriere_total,
-            nb_victoires=ch.nb_victoires_total,
-            nb_courses=ch.nb_courses_total,
+            # Carrière (PerformanceCarriere, 1:1 cheval)
+            gains_carriere=pc.gains_carriere_total if pc else None,
+            nb_victoires=pc.nb_victoires_total if pc else None,
+            nb_courses=pc.nb_courses_total if pc else None,
             # Généalogie
             pere=ch.pere,
             mere=ch.mere,
