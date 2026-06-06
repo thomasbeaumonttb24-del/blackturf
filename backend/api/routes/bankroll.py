@@ -125,6 +125,62 @@ def _entry_to_out(e: BankrollEntry) -> EntryOut:
     )
 
 
+async def settle_pending_bets(db: AsyncSession, user_id: str) -> None:
+    """
+    Règle automatiquement les paris enregistrés EN ATTENTE (resultat NULL) dont
+    la course est terminée, avec les VRAIS rapports PMU (bet_settlement). Met à
+    jour gain_perte (net) + resultat. Si un pari a gagné mais que le rapport
+    n'est pas encore publié, on le laisse en attente (aucune valeur inventée).
+    """
+    import re
+    from db.models import Resultat as _Res, Course as _Cou
+    from services.bet_settlement import settle_pari
+
+    pending = (await db.execute(
+        select(BankrollEntry).where(
+            BankrollEntry.user_id == user_id,
+            BankrollEntry.resultat.is_(None),
+            BankrollEntry.course_id.isnot(None),
+        )
+    )).scalars().all()
+    if not pending:
+        return
+
+    by_course: dict[str, list] = {}
+    for e in pending:
+        by_course.setdefault(e.course_id, []).append(e)
+
+    changed = False
+    for cid, entries in by_course.items():
+        course = await db.get(_Cou, cid)
+        if not course or course.statut != "termine":
+            continue
+        res = await db.get(_Res, cid)
+        if not res or not res.classement:
+            continue
+        nb_part = course.nb_partants or len(res.classement)
+        for e in entries:
+            nums = [int(n) for n in re.findall(r"\d+", e.chevaux or "")]
+            if not nums:
+                continue
+            r = settle_pari(e.type_pari, nums, res.classement, res.rapports, nb_part)
+            if r["gagne"]:
+                if r["rapport_reel"] is not None:
+                    gain_brut = round(e.mise * r["rapport_reel"], 2)
+                    e.gain_perte = round(gain_brut - e.mise, 2)  # NET
+                    e.cote = round(float(r["rapport_reel"]), 2)
+                    e.resultat = "gagne"
+                    changed = True
+                # sinon : rapport pas encore publié → reste en attente
+            else:
+                e.gain_perte = round(-e.mise, 2)
+                e.resultat = "perd"
+                changed = True
+
+    if changed:
+        await db.commit()
+
+
 # ─────────────────────────────────────────────
 # Routes — Entries
 # ─────────────────────────────────────────────
@@ -139,6 +195,7 @@ async def list_entries(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    await settle_pending_bets(db, user.user_id)  # règle les paris en attente
     q = select(BankrollEntry).where(BankrollEntry.user_id == user.user_id)
 
     if resultat:
@@ -238,6 +295,7 @@ async def get_stats(
     user: User = Depends(get_current_user),
 ):
     """Statistiques ROI complètes."""
+    await settle_pending_bets(db, user.user_id)  # règle les paris en attente
     q = select(BankrollEntry).where(BankrollEntry.user_id == user.user_id)
     if bankroll_id:
         q = q.where(BankrollEntry.bankroll_id == bankroll_id)

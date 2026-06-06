@@ -632,6 +632,97 @@ async def get_mise_plan(
     return plan_to_dict(plan)
 
 
+@router.post("/courses/{course_id}/enregistrer-paris")
+async def enregistrer_paris(
+    course_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Enregistre le plan de mise (montant + profil) dans la bankroll de l'utilisateur :
+    un pari par ligne du plan, en attente de résultat. Les gains/pertes seront
+    calculés automatiquement à la fin de la course (vrais rapports PMU).
+    """
+    import uuid as _uuid
+    from datetime import datetime as _dt
+    from sqlalchemy import delete as _delete, and_ as _and
+    from services.mise_calculator import generer_plan, plan_to_dict
+    from db.models import BankrollEntry, Bankroll, Prediction as _Pred
+
+    if user.plan in ("free", "decouverte"):
+        raise HTTPException(status_code=403, detail="Plan Standard ou Expert requis")
+
+    montant = float(body.get("montant", 0))
+    if montant <= 0 or montant > 10000:
+        raise HTTPException(status_code=422, detail="Montant invalide (0.01–10000€)")
+    profil = body.get("profil_risque") or (user.profil_risque or "equilibre")
+
+    course = (await db.execute(select(Course).where(Course.course_id == course_id))).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+
+    rows = (await db.execute(
+        select(_Pred, Participation, Cheval)
+        .join(Participation, Participation.participation_id == _Pred.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .where(Participation.course_id == course_id)
+        .order_by(_Pred.rang_predit)
+    )).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Aucun pronostic — analyse IA requise")
+
+    preds = [{
+        "numero": part.numero, "nom_cheval": cheval.nom,
+        "proba_top3": pred.proba_top3, "proba_top1": pred.proba_top1,
+        "cote_pmu": part.cote_pmu, "non_partant": part.non_partant,
+    } for pred, part, cheval in rows]
+    course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "nb_partants": course.nb_partants}
+
+    plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None))
+
+    # Bankroll principale
+    main = (await db.execute(
+        select(Bankroll).where(_and(
+            Bankroll.user_id == user.user_id,
+            Bankroll.est_principale == True,
+            Bankroll.est_supprime == False,
+        ))
+    )).scalar_one_or_none()
+    bankroll_id = main.bankroll_id if main else None
+
+    # Remplace un éventuel plan déjà enregistré (non réglé) pour cette course
+    await db.execute(_delete(BankrollEntry).where(_and(
+        BankrollEntry.user_id == user.user_id,
+        BankrollEntry.course_id == course_id,
+        BankrollEntry.resultat.is_(None),
+        BankrollEntry.suivi_reco_ia == True,
+    )))
+
+    now = _dt.now()
+    nb = 0
+    for niveau in plan.get("niveaux", []):
+        for pari in niveau.get("paris", []):
+            chevaux = " + ".join(f"N°{c['numero']}" for c in pari.get("chevaux", []))
+            db.add(BankrollEntry(
+                entry_id=str(_uuid.uuid4()),
+                user_id=user.user_id,
+                bankroll_id=bankroll_id,
+                course_id=course_id,
+                date=now,
+                type_pari=pari["type"],
+                chevaux=chevaux,
+                mise=float(pari.get("mise", 0) or 0),
+                suivi_reco_ia=True,
+                resultat=None,
+                gain_perte=None,
+                notes="Plan de mise IA",
+            ))
+            nb += 1
+    await db.commit()
+    return {"enregistres": nb, "montant_total": plan.get("montant_joue", montant)}
+
+
 @router.get("/courses/{course_id}/bilan-pronostic")
 async def get_bilan_pronostic(
     course_id: str,

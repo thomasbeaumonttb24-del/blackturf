@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
   Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
-  RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity,
+  RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
 } from "lucide-react";
 import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
@@ -191,7 +191,17 @@ function ELOBadge({ elo }: { elo: number | null }) {
   );
 }
 
-function PlanMiseDisplay({ plan, onClose }: { plan: MisePlan; onClose: () => void }) {
+function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: () => void; onSave: () => Promise<number> }) {
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const handleSave = async () => {
+    setSaveState("saving");
+    try {
+      await onSave();
+      setSaveState("saved");
+    } catch {
+      setSaveState("idle");
+    }
+  };
   return (
     <div className="animate-slide-up">
       {/* Header résumé */}
@@ -305,7 +315,27 @@ function PlanMiseDisplay({ plan, onClose }: { plan: MisePlan; onClose: () => voi
 
       <p className="mt-3 text-[10px] text-muted-foreground/60">{plan.avertissement}</p>
 
-      <Button variant="ghost" size="sm" className="mt-2 w-full text-xs" onClick={onClose}>
+      {saveState === "saved" ? (
+        <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-brand-emerald/30 bg-brand-emerald/5 py-2.5 text-sm font-semibold text-brand-emerald">
+          <CheckCircle2 className="h-4 w-4" /> Paris enregistrés dans votre capital
+        </div>
+      ) : (
+        <Button
+          variant="brand"
+          className="mt-3 w-full bg-brand-gold hover:bg-brand-amber text-brand-dark font-bold"
+          onClick={handleSave}
+          disabled={saveState === "saving"}
+        >
+          {saveState === "saving"
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <>Valider et enregistrer dans mon capital</>}
+        </Button>
+      )}
+      <p className="mt-1.5 text-center text-[10px] text-muted-foreground/60">
+        Les gains/pertes seront calculés automatiquement à la fin de la course (vrais rapports PMU).
+      </p>
+
+      <Button variant="ghost" size="sm" className="mt-1 w-full text-xs" onClick={onClose}>
         Modifier le montant
       </Button>
     </div>
@@ -607,6 +637,21 @@ function MiseCalculatorWidget({
     }
   }
 
+  async function saveBets(): Promise<number> {
+    const m = parseFloat(montant);
+    try {
+      const res = await api.post(`/courses/${courseId}/enregistrer-paris`, {
+        montant: m, profil_risque: profil,
+      });
+      const n = res.data?.enregistres ?? 0;
+      toast.success(`${n} pari${n > 1 ? "s" : ""} enregistré${n > 1 ? "s" : ""} dans votre capital`);
+      return n;
+    } catch {
+      toast.error("Erreur lors de l'enregistrement");
+      throw new Error("save_failed");
+    }
+  }
+
   if (!userPlan || userPlan === "free") {
     return (
       <div className="text-center py-6">
@@ -634,7 +679,7 @@ function MiseCalculatorWidget({
     );
   }
 
-  if (plan) return <PlanMiseDisplay plan={plan} onClose={() => setPlan(null)} />;
+  if (plan) return <PlanMiseDisplay plan={plan} onClose={() => setPlan(null)} onSave={saveBets} />;
 
   return (
     <div>
