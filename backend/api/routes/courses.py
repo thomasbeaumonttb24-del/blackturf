@@ -308,6 +308,7 @@ async def get_programme(
         select(Course, Reunion)
         .join(Reunion, Reunion.reunion_id == Course.reunion_id)
         .where(func.date(Course.date_heure) == target)
+        .where(Course.statut != "annule")   # masque les courses annulées / obsolètes
         .order_by(Course.date_heure)
     )
     rows = (await db.execute(q)).all()
