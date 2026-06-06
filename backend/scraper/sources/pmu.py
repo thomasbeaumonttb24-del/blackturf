@@ -257,7 +257,11 @@ class PmuScraper(BaseScraper):
         if course_date is None:
             d = date.today().strftime("%d%m%Y")
         elif isinstance(course_date, str):
-            d = course_date
+            # déjà au format ddmmyyyy (préfixe course_id) ou ISO → on garde 8 chiffres
+            d = course_date if (len(course_date) == 8 and course_date.isdigit()) else date.today().strftime("%d%m%Y")
+        elif isinstance(course_date, (int, float)):
+            # epoch ms → date (heure de départ). Tolérant : sert juste à bâtir l'URL.
+            d = datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
         else:
             d = course_date.strftime("%d%m%Y")
 
