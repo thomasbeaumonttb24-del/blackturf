@@ -75,6 +75,7 @@ export const predictionsApi = {
     api.get("/value-bets", { params: { niveau_min: niveauMin } }),
   valueBetsHistory: (limit = 50, offset = 0) =>
     api.get("/value-bets/historique", { params: { limit, offset } }),
+  pariDuJour: () => api.get("/pari-du-jour"),
   modelVersion: () => api.get("/model/version"),
 };
 

@@ -88,6 +88,11 @@ export default function DashboardPage() {
     "equity-curve",
     () => statsApi.equityCurve().then((r) => r.data)
   );
+  const { data: pariDuJour } = useSWR(
+    "pari-du-jour",
+    () => predictionsApi.pariDuJour().then((r) => r.data),
+    { refreshInterval: 120_000 }
+  );
 
   // flatten today's courses from programme reunions
   const reunions: Reunion[] = programme?.reunions ?? [];
@@ -137,6 +142,39 @@ export default function DashboardPage() {
             </Button>
           </div>
         </div>
+
+        {/* ── Pari du jour ───────────────────────── */}
+        {pariDuJour && (
+          <Link href={`/courses/${pariDuJour.course_id}`} className="block group">
+            <Card className="border-brand-gold/40 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent hover:border-brand-gold/70 transition-colors">
+              <CardContent className="p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-0.5 shrink-0">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold">🎯 Pari du jour</span>
+                    <span className="text-[11px] text-muted-foreground">{pariDuJour.code} · {pariDuJour.hippodrome}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-foreground">N°{pariDuJour.numero} {pariDuJour.nom_cheval}</span>
+                      <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-500 font-semibold">
+                        EV +{(pariDuJour.ev * 100).toFixed(0)}%
+                      </span>
+                      {"⭐".repeat(Math.max(1, pariDuJour.niveau))}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{pariDuJour.raison}</p>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0">
+                    <div className="text-right">
+                      <div className="text-lg font-bold tabular-nums">{(pariDuJour.proba_top1 * 100).toFixed(0)}%</div>
+                      <div className="text-[10px] text-muted-foreground">gagnant{pariDuJour.cote_pmu ? ` · cote ${pariDuJour.cote_pmu}` : ""}</div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-brand-gold transition-colors" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        )}
 
         {/* ── KPI cards ──────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

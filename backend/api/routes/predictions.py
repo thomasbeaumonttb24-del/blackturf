@@ -236,6 +236,81 @@ async def get_value_bets_live(
     ]
 
 
+@router.get("/pari-du-jour")
+async def get_pari_du_jour(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    LE pari du jour : meilleur value bet à venir, classé par score composite
+    edge × chance de gain × accord des modèles (calibration). On exige une vraie
+    chance de victoire (proba_top1 ≥ 0.10) pour éviter les longshots à EV gonflé.
+    Renvoie null si aucun pari crédible (intégrité : pas de pari forcé).
+    """
+    if user.plan in ("free", "decouverte"):
+        return None
+
+    q = (
+        select(ValueBet, Prediction, Participation, Cheval, Course)
+        .join(Participation, Participation.participation_id == ValueBet.participation_id)
+        .join(Prediction, Prediction.participation_id == ValueBet.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .join(Course, Course.course_id == ValueBet.course_id)
+        .where(and_(
+            ValueBet.actif == True,
+            Course.statut.in_(["a_venir", "en_cours"]),
+            Prediction.proba_top1 >= 0.10,
+            ValueBet.ev_max > 0.05,
+        ))
+    )
+    rows = (await db.execute(q)).all()
+    if not rows:
+        return None
+
+    best = None
+    best_score = -1.0
+    for vb, pred, part, cheval, course in rows:
+        proba = float(pred.proba_top1 or 0)
+        conf = float(pred.confidence_score or 0) / 100.0  # 0-1 (accord des modèles)
+        ev = float(vb.ev_max or 0)
+        # Score composite : edge (EV) × chance réelle × confiance modèle.
+        score = ev * proba * (0.5 + 0.5 * conf)
+        if score > best_score:
+            best_score = score
+            best = (vb, pred, part, cheval, course)
+
+    if not best:
+        return None
+    vb, pred, part, cheval, course = best
+    cid = course.course_id
+    code = cid[8:] if len(cid) > 8 and "R" in cid[8:] else cid  # "R6C6"
+    proba = float(pred.proba_top1 or 0)
+    conf = round(float(pred.confidence_score or 0))
+    return {
+        "course_id": cid,
+        "code": code,
+        "hippodrome": course.hippodrome_nom,
+        "date_heure": course.date_heure,
+        "discipline": course.discipline,
+        "numero": part.numero,
+        "nom_cheval": cheval.nom,
+        "cote_pmu": part.cote_pmu,
+        "ev": round(float(vb.ev_max or 0), 4),
+        "proba_top1": round(proba, 4),
+        "proba_top1_low": round(pred.proba_top1_low, 4) if pred.proba_top1_low is not None else None,
+        "proba_top1_high": round(pred.proba_top1_high, 4) if pred.proba_top1_high is not None else None,
+        "confidence": conf,
+        "niveau": vb.niveau,
+        "spi_detected": vb.spi_detected,
+        "score": round(best_score, 5),
+        "raison": (
+            f"N°{part.numero} {cheval.nom} — le modèle lui donne {proba*100:.0f}% de gagner "
+            f"(cote {part.cote_pmu:.1f}) soit une valeur de +{float(vb.ev_max or 0)*100:.0f}%, "
+            f"avec {conf}% d'accord entre les 3 modèles."
+        ),
+    }
+
+
 @router.get("/value-bets/historique")
 async def get_value_bets_history(
     limit: int = Query(default=50, le=200),
