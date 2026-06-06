@@ -1232,7 +1232,7 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     cheval_ids = [r[2] for r in partants_raw]
     pid_list = [r[0] for r in partants_raw]
     jockey_ids = [r[3] for r in partants_raw if r[3]]
-    date_heure = partants_raw[0][30]  # date_heure de la course
+    date_heure = partants_raw[0][32]  # date_heure de la course (index aligné sur le SELECT)
 
     # 2. Historique des courses (max 20 par cheval) — une seule requête
     hist_r = await session.execute(text("""
