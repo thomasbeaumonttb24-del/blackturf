@@ -389,8 +389,12 @@ async def get_course_analysis(
 
     # ── Paris multiples (probabilités simulées Plackett-Luce) ──
     try:
-        from ml.combo_bets import build_combo_proposals
+        from ml.combo_bets import build_combo_proposals, build_coverage_bets
         result["paris_multiples"] = build_combo_proposals(predictions, course_info, bankroll=100.0)
+        # Couverture jackpot (base+champ) + « coup à tenter » — gros gains
+        cov = build_coverage_bets(predictions, course_info, bankroll=100.0)
+        result["coverage_jackpot"] = cov.get("proposals", [])
+        result["coup_a_tenter"] = cov.get("coup_a_tenter")
     except Exception as e:
         log.warning("analyse.combo_bets_failed", course_id=course_id, err=str(e)[:160])
 

@@ -9,6 +9,7 @@ le pari n'est pas proposé.
 """
 from __future__ import annotations
 
+import math
 import numpy as np
 import structlog
 
@@ -91,6 +92,15 @@ class _Sim:
     def p_topk_exact(self, sel: list[int], k: int) -> float:
         member = self.in_top4 if k == 4 else self.in_top5 if k == 5 else self.in_top3
         return float(member[:, sel].all(axis=1).mean())
+
+    def p_coverage(self, sel: list[int], k: int) -> float:
+        """P(les k premiers ⊆ sélection) — couverture désordre avec |sel| ≥ k.
+
+        Le ticket gagne si les k chevaux arrivés aux k premières places sont TOUS
+        dans la sélection (peu importe l'ordre). Exactement k des |sel| colonnes
+        doivent appartenir au top-k de la simulation."""
+        member = self.in_top4 if k == 4 else self.in_top5 if k == 5 else self.in_top3
+        return float((member[:, sel].sum(axis=1) == k).mean())
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -371,6 +381,242 @@ def enumerate_bet_candidates(
         add("rendement", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel),
             f"2 des 4 chevaux N°{','.join(str(numeros[i]) for i in sel)} dans les 4 premiers.")
 
+    # ── Jackpots désordre (Tiercé/Quarté+/Quinté+) — gros lot, 1 combinaison ──
+    # Proba RÉELLE (simulation) du top-k exact des favoris modèle ; rapport ≈ TRJ /
+    # proba marché de la combi. Espérance souvent négative (TRJ ~65%) mais gros lot.
+    if (est_tierce or est_quarte or est_quinte) and len(by_p1) >= 3:
+        sel = list(by_p1[:3])
+        add("coup", "Tiercé Désordre", sel, sim.p_topk_exact(sel, 3), sim_m.p_topk_exact(sel, 3),
+            f"Tiercé désordre N°{'+N°'.join(str(numeros[i]) for i in sel)} — gros lot.")
+    if (est_quarte or est_quinte) and len(by_p1) >= 4:
+        sel = list(by_p1[:4])
+        add("coup", "Quarté+ Désordre", sel, sim.p_topk_exact(sel, 4), sim_m.p_topk_exact(sel, 4),
+            f"Quarté+ désordre N°{'+N°'.join(str(numeros[i]) for i in sel)} — gros lot.")
+    if est_quinte and len(by_p1) >= 5:
+        sel = list(by_p1[:5])
+        add("coup", "Quinté+ Désordre", sel, sim.p_topk_exact(sel, 5), sim_m.p_topk_exact(sel, 5),
+            f"Quinté+ désordre N°{'+N°'.join(str(numeros[i]) for i in sel)} — gros lot.")
+
     niv_order = {"securite": 0, "rendement": 1, "surprise": 2, "coup": 3}
     cands.sort(key=lambda c: (niv_order.get(c["niveau"], 9), -c["ev"]))
     return cands
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Couverture JACKPOT (base + champ) — viser les gros rapports
+# ──────────────────────────────────────────────────────────────────────────────
+# Mise unitaire de base par combinaison (€), avant Flexi.
+_JACKPOT_UNIT = 2.0
+# Plancher Flexi (PMU autorise des fractions ; on ne descend pas sous 10%).
+_FLEXI_MIN = 0.10
+# Plafond du rapport estimé (les rapports jackpot peuvent être énormes mais on
+# borne pour ne pas afficher une espérance non crédible sur proba minuscule).
+_RAPPORT_MAX_JACKPOT = 100000.0
+
+
+def build_coverage_bets(
+    predictions: list[dict],
+    course_info: dict,
+    bankroll: float = 100.0,
+    budget: float | None = None,
+    n_sims: int = N_SIMS,
+) -> dict:
+    """Propose une COUVERTURE multi-combinaisons pour viser les jackpots.
+
+    Pour chaque pari jackpot disponible (Tiercé / Quarté+ / Quinté+ désordre,
+    2sur4), on construit une sélection de N chevaux (base des favoris modèle +
+    champ) et on calcule, par simulation Plackett-Luce :
+      - proba_gain  = P(les k arrivants du top-k ⊆ sélection)   [réelle, pas inventée]
+      - n_combinaisons = C(N, k)
+      - coût = n_combis × mise_unitaire × flexi   (Flexi calé sur le budget)
+      - rapport_estime = TRJ / proba_marché de la combinaison MODALE (≈ gain par €)
+      - ev = proba_gain × rapport / n_combis − 1   (espérance nette du ticket)
+
+    On émet, par type, une version « tendue » (N = k) et une « couverture élargie »
+    (N = k+1 ou k+2 selon budget). Aucune valeur fabriquée : tout dérive des probas
+    du modèle, des cotes marché et des TRJ réels.
+
+    Retour : {proposals:[...], coup_a_tenter: {...}|None}.
+    """
+    parts = [p for p in predictions if (p.get("cote_pmu") or 0) > 1.0]
+    if len(parts) < 3:
+        return {"proposals": [], "coup_a_tenter": None}
+
+    p1 = np.array([max(float(p.get("proba_top1") or 0.0), 1e-4) for p in parts])
+    p1 = p1 / p1.sum()
+    cotes = np.array([float(p.get("cote_pmu") or 10.0) for p in parts])
+    numeros = [int(p["numero"]) for p in parts]
+    noms = [p.get("nom", "") for p in parts]
+
+    pm = 1.0 / np.clip(cotes, 1.01, None)
+    pm = pm / pm.sum()
+
+    order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
+    sim = _Sim(order, len(parts))
+    order_m = simulate_orderings(pm, n_sims=n_sims, seed=67890)
+    sim_m = _Sim(order_m, len(parts))
+
+    by_p1 = list(np.argsort(-p1))      # favoris modèle
+    by_pm = list(np.argsort(-pm))      # favoris marché (pour le rapport modal)
+    implied = pm
+    edge_by_idx = p1 - implied
+
+    nb_partants = course_info.get("nb_partants", len(parts))
+    est_quinte = bool(course_info.get("est_quinte"))
+    est_quarte = bool(course_info.get("est_quarte"))
+    est_tierce = bool(course_info.get("est_tierce"))
+
+    budget = budget if budget and budget > 0 else max(bankroll * 0.10, 10.0)
+
+    def H(i):
+        return {"numero": numeros[i], "nom": noms[i], "cote": round(float(cotes[i]), 1)}
+
+    proposals: list[dict] = []
+
+    def add_coverage(label, k, trj, n_sel):
+        """Ajoute une proposition de couverture de N=n_sel chevaux pour un top-k."""
+        if n_sel < k or len(by_p1) < n_sel:
+            return
+        sel = list(by_p1[:n_sel])
+        p_model = sim.p_coverage(sel, k)
+        if p_model <= 0:
+            return
+        n_combis = math.comb(n_sel, k)
+        # Rapport ≈ TRJ / proba marché de la combinaison MODALE (le top-k marché).
+        sel_m = list(by_pm[:k])
+        p_market_modal = max(sim_m.p_coverage(sel_m, k), 1e-5)
+        rapport = float(min(max(trj / p_market_modal, 1.1), _RAPPORT_MAX_JACKPOT))
+        # Flexi calé sur le budget : full_cost = n_combis × unit
+        full_cost = n_combis * _JACKPOT_UNIT
+        flexi = 1.0 if full_cost <= budget else max(_FLEXI_MIN, budget / full_cost)
+        unit_eff = _JACKPOT_UNIT * flexi
+        cout_total = max(round(n_combis * unit_eff, 2), 2.0)
+        gain_potentiel = round(rapport * unit_eff, 2)        # gain de la combi gagnante
+        ev = float(p_model * rapport / n_combis - 1.0)
+        niveau = "jackpot" if n_sel == k else "couverture"
+        couv = "tendue" if n_sel == k else f"champ {n_sel} chevaux"
+        proposals.append({
+            "niveau": niveau,
+            "type_pari": f"{label} Désordre",
+            "couverture": couv,
+            "chevaux": [H(i) for i in sel],
+            "proba_gain": round(p_model, 4),
+            "nb_combinaisons": int(n_combis),
+            "flexi_pct": round(flexi * 100),
+            "mise_unitaire": round(unit_eff, 2),
+            "cout_total": cout_total,
+            "rapport_estime": round(rapport, 1),
+            "gain_potentiel": gain_potentiel,
+            "ev": round(ev, 3),
+            "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
+            "texte_explication": (
+                f"{label} {couv} — N°{','.join(str(numeros[i]) for i in sel)} "
+                f"({n_combis} comb." + (f", Flexi {round(flexi*100)}%" if flexi < 1 else "")
+                + f") · {p_model*100:.1f}% de toucher · gain ~{gain_potentiel:.0f}€."
+            ),
+        })
+
+    # ── Tiercé désordre (k=3) : tendu (3) + couverture (4, 5) ──
+    if est_tierce or est_quarte or est_quinte:
+        for n_sel in (3, 4, 5):
+            add_coverage("Tiercé", 3, TRJ["Trio"], n_sel)
+    # ── Quarté+ désordre (k=4) : tendu (4) + couverture (5, 6) ──
+    if est_quarte or est_quinte:
+        for n_sel in (4, 5, 6):
+            add_coverage("Quarté+", 4, TRJ["Quarté+ Désordre"], n_sel)
+    # ── Quinté+ désordre (k=5) : tendu (5) + couverture (6, 7) ──
+    if est_quinte:
+        for n_sel in (5, 6, 7):
+            add_coverage("Quinté+", 5, TRJ["Quinté+ Désordre"], n_sel)
+
+    # ── 2sur4 (≥ 2 des 4 favoris dans le top-4) ──
+    if nb_partants >= 8 and len(by_p1) >= 4:
+        sel = list(by_p1[:4])
+        p_model = sim.p_2sur4(sel)
+        p_market = max(sim_m.p_2sur4(sel), 1e-4)
+        rapport = float(min(max(TRJ["2sur4"] / p_market, 1.1), 5000.0))
+        cout = max(round(math.comb(4, 2) * _JACKPOT_UNIT, 2), 2.0)
+        proposals.append({
+            "niveau": "couverture",
+            "type_pari": "2sur4",
+            "couverture": "4 chevaux",
+            "chevaux": [H(i) for i in sel],
+            "proba_gain": round(p_model, 4),
+            "nb_combinaisons": math.comb(4, 2),
+            "flexi_pct": 100,
+            "mise_unitaire": _JACKPOT_UNIT,
+            "cout_total": cout,
+            "rapport_estime": round(rapport, 1),
+            "gain_potentiel": round(rapport * _JACKPOT_UNIT, 2),
+            "ev": round(float(p_model * rapport / math.comb(4, 2) - 1.0), 3),
+            "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
+            "texte_explication": (
+                f"2sur4 — 2 des N°{','.join(str(numeros[i]) for i in sel)} dans les 4 "
+                f"premiers · {p_model*100:.0f}% de toucher."
+            ),
+        })
+
+    # Tri : niveau (jackpot tendu d'abord) puis EV décroissante
+    niv_order = {"jackpot": 0, "couverture": 1}
+    proposals.sort(key=lambda c: (niv_order.get(c["niveau"], 9), -c["ev"]))
+
+    # ── « Coup à tenter » : meilleur EV sur un outsider à VRAIE valeur (edge>0,
+    # cote ≥ 6) — Simple Gagnant ou Couplé Gagnant favori+outsider. Honnête : on
+    # n'invente pas, on prend la combi à plus forte espérance crédible.
+    coup = _best_coup(parts, p1, pm, cotes, numeros, noms, edge_by_idx, by_p1, sim, sim_m)
+
+    return {"proposals": proposals, "coup_a_tenter": coup}
+
+
+def _best_coup(parts, p1, pm, cotes, numeros, noms, edge_by_idx, by_p1, sim, sim_m):
+    """Sélectionne le meilleur « coup » : outsider (cote ≥ 6) que le modèle aime plus
+    que le marché (edge > 0), en Simple Gagnant ou Couplé Gagnant favori+outsider.
+    Retourne None si aucun candidat crédible."""
+    outsiders = sorted(
+        [i for i in range(len(parts)) if 6.0 <= cotes[i] <= 60.0 and edge_by_idx[i] > 0.005],
+        key=lambda i: edge_by_idx[i], reverse=True,
+    )
+    if not outsiders:
+        return None
+    o = outsiders[0]
+    candidates = []
+    # Simple Gagnant outsider
+    p_win = float(p1[o]); rap = float(cotes[o])
+    candidates.append({
+        "type_pari": "Simple Gagnant",
+        "chevaux": [{"numero": numeros[o], "nom": noms[o], "cote": round(rap, 1)}],
+        "proba_gain": round(p_win, 4), "rapport_estime": round(rap, 1),
+        "ev": round(rap * p_win - 1.0, 3), "edge": round(float(edge_by_idx[o]), 4),
+        "texte_explication": (
+            f"N°{numeros[o]} {noms[o]} (cote {rap:.1f}) : le modèle le voit nettement "
+            f"au-dessus du marché — {p_win*100:.0f}% de gagner, gain ~{rap:.0f}× la mise."
+        ),
+    })
+    # Couplé Gagnant favori + outsider
+    if by_p1 and by_p1[0] != o:
+        fav = by_p1[0]
+        p_cg = sim.p_couple_gagnant([fav, o])
+        p_cg_m = max(sim_m.p_couple_gagnant([fav, o]), 1e-4)
+        rap_cg = float(min(max(TRJ["Couplé Gagnant"] / p_cg_m, 1.1), 5000.0))
+        if p_cg > 0:
+            candidates.append({
+                "type_pari": "Couplé Gagnant",
+                "chevaux": [
+                    {"numero": numeros[fav], "nom": noms[fav], "cote": round(float(cotes[fav]), 1)},
+                    {"numero": numeros[o], "nom": noms[o], "cote": round(float(cotes[o]), 1)},
+                ],
+                "proba_gain": round(p_cg, 4), "rapport_estime": round(rap_cg, 1),
+                "ev": round(p_cg * rap_cg - 1.0, 3), "edge": round(float(edge_by_idx[o]), 4),
+                "texte_explication": (
+                    f"Favori N°{numeros[fav]} + outsider à valeur N°{numeros[o]} aux 2 "
+                    f"premières places — rapport ~{rap_cg:.0f}× pour {p_cg*100:.0f}%."
+                ),
+            })
+    candidates.sort(key=lambda c: -c["ev"])
+    best = candidates[0]
+    # On ne propose un « coup » que s'il est crédible : EV non franchement négative
+    # et rapport intéressant (≥ 5). Sinon pas de coup (intégrité, pas de faux espoir).
+    if best["ev"] <= -0.40 or best["rapport_estime"] < 5.0:
+        return None
+    best["niveau"] = "coup"
+    return best

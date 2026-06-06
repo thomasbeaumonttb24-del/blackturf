@@ -1334,6 +1334,19 @@ export default function CoursePage() {
         texte_explication: string;
       }>;
     };
+    coverage_jackpot?: Array<{
+      niveau: string; type_pari: string; couverture: string;
+      chevaux: Array<{ numero: number; nom: string; cote: number }>;
+      proba_gain: number; nb_combinaisons: number; flexi_pct: number;
+      mise_unitaire: number; cout_total: number; rapport_estime: number;
+      gain_potentiel: number; ev: number; edge: number; texte_explication: string;
+    }>;
+    coup_a_tenter?: {
+      niveau: string; type_pari: string;
+      chevaux: Array<{ numero: number; nom: string; cote: number }>;
+      proba_gain: number; rapport_estime: number; ev: number; edge: number;
+      texte_explication: string;
+    } | null;
   } | null>(null);
 
   const [resultats, setResultats] = useState<{
@@ -1806,6 +1819,59 @@ export default function CoursePage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── Coup à tenter (outsider à vraie valeur) ── */}
+          {analysis?.coup_a_tenter && (
+            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🎯</span>
+                <h3 className="text-sm font-semibold text-amber-800">Coup à tenter</h3>
+                <span className="ml-auto text-[10px] font-semibold rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
+                  {analysis.coup_a_tenter.type_pari}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span className="font-semibold text-sm">
+                  {analysis.coup_a_tenter.chevaux.map((h) => `N°${h.numero}`).join(" + ")}
+                </span>
+                <span className="text-xs text-muted-foreground font-mono tabular-nums">
+                  {(analysis.coup_a_tenter.proba_gain * 100).toFixed(0)}% · rapport ~{analysis.coup_a_tenter.rapport_estime.toFixed(0)}× · EV {analysis.coup_a_tenter.ev >= 0 ? "+" : ""}{(analysis.coup_a_tenter.ev * 100).toFixed(0)}%
+                </span>
+              </div>
+              <p className="text-xs text-gray-600">{analysis.coup_a_tenter.texte_explication}</p>
+            </div>
+          )}
+
+          {/* ── Couverture jackpot (base + champ) ── */}
+          {analysis?.coverage_jackpot && analysis.coverage_jackpot.length > 0 && (
+            <div className="rounded-xl border border-rose-100 bg-gradient-to-br from-rose-50/50 to-white p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-base">💰</span>
+                <h3 className="text-sm font-semibold text-rose-800">Couverture jackpot</h3>
+                <span className="ml-auto text-[10px] text-muted-foreground">Proba simulée · gros lot (variance élevée)</span>
+              </div>
+              <div className="space-y-2">
+                {analysis.coverage_jackpot.slice(0, 6).map((c, i) => (
+                  <div key={i} className="rounded-lg bg-white/70 border border-rose-100 px-3 py-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold">{c.type_pari}</span>
+                      <span className="text-[10px] rounded-full px-1.5 py-0.5 bg-rose-100 text-rose-700">{c.couverture}</span>
+                      <span className="text-[10px] text-muted-foreground">{c.nb_combinaisons} comb.{c.flexi_pct < 100 ? ` · Flexi ${c.flexi_pct}%` : ""}</span>
+                      <span className="ml-auto text-xs font-mono tabular-nums text-muted-foreground">
+                        {(c.proba_gain * 100).toFixed(1)}% · {c.cout_total.toFixed(0)}€ → ~{c.gain_potentiel.toFixed(0)}€
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {c.chevaux.map((h) => `N°${h.numero}`).join(", ")} · EV {c.ev >= 0 ? "+" : ""}{(c.ev * 100).toFixed(0)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Espérance souvent négative (le PMU prélève ~35% sur ces paris) — à jouer pour le gros lot, avec modération.
+              </p>
             </div>
           )}
 

@@ -253,54 +253,55 @@ def generer_recommandations_course(
             })
 
     if "Quarté+" in paris_dispo and len(top5) >= 4:
-        # Champ réduit : 1 cheval base + 5 autres
-        cout = 5 * 2.0  # 5 combinaisons × 2€
+        # Champ réduit : 4 favoris en désordre. EV/proba/coût RÉELS injectés par le
+        # moteur de couverture (build_coverage_bets) côté pipeline → None ici (jamais
+        # de valeur inventée).
         recos.append({
             "niveau": "audacieux",
-            "type_pari": "Quarté+ Bonus",
+            "type_pari": "Quarté+ Désordre",
             "chevaux": [{"numero": p["numero"], "nom": p["nom"]} for p in top5[:4]],
-            "mise_suggeree": cout,
-            "ev_calcule": 0.25,
-            "confidence": top5[3].get("proba_top3", 0) if len(top5) > 3 else 0,
-            "cout_total": cout,
+            "mise_suggeree": None,
+            "ev_calcule": None,
+            "confidence": None,
+            "cout_total": None,
             "nb_combinaisons": 4,
-            "texte_explication": f"Quarté Bonus N°{','.join(str(p['numero']) for p in top5[:4])}",
+            "texte_explication": f"Quarté+ désordre N°{','.join(str(p['numero']) for p in top5[:4])}",
         })
 
-    # ── 🔴 JACKPOT — Quinté+ Flexi 10% ───────────────────────────────────
+    # ── 🔴 JACKPOT — Quinté+ désordre (couverture) ───────────────────────
+    # EV/proba/coût/nb_combinaisons RÉELS injectés par build_coverage_bets côté
+    # pipeline (couverture base+champ simulée). Ici uniquement la sélection ; les
+    # champs chiffrés restent None tant qu'ils ne sont pas calculés (zéro invention).
     if "Quinté+" in paris_dispo and len(top5) >= 5:
-        # 5 chevaux Flexi 10% → 5!/(5-5)! = 120 combis × 0.20€ = 24€
-        cout = 120 * 0.20
         recos.append({
             "niveau": "jackpot",
-            "type_pari": "Quinté+ Flexi 10%",
+            "type_pari": "Quinté+ Désordre",
             "chevaux": [{"numero": p["numero"], "nom": p["nom"]} for p in top5],
-            "mise_suggeree": cout,
-            "ev_calcule": 0.35,
-            "confidence": top5[4].get("proba_top3", 0),
-            "cout_total": cout,
-            "nb_combinaisons": 120,
+            "mise_suggeree": None,
+            "ev_calcule": None,
+            "confidence": None,
+            "cout_total": None,
+            "nb_combinaisons": 1,
             "texte_explication": (
-                f"Quinté+ Flexi 10% N°{','.join(str(p['numero']) for p in top5)} — "
-                f"120 combis × 0,20€ = {cout:.0f}€"
+                f"Quinté+ désordre N°{','.join(str(p['numero']) for p in top5)} — "
+                f"couverture des 5 favoris (rapport/coût calculés)."
             ),
         })
     elif "Tiercé" in paris_dispo and top3:
-        # Fallback jackpot : Tiercé en ordre
         recos.append({
             "niveau": "jackpot",
-            "type_pari": "Tiercé Ordre",
+            "type_pari": "Tiercé Désordre",
             "chevaux": [
                 {"numero": top1["numero"], "nom": top1["nom"]},
                 {"numero": top2["numero"], "nom": top2["nom"]},
                 {"numero": top3["numero"], "nom": top3["nom"]},
             ],
-            "mise_suggeree": 2.0,
-            "ev_calcule": 0.40,
-            "confidence": top3.get("proba_top3", 0) * 0.3,
-            "cout_total": 2.0,
+            "mise_suggeree": None,
+            "ev_calcule": None,
+            "confidence": None,
+            "cout_total": None,
             "nb_combinaisons": 1,
-            "texte_explication": f"Tiercé Ordre N°{top1['numero']}-N°{top2['numero']}-N°{top3['numero']}",
+            "texte_explication": f"Tiercé désordre N°{top1['numero']}-N°{top2['numero']}-N°{top3['numero']}",
         })
 
     return recos

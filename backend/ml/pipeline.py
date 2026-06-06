@@ -815,19 +815,40 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
 
         # ── Remplacer les EV/probas HARDCODÉS des paris combinés par les valeurs
         # RÉELLES du moteur Plackett-Luce (intégrité : aucune valeur inventée). ──
+        coverage_result = {"proposals": [], "coup_a_tenter": None}
         try:
-            from ml.combo_bets import build_combo_proposals
+            from ml.combo_bets import build_combo_proposals, build_coverage_bets
             combo = build_combo_proposals(predictions, course_info, bankroll=user_bankroll)
             props = combo.get("proposals", [])
             combo_full = {c["type_pari"].lower(): c for c in props}            # ex "couplé placé"
             combo_cat = {}
             for c in props:                                                     # 1er par catégorie
                 combo_cat.setdefault(c["type_pari"].split()[0].lower(), c)
+
+            # Couverture jackpot (base+champ) — proba/coût/EV réels par catégorie.
+            coverage_result = build_coverage_bets(predictions, course_info, bankroll=user_bankroll)
+            cov_props = coverage_result.get("proposals", [])
+            cov_best = {}  # 1ère catégorie = meilleure (déjà triée jackpot→EV)
+            for c in cov_props:
+                cov_best.setdefault(c["type_pari"].split()[0].lower(), c)
+
             for reco in recos:
                 t = reco["type_pari"]
                 if t in ("Simple Gagnant", "Simple Placé"):
                     continue  # paris simples : EV déjà réel (ev_max du value bet)
-                cp = combo_full.get(t.lower()) or combo_cat.get(t.split()[0].lower())
+                cat = t.split()[0].lower()
+                # Jackpots (Tiercé/Quarté+/Quinté+) : valeurs RÉELLES du moteur de
+                # couverture (proba/coût/combinaisons cohérents avec un vrai ticket).
+                cv = cov_best.get(cat) if cat in ("tiercé", "quarté+", "quinté+") else None
+                if cv:
+                    reco["ev_calcule"] = cv["ev"]
+                    reco["confidence"] = cv["proba_gain"]
+                    reco["cout_total"] = cv["cout_total"]
+                    reco["mise_suggeree"] = cv["cout_total"]
+                    reco["nb_combinaisons"] = cv["nb_combinaisons"]
+                    reco["texte_explication"] = cv["texte_explication"]
+                    continue
+                cp = combo_full.get(t.lower()) or combo_cat.get(cat)
                 if cp:
                     reco["ev_calcule"] = cp["ev"]            # EV réelle (P × rapport − 1)
                     reco["confidence"] = cp["proba_gain"]    # proba simulée
@@ -835,6 +856,44 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                         reco["cout_total"] = cp["cout_total"]
         except Exception as e:
             log.warning("pipeline.combo_ev_override_failed", course_id=course_id, err=str(e)[:140])
+
+        # ── Ajouter le « coup à tenter » + 1 couverture élargie comme recos ──────
+        # (persistées → visibles via /courses/{id}/predictions). Valeurs 100% réelles
+        # issues du moteur de couverture ; aucune si non crédible.
+        try:
+            coup = coverage_result.get("coup_a_tenter")
+            if coup:
+                recos.append({
+                    "niveau": "coup",
+                    "type_pari": coup["type_pari"],
+                    "chevaux": [{"numero": h["numero"], "nom": h["nom"]} for h in coup["chevaux"]],
+                    "mise_suggeree": round(min(max(user_bankroll * 0.02, 1.5), 10.0), 2),
+                    "ev_calcule": coup["ev"],
+                    "confidence": coup["proba_gain"],
+                    "cout_total": round(min(max(user_bankroll * 0.02, 1.5), 10.0), 2),
+                    "nb_combinaisons": 1,
+                    "texte_explication": coup["texte_explication"],
+                })
+            # 1 meilleure couverture élargie (niveau "couverture") non déjà couverte
+            cov_extra = next(
+                (c for c in coverage_result.get("proposals", [])
+                 if c.get("niveau") == "couverture" and c.get("ev", -9) > -0.5),
+                None,
+            )
+            if cov_extra:
+                recos.append({
+                    "niveau": "couverture",
+                    "type_pari": cov_extra["type_pari"],
+                    "chevaux": [{"numero": h["numero"], "nom": h["nom"]} for h in cov_extra["chevaux"]],
+                    "mise_suggeree": cov_extra["cout_total"],
+                    "ev_calcule": cov_extra["ev"],
+                    "confidence": cov_extra["proba_gain"],
+                    "cout_total": cov_extra["cout_total"],
+                    "nb_combinaisons": cov_extra["nb_combinaisons"],
+                    "texte_explication": cov_extra["texte_explication"],
+                })
+        except Exception as e:
+            log.warning("pipeline.coup_reco_failed", course_id=course_id, err=str(e)[:140])
 
         # Purge des anciennes recommandations de la course avant recalcul
         # (sinon doublons + vieilles EV obsolètes s'accumulent à chaque re-prédiction).
@@ -879,6 +938,11 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             confidence_globale=confidence_globale,
             auc_modele=auc_modele,
         )
+
+        # ── Couverture jackpot + « coup à tenter » (gros gains) ──────────────
+        if isinstance(fiche, dict):
+            fiche["coverage_jackpot"] = coverage_result.get("proposals", [])
+            fiche["coup_a_tenter"] = coverage_result.get("coup_a_tenter")
 
         # ── Narrative IA (explication + analyse langage naturel) ─────────────
         try:
