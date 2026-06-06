@@ -374,22 +374,38 @@ async def _do_retraining(mois: int, label: str) -> None:
         model = BlackTurfEnsemble()
         metrics = model.train(X, y, y_win)
 
-        # Récupérer le modèle actuel pour comparaison
+        # Récupérer le modèle actif EN BASE pour une comparaison HONNÊTE.
+        current_mv = (await session.execute(
+            select(ModelVersion).where(ModelVersion.est_actif == True)
+            .order_by(ModelVersion.version_num.desc())
+        )).scalars().first()
         current = BlackTurfEnsemble.load_current()
-        current_auc = current.auc_roc if current else 0.0
 
-        # Le modèle actif est-il synthétique ? (prior cold-start). Si oui, le 1er vrai
-        # modèle le remplace inconditionnellement : son AUC synthétique est gonflé
-        # (labels = fonction déterministe des features) et bloquerait sinon tout
-        # apprentissage réel.
-        current_is_synth = await session.scalar(text(
-            "SELECT est_synthetique FROM model_versions WHERE est_actif = true "
-            "ORDER BY version_num DESC LIMIT 1"
-        ))
+        current_is_synth = bool(current_mv.est_synthetique) if current_mv else False
+        current_train_n = int(current_mv.nb_courses_train or 0) if current_mv else 0
 
-        # Déployer si : remplace un prior synthétique, OU pas de modèle, OU meilleur.
-        seuil_regression = 0.005  # Tolérance 0.5%
-        if current_is_synth or current is None or metrics["auc_roc"] >= current_auc - seuil_regression:
+        # ── Métrique de décision = WALK-FORWARD AUC (généralisation), PAS l'AUC test ──
+        # L'AUC test est sur-apprenable : un modèle entraîné sur peu de courses peut
+        # afficher un AUC test gonflé (ex. v2 : 399 courses → AUC 0.985 = sur-apprentissage)
+        # tout en généralisant mal. Le walk-forward (6 fenêtres glissantes) est l'estimation
+        # honnête de la perf future. On compare donc les walk-forward (fallback AUC si absent).
+        new_wf = float(metrics.get("walk_forward_auc") or metrics["auc_roc"])
+        current_wf = float(
+            (current_mv.walk_forward_auc if current_mv and current_mv.walk_forward_auc
+             else (current_mv.auc_roc if current_mv else 0.0)) or 0.0
+        )
+
+        # Un modèle actif entraîné sur trop peu de courses est NON FIABLE (sur-apprentissage
+        # probable) → il doit pouvoir être remplacé par un vrai modèle même à walk-forward
+        # inférieur. Seuil : MIN_RELIABLE_TRAIN courses réelles.
+        MIN_RELIABLE_TRAIN = 800
+        current_unreliable = (not current_is_synth) and current_train_n < MIN_RELIABLE_TRAIN
+
+        # Déployer si : prior synthétique, OU pas de modèle, OU actif non fiable (peu de
+        # données), OU walk-forward au moins aussi bon (tolérance 0.5%).
+        seuil_regression = 0.005
+        if (current_is_synth or current is None or current_mv is None
+                or current_unreliable or new_wf >= current_wf - seuil_regression):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
 
@@ -422,13 +438,15 @@ async def _do_retraining(mois: int, label: str) -> None:
                 "pipeline.retrain.deployed",
                 version=version_num,
                 auc=round(metrics["auc_roc"], 4),
-                prev_auc=round(current_auc, 4),
+                wf_auc=round(new_wf, 4),
+                prev_wf_auc=round(current_wf, 4),
+                reason=("synth" if current_is_synth else "unreliable_active" if current_unreliable else "better_wf"),
             )
         else:
             log.warning(
                 "pipeline.retrain.rollback",
-                new_auc=round(metrics["auc_roc"], 4),
-                current_auc=round(current_auc, 4),
+                new_wf_auc=round(new_wf, 4),
+                current_wf_auc=round(current_wf, 4),
             )
 
         await session.commit()
