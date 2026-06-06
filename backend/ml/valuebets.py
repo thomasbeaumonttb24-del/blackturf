@@ -49,8 +49,11 @@ CONFIANCE_SEUILS = {
 # Le gate ne s'applique qu'AU-DELÀ de LONGSHOT_COTE_MIN : sur les favoris (cote
 # basse) le modèle est bien calibré et un fort écart au marché peut être un vrai
 # edge ; c'est uniquement sur les grosses cotes que l'écart trahit le sur-fit.
-MAX_MODEL_MARKET_RATIO = 2.0
-LONGSHOT_COTE_MIN = 8.0
+# Resserré : l'inflation d'EV se produit dès la zone cote 4-8 (ex. proba modèle
+# 38% sur une cote 6.8 = 2.5× le marché → EV +118% non crédible), pas seulement
+# au-delà de 8. Gate appliqué dès cote 4, écart max 1.7× la proba marché.
+MAX_MODEL_MARKET_RATIO = 1.7
+LONGSHOT_COTE_MIN = 4.0
 
 # Cote max retenue pour le calcul de l'EV = médiane marché × ce facteur.
 # Anti winner's curse : empêche de calculer l'EV sur une cote isolée très
