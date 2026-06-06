@@ -433,6 +433,14 @@ class PmuScraper(BaseScraper):
             tendance_force = rd.get("nombreIndicateurTendance")
             est_favori = rd.get("favoris")
 
+            # robe / race : PMU peut renvoyer un dict {code, libelleCourt, libelleLong}
+            def _libelle(v):
+                if isinstance(v, dict):
+                    return v.get("libelleLong") or v.get("libelleCourt") or v.get("code")
+                return v
+            robe_val = _libelle(p.get("robe"))
+            race_val = _libelle(p.get("race"))
+
             partant = PartantScrape(
                 numero=p.get("numPmu", i + 1),
                 nom=p.get("nom", ""),
@@ -470,8 +478,8 @@ class PmuScraper(BaseScraper):
                 handicap_distance=p.get("handicapDistance"),
                 indicateur_inedit=p.get("indicateurInedit"),
                 jument_pleine=p.get("jumentPleine"),
-                race=p.get("race"),
-                robe=p.get("robe"),
+                race=race_val,
+                robe=robe_val,
                 source="pmu",
             )
             partants.append(partant)
