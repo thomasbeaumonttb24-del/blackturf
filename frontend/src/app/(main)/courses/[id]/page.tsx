@@ -879,11 +879,11 @@ function PronosticVerdictSection({ predictions, classement }: {
 interface BilanResp {
   montant: number;
   bilan: {
-    paris: Array<{ type: string; niveau: string; chevaux: { numero: number; nom: string }[]; mise: number; gagne: boolean; rapport_reel: number | null; gain: number | null; note: string | null }>;
-    nb_paris: number; nb_gagnes: number; total_mise: number; total_gain: number; net: number; roi: number; gain_indetermine: boolean;
+    paris: Array<{ type: string; niveau: string; chevaux: { numero: number; nom: string }[]; mise: number; gagne: boolean; statut: "gagne" | "perdu" | "en_attente"; rapport_reel: number | null; gain: number | null; note: string | null }>;
+    nb_paris: number; nb_gagnes: number; nb_en_attente: number; total_mise: number; total_gain: number; net: number; roi: number; en_attente: boolean; provisoire: boolean;
   };
   comparaison: { predicted_top3: number[]; actual_top3: number[]; gagnant_reel: number | null; rang_predit_gagnant: number | null; overlap_top3: number; modele_a_vu_gagnant: boolean };
-  verdict: "gagnant" | "perdant" | "indetermine";
+  verdict: "gagnant" | "perdant" | "en_attente";
 }
 
 function BilanMiseSection({ courseId }: { courseId: string }) {
@@ -905,7 +905,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
     ? { emoji: "🟢", label: "Plan gagnant", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
     : verdict === "perdant"
     ? { emoji: "🔴", label: "Plan perdant", cls: "border-rose-300 bg-rose-50 text-rose-800" }
-    : { emoji: "⚪", label: "Gain indéterminé (rapport PMU manquant)", cls: "border-gray-300 bg-gray-50 text-gray-700" };
+    : { emoji: "⏳", label: `En attente de ${bilan.nb_en_attente} rapport${bilan.nb_en_attente > 1 ? "s" : ""} PMU`, cls: "border-amber-300 bg-amber-50 text-amber-800" };
 
   return (
     <div className="mt-4 rounded-xl border border-brand-gold/30 bg-brand-gold/5 p-4">
@@ -920,7 +920,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
           <span>{vCfg.emoji}</span>{vCfg.label}
         </div>
         <div className="text-sm">
-          <span className="text-muted-foreground">Résultat net :</span>{" "}
+          <span className="text-muted-foreground">Résultat net{bilan.provisoire ? " (provisoire)" : ""} :</span>{" "}
           <span className={cn("font-bold tabular-nums", bilan.net >= 0 ? "text-emerald-600" : "text-rose-600")}>
             {bilan.net >= 0 ? "+" : ""}{bilan.net.toFixed(2)}€
           </span>
@@ -980,8 +980,10 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
                 <td className="py-1 pr-2 text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</td>
                 <td className="py-1 pr-2 text-right tabular-nums">{p.mise.toFixed(0)}€</td>
                 <td className="py-1 pr-2 text-right tabular-nums">
-                  {p.gagne
-                    ? <span className="text-emerald-600 font-semibold">✓ {p.gain != null ? `+${p.gain.toFixed(2)}€` : "gagné"}</span>
+                  {p.statut === "gagne"
+                    ? <span className="text-emerald-600 font-semibold">✓ +{(p.gain ?? 0).toFixed(2)}€</span>
+                    : p.statut === "en_attente"
+                    ? <span className="text-amber-600 font-semibold" title="Rapport PMU pas encore publié">⏳ gagné · rapport en attente</span>
                     : <span className="text-muted-foreground">✗ perdu</span>}
                 </td>
               </tr>

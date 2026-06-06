@@ -129,7 +129,7 @@ def settle_pari(
         except (TypeError, ValueError):
             rapport_reel = None
         if rapport_reel is None and note is None:
-            note = "Pari gagné mais rapport PMU indisponible."
+            note = "Rapport PMU pas encore publié — gain en attente."
 
     return {
         "gagne": bool(gagne),
@@ -149,7 +149,7 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
     paris_bilan: list[dict] = []
     total_mise = 0.0
     total_gain = 0.0
-    gain_indetermine = False
+    nb_en_attente = 0
 
     for niveau in plan.get("niveaux", []):
         for pari in niveau.get("paris", []):
@@ -157,12 +157,17 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
             mise = float(pari.get("mise", 0) or 0)
             res = settle_pari(pari["type"], numeros, classement, rapports, nb_partants)
             gain = None
+            # statut : "gagne" | "perdu" | "en_attente" (gagné mais rapport pas publié)
             if res["gagne"]:
                 if res["rapport_reel"] is not None:
                     gain = round(mise * res["rapport_reel"], 2)
                     total_gain += gain
+                    statut = "gagne"
                 else:
-                    gain_indetermine = True
+                    statut = "en_attente"
+                    nb_en_attente += 1
+            else:
+                statut = "perdu"
             total_mise += mise
             paris_bilan.append({
                 "type": pari["type"],
@@ -170,6 +175,7 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
                 "chevaux": pari.get("chevaux", []),
                 "mise": mise,
                 "gagne": res["gagne"],
+                "statut": statut,
                 "rapport_reel": res["rapport_reel"],
                 "gain": gain,
                 "rapport_approximatif": res["rapport_approximatif"],
@@ -180,15 +186,19 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
     total_gain = round(total_gain, 2)
     net = round(total_gain - total_mise, 2)
     roi = round(net / total_mise * 100, 1) if total_mise > 0 else 0.0
-    nb_gagnes = sum(1 for p in paris_bilan if p["gagne"])
+    nb_gagnes = sum(1 for p in paris_bilan if p["statut"] == "gagne")
 
     return {
         "paris": paris_bilan,
         "nb_paris": len(paris_bilan),
         "nb_gagnes": nb_gagnes,
+        "nb_en_attente": nb_en_attente,
+        "en_attente": nb_en_attente > 0,
         "total_mise": total_mise,
         "total_gain": total_gain,
         "net": net,
         "roi": roi,
-        "gain_indetermine": gain_indetermine,
+        # net/ROI provisoires tant que des rapports manquent
+        "provisoire": nb_en_attente > 0,
+        "gain_indetermine": nb_en_attente > 0,  # rétro-compat
     }

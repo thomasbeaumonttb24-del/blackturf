@@ -708,11 +708,10 @@ async def get_bilan_pronostic(
     overlap_top3 = len(set(predicted_top3) & set(actual_top3))
 
     # Verdict : le plan a-t-il été rentable ? + le modèle a-t-il vu le gagnant ?
-    plan_gagnant = bilan["net"] >= 0 and not bilan["gain_indetermine"]
     modele_a_vu_gagnant = rang_predit_gagnant is not None and rang_predit_gagnant <= 3
-    if bilan["gain_indetermine"]:
-        verdict = "indetermine"
-    elif plan_gagnant:
+    if bilan.get("en_attente"):
+        verdict = "en_attente"  # un pari gagné dont le rapport PMU n'est pas encore publié
+    elif bilan["net"] >= 0:
         verdict = "gagnant"
     else:
         verdict = "perdant"
