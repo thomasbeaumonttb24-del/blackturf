@@ -277,7 +277,10 @@ async def _do_retraining(mois: int, label: str) -> None:
     async with AsyncSessionLocal() as session:
         # Construire le dataset
         features_rows, resultats_dict = await _build_training_dataset_from_db(session, mois)
-        if len(features_rows) < 500:
+        # Seuil abaissé à 300 : amorçage sur vraies courses (le synthétique sert de
+        # prior tant qu'on a peu de données réelles ; il sera remplacé dès qu'on a
+        # un vrai modèle, cf. override est_synthetique ci-dessous).
+        if len(features_rows) < 300:
             log.warning("pipeline.retrain.insufficient_data", nb_rows=len(features_rows))
             return
 
@@ -296,9 +299,18 @@ async def _do_retraining(mois: int, label: str) -> None:
         current = BlackTurfEnsemble.load_current()
         current_auc = current.auc_roc if current else 0.0
 
-        # Déployer si meilleur ou si pas de modèle actif
+        # Le modèle actif est-il synthétique ? (prior cold-start). Si oui, le 1er vrai
+        # modèle le remplace inconditionnellement : son AUC synthétique est gonflé
+        # (labels = fonction déterministe des features) et bloquerait sinon tout
+        # apprentissage réel.
+        current_is_synth = await session.scalar(text(
+            "SELECT est_synthetique FROM model_versions WHERE est_actif = true "
+            "ORDER BY version_num DESC LIMIT 1"
+        ))
+
+        # Déployer si : remplace un prior synthétique, OU pas de modèle, OU meilleur.
         seuil_regression = 0.005  # Tolérance 0.5%
-        if metrics["auc_roc"] >= current_auc - seuil_regression:
+        if current_is_synth or current is None or metrics["auc_roc"] >= current_auc - seuil_regression:
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
 
@@ -315,6 +327,7 @@ async def _do_retraining(mois: int, label: str) -> None:
                 walk_forward_variance=metrics.get("walk_forward_variance"),
                 nb_courses_train=len(X),
                 est_actif=True,
+                est_synthetique=False,  # entraîné sur de vraies courses
                 feature_importance=model.feature_importance,
             )
             session.add(mv)
@@ -974,7 +987,20 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
             reduction_km=reduction_km,
             acceleration_index=accel_idx,
             acceleration_label=accel_label,
-        ).on_conflict_do_nothing()
+        ).on_conflict_do_update(
+            # index unique partiel (cheval_id, course_id) WHERE course_id IS NOT NULL
+            # → un seul historique par cheval & course interne (pas de doublon au re-run)
+            index_elements=["cheval_id", "course_id"],
+            index_where=text("course_id IS NOT NULL"),
+            set_={
+                "position_arrivee": entry.get("position"),
+                "incident": entry.get("incident"),
+                "temps_officiel": entry.get("temps"),
+                "reduction_km": reduction_km,
+                "acceleration_index": accel_idx,
+                "acceleration_label": accel_label,
+            },
+        )
         await session.execute(stmt)
 
 

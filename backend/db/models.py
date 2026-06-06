@@ -653,6 +653,7 @@ class ModelVersion(Base):
     nb_courses_train: Mapped[int] = mapped_column(Integer)
     est_actif: Mapped[bool] = mapped_column(Boolean, default=False)
     est_rollback: Mapped[bool] = mapped_column(Boolean, default=False)
+    est_synthetique: Mapped[bool] = mapped_column(Boolean, default=False)  # prior cold-start
     walk_forward_auc: Mapped[float | None] = mapped_column(Float)
     walk_forward_variance: Mapped[float | None] = mapped_column(Float)
     feature_importance: Mapped[dict | None] = mapped_column(JSON)
