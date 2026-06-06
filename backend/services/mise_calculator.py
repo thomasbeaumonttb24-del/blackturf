@@ -114,6 +114,21 @@ class MisePlan:
 # ─────────────────────────────────────────────────────────────
 # Moteur principal
 # ─────────────────────────────────────────────────────────────
+NIVEAU_META = {
+    "securite":  ("SÉCURITÉ",  "🟢", "#10B981"),
+    "rendement": ("RENDEMENT", "🔵", "#3B82F6"),
+    "surprise":  ("SURPRISES", "🟡", "#F59E0B"),
+    "coup":      ("GROS LOT",  "🔴", "#EF4444"),
+}
+
+# Nb de paris ciblé par niveau selon le profil (avant plafond du montant)
+PROFIL_QUOTAS = {
+    "conservateur": {"securite": 2, "rendement": 3, "surprise": 1, "coup": 1},
+    "equilibre":    {"securite": 1, "rendement": 3, "surprise": 2, "coup": 1},
+    "agressif":     {"securite": 0, "rendement": 2, "surprise": 3, "coup": 2},
+}
+
+
 def generer_plan(
     montant: float,
     profil: str,
@@ -121,68 +136,157 @@ def generer_plan(
     course_info: dict,
     bankroll: Optional[float] = None,
 ) -> MisePlan:
+    """Plan de mise : PORTEFEUILLE DIVERS de paris recalculé à chaque fois selon le
+    montant — plusieurs Simple Gagnant, 3-4 Couplé Gagnant différents, Trios, dont
+    des scénarios SURPRISE (outsider que le modèle aime > marché). Probabilités
+    RÉELLES (simulation Plackett-Luce). Mise minimale 2€, arrondie à l'euro.
     """
-    Génère le plan de mise personnalisé.
+    from ml.combo_bets import enumerate_bet_candidates
 
-    predictions: list de dicts avec champs:
-        numero, nom_cheval, proba_top3, proba_top1, cote_pmu, value_bet (optional)
-    course_info: dict avec est_quinte, est_quarte, est_tierce, nb_partants
-    """
-    profil = profil if profil in PROFIL_ALLOCATION else "equilibre"
-    alloc_sec, alloc_rend, alloc_coup = PROFIL_ALLOCATION[profil]
-
-    # Kelly protection — avertissement si >5% bankroll
+    profil = profil if profil in PROFIL_QUOTAS else "equilibre"
+    montant = max(2, int(round(float(montant))))            # euro, min 2
     kelly_warn = bankroll is not None and montant > bankroll * 0.05
 
-    # Trier par proba top3 desc, puis par EV desc
-    def _sort_key(p: dict) -> tuple:
-        ev = (p.get("value_bet") or {}).get("ev_max", 0) or 0
-        return (p.get("proba_top3", 0), ev)
+    preds = []
+    for p in predictions:
+        if p.get("non_partant"):
+            continue
+        preds.append({
+            "numero": p["numero"],
+            "nom": p.get("nom_cheval") or p.get("nom") or f"N°{p['numero']}",
+            "proba_top1": p.get("proba_top1"),
+            "proba_top3": p.get("proba_top3"),
+            "cote_pmu": p.get("cote_pmu"),
+        })
 
-    sorted_preds = sorted(
-        [p for p in predictions if not p.get("non_partant", False)],
-        key=_sort_key,
-        reverse=True,
-    )
-
-    # Construire les objets ChevPred
-    chevaux: list[ChevPred] = []
-    for p in sorted_preds[:8]:  # top 8 suffisent
-        cote = p.get("cote_pmu") or 5.0  # fallback si cote manquante
-        chevaux.append(ChevPred(
-            numero=p["numero"],
-            nom=p.get("nom_cheval", f"N°{p['numero']}"),
-            cote_pmu=max(1.1, float(cote)),
-            proba_top3=float(p.get("proba_top3", 0.3)),
-            proba_top1=float(p.get("proba_top1", 0.1)),
-            ev=(p.get("value_bet") or {}).get("ev_max"),
-        ))
-
-    nb = len(chevaux)
-    if nb == 0:
+    cands = enumerate_bet_candidates(preds, course_info)
+    if not cands:
         return _plan_vide(montant, profil)
 
-    is_quinte = course_info.get("est_quinte", False)
-    is_quarte = course_info.get("est_quarte", False)
-    nb_partants = course_info.get("nb_partants", nb)
+    max_bets = max(1, min(montant // 2, 8))                 # chaque pari ≥ 2€
+    selected = _select_diverse(cands, max_bets, profil)
+    if not selected:
+        return _plan_vide(montant, profil)
 
-    # ─── Adapter la stratégie selon le montant ──────────────
-    # < 5€ → micro (1 pari)
-    # 5-20€ → simple (2-3 paris)
-    # 20-50€ → standard (3-4 paris)
-    # 50-150€ → complet (4-5 paris)
-    # > 150€ → premium (Kelly avancé)
+    _allocate_euros(selected, montant)                      # remplit "mise" (int €)
+    return _assemble_plan(selected, montant, kelly_warn)
 
-    if montant < 5:
-        return _plan_micro(montant, chevaux, profil, kelly_warn)
-    elif montant < 20:
-        return _plan_simple(montant, alloc_sec, alloc_rend, alloc_coup, chevaux, is_quinte, nb_partants, kelly_warn)
-    elif montant < 50:
-        return _plan_standard(montant, alloc_sec, alloc_rend, alloc_coup, chevaux, is_quinte, nb_partants, kelly_warn)
-    elif montant < 150:
-        return _plan_complet(montant, alloc_sec, alloc_rend, alloc_coup, chevaux, is_quinte, is_quarte, nb_partants, kelly_warn)
-    else:
-        return _plan_premium(montant, alloc_sec, alloc_rend, alloc_coup, chevaux, is_quinte, is_quarte, nb_partants, kelly_warn)
+
+def _select_diverse(cands: list[dict], max_bets: int, profil: str) -> list[dict]:
+    """Choisit un sous-ensemble VARIÉ selon les quotas du profil, en privilégiant
+    l'EV puis la proba. Au plus 3 paris d'un même type, mix de niveaux."""
+    quotas = dict(PROFIL_QUOTAS[profil])
+    by_niveau: dict[str, list[dict]] = {}
+    for c in cands:
+        by_niveau.setdefault(c["niveau"], []).append(c)
+    for lst in by_niveau.values():
+        lst.sort(key=lambda c: (c["ev"], c["proba_gain"]), reverse=True)
+
+    selected: list[dict] = []
+    type_count: dict[str, int] = {}
+
+    def take(c):
+        if len(selected) >= max_bets:
+            return False
+        if type_count.get(c["type_pari"], 0) >= 3:
+            return False
+        selected.append(c)
+        type_count[c["type_pari"]] = type_count.get(c["type_pari"], 0) + 1
+        return True
+
+    # 1) Respecter les quotas par niveau
+    for niveau in ("securite", "rendement", "surprise", "coup"):
+        for c in by_niveau.get(niveau, []):
+            if quotas.get(niveau, 0) <= 0:
+                break
+            if take(c):
+                quotas[niveau] -= 1
+    # 2) Compléter avec les meilleurs candidats restants (EV+) jusqu'au plafond
+    rest = sorted(
+        [c for c in cands if c not in selected],
+        key=lambda c: (c["ev"], c["proba_gain"]), reverse=True,
+    )
+    for c in rest:
+        if len(selected) >= max_bets:
+            break
+        take(c)
+    return selected
+
+
+def _allocate_euros(selected: list[dict], montant: int) -> None:
+    """Répartit `montant` (€ entiers) : 2€ plancher par pari, le reste pondéré par
+    la conviction (proba × max(EV,0)+petit socle). Total == montant exactement."""
+    n = len(selected)
+    # si le montant ne couvre pas 2€ par pari, on garde les meilleurs
+    while n * 2 > montant and n > 1:
+        selected.pop()  # déjà triés best-first par _select_diverse
+        n = len(selected)
+
+    base = 2
+    reste = montant - base * n
+    weights = []
+    for c in selected:
+        w = c["proba_gain"] * (1.0 + max(c["ev"], 0.0)) + 0.05
+        weights.append(max(w, 0.01))
+    total_w = sum(weights)
+    extra = [int(reste * w / total_w) for w in weights] if total_w > 0 else [0] * n
+    # distribuer les euros restants au(x) plus forte(s) conviction(s)
+    leftover = reste - sum(extra)
+    order = sorted(range(n), key=lambda i: weights[i], reverse=True)
+    for k in range(leftover):
+        extra[order[k % n]] += 1
+    for i, c in enumerate(selected):
+        c["mise"] = base + extra[i]
+
+
+def _assemble_plan(selected: list[dict], montant: int, kelly_warn: bool) -> MisePlan:
+    """Groupe les paris choisis par niveau → MisePlan (structure attendue par le front)."""
+    niveaux_map: dict[str, list[PariRec]] = {}
+    ev_pondere = 0.0
+    for c in selected:
+        mise = c["mise"]
+        gain = round(mise * c["rapport_estime"])
+        pari = PariRec(
+            type=c["type_pari"],
+            chevaux=[{"numero": h["numero"], "nom": h["nom"]} for h in c["chevaux"]],
+            mise=mise,
+            gain_potentiel=gain,
+            probabilite=c["proba_gain"],
+            description=c["texte_explication"],
+            ev_estime=c["ev"],
+        )
+        niveaux_map.setdefault(c["niveau"], []).append(pari)
+        ev_pondere += mise * c["ev"]
+
+    niveaux: list[NiveauPlan] = []
+    for niv in ("securite", "rendement", "surprise", "coup"):
+        paris = niveaux_map.get(niv)
+        if not paris:
+            continue
+        label, emoji, couleur = NIVEAU_META[niv]
+        m_niv = sum(p.mise for p in paris)
+        niveaux.append(NiveauPlan(
+            niveau=niv, label=label, emoji=emoji, couleur=couleur,
+            montant=m_niv, pct=round(m_niv / montant * 100), paris=paris,
+        ))
+
+    nb_paris = len(selected)
+    nb_surprise = sum(1 for c in selected if c["niveau"] == "surprise")
+    resume = (
+        f"{nb_paris} paris répartis sur {len(niveaux)} niveaux"
+        + (f", dont {nb_surprise} scénario(s) surprise" if nb_surprise else "")
+        + f". Mise totale {montant}€."
+    )
+    return MisePlan(
+        montant_total=montant,
+        montant_joue=sum(c["mise"] for c in selected),
+        montant_reserve=montant - sum(c["mise"] for c in selected),
+        ev_global=round(ev_pondere / montant, 3) if montant else 0.0,
+        niveaux=niveaux,
+        resume_ia=resume,
+        avertissement="Probabilités estimées par simulation. Mises arrondies à l'euro (min 2€). Jouez avec modération.",
+        kelly_warning=kelly_warn,
+    )
 
 
 # ─────────────────────────────────────────────────────────────

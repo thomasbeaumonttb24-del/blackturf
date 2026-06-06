@@ -224,3 +224,145 @@ def build_combo_proposals(
         "scenario_arrivee": scenario,
         "proposals": proposals,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Énumération de candidats DIVERSES pour le plan de mise
+# ──────────────────────────────────────────────────────────────────────────────
+def enumerate_bet_candidates(
+    predictions: list[dict],
+    course_info: dict,
+    n_sims: int = N_SIMS,
+) -> list[dict]:
+    """Génère BEAUCOUP de paris candidats variés (plusieurs Simple Gagnant, 3-4
+    Couplé Gagnant différents, Trios, dont des scénarios SURPRISE avec outsider),
+    chacun avec proba RÉELLE (simulation Plackett-Luce) + rapport + EV + edge.
+
+    niveau : "securite" (forte proba) / "rendement" (EV+ favoris) /
+             "surprise" (outsider que le modèle aime > marché) / "coup" (gros lot).
+    Retour trié par (niveau prioritaire, EV décroissante).
+    """
+    parts = [p for p in predictions if (p.get("cote_pmu") or 0) > 1.0]
+    if len(parts) < 3:
+        return []
+
+    p1 = np.array([max(float(p.get("proba_top1") or 0.0), 1e-4) for p in parts])
+    p1 = p1 / p1.sum()
+    cotes = np.array([float(p.get("cote_pmu") or 10.0) for p in parts])
+    numeros = [int(p["numero"]) for p in parts]
+    noms = [p.get("nom", "") for p in parts]
+
+    pm = 1.0 / np.clip(cotes, 1.01, None)
+    pm = pm / pm.sum()
+
+    order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
+    sim = _Sim(order, len(parts))
+    order_m = simulate_orderings(pm, n_sims=n_sims, seed=67890)
+    sim_m = _Sim(order_m, len(parts))
+
+    by_p1 = list(np.argsort(-p1))                 # favoris modèle
+    implied = pm                                   # proba marché par cheval
+    edge_by_idx = p1 - implied                     # avantage modèle vs marché
+
+    # Meilleur(s) outsider(s) : cote 6-40 où le modèle a un edge positif
+    outsiders = sorted(
+        [i for i in range(len(parts)) if 6.0 <= cotes[i] <= 40.0 and edge_by_idx[i] > 0],
+        key=lambda i: edge_by_idx[i], reverse=True,
+    )
+    out1 = outsiders[0] if outsiders else None
+
+    cands: list[dict] = []
+    seen: set = set()
+
+    def H(i):
+        return {"numero": numeros[i], "nom": noms[i], "cote": round(float(cotes[i]), 1)}
+
+    def add(niveau, type_pari, sel, proba, p_market, texte):
+        if len(set(sel)) != len(sel):       # pas de cheval en double dans une combinaison
+            return
+        key = (type_pari, tuple(sorted(sel)))
+        if key in seen or proba <= 0:
+            return
+        seen.add(key)
+        trj = TRJ.get(type_pari, 0.80 if "Simple" in type_pari else 0.70)
+        rapport = float(min(max(trj / max(p_market, 1e-3), 1.1), 5000.0))
+        cands.append({
+            "niveau": niveau,
+            "type_pari": type_pari,
+            "chevaux": [H(i) for i in sel],
+            "proba_gain": round(float(proba), 4),
+            "rapport_estime": round(rapport, 1),
+            "ev": round(_ev(proba, rapport), 3),
+            "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
+            "texte_explication": texte,
+        })
+
+    nb_partants = course_info.get("nb_partants", len(parts))
+    est_quinte = bool(course_info.get("est_quinte"))
+    est_quarte = bool(course_info.get("est_quarte"))
+    est_tierce = bool(course_info.get("est_tierce"))
+
+    # ── 2-3 SIMPLE GAGNANT (favori + value + surprise) ──
+    for rank, i in enumerate(by_p1[:3]):
+        niv = "rendement" if rank == 0 else "rendement"
+        p_win = float(p1[i])
+        # rapport simple = cote gagnant réelle ; EV = cote × p_win − 1
+        rap = float(cotes[i])
+        if rap * p_win - 1 > -0.5:  # éviter les paris franchement négatifs
+            cands.append({
+                "niveau": niv, "type_pari": "Simple Gagnant", "chevaux": [H(i)],
+                "proba_gain": round(p_win, 4), "rapport_estime": round(rap, 1),
+                "ev": round(rap * p_win - 1, 3), "edge": round(float(edge_by_idx[i]), 4),
+                "texte_explication": f"N°{numeros[i]} {noms[i]} — {p_win*100:.0f}% de gagner, cote {cotes[i]:.1f}.",
+            })
+            seen.add(("Simple Gagnant", (i,)))
+    if out1 is not None and ("Simple Gagnant", (out1,)) not in seen:
+        p_win = float(p1[out1]); rap = float(cotes[out1])
+        cands.append({
+            "niveau": "surprise", "type_pari": "Simple Gagnant", "chevaux": [H(out1)],
+            "proba_gain": round(p_win, 4), "rapport_estime": round(rap, 1),
+            "ev": round(rap * p_win - 1, 3), "edge": round(float(edge_by_idx[out1]), 4),
+            "texte_explication": f"SURPRISE — N°{numeros[out1]} {noms[out1]} (cote {cotes[out1]:.1f}) : "
+                                 f"le modèle le voit plus haut que le marché.",
+        })
+
+    # ── 3-4 COUPLÉ GAGNANT différents ──
+    pairs = []
+    if len(by_p1) >= 2: pairs.append((by_p1[0], by_p1[1]))
+    if len(by_p1) >= 3: pairs.append((by_p1[0], by_p1[2]))
+    if len(by_p1) >= 3: pairs.append((by_p1[1], by_p1[2]))
+    if out1 is not None: pairs.append((by_p1[0], out1))   # favori + surprise
+    for a, b in pairs:
+        niv = "surprise" if (out1 is not None and b == out1) else "rendement"
+        add(niv, "Couplé Gagnant", [a, b], sim.p_couple_gagnant([a, b]), sim_m.p_couple_gagnant([a, b]),
+            f"N°{numeros[a]} + N°{numeros[b]} aux 2 premières places.")
+
+    # ── Couplé Placé (sécurité) ──
+    if len(by_p1) >= 2:
+        add("securite", "Couplé Placé", [by_p1[0], by_p1[1]],
+            sim.p_couple_place([by_p1[0], by_p1[1]]), sim_m.p_couple_place([by_p1[0], by_p1[1]]),
+            f"N°{numeros[by_p1[0]]} + N°{numeros[by_p1[1]]} tous deux dans les 3 premiers.")
+    if len(by_p1) >= 3:
+        add("securite", "Couplé Placé", [by_p1[0], by_p1[2]],
+            sim.p_couple_place([by_p1[0], by_p1[2]]), sim_m.p_couple_place([by_p1[0], by_p1[2]]),
+            f"N°{numeros[by_p1[0]]} + N°{numeros[by_p1[2]]} tous deux dans les 3 premiers.")
+
+    # ── Trios (favoris + surprise) ──
+    trios = []
+    if len(by_p1) >= 3: trios.append((by_p1[0], by_p1[1], by_p1[2]))
+    if len(by_p1) >= 4: trios.append((by_p1[0], by_p1[1], by_p1[3]))
+    if out1 is not None and len(by_p1) >= 2: trios.append((by_p1[0], by_p1[1], out1))
+    for t in trios:
+        niv = "surprise" if (out1 is not None and out1 in t) else "coup"
+        add(niv, "Trio", list(t), sim.p_trio(list(t)), sim_m.p_trio(list(t)),
+            f"N°{'+N°'.join(str(numeros[i]) for i in t)} aux 3 premières places (sans ordre).")
+
+    # ── 2sur4 ──
+    if len(by_p1) >= 4 and nb_partants >= 8:
+        sel = list(by_p1[:4])
+        add("rendement", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel),
+            f"2 des 4 chevaux N°{','.join(str(numeros[i]) for i in sel)} dans les 4 premiers.")
+
+    niv_order = {"securite": 0, "rendement": 1, "surprise": 2, "coup": 3}
+    cands.sort(key=lambda c: (niv_order.get(c["niveau"], 9), -c["ev"]))
+    return cands
