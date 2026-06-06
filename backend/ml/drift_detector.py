@@ -79,6 +79,10 @@ SEVERITY_NONE: str = "none"
 SEVERITY_WARNING: str = "warning"
 SEVERITY_CRITICAL: str = "critical"
 
+# Détecter une dérive sous ce nombre d'observations est peu fiable (bruit) :
+# en phase d'amorçage (peu de vraies courses), on ne déclare pas de dérive.
+DRIFT_WARMUP_MIN: int = 200
+
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -522,6 +526,13 @@ class DriftDetector:
         else:
             severity = SEVERITY_CRITICAL
             drift_detected = True
+
+        # Warm-up : sous le seuil minimal d'observations, la détection est trop
+        # bruitée (faux "critique" en amorçage du modèle) → on neutralise.
+        if self._total_observations < DRIFT_WARMUP_MIN:
+            severity = SEVERITY_NONE
+            drift_detected = False
+            self._last_drift_type = None  # garde save_state cohérent (severity=none)
 
         if drift_detected:
             drift_type = next(k for k, v in active_signals.items() if v)
