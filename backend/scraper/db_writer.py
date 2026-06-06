@@ -172,6 +172,10 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
             existing.mere = _t(partant.mere, 100)
         if getattr(partant, "eleveur", None) and not existing.eleveur:
             existing.eleveur = _t(partant.eleveur, 100)
+        if getattr(partant, "race", None) and not existing.race:
+            existing.race = _t(partant.race, 40)
+        if getattr(partant, "robe", None) and not existing.robe:
+            existing.robe = _t(partant.robe, 30)
         existing.updated_at = datetime.now()
         # MAJ stats carrière (victoires/places/courses/gains)
         perf = await session.get(PerformanceCarriere, existing.cheval_id)
@@ -197,6 +201,8 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
         pere=_t(getattr(partant, "pere", None), 100),
         mere=_t(getattr(partant, "mere", None), 100),
         eleveur=_t(getattr(partant, "eleveur", None), 100),
+        race=_t(getattr(partant, "race", None), 40),
+        robe=_t(getattr(partant, "robe", None), 30),
     )
     session.add(cheval)
 
@@ -285,6 +291,18 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             cote_bzh=partant.cote_bzh,
             rang_pronostic_pmu=partant.rang_pronostic_pmu,
             musique=_t(partant.musique, 50),
+            # ── Enrichissements PMU ──
+            cote_reference=partant.cote_reference,
+            mouvement_cote_pct=partant.mouvement_cote_pct,
+            tendance_cote=_t(partant.tendance_cote, 2),
+            tendance_force=partant.tendance_force,
+            est_favori_pmu=partant.est_favori,
+            avis_entraineur=_t(partant.avis_entraineur, 20),
+            nb_places_second=partant.nb_places_second,
+            nb_places_troisieme=partant.nb_places_troisieme,
+            handicap_distance=partant.handicap_distance,
+            indicateur_inedit=partant.indicateur_inedit,
+            jument_pleine=partant.jument_pleine,
             non_partant=False,
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
@@ -292,6 +310,18 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
                 "cote_pmu": partant.cote_pmu,
                 "cote_geny": partant.cote_geny,
                 "rang_pronostic_pmu": partant.rang_pronostic_pmu,
+                # le mouvement de cote évolue → réactualisé à chaque cycle
+                "cote_reference": partant.cote_reference,
+                "mouvement_cote_pct": partant.mouvement_cote_pct,
+                "tendance_cote": _t(partant.tendance_cote, 2),
+                "tendance_force": partant.tendance_force,
+                "est_favori_pmu": partant.est_favori,
+                "avis_entraineur": _t(partant.avis_entraineur, 20),
+                "nb_places_second": partant.nb_places_second,
+                "nb_places_troisieme": partant.nb_places_troisieme,
+                "handicap_distance": partant.handicap_distance,
+                "indicateur_inedit": partant.indicateur_inedit,
+                "jument_pleine": partant.jument_pleine,
                 "updated_at": datetime.now(),
             },
         ).returning(Participation.participation_id)
@@ -397,11 +427,15 @@ async def save_resultat_to_db(session: AsyncSession, resultat: ResultatScrape) -
         rapports=resultat.rapports,
         temps_gagnant=resultat.temps_gagnant,
         incidents=resultat.incidents,
+        commentaire=getattr(resultat, "commentaire", None),
+        duree_course=getattr(resultat, "duree_course", None),
     ).on_conflict_do_update(
         index_elements=["course_id"],
         set_={
             "classement": resultat.ordre_arrivee,
             "rapports": resultat.rapports,
+            "commentaire": getattr(resultat, "commentaire", None),
+            "duree_course": getattr(resultat, "duree_course", None),
         },
     )
     await session.execute(stmt)

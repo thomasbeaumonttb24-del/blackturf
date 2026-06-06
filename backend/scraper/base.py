@@ -156,6 +156,20 @@ class PartantScrape:
     eleveur: Optional[str] = None
     nb_courses: Optional[int] = None
     reduction_km: Optional[float] = None  # secondes/km
+    # ── Données PMU enrichies (participants) ─────────────────────────────────
+    cote_reference: Optional[float] = None      # dernierRapportReference (cote d'ouverture)
+    mouvement_cote_pct: Optional[float] = None  # (direct - reference)/reference
+    tendance_cote: Optional[str] = None         # "+" / "-" / "=" (indicateurTendance)
+    tendance_force: Optional[float] = None       # nombreIndicateurTendance (ampleur)
+    est_favori: Optional[bool] = None           # dernierRapportDirect.favoris
+    avis_entraineur: Optional[str] = None        # POSITIF / NEUTRE / NEGATIF
+    nb_places_second: Optional[int] = None
+    nb_places_troisieme: Optional[int] = None
+    handicap_distance: Optional[int] = None      # distance de handicap (mètres)
+    indicateur_inedit: Optional[bool] = None     # cheval n'ayant jamais couru
+    jument_pleine: Optional[bool] = None
+    race: Optional[str] = None                   # race/breed
+    robe: Optional[str] = None                   # robe (couleur)
     source: str = "pmu"
     scraped_at: str = ""
 
@@ -201,6 +215,8 @@ class ResultatScrape:
     rapports: dict  # {"gagnant": 4.5, "place": 2.1, "couple": 12.3, ...}
     temps_gagnant: Optional[str] = None
     incidents: Optional[str] = None
+    commentaire: Optional[str] = None      # commentaireApresCourse.texte (narratif PMU/GENY)
+    duree_course: Optional[int] = None     # dureeCourse (ms)
     source: str = "pmu"
     scraped_at: str = ""
 

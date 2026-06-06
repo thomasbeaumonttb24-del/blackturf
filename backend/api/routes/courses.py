@@ -460,6 +460,8 @@ async def get_resultats(course_id: str, db: AsyncSession = Depends(get_db)):
         "rapports": res.rapports,
         "temps_gagnant": res.temps_gagnant,
         "incidents": res.incidents,
+        "commentaire": res.commentaire,              # narratif post-course PMU/GENY
+        "duree_course": res.duree_course,            # ms
     }
 
 

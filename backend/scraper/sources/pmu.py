@@ -287,12 +287,30 @@ class PmuScraper(BaseScraper):
         except Exception as e:
             log.warning("pmu.rapports_dividendes_skip", course_id=c_id, error=str(e)[:120])
 
+        # 3) Commentaire narratif post-course + durée (objet course C1)
+        commentaire = None
+        duree_course = None
+        try:
+            c_obj = await self._fetch_json(f"{base_rc}?specialisation=INTERNET")
+            if isinstance(c_obj, dict):
+                cac = c_obj.get("commentaireApresCourse")
+                if isinstance(cac, dict):
+                    commentaire = cac.get("texte")
+                elif isinstance(cac, str):
+                    commentaire = cac
+                dc = c_obj.get("dureeCourse")
+                duree_course = int(dc) if isinstance(dc, (int, float)) else None
+        except Exception as e:
+            log.warning("pmu.course_commentaire_skip", course_id=c_id, error=str(e)[:120])
+
         return ResultatScrape(
             course_id=c_id,
             ordre_arrivee=ordre,
             rapports=rapports,
             temps_gagnant=str(ordre[0]["temps"]) if ordre and ordre[0].get("temps") is not None else None,
             incidents=None,
+            commentaire=commentaire,
+            duree_course=duree_course,
             source="pmu",
         )
 
@@ -383,6 +401,17 @@ class PmuScraper(BaseScraper):
             rk_raw = p.get("reductionKilometrique")
             reduction_km = round(rk_raw / 1000.0, 2) if isinstance(rk_raw, (int, float)) and rk_raw else None
 
+            # ── Mouvement de cote NATIF PMU (référence = ouverture, direct = actuel) ──
+            rd = p.get("dernierRapportDirect") or {}
+            rr = p.get("dernierRapportReference") or {}
+            cote_ref = rr.get("rapport")
+            mouvement_pct = None
+            if cote and cote_ref and cote_ref > 0:
+                mouvement_pct = round((float(cote) - float(cote_ref)) / float(cote_ref), 4)
+            tendance = rd.get("indicateurTendance")  # "+" / "-" / "="
+            tendance_force = rd.get("nombreIndicateurTendance")
+            est_favori = rd.get("favoris")
+
             partant = PartantScrape(
                 numero=p.get("numPmu", i + 1),
                 nom=p.get("nom", ""),
@@ -408,6 +437,20 @@ class PmuScraper(BaseScraper):
                 eleveur=p.get("eleveur") or None,
                 reduction_km=reduction_km,
                 rang_pronostic_pmu=p.get("ordreArriveePronostic"),
+                # ── Enrichissements PMU ──
+                cote_reference=float(cote_ref) if cote_ref else None,
+                mouvement_cote_pct=mouvement_pct,
+                tendance_cote=tendance,
+                tendance_force=float(tendance_force) if isinstance(tendance_force, (int, float)) else None,
+                est_favori=bool(est_favori) if est_favori is not None else None,
+                avis_entraineur=p.get("avisEntraineur"),
+                nb_places_second=p.get("nombrePlacesSecond"),
+                nb_places_troisieme=p.get("nombrePlacesTroisieme"),
+                handicap_distance=p.get("handicapDistance"),
+                indicateur_inedit=p.get("indicateurInedit"),
+                jument_pleine=p.get("jumentPleine"),
+                race=p.get("race"),
+                robe=p.get("robe"),
                 source="pmu",
             )
             partants.append(partant)

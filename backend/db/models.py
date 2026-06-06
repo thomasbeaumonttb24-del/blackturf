@@ -123,6 +123,7 @@ class Cheval(Base):
     age: Mapped[int | None] = mapped_column(Integer)
     sexe: Mapped[str | None] = mapped_column(String(5))  # H/E/M/F/JP
     robe: Mapped[str | None] = mapped_column(String(30))
+    race: Mapped[str | None] = mapped_column(String(40))  # race/breed (TROTTEUR FRANCAIS, PUR SANG...)
     pays_naissance: Mapped[str | None] = mapped_column(String(5))
     date_naissance: Mapped[datetime | None] = mapped_column(Date)
 
@@ -282,6 +283,16 @@ class Participation(Base):
     cote_unibet: Mapped[float | None] = mapped_column(Float)
     cote_betfair_exchange: Mapped[float | None] = mapped_column(Float)    # marché d'échange
     mouvement_cote_pct: Mapped[float | None] = mapped_column(Float)       # % mouvement cote (ouverture→actuelle)
+    cote_reference: Mapped[float | None] = mapped_column(Float)           # cote d'ouverture (dernierRapportReference)
+    tendance_cote: Mapped[str | None] = mapped_column(String(2))          # "+" / "-" / "="
+    tendance_force: Mapped[float | None] = mapped_column(Float)           # ampleur tendance PMU
+    est_favori_pmu: Mapped[bool | None] = mapped_column(Boolean)          # favori désigné PMU
+    avis_entraineur: Mapped[str | None] = mapped_column(String(20))       # POSITIF / NEUTRE / NEGATIF
+    nb_places_second: Mapped[int | None] = mapped_column(Integer)
+    nb_places_troisieme: Mapped[int | None] = mapped_column(Integer)
+    handicap_distance: Mapped[int | None] = mapped_column(Integer)
+    indicateur_inedit: Mapped[bool | None] = mapped_column(Boolean)       # cheval débutant
+    jument_pleine: Mapped[bool | None] = mapped_column(Boolean)
     rang_pronostic_pmu: Mapped[int | None] = mapped_column(Integer)
     rang_pronostic_geny: Mapped[int | None] = mapped_column(Integer)
 
@@ -423,6 +434,8 @@ class Resultat(Base):
     rapports: Mapped[dict | None] = mapped_column(JSON)  # {gagnant, place, couple, ...}
     temps_gagnant: Mapped[str | None] = mapped_column(String(20))
     incidents: Mapped[str | None] = mapped_column(Text)
+    commentaire: Mapped[str | None] = mapped_column(Text)       # narratif post-course (PMU/GENY)
+    duree_course: Mapped[int | None] = mapped_column(Integer)   # durée course (ms)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
