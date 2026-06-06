@@ -21,6 +21,17 @@ log = structlog.get_logger(source="pmu")
 
 BASE = "https://offline.turfinfo.api.pmu.fr/rest/client/7"
 
+
+def make_course_id(date_ddmmyyyy: str, reunion_id, course_num) -> str:
+    """Identifiant de course DATÉ : {ddmmyyyy}R{reunion}C{course}.
+
+    Le préfixe date est indispensable : sans lui, "R1C1" est réutilisé chaque jour
+    et la course du jour ÉCRASE celle de la veille (collision de clé primaire →
+    corruption de l'historique). Préfixe = chiffres uniquement, donc
+    `course_id.split("C")[-1]` continue de donner le numéro de course.
+    """
+    return f"{date_ddmmyyyy}R{reunion_id}C{course_num}"
+
 DISCIPLINE_MAP = {
     "PLAT": "Plat",
     "TROT_ATTELE": "Attelé",
@@ -121,9 +132,19 @@ class PmuScraper(BaseScraper):
             hippodrome = reunion.get("hippodrome", {}).get("libelleLong", "Inconnu")
             pays = reunion.get("hippodrome", {}).get("pays", {}).get("code", "FR")
 
+            # Date réelle de la réunion (sinon aujourd'hui) → préfixe de l'ID
+            r_date = today_str
+            dr = reunion.get("dateReunion")
+            if isinstance(dr, (int, float)):  # epoch ms
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+                    r_date = _dt.fromtimestamp(dr / 1000, tz=_tz.utc).strftime("%d%m%Y")
+                except Exception:
+                    r_date = today_str
+
             for c_data in reunion.get("courses", []):
                 c_num = c_data.get("numOrdre", 0)
-                c_id = f"R{r_id}C{c_num}"
+                c_id = make_course_id(r_date, r_id, c_num)
 
                 partants = self._parse_partants(c_data.get("participants", []))
 
@@ -247,7 +268,7 @@ class PmuScraper(BaseScraper):
         else:
             d = course_date.strftime("%d%m%Y")
 
-        c_id = f"R{reunion_id}C{course_num}"
+        c_id = make_course_id(d, reunion_id, course_num)
         base_rc = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}"
 
         # 1) Ordre d'arrivée via /participants

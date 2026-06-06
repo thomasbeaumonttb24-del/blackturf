@@ -840,7 +840,7 @@ export default function CoursePage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <h1 className="text-xl font-bold">{course.nom || `Course R${course.course_id.slice(-3)}`}</h1>
+              <h1 className="text-xl font-bold">{course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}</h1>
               {course.est_quinte && <Badge variant="gold" className="animate-pulse-slow">⭐ Quinté+</Badge>}
               {course.est_quarte && <Badge variant="gold">Quarté+</Badge>}
               {course.est_tierce && <Badge variant="secondary">Tiercé</Badge>}
