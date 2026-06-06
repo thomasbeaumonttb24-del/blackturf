@@ -503,6 +503,42 @@ async def get_cotes_historique(
     ]
 
 
+@router.get("/courses/{course_id}/cotes-live")
+async def get_cotes_live(
+    course_id: str,
+    _: User = Depends(require_pro),
+):
+    """
+    Cotes PMU EN DIRECT pour une course (lecture à la demande de l'API PMU).
+    Cache court partagé (4 s) pour rester proche du temps réel sans marteler le PMU.
+    Retourne {"time": iso, "cotes": [{"numero", "cote"}]}.
+    """
+    import json
+    from datetime import datetime, timezone
+    from services.pmu_cotes import fetch_live_cotes
+
+    cache_key = f"cotes_live:{course_id}"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        log.debug("courses.cotes_live_cache_read_failed", error=str(e))
+        redis = None
+
+    cotes = await fetch_live_cotes(course_id)
+    payload = {"time": datetime.now(timezone.utc).isoformat(), "cotes": cotes}
+
+    if redis is not None and cotes:
+        try:
+            await redis.setex(cache_key, 4, json.dumps(payload))
+        except Exception as e:
+            log.debug("courses.cotes_live_cache_write_failed", error=str(e))
+
+    return payload
+
+
 @router.post("/courses/{course_id}/mise-plan")
 async def get_mise_plan(
     course_id: str,

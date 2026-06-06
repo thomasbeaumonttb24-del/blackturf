@@ -967,23 +967,56 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
     let alive = true;
     const pidToNum: Record<string, number> = {};
     for (const p of partants) pidToNum[p.participation_id] = p.numero;
-    const load = () => {
-      api.get(`/courses/${courseId}/cotes-historique`)
+
+    // 1) Base : historique des cotes déjà enregistrées (granularité scraper)
+    api.get(`/courses/${courseId}/cotes-historique`)
+      .then((res) => {
+        if (!alive) return;
+        const map: Record<string, Record<string, number>> = {};
+        for (const r of res.data) {
+          const t = new Date(r.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+          const num = pidToNum[r.participation_id];
+          if (num == null) continue;
+          (map[t] ||= {})[`N°${num}`] = r.cote;
+        }
+        const base = Object.entries(map).map(([time, vals]) => ({ time, ...vals }));
+        setChartData((prev) => (prev.length > base.length ? prev : base));
+      })
+      .catch(() => {});
+
+    // 2) Live : cotes PMU en direct toutes les 5 s, append en continu
+    const poll = () => {
+      api.get(`/courses/${courseId}/cotes-live`)
         .then((res) => {
           if (!alive) return;
-          const map: Record<string, Record<string, number>> = {};
-          for (const r of res.data) {
-            const t = new Date(r.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-            const num = pidToNum[r.participation_id];
-            if (num == null) continue;
-            (map[t] ||= {})[`N°${num}`] = r.cote;
-          }
-          setChartData(Object.entries(map).map(([time, vals]) => ({ time, ...vals })));
+          const cotes: Array<{ numero: number; cote: number }> = res.data?.cotes ?? [];
+          if (!cotes.length) return;
+          const label = new Date(res.data.time).toLocaleTimeString("fr-FR", {
+            hour: "2-digit", minute: "2-digit", second: "2-digit",
+          });
+          setChartData((prev) => {
+            const lastPt = prev[prev.length - 1] || {};
+            const point: Record<string, number | string> = { time: label };
+            // report les dernières cotes connues (lignes continues)
+            for (const k of Object.keys(lastPt)) if (k !== "time") point[k] = lastPt[k];
+            for (const c of cotes) point[`N°${c.numero}`] = c.cote;
+            // éviter un doublon strict (même seconde)
+            if (lastPt.time === label) {
+              const copy = prev.slice(0, -1);
+              return [...copy, point];
+            }
+            const next = [...prev, point];
+            return next.length > 200 ? next.slice(next.length - 200) : next;
+          });
         })
         .catch(() => {});
     };
-    load();
-    const iv = isLive ? setInterval(load, 30000) : undefined;
+
+    let iv: ReturnType<typeof setInterval> | undefined;
+    if (isLive) {
+      poll();
+      iv = setInterval(poll, 5000);
+    }
     return () => { alive = false; if (iv) clearInterval(iv); };
   }, [courseId, partants, isLive]);
 
@@ -1068,7 +1101,7 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
         <p className="mt-3 text-[10px] text-muted-foreground/70">
           <span className="font-semibold text-emerald-600">▼ vert</span> = cote en baisse (cheval de plus en plus joué) ·
           <span className="font-semibold text-rose-500"> ▲ rouge</span> = cote qui monte (délaissé).
-          {isLive && " Mise à jour automatique toutes les 30 s."}
+          {isLive && " Cotes PMU en direct — rafraîchies toutes les 5 s."}
         </p>
       </CardContent>
     </Card>
