@@ -293,10 +293,19 @@ export default function AlgorithmeMonitoringPage() {
                       stroke="#3b82f6"
                       strokeWidth={1.5}
                       dot={(props) => {
-                        const { cx, cy, payload } = props;
-                        return payload.surprise
-                          ? <circle key={props.key} cx={cx} cy={cy} r={4} fill="#ef4444" stroke="none" />
-                          : <circle key={props.key} cx={cx} cy={cy} r={2} fill="#3b82f6" stroke="none" />;
+                        const { cx, cy, payload, index } = props;
+                        if (cx == null || cy == null || !payload) return <g key={index} />;
+                        const surprise = !!payload.surprise;
+                        return (
+                          <circle
+                            key={index}
+                            cx={cx}
+                            cy={cy}
+                            r={surprise ? 4 : 2}
+                            fill={surprise ? "#ef4444" : "#3b82f6"}
+                            stroke="none"
+                          />
+                        );
                       }}
                     />
                   </LineChart>

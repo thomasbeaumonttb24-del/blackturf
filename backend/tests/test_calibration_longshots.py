@@ -15,7 +15,7 @@ def _rows(cote: float, proba: float, n: int, win_every: int, start_course: int =
     for i in range(n):
         cid = f"c{start_course + i}"
         rows.append((proba, cote, 1, cid))
-        winners[cid] = {1} if (i % win_every == 0) else {2}  # numero 1 gagne ou pas
+        winners[cid] = {1} if ((i + 1) % win_every == 0) else {2}  # numero 1 gagne ou pas
     return rows, winners
 
 

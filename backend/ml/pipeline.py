@@ -180,15 +180,28 @@ async def run_post_course(course_id: str) -> None:
             except Exception:
                 await _init_al(al_session)
 
-            # Charger les prédictions sauvegardées pour cette course
-            pred_result = await al_session.execute(text("""
-                SELECT p.participation_id, p.proba_top3, p.proba_top1,
-                       p.confidence_score, pa.numero
-                FROM predictions p
-                JOIN participations pa ON p.participation_id = pa.participation_id
-                WHERE p.course_id = :cid
-            """), {"cid": course_id})
-            pred_rows = pred_result.fetchall()
+            # ── Idempotence : une course déjà apprise ne doit JAMAIS être
+            # ré-injectée dans le drift detector / l'état adaptatif. Sinon le
+            # re-polling des résultats fait gonfler n_updates (ex: 2331 pour 78
+            # courses) et déclenche de fausses "dérives critiques".
+            already_learned = (await al_session.execute(
+                text("SELECT 1 FROM race_learning_log WHERE course_id = :cid LIMIT 1"),
+                {"cid": course_id},
+            )).first() is not None
+
+            if already_learned:
+                log.info("pipeline.post_course.skip_already_learned", course_id=course_id)
+                pred_rows = []
+            else:
+                # Charger les prédictions sauvegardées pour cette course
+                pred_result = await al_session.execute(text("""
+                    SELECT p.participation_id, p.proba_top3, p.proba_top1,
+                           p.confidence_score, pa.numero
+                    FROM predictions p
+                    JOIN participations pa ON p.participation_id = pa.participation_id
+                    WHERE p.course_id = :cid
+                """), {"cid": course_id})
+                pred_rows = pred_result.fetchall()
 
             if pred_rows:
                 predictions_for_analysis = [
