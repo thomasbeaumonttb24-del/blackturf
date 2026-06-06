@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, Fragment } from "react";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
-  Calculator, ChevronRight, Star, Zap, Info, BarChart2,
+  Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity,
 } from "lucide-react";
 import Link from "next/link";
@@ -1581,6 +1581,16 @@ export default function CoursePage() {
                                 {partant.pere && (
                                   <span className="text-muted-foreground/70">Par {partant.pere}</span>
                                 )}
+                              </div>
+                              {partant.musique && (
+                                <div className="mt-1.5 flex items-center gap-1.5">
+                                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60">Musique</span>
+                                  <MusiqueDisplay musique={partant.musique} />
+                                </div>
+                              )}
+                              <div className="mt-0.5 flex items-center gap-1 text-[10px] text-brand-gold/80">
+                                <ChevronDown className={cn("h-3 w-3 transition-transform", isExp && "rotate-180")} />
+                                {isExp ? "Masquer" : "Détails (équipement, poids, carrière, origines)"}
                               </div>
                             </td>
                             <td className="px-3 py-2.5 hidden md:table-cell text-xs">
