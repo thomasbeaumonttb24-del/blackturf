@@ -281,6 +281,7 @@ class Participation(Base):
     cote_betclic_ouverture: Mapped[float | None] = mapped_column(Float)   # cote J-1
     cote_unibet: Mapped[float | None] = mapped_column(Float)
     cote_betfair_exchange: Mapped[float | None] = mapped_column(Float)    # marché d'échange
+    mouvement_cote_pct: Mapped[float | None] = mapped_column(Float)       # % mouvement cote (ouverture→actuelle)
     rang_pronostic_pmu: Mapped[int | None] = mapped_column(Integer)
     rang_pronostic_geny: Mapped[int | None] = mapped_column(Integer)
 
