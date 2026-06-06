@@ -144,6 +144,7 @@ services:
         condition: service_healthy
     volumes:
       - scrape_data:/app/data
+      - ml_models:/app/models   # nécessaire : run_predictions_cycle charge le modèle
     restart: unless-stopped
     deploy:
       resources:
