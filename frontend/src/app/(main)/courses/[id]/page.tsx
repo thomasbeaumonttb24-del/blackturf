@@ -633,7 +633,21 @@ function MiseCalculatorWidget({
 }
 
 // ─── Résultats officiels (course terminée) ──────────────────────────────────────
-function ResultatsSection({ resultats }: {
+const RAPPORT_META: Record<string, { label: string; emoji: string; ordre: number }> = {
+  e_simple_gagnant: { label: "Gagnant", emoji: "🏆", ordre: 1 },
+  e_simple_place:   { label: "Placé", emoji: "🎖️", ordre: 2 },
+  e_couple_gagnant: { label: "Couplé Gagnant", emoji: "🔗", ordre: 3 },
+  e_couple_place:   { label: "Couplé Placé", emoji: "🔗", ordre: 4 },
+  e_2sur4:          { label: "2 sur 4", emoji: "🎯", ordre: 5 },
+  e_super_quatre:   { label: "2 sur 4", emoji: "🎯", ordre: 5 },
+  e_trio:           { label: "Trio", emoji: "🥉", ordre: 6 },
+  e_tierce:         { label: "Tiercé", emoji: "3️⃣", ordre: 7 },
+  e_quarte_plus:    { label: "Quarté+", emoji: "4️⃣", ordre: 8 },
+  e_quinte_plus:    { label: "Quinté+", emoji: "5️⃣", ordre: 9 },
+  e_multi:          { label: "Multi", emoji: "✳️", ordre: 10 },
+};
+
+function ResultatsSection({ resultats, partants }: {
   resultats: {
     classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
     rapports: Record<string, number> | null;
@@ -641,67 +655,97 @@ function ResultatsSection({ resultats }: {
     commentaire: string | null;
     duree_course: number | null;
   };
+  partants: Partant[];
 }) {
   const podium = [...(resultats.classement || [])].sort((a, b) => a.position - b.position);
-  const medal = (pos: number) => (pos === 1 ? "🥇" : pos === 2 ? "🥈" : pos === 3 ? "🥉" : `${pos}e`);
-  const rapportLabel: Record<string, string> = {
-    e_simple_gagnant: "Gagnant", e_simple_place: "Placé", e_couple_gagnant: "Couplé G.",
-    e_couple_place: "Couplé P.", e_trio: "Trio", e_tierce: "Tiercé",
-    e_quarte_plus: "Quarté+", e_quinte_plus: "Quinté+",
-    e_2sur4: "2sur4", e_super_quatre: "2sur4", e_multi: "Multi",
-  };
+  const coteByNum: Record<number, number | null> = {};
+  for (const p of partants) coteByNum[p.numero] = p.cote_pmu ?? null;
+
+  const hasRedKm = podium.some((c) => c.reduction_km != null);
+  const rowTint = (pos: number) =>
+    pos === 1 ? "bg-amber-50/80" : pos === 2 ? "bg-slate-100/70" : pos === 3 ? "bg-orange-50/70" : "";
+  const medalBox = (pos: number) =>
+    pos === 1 ? "bg-amber-100 text-amber-700" : pos === 2 ? "bg-slate-200 text-slate-600"
+    : pos === 3 ? "bg-orange-100 text-orange-700" : "bg-muted text-muted-foreground";
+
+  const rapportsTries = resultats.rapports
+    ? Object.entries(resultats.rapports)
+        .filter(([, v]) => v != null)
+        .sort((a, b) => (RAPPORT_META[a[0]]?.ordre ?? 99) - (RAPPORT_META[b[0]]?.ordre ?? 99))
+    : [];
 
   return (
-    <div className="mt-4 rounded-xl border border-brand-emerald/30 bg-brand-emerald/5 p-4">
-      <h2 className="mb-3 flex items-center gap-2 text-base font-bold">
-        🏁 Arrivée officielle
+    <div className="mt-4 overflow-hidden rounded-xl border border-brand-emerald/30 bg-gradient-to-br from-brand-emerald/[0.07] to-transparent">
+      <div className="flex flex-wrap items-center gap-2 border-b border-brand-emerald/20 px-4 py-3">
+        <h2 className="flex items-center gap-2 text-base font-bold">🏁 Arrivée officielle</h2>
         {resultats.temps_gagnant && (
-          <span className="text-xs font-normal text-muted-foreground">
-            · Chrono gagnant {resultats.temps_gagnant}s
+          <span className="text-xs text-muted-foreground">
+            ⏱️ Chrono {resultats.temps_gagnant}s
             {resultats.duree_course ? ` · durée ${(resultats.duree_course / 1000).toFixed(1)}s` : ""}
           </span>
         )}
-      </h2>
+      </div>
 
       {/* Classement */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto px-2 py-2">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs text-muted-foreground border-b">
-              <th className="py-1 pr-2">Pos.</th><th className="py-1 pr-2">N°</th>
-              <th className="py-1 pr-2">Cheval</th><th className="py-1 pr-2 text-right">Réd. km</th>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <th className="px-2 py-1.5 font-medium">Pos.</th>
+              <th className="px-2 py-1.5 font-medium">N°</th>
+              <th className="px-2 py-1.5 font-medium">Cheval</th>
+              <th className="px-2 py-1.5 text-right font-medium">Cote finale</th>
+              <th className="px-2 py-1.5 text-right font-medium">{hasRedKm ? "Réd. km" : "Temps"}</th>
             </tr>
           </thead>
           <tbody>
-            {podium.map((c) => (
-              <tr key={c.numero} className={c.position <= 3 ? "font-semibold" : ""}>
-                <td className="py-1 pr-2">{medal(c.position)}</td>
-                <td className="py-1 pr-2 tabular-nums">{c.numero}</td>
-                <td className="py-1 pr-2">{c.nom}</td>
-                <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground">
-                  {c.reduction_km != null ? `${c.reduction_km}` : "—"}
-                </td>
-              </tr>
-            ))}
+            {podium.map((c) => {
+              const cote = coteByNum[c.numero];
+              return (
+                <tr key={c.numero} className={cn("rounded-lg", rowTint(c.position), c.position <= 3 && "font-semibold")}>
+                  <td className="px-2 py-2">
+                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold tabular-nums", medalBox(c.position))}>
+                      {c.position}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 tabular-nums">{c.numero}</td>
+                  <td className="px-2 py-2">{c.nom}</td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums">
+                    {cote != null ? cote.toFixed(1) : "—"}
+                  </td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                    {c.reduction_km != null ? c.reduction_km : c.temps != null ? `${c.temps}s` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
-      {/* Rapports */}
-      {resultats.rapports && Object.keys(resultats.rapports).length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {Object.entries(resultats.rapports).map(([k, v]) => (
-            <span key={k} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">
-              <span className="text-muted-foreground">{rapportLabel[k] ?? k}</span>
-              <span className="font-semibold tabular-nums">{Number(v).toFixed(2)}€</span>
-            </span>
-          ))}
+      {/* Rapports PMU — tous les gains de combinaisons */}
+      {rapportsTries.length > 0 && (
+        <div className="border-t border-brand-emerald/20 px-4 py-3">
+          <p className="mb-2 text-xs font-semibold text-muted-foreground">💰 Rapports PMU · gains pour 1€ misé</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {rapportsTries.map(([k, v]) => {
+              const meta = RAPPORT_META[k];
+              return (
+                <div key={k} className="flex items-center justify-between gap-1 rounded-lg border border-border bg-white px-2.5 py-1.5">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>{meta?.emoji ?? "•"}</span>{meta?.label ?? k}
+                  </span>
+                  <span className="font-bold tabular-nums text-brand-emerald">{Number(v).toFixed(2)}€</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Commentaire narratif post-course */}
       {resultats.commentaire && (
-        <div className="mt-3 rounded-lg bg-white/60 p-3 text-sm leading-relaxed text-foreground">
+        <div className="border-t border-brand-emerald/20 px-4 py-3 text-sm leading-relaxed text-foreground">
           <p className="mb-1 text-xs font-semibold text-muted-foreground">📝 Analyse de course</p>
           {resultats.commentaire}
         </div>
@@ -1317,7 +1361,7 @@ export default function CoursePage() {
 
         {/* Résultats officiels (course terminée) */}
         {course.statut === "termine" && resultats && (
-          <ResultatsSection resultats={resultats} />
+          <ResultatsSection resultats={resultats} partants={course.partants} />
         )}
 
         {/* Bilan du pronostic IA vs arrivée (course terminée) */}
