@@ -1839,6 +1839,10 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # ── DD. Composite confidence score ───────────────────────────────────────
     # Score multi-facteur qui donne une mesure de fiabilité de la prédiction
     # Tient compte: qualité des données, cohérence des signaux, nb sources
+    nb_sources = sum(
+        1 for c in (cote_pmu, cote_geny, cote_bzh, cote_winamax, cote_betclic, cote_unibet, cote_betfair)
+        if c
+    )
     data_completeness = min(
         1.0,
         (1 if cote_pmu else 0) * 0.2 +
