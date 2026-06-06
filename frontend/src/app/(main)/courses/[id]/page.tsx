@@ -806,6 +806,138 @@ function PronosticVerdictSection({ predictions, classement }: {
   );
 }
 
+// ─── Bilan du plan de mise 20€ (course terminée) ───────────────────────────────
+// Rejoue le plan de mise (20€) sur les pronostics réels et le règle contre le
+// résultat officiel (rapports PMU réels). Indique si le pari serait passé + le gain.
+interface BilanResp {
+  montant: number;
+  bilan: {
+    paris: Array<{ type: string; niveau: string; chevaux: { numero: number; nom: string }[]; mise: number; gagne: boolean; rapport_reel: number | null; gain: number | null; note: string | null }>;
+    nb_paris: number; nb_gagnes: number; total_mise: number; total_gain: number; net: number; roi: number; gain_indetermine: boolean;
+  };
+  comparaison: { predicted_top3: number[]; actual_top3: number[]; gagnant_reel: number | null; rang_predit_gagnant: number | null; overlap_top3: number; modele_a_vu_gagnant: boolean };
+  verdict: "gagnant" | "perdant" | "indetermine";
+}
+
+function BilanMiseSection({ courseId }: { courseId: string }) {
+  const [data, setData] = useState<BilanResp | null>(null);
+  const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+
+  useEffect(() => {
+    let alive = true;
+    api.get(`/courses/${courseId}/bilan-pronostic?montant=20`)
+      .then((r) => { if (alive) { setData(r.data); setState("ok"); } })
+      .catch(() => { if (alive) setState("error"); });
+    return () => { alive = false; };
+  }, [courseId]);
+
+  if (state !== "ok" || !data) return null;
+  const { bilan, comparaison: cmp, verdict } = data;
+
+  const vCfg = verdict === "gagnant"
+    ? { emoji: "🟢", label: "Plan gagnant", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
+    : verdict === "perdant"
+    ? { emoji: "🔴", label: "Plan perdant", cls: "border-rose-300 bg-rose-50 text-rose-800" }
+    : { emoji: "⚪", label: "Gain indéterminé (rapport PMU manquant)", cls: "border-gray-300 bg-gray-50 text-gray-700" };
+
+  return (
+    <div className="mt-4 rounded-xl border border-brand-gold/30 bg-brand-gold/5 p-4">
+      <h2 className="mb-1 flex items-center gap-2 text-base font-bold">
+        🧮 Bilan du plan de mise — {data.montant}€
+        <span className="text-xs font-normal text-muted-foreground">· pronostic rejoué sur l&apos;arrivée réelle</span>
+      </h2>
+
+      {/* Verdict + net */}
+      <div className="my-3 flex flex-wrap items-center gap-3">
+        <div className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold", vCfg.cls)}>
+          <span>{vCfg.emoji}</span>{vCfg.label}
+        </div>
+        <div className="text-sm">
+          <span className="text-muted-foreground">Résultat net :</span>{" "}
+          <span className={cn("font-bold tabular-nums", bilan.net >= 0 ? "text-emerald-600" : "text-rose-600")}>
+            {bilan.net >= 0 ? "+" : ""}{bilan.net.toFixed(2)}€
+          </span>
+          <span className="text-muted-foreground"> · ROI </span>
+          <span className={cn("font-bold tabular-nums", bilan.roi >= 0 ? "text-emerald-600" : "text-rose-600")}>
+            {bilan.roi >= 0 ? "+" : ""}{bilan.roi}%
+          </span>
+        </div>
+      </div>
+
+      {/* Comparaison prono vs réel */}
+      <div className="mb-3 grid gap-2 sm:grid-cols-2 text-xs">
+        <div className="rounded-lg bg-white/70 p-2.5">
+          <p className="mb-1 font-semibold text-muted-foreground">Top-3 pronostiqué (modèle)</p>
+          <div className="flex gap-1.5">
+            {cmp.predicted_top3.map((n) => (
+              <span key={n} className="inline-flex items-center rounded-md bg-blue-50 ring-1 ring-blue-200 px-1.5 py-0.5 font-bold">N°{n}</span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg bg-white/70 p-2.5">
+          <p className="mb-1 font-semibold text-muted-foreground">Arrivée réelle (top-3)</p>
+          <div className="flex gap-1.5">
+            {cmp.actual_top3.map((n, i) => (
+              <span key={n} className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold ring-1",
+                cmp.predicted_top3.includes(n) ? "bg-emerald-50 ring-emerald-300 text-emerald-700" : "bg-gray-50 ring-gray-200")}>
+                <span className="text-[9px] text-muted-foreground">{i + 1}.</span>N°{n}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {cmp.gagnant_reel != null && (
+          <>Vainqueur N°{cmp.gagnant_reel} — {cmp.modele_a_vu_gagnant
+            ? <span className="text-emerald-700 font-medium">vu par le modèle (rang {cmp.rang_predit_gagnant})</span>
+            : <span className="text-rose-700 font-medium">manqué par le modèle{cmp.rang_predit_gagnant ? ` (rang ${cmp.rang_predit_gagnant})` : ""}</span>}
+          {" · "}{cmp.overlap_top3}/3 chevaux du top-3 trouvés</>
+        )}
+      </p>
+
+      {/* Détail des paris */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground border-b">
+              <th className="py-1 pr-2">Pari</th>
+              <th className="py-1 pr-2">Chevaux</th>
+              <th className="py-1 pr-2 text-right">Mise</th>
+              <th className="py-1 pr-2 text-right">Résultat</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bilan.paris.map((p, i) => (
+              <tr key={i} className="border-b border-border/40">
+                <td className="py-1 pr-2 font-medium">{p.type}</td>
+                <td className="py-1 pr-2 text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</td>
+                <td className="py-1 pr-2 text-right tabular-nums">{p.mise.toFixed(0)}€</td>
+                <td className="py-1 pr-2 text-right tabular-nums">
+                  {p.gagne
+                    ? <span className="text-emerald-600 font-semibold">✓ {p.gain != null ? `+${p.gain.toFixed(2)}€` : "gagné"}</span>
+                    : <span className="text-muted-foreground">✗ perdu</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t font-semibold">
+              <td className="py-1.5 pr-2" colSpan={2}>Total ({bilan.nb_gagnes}/{bilan.nb_paris} gagné{bilan.nb_gagnes > 1 ? "s" : ""})</td>
+              <td className="py-1.5 pr-2 text-right tabular-nums">{bilan.total_mise.toFixed(0)}€</td>
+              <td className={cn("py-1.5 pr-2 text-right tabular-nums", bilan.total_gain > 0 ? "text-emerald-600" : "text-muted-foreground")}>
+                {bilan.total_gain.toFixed(2)}€
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p className="mt-2 text-[10px] text-muted-foreground/70">
+        Plan rejoué à l&apos;identique, réglé avec les rapports PMU définitifs réels. Simulation à but pédagogique — jouez responsable.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CoursePage() {
   const { id } = useParams<{ id: string }>();
@@ -1044,6 +1176,11 @@ export default function CoursePage() {
         {/* Bilan du pronostic IA vs arrivée (course terminée) */}
         {course.statut === "termine" && resultats && predictions && predictions.length > 0 && (
           <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
+        )}
+
+        {/* Bilan du plan de mise 20€ rejoué sur l'arrivée réelle (course terminée) */}
+        {course.statut === "termine" && resultats && predictions && predictions.length > 0 && (
+          <BilanMiseSection courseId={id} />
         )}
 
         {/* Alert value bet exceptionnel */}
