@@ -43,7 +43,7 @@ from typing import Any, Optional
 
 import numpy as np
 import structlog
-from sqlalchemy import Column, DateTime, Integer, String, Text, select
+from sqlalchemy import Column, DateTime, Integer, String, Text, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -688,26 +688,30 @@ class DriftDetector:
         }
         json_blob = json.dumps(state_blob, default=str)
 
-        result = await session.execute(
-            select(DriftDetectorState).where(DriftDetectorState.id == 1)
+        # Upsert SQL brut sur la VRAIE table (schéma db.models : state_id 'singleton',
+        # state_json JSON, severity, n_updates, last_drift_at). Évite le mismatch ORM
+        # (ancienne classe locale attendait une colonne `id` inexistante → cassait
+        # le commit de la boucle d'apprentissage).
+        severity = SEVERITY_CRITICAL if self._last_drift_type else SEVERITY_NONE
+        await session.execute(
+            text("""
+                INSERT INTO drift_detector_state
+                    (state_id, state_json, severity, n_updates, last_drift_at, updated_at)
+                VALUES ('singleton', CAST(:sj AS JSONB), :sev, :nu, :lda, now())
+                ON CONFLICT (state_id) DO UPDATE SET
+                    state_json = CAST(:sj AS JSONB),
+                    severity   = :sev,
+                    n_updates  = :nu,
+                    last_drift_at = :lda,
+                    updated_at = now()
+            """),
+            {
+                "sj": json_blob,
+                "sev": severity,
+                "nu": int(self._total_observations),
+                "lda": self._last_drift_time,
+            },
         )
-        row = result.scalar_one_or_none()
-
-        if row is None:
-            row = DriftDetectorState(
-                id=1,
-                state_json=json_blob,
-                drift_count=len(self._drift_events),
-                last_drift_type=self._last_drift_type,
-            )
-            session.add(row)
-        else:
-            row.state_json = json_blob
-            row.drift_count = len(self._drift_events)
-            row.last_drift_type = self._last_drift_type
-            row.updated_at = datetime.now(timezone.utc)
-
-        await session.flush()
         logger.debug(
             "drift_detector_state_saved",
             total_observations=self._total_observations,
@@ -729,15 +733,16 @@ class DriftDetector:
             True if state was successfully loaded, False if no state exists.
         """
         result = await session.execute(
-            select(DriftDetectorState).where(DriftDetectorState.id == 1)
+            text("SELECT state_json FROM drift_detector_state WHERE state_id = 'singleton'")
         )
-        row = result.scalar_one_or_none()
+        row = result.first()
 
-        if row is None:
+        if row is None or row[0] is None:
             logger.info("drift_detector_no_persisted_state_found")
             return False
 
-        blob = json.loads(row.state_json)
+        # Colonne JSON → asyncpg renvoie déjà un dict (ou une str selon le driver)
+        blob = row[0] if isinstance(row[0], dict) else json.loads(row[0])
 
         self._brier_adwin = _ADWINWindow.from_dict(blob["brier_adwin"])
         self._surprise_ph = _PageHinkley.from_dict(blob["surprise_ph"])
