@@ -253,6 +253,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
     stmt = pg_insert(Course).values(
         course_id=course.course_id,
         reunion_id=course.reunion_id,
+        numero_reunion=course.numero_reunion,
         numero=int(course.course_id.split("C")[-1]) if "C" in course.course_id else 1,
         nom=_t(course.nom, 200),
         date_heure=date_heure,
@@ -278,6 +279,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
     ).on_conflict_do_update(
         index_elements=["course_id"],
         set_={
+            "numero_reunion": course.numero_reunion,
             "terrain_officiel": course.terrain,
             "terrain_code": course.terrain_code,
             "nb_partants": course.nb_partants,

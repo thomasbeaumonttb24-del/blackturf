@@ -129,6 +129,10 @@ class PmuScraper(BaseScraper):
         for reunion in reunions:
             r_num = reunion.get("numOfficiel", 0)
             r_id = str(r_num)
+            # N° de réunion PUBLIC = numExterne (affiché sur pmu.fr). Diffère parfois
+            # de numOfficiel (ex. REIMS : officiel 10, externe 9). On garde r_id =
+            # numOfficiel pour les URLs API PMU, mais on affiche numExterne.
+            r_public = reunion.get("numExterne") or r_num
             hippodrome = reunion.get("hippodrome", {}).get("libelleLong", "Inconnu")
             pays = reunion.get("hippodrome", {}).get("pays", {}).get("code", "FR")
 
@@ -168,6 +172,7 @@ class PmuScraper(BaseScraper):
                 course = CourseScrape(
                     reunion_id=r_id,
                     course_id=c_id,
+                    numero_reunion=int(r_public) if r_public else None,
                     hippodrome=hippodrome,
                     date_heure=c_data.get("heureDepart", ""),
                     discipline=DISCIPLINE_MAP.get(c_data.get("specialite", ""), c_data.get("specialite", "")),

@@ -109,6 +109,7 @@ class CourseDetailOut(BaseModel):
     course_id: str
     nom: Optional[str]
     reunion_id: str
+    numero_reunion: Optional[int] = None  # n° réunion public (PMU numExterne)
     numero: int
     date_heure: datetime
     hippodrome_nom: str
@@ -143,6 +144,7 @@ class CourseSummary(BaseModel):
     course_id: str
     nom: Optional[str]
     reunion_id: str
+    numero_reunion: Optional[int] = None  # n° réunion public (PMU numExterne)
     numero: int
     date_heure: datetime
     hippodrome_nom: str
@@ -338,13 +340,16 @@ async def get_programme(
             reunions_dict[rid] = {
                 "reunion_id": rid,
                 "hippodrome": reunion.hippodrome_nom,
-                "numero": reunion.numero,
+                # N° public (PMU numExterne) pour matcher pmu.fr — porté par la course
+                # (numero_reunion) ; fallback sur reunion.numero (numOfficiel).
+                "numero": course.numero_reunion or reunion.numero,
                 "courses": [],
             }
         reunions_dict[rid]["courses"].append(CourseSummary(
             course_id=course.course_id,
             nom=course.nom,
             reunion_id=course.reunion_id,
+            numero_reunion=course.numero_reunion,
             numero=course.numero,
             date_heure=course.date_heure,
             hippodrome_nom=course.hippodrome_nom,
@@ -429,6 +434,7 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
         course_id=course.course_id,
         nom=course.nom,
         reunion_id=course.reunion_id,
+        numero_reunion=course.numero_reunion,
         numero=course.numero,
         date_heure=course.date_heure,
         hippodrome_nom=course.hippodrome_nom,

@@ -218,6 +218,9 @@ class CourseScrape:
     categorie_particularite: Optional[str] = None  # EUROPEENNE / NATIONALE / ...
     montant_offert_1er: Optional[int] = None       # dotation au gagnant (euros)
     nombre_declares_partants: Optional[int] = None # déclarés (vs réels = scratchings)
+    # N° de réunion PUBLIC (PMU numExterne) pour l'affichage — peut différer de
+    # reunion_id (numOfficiel, utilisé dans les URLs API PMU). None → fallback.
+    numero_reunion: Optional[int] = None
     source: str = "pmu"
     scraped_at: str = ""
 

@@ -204,6 +204,9 @@ class Course(Base):
     course_id: Mapped[str] = mapped_column(String(30), primary_key=True)  # R1C1 format PMU
     reunion_id: Mapped[str] = mapped_column(ForeignKey("reunions.reunion_id"), index=True)
     numero: Mapped[int] = mapped_column(Integer)
+    # N° de réunion PUBLIC (PMU numExterne) — affiché à l'utilisateur, doit matcher
+    # pmu.fr. Distinct de reunion_id (= numOfficiel, utilisé dans les URLs API PMU).
+    numero_reunion: Mapped[int | None] = mapped_column(Integer)
     nom: Mapped[str | None] = mapped_column(String(200))
     date_heure: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     hippodrome_nom: Mapped[str] = mapped_column(String(100))

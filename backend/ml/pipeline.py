@@ -283,6 +283,12 @@ async def run_post_course(course_id: str) -> None:
     except Exception as e:
         log.error("pipeline.adaptive_learning.error", course_id=course_id, err=str(e))
 
+    # ── 6b. Invalider les caches stats : à CHAQUE fin de course, les chiffres
+    # (performance IA, précision Top-3, équity, track-record) doivent refléter le
+    # résultat tout juste tombé — sinon ils restent figés jusqu'à expiration TTL
+    # (2-30 min). On purge les clés → recalcul à la volée sur données RÉELLES.
+    await _invalidate_stats_caches(course_id)
+
     # 7. Mini-retraining si nb_resultats_depuis_dernier_retrain % 20 == 0
     nb_new = await _count_recent_results()
     if nb_new % settings.retrain_every_n_results == 0:
@@ -291,6 +297,24 @@ async def run_post_course(course_id: str) -> None:
 
     elapsed = (datetime.now() - t0).total_seconds()
     log.info("pipeline.post_course.done", course_id=course_id, elapsed_s=round(elapsed, 2))
+
+
+async def _invalidate_stats_caches(course_id: str) -> None:
+    """Purge les caches de stats agrégées + la fiche de la course finie, pour que le
+    dashboard/track-record reflètent immédiatement le nouveau résultat (données réelles
+    recalculées au prochain appel). Best-effort : un échec Redis n'interrompt rien."""
+    try:
+        from db.redis_client import get_redis
+        redis = await get_redis()
+        keys = [
+            "stats:public", "stats:equity-curve", "stats:ml-status",
+            "stats:dashboard-summary", "stats:track-record",
+            f"course_detail:{course_id}", f"analyse:{course_id}",
+        ]
+        await redis.delete(*keys)
+        log.info("pipeline.stats_cache_invalidated", course_id=course_id, n_keys=len(keys))
+    except Exception as e:
+        log.warning("pipeline.stats_cache_invalidate_skip", err=str(e)[:140])
 
 
 async def run_incremental_retraining() -> None:
