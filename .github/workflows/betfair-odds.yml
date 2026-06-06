@@ -4,10 +4,10 @@ name: Cotes Betfair Exchange → BlackTurf
 # Betfair sur le hippique. Repo public = minutes Actions illimitées (gratuit).
 
 on:
-  schedule:
-    # Toutes les 10 min pendant les heures de course (10h-23h UTC)
-    - cron: "*/10 10-23 * * *"
-  workflow_dispatch: {}   # déclenchement manuel possible
+  # Auto-run DÉSACTIVÉ : Betfair Exchange est interdit en France (bourses de paris
+  # illégales, ANJ) ET géo-bloqué depuis le VPS allemand → inutilisable ici.
+  # Conservé en manuel uniquement, au cas où exécuté depuis un pays autorisé.
+  workflow_dispatch: {}
 
 concurrency:
   group: betfair-odds
