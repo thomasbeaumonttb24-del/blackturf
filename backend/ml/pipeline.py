@@ -309,6 +309,13 @@ async def run_nightly_retraining() -> None:
     """
     log.info("pipeline.nightly_retrain.start")
     await _do_retraining(mois=18, label="nightly")
+    # Recalcule la calibration longshots sur toutes les données réelles à jour
+    try:
+        from ml.longshot_calibration import compute_and_store
+        async with AsyncSessionLocal() as cal_session:
+            await compute_and_store(cal_session)
+    except Exception as e:
+        log.warning("pipeline.nightly_calibration_skip", err=str(e)[:140])
 
 
 async def _do_retraining(mois: int, label: str) -> None:
@@ -569,6 +576,17 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             bs = float(blend.sum())
             if bs > 0:
                 probas_top1 = blend / bs
+
+        # ── Calibration longshots : corrige le sur-fit sur grosses cotes en
+        # ramenant la proba vers la fréquence RÉELLE observée par bucket de cote,
+        # puis renormalise. Facteurs appris sur données réelles (recalc nightly).
+        try:
+            from ml.longshot_calibration import load_factors, apply_calibration
+            _cal_factors = await load_factors(session)
+            if _cal_factors:
+                probas_top1 = apply_calibration(probas_top1, cotes_pmu, _cal_factors)
+        except Exception as e:
+            log.warning("pipeline.longshot_calibration_skip", err=str(e)[:140])
 
         # Purge des value bets de la course avant recalcul : un partant qui n'est
         # PLUS un value bet (recalibré) doit disparaître, sinon des paris obsolètes
