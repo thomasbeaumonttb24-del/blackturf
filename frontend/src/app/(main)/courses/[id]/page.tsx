@@ -511,9 +511,10 @@ function MiseCalculatorWidget({
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function generate() {
-    const m = parseFloat(montant);
+  async function generate(override?: number) {
+    const m = override ?? parseFloat(montant);
     if (!m || m <= 0) return;
+    if (override) setMontant(String(override));
     setLoading(true);
     try {
       const res = await api.post(`/courses/${courseId}/mise-plan`, {
@@ -560,6 +561,26 @@ function MiseCalculatorWidget({
       <p className="text-xs text-muted-foreground mb-3">
         Combien souhaitez-vous miser sur cette course ?
       </p>
+      {/* Plans recommandés */}
+      <div className="mb-3">
+        <p className="text-[10px] uppercase tracking-wide text-brand-gold/80 font-semibold mb-1.5">
+          Plans recommandés
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {[10, 20, 30].map((v) => (
+            <button
+              key={v}
+              onClick={() => generate(v)}
+              disabled={loading}
+              className="rounded-lg border border-brand-gold/40 bg-brand-gold/5 px-2 py-2.5 text-center hover:bg-brand-gold/15 hover:border-brand-gold transition-colors disabled:opacity-50"
+            >
+              <span className="block text-base font-bold tabular-nums text-brand-gold">{v}€</span>
+              <span className="block text-[9px] text-muted-foreground mt-0.5">plan complet</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-[10px] text-muted-foreground mb-2">Ou montant personnalisé :</p>
       <div className="flex gap-2">
         <div className="relative flex-1">
           <input
@@ -578,7 +599,7 @@ function MiseCalculatorWidget({
         </div>
         <Button
           variant="brand"
-          onClick={generate}
+          onClick={() => generate()}
           disabled={!montant || parseFloat(montant) <= 0 || loading}
           className="px-4 bg-brand-gold hover:bg-brand-amber text-brand-dark font-bold"
         >
@@ -589,7 +610,7 @@ function MiseCalculatorWidget({
       </div>
       {/* Quick amounts */}
       <div className="flex gap-1.5 mt-2 flex-wrap">
-        {[10, 20, 50, 100].map((v) => (
+        {[50, 100, 200].map((v) => (
           <button
             key={v}
             onClick={() => setMontant(String(v))}
