@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
+import Link from "next/link";
 import {
   Plus, Download, TrendingUp, TrendingDown, Loader2,
   Wallet, Target, Brain, Trophy, X,
@@ -24,9 +25,16 @@ import { formatEuro, formatDateTime, cn } from "@/lib/utils";
 // ─── Types ───────────────────────────────────────────────────
 interface Entry {
   entry_id: string; date: string; type_pari: string;
+  course_id: string | null;
   chevaux: string | null; mise: number; cote: number | null;
   resultat: string | null; gain_perte: number | null;
   suivi_reco_ia: boolean; notes: string | null;
+}
+
+// Extrait le code R{réunion}C{course} depuis le course_id daté (ddmmyyyyR..C..)
+function rcCode(courseId: string | null | undefined): string | null {
+  if (!courseId) return null;
+  return courseId.match(/R\d+C\d+$/)?.[0] ?? null;
 }
 interface Stats {
   bankroll_initiale: number | null; mise_totale: number;
@@ -428,7 +436,14 @@ export default function BankrollPage() {
                       e.resultat === "perd" && "bg-red-50/10",
                     )}>
                       <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{formatDateTime(e.date)}</td>
-                      <td className="px-4 py-3 text-xs font-medium text-gray-700 whitespace-nowrap">{e.type_pari}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="text-xs font-medium text-gray-700">{e.type_pari}</div>
+                        {rcCode(e.course_id) && (
+                          <Link href={`/courses/${e.course_id}`} className="mt-0.5 inline-flex items-center rounded bg-gray-900 px-1.5 py-0 text-[10px] font-bold text-white hover:bg-gray-700 transition-colors">
+                            {rcCode(e.course_id)}
+                          </Link>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-xs text-gray-400 hidden md:table-cell max-w-[100px] truncate">{e.chevaux || "—"}</td>
                       <td className="px-4 py-3 text-right font-mono text-sm font-semibold text-gray-800">{formatEuro(e.mise)}</td>
                       <td className="px-4 py-3 text-right text-gray-500 hidden sm:table-cell font-mono text-xs">{e.cote?.toFixed(2) || "—"}</td>
