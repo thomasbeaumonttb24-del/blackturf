@@ -325,6 +325,23 @@ async def dashboard_summary(
     )).scalar_one_or_none()
     drift_severity = dd_state.severity if dd_state else "none"
 
+    # Métriques RÉELLES du modèle actif (au lieu de valeurs hardcodées côté front).
+    # precision_top3 : préférer la précision RÉELLE observée (race_learning_log)
+    # à la métrique d'entraînement.
+    from db.models import ModelVersion, RaceLearningLog
+    mv = (await db.execute(
+        select(ModelVersion).where(ModelVersion.est_actif == True)
+    )).scalars().first()
+    model_auc = round(float(mv.auc_roc), 3) if mv and mv.auc_roc else None
+    rll_total = (await db.execute(select(func.count()).select_from(RaceLearningLog))).scalar() or 0
+    rll_top3 = (await db.execute(
+        select(func.count()).select_from(RaceLearningLog)
+        .where(RaceLearningLog.gagnant_rang_predit <= 3)
+    )).scalar() or 0
+    precision_top3 = round(rll_top3 / rll_total, 3) if rll_total else (
+        round(float(mv.precision_top3), 3) if mv and mv.precision_top3 else None
+    )
+
     result = {
         "nb_courses_jour": nb_courses_jour,
         "nb_en_cours": nb_en_cours,
@@ -332,6 +349,9 @@ async def dashboard_summary(
         "nb_vbs_premium": nb_vbs_premium,
         "top_vbs": top_vbs,
         "drift_severity": drift_severity,
+        "model_auc": model_auc,
+        "precision_top3": precision_top3,
+        "nb_courses_evaluees": rll_total,
     }
     await _cache_set(redis, CACHE_KEY, result, ttl=120)  # 2 min
     return result

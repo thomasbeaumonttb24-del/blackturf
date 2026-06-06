@@ -66,6 +66,7 @@ class UserMeResponse(BaseModel):
     plan: str
     profil_risque: str
     email_verified: bool
+    is_admin: bool = False
     bankroll_initiale: Optional[float]
     created_at: datetime
 
@@ -280,6 +281,7 @@ async def me(user: User = Depends(get_current_user)):
         plan=user.plan,
         profil_risque=user.profil_risque,
         email_verified=user.email_verified,
+        is_admin=bool(user.is_admin),
         bankroll_initiale=user.bankroll_initiale,
         created_at=user.created_at,
     )

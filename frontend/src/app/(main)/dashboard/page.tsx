@@ -445,11 +445,17 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-muted/40 p-3">
                     <div className="text-xs text-muted-foreground mb-1">AUC-ROC</div>
-                    <div className="text-base font-bold text-foreground tabular-nums">0.71</div>
+                    <div className="text-base font-bold text-foreground tabular-nums">
+                      {summary?.model_auc != null ? summary.model_auc.toFixed(3) : "—"}
+                    </div>
                   </div>
                   <div className="rounded-lg bg-muted/40 p-3">
-                    <div className="text-xs text-muted-foreground mb-1">Précision Top-3</div>
-                    <div className="text-base font-bold text-foreground tabular-nums">59%</div>
+                    <div className="text-xs text-muted-foreground mb-1">
+                      Précision Top-3{summary?.nb_courses_evaluees ? ` (${summary.nb_courses_evaluees} courses)` : ""}
+                    </div>
+                    <div className="text-base font-bold text-foreground tabular-nums">
+                      {summary?.precision_top3 != null ? `${Math.round(summary.precision_top3 * 100)}%` : "—"}
+                    </div>
                   </div>
                 </div>
 
