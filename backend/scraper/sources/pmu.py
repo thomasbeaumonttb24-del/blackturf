@@ -227,47 +227,74 @@ class PmuScraper(BaseScraper):
                 out.append({"cheval_nom": part.get("nomCheval"), "courses": courses})
         return out
 
-    async def get_rapports_definitifs(self, reunion_id: str, course_num: int) -> Optional[ResultatScrape]:
-        """Récupère les résultats officiels après la course."""
-        d = date.today().strftime("%d%m%Y")
-        url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/rapports-definitifs?specialisation=INTERNET"
-        data = await self._fetch_json(url)
-        if not data:
-            return None
+    async def get_rapports_definitifs(
+        self, reunion_id: str, course_num: int, course_date=None
+    ) -> Optional[ResultatScrape]:
+        """Récupère les résultats officiels après la course.
 
+        - ordre d'arrivée : endpoint /participants (champ ordreArrivee, fiable)
+        - rapports (dividendes) : endpoint /rapports-definitifs (LISTE de typePari)
+        course_date : date de la course (date|datetime|str ddmmyyyy). Défaut = aujourd'hui.
+        """
+        if course_date is None:
+            d = date.today().strftime("%d%m%Y")
+        elif isinstance(course_date, str):
+            d = course_date
+        else:
+            d = course_date.strftime("%d%m%Y")
+
+        c_id = f"R{reunion_id}C{course_num}"
+        base_rc = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}"
+
+        # 1) Ordre d'arrivée via /participants
+        parts = await self._fetch_json(f"{base_rc}/participants?specialisation=INTERNET")
+        if not parts:
+            return None
+        participants = parts if isinstance(parts, list) else parts.get("participants", [])
+
+        ordre = []
+        for p in participants:
+            pos = p.get("ordreArrivee")
+            if pos and pos > 0:  # uniquement les chevaux classés
+                temps_ms = p.get("tempsObtenu")
+                rk = p.get("reductionKilometrique")
+                ordre.append({
+                    "numero": p.get("numPmu"),
+                    "nom": p.get("nom"),
+                    "position": int(pos),
+                    "temps": round(temps_ms / 1000, 2) if temps_ms else None,
+                    "reduction_km": round(rk / 1000, 2) if rk else None,
+                    "incident": p.get("incident"),
+                })
+        if not ordre:
+            return None  # course pas encore arrivée
+        ordre.sort(key=lambda x: x["position"])
+
+        # 2) Rapports (dividendes) via /rapports-definitifs (liste de typePari)
+        rapports = {}
         try:
-            c_id = f"R{reunion_id}C{course_num}"
-            ordre = []
-            for p in data.get("participants", []):
-                if p.get("ordreArrivee"):
-                    ordre.append({
-                        "numero": p.get("numPmu"),
-                        "nom": p.get("nom"),
-                        "position": p.get("ordreArrivee"),
-                        "temps": p.get("tempsOfficiel"),
-                        "incident": p.get("incident"),
-                        "gains": p.get("gainsRapportes"),
-                    })
-            ordre.sort(key=lambda x: (x.get("position") or 999))
-
-            rapports = {}
-            for r in data.get("rapports", []):
-                type_r = r.get("typePari", "").lower()
-                rapport = r.get("dividendes", [{}])[0].get("rapport")
-                if rapport:
-                    rapports[type_r] = rapport
-
-            return ResultatScrape(
-                course_id=c_id,
-                ordre_arrivee=ordre,
-                rapports=rapports,
-                temps_gagnant=ordre[0].get("temps") if ordre else None,
-                incidents=data.get("incidents"),
-                source="pmu",
-            )
+            rd = await self._fetch_json(f"{base_rc}/rapports-definitifs?specialisation=INTERNET")
+            if isinstance(rd, list):
+                for item in rd:
+                    type_pari = (item.get("typePari") or "").lower()
+                    raps = item.get("rapports") or []
+                    if not type_pari or not raps:
+                        continue
+                    # dividende exprimé "pour un euro" en centimes → euros
+                    div = raps[0].get("dividendePourUnEuro") or raps[0].get("dividende")
+                    if div:
+                        rapports[type_pari] = round(div / 100, 2)
         except Exception as e:
-            log.error("pmu.rapports_parse_error", error=str(e))
-            return None
+            log.warning("pmu.rapports_dividendes_skip", course_id=c_id, error=str(e)[:120])
+
+        return ResultatScrape(
+            course_id=c_id,
+            ordre_arrivee=ordre,
+            rapports=rapports,
+            temps_gagnant=str(ordre[0]["temps"]) if ordre and ordre[0].get("temps") is not None else None,
+            incidents=None,
+            source="pmu",
+        )
 
     async def get_cotes_live(self, reunion_id: str, course_num: int) -> dict[int, float]:
         """
