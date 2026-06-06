@@ -92,8 +92,26 @@ function StatutBadge({ statut }: { statut: string }) {
   return null;
 }
 
+/* ─── Code R{r}C{c} ─────────────────────────────────────── */
+function CourseCode({ reunionNum, courseNum, variant = "default" }: {
+  reunionNum: number; courseNum: number; variant?: "default" | "live" | "quinte";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[11px] font-bold tabular-nums tracking-tight ring-1 flex-shrink-0",
+        variant === "quinte" ? "bg-amber-50 text-amber-700 ring-amber-200"
+          : variant === "live" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+          : "bg-gray-100 text-gray-700 ring-gray-200",
+      )}
+    >
+      R{reunionNum}C{courseNum}
+    </span>
+  );
+}
+
 /* ─── CourseRow ─────────────────────────────────────────── */
-function CourseRow({ course, vbCount }: { course: CourseSummary; vbCount?: number }) {
+function CourseRow({ course, reunionNum, vbCount }: { course: CourseSummary; reunionNum: number; vbCount?: number }) {
   const isLive = course.statut === "en_cours";
   const isDone = course.statut === "termine" || course.statut === "annule";
   const countdown = useCountdown(course.date_heure, course.statut);
@@ -113,6 +131,16 @@ function CourseRow({ course, vbCount }: { course: CourseSummary; vbCount?: numbe
           <span className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-0.5 rounded-full bg-emerald-500" />
         )}
 
+        {/* Heure de départ (repère principal) */}
+        <div className="flex flex-col items-center w-12 flex-shrink-0">
+          <span className={cn("text-base font-bold tabular-nums leading-none", isLive ? "text-emerald-600" : isDone ? "text-gray-400" : "text-gray-900")}>
+            {formatTime(course.date_heure)}
+          </span>
+          {countdown && (
+            <span className="mt-1 text-[9px] font-semibold text-amber-600 leading-none">{countdown}</span>
+          )}
+        </div>
+
         {/* Course number circle */}
         <div
           className={cn(
@@ -130,9 +158,11 @@ function CourseRow({ course, vbCount }: { course: CourseSummary; vbCount?: numbe
         {/* Main info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
+            <CourseCode reunionNum={reunionNum} courseNum={course.numero}
+              variant={course.est_quinte ? "quinte" : isLive ? "live" : "default"} />
             <span
               className={cn(
-                "text-sm font-semibold truncate max-w-[200px] group-hover:text-gray-900",
+                "text-sm font-semibold truncate max-w-[180px] group-hover:text-gray-900",
                 isDone ? "text-gray-400" : "text-gray-800",
               )}
             >
@@ -186,27 +216,15 @@ function CourseRow({ course, vbCount }: { course: CourseSummary; vbCount?: numbe
           </div>
         </div>
 
-        {/* Right: time + status + VB */}
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          <div className="flex items-center gap-1.5">
-            {countdown && (
-              <span className="text-[10px] font-medium text-amber-600 bg-amber-50 rounded-full px-1.5 py-0.5">
-                {countdown}
-              </span>
-            )}
-            <span className={cn("text-sm font-semibold tabular-nums", isLive ? "text-emerald-600" : "text-gray-700")}>
-              {formatTime(course.date_heure)}
+        {/* Right: status + VB */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {vbCount !== undefined && vbCount > 0 && (
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 ring-1 ring-amber-200">
+              <Zap className="h-2.5 w-2.5" />
+              {vbCount} <span className="hidden sm:inline">de valeur</span>
             </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {vbCount !== undefined && vbCount > 0 && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 ring-1 ring-amber-200">
-                <Zap className="h-2.5 w-2.5" />
-                {vbCount} <span className="hidden sm:inline">de valeur</span>
-              </span>
-            )}
-            <StatutBadge statut={course.statut} />
-          </div>
+          )}
+          <StatutBadge statut={course.statut} />
         </div>
 
         {/* Hover arrow */}
@@ -277,14 +295,14 @@ function ReunionCard({
           <span className="h-full absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl bg-gradient-to-b from-amber-400 to-amber-500" />
         )}
 
-        {/* Hippodrome icon */}
+        {/* Badge réunion R{n} */}
         <div
           className={cn(
-            "h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 text-base",
-            hasQuinte ? "bg-amber-100 text-amber-600" : "bg-gray-100 text-gray-500",
+            "h-9 w-11 rounded-xl flex items-center justify-center flex-shrink-0 font-mono text-sm font-bold tracking-tight ring-1",
+            hasQuinte ? "bg-amber-100 text-amber-700 ring-amber-200" : "bg-gray-100 text-gray-600 ring-gray-200",
           )}
         >
-          <MapPin className="h-4 w-4" />
+          R{reunion.numero}
         </div>
 
         {/* Info */}
@@ -304,7 +322,7 @@ function ReunionCard({
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5 flex-wrap">
-            <span>R{reunion.numero}</span>
+            <span className="flex items-center gap-0.5"><MapPin className="h-2.5 w-2.5" /> Réunion {reunion.numero}</span>
             <span className="text-gray-200">·</span>
             <span>{filteredCourses.length} courses</span>
             {firstTime && (
@@ -358,11 +376,105 @@ function ReunionCard({
             <CourseRow
               key={course.course_id}
               course={course}
+              reunionNum={reunion.numero}
               vbCount={isPaid ? vbByCourse[course.course_id] : undefined}
             />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── Vue chronologique (par heure de départ) ───────────── */
+function ChronoView({
+  reunions, vbByCourse, isPaid, disciplineFilter,
+}: {
+  reunions: Reunion[];
+  vbByCourse: Record<string, number>;
+  isPaid: boolean;
+  disciplineFilter: DisciplineFilter;
+}) {
+  // Aplatir toutes les courses + contexte réunion, filtrer, trier par heure
+  const flat = useMemo(() => {
+    const items: Array<{ course: CourseSummary; reunionNum: number; hippodrome: string }> = [];
+    for (const r of reunions) {
+      for (const c of r.courses) {
+        if (disciplineFilter !== "Tous" && c.discipline !== disciplineFilter) continue;
+        items.push({ course: c, reunionNum: r.numero, hippodrome: r.hippodrome });
+      }
+    }
+    items.sort((a, b) => new Date(a.course.date_heure).getTime() - new Date(b.course.date_heure).getTime());
+    return items;
+  }, [reunions, disciplineFilter]);
+
+  // Grouper par tranche horaire (ex: "13h")
+  const groups = useMemo(() => {
+    const map = new Map<string, typeof flat>();
+    for (const it of flat) {
+      const h = new Date(it.course.date_heure).getHours();
+      const key = `${h}h`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(it);
+    }
+    return Array.from(map.entries());
+  }, [flat]);
+
+  if (flat.length === 0) return null;
+
+  return (
+    <div className="space-y-4">
+      {groups.map(([hour, items]) => (
+        <div key={hour} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-2.5 bg-gray-50/80 border-b border-gray-100">
+            <Clock className="h-3.5 w-3.5 text-gray-400" />
+            <span className="text-sm font-bold text-gray-700 tabular-nums">{hour}</span>
+            <span className="text-xs text-gray-400">· {items.length} course{items.length > 1 ? "s" : ""}</span>
+          </div>
+          <div>
+            {items.map(({ course, reunionNum, hippodrome }) => {
+              const isLive = course.statut === "en_cours";
+              const isDone = course.statut === "termine" || course.statut === "annule";
+              return (
+                <Link key={course.course_id} href={`/courses/${course.course_id}`} className="block group">
+                  <div className={cn(
+                    "relative flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-b-0 transition-all",
+                    "hover:bg-gray-50/80",
+                    isLive && "bg-emerald-50/50 hover:bg-emerald-50",
+                    isDone && "opacity-60",
+                  )}>
+                    {isLive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-0.5 rounded-full bg-emerald-500" />}
+                    <span className={cn("text-sm font-bold tabular-nums w-11 flex-shrink-0", isLive ? "text-emerald-600" : isDone ? "text-gray-400" : "text-gray-900")}>
+                      {formatTime(course.date_heure)}
+                    </span>
+                    <CourseCode reunionNum={reunionNum} courseNum={course.numero}
+                      variant={course.est_quinte ? "quinte" : isLive ? "live" : "default"} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">
+                        <span className="text-gray-500">{hippodrome}</span>
+                        <span className="text-gray-300"> · </span>
+                        {course.nom || `Course ${course.numero}`}
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {disciplineIcon(course.discipline)} {course.discipline} · {course.distance}m · {course.nb_partants} partants
+                      </p>
+                    </div>
+                    {course.est_quinte && (
+                      <span className="hidden sm:inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[9px] font-bold text-amber-600 ring-1 ring-amber-200 uppercase tracking-wide flex-shrink-0">Quinté+</span>
+                    )}
+                    {isPaid && (vbByCourse[course.course_id] || 0) > 0 && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 ring-1 ring-amber-200 flex-shrink-0">
+                        <Zap className="h-2.5 w-2.5" />{vbByCourse[course.course_id]}
+                      </span>
+                    )}
+                    <StatutBadge statut={course.statut} />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -377,6 +489,7 @@ export default function ProgrammePage() {
   const [hippoSearch, setHippoSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [vbOnly, setVbOnly] = useState(false);
+  const [viewMode, setViewMode] = useState<"reunion" | "heure">("reunion");
 
   const isToday = format(selectedDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
   const isPaid = user && !["free", "decouverte"].includes(user.plan);
@@ -523,6 +636,25 @@ export default function ProgrammePage() {
         </div>
       )}
 
+      {/* ── Bascule de vue : Par réunion / Par heure ── */}
+      {programme && programme.nb_courses > 0 && (
+        <div className="inline-flex items-center rounded-xl bg-gray-100 p-1 gap-1">
+          {([["reunion", "Par réunion", MapPin], ["heure", "Par heure", Clock]] as const).map(([mode, label, Icon]) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                viewMode === mode ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Filters ── */}
       {programme && programme.nb_courses > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -640,6 +772,13 @@ export default function ProgrammePage() {
             Effacer les filtres
           </button>
         </div>
+      ) : viewMode === "heure" ? (
+        <ChronoView
+          reunions={filteredReunions}
+          vbByCourse={vbByCourse}
+          isPaid={!!isPaid}
+          disciplineFilter={discFilter}
+        />
       ) : (
         <div className="space-y-3">
           {filteredReunions.map((reunion) => (
