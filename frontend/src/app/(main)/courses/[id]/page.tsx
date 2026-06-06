@@ -207,10 +207,36 @@ function PlanMiseDisplay({ plan, onClose }: { plan: MisePlan; onClose: () => voi
         </div>
       </div>
 
+      {/* Explication espérance */}
+      <details className="mb-4 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs group">
+        <summary className="cursor-pointer font-semibold text-muted-foreground flex items-center gap-1.5 list-none">
+          <span className="text-brand-gold">ⓘ</span> C&apos;est quoi l&apos;espérance ?
+        </summary>
+        <div className="mt-2 space-y-1.5 text-muted-foreground leading-relaxed">
+          <p>
+            L&apos;<strong>espérance</strong> = le gain (ou la perte) moyen attendu pour 1€ misé,
+            si tu rejouais ce type de plan un très grand nombre de fois.
+          </p>
+          <p>
+            <strong className="text-brand-emerald">Positif</strong> = avantage : en moyenne le plan
+            rapporte. <strong className="text-brand-red">Négatif</strong> = perte moyenne.
+          </p>
+          <p>
+            Au PMU, le pari mutuel prélève ~15 à 25% des mises : une espérance légèrement négative
+            est <strong>normale</strong>. Plus elle est proche de 0% (ou positive), meilleure est la sélection.
+            L&apos;analyse BlackTurf vise à la maximiser, sans jamais garantir un gain.
+          </p>
+        </div>
+      </details>
+
       {/* Résumé IA */}
       <div className="rounded-lg border border-brand-gold/20 bg-brand-gold/5 p-3 mb-4 text-sm leading-relaxed">
         <p className="text-muted-foreground text-xs font-semibold mb-1">💬 Analyse BlackTurf</p>
         {plan.resume_ia}
+        <p className="mt-2 text-[11px] text-muted-foreground/70">
+          Mises réparties par simulation (Plackett-Luce) sur les probabilités du modèle : forme,
+          cotes, ELO, terrain, distance, jockey/entraîneur et historique de chaque cheval.
+        </p>
       </div>
 
       {/* Niveaux */}
@@ -572,7 +598,7 @@ function MiseCalculatorWidget({
             value={montant}
             onChange={(e) => setMontant(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && generate()}
-            placeholder="50"
+            placeholder="10"
             className="w-full rounded-lg border border-input bg-muted/30 px-3 py-2.5 text-sm font-mono pr-8 focus:outline-none focus:ring-2 focus:ring-brand-gold/50 focus:border-brand-gold/50 transition"
           />
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">€</span>
@@ -590,7 +616,7 @@ function MiseCalculatorWidget({
       </div>
       {/* Quick amounts */}
       <div className="flex gap-1.5 mt-2 flex-wrap">
-        {[50, 100, 200].map((v) => (
+        {[5, 10, 20, 30].map((v) => (
           <button
             key={v}
             onClick={() => setMontant(String(v))}
