@@ -22,14 +22,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-# type_pari -> clé du rapport PMU (base 1€)
-_RAPPORT_KEY = {
-    "Simple Gagnant": "e_simple_gagnant",
-    "Simple Placé": "e_simple_place",
-    "Couplé Gagnant": "e_couple_gagnant",
-    "Couplé Placé": "e_couple_place",
-    "Trio": "e_trio",
-    "2sur4": "e_super_quatre",
+# type_pari -> clés candidates du rapport PMU (base 1€). Le PMU nomme le même
+# pari différemment selon la course (ex. 2sur4 : e_deux_sur_quatre OU e_super_quatre)
+# -> on essaie chaque clé et on prend la première publiée.
+_RAPPORT_KEYS = {
+    "Simple Gagnant": ("e_simple_gagnant", "simple_gagnant_international"),
+    "Simple Placé":   ("e_simple_place", "simple_place_international"),
+    "Couplé Gagnant": ("e_couple_gagnant",),
+    "Couplé Placé":   ("e_couple_place",),
+    "Trio":           ("e_trio",),
+    "2sur4":          ("e_deux_sur_quatre", "e_super_quatre"),
 }
 
 _APPROX_NOTE = "Rapport placé approximatif (le PMU publie un rapport par cheval placé)."
@@ -117,8 +119,11 @@ def settle_pari(
 
     rapport_reel: Optional[float] = None
     if gagne:
-        key = _RAPPORT_KEY.get(type_pari)
-        val = rapports.get(key) if key else None
+        val = None
+        for k in _RAPPORT_KEYS.get(type_pari, ()):
+            if rapports.get(k) is not None:
+                val = rapports.get(k)
+                break
         try:
             rapport_reel = float(val) if val is not None and float(val) > 0 else None
         except (TypeError, ValueError):
