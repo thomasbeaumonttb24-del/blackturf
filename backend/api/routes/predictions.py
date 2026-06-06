@@ -313,10 +313,10 @@ async def get_course_analysis(
 
     # VBs actifs
     vbs_r = await db.execute(
-        select(VBModel.participation_id, VBModel.ev_max, VBModel.niveau, VBModel.spi_detected, VBModel.spi_method)
+        select(VBModel.participation_id, VBModel.ev_max, VBModel.niveau, VBModel.spi_detected, VBModel.spi_score)
         .where(VBModel.course_id == course_id, VBModel.actif.is_(True))
     )
-    vb_map = {r[0]: {"ev_max": r[1], "niveau": r[2], "spi_detected": r[3], "spi_method": r[4]}
+    vb_map = {r[0]: {"ev_max": r[1], "niveau": r[2], "spi_detected": r[3], "spi_score": r[4]}
               for r in vbs_r.fetchall()}
 
     predictions = []
