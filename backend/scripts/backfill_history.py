@@ -54,6 +54,17 @@ async def _backfill_one_course(pmu: PmuScraper, course, ddmmyyyy: str) -> dict:
     except (ValueError, IndexError):
         return out
 
+    # 0) Partants : le programme d'une date passée renvoie participants=[] en inline.
+    # On enrichit donc via l'endpoint /participants dédié (daté) avant de sauvegarder.
+    if not course.partants:
+        try:
+            partants = await pmu.enrich_partants(r_id, c_num, ddmmyyyy)
+            if partants:
+                course.partants = partants
+                course.nb_partants = len(partants)
+        except Exception as e:
+            log.warning("backfill.enrich_partants_failed", course_id=cid, err=str(e)[:140])
+
     # 1) Course + partants
     try:
         async with AsyncSessionLocal() as s:

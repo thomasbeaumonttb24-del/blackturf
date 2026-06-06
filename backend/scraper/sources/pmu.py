@@ -208,9 +208,18 @@ class PmuScraper(BaseScraper):
         log.info("pmu.courses_parsed", count=len(courses))
         return courses
 
-    async def enrich_partants(self, reunion_id: str, course_num: int) -> list[PartantScrape]:
-        """Récupère les données complètes des partants pour une course."""
-        d = date.today().strftime("%d%m%Y")
+    async def enrich_partants(self, reunion_id: str, course_num: int, course_date=None) -> list[PartantScrape]:
+        """Récupère les données complètes des partants pour une course.
+
+        course_date : date|str(ddmmyyyy). Défaut = aujourd'hui. Indispensable au
+        BACKFILL : le programme d'une date passée renvoie participants=[] en inline,
+        mais l'endpoint /participants dédié les contient."""
+        if course_date is None:
+            d = date.today().strftime("%d%m%Y")
+        elif isinstance(course_date, str) and len(course_date) == 8 and course_date.isdigit():
+            d = course_date
+        else:
+            d = course_date.strftime("%d%m%Y")
         url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/participants?specialisation=INTERNET"
         await human_delay(0.3, 0.8)
 
