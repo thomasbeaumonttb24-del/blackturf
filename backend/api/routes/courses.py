@@ -579,6 +579,123 @@ async def get_mise_plan(
     return plan_to_dict(plan)
 
 
+@router.get("/courses/{course_id}/bilan-pronostic")
+async def get_bilan_pronostic(
+    course_id: str,
+    montant: float = 20.0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Bilan RÉTROSPECTIF d'une course TERMINÉE : applique le plan de mise (20€ par
+    défaut) généré sur les pronostics réels, le règle contre le résultat officiel
+    (rapports PMU réels) et indique si le pronostic était bon (net, ROI, comparaison
+    top-3 prédit vs réel). Aucune donnée inventée.
+    """
+    from services.mise_calculator import generer_plan, plan_to_dict
+    from services.bet_settlement import settle_plan
+    from db.models import Resultat as ResultatModel
+
+    course = (await db.execute(
+        select(Course).where(Course.course_id == course_id)
+    )).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+    if course.statut != "termine":
+        raise HTTPException(status_code=409, detail="Course non terminée — bilan indisponible")
+
+    resultat = await db.get(ResultatModel, course_id)
+    if not resultat or not resultat.classement:
+        raise HTTPException(status_code=404, detail="Résultat officiel indisponible")
+
+    # Prédictions réellement émises pour cette course
+    from sqlalchemy import select as _s
+    from db.models import Prediction as Pred
+    rows = (await db.execute(
+        _s(Pred, Participation, Cheval)
+        .join(Participation, Participation.participation_id == Pred.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .where(Participation.course_id == course_id)
+        .order_by(Pred.rang_predit)
+    )).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Aucun pronostic enregistré pour cette course")
+
+    preds = []
+    for pred, part, cheval in rows:
+        preds.append({
+            "numero": part.numero,
+            "nom_cheval": cheval.nom,
+            "proba_top3": pred.proba_top3,
+            "proba_top1": pred.proba_top1,
+            "cote_pmu": part.cote_pmu,
+            "non_partant": part.non_partant,
+            "rang_predit": pred.rang_predit,
+        })
+
+    course_info = {
+        "est_quinte": course.est_quinte,
+        "est_quarte": course.est_quarte,
+        "nb_partants": course.nb_partants,
+    }
+
+    montant = max(2.0, min(float(montant or 20), 10000.0))
+    plan = plan_to_dict(generer_plan(montant, "equilibre", preds, course_info, None))
+
+    nb_partants = course.nb_partants or len(preds)
+    bilan = settle_plan(plan, resultat.classement, resultat.rapports, nb_partants)
+
+    # ── Comparaison pronostic vs résultat réel ───────────────────────────
+    pos_by_num = {}
+    for e in resultat.classement:
+        try:
+            pos_by_num[int(e["numero"])] = int(e["position"]) if e.get("position") else None
+        except (TypeError, ValueError, KeyError):
+            continue
+    actual_top3 = [int(e["numero"]) for e in sorted(
+        [x for x in resultat.classement if x.get("position")],
+        key=lambda x: x["position"]
+    )[:3]]
+    gagnant_reel = actual_top3[0] if actual_top3 else None
+
+    # Top-3 prédit par le modèle (rang_predit 1-2-3, non-partants exclus)
+    predicted = [p for p in preds if not p.get("non_partant") and p.get("rang_predit")]
+    predicted.sort(key=lambda p: p["rang_predit"])
+    predicted_top3 = [p["numero"] for p in predicted[:3]]
+    rang_predit_gagnant = pos_predit = None
+    if gagnant_reel is not None:
+        for p in preds:
+            if p["numero"] == gagnant_reel:
+                rang_predit_gagnant = p.get("rang_predit")
+                break
+    overlap_top3 = len(set(predicted_top3) & set(actual_top3))
+
+    # Verdict : le plan a-t-il été rentable ? + le modèle a-t-il vu le gagnant ?
+    plan_gagnant = bilan["net"] >= 0 and not bilan["gain_indetermine"]
+    modele_a_vu_gagnant = rang_predit_gagnant is not None and rang_predit_gagnant <= 3
+    if bilan["gain_indetermine"]:
+        verdict = "indetermine"
+    elif plan_gagnant:
+        verdict = "gagnant"
+    else:
+        verdict = "perdant"
+
+    return {
+        "course_id": course_id,
+        "montant": montant,
+        "bilan": bilan,
+        "comparaison": {
+            "predicted_top3": predicted_top3,
+            "actual_top3": actual_top3,
+            "gagnant_reel": gagnant_reel,
+            "rang_predit_gagnant": rang_predit_gagnant,
+            "overlap_top3": overlap_top3,
+            "modele_a_vu_gagnant": modele_a_vu_gagnant,
+        },
+        "verdict": verdict,
+    }
+
+
 @router.get("/courses/{course_id}/comparaison-cotes")
 async def get_comparaison_cotes(
     course_id: str,
