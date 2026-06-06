@@ -316,7 +316,7 @@ class BlackTurfEnsemble:
         Si stacking entraîné : meta-learner L2 (LightGBM sur OOF L0 + features contextuelles).
         Sinon : fallback poids fixes 50/30/20.
         """
-        X_feat = X[self.feature_names].fillna(0)
+        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
         p_xgb, p_lgbm, p_cb = self._get_l0_predictions(X_feat)
 
         if self._stacking_trained and self.meta_learner is not None:
@@ -349,7 +349,7 @@ class BlackTurfEnsemble:
         Plus un modèle est en accord AVEC lui-même (les 3 modèles convergent)
         ET avec le marché, plus la confidence est élevée.
         """
-        X_feat = X[self.feature_names].fillna(0)
+        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
         p_xgb, p_lgbm, p_cb = self._get_l0_predictions(X_feat)
 
         probas = self.predict_proba(X)

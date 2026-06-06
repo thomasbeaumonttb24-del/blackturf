@@ -1682,7 +1682,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_synergy = {"jockey_cheval_synergy_nb": 0, "jockey_cheval_synergy_score": 0.0}
 
     # ── Fingerprint ───────────────────────────────────────────────────────────
-    fp_hist = [h for h in historique if h[8] and discipline and h[8].lower() == discipline.lower()
+    fp_hist = [h for h in historique if h[7] and discipline and str(h[7]).lower() == discipline.lower()
                and h[1] and abs(int(h[1]) - dist_int) <= 200
                and hippodrome and h[3] and h[3].upper() == hippodrome.upper()]
     fp_top3 = sum(1 for h in fp_hist if h[0] and h[0] <= 3)
@@ -1722,7 +1722,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     hist_long = [score_position(h[0],nb_partants_int) for h in historique if h[0] and h[0]<20 and h[1] and int(h[1])>dist_int+200]
     hist_court = [score_position(h[0],nb_partants_int) for h in historique if h[0] and h[0]<20 and h[1] and int(h[1])<dist_int-200]
     stamina_index = float(np.mean(hist_long)-np.mean(hist_court)) if hist_long and hist_court else 0.0
-    hist_same_disc = [h for h in historique if h[8] and discipline and h[8].lower()==discipline.lower()]
+    hist_same_disc = [h for h in historique if h[7] and discipline and str(h[7]).lower()==discipline.lower()]
     disc_coherence = len(hist_same_disc)/max(len(historique),1) if historique else 0.5
     feat_pace = {"vitesse_theorique": vitesse_theorique, "stamina_index": float(np.clip(stamina_index,-1,1)),
                  "discipline_coherence": float(disc_coherence)}
