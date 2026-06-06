@@ -112,11 +112,19 @@ class PmuScraper(BaseScraper):
                     return None
         return None
 
-    async def get_programme_today(self) -> list[CourseScrape]:
-        """Récupère toutes les courses du jour avec partants basiques."""
-        today_str = date.today().strftime("%d%m%Y")
+    async def get_programme_today(self, target_date=None) -> list[CourseScrape]:
+        """Récupère toutes les courses d'une journée avec partants basiques.
+
+        target_date : date|datetime|str(ddmmyyyy). Défaut = aujourd'hui. Permet le
+        BACKFILL historique (programme + arrivées d'une date passée)."""
+        if target_date is None:
+            today_str = date.today().strftime("%d%m%Y")
+        elif isinstance(target_date, str) and len(target_date) == 8 and target_date.isdigit():
+            today_str = target_date
+        else:
+            today_str = target_date.strftime("%d%m%Y")
         url = f"{BASE}/programme/{today_str}?specialisation=INTERNET"
-        log.info("pmu.programme_today", date=today_str)
+        log.info("pmu.programme_fetch", date=today_str)
 
         data = await self._fetch_json(url)
         if not data:
