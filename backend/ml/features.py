@@ -1209,9 +1209,9 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             eq.deferre_change, eq.premier_deferre, eq.oeilleres_change, eq.equipement_nouveau,
             -- Association J×E
             aje.taux_victoire AS asso_win, aje.nb_courses AS asso_nb,
-            -- Avis entraîneur + tendance cote (enrichissements PMU, en fin pour ne pas
-            -- décaler les index positionnels existants)
-            p.avis_entraineur, p.tendance_force
+            -- Avis entraîneur + tendance cote + smart money (enrichissements PMU, en
+            -- fin pour ne pas décaler les index positionnels existants)
+            p.avis_entraineur, p.tendance_force, c.pool_gagnant_evolution
         FROM participations p
         JOIN courses c ON c.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
@@ -1401,13 +1401,15 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         e_win, e_place, e_roi, e_vic_s,
         deferre_change, premier_deferre, oeilleres_change, equipement_nouveau,
         asso_win, asso_nb,
-        avis_entraineur_raw, tendance_force_raw,
+        avis_entraineur_raw, tendance_force_raw, pool_gagnant_evol_raw,
     ) = row
 
     # Avis entraîneur PMU → score numérique (POSITIF=1, NEUTRE=0.5, NEGATIF=0)
     _avis_map = {"POSITIF": 1.0, "TRES_POSITIF": 1.0, "NEUTRE": 0.5, "NEGATIF": 0.0, "TRES_NEGATIF": 0.0}
     avis_entraineur_score = _avis_map.get((avis_entraineur_raw or "").upper(), 0.5)
     tendance_force_val = float(tendance_force_raw) if isinstance(tendance_force_raw, (int, float)) else 0.0
+    # Smart money : croissance du pool gagnant (afflux de mises)
+    pool_evol_val = float(pool_gagnant_evol_raw) if isinstance(pool_gagnant_evol_raw, (int, float)) else 0.0
 
     nb_partants_int = int(nb_partants or 10)
     disc_lower = (discipline or "plat").lower()
@@ -1895,6 +1897,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_pmu = {
         "avis_entraineur_score": float(avis_entraineur_score),
         "tendance_cote_force": float(np.clip(tendance_force_val, 0.0, 50.0)),
+        "pool_gagnant_evolution": float(np.clip(pool_evol_val, -1.0, 1.0)),
     }
 
     # ── Assemblage final ──────────────────────────────────────────────────────

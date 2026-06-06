@@ -198,6 +198,11 @@ class CourseScrape:
     est_quarte: bool = False
     est_tierce: bool = False
     nom: Optional[str] = None
+    # ── Enrichissements PMU (course) ─────────────────────────────────────────
+    conditions_texte: Optional[str] = None        # conditions complètes (texte long)
+    categorie_particularite: Optional[str] = None  # EUROPEENNE / NATIONALE / ...
+    montant_offert_1er: Optional[int] = None       # dotation au gagnant (euros)
+    nombre_declares_partants: Optional[int] = None # déclarés (vs réels = scratchings)
     source: str = "pmu"
     scraped_at: str = ""
 
@@ -303,6 +308,7 @@ class PoolPMUScrape:
     pool_gagnant: Optional[int] = None
     pool_place: Optional[int] = None
     nb_parieurs: Optional[int] = None
+    gagnant_evolution: Optional[float] = None  # taux de croissance du pool gagnant (smart money)
     scraped_at: str = ""
 
     def __post_init__(self):

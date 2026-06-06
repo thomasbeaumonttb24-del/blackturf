@@ -255,6 +255,11 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         est_quinte=course.est_quinte,
         est_quarte=course.est_quarte,
         est_tierce=course.est_tierce,
+        # ── Enrichissements PMU course ──
+        conditions_texte=course.conditions_texte,
+        categorie_particularite=_t(course.categorie_particularite, 30),
+        montant_offert_1er=course.montant_offert_1er,
+        nombre_declares_partants=course.nombre_declares_partants,
         statut="a_venir",
     ).on_conflict_do_update(
         index_elements=["course_id"],
@@ -263,6 +268,10 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             "terrain_code": course.terrain_code,
             "nb_partants": course.nb_partants,
             "allocation": course.dotation,
+            "conditions_texte": course.conditions_texte,
+            "categorie_particularite": _t(course.categorie_particularite, 30),
+            "montant_offert_1er": course.montant_offert_1er,
+            "nombre_declares_partants": course.nombre_declares_partants,
             "updated_at": datetime.now(),
         },
     )
@@ -571,6 +580,7 @@ async def save_pool_pmu(session: AsyncSession, pool: PoolPMUScrape) -> None:
         .values(
             pool_total_centimes=pool.pool_total,
             pool_gagnant_centimes=pool.pool_gagnant,
+            pool_gagnant_evolution=pool.gagnant_evolution,
             updated_at=datetime.now(),
         )
     )

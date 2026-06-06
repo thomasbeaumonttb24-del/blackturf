@@ -218,6 +218,12 @@ class Course(Base):
     allocation: Mapped[int | None] = mapped_column(BigInteger)  # en centimes
     niveau_course: Mapped[str | None] = mapped_column(String(30))  # Group1/Listed/Conditions/Réclamer
     type_depart: Mapped[str | None] = mapped_column(String(5))  # A/C/S/H
+    # ── Enrichissements PMU (course) ─────────────────────────────────────────
+    conditions_texte: Mapped[str | None] = mapped_column(Text)              # conditions complètes
+    categorie_particularite: Mapped[str | None] = mapped_column(String(30)) # EUROPEENNE/NATIONALE/...
+    montant_offert_1er: Mapped[int | None] = mapped_column(BigInteger)      # dotation gagnant (euros)
+    nombre_declares_partants: Mapped[int | None] = mapped_column(Integer)   # déclarés (scratchings)
+    pool_gagnant_evolution: Mapped[float | None] = mapped_column(Float)     # taux croissance pool (smart money)
 
     # Pénétromètre (France Galop)
     penetrometre_coef: Mapped[float | None] = mapped_column(Float)        # 0.0–9.0

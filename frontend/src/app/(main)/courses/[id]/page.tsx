@@ -99,7 +99,12 @@ interface CourseData {
   penetrometre_desc: string | null;
   pool_total_eur: number | null;
   pool_gagnant_eur: number | null;
+  pool_gagnant_evolution: number | null;
   avantage_couloir: string | null;
+  conditions_texte: string | null;
+  categorie_particularite: string | null;
+  montant_offert_1er: number | null;
+  nombre_declares_partants: number | null;
   meteo: { terrain_officiel: string | null; temperature: number | null; pluie_24h: number | null } | null;
   pronostics_presse: Array<{
     source: string;
@@ -856,10 +861,25 @@ export default function CoursePage() {
               <span>🕐 {formatDateTime(course.date_heure)}</span>
               {course.terrain_officiel && <span>🌿 {course.terrain_officiel}</span>}
               {course.allocation && <span>💰 {course.allocation.toLocaleString("fr-FR")}€</span>}
+              {course.montant_offert_1er != null && course.montant_offert_1er > 0 && (
+                <span>🏆 {course.montant_offert_1er.toLocaleString("fr-FR")}€ au gagnant</span>
+              )}
+              {course.categorie_particularite && (
+                <span className="capitalize">🏷️ {course.categorie_particularite.toLowerCase()}</span>
+              )}
               {course.meteo?.temperature && (
                 <span><Cloud className="h-3 w-3 inline" /> {course.meteo.temperature}°C</span>
               )}
             </div>
+            {/* Conditions de course (texte officiel PMU) */}
+            {course.conditions_texte && (
+              <details className="mt-2 text-xs text-muted-foreground">
+                <summary className="cursor-pointer font-semibold hover:text-foreground select-none">
+                  📋 Conditions de la course
+                </summary>
+                <p className="mt-1.5 leading-relaxed rounded-lg bg-muted/40 p-2.5">{course.conditions_texte}</p>
+              </details>
+            )}
             {/* Nouvelles infos enrichies */}
             {(course.penetrometre_coef || course.pool_total_eur || course.avantage_couloir) && (
               <div className="flex flex-wrap gap-2 mt-2.5">

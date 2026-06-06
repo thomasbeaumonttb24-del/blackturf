@@ -162,6 +162,10 @@ class PmuScraper(BaseScraper):
                     est_quarte=est_quarte,
                     est_tierce=est_tierce,
                     nom=c_data.get("libelle"),
+                    conditions_texte=conditions or None,
+                    categorie_particularite=c_data.get("categorieParticularite"),
+                    montant_offert_1er=c_data.get("montantOffert1er"),
+                    nombre_declares_partants=c_data.get("nombreDeclaresPartants"),
                     source="pmu",
                 )
                 courses.append(course)
@@ -355,6 +359,7 @@ class PmuScraper(BaseScraper):
             pool_total = None
             pool_gagnant = None
             pool_place = None
+            gagnant_evolution = None
             for it in items:
                 type_pari = (it.get("typePari") or "").upper()
                 fond = it.get("totalEnjeu")  # centimes
@@ -363,6 +368,7 @@ class PmuScraper(BaseScraper):
                 pool_total = (pool_total or 0) + fond
                 if "SIMPLE_GAGNANT" in type_pari:
                     pool_gagnant = fond
+                    gagnant_evolution = it.get("evolution")  # taux croissance (smart money)
                 elif "SIMPLE_PLACE" in type_pari:
                     pool_place = fond
 
@@ -374,6 +380,7 @@ class PmuScraper(BaseScraper):
                 pool_total=pool_total,
                 pool_gagnant=pool_gagnant,
                 pool_place=pool_place,
+                gagnant_evolution=float(gagnant_evolution) if isinstance(gagnant_evolution, (int, float)) else None,
             )
         except Exception as e:
             log.warning("pmu.pool_data_error", course_id=course_id, error=str(e))

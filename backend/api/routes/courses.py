@@ -119,7 +119,13 @@ class CourseDetailOut(BaseModel):
     penetrometre_desc: Optional[str]          # Bon / Souple / Lourd
     pool_total_eur: Optional[int]             # pool total en euros
     pool_gagnant_eur: Optional[int]
+    pool_gagnant_evolution: Optional[float] = None  # taux croissance pool (smart money)
     avantage_couloir: Optional[str]           # interieur / exterieur / neutre
+    # Enrichissements PMU course
+    conditions_texte: Optional[str] = None
+    categorie_particularite: Optional[str] = None
+    montant_offert_1er: Optional[int] = None        # dotation gagnant (euros)
+    nombre_declares_partants: Optional[int] = None
     meteo: Optional[MeteoOut]
     pronostics_presse: list[PronosticPresseOut] = []
     partants: list[PartantOut]
@@ -422,7 +428,12 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
         penetrometre_desc=course.penetrometre_desc,
         pool_total_eur=int(course.pool_total_centimes / 100) if course.pool_total_centimes else None,
         pool_gagnant_eur=int(course.pool_gagnant_centimes / 100) if course.pool_gagnant_centimes else None,
+        pool_gagnant_evolution=course.pool_gagnant_evolution,
         avantage_couloir=course.avantage_couloir,
+        conditions_texte=course.conditions_texte,
+        categorie_particularite=course.categorie_particularite,
+        montant_offert_1er=course.montant_offert_1er,
+        nombre_declares_partants=course.nombre_declares_partants,
         meteo=meteo_out,
         pronostics_presse=pronostics_presse,
         partants=partants,

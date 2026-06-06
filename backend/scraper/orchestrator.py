@@ -172,7 +172,7 @@ class BlackTurfOrchestrator:
                     async with AsyncSessionLocal() as session:
                         await save_course_to_db(session, course)
                         if course.date_heure:
-                            resultat = await pmu.get_rapports_definitifs(r_id, c_num)
+                            resultat = await pmu.get_rapports_definitifs(r_id, c_num, course.date_heure)
                             if resultat and resultat.ordre_arrivee:
                                 await save_resultat_to_db(session, resultat)
                         await session.commit()
@@ -942,7 +942,7 @@ class BlackTurfOrchestrator:
                 for course in courses:
                     r_id = course.reunion_id
                     c_num = int(course.course_id.split("C")[-1])
-                    resultat = await pmu.get_rapports_definitifs(r_id, c_num)
+                    resultat = await pmu.get_rapports_definitifs(r_id, c_num, course.date_heure)
                     if resultat and resultat.ordre_arrivee:
                         await save_resultat_to_db(session, resultat)
                         log.info("orchestrator.resultat_polled", course_id=course.course_id)
