@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Brain, Search, BarChart2, Sun, Moon } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Brain, Search, BarChart2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -109,23 +109,13 @@ export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
 
-  // Dark mode persistence
+  // Thème CLAIR forcé : on retire toute classe "dark" persistée (ancien toggle).
+  // Le design BlackTurf est blanc premium + or — pas de mode sombre.
   useEffect(() => {
-    const saved = localStorage.getItem("blackturf-dark");
-    if (saved === "true" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-      document.documentElement.classList.add("dark");
-      setDarkMode(true);
-    }
+    document.documentElement.classList.remove("dark");
+    try { localStorage.removeItem("blackturf-dark"); } catch {}
   }, []);
-
-  const toggleDark = useCallback(() => {
-    const next = !darkMode;
-    setDarkMode(next);
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("blackturf-dark", String(next));
-  }, [darkMode]);
 
   // Keyboard shortcut ⌘K / Ctrl+K
   useEffect(() => {
@@ -203,15 +193,6 @@ export function Navbar() {
             </Button>
 
             {/* Dark mode toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-gray-500 hover:text-gray-800 hover:bg-gray-100"
-              onClick={toggleDark}
-              aria-label="Basculer mode sombre"
-            >
-              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
 
             {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} />}
 
