@@ -8,10 +8,6 @@ import {
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity,
 } from "lucide-react";
 import Link from "next/link";
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-} from "recharts";
-import { CHART_PALETTE, axisTick, axisLine, tickLine, GRID, ChartTooltip } from "@/components/charts/chart-kit";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -938,20 +934,24 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
   );
 }
 
-// ─── Marché des cotes (live, style bourse) ─────────────────────────────────────
-// Affiché uniquement avant/pendant la course. Poll toutes les 30s. Montre TOUTES
-// les cotes des partants qui fluctuent, + un ticker par cheval (cote + variation).
+// ─── Marché des cotes (live) ────────────────────────────────────────────────────
+// Affiché uniquement avant/pendant la course. Poll les cotes PMU toutes les 5 s.
+// Une carte par cheval : cote actuelle + variation + graphe individuel d'évolution.
 function Sparkline({ data, color }: { data: number[]; color: string }) {
-  if (data.length < 2) return <div className="h-[18px]" />;
-  const w = 72, h = 18;
+  if (data.length < 2) return <div className="h-11" />;
   const min = Math.min(...data), max = Math.max(...data);
   const rng = max - min || 1;
   const pts = data
-    .map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / rng) * h}`)
+    .map((v, i) => `${(i / (data.length - 1)) * 100},${27 - ((v - min) / rng) * 25}`)
     .join(" ");
+  const area = `0,28 ${pts} 100,28`;
+  const lastY = 27 - ((data[data.length - 1] - min) / rng) * 25;
   return (
-    <svg width={w} height={h} className="overflow-visible">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-11 w-full">
+      <polygon points={area} fill={color} fillOpacity={0.1} />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5}
+        vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={100} cy={lastY} r={2} fill={color} vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
@@ -1030,7 +1030,10 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
     const cur = series[series.length - 1] ?? 0;
     const delta = open ? (cur - open) / open : 0;
     const num = parseInt(k.replace("N°", ""), 10);
-    return { key: k, num, nom: nameByNum[num] ?? "", open, cur, delta, series };
+    return {
+      key: k, num, nom: nameByNum[num] ?? "", open, cur, delta, series,
+      lo: Math.min(...series), hi: Math.max(...series),
+    };
   }).sort((a, b) => a.cur - b.cur);
 
   const colorFor = (delta: number) => (delta < -0.001 ? "#10B981" : delta > 0.001 ? "#EF4444" : "#9CA3AF");
@@ -1055,43 +1058,32 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {/* Graphe toutes cotes (style bourse) */}
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={chartData} margin={{ top: 12, right: 16, left: 4, bottom: 4 }}>
-            <CartesianGrid {...GRID} />
-            <XAxis dataKey="time" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={48} padding={{ left: 8, right: 8 }} />
-            <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={40} tickCount={6} allowDecimals={false}
-              tickFormatter={(v) => `${Math.round(v)}`} domain={["dataMin - 1", "dataMax + 1"]} />
-            <Tooltip
-              content={<ChartTooltip labelMap={Object.fromEntries(runners.map((r) => [r.key, `N°${r.num} ${r.nom}`]))} valueFormatter={(v) => `${v.toFixed(1)}`} />}
-              cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
-            />
-            {runners.map((r, i) => (
-              <Line key={r.key} type="monotone" dataKey={r.key} name={r.key}
-                stroke={CHART_PALETTE[i % CHART_PALETTE.length]} strokeWidth={1.75}
-                strokeOpacity={0.85} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }} isAnimationActive={false} />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-
-        {/* Ticker — toutes les cotes, triées par cote (favoris d'abord) */}
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Une carte par cheval — graphe individuel d'évolution de la cote */}
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
           {runners.map((r) => {
             const c = colorFor(r.delta);
             const up = r.delta > 0.001;
             const flat = Math.abs(r.delta) <= 0.001;
             return (
-              <div key={r.key} className="flex items-center gap-2.5 rounded-lg border border-border bg-white px-2.5 py-2">
-                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-gray-900 text-xs font-bold text-white tabular-nums">{r.num}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-semibold leading-tight">{r.nom}</p>
+              <div key={r.key} className="rounded-xl border border-border bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-900 text-xs font-bold text-white tabular-nums">{r.num}</span>
+                    <p className="truncate text-sm font-semibold">{r.nom}</p>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <p className="text-lg font-bold leading-none tabular-nums">{r.cur.toFixed(1)}</p>
+                    <p className="mt-0.5 text-[11px] font-bold tabular-nums" style={{ color: c }}>
+                      {flat ? "—" : `${up ? "▲" : "▼"} ${Math.abs(r.delta * 100).toFixed(0)}%`}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-2">
                   <Sparkline data={r.series} color={c} />
                 </div>
-                <div className="flex-shrink-0 text-right">
-                  <p className="text-base font-bold tabular-nums leading-none">{r.cur.toFixed(1)}</p>
-                  <p className="mt-0.5 text-[11px] font-semibold tabular-nums" style={{ color: c }}>
-                    {flat ? "—" : `${up ? "▲" : "▼"} ${Math.abs(r.delta * 100).toFixed(0)}%`}
-                  </p>
+                <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground/80">
+                  <span>Ouv. <span className="tabular-nums font-medium">{r.open.toFixed(1)}</span></span>
+                  <span className="tabular-nums">{r.lo.toFixed(1)} – {r.hi.toFixed(1)}</span>
                 </div>
               </div>
             );
