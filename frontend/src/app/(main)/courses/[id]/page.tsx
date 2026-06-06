@@ -986,6 +986,100 @@ interface BilanResp {
   verdict: "gagnant" | "perdant" | "en_attente";
 }
 
+interface ConfrontParCheval {
+  numero: number; nom: string; nb_adversaires_connus: number;
+  victoires: number; defaites: number; bilan: string;
+  top_victime: { nom: string; numero: number; nb: number } | null;
+  bete_noire: { nom: string; numero: number; nb: number } | null;
+}
+interface ConfrontPaire {
+  a_numero: number; a_nom: string; b_numero: number; b_nom: string;
+  nb_rencontres: number; a_victoires: number; b_victoires: number; nuls: number;
+}
+interface ConfrontResp {
+  nb_partants: number; nb_paires_avec_duel: number;
+  paires: ConfrontPaire[]; par_cheval: ConfrontParCheval[];
+}
+
+/* ─── Confrontations directes (head-to-head) ─────────────────────────────── */
+function ConfrontationsSection({ courseId }: { courseId: string }) {
+  const [data, setData] = useState<ConfrontResp | null>(null);
+  useEffect(() => {
+    let alive = true;
+    coursesApi.confrontations(courseId)
+      .then((r) => { if (alive) setData(r.data); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [courseId]);
+
+  if (!data || data.nb_paires_avec_duel === 0) return null;
+
+  // Chevaux ayant un vrai vécu de duels, meilleur bilan net d'abord
+  const acteurs = data.par_cheval
+    .filter((c) => c.victoires + c.defaites > 0)
+    .slice(0, 6);
+  const topPaires = data.paires.slice(0, 5);
+
+  return (
+    <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/40 to-white p-5 space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-base">⚔️</span>
+        <h3 className="text-sm font-semibold text-gray-900">Confrontations directes</h3>
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          {data.nb_paires_avec_duel} duel{data.nb_paires_avec_duel > 1 ? "s" : ""} déjà disputé{data.nb_paires_avec_duel > 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* Bilan par cheval */}
+      {acteurs.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {acteurs.map((c) => {
+            const net = c.victoires - c.defaites;
+            return (
+              <div key={c.numero} className="rounded-lg bg-white/70 border border-violet-100 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold">N°{c.numero} {c.nom}</span>
+                  <span className={cn(
+                    "ml-auto text-[11px] font-mono font-bold tabular-nums",
+                    net > 0 ? "text-emerald-600" : net < 0 ? "text-rose-600" : "text-muted-foreground",
+                  )}>
+                    {c.victoires}V – {c.defaites}D
+                  </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5 space-x-2">
+                  {c.top_victime && <span>domine N°{c.top_victime.numero} ({c.top_victime.nb}×)</span>}
+                  {c.bete_noire && <span>bête noire N°{c.bete_noire.numero} ({c.bete_noire.nb}×)</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Duels marquants */}
+      {topPaires.length > 0 && (
+        <div className="space-y-1 pt-1">
+          {topPaires.map((p, i) => {
+            const lead = p.a_victoires === p.b_victoires
+              ? `${p.a_victoires}–${p.b_victoires} (équilibré)`
+              : p.a_victoires > p.b_victoires
+                ? `N°${p.a_numero} mène ${p.a_victoires}–${p.b_victoires}`
+                : `N°${p.b_numero} mène ${p.b_victoires}–${p.a_victoires}`;
+            return (
+              <div key={i} className="text-[11px] text-gray-600 flex items-center gap-1.5">
+                <span className="text-muted-foreground">N°{p.a_numero} {p.a_nom} vs N°{p.b_numero} {p.b_nom}</span>
+                <span className="ml-auto font-mono text-gray-800">{lead}</span>
+                <span className="text-muted-foreground/70">· {p.nb_rencontres} fois</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[10px] text-muted-foreground">Calculé depuis l&apos;historique réel des arrivées — qui a déjà battu qui.</p>
+    </div>
+  );
+}
+
 function BilanMiseSection({ courseId }: { courseId: string }) {
   const [data, setData] = useState<BilanResp | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
@@ -1896,6 +1990,9 @@ export default function CoursePage() {
           {course.pronostics_presse?.length > 0 && (
             <PronosticsPresse pronostics={course.pronostics_presse} />
           )}
+
+          {/* ── Confrontations directes (head-to-head depuis l'historique) ── */}
+          <ConfrontationsSection courseId={id} />
 
           {course.statut !== "termine" && (
             <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} />

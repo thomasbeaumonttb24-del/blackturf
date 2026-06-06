@@ -61,6 +61,7 @@ export const coursesApi = {
   programme: (jour?: string) => api.get("/programme", { params: jour ? { jour } : {} }),
   course: (id: string) => api.get(`/courses/${id}`),
   resultats: (id: string) => api.get(`/courses/${id}/resultats`),
+  confrontations: (id: string) => api.get(`/courses/${id}/confrontations`),
   cheval: (id: string) => api.get(`/chevaux/${id}`),
   jockey: (id: string) => api.get(`/jockeys/${id}`),
   entraineur: (id: string) => api.get(`/entraineurs/${id}`),
