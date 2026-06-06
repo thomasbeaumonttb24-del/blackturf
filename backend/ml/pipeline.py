@@ -1069,7 +1069,7 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
             set_={
                 "position_arrivee": entry.get("position"),
                 "incident": entry.get("incident"),
-                "temps_officiel": entry.get("temps"),
+                "temps_officiel": (str(entry.get("temps")) if entry.get("temps") is not None else None),
                 "reduction_km": reduction_km,
                 "acceleration_index": accel_idx,
                 "acceleration_label": accel_label,
