@@ -369,11 +369,11 @@ async def get_course_analysis(
     )
 
     # Dutch bet si ≥ 2 VBs
-    vb_preds = [p for p in predictions if p.get("vb") and p["vb"].get("ev_max", 0) > 0.05]
+    vb_preds = [p for p in predictions if p.get("vb") and (p["vb"].get("ev_max") or 0) > 0.05]
     if len(vb_preds) >= 2:
         dutch = dutching_calculator(
             selections=[{"numero": p["numero"], "nom": p["nom"],
-                         "cote": p.get("cote_pmu", 5.0), "proba": p.get("proba_top1", 0.1)}
+                         "cote": p.get("cote_pmu") or 5.0, "proba": p.get("proba_top1") or 0.1}
                         for p in vb_preds[:4]],
             budget=20.0,
         )
