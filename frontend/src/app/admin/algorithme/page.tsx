@@ -83,7 +83,32 @@ export default function AlgorithmeMonitoringPage() {
   const [histLimit, setHistLimit] = useState(30);
   const [showBiasAll, setShowBiasAll] = useState(false);
 
-  if (!user?.is_admin) {
+  // ⚠️ Tous les hooks DOIVENT être appelés inconditionnellement (Rules of Hooks).
+  // Les clés SWR sont gatées sur is_admin : null = pas de fetch tant que non-admin.
+  const isAdmin = !!user?.is_admin;
+  const { data: alState, mutate: refreshState, isLoading: loadingState } = useSWR(
+    isAdmin ? "admin-al-state" : null,
+    () => adminApi.alState().then((r) => r.data),
+    { refreshInterval: 30_000 }
+  );
+  const { data: history, isLoading: loadingHistory } = useSWR(
+    isAdmin ? ["admin-al-history", histLimit] : null,
+    () => adminApi.alHistory(histLimit).then((r) => r.data),
+    { refreshInterval: 60_000 }
+  );
+  const { data: biasMatrix } = useSWR(
+    isAdmin ? "admin-bias-matrix" : null,
+    () => adminApi.biasMatrix().then((r) => r.data),
+    { refreshInterval: 300_000 }
+  );
+  const { data: mlStatus } = useSWR(
+    isAdmin ? "ml-status" : null,
+    () => statsApi.mlStatus().then((r) => r.data),
+    { refreshInterval: 30_000 }
+  );
+
+  // Garde d'accès APRÈS tous les hooks.
+  if (!isAdmin) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -94,27 +119,6 @@ export default function AlgorithmeMonitoringPage() {
       </div>
     );
   }
-
-  const { data: alState, mutate: refreshState, isLoading: loadingState } = useSWR(
-    "admin-al-state",
-    () => adminApi.alState().then((r) => r.data),
-    { refreshInterval: 30_000 }
-  );
-  const { data: history, isLoading: loadingHistory } = useSWR(
-    ["admin-al-history", histLimit],
-    () => adminApi.alHistory(histLimit).then((r) => r.data),
-    { refreshInterval: 60_000 }
-  );
-  const { data: biasMatrix } = useSWR(
-    "admin-bias-matrix",
-    () => adminApi.biasMatrix().then((r) => r.data),
-    { refreshInterval: 300_000 }
-  );
-  const { data: mlStatus } = useSWR(
-    "ml-status",
-    () => statsApi.mlStatus().then((r) => r.data),
-    { refreshInterval: 30_000 }
-  );
 
   const al = alState?.adaptive_learning ?? mlStatus?.adaptive_learning ?? {};
   const dd = alState?.drift_detector ?? mlStatus?.drift_detector ?? {};
