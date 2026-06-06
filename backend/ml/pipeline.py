@@ -586,14 +586,25 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         mv = mv_result.scalars().first()
         mv_id = mv.version_id if mv else None
 
+        # Rang prédit = ordre par PROBABILITÉ finale (proba_top1 desc, tiebreak top3).
+        # Doit être cohérent avec les probas affichées + le plan de mise. Calculé ICI
+        # sur les probas définitives (post calibration + blend marché), pas sur l'ordre
+        # d'itération des features.
+        _p1_arr = np.asarray(probas_top1, dtype=float)
+        _p3_arr = np.asarray(probas_top3, dtype=float)
+        _order = np.lexsort((-_p3_arr, -_p1_arr))  # primaire: -proba_top1, secondaire: -proba_top3
+        _rang_by_index = np.empty(len(_order), dtype=int)
+        for _k, _idx in enumerate(_order):
+            _rang_by_index[int(_idx)] = _k + 1
+
         predictions = []
         for i, feat in enumerate(features_list):
             pid = feat.get("participation_id")
             proba_t3 = float(probas_top3[i])
             proba_t1 = float(probas_top1[i])
 
-            # Rang prédit
-            rang = int(i + 1)  # Sera recalculé après tri
+            # Rang prédit cohérent avec la proba finale
+            rang = int(_rang_by_index[i])
 
             # Sauvegarder prédiction
             confidence = float(confidence_scores[i])
@@ -613,6 +624,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 set_={
                     "proba_top1": proba_t1,
                     "proba_top3": proba_t3,
+                    "rang_predit": rang,
                     "confidence_score": round(confidence * 100, 2),
                 },
             ).returning(PredictionModel.prediction_id)
@@ -712,8 +724,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 "prediction_id": pred_id,
             })
 
-        # Trier par proba décroissante et assigner les rangs
-        predictions.sort(key=lambda x: x["proba_top3"], reverse=True)
+        # Trier par proba de VICTOIRE décroissante (tiebreak top-3) et assigner les
+        # rangs — même base que le rang_predit sauvegardé en DB (cohérence totale).
+        predictions.sort(key=lambda x: (x["proba_top1"], x["proba_top3"]), reverse=True)
         for i, p in enumerate(predictions):
             p["rang_predit"] = i + 1
 
