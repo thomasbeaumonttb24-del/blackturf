@@ -1080,7 +1080,8 @@ async def get_portfolio(
             ch.nom AS nom_cheval,
             pa.cote_pmu,
             pa.cote_geny,
-            pa.cote_zeturf,
+            LEAST(pa.cote_pmu, pa.cote_geny, pa.cote_bzh, pa.cote_winamax,
+                  pa.cote_betclic, pa.cote_unibet) AS cote_min,
             fm.features
         FROM predictions p
         JOIN participations pa ON p.participation_id = pa.participation_id
@@ -1107,7 +1108,7 @@ async def get_portfolio(
             "nom": r[5],
             "cote_pmu": float(r[6]) if r[6] else None,
             "cote_geny": float(r[7]) if r[7] else None,
-            "cote_zeturf": float(r[8]) if r[8] else None,
+            "cote_min": float(r[8]) if r[8] else None,
             # Signaux DELTA (smart money) depuis features ML
             "spi": float(features.get("spi", 0) or 0),
             "mouvement_cote": float(features.get("mouvement_cote_relatif", 0) or 0),

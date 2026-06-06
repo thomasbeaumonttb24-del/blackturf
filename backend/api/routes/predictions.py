@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, func
 
 from api.routes.auth import get_current_user, require_pro
 from db.database import get_db
@@ -297,7 +297,11 @@ async def get_course_analysis(
         select(FeatureML.participation_id, FeatureML.features,
                PredictionModel.proba_top3, PredictionModel.proba_top1, PredictionModel.rang_predit,
                Participation.numero, Cheval.nom,
-               Participation.cote_pmu, Participation.cote_min,)
+               Participation.cote_pmu,
+               func.least(
+                   Participation.cote_pmu, Participation.cote_geny, Participation.cote_bzh,
+                   Participation.cote_winamax, Participation.cote_betclic, Participation.cote_unibet,
+               ).label("cote_min"),)
         .join(PredictionModel, PredictionModel.participation_id == FeatureML.participation_id, isouter=True)
         .join(Participation, Participation.participation_id == FeatureML.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
