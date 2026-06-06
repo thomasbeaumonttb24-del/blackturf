@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5-20251001"
     brightdata_proxy: str = ""
+    betfair_ingest_token: str = ""   # secret partagé pour /admin/api/ingest-betfair
     stripe_secret_key: str = ""
     stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""

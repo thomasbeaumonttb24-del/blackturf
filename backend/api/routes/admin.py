@@ -6,7 +6,7 @@ import structlog
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, and_, text
@@ -874,3 +874,100 @@ async def causes_recurrentes(
         for tag, n in tag_counts.most_common()
     ]
     return {"courses_analysees": total, "causes": causes}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Ingestion cotes Betfair Exchange (POST depuis GitHub Actions, hors VPS DE)
+# ──────────────────────────────────────────────────────────────────────────────
+def _norm_name(s: str) -> str:
+    """Normalise un nom (cheval/hippodrome) : majuscules, sans accents ni ponctuation."""
+    import unicodedata, re
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    s = re.sub(r"\([A-Z]{2,3}\)", "", s)          # retire suffixe pays "(FR)" "(IRE)"
+    s = re.sub(r"[^A-Za-z0-9]", "", s).upper()
+    return s
+
+
+@router.post("/ingest-betfair")
+async def ingest_betfair(payload: dict, request: Request, db: AsyncSession = Depends(get_db)):
+    """Reçoit les marchés Betfair (cotes Exchange) et les mappe aux courses PMU.
+
+    Auth : header X-Ingest-Token == settings.betfair_ingest_token.
+    Mapping : hippodrome (venue ⊂ hippodrome_nom) + heure (±12 min) → course ;
+    nom du cheval normalisé → participation. Écrit cote_betfair_exchange.
+    Aucune donnée inventée : si pas de correspondance, on ignore (pas de fausse cote).
+    """
+    from api.config import get_settings
+    from db.models import Participation, Cheval
+    from sqlalchemy import update as sa_update
+    from datetime import datetime, timezone, timedelta
+
+    settings = get_settings()
+    token = request.headers.get("X-Ingest-Token", "")
+    if not settings.betfair_ingest_token or token != settings.betfair_ingest_token:
+        raise HTTPException(status_code=401, detail="Token d'ingestion invalide")
+
+    markets = payload.get("markets") or []
+    matched_markets = 0
+    matched_runners = 0
+
+    for mk in markets:
+        venue = _norm_name(mk.get("hippodrome") or "")
+        start = mk.get("market_start_time")
+        if not venue or not start:
+            continue
+        try:
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        lo = start_dt - timedelta(minutes=12)
+        hi = start_dt + timedelta(minutes=12)
+
+        # Course PMU : hippodrome contient le venue Betfair + heure proche
+        crs = (await db.execute(
+            select(Course).where(
+                and_(Course.date_heure >= lo, Course.date_heure <= hi,
+                     func.upper(func.translate(Course.hippodrome_nom, "ÉÈÊÀÂ-' ", "EEEAA   ")).like(f"%{venue}%"))
+            )
+        )).scalars().first()
+        if not crs:
+            continue
+
+        # Partants de la course (nom normalisé → numero)
+        rows = (await db.execute(
+            select(Participation.participation_id, Cheval.nom)
+            .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+            .where(Participation.course_id == crs.course_id)
+        )).all()
+        by_name = {_norm_name(nom): pid for pid, nom in rows}
+
+        m_runner = 0
+        for h in mk.get("horses", []):
+            key = _norm_name(h.get("name") or "")
+            pid = by_name.get(key)
+            if not pid:
+                continue
+            # Cote retenue : back disponible, sinon dernier échangé (marché efficient)
+            cote = h.get("back_price") or h.get("last_traded")
+            if not cote or cote <= 1.0:
+                continue
+            await db.execute(
+                sa_update(Participation)
+                .where(Participation.participation_id == pid)
+                .values(cote_betfair_exchange=float(cote))
+            )
+            m_runner += 1
+        if m_runner:
+            matched_markets += 1
+            matched_runners += m_runner
+
+    await db.commit()
+    log.info("admin.ingest_betfair", markets=len(markets),
+             matched_markets=matched_markets, matched_runners=matched_runners)
+    return {
+        "received_markets": len(markets),
+        "matched_markets": matched_markets,
+        "matched_runners": matched_runners,
+    }

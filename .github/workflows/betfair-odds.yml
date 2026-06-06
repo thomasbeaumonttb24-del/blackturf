@@ -1,0 +1,34 @@
+name: Cotes Betfair Exchange → BlackTurf
+
+# Tourne sur les runners GitHub (hors VPS allemand) pour contourner le géo-blocage
+# Betfair sur le hippique. Repo public = minutes Actions illimitées (gratuit).
+
+on:
+  schedule:
+    # Toutes les 10 min pendant les heures de course (10h-23h UTC)
+    - cron: "*/10 10-23 * * *"
+  workflow_dispatch: {}   # déclenchement manuel possible
+
+concurrency:
+  group: betfair-odds
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet httpx
+      - name: Récupérer + envoyer les cotes Betfair
+        env:
+          BETFAIR_USER: ${{ secrets.BETFAIR_USER }}
+          BETFAIR_PASS: ${{ secrets.BETFAIR_PASS }}
+          BETFAIR_APPKEY: ${{ secrets.BETFAIR_APPKEY }}
+          BLACKTURF_INGEST_URL: ${{ secrets.BLACKTURF_INGEST_URL }}
+          BLACKTURF_INGEST_TOKEN: ${{ secrets.BLACKTURF_INGEST_TOKEN }}
+          BETFAIR_COUNTRIES: "FR,GB,IE"
+        run: python scripts/betfair_fetch.py
