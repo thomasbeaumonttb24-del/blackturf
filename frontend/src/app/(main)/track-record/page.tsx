@@ -32,6 +32,7 @@ interface TrackRecord {
     favori_gain_total: number;
     favori_net: number;
   };
+  clv?: { n: number; pct_beat_line: number; clv_implied: number; clv_median: number } | null;
   updated_at?: string;
   by_month: Array<{
     mois: string;
@@ -227,6 +228,40 @@ export default function TrackRecordPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-10 space-y-10">
+
+        {/* ── CLV : l'IA bat-elle la ligne de clôture ? ─────────────── */}
+        {data.clv && data.clv.n >= 10 && (
+          <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-50/60 to-transparent">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-emerald-500" />
+                Closing Line Value — l&apos;IA anticipe le marché
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="text-center">
+                  <div className="text-3xl font-black tabular-nums text-emerald-600">{data.clv.pct_beat_line}%</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Picks battant la ligne de clôture</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-3xl font-black tabular-nums text-emerald-600">+{data.clv.clv_median}%</div>
+                  <div className="mt-1 text-xs text-muted-foreground">CLV médian (cote prise vs clôture)</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-3xl font-black tabular-nums text-blue-500">+{data.clv.clv_implied}%</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Gain de proba implicite moyen</div>
+                </div>
+              </div>
+              <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/80">
+                Sur {data.clv.n} courses, la cote du favori IA <strong>baisse {data.clv.pct_beat_line}% du temps</strong> entre
+                l&apos;ouverture et le départ : le marché bouge <strong>vers</strong> le pronostic de l&apos;IA. C&apos;est la
+                métrique de référence des pros — battre la ligne de clôture prouve un avantage réel, indépendamment de la chance
+                sur un résultat isolé. Calculé sur les cotes PMU réelles (ouverture vs clôture).
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── Monthly accuracy chart ─────────────── */}
         <Card className="border-border/60">

@@ -10,7 +10,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 
 from api.model_metrics import real_model_metrics
 from api.routes.auth import get_current_user
@@ -802,6 +802,43 @@ async def track_record(
             "brier_ema": round(al_state.brier_ema, 4),
         }
 
+    # ── CLV (Closing Line Value) : l'IA bat-elle la ligne de clôture ? ──────
+    # Pour chaque favori IA (rang 1), compare la cote d'OUVERTURE (1ère relevée)
+    # à la cote de CLÔTURE (dernière relevée). Si la cote baisse, le marché a
+    # bougé VERS le pick → l'IA a anticipé = vrai signal d'edge. Données réelles
+    # (cotes_historique). CLV robuste : % de picks battant la ligne + médiane +
+    # gain de proba implicite moyen (insensible aux outliers de cote).
+    clv = None
+    try:
+        clv_row = (await db.execute(text("""
+            WITH fav AS (
+                SELECT p.participation_id FROM predictions p
+                JOIN courses c ON c.course_id = p.course_id
+                WHERE p.rang_predit = 1 AND c.statut = 'termine'
+            ),
+            ch AS (
+                SELECT participation_id,
+                       (array_agg(cote ORDER BY time ASC))[1]  AS o,
+                       (array_agg(cote ORDER BY time DESC))[1] AS c
+                FROM cotes_historique WHERE cote > 1 GROUP BY participation_id
+            )
+            SELECT count(*) AS n,
+                   round((count(*) FILTER (WHERE o > c)::numeric / nullif(count(*),0) * 100), 1) AS pct_beat,
+                   round(avg(1.0/c - 1.0/o)::numeric * 100, 2) AS clv_implied,
+                   round((percentile_cont(0.5) WITHIN GROUP (ORDER BY o/c - 1))::numeric * 100, 1) AS clv_median
+            FROM fav JOIN ch ON ch.participation_id = fav.participation_id
+            WHERE o IS NOT NULL AND c IS NOT NULL AND o <> c
+        """))).first()
+        if clv_row and clv_row[0] and clv_row[0] >= 10:
+            clv = {
+                "n": int(clv_row[0]),
+                "pct_beat_line": float(clv_row[1] or 0),
+                "clv_implied": float(clv_row[2] or 0),
+                "clv_median": float(clv_row[3] or 0),
+            }
+    except Exception as e:
+        log.warning("track_record.clv_failed", error=str(e))
+
     result = {
         "global": {
             "accuracy_top1": accuracy_top1,
@@ -824,6 +861,7 @@ async def track_record(
         "derniers_pronostics": derniers_pronostics,
         "vb_performance": vb_performance,
         "adaptive_learning": al_data,
+        "clv": clv,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await _cache_set(redis, CACHE_KEY, result, ttl=120)  # 2 min — quasi temps réel
