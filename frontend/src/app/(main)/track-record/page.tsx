@@ -27,7 +27,12 @@ interface TrackRecord {
     favori_win_rate: number;
     favori_place_rate: number;
     nb_favoris_evalues: number;
+    favori_roi: number;
+    favori_mise_totale: number;
+    favori_gain_total: number;
+    favori_net: number;
   };
+  updated_at?: string;
   by_month: Array<{
     mois: string;
     accuracy_top3: number;
@@ -120,7 +125,7 @@ export default function TrackRecordPage() {
   const { data, isLoading } = useSWR<TrackRecord>(
     "track-record",
     () => statsApi.trackRecord().then((r) => r.data),
-    { refreshInterval: 3_600_000 }  // matches server cache
+    { refreshInterval: 60_000, revalidateOnFocus: true }  // recalcul ~ à chaque fin de course
   );
 
   if (isLoading || !data) {
@@ -140,8 +145,12 @@ export default function TrackRecordPage() {
       <div className="relative overflow-hidden border-b border-border/40 bg-gradient-to-br from-background via-background to-amber-950/10">
         <div className="max-w-7xl mx-auto px-4 py-14 sm:py-20">
           <div className="text-center max-w-2xl mx-auto">
-            <Badge className="mb-4 bg-amber-500/20 text-amber-400 border-amber-500/30 px-3 py-1">
-              Palmarès de l&apos;IA — Données réelles
+            <Badge className="mb-4 inline-flex items-center gap-1.5 bg-emerald-500/15 text-emerald-600 border-emerald-500/30 px-3 py-1">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              </span>
+              Données réelles — mises à jour à chaque fin de course
             </Badge>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-foreground mb-4 leading-tight">
               L&apos;IA BlackTurf prouve ses résultats
@@ -182,7 +191,23 @@ export default function TrackRecordPage() {
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">Favori IA placé (top-3)</div>
               </div>
+              <div className="text-center">
+                <div className={cn("text-4xl font-black tabular-nums", g.favori_roi >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                  {g.favori_roi >= 0 ? "+" : ""}{g.favori_roi}%
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  ROI réel — 1€ sur le favori
+                  <span className="block text-[10px] text-muted-foreground/60">
+                    {g.favori_net >= 0 ? "+" : ""}{g.favori_net}€ sur {g.favori_mise_totale} paris
+                  </span>
+                </div>
+              </div>
             </div>
+            {data.updated_at && (
+              <p className="mt-4 text-[11px] text-muted-foreground/70">
+                Dernière mise à jour : {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · recalculé automatiquement
+              </p>
+            )}
 
             <div className="mt-8 flex justify-center gap-3">
               <Button asChild variant="brand" size="lg">

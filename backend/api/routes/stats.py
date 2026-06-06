@@ -732,6 +732,9 @@ async def track_record(
         return None
 
     fav_total = fav_wins = fav_places = 0
+    # ROI RÉEL prouvé : 1€ Simple Gagnant sur le favori IA de chaque course,
+    # réglé sur l'arrivée officielle (cote_pmu réelle). Aucune valeur inventée.
+    mise_fav = gain_fav = 0.0
     derniers_pronostics: list[dict] = []
     for pred, part, cheval, course, resultat in fav_rows:
         classement = resultat.classement if resultat else None
@@ -743,6 +746,12 @@ async def track_record(
         is_place = pos <= 3
         fav_wins += int(is_win)
         fav_places += int(is_place)
+
+        # ROI : on ne compte que les courses où la cote PMU réelle est connue
+        if part.cote_pmu and part.cote_pmu > 1.0:
+            mise_fav += 1.0
+            if is_win:
+                gain_fav += float(part.cote_pmu)
 
         if len(derniers_pronostics) < 20:
             gagnant_nom = None
@@ -778,6 +787,8 @@ async def track_record(
 
     favori_win_rate = round(fav_wins / fav_total * 100, 1) if fav_total else 0.0
     favori_place_rate = round(fav_places / fav_total * 100, 1) if fav_total else 0.0
+    net_fav = round(gain_fav - mise_fav, 2)
+    roi_fav = round(net_fav / mise_fav * 100, 1) if mise_fav else 0.0
 
     # ── 6. Adaptive learning state ────────────────────────────
     al_state = (await db.execute(
@@ -801,6 +812,11 @@ async def track_record(
             "favori_win_rate": favori_win_rate,
             "favori_place_rate": favori_place_rate,
             "nb_favoris_evalues": fav_total,
+            # ROI réel : 1€ Gagnant sur le favori IA, réglé sur l'arrivée réelle
+            "favori_roi": roi_fav,
+            "favori_mise_totale": round(mise_fav, 0),
+            "favori_gain_total": round(gain_fav, 2),
+            "favori_net": net_fav,
         },
         "by_month": monthly_list,
         "by_discipline": by_discipline,
@@ -808,6 +824,7 @@ async def track_record(
         "derniers_pronostics": derniers_pronostics,
         "vb_performance": vb_performance,
         "adaptive_learning": al_data,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await _cache_set(redis, CACHE_KEY, result, ttl=3600)  # 1h
+    await _cache_set(redis, CACHE_KEY, result, ttl=120)  # 2 min — quasi temps réel
     return result
