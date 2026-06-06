@@ -4,6 +4,7 @@ Claude API proxy avec contexte hippique + function calling DB.
 Plan Expert uniquement.
 """
 import json
+import re
 import structlog
 from datetime import date
 from typing import AsyncIterator, Optional
@@ -214,6 +215,214 @@ async def _execute_tool(
     return json.dumps({"error": "Tool inconnu"})
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Moteur rule-based — fonctionne SANS clé LLM, répond depuis les données réelles
+# ───────────────────────────────────────────────────────────────────────────
+
+DISCLAIMER = "\n\n⚠️ Outil d'aide à la décision uniquement — aucune garantie de gain. Jouez responsable."
+
+KELLY_EXPLAIN = (
+    "📐 **Critère de Kelly** — calcule la fraction optimale de bankroll à miser.\n\n"
+    "Formule : f = (p × c − 1) / (c − 1)\n"
+    "• p = probabilité réelle de gain (estimée par l'IA)\n"
+    "• c = cote décimale\n\n"
+    "Exemple : cheval à cote 4.0, proba IA 30% → f = (0,30 × 4 − 1) / (4 − 1) = 0,067 → 6,7% de la bankroll.\n\n"
+    "BlackTurf plafonne toujours à **5% maximum** (Kelly fractionné) pour limiter la variance. "
+    "Si le résultat est négatif, l'espérance est défavorable : on ne joue pas." + DISCLAIMER
+)
+
+MUSIQUE_EXPLAIN = (
+    "🎵 **Lire la musique** — l'historique codé des dernières performances (plus récent à gauche).\n\n"
+    "• Chiffre 1-9 = place à l'arrivée (1 = victoire)\n"
+    "• 0 = hors des 10 premiers\n"
+    "• D = disqualifié · T = tombé · A = arrêté · Ret = rétrogradé\n"
+    "• Lettre après le chiffre = discipline : a = attelé, m = monté, p = plat, h = haies, s = steeple, c = cross\n"
+    "• La parenthèse (23) sépare les saisons (année 2023)\n\n"
+    "Exemple : `1a 2a 3a (23) 5a` → 1er, 2e, 3e en attelé cette saison, puis 5e la saison passée. "
+    "Régularité = chiffres bas et stables. Méfiance si que des 0 ou des D récents." + DISCLAIMER
+)
+
+
+def _last_user_msg(messages: list[dict]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user" and m.get("content"):
+            return str(m["content"]).lower().strip()
+    return ""
+
+
+async def _resolve_course_id(db: AsyncSession, r: int, c: int) -> Optional[str]:
+    """Résout 'R{r}C{c}' vers le course_id (daté) du jour."""
+    suffix = f"R{r}C{c}"
+    q = (
+        select(Course.course_id)
+        .where(
+            func.date(Course.date_heure) == date.today(),
+            Course.course_id.ilike(f"%{suffix}"),
+        )
+        .order_by(desc(Course.date_heure))
+        .limit(1)
+    )
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+async def _answer_value_bets(db: AsyncSession, user: User) -> str:
+    data = json.loads(await _execute_tool("get_value_bets_actifs", {"niveau_min": 1}, db, user))
+    if not isinstance(data, list) or not data:
+        return ("Aucun value bet actif en ce moment. Les value bets apparaissent quand l'IA "
+                "estime qu'un cheval est sous-coté par le marché (EV positive). Reviens après le "
+                "scraping des cotes du jour." + DISCLAIMER)
+    lines = [f"🎯 **{len(data)} value bets actifs** (triés par espérance) :\n"]
+    for v in data[:8]:
+        lines.append(
+            f"• **{v['cheval']}** — {v['hippodrome']} {v['heure']} · cote {v['cote']} · "
+            f"EV **+{v['ev']}%** {v['niveau']}"
+        )
+    lines.append("\nL'EV (espérance) mesure l'avantage estimé vs le marché. Priorise les ⭐⭐⭐+ "
+                 "avec une mise raisonnable (≤5% bankroll).")
+    return "\n".join(lines) + DISCLAIMER
+
+
+async def _answer_programme(db: AsyncSession, user: User) -> str:
+    data = json.loads(await _execute_tool("get_programme_today", {}, db, user))
+    if not isinstance(data, list) or not data:
+        return "Aucune course enregistrée pour aujourd'hui. Le programme se remplit chaque matin via le scraper PMU." + DISCLAIMER
+    by_hippo: dict[str, list] = {}
+    for c in data:
+        by_hippo.setdefault(c["hippodrome"] or "?", []).append(c)
+    lines = [f"📅 **Programme du jour** — {len(data)} courses :\n"]
+    for hippo, courses in list(by_hippo.items())[:6]:
+        lines.append(f"**{hippo}**")
+        for c in courses[:8]:
+            q = " 👑Quinté" if c.get("est_quinte") else ""
+            code = c["course_id"][-4:] if c.get("course_id") else ""
+            lines.append(f"  • {code} {c['heure']} · {c['discipline']} {c['distance']}m · {c['nb_partants']} part.{q}")
+    lines.append("\nDemande-moi « analyse R1C3 » pour les pronostics d'une course précise.")
+    return "\n".join(lines) + DISCLAIMER
+
+
+async def _answer_course(db: AsyncSession, user: User, r: int, c: int) -> str:
+    cid = await _resolve_course_id(db, r, c)
+    if not cid:
+        return (f"Course R{r}C{c} introuvable dans le programme d'aujourd'hui. "
+                "Vérifie le numéro de réunion (R) et de course (C)." + DISCLAIMER)
+    data = json.loads(await _execute_tool("get_course_predictions", {"course_id": cid}, db, user))
+    if isinstance(data, dict) and data.get("error"):
+        return (f"Pas encore de prédictions IA pour R{r}C{c}. L'analyse se lance "
+                "automatiquement avant la course." + DISCLAIMER)
+    if not isinstance(data, list) or not data:
+        return f"Pas de prédictions disponibles pour R{r}C{c}." + DISCLAIMER
+    lines = [f"🔮 **Pronostics IA — R{r}C{c}** (top {min(len(data), 6)}) :\n"]
+    for p in data[:6]:
+        cote = f"cote {p['cote']}" if p.get("cote") else "cote n/d"
+        lines.append(f"{p['rang']}. **N°{p['numero']} {p['cheval']}** — top-3 {p['proba_top3']} · {cote}")
+    lines.append("\nLe « top-3 » = probabilité estimée de finir dans les 3 premiers. "
+                 "Croise avec les cotes pour repérer la valeur.")
+    return "\n".join(lines) + DISCLAIMER
+
+
+async def _answer_metrics(db: AsyncSession, user: User) -> str:
+    data = json.loads(await _execute_tool("get_model_metrics", {}, db, user))
+    if isinstance(data, dict) and data.get("error"):
+        return "Pas de modèle IA actif pour le moment." + DISCLAIMER
+    return (
+        "📊 **Modèle IA actif** :\n"
+        f"• AUC-ROC : **{data['auc_roc']}** (pouvoir discriminant, >0.7 = bon)\n"
+        f"• Précision top-3 : **{data['precision_top3']}**\n"
+        f"• ROI simulé : **{data['roi_simule']}**\n"
+        f"• Entraîné sur **{data['nb_courses_train']}** courses\n\n"
+        "Le modèle se ré-entraîne chaque nuit avec les résultats du jour (apprentissage continu)."
+        + DISCLAIMER
+    )
+
+
+async def _answer_bankroll(db: AsyncSession, user: User) -> str:
+    data = json.loads(await _execute_tool("get_bankroll_stats", {}, db, user))
+    if isinstance(data, dict) and data.get("error"):
+        return "Impossible de lire ta bankroll pour le moment." + DISCLAIMER
+    if data.get("nb_paris", 0) == 0:
+        return ("Aucun pari enregistré dans ta bankroll. Ajoute tes paris depuis la page Capital "
+                "pour suivre ton ROI réel." + DISCLAIMER)
+    return (
+        "💰 **Ta bankroll** :\n"
+        f"• Paris enregistrés : {data['nb_paris']}\n"
+        f"• Mise totale : {data['mise_totale']}€\n"
+        f"• Gain net : {data['gain_net']}€\n"
+        f"• ROI : **{data['roi']}**" + DISCLAIMER
+    )
+
+
+def _answer_mise() -> str:
+    return (
+        "🧮 **Répartir tes mises** — méthode BlackTurf :\n\n"
+        "1. Définis ta bankroll totale et ne risque jamais plus de 5% sur une course.\n"
+        "2. Sur chaque page course, entre ton montant dans le **calculateur de mise** : "
+        "l'IA répartit automatiquement sur plusieurs paris (Simple Gagnant, Couplé, Trio…) "
+        "selon les probabilités réelles et ton niveau de risque.\n"
+        "3. Privilégie les paris à EV positive (value bets).\n"
+        "4. Mise fixe minimale 2€, arrondie à l'euro.\n\n"
+        "Donne-moi ton montant et je t'explique la logique, ou utilise directement le calculateur sur la course."
+        + DISCLAIMER
+    )
+
+
+def _answer_help() -> str:
+    return (
+        "👋 Je suis **BlackTurf IA**. Je réponds depuis les données réelles de la plateforme. "
+        "Voici ce que je peux faire :\n\n"
+        "• **« Les value bets du jour »** — paris à valeur détectés par l'IA\n"
+        "• **« Le programme »** — courses du jour\n"
+        "• **« Analyse R1C3 »** — pronostics IA d'une course\n"
+        "• **« Les métriques du modèle »** — fiabilité de l'IA\n"
+        "• **« Ma bankroll »** — ton ROI et tes paris\n"
+        "• **« Comment répartir mes mises ? »** — stratégie de staking\n"
+        "• **« Explique le critère de Kelly »** / **« Comment lire la musique ? »**\n\n"
+        "Pose ta question en langage naturel." + DISCLAIMER
+    )
+
+
+async def _rule_based_answer(messages: list[dict], db: AsyncSession, user: User) -> str:
+    """Routeur d'intention sans LLM — répond depuis la DB réelle."""
+    q = _last_user_msg(messages)
+    if not q:
+        return _answer_help()
+
+    # Code course R{r}C{c}
+    m = re.search(r"\br\s*0*(\d{1,2})\s*c\s*0*(\d{1,2})\b", q)
+    if m and any(k in q for k in ("analys", "pronostic", "course", "predi", "prono", "r")):
+        return await _answer_course(db, user, int(m.group(1)), int(m.group(2)))
+
+    if any(k in q for k in ("value", "valeur", "vb", "meilleur pari", "bon pari", "paris du jour")):
+        return await _answer_value_bets(db, user)
+    if "kelly" in q:
+        return KELLY_EXPLAIN
+    if "musique" in q:
+        return MUSIQUE_EXPLAIN
+    if any(k in q for k in ("programme", "courses du jour", "aujourd", "quinté", "quinte", "réunion", "reunion")):
+        return await _answer_programme(db, user)
+    if any(k in q for k in ("modèle", "modele", "auc", "précision", "precision", "fiab", "performance", "perf ia", "roi simul")):
+        return await _answer_metrics(db, user)
+    if any(k in q for k in ("bankroll", "capital", "mon roi", "mes paris", "mes gains", "mon solde")):
+        return await _answer_bankroll(db, user)
+    if any(k in q for k in ("répart", "repart", "miser", "mise", "combien jouer", "combien miser", "staking", "stratégie de mise")):
+        return _answer_mise()
+    if m:  # code course détecté sans mot-clé explicite
+        return await _answer_course(db, user, int(m.group(1)), int(m.group(2)))
+    if any(k in q for k in ("bonjour", "salut", "hello", "aide", "help", "que peux", "tu fais quoi", "comment ça marche", "qui es")):
+        return _answer_help()
+
+    # Fallback — pas d'intention reconnue
+    return (
+        "Je n'ai pas de réponse fiable à cette question précise sans inventer de données. "
+        "Je préfère ne répondre que sur du concret.\n\n" + _answer_help()
+    )
+
+
+def _stream_chunks(text: str):
+    """Découpe un texte en petits morceaux pour un rendu progressif type streaming."""
+    for token in re.findall(r"\S+\s*|\n", text):
+        yield token
+
+
 class ChatRequest(BaseModel):
     messages: list[dict]  # [{role, content}]
     stream: bool = True
@@ -229,10 +438,6 @@ async def chat(
     """Chat avec l'IA hippique. Plan Expert uniquement."""
     if user.plan not in ("pro", "expert"):
         raise HTTPException(status_code=403, detail="Assistant IA réservé au plan Pro")
-    if not settings.anthropic_api_key:
-        raise HTTPException(status_code=503, detail="Anthropic API non configurée")
-
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     # Valider et nettoyer les messages
     messages = [
@@ -243,6 +448,24 @@ async def chat(
 
     if not messages:
         raise HTTPException(status_code=400, detail="Messages vides")
+
+    sse_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+    # ── Pas de clé LLM → moteur rule-based sur données réelles ──────────────
+    if not settings.anthropic_api_key:
+        async def generate_rb() -> AsyncIterator[str]:
+            try:
+                answer = await _rule_based_answer(messages, db, user)
+            except Exception as e:
+                log.error("assistant.rule_based_error", error=str(e))
+                answer = "Erreur lors de la récupération des données. Réessaie."
+            for chunk in _stream_chunks(answer):
+                yield f"data: {json.dumps({'type': 'text', 'text': chunk})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(generate_rb(), media_type="text/event-stream", headers=sse_headers)
+
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     async def generate() -> AsyncIterator[str]:
         try:
