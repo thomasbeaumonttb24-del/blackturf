@@ -1676,8 +1676,8 @@ export default function CoursePage() {
                                   {/* Équipement */}
                                   <div className="rounded-lg border border-border bg-white p-2.5">
                                     <p className="mb-1 text-[11px] font-semibold text-muted-foreground">🔧 Équipement</p>
-                                    <p className="text-sm">Déferré : <span className="font-medium">{partant.deferre || "Non"}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] text-brand-gold">★ 1ʳᵉ fois</span>}</p>
-                                    <p className="text-sm">Œillères : <span className="font-medium">{partant.oeilleres || "Non"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] text-brand-blue">★ 1ʳᵉ fois</span>}</p>
+                                    <p className="text-sm">Déferré : <span className="font-medium capitalize">{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] text-brand-gold">★ 1ʳᵉ fois</span>}</p>
+                                    <p className="text-sm">Œillères : <span className="font-medium capitalize">{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "Sans"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] text-brand-blue">★ 1ʳᵉ fois</span>}</p>
                                   </div>
                                   {/* Poids / Handicap / Corde */}
                                   {(partant.handicap_poids || partant.poids_prevu || partant.numero_corde || partant.poids_reel_pesee) && (
