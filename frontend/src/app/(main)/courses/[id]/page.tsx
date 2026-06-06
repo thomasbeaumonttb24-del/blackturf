@@ -144,7 +144,8 @@ interface MisePlan {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function ConfidenceMeter({ score, size = "md" }: { score: number; size?: "sm" | "md" }) {
-  const pct = Math.round(score * 100);
+  // confidence_score est déjà en pourcentage (0-100) côté backend.
+  const pct = Math.round(Math.min(Math.max(score, 0), 100));
   const color = pct >= 70 ? "#10B981" : pct >= 50 ? "#F59E0B" : "#EF4444";
   return (
     <div className={cn("flex items-center gap-2", size === "sm" && "text-xs")}>
@@ -1603,35 +1604,41 @@ export default function CoursePage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {/* Top 3 */}
-                  {predictions.slice(0, 3).map((p) => (
-                    <div key={p.prediction_id} className="flex items-center gap-3">
-                      <div className={cn(
-                        "h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0",
-                        p.rang_predit === 1 && "bg-brand-gold/20 text-brand-gold gold-glow",
-                        p.rang_predit === 2 && "bg-brand-blue/20 text-brand-blue",
-                        p.rang_predit === 3 && "bg-brand-emerald/20 text-brand-emerald",
-                      )}>
-                        {p.rang_predit}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-sm font-semibold truncate">N°{p.numero} {p.nom_cheval}</p>
-                          {p.value_bet && <EVBadge ev={p.value_bet.ev_max} />}
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Classement IA — {predictions.length} partant{predictions.length > 1 ? "s" : ""}
+                  </p>
+                  {/* Classement complet (scroll si beaucoup de partants) */}
+                  <div className="space-y-2.5 max-h-[28rem] overflow-y-auto pr-1 -mr-1">
+                    {[...predictions].sort((a, b) => a.rang_predit - b.rang_predit).map((p) => (
+                      <div key={p.prediction_id} className="flex items-center gap-2.5">
+                        <div className={cn(
+                          "h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0",
+                          p.rang_predit === 1 ? "bg-brand-gold/20 text-brand-gold gold-glow" :
+                          p.rang_predit === 2 ? "bg-brand-blue/20 text-brand-blue" :
+                          p.rang_predit === 3 ? "bg-brand-emerald/20 text-brand-emerald" :
+                          "bg-muted text-muted-foreground",
+                        )}>
+                          {p.rang_predit}
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <ConfidenceMeter score={p.confidence_score || 0} size="sm" />
-                          <span className="text-[10px] text-muted-foreground">
-                            {(p.proba_top3 * 100).toFixed(0)}% top-3
-                          </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-semibold truncate">N°{p.numero} {p.nom_cheval}</p>
+                            {p.value_bet && <EVBadge ev={p.value_bet.ev_max} />}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <ConfidenceMeter score={p.confidence_score || 0} size="sm" />
+                            <span className="text-[10px] text-muted-foreground">
+                              {(p.proba_top3 * 100).toFixed(0)}% top-3
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                   <div className="pt-2 border-t border-border/50">
                     <p className="text-[10px] text-muted-foreground flex gap-1.5">
                       <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
-                      Outil d&apos;aide à la décision. Aucune garantie.
+                      Confiance = accord des 3 modèles. Outil d&apos;aide à la décision, aucune garantie.
                     </p>
                   </div>
                 </div>
