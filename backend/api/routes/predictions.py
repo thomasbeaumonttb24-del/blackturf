@@ -358,6 +358,8 @@ async def get_course_analysis(
         "nb_partants": course.nb_partants,
         "penetrometre_coef": course.penetrometre_coef,
         "est_quinte": course.est_quinte,
+        "est_quarte": course.est_quarte,
+        "est_tierce": course.est_tierce,
     }
 
     result = await generate_full_course_analysis(
@@ -379,6 +381,13 @@ async def get_course_analysis(
         )
         if dutch.get("is_profitable"):
             result["dutch_bet"] = dutch
+
+    # ── Paris multiples (probabilités simulées Plackett-Luce) ──
+    try:
+        from ml.combo_bets import build_combo_proposals
+        result["paris_multiples"] = build_combo_proposals(predictions, course_info, bankroll=100.0)
+    except Exception as e:
+        log.warning("analyse.combo_bets_failed", course_id=course_id, err=str(e)[:160])
 
     # Cache 2 min
     try:
