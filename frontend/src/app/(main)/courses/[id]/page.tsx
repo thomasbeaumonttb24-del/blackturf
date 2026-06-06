@@ -708,6 +708,104 @@ function ResultatsSection({ resultats }: {
   );
 }
 
+// ─── Bilan du pronostic (course terminée) ──────────────────────────────────────
+// Compare le pronostic IA FIGÉ avant la course à l'arrivée réelle. Aucune donnée
+// recalculée : on lit les Prediction stockées (immuables) + le classement officiel.
+function PronosticVerdictSection({ predictions, classement }: {
+  predictions: Prediction[];
+  classement: Array<{ numero: number; nom: string; position: number }>;
+}) {
+  const posByNum = new Map<number, number>();
+  for (const c of classement) posByNum.set(c.numero, c.position);
+
+  const iaRanked = [...predictions].sort((a, b) => a.rang_predit - b.rang_predit);
+  const picks = iaRanked.slice(0, 5);
+  const favoriIA = iaRanked[0];
+
+  const gagnant = classement.find((c) => c.position === 1);
+  const rangIAduGagnant = gagnant
+    ? predictions.find((p) => p.numero === gagnant.numero)?.rang_predit ?? null
+    : null;
+
+  const favPos = favoriIA ? posByNum.get(favoriIA.numero) ?? null : null;
+  const favGagne = favPos === 1;
+  const favPlace = favPos != null && favPos <= 3;
+  const gagnantDansTop3IA = rangIAduGagnant != null && rangIAduGagnant <= 3;
+
+  // Verdict global, du meilleur au moins bon
+  const verdict = favGagne
+    ? { emoji: "🎯", label: "Gagnant trouvé — favori IA vainqueur", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
+    : favPlace
+    ? { emoji: "✅", label: `Favori IA placé (${favPos}${favPos === 1 ? "er" : "e"})`, cls: "border-amber-300 bg-amber-50 text-amber-800" }
+    : gagnantDansTop3IA
+    ? { emoji: "➕", label: `Vainqueur dans le top 3 IA (classé #${rangIAduGagnant})`, cls: "border-blue-300 bg-blue-50 text-blue-800" }
+    : { emoji: "❌", label: "Pronostic manqué", cls: "border-rose-300 bg-rose-50 text-rose-800" };
+
+  const pickVerdict = (pos: number | null | undefined) => {
+    if (pos == null) return { icon: "⚪", txt: "NP", cls: "text-muted-foreground" };
+    if (pos === 1) return { icon: "🥇", txt: "1er", cls: "text-emerald-600 font-semibold" };
+    if (pos <= 3) return { icon: "✅", txt: `${pos}e`, cls: "text-amber-600 font-semibold" };
+    return { icon: "❌", txt: `${pos}e`, cls: "text-muted-foreground" };
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-brand-blue/30 bg-brand-blue/5 p-4">
+      <h2 className="mb-3 flex items-center gap-2 text-base font-bold">
+        🔮 Bilan du pronostic IA
+        <span className="text-xs font-normal text-muted-foreground">
+          · pronostic figé avant la course
+        </span>
+      </h2>
+
+      <div className={cn("mb-3 inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold", verdict.cls)}>
+        <span>{verdict.emoji}</span>{verdict.label}
+      </div>
+
+      {gagnant && (
+        <p className="mb-3 text-sm text-muted-foreground">
+          Vainqueur : <span className="font-semibold text-foreground">N°{gagnant.numero} {gagnant.nom}</span>
+          {rangIAduGagnant != null
+            ? <> — l&apos;IA le classait <span className="font-semibold text-foreground">#{rangIAduGagnant}</span></>
+            : <> — non pronostiqué par l&apos;IA</>}
+        </p>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground border-b">
+              <th className="py-1 pr-2">Pronostic IA</th>
+              <th className="py-1 pr-2">N°</th>
+              <th className="py-1 pr-2">Cheval</th>
+              <th className="py-1 pr-2 text-right">Proba top-3</th>
+              <th className="py-1 pr-2 text-right">Arrivée réelle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {picks.map((p) => {
+              const pos = posByNum.get(p.numero);
+              const pv = pickVerdict(pos);
+              return (
+                <tr key={p.participation_id} className="border-b border-border/40">
+                  <td className="py-1 pr-2 font-bold tabular-nums">#{p.rang_predit}</td>
+                  <td className="py-1 pr-2 tabular-nums">{p.numero}</td>
+                  <td className="py-1 pr-2">{p.nom_cheval}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground">
+                    {(p.proba_top3 * 100).toFixed(0)}%
+                  </td>
+                  <td className={cn("py-1 pr-2 text-right tabular-nums", pv.cls)}>
+                    {pv.icon} {pv.txt}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CoursePage() {
   const { id } = useParams<{ id: string }>();
@@ -941,6 +1039,11 @@ export default function CoursePage() {
         {/* Résultats officiels (course terminée) */}
         {course.statut === "termine" && resultats && (
           <ResultatsSection resultats={resultats} />
+        )}
+
+        {/* Bilan du pronostic IA vs arrivée (course terminée) */}
+        {course.statut === "termine" && resultats && predictions && predictions.length > 0 && (
+          <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
         )}
 
         {/* Alert value bet exceptionnel */}

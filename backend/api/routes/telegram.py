@@ -3,9 +3,11 @@ Telegram webhook route — BlackTurf.
 POST /telegram/webhook  → reçoit les updates Telegram et les dispatche.
 """
 import structlog
-from fastapi import APIRouter, Request, HTTPException, Header
+from fastapi import APIRouter, Request, HTTPException, Header, Depends
 from typing import Optional
 from api.config import get_settings
+from api.routes.auth import require_admin
+from db.models import User
 from services.telegram_bot import handle_update
 
 log = structlog.get_logger()
@@ -40,14 +42,12 @@ async def telegram_webhook(
 
 
 @router.post("/setup-webhook")
-async def setup_webhook(request: Request):
+async def setup_webhook(request: Request, _: User = Depends(require_admin)):
     """
     Configure le webhook Telegram.
     Requiert authentification admin.
     Appeler une seule fois après déploiement.
     """
-    from api.routes.auth import require_admin, get_current_user
-    from fastapi import Depends
     from services.telegram_bot import set_webhook
 
     webhook_url = f"{settings.api_url}/api/v1/telegram/webhook"

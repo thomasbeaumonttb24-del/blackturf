@@ -955,6 +955,21 @@ class BlackTurfOrchestrator:
         from ml.pipeline import predict_course
         from sqlalchemy import text
 
+        # Cleanup : un value bet n'a de sens que sur une course à venir / en cours.
+        # Dès qu'une course est terminée ou annulée, ses VB doivent être désactivés
+        # (sinon ils s'accumulent en `actif=true` avec des EV obsolètes). Idempotent.
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(text("""
+                UPDATE value_bets vb SET actif = false
+                FROM courses c
+                WHERE vb.course_id = c.course_id
+                  AND vb.actif = true
+                  AND c.statut NOT IN ('a_venir', 'en_cours')
+            """))
+            await session.commit()
+            if res.rowcount:
+                log.info("orchestrator.vb_deactivated", n=res.rowcount)
+
         async with AsyncSessionLocal() as session:
             r = await session.execute(text("""
                 SELECT c.course_id

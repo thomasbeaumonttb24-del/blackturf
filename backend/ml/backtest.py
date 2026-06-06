@@ -23,6 +23,21 @@ import structlog
 log = structlog.get_logger()
 
 
+def _p_win(partant: dict, nb_partants: int) -> float:
+    """
+    P(victoire) d'un partant pour un value bet GAGNANT.
+
+    Préfère proba_top1 si fournie ; sinon l'estime depuis proba_top3 (proba placé)
+    et la taille du champ : P(win) ≈ proba_top3 × 3 / nb_partants. Cohérent avec la
+    prod (pipeline passe proba_t1) et avec les CONFIANCE_SEUILS calibrés sur P(win).
+    """
+    p1 = partant.get("proba_top1")
+    if p1 is not None:
+        return float(p1)
+    p3 = float(partant.get("proba_top3") or 0.0)
+    return round(min(1.0, p3 * (3.0 / max(nb_partants, 3))), 4)
+
+
 # ─────────────────────────────────────────────
 # Modèles
 # ─────────────────────────────────────────────
@@ -288,13 +303,17 @@ def value_bet_strategy(
     """
     from ml.valuebets import detect_value_bet, calculer_mise_kelly
 
+    nb_partants = (course_info or {}).get("nb_partants") or len(partants)
+
     bets = []
     for p in partants:
         cotes = {k: v for k, v in (p.get("cotes") or {}).items() if v and v > 1.0}
         if not cotes:
             continue
+        # Value bet GAGNANT → P(victoire). Si absente, estimer depuis proba_top3
+        # (proba placé) et la taille du champ, cohérent avec la prod (proba_t1).
         vb = detect_value_bet(
-            proba_top3=p["proba_top3"],
+            proba_top1=_p_win(p, nb_partants),
             cote_pmu=cotes.get("pmu"),
             cote_geny=cotes.get("geny"),
             cote_bzh=cotes.get("bzh"),
@@ -350,7 +369,7 @@ def portfolio_strategy(
         cote_by_num[p["numero"]] = best_cote
         proba3 = p["proba_top3"]
         vb = detect_value_bet(
-            proba_top3=proba3, cote_pmu=cotes.get("pmu"), cote_geny=cotes.get("geny"),
+            proba_top1=_p_win(p, nb_partants), cote_pmu=cotes.get("pmu"), cote_geny=cotes.get("geny"),
             cote_bzh=cotes.get("bzh"), cote_winamax=cotes.get("winamax"),
             cote_betclic=cotes.get("betclic"), cote_unibet=cotes.get("unibet"),
             cote_betfair=cotes.get("betfair"),
@@ -360,7 +379,7 @@ def portfolio_strategy(
             "numero": p["numero"],
             "nom": p.get("nom") or f"N{p['numero']}",
             "proba_top3": proba3,
-            "proba_top1": round(proba3 * (3.0 / max(nb_partants, 3)), 4),
+            "proba_top1": _p_win(p, nb_partants),
             "cote_pmu": cotes.get("pmu") or best_cote,
             "ev_max": (vb["ev_max"] if vb else calculer_ev(best_cote, proba3)),
             "niveau_vb": (vb["niveau"] if vb else 0),
@@ -455,7 +474,7 @@ async def run_backtest(
         rows = await session.execute(text("""
             SELECT p.numero, p.cote_pmu, p.cote_geny, p.cote_bzh,
                    p.cote_winamax, p.cote_betclic, p.cote_unibet, p.cote_betfair_exchange,
-                   pr.proba_top3
+                   pr.proba_top3, pr.proba_top1
             FROM participations p
             JOIN predictions pr ON pr.participation_id = p.participation_id
             WHERE p.course_id = :cid AND p.non_partant = false
@@ -468,6 +487,8 @@ async def run_backtest(
                 "course_id": course.course_id,
                 "numero": r.numero,
                 "proba_top3": float(r.proba_top3),
+                # P(victoire) stockée → value bet GAGNANT calibré (sinon estimée par _p_win)
+                "proba_top1": float(r.proba_top1) if r.proba_top1 is not None else None,
                 "cotes": {
                     "pmu": r.cote_pmu, "geny": r.cote_geny, "bzh": r.cote_bzh,
                     "winamax": r.cote_winamax, "betclic": r.cote_betclic,

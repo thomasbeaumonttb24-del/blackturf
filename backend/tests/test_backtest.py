@@ -170,7 +170,9 @@ def test_value_bet_strategy_pas_de_pari_sans_edge():
 
 
 # ── Runner DB ──────────────────────────────────────────────────
-async def _seed_course(db, cid, num1_pos, cote=3.0, proba=0.5):
+# proba=0.8 → proba_top1=0.4 ; à cote 3.0, EV gagnant = 3.0×0.4−1 = +0.2 → vrai
+# value bet (le runner détecte sur P(victoire), pas sur la proba placé).
+async def _seed_course(db, cid, num1_pos, cote=3.0, proba=0.8):
     db.add(Course(
         course_id=cid, reunion_id="R1", numero=1, nom="Test",
         date_heure=datetime(2026, 1, int(cid[-1]) + 1, 13, 0, tzinfo=timezone.utc),

@@ -5,6 +5,7 @@ import pandas as pd
 from ml.valuebets import (
     calculer_ev, determine_niveau, detect_value_bet, calculer_mise_kelly,
     triangulation_cotes_v2, compute_spi_v2,
+    COTE_MAX_VB, LONGSHOT_COTE_MIN, MAX_MODEL_MARKET_RATIO, COTE_CEIL_FACTOR,
     # backward compat aliases for existing tests
     triangulation_cotes, compute_spi_from_gap,
 )
@@ -69,7 +70,9 @@ def test_niveau_none_ev_trop_faible():
 
 
 def test_niveau_none_proba_trop_faible():
-    n = determine_niveau(ev=0.25, proba=0.45)
+    # proba = P(victoire) normalisée ; sous le seuil de confiance le plus bas
+    # (CONFIANCE_SEUILS[1] = 0.10) → pas de VB même si l'EV est forte.
+    n = determine_niveau(ev=0.25, proba=0.08)
     assert n is None
 
 
@@ -103,31 +106,31 @@ def test_triangulation_ev_calcule_correctement():
 # detect_value_bet intégration
 # ─────────────────────────────────────────────
 def test_detect_value_bet_found():
-    vb = detect_value_bet(proba_top3=0.60, cote_pmu=4.5)
+    vb = detect_value_bet(proba_top1=0.60, cote_pmu=4.5)
     assert vb is not None
     assert vb["niveau"] >= 1
     assert vb["ev_max"] > 0
 
 
 def test_detect_value_bet_not_found():
-    vb = detect_value_bet(proba_top3=0.30, cote_pmu=2.0)
+    vb = detect_value_bet(proba_top1=0.30, cote_pmu=2.0)
     assert vb is None
 
 
 def test_detect_value_bet_no_cotes():
-    vb = detect_value_bet(proba_top3=0.80)
+    vb = detect_value_bet(proba_top1=0.80)
     assert vb is None
 
 
 def test_detect_picks_best_source():
-    vb = detect_value_bet(proba_top3=0.55, cote_pmu=3.0, cote_geny=5.0, cote_bzh=2.5)
+    vb = detect_value_bet(proba_top1=0.55, cote_pmu=3.0, cote_geny=5.0, cote_bzh=2.5)
     assert vb is not None
     assert vb["meilleure_source"] == "geny"
     assert vb["ev_geny"] > vb["ev_pmu"]
 
 
 def test_detect_value_bet_inclut_spi_fields():
-    vb = detect_value_bet(proba_top3=0.65, cote_pmu=4.0)
+    vb = detect_value_bet(proba_top1=0.65, cote_pmu=4.0)
     assert vb is not None
     assert "spi_detected" in vb
     assert "spi_score" in vb
@@ -136,7 +139,7 @@ def test_detect_value_bet_inclut_spi_fields():
 def test_detect_value_bet_spi_via_history():
     """Cote qui chute de 5.0 → 3.5 → SPI détecté."""
     history = [5.0, 4.8, 4.5, 4.2, 3.8, 3.5]
-    vb = detect_value_bet(proba_top3=0.65, cote_pmu=3.5, cotes_history=history)
+    vb = detect_value_bet(proba_top1=0.65, cote_pmu=3.5, cotes_history=history)
     assert vb is not None
     assert vb["spi_detected"] is True
     assert vb["spi_score"] > 0
@@ -144,9 +147,58 @@ def test_detect_value_bet_spi_via_history():
 
 def test_detect_value_bet_no_spi_stable_cote():
     history = [4.0, 4.1, 3.9, 4.0, 4.0]
-    vb = detect_value_bet(proba_top3=0.65, cote_pmu=4.0, cotes_history=history)
+    vb = detect_value_bet(proba_top1=0.65, cote_pmu=4.0, cotes_history=history)
     if vb:
         assert vb["spi_detected"] is False
+
+
+# ─────────────────────────────────────────────
+# Garde-fous anti biais-longshot (gates A+D) — non-régression du bug +296%
+# ─────────────────────────────────────────────
+def test_longshot_gate_rejette_proba_sur_evaluee():
+    """Modèle attribue P(win) >> proba marché implicite sur grosse cote → None.
+
+    cote_marché ≈ 10 (≥ LONGSHOT_COTE_MIN), implicite ≈ 0.10. proba 0.60 donne
+    un ratio de 6× : c'est le sur-fit outsider qui générait les EV absurdes.
+    """
+    assert LONGSHOT_COTE_MIN <= 10.0
+    vb = detect_value_bet(
+        proba_top1=0.60, cote_pmu=10.0, cote_geny=10.0, cote_bzh=10.0,
+    )
+    assert vb is None
+
+
+def test_longshot_gate_ne_sapplique_pas_aux_favoris():
+    """Sous LONGSHOT_COTE_MIN (cote basse) un fort écart marché reste un edge valide."""
+    vb = detect_value_bet(
+        proba_top1=0.60, cote_pmu=3.0, cote_geny=3.0, cote_bzh=3.0,
+    )
+    assert vb is not None
+    assert vb["niveau"] >= 1
+
+
+def test_cote_max_vb_rejette_outsider_extreme():
+    """Cote de la meilleure source > COTE_MAX_VB → None (modèle non fiable)."""
+    cote = COTE_MAX_VB + 5.0
+    vb = detect_value_bet(proba_top1=0.30, cote_pmu=cote)
+    assert vb is None
+
+
+def test_winners_curse_ev_plafonnee_a_mediane():
+    """EV calculée sur cote plafonnée (médiane × COTE_CEIL_FACTOR), pas sur la cote
+    isolée la plus haute des 7 sources (stale → EV gonflée)."""
+    # médiane de [4,4,4,10] = 4 ; cote isolée winamax = 10
+    vb = detect_value_bet(
+        proba_top1=0.40, cote_pmu=4.0, cote_geny=4.0, cote_bzh=4.0,
+        cote_winamax=10.0,
+    )
+    assert vb is not None
+    assert vb["meilleure_source"] == "winamax"   # on parie quand même la meilleure cote
+    cote_plafond = 4.0 * COTE_CEIL_FACTOR
+    ev_attendu = cote_plafond * 0.40 - 1.0
+    assert vb["ev_max"] == pytest.approx(ev_attendu, rel=1e-6)
+    # sans plafond l'EV serait 10×0.40−1 = 3.0 ; le plafond la garde crédible
+    assert vb["ev_max"] < 1.0
 
 
 # ─────────────────────────────────────────────

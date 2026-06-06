@@ -49,7 +49,7 @@ CONFIANCE_SEUILS = {
 # Le gate ne s'applique qu'AU-DELÀ de LONGSHOT_COTE_MIN : sur les favoris (cote
 # basse) le modèle est bien calibré et un fort écart au marché peut être un vrai
 # edge ; c'est uniquement sur les grosses cotes que l'écart trahit le sur-fit.
-MAX_MODEL_MARKET_RATIO = 2.5
+MAX_MODEL_MARKET_RATIO = 2.0
 LONGSHOT_COTE_MIN = 8.0
 
 # Cote max retenue pour le calcul de l'EV = médiane marché × ce facteur.
@@ -173,7 +173,7 @@ def compute_spi_v2(
 
 
 def detect_value_bet(
-    proba_top3: float,
+    proba_top1: float,
     cote_pmu: Optional[float] = None,
     cote_geny: Optional[float] = None,
     cote_bzh: Optional[float] = None,
@@ -189,6 +189,10 @@ def detect_value_bet(
 ) -> Optional[dict]:
     """
     Détecte si un partant est un value bet — version multi-sources.
+
+    proba_top1 : P(victoire) normalisée (Σ=1) du partant. Pour un value bet
+    GAGNANT, passer la P(victoire), pas la proba placé — cf. pipeline.py qui
+    passe proba_t1. Les CONFIANCE_SEUILS sont calibrés sur P(victoire).
 
     Garde-fous :
       - Non-partant déclaré → None
@@ -216,7 +220,7 @@ def detect_value_bet(
         "betfair": cote_betfair,
     }
 
-    evs, meilleure_source, cote_marche = triangulation_cotes_v2(proba_top3, cotes)
+    evs, meilleure_source, cote_marche = triangulation_cotes_v2(proba_top1, cotes)
     if not evs:
         return None
 
@@ -233,10 +237,10 @@ def detect_value_bet(
     # pas un vrai edge. C'est la source des EV absurdes (+296% sur des 37/1).
     if cote_marche and cote_marche >= LONGSHOT_COTE_MIN:
         implied_marche = 1.0 / cote_marche
-        if proba_top3 > MAX_MODEL_MARKET_RATIO * implied_marche:
+        if proba_top1 > MAX_MODEL_MARKET_RATIO * implied_marche:
             log.info("valuebets.longshot_rejected",
-                     proba=round(proba_top3, 4), cote_marche=round(cote_marche, 2),
-                     ratio=round(proba_top3 / implied_marche, 2))
+                     proba=round(proba_top1, 4), cote_marche=round(cote_marche, 2),
+                     ratio=round(proba_top1 / implied_marche, 2))
             return None
 
     # ── EV anti winner's curse ───────────────────────────────────────────────
@@ -246,9 +250,9 @@ def detect_value_bet(
     cotes_valides = [c for c in cotes.values() if c and c > 1.0]
     cote_mediane = statistics.median(cotes_valides) if cotes_valides else cote_meilleure
     cote_ev = min(cote_meilleure, cote_mediane * COTE_CEIL_FACTOR)
-    ev_max = calculer_ev(cote_ev, proba_top3)
+    ev_max = calculer_ev(cote_ev, proba_top1)
 
-    niveau = determine_niveau(ev_max, proba_top3)
+    niveau = determine_niveau(ev_max, proba_top1)
     if niveau is None:
         return None
 
