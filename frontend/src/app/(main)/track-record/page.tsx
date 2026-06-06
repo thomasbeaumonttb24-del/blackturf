@@ -203,9 +203,14 @@ export default function TrackRecordPage() {
                 </div>
               </div>
             </div>
+            <p className="mt-3 text-[11px] text-muted-foreground/60 max-w-xl mx-auto">
+              ROI = backtest réel (1€ Simple Gagnant sur le favori IA, réglé sur l&apos;arrivée
+              officielle et la cote PMU réelle). Échantillon limité, forte variance —
+              les performances passées ne préjugent pas des résultats futurs.
+            </p>
             {data.updated_at && (
-              <p className="mt-4 text-[11px] text-muted-foreground/70">
-                Dernière mise à jour : {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · recalculé automatiquement
+              <p className="mt-2 text-[11px] text-muted-foreground/70">
+                Dernière mise à jour : {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · recalculé automatiquement à chaque fin de course
               </p>
             )}
 
