@@ -111,12 +111,27 @@ def get_circuit_breaker(source: str) -> CircuitBreaker:
     return _circuit_breakers[source]
 
 
+# Pool d'User-Agents récents (Chrome/Firefox/Edge, Win/Mac/Linux). Une UA trop
+# ancienne (ex. Chrome 124 en 2026) est un signal anti-bot évident → on garde un
+# parc à jour et diversifié, tiré aléatoirement par contexte navigateur.
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    # Chrome — Windows / macOS / Linux
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    # Edge — Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.0.0",
+    # Firefox — Windows / macOS / Linux
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
 ]
+
+
+def random_user_agent() -> str:
+    """Retourne un User-Agent aléatoire du parc (rotation anti-détection)."""
+    return random.choice(USER_AGENTS)
 
 
 # ─────────────────────────────────────────────
@@ -256,7 +271,7 @@ async def make_stealth_browser(proxy: Optional[str] = None):
 
     context = await browser.new_context(
         viewport={"width": 1366, "height": 768},
-        user_agent=random.choice(USER_AGENTS),
+        user_agent=random_user_agent(),
         locale="fr-FR",
         timezone_id="Europe/Paris",
         extra_http_headers={

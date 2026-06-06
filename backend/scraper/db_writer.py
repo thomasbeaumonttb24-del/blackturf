@@ -25,7 +25,9 @@ from scraper.base import (
     PenetrometreScrape, TempsPassageScrape, PronosticPresseScrape,
     GeneralogieScrape, RunningStyleScrape,
 )
-from scraper.validation import valid_cote, valid_penetrometre
+from scraper.validation import (
+    valid_cote, valid_penetrometre, valid_distance, valid_position, valid_nb_partants,
+)
 
 log = structlog.get_logger()
 
@@ -33,6 +35,20 @@ log = structlog.get_logger()
 def _t(v, n: int):
     """Tronque une chaîne à n caractères (sécurité longueur colonne). None inchangé."""
     return v[:n] if isinstance(v, str) and len(v) > n else v
+
+
+def _historique_numeric(c: dict) -> dict:
+    """Champs numériques validés d'une course historique passée.
+
+    Garde-fou intégrité : une distance/position/nb_partants aberrante (parse
+    décalé) ne doit pas polluer les features ML. distance est NOT NULL → on
+    retombe sur 0 (sentinelle « inconnu ») ; les autres → NULL si aberrant.
+    """
+    return {
+        "distance": valid_distance(c.get("distance")) or 0,
+        "nb_partants": valid_nb_partants(c.get("nb_partants")),
+        "position_arrivee": valid_position(c.get("position")),
+    }
 
 
 async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: list) -> int:
@@ -76,9 +92,7 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
             date_course=d_course,
             hippodrome=hippo,
             discipline=_t(c.get("discipline"), 20) or "?",
-            distance=c.get("distance") or 0,
-            nb_partants=c.get("nb_partants"),
-            position_arrivee=c.get("position"),
+            **_historique_numeric(c),
             ecart_longueurs=float(ecart) if isinstance(ecart, (int, float)) else None,
             allocation=c.get("allocation"),
             jockey_course=_t(c.get("jockey"), 100),
@@ -283,6 +297,13 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         jockey_id = await upsert_jockey(session, partant.jockey or "")
         entraineur_id = await upsert_entraineur(session, partant.entraineur or "")
 
+        # Garde-fou intégrité : une cote aberrante (parse décalé) fausserait la
+        # détection de value bets + les features ML → NULL plutôt que fausse donnée.
+        cote_pmu_v = valid_cote(partant.cote_pmu)
+        cote_geny_v = valid_cote(partant.cote_geny)
+        cote_bzh_v = valid_cote(partant.cote_bzh)
+        cote_ref_v = valid_cote(partant.cote_reference)
+
         participation_id = gen_uuid()
         stmt = pg_insert(Participation).values(
             participation_id=participation_id,
@@ -295,13 +316,13 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             decharge=partant.decharge,
             valeur_indice=partant.valeur_indice,
             retard_gains=partant.retard_gains,
-            cote_pmu=partant.cote_pmu,
-            cote_geny=partant.cote_geny,
-            cote_bzh=partant.cote_bzh,
+            cote_pmu=cote_pmu_v,
+            cote_geny=cote_geny_v,
+            cote_bzh=cote_bzh_v,
             rang_pronostic_pmu=partant.rang_pronostic_pmu,
             musique=_t(partant.musique, 50),
             # ── Enrichissements PMU ──
-            cote_reference=partant.cote_reference,
+            cote_reference=cote_ref_v,
             mouvement_cote_pct=partant.mouvement_cote_pct,
             tendance_cote=_t(partant.tendance_cote, 2),
             tendance_force=partant.tendance_force,
@@ -316,11 +337,11 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
             set_={
-                "cote_pmu": partant.cote_pmu,
-                "cote_geny": partant.cote_geny,
+                "cote_pmu": cote_pmu_v,
+                "cote_geny": cote_geny_v,
                 "rang_pronostic_pmu": partant.rang_pronostic_pmu,
                 # le mouvement de cote évolue → réactualisé à chaque cycle
-                "cote_reference": partant.cote_reference,
+                "cote_reference": cote_ref_v,
                 "mouvement_cote_pct": partant.mouvement_cote_pct,
                 "tendance_cote": _t(partant.tendance_cote, 2),
                 "tendance_force": partant.tendance_force,
