@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     template: "%s | BlackTurf",
   },
   description:
-    "Entrez votre mise → BlackTurf génère votre plan de pari personnalisé. Paris de valeur détectés par IA en temps réel. XGBoost + LightGBM + CatBoost. Précision Top-3 : 59%. Rendement simulé : +8,4%.",
+    "Entrez votre mise → BlackTurf génère votre plan de pari personnalisé. Paris de valeur détectés par IA (XGBoost + LightGBM + CatBoost) sur le programme PMU du jour, entraînée sur les résultats réels.",
   keywords: [
     "pronostics hippiques", "pari de valeur", "intelligence artificielle",
     "PMU", "analyse hippique", "tiercé", "quinté", "critère de Kelly",
