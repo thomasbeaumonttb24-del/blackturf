@@ -7,7 +7,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import {
-  TrendingUp, Brain, Zap, Trophy, CheckCircle2, XCircle,
+  TrendingUp, Brain, Zap, Trophy, CheckCircle2, XCircle, ArrowUpRight, Minus,
   ChevronRight, Star, Activity,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -455,7 +455,7 @@ export default function TrackRecordPage() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
                 <Activity className="w-4 h-4 text-brand-blue" />
-                Derniers pronostics — favori IA vs arrivée
+                Historique des courses — favori IA
               </CardTitle>
               {g.nb_favoris_evalues > 0 && (
                 <span className="text-xs text-muted-foreground">
@@ -470,49 +470,70 @@ export default function TrackRecordPage() {
                 Aucune course terminée avec pronostic archivé pour le moment
               </div>
             ) : (
-              <div className="space-y-2">
+              <>
+              <div className="divide-y divide-border/40">
                 {data.derniers_pronostics.map((p, i) => {
-                  const v = VERDICTS[p.verdict];
+                  // Mise fictive 1€ Gagnant sur le favori IA.
+                  const pos = p.favori_position;
+                  const won = pos === 1;
+                  const placed = pos != null && pos > 1 && pos <= 3;
+                  const gain = won && p.cote ? p.cote : 0;      // 1€ Gagnant -> cote
+                  const tier = won ? "gain" : placed ? "place" : "loss";
+                  const posLabel = pos === 1 ? "1ᵉʳ" : pos != null ? `${pos}ᵉ` : "NP";
+                  const posCircle =
+                    won ? "bg-emerald-100 text-emerald-700"
+                    : placed ? "bg-amber-100 text-amber-700"
+                    : "bg-rose-100 text-rose-600";
                   return (
                     <Link
                       key={p.course_id + i}
                       href={`/courses/${p.course_id}`}
-                      className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
+                      className="flex items-center gap-3 py-2.5 px-1 hover:bg-accent/30 transition-colors group rounded-md"
                     >
+                      {/* Position */}
+                      <span className={cn("flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold tabular-nums", posCircle)}>
+                        {posLabel}
+                      </span>
+                      {/* Cheval + meta */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-foreground text-sm">
-                            N°{p.favori_numero} {p.favori_nom}
-                          </span>
-                          <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 shrink-0">
-                            {p.discipline}
-                          </Badge>
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-foreground">N°{p.favori_numero} {p.favori_nom}</span>
+                          <Badge variant="outline" className="hidden sm:inline-flex text-[10px] px-1.5 py-0 h-4 shrink-0">{p.discipline}</Badge>
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                          {p.hippodrome} · {p.date} · {p.proba_top1}% top-1
+                        <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {p.hippodrome} · {p.date}
                           {p.cote ? ` · cote ${p.cote}` : ""}
-                          {p.gagnant_nom && p.verdict !== "gagnant" && (
-                            <span className="ml-1">
-                              → vainqueur <span className="text-foreground font-medium">{p.gagnant_nom}</span>
-                              {p.rang_ia_gagnant != null && ` (IA #${p.rang_ia_gagnant})`}
-                            </span>
-                          )}
+                          {!won && p.gagnant_nom && <span> · vainqueur {p.gagnant_nom}</span>}
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap",
-                          v.cls,
-                        )}>
-                          {v.emoji} {v.label}
-                          <span className="tabular-nums opacity-70">· {p.favori_position}e</span>
-                        </span>
-                        <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                      {/* Résultat */}
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        {tier === "gain" ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">
+                            <ArrowUpRight className="h-3.5 w-3.5" />+{gain.toFixed(2)}€
+                          </span>
+                        ) : tier === "place" ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-200">
+                            <Minus className="h-3.5 w-3.5" />Placé
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 ring-1 ring-rose-200">
+                            <XCircle className="h-3.5 w-3.5" />Perdu
+                          </span>
+                        )}
+                        <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground transition-colors" />
                       </div>
                     </Link>
                   );
                 })}
               </div>
+              <p className="mt-3 text-[10px] text-muted-foreground/70">
+                Résultat = 1€ Gagnant sur le favori IA, réglé à la cote réelle.
+                <span className="text-emerald-600 font-medium"> ↗ vert</span> = gain &gt; mise ·
+                <span className="text-amber-600 font-medium"> Placé orange</span> = top 3 sans gain ·
+                <span className="text-rose-600 font-medium"> Perdu rouge</span> = hors top 3.
+              </p>
+              </>
             )}
           </CardContent>
         </Card>
