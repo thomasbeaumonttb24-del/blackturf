@@ -528,7 +528,7 @@ function PronosticsPresse({ pronostics }: {
       {consensus.length > 0 && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
           <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide mb-1.5">
-            🎯 Consensus experts
+            Consensus experts
           </p>
           <div className="flex flex-wrap gap-1.5">
             {consensus.map(([num, { nb, nom }]) => (
@@ -744,10 +744,10 @@ function ResultatsSection({ resultats, partants }: {
   return (
     <div className="mt-4 overflow-hidden rounded-xl border border-brand-emerald/30 bg-gradient-to-br from-brand-emerald/[0.07] to-transparent">
       <div className="flex flex-wrap items-center gap-2 border-b border-brand-emerald/20 px-4 py-3">
-        <h2 className="flex items-center gap-2 text-base font-bold">🏁 Arrivée officielle</h2>
+        <h2 className="flex items-center gap-2 text-base font-bold">Arrivée officielle</h2>
         {resultats.temps_gagnant && (
           <span className="text-xs text-muted-foreground">
-            ⏱️ Chrono {resultats.temps_gagnant}s
+            Chrono {resultats.temps_gagnant}s
             {resultats.duree_course ? ` · durée ${(resultats.duree_course / 1000).toFixed(1)}s` : ""}
           </span>
         )}
@@ -793,7 +793,7 @@ function ResultatsSection({ resultats, partants }: {
       {/* Rapports PMU — tous les gains de combinaisons */}
       {rapportsTries.length > 0 && (
         <div className="border-t border-brand-emerald/20 px-4 py-3">
-          <p className="mb-2 text-xs font-semibold text-muted-foreground">💰 Rapports PMU · gains pour 1€ misé</p>
+          <p className="mb-2 text-xs font-semibold text-muted-foreground">Rapports PMU · gains pour 1€ misé</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {rapportsTries.map(([k, v]) => {
               const meta = RAPPORT_META[k];
@@ -871,14 +871,14 @@ function PronosticVerdictSection({ predictions, classement }: {
   return (
     <div className="mt-4 rounded-xl border border-brand-blue/30 bg-brand-blue/5 p-4">
       <h2 className="mb-3 flex items-center gap-2 text-base font-bold">
-        🔮 Bilan du pronostic IA
+        Bilan du pronostic IA
         <span className="text-xs font-normal text-muted-foreground">
           · pronostic figé avant la course
         </span>
       </h2>
 
       <div className={cn("mb-3 inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold", verdict.cls)}>
-        <span>{verdict.emoji}</span>{verdict.label}
+        {verdict.label}
       </div>
 
       {gagnant && (
@@ -963,14 +963,14 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
   return (
     <div className="mt-4 rounded-xl border border-brand-gold/30 bg-brand-gold/5 p-4">
       <h2 className="mb-1 flex items-center gap-2 text-base font-bold">
-        🧮 Bilan du plan de mise — {data.montant}€
+        Bilan du plan de mise — {data.montant}€
         <span className="text-xs font-normal text-muted-foreground">· pronostic rejoué sur l&apos;arrivée réelle</span>
       </h2>
 
       {/* Verdict + net */}
       <div className="my-3 flex flex-wrap items-center gap-3">
         <div className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold", vCfg.cls)}>
-          <span>{vCfg.emoji}</span>{vCfg.label}
+          {vCfg.label}
         </div>
         <div className="text-sm">
           <span className="text-muted-foreground">Résultat net{bilan.provisoire ? " (provisoire)" : ""} :</span>{" "}
@@ -1036,7 +1036,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
                   {p.statut === "gagne"
                     ? <span className="text-emerald-600 font-semibold">✓ +{(p.gain ?? 0).toFixed(2)}€</span>
                     : p.statut === "en_attente"
-                    ? <span className="text-amber-600 font-semibold" title="Rapport PMU pas encore publié">⏳ gagné · rapport en attente</span>
+                    ? <span className="text-amber-600 font-semibold" title="Rapport PMU pas encore publié">Gagné · rapport en attente</span>
                     : <span className="text-muted-foreground">✗ perdu</span>}
                 </td>
               </tr>
@@ -1398,7 +1398,7 @@ export default function CoursePage() {
               {course.est_quarte && <Badge variant="gold">Quarté+</Badge>}
               {course.est_tierce && <Badge variant="secondary">Tiercé</Badge>}
               <Badge variant={course.statut === "en_cours" ? "success" : course.statut === "termine" ? "secondary" : "warning"}>
-                {course.statut === "en_cours" ? "🔴 En cours" : course.statut === "termine" ? "✓ Terminée" : "⏳ À venir"}
+                {course.statut === "en_cours" ? "En cours" : course.statut === "termine" ? "Terminée" : "À venir"}
               </Badge>
               {wsConnected && (
                 <span className="flex items-center gap-1 text-[10px] font-semibold text-brand-emerald">
@@ -1413,7 +1413,7 @@ export default function CoursePage() {
               <span>👥 {course.nb_partants} partants</span>
               <span>🕐 {formatDateTime(course.date_heure)}</span>
               {course.terrain_officiel && <span>🌿 {course.terrain_officiel}</span>}
-              {course.allocation && <span>💰 {course.allocation.toLocaleString("fr-FR")}€</span>}
+              {course.allocation && <span>Allocation {course.allocation.toLocaleString("fr-FR")}€</span>}
               {course.montant_offert_1er != null && course.montant_offert_1er > 0 && (
                 <span>🏆 {course.montant_offert_1er.toLocaleString("fr-FR")}€ au gagnant</span>
               )}
@@ -1660,59 +1660,58 @@ export default function CoursePage() {
                           {isExp && (
                             <tr className="bg-muted/20">
                               <td colSpan={predictions ? 8 : 5} className="px-3 pb-3 pt-1">
-                                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                                   {/* Musique */}
-                                  <div className="rounded-lg border border-border bg-white p-2.5 sm:col-span-2 lg:col-span-3">
-                                    <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">🎵 Musique (10 dernières sorties)</p>
+                                  <div className="rounded-lg border border-border bg-white p-3 sm:col-span-2 lg:col-span-3">
+                                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Musique — forme récente</p>
                                     <MusiqueDisplay musique={partant.musique} />
                                   </div>
                                   {/* Jockey / Entraîneur */}
-                                  <div className="rounded-lg border border-border bg-white p-2.5">
-                                    <p className="mb-1 text-[11px] font-semibold text-muted-foreground">👤 Jockey / Entraîneur</p>
-                                    <p className="text-sm font-medium">{partant.jockey || "—"}</p>
-                                    <p className="text-xs text-muted-foreground">Entr. {partant.entraineur || "—"}</p>
-                                    {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && (
-                                      <p className="mt-1 text-[11px] text-violet-600">Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% de réussite ({partant.asso_jockey_entraineur_nb} courses)</p>
+                                  <div className="rounded-lg border border-border bg-white p-3">
+                                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Jockey / Entraîneur</p>
+                                    <p className="text-sm font-medium leading-snug">{partant.jockey || "—"}</p>
+                                    <p className="text-xs text-muted-foreground">Entraîneur : {partant.entraineur || "—"}</p>
+                                    {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 3 && (
+                                      <p className="mt-1.5 text-[11px] text-violet-600">Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% de réussite sur {partant.asso_jockey_entraineur_nb} courses</p>
                                     )}
                                   </div>
-                                  {/* Carrière */}
-                                  <div className="rounded-lg border border-border bg-white p-2.5">
-                                    <p className="mb-1 text-[11px] font-semibold text-muted-foreground">🏆 Carrière</p>
-                                    {partant.nb_courses ? (
+                                  {/* Carrière (gains retirés — donnée source non fiable) */}
+                                  {partant.nb_courses ? (
+                                    <div className="rounded-lg border border-border bg-white p-3">
+                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Carrière</p>
                                       <p className="text-sm">
-                                        <span className="font-bold">{partant.nb_victoires ?? 0}</span> victoire{(partant.nb_victoires ?? 0) > 1 ? "s" : ""} / {partant.nb_courses} courses
-                                        <span className="text-muted-foreground"> ({Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%)</span>
+                                        <span className="font-bold tabular-nums">{partant.nb_victoires ?? 0}</span> victoire{(partant.nb_victoires ?? 0) > 1 ? "s" : ""}
+                                        <span className="text-muted-foreground"> sur </span>
+                                        <span className="font-medium tabular-nums">{partant.nb_courses}</span> courses
                                       </p>
-                                    ) : <p className="text-xs text-muted-foreground">—</p>}
-                                    {partant.gains_carriere ? (
-                                      <p className="text-xs text-muted-foreground">Gains : {partant.gains_carriere.toLocaleString("fr-FR")}€</p>
-                                    ) : null}
-                                  </div>
+                                      <p className="text-xs text-muted-foreground">Réussite {Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%</p>
+                                    </div>
+                                  ) : null}
                                   {/* Équipement */}
-                                  <div className="rounded-lg border border-border bg-white p-2.5">
-                                    <p className="mb-1 text-[11px] font-semibold text-muted-foreground">🔧 Équipement</p>
-                                    <p className="text-sm">Déferré : <span className="font-medium capitalize">{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] text-brand-gold">★ 1ʳᵉ fois</span>}</p>
-                                    <p className="text-sm">Œillères : <span className="font-medium capitalize">{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "Sans"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] text-brand-blue">★ 1ʳᵉ fois</span>}</p>
+                                  <div className="rounded-lg border border-border bg-white p-3">
+                                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Équipement</p>
+                                    <p className="text-sm">Déferré : <span className="font-medium capitalize">{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] font-semibold text-brand-gold">1ʳᵉ fois</span>}</p>
+                                    <p className="text-sm">Œillères : <span className="font-medium capitalize">{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "sans"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] font-semibold text-brand-blue">1ʳᵉ fois</span>}</p>
                                   </div>
                                   {/* Poids / Handicap / Corde */}
                                   {(partant.handicap_poids || partant.poids_prevu || partant.numero_corde || partant.poids_reel_pesee) && (
-                                    <div className="rounded-lg border border-border bg-white p-2.5">
-                                      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">⚖️ Poids / Départ</p>
-                                      {(partant.handicap_poids || partant.poids_prevu) != null && (
-                                        <p className="text-sm">Poids : <span className="font-medium">{(partant.handicap_poids ?? partant.poids_prevu)}kg</span></p>
+                                    <div className="rounded-lg border border-border bg-white p-3">
+                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Poids / Départ</p>
+                                      {(partant.handicap_poids ?? partant.poids_prevu) != null && (
+                                        <p className="text-sm">Poids : <span className="font-medium tabular-nums">{(partant.handicap_poids ?? partant.poids_prevu)} kg</span></p>
                                       )}
                                       {partant.poids_reel_pesee != null && (
-                                        <p className="text-xs text-muted-foreground">Pesée réelle : {partant.poids_reel_pesee}kg</p>
+                                        <p className="text-xs text-muted-foreground">Pesée réelle : {partant.poids_reel_pesee} kg</p>
                                       )}
                                       {partant.numero_corde != null && (
-                                        <p className="text-sm">Corde : <span className="font-medium">{partant.numero_corde}</span></p>
+                                        <p className="text-sm">Corde : <span className="font-medium tabular-nums">{partant.numero_corde}</span></p>
                                       )}
                                     </div>
                                   )}
-                                  {/* Généalogie */}
+                                  {/* Origines */}
                                   {(partant.pere || partant.mere) && (
-                                    <div className="rounded-lg border border-border bg-white p-2.5">
-                                      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">🧬 Origines</p>
+                                    <div className="rounded-lg border border-border bg-white p-3">
+                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Origines</p>
                                       {partant.pere && <p className="text-xs">Père : <span className="font-medium">{partant.pere}</span></p>}
                                       {partant.mere && <p className="text-xs">Mère : <span className="font-medium">{partant.mere}</span></p>}
                                       {partant.pere_de_mere && <p className="text-xs text-muted-foreground">Père de mère : {partant.pere_de_mere}</p>}
