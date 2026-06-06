@@ -733,6 +733,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.combo_ev_override_failed", course_id=course_id, err=str(e)[:140])
 
+        # Purge des anciennes recommandations de la course avant recalcul
+        # (sinon doublons + vieilles EV obsolètes s'accumulent à chaque re-prédiction).
+        await session.execute(
+            text("DELETE FROM recommandations WHERE course_id = :cid"), {"cid": course_id}
+        )
+
         # Sauvegarder recommandations en DB
         for reco in recos:
             r = Recommandation(
