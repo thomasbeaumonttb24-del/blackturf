@@ -91,6 +91,11 @@ export default function AlgorithmeMonitoringPage() {
     () => adminApi.alState().then((r) => r.data),
     { refreshInterval: 30_000 }
   );
+  const { data: calib } = useSWR(
+    isAdmin ? "admin-calibration-quality" : null,
+    () => adminApi.calibrationQuality().then((r) => r.data),
+    { refreshInterval: 120_000 }
+  );
   const { data: history, isLoading: loadingHistory } = useSWR(
     isAdmin ? ["admin-al-history", histLimit] : null,
     () => adminApi.alHistory(histLimit).then((r) => r.data),
@@ -269,6 +274,47 @@ export default function AlgorithmeMonitoringPage() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Qualité de calibration (reliability + ECE) */}
+        {calib?.reliable && (
+          <Card className="border-border/60">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Cpu className="w-4 h-4 text-violet-400" />
+                <span className="text-sm font-medium">Qualité de calibration — proba de victoire</span>
+                <Badge className="ml-auto text-[10px] bg-violet-500/20 text-violet-300 border-violet-500/30">
+                  {calib.verdict} · {calib.n_obs} obs
+                </Badge>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-xs mb-3">
+                <div className="rounded bg-muted/40 p-2">
+                  <span className="text-muted-foreground">ECE</span>
+                  <div className="font-bold mt-0.5">{(calib.ece * 100).toFixed(1)}%</div>
+                </div>
+                <div className="rounded bg-muted/40 p-2">
+                  <span className="text-muted-foreground">Brier (victoire)</span>
+                  <div className="font-bold mt-0.5">{calib.brier.toFixed(4)}</div>
+                </div>
+                <div className="rounded bg-muted/40 p-2">
+                  <span className="text-muted-foreground">Taux victoire moyen</span>
+                  <div className="font-bold mt-0.5">{(calib.base_rate * 100).toFixed(1)}%</div>
+                </div>
+              </div>
+              {/* Reliability : proba prédite vs fréquence réelle par bin */}
+              <div className="space-y-1">
+                {calib.bins.filter((b: { n: number }) => b.n > 0).map((b: { lo: number; hi: number; n: number; proba_moy: number; freq_reelle: number }, i: number) => (
+                  <div key={i} className="flex items-center gap-2 text-[10px]">
+                    <span className="text-muted-foreground w-16 tabular-nums">{Math.round(b.lo * 100)}–{Math.round(b.hi * 100)}%</span>
+                    <span className="tabular-nums text-muted-foreground">prédit {(b.proba_moy * 100).toFixed(0)}%</span>
+                    <span className="tabular-nums font-semibold">→ réel {(b.freq_reelle * 100).toFixed(0)}%</span>
+                    <span className="text-muted-foreground/60">({b.n})</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">ECE bas = probas fiables (un cheval à 30% gagne ~30% du temps). Mesuré sur résultats réels.</p>
             </CardContent>
           </Card>
         )}

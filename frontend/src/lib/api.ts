@@ -149,4 +149,6 @@ export const adminApi = {
     api.get("/adaptive-learning/history", { baseURL: `${API_URL}/admin/api`, params: { limit } }),
   biasMatrix: () =>
     api.get("/adaptive-learning/bias-matrix", { baseURL: `${API_URL}/admin/api` }),
+  calibrationQuality: () =>
+    api.get("/calibration-quality", { baseURL: `${API_URL}/admin/api` }),
 };

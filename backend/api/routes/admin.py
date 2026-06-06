@@ -487,6 +487,17 @@ async def get_adaptive_learning_state(
     }
 
 
+@router.get("/calibration-quality")
+async def get_calibration_quality(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Qualité de calibration de la proba de victoire (reliability + ECE + Brier),
+    mesurée sur les courses terminées. Preuve honnête de la qualité des probas."""
+    from ml.calibration_eval import compute_calibration_quality
+    return await compute_calibration_quality(db)
+
+
 @router.get("/adaptive-learning/history")
 async def get_adaptive_learning_history(
     limit: int = Query(default=50, le=200),
