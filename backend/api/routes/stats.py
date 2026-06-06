@@ -696,6 +696,89 @@ async def track_record(
         for n, v in sorted(vb_stats.items())
     ]
 
+    # ── 6b. Favori IA : taux gagnant / placé + derniers pronostics ────────────
+    # Le favori IA = prédiction rang_predit==1 de chaque course. On le confronte à
+    # l'arrivée réelle (sa position dans le classement officiel). Données réelles
+    # uniquement (Prediction figée + Resultat), borné aux 2000 derniers résolus.
+    q_fav = (
+        select(Prediction, Participation, Cheval, Course, Resultat)
+        .join(Participation, Participation.participation_id == Prediction.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .join(Course, Course.course_id == Prediction.course_id)
+        .join(Resultat, Resultat.course_id == Prediction.course_id)
+        .where(Prediction.rang_predit == 1, Course.statut == "termine")
+        .order_by(Prediction.created_at.desc())
+        .limit(2000)
+    )
+    fav_rows = (await db.execute(q_fav)).all()
+
+    # Rang IA du vainqueur réel par course (depuis race_learning_log)
+    course_ids = [c.course_id for _, _, _, c, _ in fav_rows]
+    rll_by_course: dict[str, int] = {}
+    if course_ids:
+        rll_rows = (await db.execute(
+            select(RaceLearningLog.course_id, RaceLearningLog.gagnant_rang_predit)
+            .where(RaceLearningLog.course_id.in_(course_ids))
+        )).all()
+        rll_by_course = {cid: rang for cid, rang in rll_rows if rang is not None}
+
+    def _pos_in_classement(classement, numero: int):
+        if not classement or not isinstance(classement, list):
+            return None
+        for entry in classement:
+            if isinstance(entry, dict) and entry.get("numero") == numero:
+                p = entry.get("position")
+                return int(p) if isinstance(p, (int, float)) else None
+        return None
+
+    fav_total = fav_wins = fav_places = 0
+    derniers_pronostics: list[dict] = []
+    for pred, part, cheval, course, resultat in fav_rows:
+        classement = resultat.classement if resultat else None
+        pos = _pos_in_classement(classement, part.numero)
+        if pos is None:
+            continue  # non-partant / arrivée incomplète → hors taux
+        fav_total += 1
+        is_win = pos == 1
+        is_place = pos <= 3
+        fav_wins += int(is_win)
+        fav_places += int(is_place)
+
+        if len(derniers_pronostics) < 20:
+            gagnant_nom = None
+            if isinstance(classement, list) and classement:
+                premier = min(
+                    (e for e in classement
+                     if isinstance(e, dict) and isinstance(e.get("position"), (int, float))),
+                    key=lambda e: e["position"], default=None,
+                )
+                if premier:
+                    gagnant_nom = premier.get("cheval") or premier.get("nom")
+            rang_gagnant_ia = rll_by_course.get(course.course_id)
+            verdict = (
+                "gagnant" if is_win
+                else "place" if is_place
+                else "top3" if (rang_gagnant_ia is not None and rang_gagnant_ia <= 3)
+                else "manque"
+            )
+            derniers_pronostics.append({
+                "course_id": course.course_id,
+                "hippodrome": course.hippodrome_nom,
+                "discipline": course.discipline,
+                "date": course.date_heure.strftime("%d/%m/%Y") if course.date_heure else None,
+                "favori_nom": cheval.nom,
+                "favori_numero": part.numero,
+                "proba_top1": round(pred.proba_top1 * 100, 1),
+                "cote": round(part.cote_pmu, 1) if part.cote_pmu else None,
+                "favori_position": pos,
+                "gagnant_nom": gagnant_nom,
+                "rang_ia_gagnant": rang_gagnant_ia,
+                "verdict": verdict,
+            })
+
+    favori_win_rate = round(fav_wins / fav_total * 100, 1) if fav_total else 0.0
+    favori_place_rate = round(fav_places / fav_total * 100, 1) if fav_total else 0.0
+
     # ── 6. Adaptive learning state ────────────────────────────
     al_state = (await db.execute(
         select(AdaptiveLearningState).limit(1)
@@ -715,10 +798,14 @@ async def track_record(
             "brier_moyen": brier_moyen,
             "nb_courses_analysees": nb_total,
             "nb_surprises": nb_surprises,
+            "favori_win_rate": favori_win_rate,
+            "favori_place_rate": favori_place_rate,
+            "nb_favoris_evalues": fav_total,
         },
         "by_month": monthly_list,
         "by_discipline": by_discipline,
         "best_pronostics": best_pronostics,
+        "derniers_pronostics": derniers_pronostics,
         "vb_performance": vb_performance,
         "adaptive_learning": al_data,
     }

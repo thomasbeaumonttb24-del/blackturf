@@ -7,6 +7,7 @@ import { Search, User, MapPin, Clock, Loader2, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 type SearchResult = {
   type: "cheval" | "jockey" | "hippodrome" | "course";
@@ -27,7 +28,7 @@ const RUNNING_STYLE_EMOJIS: Record<string, string> = {
   mene: "🔴", suit_tete: "🟠", placier: "🔵", ferme: "🟢", irregulier: "⚪"
 };
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+const fetcher = (url: string) => api.get(url).then((r) => r.data);
 
 function RechercheContent() {
   const searchParams = useSearchParams();
@@ -41,7 +42,7 @@ function RechercheContent() {
   }, [q]);
 
   const { data, isLoading } = useSWR<SearchResult[]>(
-    debouncedQ.length >= 2 ? `/api/v1/recherche?q=${encodeURIComponent(debouncedQ)}&limit=20` : null,
+    debouncedQ.length >= 2 ? `/recherche?q=${encodeURIComponent(debouncedQ)}&limit=20` : null,
     fetcher,
     { dedupingInterval: 500 },
   );

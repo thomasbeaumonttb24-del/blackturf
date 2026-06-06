@@ -27,6 +27,22 @@ from typing import Optional
 
 log = structlog.get_logger(module="portfolio")
 
+# Conversion empirique top-3 -> top-1 quand proba_top1 absente.
+# P(gagner) ≈ P(top-3) / 2.85 en moyenne sur un champ ~12 partants.
+_P1_FROM_P3 = 0.35
+
+
+def _p1(d: dict) -> float:
+    """Probabilité de victoire (top-1) d'un partant, avec repli robuste sur top-3.
+
+    Évite l'ambiguïté de précédence `a or b * c` et centralise la conversion.
+    """
+    p1 = d.get("proba_top1")
+    if p1 and p1 > 0:
+        return float(p1)
+    return float(d.get("proba_top3", 0.0)) * _P1_FROM_P3
+
+
 # TRJ 2026 par type de pari
 TRJ = {
     "Simple Gagnant": 0.8495,
@@ -253,7 +269,7 @@ class BetPortfolioEngine:
             "chevaux": [_cheval(best)],
             "mise": round(mise, 2),
             "ev": round(best.get("ev_max", 0), 3),
-            "proba": round(best.get("proba_top1", 0) or best.get("proba_top3", 0) * 0.4, 3),
+            "proba": round(_p1(best), 3),
             "explication": f"N°{best['numero']} {best['nom']} — EV +{best.get('ev_max',0)*100:.0f}% | Cote {cote:.1f}",
         })
         cout_total += mise
@@ -261,8 +277,8 @@ class BetPortfolioEngine:
         # Couplé Gagnant top-2 EV
         if len(vbs_qual) >= 2 and "Couplé Gagnant" in paris_dispo:
             sec = vbs_qual[1]
-            p1 = float(by_proba[0].get("proba_top1") or by_proba[0].get("proba_top3", 0) * 0.4) if by_proba else 0.2
-            p2 = float(sec.get("proba_top1") or sec.get("proba_top3", 0) * 0.4)
+            p1 = _p1(by_proba[0]) if by_proba else 0.2
+            p2 = _p1(sec)
             proba_couple = p1 * p2 * 2  # ordre quelconque
             mise_c = MISE_MIN["Couplé Gagnant"] + 2.0
             paris.append({
@@ -672,7 +688,7 @@ class BetPortfolioEngine:
         ]
 
         avg_proba_top1 = float(np.mean([
-            p.get("proba_top1", 0) or p.get("proba_top3", 0) * 0.4
+            _p1(p)
             for p in predictions
             if p.get("proba_top1", 0) or p.get("proba_top3", 0)
         ])) if predictions else 0.0

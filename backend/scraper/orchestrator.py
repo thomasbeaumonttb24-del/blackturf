@@ -35,7 +35,6 @@ from scraper.sources.meteo import MeteoScraper
 from scraper.sources.winamax import WinamaxScraper
 from scraper.sources.betclic import BetclicScraper
 from scraper.sources.unibet import UnibetScraper
-from scraper.sources.betfair import BetfairScraper
 from scraper.sources.france_galop import FranceGalopScraper
 from scraper.sources.paris_turf import ParisTurfScraper
 from scraper.sources.racing_post import RacingPostScraper
@@ -564,7 +563,6 @@ class BlackTurfOrchestrator:
             ("winamax", WinamaxScraper),
             ("betclic", BetclicScraper),
             ("unibet", UnibetScraper),
-            ("betfair", BetfairScraper),
         ]
 
         for source_name, ScraperClass in scrapers:
@@ -769,26 +767,26 @@ class BlackTurfOrchestrator:
                 # Chevaux sans généalogie et d'origine étrangère (non FR)
                 from sqlalchemy import select as sa_select
                 from db.models import Cheval
-                stmt = sa_select(Cheval.nom, Cheval.racing_post_url).where(
+                stmt = sa_select(Cheval.cheval_id, Cheval.nom, Cheval.racing_post_url).where(
                     Cheval.pere.is_(None),
                     Cheval.pays_naissance != "FR",
                 )
                 result = await session.execute(stmt)
                 chevaux = result.fetchall()[:30]  # max 30/jour
 
-                for nom, rp_url in chevaux:
+                for cheval_id, nom, rp_url in chevaux:
                     gen = await scraper.get_genealogie(nom)
                     if gen:
                         await save_genealogie(session, gen)
 
-                    # Sauvegarder l'URL Racing Post sur le cheval
+                    # Sauvegarder l'URL Racing Post sur le cheval — par PK (évite les homonymes)
                     fiche = await scraper.get_fiche_cheval(nom, rp_url)
                     if fiche and fiche.get("racing_post_url"):
                         from sqlalchemy import update as sa_update
                         from db.models import Cheval as ChevalModel
                         await session.execute(
                             sa_update(ChevalModel)
-                            .where(ChevalModel.nom == nom)
+                            .where(ChevalModel.cheval_id == cheval_id)
                             .values(racing_post_url=fiche["racing_post_url"])
                         )
 
@@ -992,6 +990,29 @@ class BlackTurfOrchestrator:
             except Exception as e:
                 log.error("orchestrator.predict_error", course_id=cid, error=str(e)[:200])
         log.info("orchestrator.predictions_cycle", total=len(course_ids), ok=ok)
+
+        # ── Garde-fou observabilité : alerte si la couche value-bet repart en vrille
+        # (régression de calibration). Bornes larges = ne crient qu'en cas d'anomalie
+        # franche, pas sur du bruit. Aide à détecter un retour du biais longshot.
+        VB_COUNT_ALERT = 120     # > ~2 VB/course en moyenne = suspect
+        VB_EV_ALERT = 2.0        # EV > +200% = quasi toujours une erreur de calibration
+        try:
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(text("""
+                    SELECT count(*) AS n,
+                           COALESCE(max(ev_max), 0) AS ev_max,
+                           COALESCE(count(*) FILTER (WHERE ev_max > :ev), 0) AS n_hot
+                    FROM value_bets WHERE actif = true
+                """), {"ev": VB_EV_ALERT})).one()
+                n, ev_max, n_hot = int(row[0]), float(row[1]), int(row[2])
+                if n > VB_COUNT_ALERT or ev_max > VB_EV_ALERT:
+                    log.warning("orchestrator.vb_sanity_alert",
+                                n_actifs=n, ev_max=round(ev_max, 3), n_ev_aberrants=n_hot,
+                                seuil_count=VB_COUNT_ALERT, seuil_ev=VB_EV_ALERT)
+                else:
+                    log.info("orchestrator.vb_sanity_ok", n_actifs=n, ev_max=round(ev_max, 3))
+        except Exception as e:
+            log.error("orchestrator.vb_sanity_failed", error=str(e)[:160])
 
     async def poll_resultats(self) -> None:
         """Polling résultats toutes les 3 minutes pour courses en cours."""

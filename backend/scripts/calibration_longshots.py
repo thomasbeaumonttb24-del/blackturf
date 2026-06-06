@@ -84,14 +84,17 @@ async def fetch_winners(session) -> dict[str, set]:
     return winners
 
 
-async def main(cote_col: str) -> None:
-    async with AsyncSessionLocal() as session:
-        rows = await fetch_rows(session, cote_col)
-        winners = await fetch_winners(session)
+def compute_bucket_stats(rows, winners) -> list[dict]:
+    """
+    Agrège (proba_top1, cote, numero, course_id) par bucket de cote et croise avec
+    les gagnants réels. Fonction PURE (aucune I/O) → testable sans DB.
 
-    # Agrège par bucket : probas prédites + outcomes réels.
+    Retourne une liste ordonnée (un dict par bucket, dans l'ordre de COTE_BUCKETS) :
+      {bucket, lo, hi, n, proba_moy, freq, implied_moy, ratio, verdict, reliable}.
+    Les buckets sous MIN_OBS ont reliable=False et leurs métriques à None (pas
+    d'extrapolation — cf. règle d'intégrité no-fake-data).
+    """
     by_bucket: dict[str, dict] = defaultdict(lambda: {"probas": [], "wins": 0, "implied": []})
-    n_used = 0
     for proba, cote, numero, course_id in rows:
         gagnants = winners.get(course_id)
         if gagnants is None:          # course sans résultat exploitable → ignorée
@@ -100,51 +103,142 @@ async def main(cote_col: str) -> None:
             cote = float(cote); proba = float(proba); numero = int(numero)
         except (TypeError, ValueError):
             continue
+        if cote <= 1.0:
+            continue
         b = bucket_label(cote)
         by_bucket[b]["probas"].append(proba)
         by_bucket[b]["implied"].append(1.0 / cote)
         if numero in gagnants:
             by_bucket[b]["wins"] += 1
-        n_used += 1
 
-    print(f"\nCalibration longshots — cote de référence : {cote_col}")
-    print(f"Observations exploitées : {n_used}  (courses avec résultat : {len(winners)})\n")
-    print(f"{'bucket cote':<16}{'n':>7}{'proba_préd':>13}{'freq_réelle':>13}"
-          f"{'implicite':>12}{'ratio P/réel':>14}{'verdict':>20}")
-    print("-" * 95)
-
+    stats: list[dict] = []
     for hi_idx in range(len(COTE_BUCKETS)):
         lo = 1.0 if hi_idx == 0 else COTE_BUCKETS[hi_idx - 1]
         hi = COTE_BUCKETS[hi_idx]
         b = f"[{lo:g} – {hi:g})" if hi != float("inf") else f"[{lo:g} – ∞)"
         d = by_bucket.get(b)
-        if not d or len(d["probas"]) < MIN_OBS:
-            n = len(d["probas"]) if d else 0
-            print(f"{b:<16}{n:>7}{'NULL':>13}{'NULL':>13}{'NULL':>12}{'NULL':>14}"
-                  f"{'(n<'+str(MIN_OBS)+')':>20}")
+        n = len(d["probas"]) if d else 0
+        entry = {"bucket": b, "lo": lo, "hi": hi, "n": n,
+                 "proba_moy": None, "freq": None, "implied_moy": None,
+                 "ratio": None, "verdict": None, "reliable": False}
+        if d and n >= MIN_OBS:
+            proba_moy = statistics.mean(d["probas"])
+            freq = d["wins"] / n
+            ratio = proba_moy / freq if freq > 0 else float("inf")
+            if ratio >= 1.5:
+                verdict = "SUR-ÉVALUÉ ⚠"
+            elif ratio <= 0.67:
+                verdict = "sous-évalué"
+            else:
+                verdict = "ok"
+            entry.update(proba_moy=proba_moy, freq=freq,
+                         implied_moy=statistics.mean(d["implied"]),
+                         ratio=ratio, verdict=verdict, reliable=True)
+        stats.append(entry)
+    return stats
+
+
+def recommend_gate_params(stats: list[dict]) -> dict:
+    """
+    Dérive des valeurs concrètes pour les garde-fous de valuebets.py à partir des
+    buckets FIABLES (reliable=True). Fonction PURE → testable sans DB.
+
+    - longshot_cote_min : borne basse du 1er bucket fiable jugé SUR-ÉVALUÉ
+      (ratio ≥ 1.5). En-dessous le modèle est calibré → on ne gate pas.
+    - max_model_market_ratio : ratio P/réel médian des buckets sur-évalués, borné
+      à [1.5, 3.0]. C'est l'ampleur du sur-fit à neutraliser.
+    - cote_max_vb : borne basse du 1er bucket fiable où la fréquence réelle de
+      victoire s'effondre (freq < 0.02 → quasi jamais gagnant, edge non crédible).
+
+    Chaque champ vaut None si les données ne permettent pas de le caler (pas de
+    bucket fiable correspondant) → ne JAMAIS inventer une valeur. `rationale`
+    explique chaque choix ; `insufficient_data` liste les champs non calables.
+    """
+    reliable = [s for s in stats if s["reliable"]]
+    over = [s for s in reliable if s["ratio"] is not None and s["ratio"] >= 1.5]
+
+    rec: dict = {"longshot_cote_min": None, "max_model_market_ratio": None,
+                 "cote_max_vb": None, "rationale": {}, "insufficient_data": []}
+
+    if over:
+        first_over = min(over, key=lambda s: s["lo"])
+        rec["longshot_cote_min"] = first_over["lo"]
+        rec["rationale"]["longshot_cote_min"] = (
+            f"1er bucket fiable sur-évalué : {first_over['bucket']} "
+            f"(ratio {first_over['ratio']:.2f})")
+        ratio_med = statistics.median([s["ratio"] for s in over
+                                       if s["ratio"] != float("inf")] or [1.5])
+        rec["max_model_market_ratio"] = round(min(3.0, max(1.5, ratio_med)), 2)
+        rec["rationale"]["max_model_market_ratio"] = (
+            f"ratio médian des {len(over)} buckets sur-évalués = {ratio_med:.2f} "
+            f"(borné [1.5, 3.0])")
+    else:
+        rec["insufficient_data"] += ["longshot_cote_min", "max_model_market_ratio"]
+
+    collapse = [s for s in reliable if s["freq"] is not None and s["freq"] < 0.02]
+    if collapse:
+        first_collapse = min(collapse, key=lambda s: s["lo"])
+        rec["cote_max_vb"] = first_collapse["lo"]
+        rec["rationale"]["cote_max_vb"] = (
+            f"1er bucket fiable à freq<2% : {first_collapse['bucket']} "
+            f"(freq réelle {first_collapse['freq']:.4f})")
+    else:
+        rec["insufficient_data"].append("cote_max_vb")
+
+    return rec
+
+
+def _print_report(cote_col: str, n_used: int, n_courses: int,
+                  stats: list[dict], rec: dict) -> None:
+    print(f"\nCalibration longshots — cote de référence : {cote_col}")
+    print(f"Observations exploitées : {n_used}  (courses avec résultat : {n_courses})\n")
+    print(f"{'bucket cote':<16}{'n':>7}{'proba_préd':>13}{'freq_réelle':>13}"
+          f"{'implicite':>12}{'ratio P/réel':>14}{'verdict':>20}")
+    print("-" * 95)
+    for s in stats:
+        if not s["reliable"]:
+            print(f"{s['bucket']:<16}{s['n']:>7}{'NULL':>13}{'NULL':>13}{'NULL':>12}"
+                  f"{'NULL':>14}{'(n<'+str(MIN_OBS)+')':>20}")
             continue
-        n = len(d["probas"])
-        proba_moy = statistics.mean(d["probas"])
-        freq = d["wins"] / n
-        implied_moy = statistics.mean(d["implied"])
-        ratio = proba_moy / freq if freq > 0 else float("inf")
-        if ratio >= 1.5:
-            verdict = "SUR-ÉVALUÉ ⚠"
-        elif ratio <= 0.67:
-            verdict = "sous-évalué"
-        else:
-            verdict = "ok"
-        print(f"{b:<16}{n:>7}{proba_moy:>13.4f}{freq:>13.4f}"
-              f"{implied_moy:>12.4f}{ratio:>14.2f}{verdict:>20}")
+        print(f"{s['bucket']:<16}{s['n']:>7}{s['proba_moy']:>13.4f}{s['freq']:>13.4f}"
+              f"{s['implied_moy']:>12.4f}{s['ratio']:>14.2f}{s['verdict']:>20}")
 
     print("\nLecture : ratio P/réel > 1.5 sur les gros buckets = biais longshot confirmé.")
     print("La colonne 'implicite' (1/cote moyen) est le prior marché — souvent mieux")
     print("calibré que le modèle sur les grosses cotes. Cale ALPHA/shrinkage là-dessus.\n")
+
+    print("Recommandations garde-fous (valuebets.py) — dérivées des buckets fiables :")
+    for key in ("longshot_cote_min", "max_model_market_ratio", "cote_max_vb"):
+        val = rec[key]
+        if val is None:
+            print(f"  {key:<24} = NULL  (données insuffisantes, valeur conservatrice conservée)")
+        else:
+            print(f"  {key:<24} = {val}   ← {rec['rationale'].get(key, '')}")
+    print()
+
+
+async def main(cote_col: str, as_json: bool = False) -> None:
+    async with AsyncSessionLocal() as session:
+        rows = await fetch_rows(session, cote_col)
+        winners = await fetch_winners(session)
+
+    stats = compute_bucket_stats(rows, winners)
+    rec = recommend_gate_params(stats)
+    n_used = sum(s["n"] for s in stats)
+
+    if as_json:
+        print(json.dumps({"cote_col": cote_col, "n_used": n_used,
+                          "n_courses": len(winners), "buckets": stats,
+                          "recommendations": rec}, ensure_ascii=False, indent=2))
+    else:
+        _print_report(cote_col, n_used, len(winners), stats, rec)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="cote_pmu",
                     help="colonne cote de participations (cote_pmu, cote_betfair, …)")
+    ap.add_argument("--json", action="store_true",
+                    help="sortie JSON machine (buckets + recommandations) au lieu du tableau")
     args = ap.parse_args()
-    asyncio.run(main(args.source))
+    asyncio.run(main(args.source, as_json=args.json))

@@ -203,8 +203,8 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
                 "taux": r.taux_victoire,
                 "nb": r.nb_courses,
             }
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("courses.asso_map_failed", error=str(e))
 
     partants = []
     for p, ch, j, en, eq in rows:
@@ -301,8 +301,8 @@ async def get_programme(
         if cached:
             data = json.loads(cached)
             return ProgrammeOut(**data)
-    except Exception:
-        pass  # Redis indisponible → continuer sans cache
+    except Exception as e:
+        log.debug("courses.programme_cache_read_failed", error=str(e))  # Redis indispo → continuer sans cache
 
     q = (
         select(Course, Reunion)
@@ -354,8 +354,8 @@ async def get_programme(
         redis = await get_redis()
         ttl = 60 if target == date.today() else 3600   # 1 min live, 1h passé
         await redis.setex(cache_key, ttl, json.dumps(result.model_dump(), default=str))
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("courses.programme_cache_write_failed", error=str(e))
 
     return result
 
@@ -371,8 +371,8 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
         cached = await redis.get(cache_key)
         if cached:
             return CourseDetailOut(**json.loads(cached))
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("courses.detail_cache_read_failed", error=str(e))
 
     result = await db.execute(select(Course).where(Course.course_id == course_id))
     course = result.scalar_one_or_none()
@@ -453,8 +453,8 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
             f"course_detail:{course_id}", ttl,
             json.dumps(response.model_dump(), default=str)
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("courses.detail_cache_write_failed", error=str(e))
 
     return response
 

@@ -24,6 +24,9 @@ interface TrackRecord {
     brier_moyen: number;
     nb_courses_analysees: number;
     nb_surprises: number;
+    favori_win_rate: number;
+    favori_place_rate: number;
+    nb_favoris_evalues: number;
   };
   by_month: Array<{
     mois: string;
@@ -47,6 +50,20 @@ interface TrackRecord {
     gagnant_reel: string | null;
     correct: boolean | null;
   }>;
+  derniers_pronostics: Array<{
+    course_id: string;
+    hippodrome: string;
+    discipline: string;
+    date: string | null;
+    favori_nom: string;
+    favori_numero: number;
+    proba_top1: number;
+    cote: number | null;
+    favori_position: number;
+    gagnant_nom: string | null;
+    rang_ia_gagnant: number | null;
+    verdict: "gagnant" | "place" | "top3" | "manque";
+  }>;
   vb_performance: Array<{
     niveau: number;
     nb_vbs: number;
@@ -65,6 +82,13 @@ const NIVEAU_LABELS: Record<number, string> = {
 };
 const NIVEAU_COLORS: Record<number, string> = {
   1: "text-zinc-400", 2: "text-blue-400", 3: "text-amber-400", 4: "text-emerald-400",
+};
+
+const VERDICTS: Record<string, { emoji: string; label: string; cls: string }> = {
+  gagnant: { emoji: "🎯", label: "Gagnant", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" },
+  place: { emoji: "✅", label: "Placé", cls: "border-amber-300 bg-amber-50 text-amber-700" },
+  top3: { emoji: "➕", label: "Vainqueur top-3 IA", cls: "border-blue-300 bg-blue-50 text-blue-700" },
+  manque: { emoji: "❌", label: "Manqué", cls: "border-rose-300 bg-rose-50 text-rose-700" },
 };
 
 function StarRating({ n }: { n: number }) {
@@ -151,6 +175,12 @@ export default function TrackRecordPage() {
                   {g.accuracy_top1}%
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">Précision Top-1</div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-black text-emerald-400 tabular-nums">
+                  {g.favori_place_rate}%
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">Favori IA placé (top-3)</div>
               </div>
             </div>
 
@@ -384,6 +414,74 @@ export default function TrackRecordPage() {
                     </div>
                   </Link>
                 ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Derniers pronostics (favori IA vs arrivée) ─────── */}
+        <Card className="border-border/60">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Activity className="w-4 h-4 text-brand-blue" />
+                Derniers pronostics — favori IA vs arrivée
+              </CardTitle>
+              {g.nb_favoris_evalues > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Favori IA gagnant {g.favori_win_rate}% · placé {g.favori_place_rate}% sur {g.nb_favoris_evalues.toLocaleString("fr-FR")} courses
+                </span>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {data.derniers_pronostics.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Aucune course terminée avec pronostic archivé pour le moment
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {data.derniers_pronostics.map((p, i) => {
+                  const v = VERDICTS[p.verdict];
+                  return (
+                    <Link
+                      key={p.course_id + i}
+                      href={`/courses/${p.course_id}`}
+                      className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-foreground text-sm">
+                            N°{p.favori_numero} {p.favori_nom}
+                          </span>
+                          <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 shrink-0">
+                            {p.discipline}
+                          </Badge>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                          {p.hippodrome} · {p.date} · {p.proba_top1}% top-1
+                          {p.cote ? ` · cote ${p.cote}` : ""}
+                          {p.gagnant_nom && p.verdict !== "gagnant" && (
+                            <span className="ml-1">
+                              → vainqueur <span className="text-foreground font-medium">{p.gagnant_nom}</span>
+                              {p.rang_ia_gagnant != null && ` (IA #${p.rang_ia_gagnant})`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className={cn(
+                          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap",
+                          v.cls,
+                        )}>
+                          {v.emoji} {v.label}
+                          <span className="tabular-nums opacity-70">· {p.favori_position}e</span>
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </CardContent>

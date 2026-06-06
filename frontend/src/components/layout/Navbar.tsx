@@ -14,6 +14,7 @@ import { planLabel, cn } from "@/lib/utils";
 const NAV_LINKS_PUBLIC = [
   { href: "/programme", label: "Programme" },
   { href: "/value-bets", label: "Paris de valeur" },
+  { href: "/track-record", label: "Palmarès IA" },
   { href: "/bankroll", label: "Capital" },
   { href: "/assistant", label: "Assistant IA" },
   { href: "/tarifs", label: "Tarifs" },
@@ -23,6 +24,7 @@ const NAV_LINKS_AUTH: Array<{ href: string; label: string; icon?: LucideIcon }> 
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/programme", label: "Programme" },
   { href: "/value-bets", label: "Paris de valeur" },
+  { href: "/track-record", label: "Palmarès IA" },
   { href: "/bankroll", label: "Capital" },
   { href: "/assistant", label: "Assistant IA" },
 ];
