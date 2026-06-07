@@ -54,6 +54,10 @@ CONFIANCE_SEUILS = {
 # au-delà de 8. Gate appliqué dès cote 4, écart max 1.7× la proba marché.
 MAX_MODEL_MARKET_RATIO = 1.7
 LONGSHOT_COTE_MIN = 4.0
+# Court-cote : sur cote < LONGSHOT_COTE_MIN, on cape la proba modèle au marché ×
+# ce ratio. Le sous-ensemble VB cote<4 est sur-coté (ROI réel −44%) → edge max
+# crédible sur favori court = +30% vs marché. Tue les faux value bets courts.
+SHORT_MAX_RATIO = 1.3
 
 # Cote max retenue pour le calcul de l'EV = médiane marché × ce facteur.
 # Anti winner's curse : empêche de calculer l'EV sur une cote isolée très
@@ -261,6 +265,14 @@ def detect_value_bet(
                      proba=round(proba_top1, 4), cote_marche=round(cote_marche, 2),
                      ratio=round(proba_top1 / implied_marche, 2))
             return None
+
+    # ── Garde-fou COURT-COTE (symétrique du longshot) ────────────────────────
+    # Sur cote < LONGSHOT_COTE_MIN, le sous-ensemble value bet (modèle > marché) est
+    # SUR-coté : ROI réel mesuré −44% (le modèle surestime les courts qu'il aime).
+    # On CAPE la P(victoire) au marché × SHORT_MAX_RATIO → EV honnête, plus de faux
+    # value bet court (don au PMU). Mesuré sur predictions ⋈ résultats par bucket.
+    elif cote_marche and 1.0 < cote_marche < LONGSHOT_COTE_MIN:
+        proba_top1 = min(proba_top1, SHORT_MAX_RATIO / cote_marche)
 
     # ── EV anti winner's curse ───────────────────────────────────────────────
     # ev_max calculé sur une cote PLAFONNÉE à la médiane marché × facteur, pas sur
