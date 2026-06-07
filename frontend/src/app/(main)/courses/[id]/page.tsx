@@ -1253,7 +1253,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
 
   useEffect(() => {
     let alive = true;
-    api.get(`/courses/${courseId}/bilan-pronostic?montant=20`)
+    api.get(`/courses/${courseId}/bilan-pronostic?montant=10`)
       .then((r) => { if (alive) { setData(r.data); setState("ok"); } })
       .catch(() => { if (alive) setState("error"); });
     return () => { alive = false; };
