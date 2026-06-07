@@ -347,6 +347,13 @@ async def run_nightly_retraining() -> None:
             await _iso_compute(iso_session)
     except Exception as e:
         log.warning("pipeline.nightly_isotonic_skip", err=str(e)[:140])
+    # Recalcule la calibration isotonique du proba_top3 (placé → fréquence réelle)
+    try:
+        from ml.isotonic_calibration_top3 import compute_and_store as _iso3_compute
+        async with AsyncSessionLocal() as iso3_session:
+            await _iso3_compute(iso3_session)
+    except Exception as e:
+        log.warning("pipeline.nightly_isotonic_top3_skip", err=str(e)[:140])
 
 
 async def _do_retraining(mois: int, label: str) -> None:
@@ -626,6 +633,18 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         target_sum3 = float(min(3.0, nb_partants))
         s3 = float(p3_arr.sum())
         probas_top3 = np.clip(p3_arr * (target_sum3 / s3), 0.0, 0.99) if s3 > 0 else p3_arr
+
+        # ── Calibration isotonique du proba_top3 (placé) ─────────────────────────
+        # Corrige la sur-confiance milieu de gamme du placé (mesurée : prédit 0.5
+        # → réel ~0.40) → EV/proba des paris PLACÉ honnêtes (cœur prudent/modéré).
+        # Régression monotone apprise sur les vraies arrivées, recalc nightly.
+        try:
+            from ml.isotonic_calibration_top3 import load_curve as _t3_load, apply_calibration as _t3_apply
+            _t3_curve = await _t3_load(session)
+            if _t3_curve:
+                probas_top3 = _t3_apply(probas_top3, _t3_curve, nb_partants)
+        except Exception as e:
+            log.warning("pipeline.isotonic_top3_skip", err=str(e)[:140])
 
         # ── Calibration par le marché (blend modèle × proba implicite PMU) ───────
         # Le marché PMU est un prior fort et bien calibré. On mélange la proba
