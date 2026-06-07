@@ -190,6 +190,7 @@ def detect_value_bet(
     entraineur_suspendu: bool = False,
     non_partant: bool = False,
     cote_calib: Optional[dict] = None,
+    signal_mult: Optional[float] = None,
 ) -> Optional[dict]:
     """
     Détecte si un partant est un value bet — version multi-sources.
@@ -285,7 +286,19 @@ def detect_value_bet(
         if spi_score and spi_score >= 0.40 and niveau < 4:
             niveau = min(4, niveau + 1)
 
+    # ── Apprentissage par SIGNAL : module le niveau selon le ROI réel des signaux
+    # portés par ce cheval (appris des résultats, recalc nightly). Un cheval avec
+    # des signaux historiquement PERDANTS (ex. "forme excellente" surcotée, ROI −25%)
+    # est rétrogradé ; des signaux GAGNANTS (duo J/E +218%, ELO sup +74%) le promeuvent.
+    # → la sélection se réajuste vers ce qui a VRAIMENT rapporté. Neutre si None.
+    if signal_mult is not None:
+        if signal_mult <= 0.80 and niveau > 1:
+            niveau -= 1
+        elif signal_mult >= 1.30 and niveau < 4:
+            niveau += 1
+
     return {
+        "signal_mult": round(float(signal_mult), 3) if signal_mult is not None else None,
         # EVs par source
         "ev_pmu":     evs.get("pmu"),
         "ev_geny":    evs.get("geny"),

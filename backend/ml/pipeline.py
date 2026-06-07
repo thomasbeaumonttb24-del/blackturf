@@ -374,6 +374,16 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.cote_calibration_done", n=_cc.get("n_total"))
     except Exception as e:
         log.warning("pipeline.nightly_cote_calib_skip", err=str(e)[:140])
+    # Ré-apprend le ROI réel PAR SIGNAL (duo J/E, ELO, pedigree, forme-piège…) →
+    # module la sélection des value bets vers ce qui rapporte. Auto-amélioration.
+    try:
+        from ml.signal_performance import compute_signal_performance, persist_signal_performance
+        async with AsyncSessionLocal() as sp_session:
+            _sp = await compute_signal_performance(sp_session)
+            await persist_signal_performance(sp_session, _sp)
+            log.info("pipeline.signal_performance_done", n=_sp.get("n_total"))
+    except Exception as e:
+        log.warning("pipeline.nightly_signal_perf_skip", err=str(e)[:140])
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
     try:
@@ -788,6 +798,15 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             _cote_calib = await load_cote_calibration(session)
         except Exception:
             _cote_calib = None
+        # Apprentissage par signal (ROI réel par signal, recalc nightly) — module
+        # le niveau des value bets vers les signaux historiquement gagnants.
+        _sig_mult = None
+        try:
+            from ml.signal_performance import load_signal_performance, signal_multiplier as _sig_mult_fn
+            _signal_perf = await load_signal_performance(session)
+            _sig_mult = _sig_mult_fn
+        except Exception:
+            _signal_perf = None
 
         predictions = []
         for i, feat in enumerate(features_list):
@@ -891,6 +910,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 jockey_suspendu=jockey_susp,
                 entraineur_suspendu=entraineur_susp,
                 cote_calib=_cote_calib,
+                signal_mult=(_sig_mult(feat, _signal_perf) if (_sig_mult and _signal_perf) else None),
             )
             niveau_vb = 0
             ev_max = 0.0
