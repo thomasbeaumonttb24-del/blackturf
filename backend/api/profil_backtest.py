@@ -1,17 +1,20 @@
 """
 profil_backtest.py — Backtest des 3 PROFILS de risque sur l'historique réel.
 
-Pour chaque course terminée (avec prédictions FIGÉES avant la course + arrivée
-officielle), on génère le plan de mise de chaque profil (conservateur / équilibré
-/ agressif) pour une mise fixe, on règle chaque pari sur l'arrivée RÉELLE et on
+Pour chaque course terminée (prédictions FIGÉES avant la course + arrivée
+officielle + rapports PMU publiés), on génère le plan de mise de chaque profil
+(conservateur / équilibré / agressif) pour une mise fixe, on règle chaque pari
+sur l'arrivée RÉELLE aux RAPPORTS PMU RÉELS (services/bet_settlement), puis on
 agrège ROI / gain net / taux de courses bénéficiaires par profil.
 
-Intégrité :
+Intégrité — QUE DU RÉEL, aucune valeur inventée :
 - Sélection = mêmes prédictions figées que celles servies avant la course.
-- Issue gagnant/perdant = arrivée officielle PMU (Resultat.classement) — RÉELLE.
-- Gains : Simple Gagnant réglé à la COTE PMU RÉELLE ; paris combinés au rapport
-  ESTIMÉ par le modèle (TRJ / proba marché) — c'est une SIMULATION de stratégie,
-  clairement étiquetée comme telle, pas un relevé de rapports PMU officiels.
+- Gagné/perdu = arrivée officielle PMU.
+- Gain = mise × rapport PMU RÉEL (clés e_* base 1€). Le Simple Gagnant, Couplé,
+  Trio, 2sur4 utilisent leur vrai rapport publié.
+- Si un pari GAGNANT n'a pas de rapport publié (gain indéterminé), la course est
+  EXCLUE pour ce profil (jamais d'estimation). nb_courses = courses réellement
+  réglables.
 """
 from __future__ import annotations
 
@@ -24,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Course, Participation, Prediction, Resultat
 from ml.combo_bets import enumerate_bet_candidates
+from services.bet_settlement import settle_pari
 from services.mise_calculator import (
     _palier, _effective_config, _select_conviction, _allocate_kelly,
 )
@@ -38,55 +42,19 @@ PROFILS = [
 ]
 
 
-def _positions(classement) -> dict[int, int]:
-    """{numero: position} depuis l'arrivée officielle. Ignore les entrées invalides."""
-    pos: dict[int, int] = {}
-    if isinstance(classement, list):
-        for e in classement:
-            if isinstance(e, dict):
-                n, p = e.get("numero"), e.get("position")
-                if isinstance(n, (int, float)) and isinstance(p, (int, float)):
-                    pos[int(n)] = int(p)
-    return pos
-
-
-def _won(type_pari: str, nums: list[int], pos: dict[int, int], place_k: int) -> bool:
-    """Le pari est-il gagnant au vu de l'arrivée réelle ?"""
-    P = lambda n: pos.get(n, 999)
-    t = type_pari
-    if t == "Simple Gagnant":
-        return P(nums[0]) == 1
-    if t == "Simple Placé":
-        return P(nums[0]) <= place_k
-    if t == "Couplé Gagnant":
-        return all(P(n) <= 2 for n in nums)
-    if t == "Couplé Placé":
-        return all(P(n) <= 3 for n in nums)
-    if t == "2sur4":
-        return sum(1 for n in nums if P(n) <= 4) >= 2
-    if t in ("Trio", "Tiercé Désordre"):
-        return all(P(n) <= 3 for n in nums)
-    if t == "Tiercé Ordre":
-        return [P(n) for n in nums] == [1, 2, 3]
-    if t in ("Quarté+ Désordre", "Quarté+"):
-        return all(P(n) <= 4 for n in nums)
-    if t.startswith("Quinté+"):
-        return all(P(n) <= 5 for n in nums)
-    return False
-
-
 def _compute(courses: list[dict], n_sims: int) -> dict:
-    """Boucle CPU pure (exécutée hors event-loop via asyncio.to_thread)."""
-    agg = {k: {"nb": 0, "mise": 0.0, "gain": 0.0, "benef": 0} for k, _ in PROFILS}
+    """Boucle CPU pure (exécutée hors event-loop via asyncio.to_thread).
+    Règlement 100% aux rapports PMU réels (settle_pari)."""
+    agg = {k: {"nb": 0, "mise": 0.0, "gain": 0.0, "benef": 0, "skip": 0} for k, _ in PROFILS}
     palier = _palier(MISE)
 
     for c in courses:
         preds = c["preds"]
-        pos = c["pos"]
-        if not preds or not pos:
+        classement = c["classement"]
+        rapports = c["rapports"]
+        if not preds or not classement:
             continue
         nb_part = c["nb_partants"] or len(preds)
-        place_k = 3 if nb_part >= 8 else 2
         course_info = {
             "nb_partants": nb_part,
             "est_quinte": c["est_quinte"], "est_quarte": c["est_quarte"], "est_tierce": c["est_tierce"],
@@ -105,13 +73,24 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
             if not sel:
                 continue
             _allocate_kelly(sel, MISE, palier, cfg)
-            mise_course = sum(x["mise"] for x in sel)
+
+            mise_course = 0.0
             gain_course = 0.0
+            indetermine = False
             for x in sel:
                 nums = [h["numero"] for h in x["chevaux"]]
-                if _won(x["type_pari"], nums, pos, place_k):
-                    gain_course += x["mise"] * x["rapport_estime"]
+                r = settle_pari(x["type_pari"], nums, classement, rapports, nb_part)
+                if r["gagne"] and r["rapport_reel"] is None:
+                    indetermine = True  # gagnant sans rapport publié → course non réglable
+                    break
+                mise_course += x["mise"]
+                if r["gagne"]:
+                    gain_course += x["mise"] * r["rapport_reel"]
+
             a = agg[key]
+            if indetermine or mise_course <= 0:
+                a["skip"] += 1
+                continue
             a["nb"] += 1
             a["mise"] += mise_course
             a["gain"] += gain_course
@@ -139,8 +118,9 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
     }
 
 
-async def backtest_profils(db: AsyncSession, limit: int = 120, n_sims: int = 3000) -> dict:
-    """Charge l'historique (IO async) puis lance le backtest CPU en thread."""
+async def backtest_profils(db: AsyncSession, limit: int = 200, n_sims: int = 3000) -> dict:
+    """Charge l'historique (IO async) puis lance le backtest CPU en thread.
+    On ne garde que les courses avec rapports PMU publiés (reglables au reel)."""
     courses = (await db.execute(
         select(Course)
         .join(Resultat, Resultat.course_id == Course.course_id)
@@ -171,19 +151,22 @@ async def backtest_profils(db: AsyncSession, limit: int = 120, n_sims: int = 300
     res_rows = (await db.execute(
         select(Resultat).where(Resultat.course_id.in_(course_ids))
     )).scalars().all()
-    pos_by_course = {r.course_id: _positions(r.classement) for r in res_rows}
+    res_by_course = {r.course_id: r for r in res_rows}
 
-    payload = [
-        {
+    payload = []
+    for c in courses:
+        res = res_by_course.get(c.course_id)
+        if not res:
+            continue
+        payload.append({
             "course_id": c.course_id,
             "preds": preds_by_course.get(c.course_id, []),
-            "pos": pos_by_course.get(c.course_id, {}),
+            "classement": res.classement if isinstance(res.classement, list) else [],
+            "rapports": res.rapports or {},
             "nb_partants": c.nb_partants,
             "est_quinte": bool(c.est_quinte),
             "est_quarte": bool(c.est_quarte),
             "est_tierce": bool(c.est_tierce),
-        }
-        for c in courses
-    ]
+        })
 
     return await asyncio.to_thread(_compute, payload, n_sims)

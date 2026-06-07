@@ -897,7 +897,9 @@ async def stats_profils(
     if cached:
         return cached
 
-    data = await backtest_profils(db, limit=120, n_sims=3000)
+    data = await backtest_profils(db, limit=200, n_sims=3000)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await _cache_set(redis, CACHE_KEY, data, ttl=21600)  # 6h
+    # Cache 1h en filet ; surtout invalidé à CHAQUE fin de course
+    # (_invalidate_stats_caches) → recalcul immédiat sur données réelles.
+    await _cache_set(redis, CACHE_KEY, data, ttl=3600)
     return data

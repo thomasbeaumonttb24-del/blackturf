@@ -308,7 +308,7 @@ async def _invalidate_stats_caches(course_id: str) -> None:
         redis = await get_redis()
         keys = [
             "stats:public", "stats:equity-curve", "stats:ml-status",
-            "stats:dashboard-summary", "stats:track-record",
+            "stats:dashboard-summary", "stats:track-record", "stats:profils",
             f"course_detail:{course_id}", f"analyse:{course_id}",
         ]
         await redis.delete(*keys)

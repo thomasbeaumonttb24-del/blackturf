@@ -149,7 +149,7 @@ export default function TrackRecordPage() {
   const { data: profilsData } = useSWR<ProfilsBacktest>(
     "stats-profils",
     () => statsApi.profils().then((r) => r.data),
-    { revalidateOnFocus: false },
+    { refreshInterval: 300_000, revalidateOnFocus: true },  // maj ~ à chaque fin de course
   );
 
   if (isLoading || !data) {
@@ -397,10 +397,11 @@ export default function TrackRecordPage() {
                   })}
                 </div>
                 <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/80">
-                  Simulation sur les {profilsData.nb_courses} dernières courses : le plan de mise de chaque profil est figé
-                  <strong> avant la course</strong> (mêmes prédictions que celles servies), puis réglé sur l&apos;arrivée
-                  officielle PMU. Le Simple Gagnant est réglé aux <strong>cotes PMU réelles</strong> ; les paris combinés au
-                  rapport <strong>estimé</strong> par le modèle. Résultats passés à forte variance — ne préjugent pas du futur.
+                  Backtest sur les {profilsData.nb_courses} dernières courses réglables : le plan de mise de chaque profil est
+                  figé <strong>avant la course</strong> (mêmes prédictions que celles servies), réglé sur l&apos;arrivée
+                  officielle <strong>et les rapports PMU RÉELS</strong> (Simple Gagnant, Couplé, Trio, 2sur4). Mis à jour à
+                  chaque fin de course. Les rares courses dont un pari gagnant n&apos;a pas de rapport publié sont exclues
+                  (jamais estimées). Résultats passés à forte variance — ne préjugent pas du futur.
                 </p>
               </>
             )}
