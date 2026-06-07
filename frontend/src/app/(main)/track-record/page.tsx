@@ -92,6 +92,7 @@ interface ProfilsBacktest {
     gain_total: number;
     gain_net: number;
     roi: number | null;
+    roi_winsorise: number | null;
     taux_courses_beneficiaires: number | null;
   }>;
   nb_courses: number;
@@ -352,11 +353,15 @@ export default function TrackRecordPage() {
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {profilsData.profils.map((p) => {
-                    const pos = (p.roi ?? 0) >= 0;
                     const accent =
                       p.profil === "conservateur" ? "#059669"
                       : p.profil === "equilibre" ? "#2563EB"
                       : "#D97706";
+                    const tcb = p.taux_courses_beneficiaires;
+                    // ROI typique = winsorisé (gros rapports plafonnés) pour ne pas
+                    // afficher un chiffre gonflé par la variance (jeu responsable).
+                    const roiT = p.roi_winsorise;
+                    const roiPos = (roiT ?? 0) >= 0;
                     return (
                       <div key={p.profil} className="rounded-2xl border border-border/60 bg-white p-5">
                         <div className="flex items-center justify-between mb-3">
@@ -365,31 +370,29 @@ export default function TrackRecordPage() {
                             {p.nb_courses} courses
                           </span>
                         </div>
-                        <div
-                          className="text-3xl font-black tabular-nums"
-                          style={{ color: p.roi == null ? "#9CA3AF" : pos ? "#059669" : "#DC2626" }}
-                        >
-                          {p.roi == null ? "—" : `${pos ? "+" : ""}${p.roi}%`}
+                        {/* Métrique PRINCIPALE : % de courses où le profil gagne (robuste, intuitif) */}
+                        <div className="text-3xl font-black tabular-nums" style={{ color: accent }}>
+                          {tcb == null ? "—" : `${tcb}%`}
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">
-                          ROI simulé (mise {profilsData.mise_par_course}€/course)
+                          courses gagnantes (mise {profilsData.mise_par_course}€/course)
                         </div>
                         <div className="mt-4 space-y-1.5 text-xs">
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">Gain net</span>
-                            <span className="font-semibold tabular-nums" style={{ color: p.gain_net >= 0 ? "#059669" : "#DC2626" }}>
+                            <span className="text-muted-foreground">ROI typique</span>
+                            <span className="font-semibold tabular-nums" style={{ color: roiT == null ? "#9CA3AF" : roiPos ? "#059669" : "#DC2626" }}>
+                              {roiT == null ? "—" : `${roiPos ? "+" : ""}${roiT}%`}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Gain net (brut)</span>
+                            <span className="font-medium tabular-nums" style={{ color: p.gain_net >= 0 ? "#059669" : "#DC2626" }}>
                               {p.gain_net >= 0 ? "+" : ""}{p.gain_net}€
                             </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Misé total</span>
                             <span className="font-medium tabular-nums">{p.mise_totale}€</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Courses bénéficiaires</span>
-                            <span className="font-medium tabular-nums">
-                              {p.taux_courses_beneficiaires == null ? "—" : `${p.taux_courses_beneficiaires}%`}
-                            </span>
                           </div>
                         </div>
                       </div>
@@ -400,8 +403,11 @@ export default function TrackRecordPage() {
                   Backtest sur les {profilsData.nb_courses} dernières courses réglables : le plan de mise de chaque profil est
                   figé <strong>avant la course</strong> (mêmes prédictions que celles servies), réglé sur l&apos;arrivée
                   officielle <strong>et les rapports PMU RÉELS</strong> (Simple Gagnant, Couplé, Trio, 2sur4). Mis à jour à
-                  chaque fin de course. Les rares courses dont un pari gagnant n&apos;a pas de rapport publié sont exclues
-                  (jamais estimées). Résultats passés à forte variance — ne préjugent pas du futur.
+                  chaque fin de course. <strong>Courses gagnantes</strong> = part des courses où le profil finit bénéficiaire
+                  (le Prudent gagne souvent peu, le Risqué rarement mais gros). Le <strong>ROI typique</strong> plafonne les
+                  très gros rapports (×30) pour refléter le rendement courant ; le <strong>gain net brut</strong> les inclut,
+                  d&apos;où sa forte variance. Les courses dont un pari gagnant n&apos;a pas de rapport publié sont exclues
+                  (jamais estimées). <strong>Simulation — résultats passés, aucune garantie de gain futur.</strong>
                 </p>
               </>
             )}

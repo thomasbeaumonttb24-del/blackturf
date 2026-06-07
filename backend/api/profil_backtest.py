@@ -35,6 +35,10 @@ from services.mise_calculator import (
 log = structlog.get_logger()
 
 MISE = 10  # € fixes par course (comparabilité entre profils)
+# Plafond du gain par pari (× mise) pour le ROI WINSORISÉ : neutralise la queue
+# épaisse (un Trio/Couplé à gros rapport domine la moyenne sur petit échantillon).
+# Le ROI winsorisé = rendement TYPIQUE, plus honnête que le ROI brut pour un public.
+WINSOR_CAP = 30.0
 PROFILS = [
     ("conservateur", "Conservateur"),
     ("equilibre", "Équilibré"),
@@ -45,7 +49,7 @@ PROFILS = [
 def _compute(courses: list[dict], n_sims: int) -> dict:
     """Boucle CPU pure (exécutée hors event-loop via asyncio.to_thread).
     Règlement 100% aux rapports PMU réels (settle_pari)."""
-    agg = {k: {"nb": 0, "mise": 0.0, "gain": 0.0, "benef": 0, "skip": 0} for k, _ in PROFILS}
+    agg = {k: {"nb": 0, "mise": 0.0, "gain": 0.0, "gain_w": 0.0, "benef": 0, "skip": 0} for k, _ in PROFILS}
     palier = _palier(MISE)
 
     for c in courses:
@@ -76,6 +80,7 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
 
             mise_course = 0.0
             gain_course = 0.0
+            gain_w_course = 0.0
             indetermine = False
             for x in sel:
                 nums = [h["numero"] for h in x["chevaux"]]
@@ -85,7 +90,9 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
                     break
                 mise_course += x["mise"]
                 if r["gagne"]:
-                    gain_course += x["mise"] * r["rapport_reel"]
+                    payout = x["mise"] * r["rapport_reel"]
+                    gain_course += payout
+                    gain_w_course += min(payout, x["mise"] * WINSOR_CAP)  # winsorisé
 
             a = agg[key]
             if indetermine or mise_course <= 0:
@@ -94,6 +101,7 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
             a["nb"] += 1
             a["mise"] += mise_course
             a["gain"] += gain_course
+            a["gain_w"] += gain_w_course
             if gain_course > mise_course:
                 a["benef"] += 1
 
@@ -101,6 +109,7 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
     for key, label in PROFILS:
         a = agg[key]
         roi = round((a["gain"] - a["mise"]) / a["mise"] * 100, 1) if a["mise"] > 0 else None
+        roi_w = round((a["gain_w"] - a["mise"]) / a["mise"] * 100, 1) if a["mise"] > 0 else None
         profils.append({
             "profil": key,
             "label": label,
@@ -109,6 +118,7 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
             "gain_total": round(a["gain"]),
             "gain_net": round(a["gain"] - a["mise"]),
             "roi": roi,
+            "roi_winsorise": roi_w,           # rendement TYPIQUE (gros gains plafonnés 30×)
             "taux_courses_beneficiaires": round(a["benef"] / a["nb"] * 100, 1) if a["nb"] else None,
         })
     return {
