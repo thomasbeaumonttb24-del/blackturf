@@ -424,18 +424,21 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <TrendingUp className="w-4 h-4 text-emerald-400" />
-                    Performance IA
+                    Performance IA — backtest
                   </CardTitle>
                   {equity?.is_real ? (
-                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">En direct</Badge>
+                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">Réel</Badge>
                   ) : (
-                    <Badge variant="secondary" className="text-xs">Simulation</Badge>
+                    <Badge variant="secondary" className="text-xs">En construction</Badge>
                   )}
                 </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Simulation 10€/pari de valeur ★★★+ sur l&apos;historique — distinct de votre capital
+                </p>
                 {equityPoints.length > 1 && (
                   <div className={`text-lg font-bold tabular-nums mt-1 ${equityGain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {equityGain >= 0 ? "+" : ""}€{equityGain.toFixed(0)}
-                    <span className="text-xs font-normal text-muted-foreground ml-2">depuis le début</span>
+                    <span className="text-xs font-normal text-muted-foreground ml-2">gain simulé · forte variance</span>
                   </div>
                 )}
               </CardHeader>
@@ -458,7 +461,7 @@ export default function DashboardPage() {
                       <Tooltip
                         cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
                         contentStyle={{ background: "#ffffff", border: "1px solid #E5E7EB", borderRadius: 12, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}
-                        formatter={(v: number) => [`€${v.toFixed(0)}`, "Capital"]}
+                        formatter={(v: number) => [`€${v.toFixed(0)}`, "Capital simulé"]}
                         labelFormatter={(l) => l}
                       />
                       <Area

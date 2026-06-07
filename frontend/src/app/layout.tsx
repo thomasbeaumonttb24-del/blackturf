@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
@@ -31,7 +31,6 @@ export const metadata: Metadata = {
   ],
   metadataBase: new URL("https://blackturf.fr"),
   manifest: "/manifest.json",
-  themeColor: "#F59E0B",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -53,6 +52,12 @@ export const metadata: Metadata = {
     description: "Plan de mise personnalisé. Paris de valeur en temps réel.",
   },
   robots: { index: true, follow: true },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#F59E0B",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
