@@ -344,14 +344,38 @@ def enumerate_bet_candidates(
                                  f"le modèle le voit plus haut que le marché.",
         })
 
-    # ── SIMPLE PLACÉ — socle du profil PRUDENT (gagne souvent, petit gain). ──
-    # Top favoris par proba placé : forte fréquence de réussite, faible variance.
-    for i in by_p1[:3]:
-        p_pl = sim.p_simple_place(i)
-        if p_pl < 0.30:                  # placé peu probable → on ne propose pas
+    # ── SIMPLE PLACÉ à VALEUR — socle du profil PRUDENT. ──────────────────────
+    # On NE veut PAS l'ultra-favori placé (rapport ~1.1× = argent mort même gagné).
+    # On veut un placé qui (1) tombe souvent (proba ≥ 0.25), (2) RAPPORTE (rapport
+    # ≥ 1.3×), (3) a une VRAIE valeur : le modèle place le cheval PLUS que le marché
+    # (edge placé > 0) OU EV placé positive. C'est le placé qui fait vraiment gagner.
+    TRJ_PLACE = 0.85
+    for i in by_p1[:6]:                               # champ élargi, pas que les 3 favoris
+        p_pl = float(sim.p_simple_place(i))
+        if p_pl < 0.25:
             continue
-        add("securite", "Simple Placé", [i], p_pl, sim_m.p_simple_place(i),
-            f"N°{numeros[i]} {noms[i]} dans les 3 premiers — {p_pl*100:.0f}% (placé, sécurité).")
+        p_pl_m = max(float(sim_m.p_simple_place(i)), 1e-3)   # proba placé marché
+        rapport = float(min(max(TRJ_PLACE / p_pl_m, 1.1), 50.0))
+        if rapport < 1.3:                            # ultra-favori qui ne rapporte rien → skip
+            continue
+        edge_pl = p_pl - p_pl_m                       # edge PLACÉ (modèle vs marché)
+        ev = p_pl * rapport - 1.0
+        if edge_pl <= 0 and ev <= 0:                  # ni valeur ni EV → on ne propose pas
+            continue
+        key = ("Simple Placé", (i,))
+        if key in seen:
+            continue
+        seen.add(key)
+        cands.append({
+            "niveau": "securite", "type_pari": "Simple Placé", "chevaux": [H(i)],
+            "proba_gain": round(p_pl, 4), "rapport_estime": round(rapport, 1),
+            "ev": round(ev, 3), "edge": round(float(edge_pl), 4),
+            "texte_explication": (
+                f"N°{numeros[i]} {noms[i]} placé à VALEUR — {p_pl*100:.0f}% d'être dans "
+                f"les 3 (cote {cotes[i]:.1f}, rapport ~{rapport:.1f}×) : le modèle le place "
+                f"plus haut que le marché."
+            ),
+        })
 
     # ── 3-4 COUPLÉ GAGNANT différents ──
     pairs = []
