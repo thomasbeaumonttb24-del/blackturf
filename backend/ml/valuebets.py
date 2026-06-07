@@ -229,9 +229,14 @@ def detect_value_bet(
     # les favoris et sur-estime les outsiders → sans ça, EV gonflées sur longshots
     # (faux value bets perdants). On rapproche la P(victoire) de la réalité observée
     # par bucket de cote → EV honnête → renta. Neutre (×1.0) si pas de calibration.
+    # SHRINK-ONLY pour la sélection value bet : on ne laisse la calibration que
+    # RÉDUIRE la proba (couper les outsiders sur-cotés = vrais faux value bets),
+    # jamais l'augmenter — un boost de favori pourrait gonfler un faux VB court
+    # (le sous-ensemble VB cote<4 est sur-coté, ROI réel mesuré −44%). Prudent = renta.
     if cote_calib and cote_pmu and cote_pmu > 1:
         from ml.cote_calibration import apply_factor
-        proba_top1 = float(max(1e-4, min(0.99, proba_top1 * apply_factor(cote_pmu, cote_calib, "win"))))
+        f = min(1.0, apply_factor(cote_pmu, cote_calib, "win"))
+        proba_top1 = float(max(1e-4, min(0.99, proba_top1 * f)))
 
     evs, meilleure_source, cote_marche = triangulation_cotes_v2(proba_top1, cotes)
     if not evs:
