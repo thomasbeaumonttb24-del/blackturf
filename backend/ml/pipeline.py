@@ -289,6 +289,16 @@ async def run_post_course(course_id: str) -> None:
     # (2-30 min). On purge les clés → recalcul à la volée sur données RÉELLES.
     await _invalidate_stats_caches(course_id)
 
+    # ── 6c. Régler les paris enregistrés (TOUS les utilisateurs) de la course qui
+    # vient de finir → bankroll + back-office admin à jour immédiatement, sans
+    # attendre que chaque utilisateur consulte son compte. Vrais rapports PMU.
+    try:
+        from api.routes.bankroll import settle_pending_bets
+        async with AsyncSessionLocal() as settle_session:
+            await settle_pending_bets(settle_session, None)  # None = tous les users
+    except Exception as e:
+        log.warning("pipeline.settle_all_skip", course_id=course_id, err=str(e)[:140])
+
     # 7. Mini-retraining si nb_resultats_depuis_dernier_retrain % 20 == 0
     nb_new = await _count_recent_results()
     if nb_new % settings.retrain_every_n_results == 0:

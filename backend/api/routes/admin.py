@@ -105,6 +105,13 @@ async def list_users(
     ROI/solde), nb paris, date création — tout ce qu'il faut pour suivre chaque compte.
     Agrégats calculés en requêtes GROUPÉES (pas de N+1). Jamais le mot de passe."""
     from db.models import Bankroll
+    # Règle d'abord les paris en attente de TOUS les users (courses terminées) →
+    # ROI/solde affichés à l'admin toujours réels et à jour. Best-effort.
+    try:
+        from api.routes.bankroll import settle_pending_bets
+        await settle_pending_bets(db, None)
+    except Exception as e:
+        log.warning("admin.settle_skip", err=str(e)[:120])
     q = select(User)
     if plan:
         q = q.where(User.plan == plan)

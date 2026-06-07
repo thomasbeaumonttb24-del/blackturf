@@ -127,23 +127,26 @@ def _entry_to_out(e: BankrollEntry, numero_reunion: Optional[int] = None) -> Ent
     )
 
 
-async def settle_pending_bets(db: AsyncSession, user_id: str) -> None:
+async def settle_pending_bets(db: AsyncSession, user_id: Optional[str] = None) -> None:
     """
     Règle automatiquement les paris enregistrés EN ATTENTE (resultat NULL) dont
     la course est terminée, avec les VRAIS rapports PMU (bet_settlement). Met à
     jour gain_perte (net) + resultat. Si un pari a gagné mais que le rapport
     n'est pas encore publié, on le laisse en attente (aucune valeur inventée).
+
+    user_id=None → règle les paris de TOUS les utilisateurs (appelé à la fin de
+    chaque course pour que toutes les données — bankroll, back-office admin — soient
+    à jour immédiatement, sans attendre que l'utilisateur consulte son compte).
     """
     import re
     from db.models import Resultat as _Res, Course as _Cou
     from services.bet_settlement import settle_pari
 
+    conds = [BankrollEntry.resultat.is_(None), BankrollEntry.course_id.isnot(None)]
+    if user_id is not None:
+        conds.insert(0, BankrollEntry.user_id == user_id)
     pending = (await db.execute(
-        select(BankrollEntry).where(
-            BankrollEntry.user_id == user_id,
-            BankrollEntry.resultat.is_(None),
-            BankrollEntry.course_id.isnot(None),
-        )
+        select(BankrollEntry).where(*conds)
     )).scalars().all()
     if not pending:
         return

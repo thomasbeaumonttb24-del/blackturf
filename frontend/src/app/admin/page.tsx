@@ -69,7 +69,8 @@ export default function AdminPage() {
 
   const { data: models, mutate: mutateModels } = useSWR<ModelVersion[]>(
     user?.is_admin ? "/admin-models" : null,
-    () => adminApi.models().then((r) => r.data)
+    () => adminApi.models().then((r) => r.data),
+    { refreshInterval: 60000 }
   );
 
   const { data: scraperStatus } = useSWR<ScraperStatus>(
@@ -81,7 +82,8 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState("");
   const { data: users } = useSWR(
     user?.is_admin ? ["/admin-users", userSearch] : null,
-    () => adminApi.users({ limit: 200, search: userSearch || undefined }).then((r) => r.data)
+    () => adminApi.users({ limit: 200, search: userSearch || undefined }).then((r) => r.data),
+    { refreshInterval: 30000, revalidateOnFocus: true }
   );
 
   async function handleRetrain() {
