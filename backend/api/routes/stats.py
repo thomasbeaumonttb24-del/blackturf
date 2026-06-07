@@ -6,6 +6,7 @@ Cache Redis pour éviter requêtes lourdes répétées.
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 from fastapi import APIRouter, Depends
@@ -569,9 +570,11 @@ async def track_record(
     accuracy_top3 = round(len(top3_hits) / nb_total * 100, 1) if nb_total else 0.0
     nb_surprises = len([r for r in all_rll if r.was_surprise])
 
-    # ── 2. Par jour (7 derniers jours) ───────────────────────
-    now = datetime.now(timezone.utc)
-    today = now.date()
+    # ── 2. Par jour (7 derniers jours, fuseau Europe/Paris) ──
+    # Coupure de journée à minuit heure française (pas UTC) pour que
+    # le point du jour reflète bien "la journée" côté utilisateur.
+    paris_tz = ZoneInfo("Europe/Paris")
+    today = datetime.now(paris_tz).date()
     daily_acc: dict[str, dict] = {}
     for i in range(6, -1, -1):
         day_dt = today - timedelta(days=i)
@@ -586,7 +589,11 @@ async def track_record(
     for r in all_rll:
         if not r.analyzed_at:
             continue
-        key = r.analyzed_at.strftime("%Y-%m-%d")
+        # analyzed_at est en UTC (naïf ou aware) → on le ramène en heure FR
+        dt = r.analyzed_at
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        key = dt.astimezone(paris_tz).strftime("%Y-%m-%d")
         if key not in daily_acc:
             continue
         daily_acc[key]["nb_predictions"] += 1
