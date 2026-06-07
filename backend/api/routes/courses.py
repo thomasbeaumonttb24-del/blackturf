@@ -88,6 +88,10 @@ class PartantOut(BaseModel):
     # Suspension active
     jockey_suspendu: bool = False
     entraineur_suspendu: bool = False
+    # Analyse détaillée (features ML réelles + stats saison) — None si indispo.
+    # Sert la fiche cheval enrichie : forme, préférences contexte, stats jockey/
+    # entraîneur, signaux marché, ELO détaillé, explication. 100% données réelles.
+    analyse: Optional[dict] = None
 
 
 class MeteoOut(BaseModel):
@@ -172,7 +176,9 @@ class ProgrammeOut(BaseModel):
 # ─────────────────────────────────────────────
 async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     from datetime import date as date_type
+    from db.models import FeatureML, StatsJockey, StatsEntraineur
     today = date_type.today()
+    saison_now = today.year
 
     # Suspensions actives aujourd'hui (jockeys + entraîneurs)
     susp_res = await db.execute(
@@ -185,16 +191,34 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     suspendus: dict[str, str] = {r.nom.lower(): r.type_pro for r in susp_res.fetchall()}
 
     q = (
-        select(Participation, Cheval, Jockey, Entraineur, Equipement, PerformanceCarriere)
+        select(Participation, Cheval, Jockey, Entraineur, Equipement, PerformanceCarriere, FeatureML)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
         .outerjoin(Jockey, Jockey.jockey_id == Participation.jockey_id)
         .outerjoin(Entraineur, Entraineur.entraineur_id == Participation.entraineur_id)
         .outerjoin(Equipement, Equipement.participation_id == Participation.participation_id)
         .outerjoin(PerformanceCarriere, PerformanceCarriere.cheval_id == Cheval.cheval_id)
+        .outerjoin(FeatureML, FeatureML.participation_id == Participation.participation_id)
         .where(Participation.course_id == course_id)
         .order_by(Participation.numero)
     )
     rows = (await db.execute(q)).all()
+
+    # Stats SAISON jockey + entraîneur (tables dédiées) pour les acteurs de la course.
+    jockey_ids = [p.jockey_id for p, *_ in rows if p.jockey_id]
+    entraineur_ids = [p.entraineur_id for p, *_ in rows if p.entraineur_id]
+    sj_map: dict = {}
+    se_map: dict = {}
+    try:
+        if jockey_ids:
+            for sj in (await db.execute(select(StatsJockey).where(
+                StatsJockey.jockey_id.in_(jockey_ids), StatsJockey.saison == saison_now))).scalars():
+                sj_map[sj.jockey_id] = sj
+        if entraineur_ids:
+            for se in (await db.execute(select(StatsEntraineur).where(
+                StatsEntraineur.entraineur_id.in_(entraineur_ids), StatsEntraineur.saison == saison_now))).scalars():
+                se_map[se.entraineur_id] = se
+    except Exception as e:
+        log.warning("courses.stats_saison_failed", error=str(e)[:120])
 
     # Associations jockey × entraîneur pour les paires de cette course
     asso_map: dict[tuple, dict] = {}
@@ -218,7 +242,7 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
         log.warning("courses.asso_map_failed", error=str(e))
 
     partants = []
-    for p, ch, j, en, eq, pc in rows:
+    for p, ch, j, en, eq, pc, fm in rows:
         # Cotes disponibles
         cotes = [c for c in [p.cote_pmu, p.cote_geny, p.cote_winamax,
                               p.cote_betclic, p.cote_unibet, p.cote_betfair_exchange]
@@ -242,6 +266,12 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
         entraineur_nom = (en.nom if en else "").lower()
         jockey_suspendu = jockey_nom in suspendus and suspendus[jockey_nom] == "jockey"
         entraineur_suspendu = entraineur_nom in suspendus and suspendus[entraineur_nom] == "entraineur"
+
+        # ── Analyse détaillée (features ML réelles + stats saison) ──
+        analyse = _build_analyse(
+            fm.features if fm else None,
+            sj_map.get(p.jockey_id), se_map.get(p.entraineur_id),
+        )
 
         partants.append(PartantOut(
             participation_id=p.participation_id,
@@ -296,8 +326,104 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             # Suspensions
             jockey_suspendu=jockey_suspendu,
             entraineur_suspendu=entraineur_suspendu,
+            analyse=analyse,
         ))
     return partants
+
+
+def _build_analyse(feat: Optional[dict], sj, se) -> Optional[dict]:
+    """Construit le bloc d'analyse détaillée d'un partant à partir des features ML
+    RÉELLES + stats saison jockey/entraîneur. Renvoie None si rien d'exploitable.
+    Aucune valeur inventée : on n'expose que ce qui est présent."""
+    f = feat or {}
+
+    def num(v):
+        try:
+            return round(float(v), 4) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    forme = {
+        "taux_top3": num(f.get("taux_top3")),
+        "recent_win_rate": num(f.get("recent_win_rate")),
+        "forme_5": num(f.get("forme_5_courses")),
+        "regularite": num(f.get("regularite")),
+        "tendance": num(f.get("forme_tendance")),
+        "momentum": num(f.get("career_momentum")),
+    }
+    contexte = {
+        "pref_distance": num(f.get("pref_distance_actuelle")),
+        "pref_terrain": num(f.get("pref_terrain_actuel")),
+        "pref_hippodrome": num(f.get("pref_hippodrome")),
+        "nb_distance": f.get("nb_courses_distance"),
+        "nb_terrain": f.get("nb_courses_terrain"),
+        "nb_hippodrome": f.get("nb_courses_hippodrome"),
+        "corde_pref": num(f.get("corde_preference")),
+    }
+    elo = {
+        "trend_30j": num(f.get("elo_trend_30j")),
+        "pct_rank": num(f.get("elo_pct_rank")),
+        "discipline": num(f.get("elo_discipline")),
+    }
+    marche = {
+        "spi": num(f.get("spi_score")),
+        "steam": num(f.get("steam_move_betclic")),
+        "valeur_latente": num(f.get("valeur_latente")),
+        "decote": num(f.get("decote_detectee")),
+        "tendance_force": num(f.get("tendance_cote_force")),
+        "mouvement_30min": num(f.get("mouvement_30min")),
+    }
+    vitesse = {
+        "vitesse_theorique": num(f.get("vitesse_theorique")),
+        "stamina": num(f.get("stamina_index")),
+        "indice_valeur": num(f.get("indice_valeur")),
+    }
+    jockey_stats = None
+    if sj:
+        jockey_stats = {
+            "taux_victoire": num(sj.taux_victoire_global),
+            "taux_place": num(sj.taux_place_global),
+            "roi": num(sj.roi_global),
+            "victoires_saison": sj.victoires_saison,
+            "courses_saison": sj.courses_saison,
+            "montes_30j": sj.montes_30j,
+        }
+    entraineur_stats = None
+    if se:
+        entraineur_stats = {
+            "taux_victoire": num(se.taux_victoire_global),
+            "taux_place": num(se.taux_place_global),
+            "roi": num(se.roi_global),
+            "victoires_saison": se.victoires_saison,
+            "courses_saison": se.courses_saison,
+        }
+
+    # ── Points clés (le "pourquoi") dérivés des features réelles ──
+    points: list[dict] = []  # {txt, type: +/-}
+    if forme["taux_top3"] is not None and forme["taux_top3"] >= 0.5:
+        points.append({"txt": f"Régulier : {round(forme['taux_top3']*100)}% dans les 3", "type": "+"})
+    if forme["tendance"] is not None and forme["tendance"] > 0.1:
+        points.append({"txt": "Forme en progression", "type": "+"})
+    elif forme["tendance"] is not None and forme["tendance"] < -0.1:
+        points.append({"txt": "Forme en baisse", "type": "-"})
+    if contexte["pref_distance"] is not None and contexte["pref_distance"] >= 0.6:
+        points.append({"txt": "À l'aise sur la distance", "type": "+"})
+    if contexte["pref_terrain"] is not None and contexte["pref_terrain"] >= 0.6:
+        points.append({"txt": "Aime ce terrain", "type": "+"})
+    if marche["spi"] is not None and marche["spi"] >= 0.2:
+        points.append({"txt": "Argent professionnel détecté (SPI)", "type": "+"})
+    if marche["valeur_latente"] is not None and marche["valeur_latente"] >= 0.25:
+        points.append({"txt": "Sous-coté vs marché (valeur)", "type": "+"})
+    if elo["pct_rank"] is not None and elo["pct_rank"] >= 0.8:
+        points.append({"txt": f"Top {round((1-elo['pct_rank'])*100)}% du champ (ELO)", "type": "+"})
+
+    blocks = {"forme": forme, "contexte": contexte, "elo": elo, "marche": marche,
+              "vitesse": vitesse, "jockey_stats": jockey_stats, "entraineur_stats": entraineur_stats,
+              "points": points}
+    # None si aucune donnée réelle (toutes valeurs nulles + pas de stats)
+    has_data = any(v is not None for d in (forme, contexte, elo, marche, vitesse) for v in d.values()) \
+        or jockey_stats or entraineur_stats
+    return blocks if has_data else None
 
 
 # ─────────────────────────────────────────────

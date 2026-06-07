@@ -67,6 +67,16 @@ interface Partant {
   asso_jockey_entraineur_nb: number | null;
   jockey_suspendu: boolean;
   entraineur_suspendu: boolean;
+  analyse?: {
+    forme: { taux_top3: number | null; recent_win_rate: number | null; forme_5: number | null; regularite: number | null; tendance: number | null; momentum: number | null };
+    contexte: { pref_distance: number | null; pref_terrain: number | null; pref_hippodrome: number | null; nb_distance: number | null; nb_terrain: number | null; nb_hippodrome: number | null; corde_pref: number | null };
+    elo: { trend_30j: number | null; pct_rank: number | null; discipline: number | null };
+    marche: { spi: number | null; steam: number | null; valeur_latente: number | null; decote: number | null; tendance_force: number | null; mouvement_30min: number | null };
+    vitesse: { vitesse_theorique: number | null; stamina: number | null; indice_valeur: number | null };
+    jockey_stats: { taux_victoire: number | null; taux_place: number | null; roi: number | null; victoires_saison: number | null; courses_saison: number | null; montes_30j: number | null } | null;
+    entraineur_stats: { taux_victoire: number | null; taux_place: number | null; roi: number | null; victoires_saison: number | null; courses_saison: number | null } | null;
+    points: { txt: string; type: string }[];
+  } | null;
 }
 
 interface Prediction {
@@ -2085,6 +2095,9 @@ export default function CoursePage() {
                                   const eloColor = elo == null ? "#9CA3AF" : elo >= 1700 ? "#F59E0B" : elo >= 1500 ? "#3B82F6" : elo >= 1300 ? "#10B981" : "#6B7280";
                                   const mv = partant.mouvement_cote_pct;  // >0 = cote baissée = argent venu = signal +
                                   const sexeLbl = partant.sexe ? ({ M: "Mâle", H: "Hongre", F: "Femelle" } as Record<string, string>)[partant.sexe] ?? partant.sexe : null;
+                                  const a = partant.analyse;
+                                  const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100));
+                                  const js = a?.jockey_stats, es = a?.entraineur_stats;
                                   return (
                                 <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                                   {/* Musique */}
@@ -2092,6 +2105,60 @@ export default function CoursePage() {
                                     <p className={HEAD}><Activity className="h-3 w-3 text-violet-500" /> Musique — forme récente</p>
                                     <MusiqueDisplay musique={partant.musique} />
                                   </div>
+
+                                  {/* Points clés (le pourquoi) */}
+                                  {a?.points && a.points.length > 0 && (
+                                    <div className={cn(CARD, "sm:col-span-2 lg:col-span-3 border-brand-gold/30 bg-brand-gold/[0.04]")}>
+                                      <p className={HEAD}><Target className="h-3 w-3 text-brand-gold" /> Points clés de l&apos;analyse IA</p>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {a.points.map((pt, i) => (
+                                          <span key={i} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1",
+                                            pt.type === "+" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200")}>
+                                            {pt.type === "+" ? "▲" : "▼"} {pt.txt}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Forme chiffrée */}
+                                  {a && (pct(a.forme.taux_top3) != null || pct(a.forme.recent_win_rate) != null) && (
+                                    <div className={CARD}>
+                                      <p className={HEAD}><Activity className="h-3 w-3 text-emerald-500" /> Forme</p>
+                                      {pct(a.forme.taux_top3) != null && <p className="text-sm">Dans les 3 : <span className="font-bold tabular-nums">{pct(a.forme.taux_top3)}%</span></p>}
+                                      {pct(a.forme.recent_win_rate) != null && <p className="text-xs text-muted-foreground">Victoires récentes : {pct(a.forme.recent_win_rate)}%</p>}
+                                      {pct(a.forme.regularite) != null && <p className="text-xs text-muted-foreground">Régularité : {pct(a.forme.regularite)}%</p>}
+                                      {a.forme.tendance != null && Math.abs(a.forme.tendance) > 0.05 && (
+                                        <p className={cn("text-xs font-medium", a.forme.tendance > 0 ? "text-emerald-600" : "text-rose-600")}>
+                                          {a.forme.tendance > 0 ? "▲ en progression" : "▼ en baisse"}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Préférences contexte (distance / terrain / hippodrome) */}
+                                  {a && (pct(a.contexte.pref_distance) != null || pct(a.contexte.pref_terrain) != null || pct(a.contexte.pref_hippodrome) != null) && (
+                                    <div className={CARD}>
+                                      <p className={HEAD}><MapPin className="h-3 w-3 text-blue-500" /> À l&apos;aise sur…</p>
+                                      {[
+                                        ["Distance", a.contexte.pref_distance, a.contexte.nb_distance],
+                                        ["Terrain", a.contexte.pref_terrain, a.contexte.nb_terrain],
+                                        ["Hippodrome", a.contexte.pref_hippodrome, a.contexte.nb_hippodrome],
+                                      ].map(([lbl, v, nb]) => {
+                                        const p2 = pct(v as number | null);
+                                        if (p2 == null) return null;
+                                        const good = p2 >= 60;
+                                        return (
+                                          <p key={lbl as string} className="text-xs flex items-center gap-1.5">
+                                            <span className={good ? "text-emerald-600" : "text-muted-foreground"}>{good ? "✓" : "•"}</span>
+                                            <span className="text-muted-foreground">{lbl as string}</span>
+                                            <span className="font-semibold tabular-nums ml-auto">{p2}%</span>
+                                            {nb != null && (nb as number) > 0 && <span className="text-muted-foreground/60">({nb as number}c)</span>}
+                                          </p>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
 
                                   {/* Niveau & forme (ELO) */}
                                   {(elo != null || partant.age != null || partant.running_style || partant.jours_depuis_derniere != null) && (
@@ -2128,6 +2195,15 @@ export default function CoursePage() {
                                       {partant.cote_min != null && partant.cote_max != null && partant.cote_min !== partant.cote_max && (
                                         <p className="text-xs text-muted-foreground tabular-nums">Fourchette {partant.cote_min.toFixed(1)}–{partant.cote_max.toFixed(1)}{partant.nb_sources ? ` · ${partant.nb_sources} sources` : ""}</p>
                                       )}
+                                      {/* Signaux marché avancés (argent pro) */}
+                                      {a && (
+                                        <div className="mt-1 flex flex-wrap gap-1">
+                                          {a.marche.spi != null && a.marche.spi >= 0.15 && <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">SPI {Math.round(a.marche.spi * 100)}% — argent pro</span>}
+                                          {a.marche.valeur_latente != null && a.marche.valeur_latente >= 0.2 && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Sous-coté (valeur)</span>}
+                                          {a.marche.steam != null && a.marche.steam >= 0.2 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Steam move</span>}
+                                          {a.marche.decote != null && a.marche.decote >= 0.2 && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">Décote détectée</span>}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
 
@@ -2140,8 +2216,14 @@ export default function CoursePage() {
                                       {partant.jockey_suspendu && <span className="ml-1.5 rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-700 align-middle">SUSPENDU</span>}
                                     </p>
                                     <p className="text-xs text-muted-foreground">Entraîneur : {partant.entraineur || "—"}{partant.entraineur_suspendu && <span className="ml-1 text-[9px] font-bold text-rose-600">(suspendu)</span>}</p>
+                                    {js && (pct(js.taux_victoire) != null) && (
+                                      <p className="mt-1 text-[11px] text-muted-foreground">Jockey saison : <span className="font-semibold text-foreground">{pct(js.taux_victoire)}%</span> V · {pct(js.taux_place)}% P{js.victoires_saison != null ? ` · ${js.victoires_saison}/${js.courses_saison}` : ""}{js.roi != null ? ` · ROI ${js.roi >= 0 ? "+" : ""}${Math.round(js.roi * 100)}%` : ""}</p>
+                                    )}
+                                    {es && (pct(es.taux_victoire) != null) && (
+                                      <p className="text-[11px] text-muted-foreground">Entraîneur saison : <span className="font-semibold text-foreground">{pct(es.taux_victoire)}%</span> V · {pct(es.taux_place)}% P{es.roi != null ? ` · ROI ${es.roi >= 0 ? "+" : ""}${Math.round(es.roi * 100)}%` : ""}</p>
+                                    )}
                                     {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 3 && (
-                                      <p className="mt-1.5 text-[11px] text-violet-600">🤝 Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% de réussite sur {partant.asso_jockey_entraineur_nb} courses</p>
+                                      <p className="mt-1 text-[11px] text-violet-600">🤝 Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% sur {partant.asso_jockey_entraineur_nb} courses</p>
                                     )}
                                   </div>
 
