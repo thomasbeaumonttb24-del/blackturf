@@ -98,6 +98,10 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
             jockey_course=_t(c.get("jockey"), 100),
             reduction_km=c.get("reduction_km"),
             indice_vitesse=c.get("vitesse_ms"),   # m/s du vainqueur (figure de vitesse réelle)
+            terrain=_t(c.get("terrain"), 30),                                  # bon/souple/lourd… (galop)
+            corde=(_t(str(c.get("corde")), 15) if c.get("corde") is not None else None),
+            poids_porte_course=(float(c["poids"]) if isinstance(c.get("poids"), (int, float)) else None),
+            equipement_course=({"oeilleres": bool(c["oeilleres"])} if c.get("oeilleres") is not None else None),
         ))
         added += 1
     return added

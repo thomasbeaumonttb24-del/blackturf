@@ -282,6 +282,7 @@ class PmuScraper(BaseScraper):
                               if isinstance(tdp, (int, float)) and tdp > 0
                               and isinstance(dist_c, (int, float)) and dist_c > 0
                               else None)
+                _oeil = (moi or {}).get("oeillere")
                 courses.append({
                     "date_ms": c.get("date"),
                     "hippodrome": c.get("hippodrome"),
@@ -293,6 +294,11 @@ class PmuScraper(BaseScraper):
                     "ecart": (moi or {}).get("distanceAvecPrecedent"),
                     "reduction_km": round(rk / 1000.0, 2) if isinstance(rk, (int, float)) and rk else None,
                     "vitesse_ms": vitesse_ms,
+                    # ── Données API jusque-là inexploitées ──────────────────────
+                    "terrain": c.get("etatTerrain"),                 # bon/souple/lourd… (galop)
+                    "corde": (moi or {}).get("corde"),               # n° de corde (plat)
+                    "poids": (moi or {}).get("poidsJockey"),         # kg portés
+                    "oeilleres": (_oeil not in (None, "SANS_OEILLERES")) if _oeil is not None else None,
                     "jockey": (moi or {}).get("nomJockey"),
                     "adversaires": [pp.get("nomCheval") for pp in pps
                                     if not pp.get("itsHim") and pp.get("nomCheval")],
