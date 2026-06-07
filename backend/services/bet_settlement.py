@@ -22,16 +22,19 @@ from __future__ import annotations
 
 from typing import Optional
 
-# type_pari -> clés candidates du rapport PMU (base 1€). Le PMU nomme le même
-# pari différemment selon la course (ex. 2sur4 : e_deux_sur_quatre OU e_super_quatre)
-# -> on essaie chaque clé et on prend la première publiée.
+# type_pari -> clés candidates du rapport PMU (base 1€). On essaie chaque clé et on
+# prend la première publiée. ⚠️ NE PAS mélanger des paris DIFFÉRENTS : le « 2sur4 »
+# (≥2 de 4 dans le top-4) n'a RIEN à voir avec le « Super 4 » (e_super_quatre, top-4
+# exact en ordre) dont le rapport est ~100× plus gros. Utiliser e_super_quatre pour
+# régler un 2sur4 crédite un gain fictif énorme → bankroll faussée. Si le vrai
+# rapport 2sur4 (e_deux_sur_quatre) n'est pas publié, on laisse en attente (None).
 _RAPPORT_KEYS = {
     "Simple Gagnant": ("e_simple_gagnant", "simple_gagnant_international"),
     "Simple Placé":   ("e_simple_place", "simple_place_international"),
     "Couplé Gagnant": ("e_couple_gagnant",),
     "Couplé Placé":   ("e_couple_place",),
     "Trio":           ("e_trio",),
-    "2sur4":          ("e_deux_sur_quatre", "e_super_quatre"),
+    "2sur4":          ("e_deux_sur_quatre",),
 }
 
 _APPROX_NOTE = "Rapport placé approximatif (le PMU publie un rapport par cheval placé)."
