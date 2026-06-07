@@ -377,9 +377,14 @@ async def run_nightly_retraining() -> None:
     # Ré-apprend le ROI réel PAR SIGNAL (duo J/E, ELO, pedigree, forme-piège…) →
     # module la sélection des value bets vers ce qui rapporte. Auto-amélioration.
     try:
-        from ml.signal_performance import compute_signal_performance, persist_signal_performance
+        from ml.signal_performance import (
+            compute_signal_performance, compute_signal_performance_by_profile,
+            persist_signal_performance,
+        )
         async with AsyncSessionLocal() as sp_session:
-            _sp = await compute_signal_performance(sp_session)
+            _sp = await compute_signal_performance(sp_session)            # global
+            _spp = await compute_signal_performance_by_profile(sp_session)  # par profil
+            _sp["profils"] = _spp.get("profils", {})                      # fusion
             await persist_signal_performance(sp_session, _sp)
             log.info("pipeline.signal_performance_done", n=_sp.get("n_total"))
     except Exception as e:

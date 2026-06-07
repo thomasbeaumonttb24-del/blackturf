@@ -97,6 +97,89 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
     return {"signals": signals, "n_total": len(rows)}
 
 
+def _profile_pnl(profil: str, win: int, top3: int, cote: float) -> tuple[float, float]:
+    """(mise, gain) d'un 1€ selon l'OBJECTIF du profil — c'est ce qui différencie
+    quels signaux "rapportent" pour chaque profil :
+      - conservateur : Simple Placé (réussite = top-3) ; rapport placé ≈ (cote-1)/4+1.
+      - équilibré    : Simple Gagnant (réussite = victoire) ; toutes cotes.
+      - agressif     : Simple Gagnant mais GROS GAINS → ne compte que cote ≥ 6
+                        (les outsiders qui gagnent), 0 sinon (ne joue pas les favoris)."""
+    if profil == "conservateur":
+        rapport_place = max(1.1, (cote - 1) / 4.0 + 1.0)
+        return 1.0, (rapport_place if top3 else 0.0)
+    if profil == "agressif":
+        if cote < 6.0:
+            return 0.0, 0.0  # le profil agressif ne parie pas les courtes cotes
+        return 1.0, (cote if win else 0.0)
+    # équilibré
+    return 1.0, (cote if win else 0.0)
+
+
+async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
+    """Comme compute_signal_performance mais PAR PROFIL (conservateur/équilibré/agressif),
+    avec l'objectif propre à chaque profil → les multiplicateurs diffèrent par profil.
+    → permet un pronostic adapté au profil sélectionné."""
+    rows = (await session.execute(text("""
+        SELECT fm.features, pa.cote_pmu,
+               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
+               CASE WHEN pa.numero IN (
+                    SELECT (e->>'numero')::int FROM jsonb_array_elements(r.classement)
+                    WITH ORDINALITY a(e,o) WHERE o <= 3
+               ) THEN 1 ELSE 0 END AS top3
+        FROM features_ml fm
+        JOIN participations pa ON pa.participation_id = fm.participation_id
+        JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
+        JOIN resultats r ON r.course_id = pa.course_id
+        WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
+    """))).fetchall()
+
+    profils = ["conservateur", "equilibre", "agressif"]
+    agg = {p: {name: {"n": 0, "stake": 0.0, "payout": 0.0, "hits": 0} for name in SIGNALS} for p in profils}
+    parsed = []
+    for feats, cote, win, top3 in rows:
+        f = feats if isinstance(feats, dict) else json.loads(feats)
+        parsed.append((f, float(cote), int(win), int(top3)))
+
+    for f, cote, win, top3 in parsed:
+        present = [name for name, pred in SIGNALS.items() if _safe(pred, f)]
+        for p in profils:
+            stake, payout = _profile_pnl(p, win, top3, cote)
+            if stake <= 0:
+                continue
+            success = top3 if p == "conservateur" else win
+            for name in present:
+                a = agg[p][name]
+                a["n"] += 1
+                a["stake"] += stake
+                a["payout"] += payout
+                a["hits"] += success
+
+    out = {}
+    for p in profils:
+        sig = {}
+        for name, a in agg[p].items():
+            if a["stake"] <= 0:
+                sig[name] = {"n": a["n"], "roi_shrunk": 0.0, "multiplier": 1.0, "hit_rate": None}
+                continue
+            roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + K_SHRINK)
+            sig[name] = {
+                "n": a["n"],
+                "hit_rate": round(a["hits"] / a["n"], 3) if a["n"] else None,
+                "roi": round((a["payout"] - a["stake"]) / a["stake"], 3),
+                "roi_shrunk": round(roi_shrunk, 3),
+                "multiplier": round(float(max(0.6, min(1.6, 1.0 + roi_shrunk))), 3),
+            }
+        out[p] = sig
+    return {"profils": out, "n_total": len(rows)}
+
+
+def _safe(pred, f) -> bool:
+    try:
+        return bool(pred(f))
+    except Exception:
+        return False
+
+
 async def persist_signal_performance(session: AsyncSession, perf: dict) -> None:
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS signal_performance (
@@ -121,12 +204,20 @@ async def load_signal_performance(session: AsyncSession) -> dict | None:
         return None
 
 
-def signal_multiplier(features: dict, perf: dict | None) -> float:
+def signal_multiplier(features: dict, perf: dict | None, profil: str | None = None) -> float:
     """Multiplicateur de conviction d'un partant = produit (borné) des multiplicateurs
-    des signaux qu'il porte, appris du ROI réel. 1.0 si pas de perf chargée."""
-    if not perf or not perf.get("signals"):
+    des signaux qu'il porte, appris du ROI réel. PROFILE-AWARE : si `profil` fourni et
+    une table par profil existe, on utilise le ROI appris POUR CE PROFIL (un même
+    signal peut aider à se placer mais pas à gagner). Fallback table globale. 1.0 sinon."""
+    if not perf:
         return 1.0
-    sigs = perf["signals"]
+    sigs = None
+    if profil and perf.get("profils", {}).get(profil):
+        sigs = perf["profils"][profil]
+    elif perf.get("signals"):
+        sigs = perf["signals"]
+    if not sigs:
+        return 1.0
     m = 1.0
     for name, pred in SIGNALS.items():
         try:
