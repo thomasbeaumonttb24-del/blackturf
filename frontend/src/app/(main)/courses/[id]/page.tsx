@@ -1668,10 +1668,10 @@ export default function CoursePage() {
       .finally(() => setLoadingPred(false));
   }, [id, user]);
 
-  // Load narrative analysis (Standard+)
+  // Load narrative analysis (Standard+) — aussi post-course (facteurs par cheval
+  // = transparence "le modèle analyse bien plus que la cote").
   useEffect(() => {
     if (!user || ["free", "decouverte"].includes(user.plan) || !course) return;
-    if (course.statut === "termine") return; // pas utile post-course
     api.get(`/courses/${id}/analyse`)
       .then((res) => setAnalysis(res.data))
       .catch(() => {}); // fail silently
@@ -2302,6 +2302,21 @@ export default function CoursePage() {
                               intervalle {(p.proba_top1_low * 100).toFixed(0)}–{(p.proba_top1_high * 100).toFixed(0)}%
                             </span>
                           )}
+                          {/* Facteurs clés RÉELS (forme, ELO, J/E…) — montre que l'IA pèse bien plus que la cote */}
+                          {(() => {
+                            const fac = analysis?.predictions?.find((ap) => ap.numero === p.numero)?.explanation?.facteurs_positifs ?? [];
+                            const labels = fac.slice(0, 3).map((f) => f.label.replace(/^[^A-Za-zÀ-ÿ0-9]+/, "").trim()).filter(Boolean);
+                            if (!labels.length) return null;
+                            return (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {labels.map((l, i) => (
+                                  <span key={i} className="inline-block rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70 px-1.5 py-0.5 text-[9px] font-medium leading-none">
+                                    {l}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                         {/* Deux chiffres clairs alignés : victoire (gras) + placé */}
                         <div className="flex items-center gap-3 flex-shrink-0 text-right">
@@ -2320,7 +2335,9 @@ export default function CoursePage() {
                       <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
                       <span><strong className="text-foreground">Gagnant</strong> = probabilité de victoire · <strong className="text-foreground">Top-3</strong> = probabilité d&apos;être dans les 3 premiers. Probabilités calibrées sur résultats réels.</span>
                     </p>
-                    <p className="text-[10px] text-muted-foreground/70 pl-[18px]">Aide à la décision — aucune garantie de gain.</p>
+                    <p className="text-[10px] text-muted-foreground/70 pl-[18px]">
+                      Le modèle combine <strong className="text-foreground">80+ critères</strong> (forme, ELO, jockey/entraîneur, distance, terrain, descente de catégorie…) — la cote n&apos;est qu&apos;un facteur parmi d&apos;autres (~19% du poids). Aide à la décision — aucune garantie de gain.
+                    </p>
                   </div>
                 </div>
               )}
