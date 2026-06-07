@@ -635,7 +635,14 @@ async def get_mise_plan(
         "nb_partants": course.nb_partants,
     }
 
-    plan = generer_plan(montant, profil, preds, course_info, bankroll)
+    # Pondération de sélection par le ROI RÉEL des paris passés (auto-amélioration)
+    try:
+        from ml.bet_performance import get_type_roi_weights
+        roi_weights = await get_type_roi_weights(db)
+    except Exception:
+        roi_weights = {}
+
+    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights)
     return plan_to_dict(plan)
 
 
@@ -686,7 +693,14 @@ async def enregistrer_paris(
     } for pred, part, cheval in rows]
     course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "nb_partants": course.nb_partants}
 
-    plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None))
+    # Même pondération ROI que l'aperçu (le plan enregistré = celui montré)
+    try:
+        from ml.bet_performance import get_type_roi_weights
+        roi_weights = await get_type_roi_weights(db)
+    except Exception:
+        roi_weights = {}
+
+    plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None, roi_weights))
 
     # Bankroll principale
     main = (await db.execute(

@@ -109,6 +109,8 @@ class MisePlan:
     resume_ia: str
     avertissement: str
     kelly_warning: bool = False
+    esperance_gain: float = 0.0      # espérance de PROFIT NET en € (Σ mise×EV)
+    palier: str = ""                 # micro | petit | moyen | gros
 
 
 # ─────────────────────────────────────────────────────────────
@@ -121,11 +123,39 @@ NIVEAU_META = {
     "coup":      ("GROS LOT",  "🔴", "#EF4444"),
 }
 
-# Nb de paris ciblé par niveau selon le profil (avant plafond du montant)
-PROFIL_QUOTAS = {
-    "conservateur": {"securite": 2, "rendement": 3, "surprise": 1, "coup": 1},
-    "equilibre":    {"securite": 1, "rendement": 3, "surprise": 2, "coup": 1},
-    "agressif":     {"securite": 0, "rendement": 2, "surprise": 3, "coup": 2},
+# ─────────────────────────────────────────────────────────────
+# Paliers de MONTANT — changent la STRATÉGIE, pas juste le split.
+#   max_bets   : plafond du nb de paris (moins de paris, plus de conviction)
+#   min_stake  : mise plancher par pari (€) → tue le saupoudrage de petits 2€
+#   favor_value: petite mise → viser une grosse cote PROBABLE (edge réel) au
+#                lieu de saupoudrer ; on récompense le rapport élevé à valeur.
+#   cap_spec   : part max du montant allouable aux paris SPÉCULATIFS (EV ≤ 0,
+#                "coups" gros lot sans value avérée).
+# ─────────────────────────────────────────────────────────────
+MONTANT_PALIERS = [
+    (10,        {"nom": "micro", "max_bets": 2, "min_stake": 2, "favor_value": True,  "cap_spec": 1.0}),
+    (30,        {"nom": "petit", "max_bets": 3, "min_stake": 3, "favor_value": True,  "cap_spec": 0.6}),
+    (100,       {"nom": "moyen", "max_bets": 4, "min_stake": 4, "favor_value": False, "cap_spec": 0.4}),
+    (10 ** 9,   {"nom": "gros",  "max_bets": 5, "min_stake": 5, "favor_value": False, "cap_spec": 0.25}),
+]
+
+
+def _palier(montant: int) -> dict:
+    for seuil, cfg in MONTANT_PALIERS:
+        if montant < seuil:
+            return cfg
+    return MONTANT_PALIERS[-1][1]
+
+
+# Nb max de "coups" spéculatifs (gros lot sans value avérée) selon le profil.
+PROFIL_MAX_COUP = {"conservateur": 0, "equilibre": 1, "agressif": 2}
+
+# Préférence de risque par niveau : tilt de l'allocation Kelly selon le profil.
+# Concentre la mise vers le sécuritaire (conservateur) ou le spéculatif (agressif).
+PROFIL_RISK_PREF = {
+    "conservateur": {"securite": 1.4, "rendement": 1.0, "surprise": 0.5, "coup": 0.3},
+    "equilibre":    {"securite": 1.0, "rendement": 1.1, "surprise": 0.8, "coup": 0.6},
+    "agressif":     {"securite": 0.6, "rendement": 1.0, "surprise": 1.2, "coup": 1.3},
 }
 
 
@@ -135,17 +165,29 @@ def generer_plan(
     predictions: list[dict],
     course_info: dict,
     bankroll: Optional[float] = None,
+    roi_weights: Optional[dict] = None,
 ) -> MisePlan:
-    """Plan de mise : PORTEFEUILLE DIVERS de paris recalculé à chaque fois selon le
-    montant — plusieurs Simple Gagnant, 3-4 Couplé Gagnant différents, Trios, dont
-    des scénarios SURPRISE (outsider que le modèle aime > marché). Probabilités
-    RÉELLES (simulation Plackett-Luce). Mise minimale 2€, arrondie à l'euro.
+    """Plan de mise INTELLIGENT — moins de paris, plus de conviction.
+
+    Principe : le MONTANT définit la STRATÉGIE (palier micro/petit/moyen/gros),
+    pas seulement le split. Petite mise → 1-2 paris à VALEUR (cote probable plus
+    élevée, edge réel modèle > marché) pour viser un vrai gain. Gros montant +
+    coup fiable → mise concentrée sur les paris à forte espérance via Kelly réel.
+
+    - Sélection par CONVICTION = f(EV, proba, edge) × pondération ROI passé du type.
+    - Ne retient un pari que si EV > 0 OU coup crédible (edge>0 & gros rapport).
+    - Dispatch par fraction de Kelly réelle (ev/(cote-1)) tiltée par le profil,
+      plafonds sur les paris spéculatifs. Probas RÉELLES (simulation Plackett-Luce).
+    - `roi_weights` : multiplicateur par type_pari issu du ROI RÉEL observé sur les
+      paris passés réglés (auto-amélioration) ; absent/insuffisant → neutre (1.0).
     """
     from ml.combo_bets import enumerate_bet_candidates
 
-    profil = profil if profil in PROFIL_QUOTAS else "equilibre"
+    profil = profil if profil in PROFIL_RISK_PREF else "equilibre"
     montant = max(2, int(round(float(montant))))            # euro, min 2
-    kelly_warn = bankroll is not None and montant > bankroll * 0.05
+    kelly_warn = bankroll is not None and bankroll > 0 and montant > bankroll * 0.05
+    palier = _palier(montant)
+    roi_weights = roi_weights or {}
 
     preds = []
     for p in predictions:
@@ -163,83 +205,158 @@ def generer_plan(
     if not cands:
         return _plan_vide(montant, profil)
 
-    max_bets = max(1, min(montant // 2, 8))                 # chaque pari ≥ 2€
-    selected = _select_diverse(cands, max_bets, profil)
+    selected = _select_conviction(cands, montant, palier, profil, roi_weights)
     if not selected:
         return _plan_vide(montant, profil)
 
-    _allocate_euros(selected, montant)                      # remplit "mise" (int €)
-    return _assemble_plan(selected, montant, kelly_warn)
+    _allocate_kelly(selected, montant, palier, profil)      # remplit "mise" (int €)
+    return _assemble_plan(selected, montant, palier, kelly_warn)
 
 
-def _select_diverse(cands: list[dict], max_bets: int, profil: str) -> list[dict]:
-    """Choisit un sous-ensemble VARIÉ selon les quotas du profil, en privilégiant
-    l'EV puis la proba. Au plus 3 paris d'un même type, mix de niveaux."""
-    quotas = dict(PROFIL_QUOTAS[profil])
-    by_niveau: dict[str, list[dict]] = {}
-    for c in cands:
-        by_niveau.setdefault(c["niveau"], []).append(c)
-    for lst in by_niveau.values():
-        lst.sort(key=lambda c: (c["ev"], c["proba_gain"]), reverse=True)
+def _is_credible_coup(c: dict) -> bool:
+    """Coup crédible = outsider à VRAIE valeur : modèle > marché (edge>0) ET gros
+    rapport (≥6). Justifie de jouer un pari même à EV faiblement négative."""
+    return c.get("edge", 0.0) > 0 and c["rapport_estime"] >= 6.0
 
+
+def _is_speculative(c: dict) -> bool:
+    """Pari spéculatif = joué pour le gros lot sans value avérée (EV ≤ 0 et pas
+    de coup crédible). Soumis au plafond cap_spec + quota PROFIL_MAX_COUP."""
+    return c["ev"] <= 0 and not _is_credible_coup(c)
+
+
+def _select_conviction(
+    cands: list[dict], montant: int, palier: dict, profil: str, roi_weights: dict
+) -> list[dict]:
+    """Sélectionne PEU de paris à FORTE conviction (EV × proba × edge × ROI passé).
+    Profitabilité : ne retient que les EV>0 ou coups crédibles. Concentre.
+    """
+    min_stake = palier["min_stake"]
+    max_feasible = max(1, montant // min_stake)             # chaque pari ≥ min_stake
+    max_bets = min(palier["max_bets"], max_feasible, len(cands))
+    max_coup = PROFIL_MAX_COUP.get(profil, 1)
+    max_per_type = 1 if max_bets <= 3 else 2
+
+    def roi_w(c):
+        return float(roi_weights.get(c["type_pari"], 1.0))
+
+    def conviction(c):
+        base = (max(c["ev"], 0.0) * 0.6
+                + c["proba_gain"] * 0.5
+                + max(c.get("edge", 0.0), 0.0) * 0.8)
+        # petite mise → privilégier une grosse cote PROBABLE (value à edge réel)
+        if palier["favor_value"] and c.get("edge", 0.0) > 0:
+            base += min(c["rapport_estime"], 30.0) / 100.0   # jusqu'à +0.30
+        return base * roi_w(c)
+
+    ranked = sorted(cands, key=conviction, reverse=True)
     selected: list[dict] = []
     type_count: dict[str, int] = {}
+    n_coup = 0
 
-    def take(c):
-        if len(selected) >= max_bets:
-            return False
-        if type_count.get(c["type_pari"], 0) >= 3:
-            return False
-        selected.append(c)
-        type_count[c["type_pari"]] = type_count.get(c["type_pari"], 0) + 1
-        return True
-
-    # 1) Respecter les quotas par niveau
-    for niveau in ("securite", "rendement", "surprise", "coup"):
-        for c in by_niveau.get(niveau, []):
-            if quotas.get(niveau, 0) <= 0:
-                break
-            if take(c):
-                quotas[niveau] -= 1
-    # 2) Compléter avec les meilleurs candidats restants (EV+) jusqu'au plafond
-    rest = sorted(
-        [c for c in cands if c not in selected],
-        key=lambda c: (c["ev"], c["proba_gain"]), reverse=True,
-    )
-    for c in rest:
+    for c in ranked:
         if len(selected) >= max_bets:
             break
-        take(c)
+        # Profitabilité : EV>0 OU coup crédible uniquement
+        if c["ev"] <= 0 and not _is_credible_coup(c):
+            continue
+        spec = _is_speculative(c)
+        if spec and n_coup >= max_coup:
+            continue
+        if type_count.get(c["type_pari"], 0) >= max_per_type:
+            continue
+        c["_roi_w"] = roi_w(c)
+        selected.append(c)
+        type_count[c["type_pari"]] = type_count.get(c["type_pari"], 0) + 1
+        if spec:
+            n_coup += 1
+
+    # Filet : aucune value sur la course → 1 pari le plus SÛR (meilleure proba),
+    # pour ne pas renvoyer un plan vide. Aucune valeur inventée.
+    if not selected:
+        safe = max(cands, key=lambda c: c["proba_gain"])
+        safe["_roi_w"] = roi_w(safe)
+        selected = [safe]
     return selected
 
 
-def _allocate_euros(selected: list[dict], montant: int) -> None:
-    """Répartit `montant` (€ entiers) : 2€ plancher par pari, le reste pondéré par
-    la conviction (proba × max(EV,0)+petit socle). Total == montant exactement."""
+def _allocate_kelly(selected: list[dict], montant: int, palier: dict, profil: str) -> None:
+    """Dispatch `montant` (€ entiers) par fraction de KELLY réelle (ev/(cote-1))
+    tiltée par le profil de risque et le ROI passé. min_stake plancher par pari ;
+    plafond sur les paris spéculatifs (cap_spec). Total == montant exactement."""
+    rp = PROFIL_RISK_PREF.get(profil, PROFIL_RISK_PREF["equilibre"])
+    min_stake = palier["min_stake"]
+
+    def weight(c):
+        b = max(c["rapport_estime"] - 1.0, 0.1)
+        f = max(c["ev"] / b, 0.0)                # fraction de Kelly pleine
+        if f <= 0:                              # coup à upside : poids plancher
+            f = 0.02
+        return max(f * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0), 1e-3)
+
+    weights = [weight(c) for c in selected]
     n = len(selected)
-    # si le montant ne couvre pas 2€ par pari, on garde les meilleurs
-    while n * 2 > montant and n > 1:
-        selected.pop()  # déjà triés best-first par _select_diverse
+
+    # Sécurité : si min_stake×n dépasse le montant, garder les meilleurs poids.
+    if min_stake * n > montant and n > 1:
+        order = sorted(range(n), key=lambda i: weights[i], reverse=True)
+        keep = max(1, montant // min_stake)
+        keep_idx = set(order[:keep])
+        selected[:] = [selected[i] for i in range(n) if i in keep_idx]
+        weights = [weight(c) for c in selected]
         n = len(selected)
 
-    base = 2
-    reste = montant - base * n
-    weights = []
-    for c in selected:
-        w = c["proba_gain"] * (1.0 + max(c["ev"], 0.0)) + 0.05
-        weights.append(max(w, 0.01))
+    base = min_stake * n
+    reste = max(0, montant - base)
     total_w = sum(weights)
     extra = [int(reste * w / total_w) for w in weights] if total_w > 0 else [0] * n
-    # distribuer les euros restants au(x) plus forte(s) conviction(s)
     leftover = reste - sum(extra)
     order = sorted(range(n), key=lambda i: weights[i], reverse=True)
     for k in range(leftover):
         extra[order[k % n]] += 1
     for i, c in enumerate(selected):
-        c["mise"] = base + extra[i]
+        c["mise"] = min_stake + extra[i]
+
+    _apply_spec_cap(selected, montant, palier)
 
 
-def _assemble_plan(selected: list[dict], montant: int, kelly_warn: bool) -> MisePlan:
+def _apply_spec_cap(selected: list[dict], montant: int, palier: dict) -> None:
+    """Plafonne la part totale misée sur les paris SPÉCULATIFS (EV≤0) à cap_spec ×
+    montant, en transférant l'excédent vers les paris fiables (EV>0). Garde le
+    plancher min_stake. Conserve le total. Best-effort (petit n)."""
+    cap = palier["cap_spec"]
+    if cap >= 1.0:
+        return
+    min_stake = palier["min_stake"]
+    spec_idx = [i for i, c in enumerate(selected) if c["ev"] <= 0]
+    safe_idx = [i for i, c in enumerate(selected) if c["ev"] > 0]
+    if not spec_idx or not safe_idx:
+        return
+    max_spec = int(montant * cap)
+    spec_total = sum(selected[i]["mise"] for i in spec_idx)
+    if spec_total <= max_spec:
+        return
+
+    to_move = spec_total - max_spec
+    # Réduire les spéculatifs (mise desc) jusqu'au plancher min_stake.
+    for i in sorted(spec_idx, key=lambda i: selected[i]["mise"], reverse=True):
+        if to_move <= 0:
+            break
+        reducible = selected[i]["mise"] - min_stake
+        cut = min(reducible, to_move)
+        selected[i]["mise"] -= cut
+        to_move -= cut
+    moved = (spec_total - max_spec) - to_move
+    # Transférer l'euro coupé sur les paris fiables (mise desc).
+    safe_order = sorted(safe_idx, key=lambda i: selected[i]["mise"], reverse=True)
+    k = 0
+    while moved > 0 and safe_order:
+        selected[safe_order[k % len(safe_order)]]["mise"] += 1
+        moved -= 1
+        k += 1
+
+
+def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn: bool) -> MisePlan:
     """Groupe les paris choisis par niveau → MisePlan (structure attendue par le front)."""
     niveaux_map: dict[str, list[PariRec]] = {}
     ev_pondere = 0.0
@@ -256,7 +373,7 @@ def _assemble_plan(selected: list[dict], montant: int, kelly_warn: bool) -> Mise
             ev_estime=c["ev"],
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
-        ev_pondere += mise * c["ev"]
+        ev_pondere += mise * c["ev"]            # espérance de profit net (€)
 
     niveaux: list[NiveauPlan] = []
     for niv in ("securite", "rendement", "surprise", "coup"):
@@ -270,22 +387,27 @@ def _assemble_plan(selected: list[dict], montant: int, kelly_warn: bool) -> Mise
             montant=m_niv, pct=round(m_niv / montant * 100), paris=paris,
         ))
 
+    montant_joue = sum(c["mise"] for c in selected)
     nb_paris = len(selected)
-    nb_surprise = sum(1 for c in selected if c["niveau"] == "surprise")
+    nb_val = sum(1 for c in selected if c.get("edge", 0.0) > 0)
+    esp = round(ev_pondere, 2)
     resume = (
-        f"{nb_paris} paris répartis sur {len(niveaux)} niveaux"
-        + (f", dont {nb_surprise} scénario(s) surprise" if nb_surprise else "")
-        + f". Mise totale {montant}€."
+        f"{nb_paris} pari{'s' if nb_paris > 1 else ''} ciblé{'s' if nb_paris > 1 else ''} "
+        f"(palier {palier['nom']}), mise concentrée de {montant_joue}€"
+        + (f", dont {nb_val} à valeur réelle (cote probable)" if nb_val else "")
+        + f". Espérance de gain {'+' if esp >= 0 else ''}{esp:.2f}€."
     )
     return MisePlan(
         montant_total=montant,
-        montant_joue=sum(c["mise"] for c in selected),
-        montant_reserve=montant - sum(c["mise"] for c in selected),
+        montant_joue=montant_joue,
+        montant_reserve=montant - montant_joue,
         ev_global=round(ev_pondere / montant, 3) if montant else 0.0,
         niveaux=niveaux,
         resume_ia=resume,
-        avertissement="Probabilités estimées par simulation. Mises arrondies à l'euro (min 2€). Jouez avec modération.",
+        avertissement="Probabilités estimées par simulation (Plackett-Luce). Mises arrondies à l'euro. Jouez avec modération.",
         kelly_warning=kelly_warn,
+        esperance_gain=esp,
+        palier=palier["nom"],
     )
 
 
@@ -566,6 +688,8 @@ def plan_to_dict(plan: MisePlan) -> dict:
         "montant_joue": plan.montant_joue,
         "montant_reserve": plan.montant_reserve,
         "ev_global": plan.ev_global,
+        "esperance_gain": plan.esperance_gain,
+        "palier": plan.palier,
         "kelly_warning": plan.kelly_warning,
         "resume_ia": plan.resume_ia,
         "avertissement": plan.avertissement,

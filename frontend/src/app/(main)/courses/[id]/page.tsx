@@ -147,6 +147,8 @@ interface MisePlan {
   montant_joue: number;
   montant_reserve: number;
   ev_global: number;
+  esperance_gain?: number;   // espérance de profit net en €
+  palier?: string;           // micro | petit | moyen | gros
   kelly_warning: boolean;
   resume_ia: string;
   avertissement: string;
@@ -300,7 +302,7 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
       </div>
 
       {/* Résumé totaux */}
-      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+      <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
         <div className="rounded bg-muted/30 p-2">
           <div className="text-muted-foreground">Misé</div>
           <div className="font-bold font-mono tabular-nums">{plan.montant_joue.toFixed(2)}€</div>
@@ -309,6 +311,17 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
           <div className="text-muted-foreground">Réserve</div>
           <div className="font-bold font-mono tabular-nums text-brand-gold">{plan.montant_reserve.toFixed(2)}€</div>
         </div>
+        {typeof plan.esperance_gain === "number" && (
+          <div className="rounded bg-muted/30 p-2">
+            <div className="text-muted-foreground">Espérance gain</div>
+            <div className={cn(
+              "font-bold font-mono tabular-nums",
+              plan.esperance_gain >= 0 ? "text-brand-emerald" : "text-brand-red"
+            )}>
+              {plan.esperance_gain >= 0 ? "+" : ""}{plan.esperance_gain.toFixed(2)}€
+            </div>
+          </div>
+        )}
       </div>
 
       {plan.kelly_warning && (
