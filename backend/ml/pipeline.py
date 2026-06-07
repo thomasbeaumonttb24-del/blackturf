@@ -367,6 +367,15 @@ async def run_nightly_retraining() -> None:
         log.info("pipeline.nightly_learned_weights", type_weights=data.get("type_weights"))
     except Exception as e:
         log.warning("pipeline.nightly_learned_weights_skip", err=str(e)[:140])
+    # Garde-fou intégrité : nos données collent-elles à PMU ? (logge toute dérive)
+    try:
+        from datetime import date as _date
+        from scripts.validate_pmu_integrity import validate as _validate_pmu
+        res = await _validate_pmu(_date.today().strftime("%d%m%Y"))
+        if res.get("mismatches"):
+            log.error("pipeline.nightly_pmu_drift", n=len(res["mismatches"]), sample=res["mismatches"][:5])
+    except Exception as e:
+        log.warning("pipeline.nightly_pmu_integrity_skip", err=str(e)[:140])
 
 
 async def _do_retraining(mois: int, label: str) -> None:
