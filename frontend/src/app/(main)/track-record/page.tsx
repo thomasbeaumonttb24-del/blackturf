@@ -34,8 +34,8 @@ interface TrackRecord {
   };
   clv?: { n: number; pct_beat_line: number; clv_implied: number; clv_median: number } | null;
   updated_at?: string;
-  by_month: Array<{
-    mois: string;
+  by_day: Array<{
+    jour: string;
     accuracy_top3: number;
     nb_predictions: number;
     nb_surprises: number;
@@ -268,20 +268,20 @@ export default function TrackRecordPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-amber-400" />
-              Précision Top-3 par mois (6 derniers mois)
+              Précision Top-3 par jour (7 derniers jours)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {data.by_month.every((m) => m.nb_predictions === 0) ? (
+            {data.by_day.every((d) => d.nb_predictions === 0) ? (
               <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">
-                Aucune donnée mensuelle pour le moment
+                Aucune donnée journalière pour le moment
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={data.by_month} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                <LineChart data={data.by_day} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F6" vertical={false} />
                   <XAxis
-                    dataKey="mois"
+                    dataKey="jour"
                     tick={{ fontSize: 11, fill: "#9CA3AF" }}
                     axisLine={false}
                     tickLine={false}

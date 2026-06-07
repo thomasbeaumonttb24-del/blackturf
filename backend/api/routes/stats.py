@@ -569,39 +569,40 @@ async def track_record(
     accuracy_top3 = round(len(top3_hits) / nb_total * 100, 1) if nb_total else 0.0
     nb_surprises = len([r for r in all_rll if r.was_surprise])
 
-    # ── 2. Par mois (6 derniers mois) ────────────────────────
+    # ── 2. Par jour (7 derniers jours) ───────────────────────
     now = datetime.now(timezone.utc)
-    monthly_acc: dict[str, dict] = {}
-    for i in range(5, -1, -1):
-        month_dt = now - timedelta(days=30 * i)
-        key = month_dt.strftime("%Y-%m")
-        monthly_acc[key] = {
-            "mois": month_dt.strftime("%b %Y"),
+    today = now.date()
+    daily_acc: dict[str, dict] = {}
+    for i in range(6, -1, -1):
+        day_dt = today - timedelta(days=i)
+        key = day_dt.strftime("%Y-%m-%d")
+        daily_acc[key] = {
+            "jour": day_dt.strftime("%d/%m"),
             "accuracy_top3": 0.0,
             "nb_predictions": 0,
             "nb_surprises": 0,
+            "_top3": 0,
         }
     for r in all_rll:
         if not r.analyzed_at:
             continue
-        key = r.analyzed_at.strftime("%Y-%m")
-        if key not in monthly_acc:
+        key = r.analyzed_at.strftime("%Y-%m-%d")
+        if key not in daily_acc:
             continue
-        monthly_acc[key]["nb_predictions"] += 1
+        daily_acc[key]["nb_predictions"] += 1
         if r.was_surprise:
-            monthly_acc[key]["nb_surprises"] += 1
+            daily_acc[key]["nb_surprises"] += 1
+        if r.gagnant_rang_predit is not None and r.gagnant_rang_predit <= 3:
+            daily_acc[key]["_top3"] += 1
 
-    for key, v in monthly_acc.items():
+    for v in daily_acc.values():
         nb = v["nb_predictions"]
         if nb:
-            top3_in_month = sum(
-                1 for r in all_rll
-                if r.analyzed_at and r.analyzed_at.strftime("%Y-%m") == key
-                and r.gagnant_rang_predit is not None and r.gagnant_rang_predit <= 3
-            )
-            v["accuracy_top3"] = round(top3_in_month / nb * 100, 1)
+            v["accuracy_top3"] = round(v.pop("_top3") / nb * 100, 1)
+        else:
+            v.pop("_top3")
 
-    monthly_list = list(monthly_acc.values())
+    daily_list = list(daily_acc.values())
 
     # ── 3. Par discipline ─────────────────────────────────────
     disc_acc: dict[str, dict] = {}
@@ -855,7 +856,7 @@ async def track_record(
             "favori_gain_total": round(gain_fav, 2),
             "favori_net": net_fav,
         },
-        "by_month": monthly_list,
+        "by_day": daily_list,
         "by_discipline": by_discipline,
         "best_pronostics": best_pronostics,
         "derniers_pronostics": derniers_pronostics,
