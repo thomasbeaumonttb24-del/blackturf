@@ -78,9 +78,10 @@ export default function AdminPage() {
     { refreshInterval: 60000 }
   );
 
+  const [userSearch, setUserSearch] = useState("");
   const { data: users } = useSWR(
-    user?.is_admin ? "/admin-users" : null,
-    () => adminApi.users({ limit: 20 }).then((r) => r.data)
+    user?.is_admin ? ["/admin-users", userSearch] : null,
+    () => adminApi.users({ limit: 200, search: userSearch || undefined }).then((r) => r.data)
   );
 
   async function handleRetrain() {
@@ -275,41 +276,73 @@ export default function AdminPage() {
         </Card>
       )}
 
-      {/* Users */}
+      {/* Gestion des comptes */}
       {users && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Derniers utilisateurs</CardTitle>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CardTitle className="text-base">Gestion des comptes ({(users as unknown[]).length})</CardTitle>
+              <input
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder="Rechercher (email, nom)…"
+                className="rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
+              />
+            </div>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full text-sm min-w-[480px]">
+            <table className="w-full text-sm min-w-[920px]">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
-                  <th className="text-left p-3">Email</th>
+                  <th className="text-left p-3">Utilisateur</th>
                   <th className="text-center p-3">Plan</th>
-                  <th className="text-center p-3">Actif</th>
+                  <th className="text-center p-3">Profil</th>
+                  <th className="text-right p-3">Solde</th>
+                  <th className="text-right p-3">Misé</th>
+                  <th className="text-right p-3">Net</th>
+                  <th className="text-right p-3">ROI</th>
+                  <th className="text-center p-3">Paris</th>
+                  <th className="text-center p-3">Statut</th>
                   <th className="text-right p-3">Inscrit le</th>
                 </tr>
               </thead>
               <tbody>
-                {(users as Array<{ user_id: string; email: string; plan: string; is_active: boolean; created_at: string }>).map((u) => (
-                  <tr key={u.user_id} className="border-b border-border/50">
-                    <td className="p-3">{u.email}</td>
-                    <td className="p-3 text-center">
-                      <Badge variant={["pro", "expert"].includes(u.plan) ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">
-                        {u.plan}
-                      </Badge>
+                {(users as Array<{
+                  user_id: string; email: string; nom: string | null; prenom: string | null;
+                  plan: string; profil_risque: string; is_active: boolean; is_admin: boolean;
+                  email_verified: boolean; auth_method: string; stripe_client: boolean;
+                  created_at: string; solde_actuel: number; mise_totale: number; gain_net: number;
+                  roi: number | null; nb_paris: number; nb_gagnes: number;
+                }>).map((u) => {
+                  const nom = [u.prenom, u.nom].filter(Boolean).join(" ") || "—";
+                  return (
+                  <tr key={u.user_id} className="border-b border-border/50 hover:bg-muted/20">
+                    <td className="p-3">
+                      <div className="font-medium flex items-center gap-1.5">
+                        {nom}
+                        {u.is_admin && <Badge variant="secondary" className="text-[9px]">ADMIN</Badge>}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        {u.email}
+                        <span className="text-[9px]" title={u.auth_method === "google" ? "Google" : "Email"}>{u.auth_method === "google" ? "🔵 G" : "✉"}</span>
+                        {u.email_verified ? <span className="text-[9px] text-green-500" title="Email vérifié">✓</span> : <span className="text-[9px] text-amber-500" title="Non vérifié">⚠</span>}
+                        {u.stripe_client && <span className="text-[9px] text-violet-500" title="Client Stripe">💳</span>}
+                      </div>
                     </td>
                     <td className="p-3 text-center">
-                      {u.is_active ? (
-                        <CheckCircle className="h-4 w-4 text-green-400 mx-auto" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-destructive mx-auto" />
-                      )}
+                      <Badge variant={["pro", "expert"].includes(u.plan) ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
                     </td>
+                    <td className="p-3 text-center text-xs text-muted-foreground capitalize">{u.profil_risque}</td>
+                    <td className="p-3 text-right font-mono tabular-nums">{u.solde_actuel?.toFixed(0)}€</td>
+                    <td className="p-3 text-right font-mono tabular-nums text-muted-foreground">{u.mise_totale?.toFixed(0)}€</td>
+                    <td className={cn("p-3 text-right font-mono tabular-nums font-semibold", u.gain_net >= 0 ? "text-green-500" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</td>
+                    <td className={cn("p-3 text-right font-mono tabular-nums", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-500" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</td>
+                    <td className="p-3 text-center text-xs tabular-nums">{u.nb_gagnes}/{u.nb_paris}</td>
+                    <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-400 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
                     <td className="p-3 text-right text-muted-foreground text-xs">{formatDateTime(u.created_at)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </CardContent>

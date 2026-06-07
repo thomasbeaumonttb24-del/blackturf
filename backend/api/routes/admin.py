@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, and_, text
+from sqlalchemy import select, func, desc, and_, or_, case, text
 
 from api.model_metrics import plausible_roi, real_model_metrics
 from api.routes.auth import require_admin
@@ -101,38 +101,76 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Liste les utilisateurs avec plan, date création, nb prédictions utilisées, last_login."""
+    """Liste les utilisateurs : identité, plan, profil, PORTEFEUILLE (misé/gagné/net/
+    ROI/solde), nb paris, date création — tout ce qu'il faut pour suivre chaque compte.
+    Agrégats calculés en requêtes GROUPÉES (pas de N+1). Jamais le mot de passe."""
+    from db.models import Bankroll
     q = select(User)
     if plan:
         q = q.where(User.plan == plan)
     if search:
-        q = q.where(User.email.ilike(f"%{search}%"))
+        like = f"%{search}%"
+        q = q.where(or_(User.email.ilike(like), User.nom.ilike(like), User.prenom.ilike(like)))
     q = q.order_by(desc(User.created_at)).limit(limit).offset(offset)
     users = (await db.execute(q)).scalars().all()
+    uids = [u.user_id for u in users]
+
+    # ── Agrégats bankroll par user (1 requête groupée) ──
+    agg: dict[str, dict] = {}
+    if uids:
+        rows = (await db.execute(
+            select(
+                BankrollEntry.user_id,
+                func.count(BankrollEntry.entry_id),
+                func.coalesce(func.sum(BankrollEntry.mise), 0.0),
+                func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
+                func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)),
+                func.sum(case((BankrollEntry.suivi_reco_ia == True, 1), else_=0)),
+            ).where(BankrollEntry.user_id.in_(uids)).group_by(BankrollEntry.user_id)
+        )).all()
+        for uid, nb, mise, net, gagnes, ia in rows:
+            agg[uid] = {"nb_paris": int(nb), "mise": float(mise), "net": float(net),
+                        "nb_gagnes": int(gagnes or 0), "nb_ia": int(ia or 0)}
+        # Solde = Σ montant_initial des portefeuilles + Σ gain_perte
+        sol = (await db.execute(
+            select(Bankroll.user_id, func.coalesce(func.sum(Bankroll.montant_initial), 0.0))
+            .where(Bankroll.user_id.in_(uids), Bankroll.est_supprime == False)
+            .group_by(Bankroll.user_id)
+        )).all()
+        for uid, init in sol:
+            agg.setdefault(uid, {}).setdefault("nb_paris", 0)
+            agg[uid]["capital_initial"] = float(init)
 
     result = []
     for u in users:
-        # Count IA-tracked bets as proxy for predictions used
-        nb_pred = (await db.execute(
-            select(func.count(BankrollEntry.entry_id)).where(
-                and_(
-                    BankrollEntry.user_id == u.user_id,
-                    BankrollEntry.suivi_reco_ia == True,
-                )
-            )
-        )).scalar() or 0
-
+        a = agg.get(u.user_id, {})
+        mise = a.get("mise", 0.0)
+        net = a.get("net", 0.0)
+        cap0 = a.get("capital_initial", 0.0) or (u.bankroll_initiale or 0.0)
         result.append({
             "user_id": u.user_id,
             "email": u.email,
             "nom": u.nom,
             "prenom": u.prenom,
             "plan": u.plan,
+            "profil_risque": u.profil_risque,
             "is_active": u.is_active,
             "is_admin": u.is_admin,
+            "email_verified": u.email_verified,
+            "auth_method": "google" if u.google_id else "email",
+            "stripe_client": bool(u.stripe_customer_id),
             "created_at": u.created_at,
-            "nb_predictions_used": nb_pred,
-            "last_login": u.updated_at,  # updated_at proxies last activity
+            "last_login": u.updated_at,
+            # Portefeuille
+            "bankroll_initiale": u.bankroll_initiale,
+            "capital_initial": round(cap0, 2),
+            "solde_actuel": round(cap0 + net, 2),
+            "nb_paris": a.get("nb_paris", 0),
+            "nb_gagnes": a.get("nb_gagnes", 0),
+            "nb_predictions_used": a.get("nb_ia", 0),
+            "mise_totale": round(mise, 2),
+            "gain_net": round(net, 2),
+            "roi": round(net / mise * 100, 1) if mise > 0 else None,
         })
     return result
 
