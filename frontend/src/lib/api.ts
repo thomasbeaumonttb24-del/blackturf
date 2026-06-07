@@ -119,6 +119,7 @@ export const statsApi = {
   roiByDiscipline: () => api.get("/stats/roi-by-discipline"),
   perfPersonnelle: () => api.get("/stats/perf-personnelle"),
   trackRecord: () => api.get("/stats/track-record"),
+  profils: () => api.get("/stats/profils"),
 };
 
 export const notificationsApi = {

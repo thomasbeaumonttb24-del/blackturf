@@ -83,6 +83,22 @@ interface TrackRecord {
   };
 }
 
+interface ProfilsBacktest {
+  profils: Array<{
+    profil: string;
+    label: string;
+    nb_courses: number;
+    mise_totale: number;
+    gain_total: number;
+    gain_net: number;
+    roi: number | null;
+    taux_courses_beneficiaires: number | null;
+  }>;
+  nb_courses: number;
+  mise_par_course: number;
+  updated_at?: string;
+}
+
 const NIVEAU_LABELS: Record<number, string> = {
   1: "1 étoile", 2: "2 étoiles", 3: "3 étoiles", 4: "4 étoiles",
 };
@@ -127,6 +143,13 @@ export default function TrackRecordPage() {
     "track-record",
     () => statsApi.trackRecord().then((r) => r.data),
     { refreshInterval: 60_000, revalidateOnFocus: true }  // recalcul ~ à chaque fin de course
+  );
+
+  // Backtest par profil — calcul lourd côté API (cache 6h), pas de refresh agressif
+  const { data: profilsData } = useSWR<ProfilsBacktest>(
+    "stats-profils",
+    () => statsApi.profils().then((r) => r.data),
+    { revalidateOnFocus: false },
   );
 
   if (isLoading || !data) {
@@ -304,6 +327,82 @@ export default function TrackRecordPage() {
                   />
                 </LineChart>
               </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Performance par profil de risque (backtest simulé) ───────── */}
+        <Card className="border-border/60">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-amber-400" />
+              Performance par profil de risque
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!profilsData ? (
+              <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">
+                Calcul du backtest par profil…
+              </div>
+            ) : profilsData.nb_courses === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Pas encore assez d&apos;historique pour le backtest par profil.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {profilsData.profils.map((p) => {
+                    const pos = (p.roi ?? 0) >= 0;
+                    const accent =
+                      p.profil === "conservateur" ? "#059669"
+                      : p.profil === "equilibre" ? "#2563EB"
+                      : "#D97706";
+                    return (
+                      <div key={p.profil} className="rounded-2xl border border-border/60 bg-white p-5">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm font-semibold" style={{ color: accent }}>{p.label}</span>
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {p.nb_courses} courses
+                          </span>
+                        </div>
+                        <div
+                          className="text-3xl font-black tabular-nums"
+                          style={{ color: p.roi == null ? "#9CA3AF" : pos ? "#059669" : "#DC2626" }}
+                        >
+                          {p.roi == null ? "—" : `${pos ? "+" : ""}${p.roi}%`}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          ROI simulé (mise {profilsData.mise_par_course}€/course)
+                        </div>
+                        <div className="mt-4 space-y-1.5 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Gain net</span>
+                            <span className="font-semibold tabular-nums" style={{ color: p.gain_net >= 0 ? "#059669" : "#DC2626" }}>
+                              {p.gain_net >= 0 ? "+" : ""}{p.gain_net}€
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Misé total</span>
+                            <span className="font-medium tabular-nums">{p.mise_totale}€</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Courses bénéficiaires</span>
+                            <span className="font-medium tabular-nums">
+                              {p.taux_courses_beneficiaires == null ? "—" : `${p.taux_courses_beneficiaires}%`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/80">
+                  Simulation sur les {profilsData.nb_courses} dernières courses : le plan de mise de chaque profil est figé
+                  <strong> avant la course</strong> (mêmes prédictions que celles servies), puis réglé sur l&apos;arrivée
+                  officielle PMU. Le Simple Gagnant est réglé aux <strong>cotes PMU réelles</strong> ; les paris combinés au
+                  rapport <strong>estimé</strong> par le modèle. Résultats passés à forte variance — ne préjugent pas du futur.
+                </p>
+              </>
             )}
           </CardContent>
         </Card>

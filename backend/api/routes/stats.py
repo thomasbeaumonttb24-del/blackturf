@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
 
 from api.model_metrics import real_model_metrics
+from api.profil_backtest import backtest_profils
 from api.routes.auth import get_current_user
 from db.database import get_db
 from db.redis_client import get_redis
@@ -874,3 +875,25 @@ async def track_record(
     }
     await _cache_set(redis, CACHE_KEY, result, ttl=120)  # 2 min — quasi temps réel
     return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Backtest par PROFIL de risque (public, cache 6h — calcul lourd)
+# ─────────────────────────────────────────────────────────────
+@router.get("/stats/profils")
+async def stats_profils(
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    """Performance simulée des 3 profils (conservateur/équilibré/agressif) sur
+    l'historique réel : plan de mise figé avant course, réglé sur l'arrivée
+    officielle. Calcul lourd → cache Redis 6h."""
+    CACHE_KEY = "stats:profils"
+    cached = await _cache_get(redis, CACHE_KEY)
+    if cached:
+        return cached
+
+    data = await backtest_profils(db, limit=120, n_sims=3000)
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await _cache_set(redis, CACHE_KEY, data, ttl=21600)  # 6h
+    return data
