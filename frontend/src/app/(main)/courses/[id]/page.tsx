@@ -2311,68 +2311,21 @@ export default function CoursePage() {
               </div>
               <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{analysis.narrative}</p>
 
-              {/* Signaux marché */}
+              {/* Chevaux à surveiller (signaux marché / argent pro) */}
               {analysis.market_signals?.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {analysis.market_signals.map((s, i) => (
-                    <span key={i} className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                      {s.signal} — N°{s.numero} {s.nom}
-                    </span>
-                  ))}
+                <div className="pt-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">👁️ Chevaux à surveiller</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {analysis.market_signals.map((s, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                        N°{s.numero} {s.nom} — {s.signal}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* ── Coup à tenter (outsider à vraie valeur) ── */}
-          {analysis?.coup_a_tenter && (
-            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 space-y-2">
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-amber-600" />
-                <h3 className="text-sm font-semibold text-amber-800">Coup à tenter</h3>
-                <span className="ml-auto text-[10px] font-semibold rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
-                  {analysis.coup_a_tenter.type_pari}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-baseline gap-2">
-                <span className="font-semibold text-sm">
-                  {analysis.coup_a_tenter.chevaux.map((h) => `N°${h.numero}`).join(" + ")}
-                </span>
-                <span className="text-xs text-muted-foreground font-mono tabular-nums">
-                  {(analysis.coup_a_tenter.proba_gain * 100).toFixed(0)}% · rapport ~{analysis.coup_a_tenter.rapport_estime.toFixed(0)}× · EV {analysis.coup_a_tenter.ev >= 0 ? "+" : ""}{(analysis.coup_a_tenter.ev * 100).toFixed(0)}%
-                </span>
-              </div>
-              <p className="text-xs text-gray-600">{analysis.coup_a_tenter.texte_explication}</p>
-            </div>
-          )}
-
-          {/* ── Couverture jackpot (base + champ) ── */}
-          {analysis?.coverage_jackpot && analysis.coverage_jackpot.length > 0 && (
-            <div className="rounded-xl border border-rose-100 bg-gradient-to-br from-rose-50/50 to-white p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <Trophy className="h-4 w-4 text-rose-600" />
-                <h3 className="text-sm font-semibold text-rose-800">Couverture jackpot</h3>
-                <span className="ml-auto text-[10px] text-muted-foreground">Proba simulée · gros lot (variance élevée)</span>
-              </div>
-              <div className="space-y-2">
-                {analysis.coverage_jackpot.slice(0, 6).map((c, i) => (
-                  <div key={i} className="rounded-lg bg-white/70 border border-rose-100 px-3 py-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-semibold">{c.type_pari}</span>
-                      <span className="text-[10px] rounded-full px-1.5 py-0.5 bg-rose-100 text-rose-700">{c.couverture}</span>
-                      <span className="text-[10px] text-muted-foreground">{c.nb_combinaisons} comb.{c.flexi_pct < 100 ? ` · Flexi ${c.flexi_pct}%` : ""}</span>
-                      <span className="ml-auto text-xs font-mono tabular-nums text-muted-foreground">
-                        {(c.proba_gain * 100).toFixed(1)}% · {c.cout_total.toFixed(0)}€ → ~{c.gain_potentiel.toFixed(0)}€
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {c.chevaux.map((h) => `N°${h.numero}`).join(", ")} · EV {c.ev >= 0 ? "+" : ""}{(c.ev * 100).toFixed(0)}%
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                Espérance souvent négative (le PMU prélève ~35% sur ces paris) — à jouer pour le gros lot, avec modération.
+              <p className="text-[10px] text-muted-foreground/70 pt-1">
+                Synthèse de l&apos;analyse IA. Les paris à jouer (selon ton montant et ton profil) sont dans le plan de mise ci-contre.
               </p>
             </div>
           )}
