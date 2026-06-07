@@ -88,6 +88,8 @@ interface Prediction {
 interface CourseData {
   course_id: string;
   nom: string | null;
+  numero_reunion: number | null;  // n° réunion public (PMU numExterne)
+  numero: number;                 // n° de la course dans la réunion (C)
   discipline: string;
   distance: number;
   hippodrome_nom: string;
@@ -1548,6 +1550,16 @@ export default function CoursePage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
+              {(() => {
+                const m = course.course_id.match(/R(\d+)C(\d+)$/);
+                const r = course.numero_reunion ?? (m ? Number(m[1]) : null);
+                const c = course.numero ?? (m ? Number(m[2]) : null);
+                return r && c ? (
+                  <span className="inline-flex items-center rounded-md bg-foreground px-2.5 py-1 font-mono text-sm font-bold tracking-tight text-background tabular-nums">
+                    R{r}<span className="opacity-50 mx-0.5">·</span>C{c}
+                  </span>
+                ) : null;
+              })()}
               <h1 className="text-xl font-bold">{course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}</h1>
               {course.est_quinte && <Badge variant="gold" className="animate-pulse-slow">Quinté+</Badge>}
               {course.est_quarte && <Badge variant="gold">Quarté+</Badge>}
