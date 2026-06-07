@@ -240,6 +240,7 @@ def generer_plan(
     bankroll: Optional[float] = None,
     roi_weights: Optional[dict] = None,
     heat: float = 0.0,
+    signal_mults: Optional[dict] = None,
 ) -> MisePlan:
     """Plan de mise INTELLIGENT & ADAPTATIF — relie analyse, apprentissage, résultats.
 
@@ -282,7 +283,7 @@ def generer_plan(
     if not cands:
         return _plan_vide(montant, profil)
 
-    selected = _select_conviction(cands, montant, palier, cfg, roi_weights)
+    selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults)
     if not selected:
         return _plan_vide(montant, profil)
 
@@ -309,7 +310,8 @@ def _bet_cote_max(c: dict) -> float:
 
 
 def _select_conviction(
-    cands: list[dict], montant: int, palier: dict, cfg: dict, roi_weights: dict
+    cands: list[dict], montant: int, palier: dict, cfg: dict, roi_weights: dict,
+    signal_mults: Optional[dict] = None,
 ) -> list[dict]:
     """Sélectionne PEU de paris à FORTE conviction (EV × proba × edge × ROI passé),
     filtrés par les GATES du profil EFFECTIF (cote_max, min_proba, ev_min, max_coup).
@@ -330,9 +332,20 @@ def _select_conviction(
     def roi_w(c):
         return float(roi_weights.get(c["type_pari"], 1.0))
 
+    def sig_factor(c):
+        """Multiplicateur appris PAR SIGNAL × PROFIL (moyenne des chevaux du pari) :
+        favorise les paris portés par des signaux historiquement gagnants POUR CE
+        PROFIL (ex. premier déferré boosté en conservateur, ignoré en agressif).
+        Neutre (1.0) si pas de calibration signal chargée."""
+        if not signal_mults:
+            return 1.0
+        ms = [signal_mults.get(int(h.get("numero")), 1.0)
+              for h in c.get("chevaux", []) if h.get("numero") is not None]
+        return float(sum(ms) / len(ms)) if ms else 1.0
+
     def conviction(c):
-        """Classement selon l'OBJECTIF du profil (× ROI réel passé du type)."""
-        rw = roi_w(c)
+        """Classement selon l'OBJECTIF du profil (× ROI réel passé du type × signal)."""
+        rw = roi_w(c) * sig_factor(c)
         if objectif == "proba":
             # PRUDENT : gagner souvent. Proba d'abord, EV en bonus léger.
             return (c["proba_gain"] + max(c["ev"], 0.0) * 0.2) * rw

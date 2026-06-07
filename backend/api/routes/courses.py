@@ -770,7 +770,23 @@ async def get_mise_plan(
     except Exception:
         roi_weights, heat = {}, 0.0
 
-    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat)
+    # Multiplicateurs appris PAR SIGNAL × PROFIL → le pronostic/plan s'adapte au profil
+    # sélectionné (ex. "premier déferré" boosté en conservateur=placé, ignoré en agressif).
+    signal_mults: dict = {}
+    try:
+        from ml.signal_performance import load_signal_performance, signal_multiplier
+        from db.models import FeatureML as _FM
+        perf = await load_signal_performance(db)
+        if perf:
+            fq = (_s(Participation.numero, _FM.features)
+                  .join(_FM, _FM.participation_id == Participation.participation_id)
+                  .where(Participation.course_id == course_id))
+            for numero, feats in (await db.execute(fq)).all():
+                signal_mults[int(numero)] = signal_multiplier(feats or {}, perf, profil)
+    except Exception:
+        signal_mults = {}
+
+    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat, signal_mults)
     return plan_to_dict(plan)
 
 
