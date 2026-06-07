@@ -61,6 +61,45 @@ _STATIC_CURVE = [
 ]
 
 
+async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float = 10.0, start: float = 1000.0) -> dict:
+    """Backtest HONNÊTE : 10€ flat en Simple Gagnant sur chaque value bet ★★★+
+    (niveau ≥ 3) des `since_days` derniers jours, réglé sur l'arrivée RÉELLE à la
+    COTE PMU RÉELLE. Source unique pour la courbe d'équité ET le ROI simulé 6 mois
+    (évite toute divergence). is_real=False si < 10 paris."""
+    since = datetime.now(timezone.utc) - timedelta(days=since_days)
+    rows = (await db.execute(
+        select(ValueBet, Participation, Course, Resultat)
+        .join(Participation, Participation.participation_id == ValueBet.participation_id)
+        .join(Course, Course.course_id == ValueBet.course_id)
+        .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
+        .where(ValueBet.niveau >= 3, Course.statut == "termine", Course.date_heure >= since)
+        .order_by(Course.date_heure)
+        .limit(500)
+    )).all()
+
+    if len(rows) < 10:
+        return {"is_real": False, "points": [], "n_bets": len(rows), "roi_pct": None, "gain_net": None, "mise": mise}
+
+    bankroll = start
+    points = []
+    for vb, part, course, resultat in rows:
+        gagne = (
+            resultat and isinstance(resultat.classement, list) and resultat.classement
+            and isinstance(resultat.classement[0], dict)
+            and resultat.classement[0].get("numero") == part.numero
+        )
+        if gagne and part.cote_pmu and part.cote_pmu > 1:
+            bankroll += (part.cote_pmu - 1) * mise
+        else:
+            bankroll -= mise
+        points.append({"date": course.date_heure.strftime("%Y-%m-%d"), "bankroll": round(bankroll, 2)})
+
+    n = len(rows)
+    gain = bankroll - start
+    roi = round(gain / (n * mise) * 100, 1) if n else None
+    return {"is_real": True, "points": points, "n_bets": n, "roi_pct": roi, "gain_net": round(gain, 2), "mise": mise}
+
+
 @router.get("/stats/public")
 async def public_stats(
     db: AsyncSession = Depends(get_db),
@@ -88,7 +127,10 @@ async def public_stats(
     # non fiable/indisponible renvoie null → le front affiche "—", jamais un placeholder
     # marketing. Plus de _STATIC_STATS (487 users / 12 450 courses / roi 8,4% fictifs).
     metrics = await real_model_metrics(db, mv)
-    roi_pct = round(metrics["roi_simule"] * 100, 2) if metrics["roi_simule"] is not None else None
+    # ROI simulé 6 mois = backtest réel 10€ flat sur value bets ★★★+ (même source que
+    # la courbe d'équité). null si pas assez d'historique → le front affiche "—".
+    _bt = await _vb_flat_backtest(db)
+    roi_pct = _bt["roi_pct"] if _bt["is_real"] else None
 
     result = {
         "auc_roc": round(mv.auc_roc, 4) if mv else None,
@@ -116,51 +158,13 @@ async def equity_curve(
     if cached:
         return cached
 
-    since = datetime.now(timezone.utc) - timedelta(days=180)
-
-    q = (
-        select(ValueBet, Participation, Course, Resultat)
-        .join(Participation, Participation.participation_id == ValueBet.participation_id)
-        .join(Course, Course.course_id == ValueBet.course_id)
-        .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
-        .where(
-            ValueBet.niveau >= 3,
-            Course.statut == "termine",
-            Course.date_heure >= since,
-        )
-        .order_by(Course.date_heure)
-        .limit(500)
-    )
-    rows = (await db.execute(q)).all()
-
-    if len(rows) < 10:
+    bt = await _vb_flat_backtest(db)
+    if not bt["is_real"]:
         empty = {"is_real": False, "points": []}
         await _cache_set(redis, CACHE_KEY, empty, ttl=300)
         return empty
 
-    bankroll = 1000.0
-    mise = 10.0
-    points = []
-
-    for vb, part, course, resultat in rows:
-        gagne = False
-        if resultat and resultat.classement and isinstance(resultat.classement, list):
-            if resultat.classement:
-                premier = resultat.classement[0]
-                if isinstance(premier, dict) and premier.get("numero") == part.numero:
-                    gagne = True
-
-        if gagne and part.cote_pmu and part.cote_pmu > 1:
-            bankroll += (part.cote_pmu - 1) * mise
-        else:
-            bankroll -= mise
-
-        points.append({
-            "date": course.date_heure.strftime("%Y-%m-%d"),
-            "bankroll": round(bankroll, 2),
-        })
-
-    result = {"is_real": True, "points": points}
+    result = {"is_real": True, "points": bt["points"], "roi_pct": bt["roi_pct"], "gain_net": bt["gain_net"], "n_bets": bt["n_bets"]}
     await _cache_set(redis, CACHE_KEY, result, ttl=1800)  # 30 min
     return result
 
