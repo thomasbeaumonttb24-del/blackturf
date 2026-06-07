@@ -6,6 +6,7 @@ import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
   Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
+  MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Swords,
 } from "lucide-react";
 import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
@@ -14,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
-import { formatCote, formatEV, etoiles, disciplineIcon, formatDateTime, cn } from "@/lib/utils";
+import { formatCote, formatEV, etoiles, formatDateTime, cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1023,7 +1024,7 @@ function ConfrontationsSection({ courseId }: { courseId: string }) {
   return (
     <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/40 to-white p-5 space-y-4">
       <div className="flex items-center gap-2">
-        <span className="text-base">⚔️</span>
+        <Swords className="h-4 w-4 text-violet-500" />
         <h3 className="text-sm font-semibold text-gray-900">Confrontations directes</h3>
         <span className="ml-auto text-[10px] text-muted-foreground">
           {data.nb_paires_avec_duel} duel{data.nb_paires_avec_duel > 1 ? "s" : ""} déjà disputé{data.nb_paires_avec_duel > 1 ? "s" : ""}
@@ -1548,7 +1549,7 @@ export default function CoursePage() {
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <h1 className="text-xl font-bold">{course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}</h1>
-              {course.est_quinte && <Badge variant="gold" className="animate-pulse-slow">⭐ Quinté+</Badge>}
+              {course.est_quinte && <Badge variant="gold" className="animate-pulse-slow">Quinté+</Badge>}
               {course.est_quarte && <Badge variant="gold">Quarté+</Badge>}
               {course.est_tierce && <Badge variant="secondary">Tiercé</Badge>}
               <Badge variant={course.statut === "en_cours" ? "success" : course.statut === "termine" ? "secondary" : "warning"}>
@@ -1560,29 +1561,32 @@ export default function CoursePage() {
                 </span>
               )}
             </div>
-            <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted-foreground">
-              <span className="font-semibold text-foreground">{disciplineIcon(course.discipline)} {course.discipline}</span>
-              <span>📍 {course.hippodrome_nom}</span>
-              <span>📏 {course.distance}m</span>
-              <span>👥 {course.nb_partants} partants</span>
-              <span>🕐 {formatDateTime(course.date_heure)}</span>
-              {course.terrain_officiel && <span>🌿 {course.terrain_officiel}</span>}
-              {course.allocation && <span>Allocation {course.allocation.toLocaleString("fr-FR")}€</span>}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+              <span className="font-semibold text-foreground">{course.discipline}</span>
+              <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.hippodrome_nom}</span>
+              <span className="inline-flex items-center gap-1.5"><Ruler className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.distance} m</span>
+              <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.nb_partants} partants</span>
+              <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground/60" /> {formatDateTime(course.date_heure)}</span>
+              {course.terrain_officiel && <span className="inline-flex items-center gap-1.5"><Activity className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.terrain_officiel}</span>}
+              {/* allocation stockée en centimes → euros */}
+              {course.allocation ? (
+                <span className="inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-muted-foreground/60" /> {Math.round(course.allocation / 100).toLocaleString("fr-FR")} € d&apos;allocation</span>
+              ) : null}
               {course.montant_offert_1er != null && course.montant_offert_1er > 0 && (
-                <span>🏆 {course.montant_offert_1er.toLocaleString("fr-FR")}€ au gagnant</span>
+                <span className="inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-brand-gold" /> {course.montant_offert_1er.toLocaleString("fr-FR")} € au gagnant</span>
               )}
               {course.categorie_particularite && (
-                <span className="capitalize">🏷️ {course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
+                <span className="inline-flex items-center gap-1.5 capitalize"><Tag className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
               )}
               {course.meteo?.temperature && (
-                <span><Cloud className="h-3 w-3 inline" /> {course.meteo.temperature}°C</span>
+                <span className="inline-flex items-center gap-1.5"><Cloud className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.meteo.temperature}°C</span>
               )}
             </div>
             {/* Conditions de course (texte officiel PMU) */}
             {course.conditions_texte && (
               <details className="mt-2 text-xs text-muted-foreground">
-                <summary className="cursor-pointer font-semibold hover:text-foreground select-none">
-                  📋 Conditions de la course
+                <summary className="cursor-pointer font-semibold hover:text-foreground select-none inline-flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5" /> Conditions de la course
                 </summary>
                 <p className="mt-1.5 leading-relaxed rounded-lg bg-muted/40 p-2.5">{course.conditions_texte}</p>
               </details>
@@ -1598,7 +1602,7 @@ export default function CoursePage() {
                 )}
                 {course.avantage_couloir && course.avantage_couloir !== "neutre" && (
                   <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-gray-100 ring-1 ring-gray-200 text-gray-700">
-                    {course.avantage_couloir === "interieur" ? "⬅️ Avantage intérieur" : "➡️ Avantage extérieur"}
+                    Avantage {course.avantage_couloir === "interieur" ? "intérieur" : "extérieur"}
                   </span>
                 )}
               </div>
@@ -1666,7 +1670,7 @@ export default function CoursePage() {
                       <th className="text-right px-3 py-2.5">ELO</th>
                       <th className="text-right px-3 py-2.5">Cote PMU</th>
                       {predictions && <th className="text-right px-3 py-2.5">Cote IA</th>}
-                      {predictions && <th className="text-right px-3 py-2.5">Top-3</th>}
+                      {predictions && <th className="text-right px-3 py-2.5">Proba IA</th>}
                       {predictions && <th className="text-right px-3 py-2.5">Espérance</th>}
                     </tr>
                   </thead>
@@ -1785,19 +1789,18 @@ export default function CoursePage() {
                             {predictions && (
                               <td className="px-3 py-2.5 text-right">
                                 {pred ? (
-                                  <div className="flex flex-col items-end gap-0.5">
+                                  <div className="flex flex-col items-end leading-tight">
                                     <span className={cn(
-                                      "font-bold font-mono tabular-nums text-xs",
-                                      rang === 1 && "text-brand-gold",
-                                      rang === 2 && "text-brand-blue",
-                                      rang === 3 && "text-brand-emerald",
-                                      (rang || 99) > 3 && "text-muted-foreground"
+                                      "font-bold tabular-nums text-sm",
+                                      rang === 1 ? "text-brand-gold" : "text-foreground",
                                     )}>
-                                      {(pred.proba_top3 * 100).toFixed(0)}%
+                                      {(pred.proba_top1 * 100).toFixed(0)}%
                                     </span>
-                                    <ConfidenceMeter score={pred.confidence_score || 0} size="sm" />
+                                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                                      {(pred.proba_top3 * 100).toFixed(0)}% top-3
+                                    </span>
                                   </div>
-                                ) : "—"}
+                                ) : <span className="text-muted-foreground">—</span>}
                               </td>
                             )}
                             {predictions && (
@@ -1920,7 +1923,7 @@ export default function CoursePage() {
           {analysis?.coup_a_tenter && (
             <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 space-y-2">
               <div className="flex items-center gap-2">
-                <span className="text-base">🎯</span>
+                <Target className="h-4 w-4 text-amber-600" />
                 <h3 className="text-sm font-semibold text-amber-800">Coup à tenter</h3>
                 <span className="ml-auto text-[10px] font-semibold rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                   {analysis.coup_a_tenter.type_pari}
@@ -1942,7 +1945,7 @@ export default function CoursePage() {
           {analysis?.coverage_jackpot && analysis.coverage_jackpot.length > 0 && (
             <div className="rounded-xl border border-rose-100 bg-gradient-to-br from-rose-50/50 to-white p-5 space-y-3">
               <div className="flex items-center gap-2">
-                <span className="text-base">💰</span>
+                <Trophy className="h-4 w-4 text-rose-600" />
                 <h3 className="text-sm font-semibold text-rose-800">Couverture jackpot</h3>
                 <span className="ml-auto text-[10px] text-muted-foreground">Proba simulée · gros lot (variance élevée)</span>
               </div>
@@ -2050,50 +2053,55 @@ export default function CoursePage() {
                 )
               ) : (
                 <div className="space-y-3">
-                  <p className="text-[11px] font-medium text-muted-foreground">
-                    Classement IA — {predictions.length} partant{predictions.length > 1 ? "s" : ""}
-                  </p>
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-[11px] font-medium text-muted-foreground">
+                      Classement IA — {predictions.length} partant{predictions.length > 1 ? "s" : ""}
+                    </p>
+                    <div className="flex items-center gap-2 text-[9px] uppercase tracking-wide text-muted-foreground/70">
+                      <span>Gagnant</span><span>·</span><span>Top-3</span>
+                    </div>
+                  </div>
                   {/* Classement complet (scroll si beaucoup de partants) */}
-                  <div className="space-y-2.5 max-h-[28rem] overflow-y-auto pr-1 -mr-1">
+                  <div className="space-y-1.5 max-h-[28rem] overflow-y-auto pr-1 -mr-1">
                     {[...predictions].sort((a, b) => a.rang_predit - b.rang_predit).map((p) => (
-                      <div key={p.prediction_id} className="flex items-center gap-2.5">
+                      <div key={p.prediction_id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-muted/40 transition-colors">
                         <div className={cn(
-                          "h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0",
-                          p.rang_predit === 1 ? "bg-brand-gold/20 text-brand-gold gold-glow" :
-                          p.rang_predit === 2 ? "bg-brand-blue/20 text-brand-blue" :
-                          p.rang_predit === 3 ? "bg-brand-emerald/20 text-brand-emerald" :
-                          "bg-muted text-muted-foreground",
+                          "h-6 w-6 rounded-md flex items-center justify-center text-[11px] font-bold flex-shrink-0 tabular-nums",
+                          p.rang_predit === 1 ? "bg-brand-gold/15 text-brand-gold ring-1 ring-brand-gold/30" :
+                          p.rang_predit <= 3 ? "bg-foreground/5 text-foreground ring-1 ring-border" :
+                          "bg-transparent text-muted-foreground/60",
                         )}>
                           {p.rang_predit}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-semibold truncate">N°{p.numero} {p.nom_cheval}</p>
+                            <p className="text-sm font-medium truncate">N°{p.numero} {p.nom_cheval}</p>
                             {p.value_bet && <EVBadge ev={p.value_bet.ev_max} />}
                           </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <ConfidenceMeter score={p.confidence_score || 0} size="sm" />
-                            <span className="text-[10px] text-muted-foreground">
-                              {(p.proba_top3 * 100).toFixed(0)}% top-3
+                          {p.proba_top1_low != null && p.proba_top1_high != null && (
+                            <span className="text-[9px] text-muted-foreground/60 tabular-nums">
+                              intervalle {(p.proba_top1_low * 100).toFixed(0)}–{(p.proba_top1_high * 100).toFixed(0)}%
                             </span>
-                            <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
-                              {(p.proba_top1 * 100).toFixed(0)}% gagnant
-                              {p.proba_top1_low != null && p.proba_top1_high != null && (
-                                <span className="text-muted-foreground/70">
-                                  {" "}[{(p.proba_top1_low * 100).toFixed(0)}–{(p.proba_top1_high * 100).toFixed(0)}%]
-                                </span>
-                              )}
-                            </span>
+                          )}
+                        </div>
+                        {/* Deux chiffres clairs alignés : victoire (gras) + placé */}
+                        <div className="flex items-center gap-3 flex-shrink-0 text-right">
+                          <div className="w-10">
+                            <div className="text-sm font-bold tabular-nums text-foreground">{(p.proba_top1 * 100).toFixed(0)}%</div>
+                          </div>
+                          <div className="w-10">
+                            <div className="text-xs font-medium tabular-nums text-muted-foreground">{(p.proba_top3 * 100).toFixed(0)}%</div>
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
-                  <div className="pt-2 border-t border-border/50">
+                  <div className="pt-2 border-t border-border/50 space-y-1">
                     <p className="text-[10px] text-muted-foreground flex gap-1.5">
                       <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
-                      Confiance = accord des 3 modèles. L&apos;intervalle [x–y%] sur la proba gagnant reflète leur désaccord. Outil d&apos;aide à la décision, aucune garantie.
+                      <span><strong className="text-foreground">Gagnant</strong> = probabilité de victoire · <strong className="text-foreground">Top-3</strong> = probabilité d&apos;être dans les 3 premiers. Probabilités calibrées sur résultats réels.</span>
                     </p>
+                    <p className="text-[10px] text-muted-foreground/70 pl-[18px]">Aide à la décision — aucune garantie de gain.</p>
                   </div>
                 </div>
               )}
@@ -2124,7 +2132,7 @@ export default function CoursePage() {
             <CardContent className="p-4 space-y-2 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Discipline</span>
-                <span className="font-medium">{disciplineIcon(course.discipline)} {course.discipline}</span>
+                <span className="font-medium">{course.discipline}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Distance</span>
@@ -2161,7 +2169,7 @@ export default function CoursePage() {
               {course.allocation && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Dotation</span>
-                  <span className="font-mono font-medium">{course.allocation.toLocaleString("fr-FR")}€</span>
+                  <span className="font-mono font-medium">{Math.round(course.allocation / 100).toLocaleString("fr-FR")} €</span>
                 </div>
               )}
             </CardContent>
