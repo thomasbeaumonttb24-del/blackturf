@@ -21,6 +21,7 @@ Hiérarchie des explications (du plus au moins important) :
 """
 import json
 import math
+import re
 import structlog
 from typing import Optional
 import httpx
@@ -30,45 +31,68 @@ from api.config import get_settings
 log = structlog.get_logger(module="narrative")
 settings = get_settings()
 
+# Retrait des emojis (look pro, épuré). Couvre les plages emoji + symboles usuels.
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF"
+    "\U0001F1E6-\U0001F1FF\U00002190-\U000021FF️✅⚡⤵⤴✨]"
+)
+
+
+def _strip_emoji(s) -> str:
+    """Retire les emojis d'une chaîne et nettoie les espaces (pro/épuré)."""
+    if not isinstance(s, str):
+        return s
+    return re.sub(r"\s{2,}", " ", _EMOJI_RE.sub("", s)).strip()
+
+
+def _clean_labels(items: list) -> list:
+    """Retire les emojis des champs label/detail d'une liste de signaux."""
+    for it in items:
+        if isinstance(it, dict):
+            for k in ("label", "detail", "signal"):
+                if k in it:
+                    it[k] = _strip_emoji(it[k])
+    return items
+
 
 # ── Feature groups avec labels humains ──────────────────────────────────────
 FEATURE_GROUPS = {
     # Signaux marché
-    "steam_move_betclic":     ("🔥 Steam Betclic",    "Cote en forte baisse depuis l'ouverture"),
-    "gap_pmu_betfair":        ("🎯 Gap PMU/Betfair",  "PMU surcoté vs marché efficient"),
-    "spi_score":              ("⚡ SPI",               "Argent pro détecté (mouvement de cote)"),
-    "mouvement_30min":        ("📉 Mouvement cote",   "Cote PMU en baisse ces 30 dernières minutes"),
-    "pool_gagnant_ratio":     ("💰 Pool actif",       "Fort volume de paris sur ce cheval"),
+    "steam_move_betclic":     ("Steam Betclic",    "Cote en forte baisse depuis l'ouverture"),
+    "gap_pmu_betfair":        ("Gap PMU/Betfair",  "PMU surcoté vs marché efficient"),
+    "spi_score":              ("SPI",               "Argent pro détecté (mouvement de cote)"),
+    "mouvement_30min":        ("Mouvement cote",   "Cote PMU en baisse ces 30 dernières minutes"),
+    "pool_gagnant_ratio":     ("Pool actif",       "Fort volume de paris sur ce cheval"),
     # Forme
-    "forme_1_course":         ("🏆 Dernière course",  "Performance récente"),
-    "forme_5_courses":        ("📊 Forme 5 courses",  "Forme sur les 5 dernières sorties"),
-    "forme_tendance":         ("📈 Tendance",          "Progression ou régression"),
-    "career_momentum":        ("🚀 Momentum carrière","Dynamique ELO long terme"),
-    "regularite":             ("✅ Régularité",        "Constance dans les performances"),
+    "forme_1_course":         ("Dernière course",  "Performance récente"),
+    "forme_5_courses":        ("Forme 5 courses",  "Forme sur les 5 dernières sorties"),
+    "forme_tendance":         ("Tendance",          "Progression ou régression"),
+    "career_momentum":        ("Momentum carrière","Dynamique ELO long terme"),
+    "regularite":             ("Régularité",        "Constance dans les performances"),
     # Adéquation course
-    "class_drop_ratio":       ("⬇️ Descente catégorie","Dotation inférieure aux habitudes"),
-    "class_jump_score":       ("📉 Classe",            "Rapport dotation vs habitudes"),
-    "pref_terrain_actuel":    ("🌿 Terrain",           "Affinité avec le terrain du jour"),
-    "penetrometre_coef":      ("🌿 Pénétromètre",      "Coefficient de sol officiel"),
-    "pref_distance_actuelle": ("📏 Distance",           "Performances à cette distance"),
-    "running_style_terrain_fit": ("🏇 Style×Terrain", "Adéquation style de course et terrain"),
-    "pace_conflict_score":    ("⚔️ Conflit de rythme","Présence d'autres meneurs dans la course"),
+    "class_drop_ratio":       ("Descente catégorie","Dotation inférieure aux habitudes"),
+    "class_jump_score":       ("Classe",            "Rapport dotation vs habitudes"),
+    "pref_terrain_actuel":    ("Terrain",           "Affinité avec le terrain du jour"),
+    "penetrometre_coef":      ("Pénétromètre",      "Coefficient de sol officiel"),
+    "pref_distance_actuelle": ("Distance",           "Performances à cette distance"),
+    "running_style_terrain_fit": ("Style×Terrain", "Adéquation style de course et terrain"),
+    "pace_conflict_score":    ("Conflit de rythme","Présence d'autres meneurs dans la course"),
     # ELO et force
-    "elo_vs_moyenne":         ("💪 Force relative",   "ELO vs moyenne du champ"),
-    "elo_discipline":         ("🏅 Niveau discipline","Score ELO dans cette discipline"),
-    "velocity_elo":           ("📈 Progression ELO",  "Vitesse de progression récente"),
+    "elo_vs_moyenne":         ("Force relative",   "ELO vs moyenne du champ"),
+    "elo_discipline":         ("Niveau discipline","Score ELO dans cette discipline"),
+    "velocity_elo":           ("Progression ELO",  "Vitesse de progression récente"),
     # Jockey / entraîneur
-    "asso_jockey_entraineur_taux": ("🤝 Duo J×E",   "Taux de victoire de l'association"),
-    "jockey_forme_30j":       ("👤 Jockey forme",    "Win rate jockey sur 30 jours"),
-    "trainer_return_bonus":   ("🏋️ Spécialiste retour","Entraîneur fort après longue absence"),
-    "changement_jockey":      ("⚠️ Changement jockey","Jockey différent de la dernière course"),
+    "asso_jockey_entraineur_taux": ("Duo J×E",   "Taux de victoire de l'association"),
+    "jockey_forme_30j":       ("Jockey forme",    "Win rate jockey sur 30 jours"),
+    "trainer_return_bonus":   ("Spécialiste retour","Entraîneur fort après longue absence"),
+    "changement_jockey":      ("Changement jockey","Jockey différent de la dernière course"),
     # Draw / équipement
-    "draw_bias_score":        ("🎲 Numéro de départ", "Avantage du numéro de départ"),
-    "premier_deferre":        ("🔧 Déferre",          "Premiers défers = souvent positif"),
-    "premieres_oeilleres":    ("👓 Œillères",         "Premières œillères = souvent positif"),
+    "draw_bias_score":        ("Numéro de départ", "Avantage du numéro de départ"),
+    "premier_deferre":        ("Déferré",          "Premiers défers = souvent positif"),
+    "premieres_oeilleres":    ("Œillères",         "Premières œillères = souvent positif"),
     # Bounce / class
-    "bounce_score":           ("🔄 Bounce factor",   "Rebond potentiel après course exceptionnelle"),
-    "form_vs_career_rate":    ("📊 Forme vs carrière","Surperformance récente vs moyenne carrière"),
+    "bounce_score":           ("Bounce factor",   "Rebond potentiel après course exceptionnelle"),
+    "form_vs_career_rate":    ("Forme vs carrière","Surperformance récente vs moyenne carrière"),
 }
 
 
@@ -212,9 +236,9 @@ def explain_prediction(features: dict, proba_top3: float, proba_top1: float,
     return {
         "proba_top3": proba_top3,
         "proba_top1": proba_top1,
-        "facteurs_positifs": positifs[:5],
-        "facteurs_negatifs": negatifs[:3],
-        "alertes": alertes,
+        "facteurs_positifs": _clean_labels(positifs[:5]),
+        "facteurs_negatifs": _clean_labels(negatifs[:3]),
+        "alertes": _clean_labels(alertes),
         "confiance_composite": conf,
         "nb_signaux_positifs": len(positifs),
         "nb_signaux_negatifs": len(negatifs),
@@ -377,13 +401,13 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     # Recommandation principale
     if vb and vb.get("niveau", 0) >= 2:
         ev = vb.get("ev_max", 0)
-        lines.append(f"🎯 **Value bet : N°{num} {nom}** (EV +{ev*100:.0f}%, proba top-3 {proba*100:.0f}%)")
+        lines.append(f"**Value bet : N°{num} {nom}** (EV +{ev*100:.0f}%, proba top-3 {proba*100:.0f}%)")
     else:
-        lines.append(f"✅ **Favori IA : N°{num} {nom}** (proba top-3 {proba*100:.0f}%)")
+        lines.append(f"**Favori IA : N°{num} {nom}** (proba top-3 {proba*100:.0f}%)")
 
     # Facteurs positifs top-3
     if positifs:
-        raisons = " · ".join(f["label"] for f in positifs[:3])
+        raisons = " · ".join(_strip_emoji(f["label"]) for f in positifs[:3])
         lines.append(f"Pourquoi : {raisons}")
 
     # Autres chevaux
@@ -395,7 +419,7 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     # Alertes
     alertes = explanation.get("alertes", [])
     for a in alertes[:1]:
-        lines.append(f"⚠️ {a['label']}: {a.get('detail', '')}")
+        lines.append(f"{_strip_emoji(a['label'])}: {_strip_emoji(a.get('detail', ''))}")
 
     return "\n".join(lines)
 
