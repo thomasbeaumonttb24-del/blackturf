@@ -273,6 +273,15 @@ class PmuScraper(BaseScraper):
                 moi = next((pp for pp in pps if pp.get("itsHim")), None)
                 place = (moi or {}).get("place") or {}
                 rk = (moi or {}).get("reductionKilometrique")
+                # Vitesse moyenne du vainqueur (m/s) = distance / temps. tempsDuPremier
+                # est en CENTISECONDES (vérifié : 2400m PLAT → 15.2 m/s, 1000m → 17.3).
+                # Figure de vitesse réelle, normalisée par les features (vs réf distance/discipline).
+                tdp = c.get("tempsDuPremier")
+                dist_c = c.get("distance")
+                vitesse_ms = (round(dist_c / (tdp / 100.0), 2)
+                              if isinstance(tdp, (int, float)) and tdp > 0
+                              and isinstance(dist_c, (int, float)) and dist_c > 0
+                              else None)
                 courses.append({
                     "date_ms": c.get("date"),
                     "hippodrome": c.get("hippodrome"),
@@ -283,6 +292,7 @@ class PmuScraper(BaseScraper):
                     "position": place.get("place") if isinstance(place, dict) else None,
                     "ecart": (moi or {}).get("distanceAvecPrecedent"),
                     "reduction_km": round(rk / 1000.0, 2) if isinstance(rk, (int, float)) and rk else None,
+                    "vitesse_ms": vitesse_ms,
                     "jockey": (moi or {}).get("nomJockey"),
                     "adversaires": [pp.get("nomCheval") for pp in pps
                                     if not pp.get("itsHim") and pp.get("nomCheval")],

@@ -97,6 +97,7 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
             allocation=c.get("allocation"),
             jockey_course=_t(c.get("jockey"), 100),
             reduction_km=c.get("reduction_km"),
+            indice_vitesse=c.get("vitesse_ms"),   # m/s du vainqueur (figure de vitesse réelle)
         ))
         added += 1
     return added
