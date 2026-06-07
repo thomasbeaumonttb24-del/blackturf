@@ -421,7 +421,8 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     for a in alertes[:1]:
         lines.append(f"{_strip_emoji(a['label'])}: {_strip_emoji(a.get('detail', ''))}")
 
-    return "\n".join(lines)
+    # Retire les marqueurs markdown gras (non rendus côté fiche → afficher propre).
+    return "\n".join(lines).replace("**", "")
 
 
 async def generate_full_course_analysis(
