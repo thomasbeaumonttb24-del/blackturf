@@ -599,9 +599,34 @@ export default async function HomePage() {
                   </div>
                   <h3 className={`font-semibold text-gray-900 leading-snug ${f.featured ? "text-xl mb-3" : "text-sm mb-2"}`}>{f.title}</h3>
                   <p className={`text-gray-500 leading-relaxed ${f.featured ? "text-sm" : "text-xs"}`}>{f.desc}</p>
+
+                  {/* Aperçu produit (exemple illustratif) — comble la tuile vedette */}
+                  {f.featured && (
+                    <div className="mt-6 rounded-xl border border-amber-200/70 bg-white/70 p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Votre mise</span>
+                        <span className="num-display text-lg font-extrabold text-gray-900">50&nbsp;€</span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {[
+                          { k: "plan-securite",  l: "Sécurité",  m: "25€", g: "+18€", c: "#059669" },
+                          { k: "plan-rendement", l: "Rendement", m: "15€", g: "+34€", c: "#2563EB" },
+                          { k: "plan-coup",      l: "Coup",      m: "10€", g: "+92€", c: "#D97706" },
+                        ].map((p) => (
+                          <div key={p.k} className={`${p.k} flex items-center justify-between rounded-md py-2 pl-3 pr-3 text-xs`}>
+                            <span className="font-semibold text-gray-700 w-20">{p.l}</span>
+                            <span className="text-gray-500">mise <span className="font-mono text-gray-700">{p.m}</span></span>
+                            <span className="num-display font-bold tabular-nums" style={{ color: p.c }}>{p.g}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-3 text-[10px] text-gray-400">Exemple illustratif · répartition calculée selon votre profil de risque</p>
+                    </div>
+                  )}
+
                   {f.featured && (
                     <Link href="/programme" className="press mt-auto pt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold-deep hover:gap-2.5 transition-all">
-                      Voir le calculateur <ArrowRight className="h-4 w-4" />
+                      Lancer le calculateur <ArrowRight className="h-4 w-4" />
                     </Link>
                   )}
                 </div>

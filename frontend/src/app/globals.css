@@ -111,6 +111,7 @@
   background: linear-gradient(135deg, rgba(245,158,11,0.04) 0%, transparent 60%);
   opacity: 0;
   transition: opacity 0.3s ease;
+  pointer-events: none; /* l'overlay ne doit jamais intercepter les clics (liens internes) */
 }
 .glass-card:hover {
   transform: translateY(-4px);
