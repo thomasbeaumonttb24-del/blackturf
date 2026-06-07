@@ -1355,6 +1355,35 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     """), {"cid": course_id})
     field_cotes = [float(r[0]) for r in field_cotes_r.fetchall()]
 
+    # 10. Pedigree affinity (batché) — top3-rate de la progéniture du PÈRE à la
+    #     distance de la course (±300m). `chevaux.pere` rempli ~100% ; distance
+    #     remplie. (terrain/corde non scrapés en historique → non exploitables.)
+    #     Une seule requête pour tout le peloton ; min 10 courses de lignée sinon neutre.
+    sire_dist_by_cheval: dict = {}
+    try:
+        sire_r = await session.execute(text("""
+            WITH field AS (
+                SELECT p.cheval_id, c.pere
+                FROM participations p
+                JOIN chevaux c ON c.cheval_id = p.cheval_id
+                WHERE p.course_id = :cid AND c.pere IS NOT NULL AND c.pere <> ''
+            ), d AS (SELECT distance FROM courses WHERE course_id = :cid)
+            SELECT f.cheval_id,
+                   COUNT(*) FILTER (WHERE h.position_arrivee <= 3)::float / NULLIF(COUNT(*), 0) AS rate,
+                   COUNT(*) AS n
+            FROM field f
+            JOIN chevaux sib ON sib.pere = f.pere
+            JOIN historique_courses h ON h.cheval_id = sib.cheval_id
+            JOIN d ON ABS(h.distance - d.distance) <= 300
+            WHERE h.position_arrivee IS NOT NULL
+            GROUP BY f.cheval_id
+        """), {"cid": course_id})
+        for cid_, rate, n in sire_r.fetchall():
+            if n and int(n) >= 10 and rate is not None:
+                sire_dist_by_cheval[cid_] = float(max(0.0, min(1.0, rate)))
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.sire_dist_failed", err=str(e)[:120])
+
     return {
         "partants": partants_raw,
         "hist_by_cheval": hist_by_cheval,
@@ -1367,6 +1396,7 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         "elo_avg": elo_avg,
         "elo_max": elo_max,
         "field_cotes": field_cotes,
+        "sire_dist_by_cheval": sire_dist_by_cheval,
     }
 
 
@@ -1719,8 +1749,14 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_pace_conflict = {"pace_conflict_score": float(pace_conflict), "running_style_terrain_fit": float(rs_terrain_fit),
                           "nb_meneurs_course": nb_meneurs}
 
-    # ── Pedigree (déjà en mémoire — pere/mere/pere_de_mere) ───────────────────
-    feat_pedigree = {"sire_dist_winrate": 0.5, "sire_terrain_winrate": 0.5}  # computed async si besoin
+    # ── Pedigree — affinité lignée du PÈRE à la distance (calculé en batch) ───
+    # sire_dist_winrate = top3-rate réel de la progéniture du père à cette distance
+    # (0.5 = neutre si père inconnu ou < 10 courses de lignée). sire_terrain_winrate
+    # reste neutre tant que le terrain n'est pas scrapé dans l'historique.
+    feat_pedigree = {
+        "sire_dist_winrate": float(batch.get("sire_dist_by_cheval", {}).get(cheval_id, 0.5)),
+        "sire_terrain_winrate": 0.5,
+    }
 
     # ── Synergy jockey × cheval ───────────────────────────────────────────────
     feat_synergy = {"jockey_cheval_synergy_nb": 0, "jockey_cheval_synergy_score": 0.0}
