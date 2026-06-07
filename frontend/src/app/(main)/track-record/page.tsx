@@ -272,13 +272,13 @@ export default function TrackRecordPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {data.by_day.every((d) => d.nb_predictions === 0) ? (
+            {(data.by_day ?? []).every((d) => d.nb_predictions === 0) ? (
               <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">
                 Aucune donnée journalière pour le moment
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={data.by_day} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                <LineChart data={data.by_day ?? []} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F6" vertical={false} />
                   <XAxis
                     dataKey="jour"
