@@ -808,10 +808,40 @@ async def get_bilan_pronostic(
     }
 
     montant = max(2.0, min(float(montant or 20), 10000.0))
-    plan = plan_to_dict(generer_plan(montant, "equilibre", preds, course_info, None))
-
     nb_partants = course.nb_partants or len(preds)
-    bilan = settle_plan(plan, resultat.classement, resultat.rapports, nb_partants)
+
+    # Mêmes signaux adaptatifs que le live (le bilan reflète la VRAIE méthode de
+    # chaque profil : sélection + mise + ROI passé + thermostat).
+    try:
+        from ml.bet_performance import get_type_roi_weights, get_model_heat
+        roi_weights = await get_type_roi_weights(db)
+        heat = await get_model_heat(db)
+    except Exception:
+        roi_weights, heat = {}, 0.0
+
+    # ── Bilan PAR PROFIL (prudent / modéré / risqué) ─────────────────────
+    PROFIL_LABELS = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
+    bilans_profils = []
+    for prof in ("conservateur", "equilibre", "agressif"):
+        plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None, roi_weights, heat))
+        bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants)
+        if bilan_p.get("en_attente"):
+            verdict_p = "en_attente"
+        elif bilan_p["net"] >= 0:
+            verdict_p = "gagnant"
+        else:
+            verdict_p = "perdant"
+        bilans_profils.append({
+            "profil": prof,
+            "profil_label": PROFIL_LABELS[prof],
+            "mode_adaptatif": plan_p.get("mode_adaptatif", "normal"),
+            "esperance_gain": plan_p.get("esperance_gain", 0.0),
+            "bilan": bilan_p,
+            "verdict": verdict_p,
+        })
+
+    # Bilan principal (Modéré) — rétro-compat avec l'ancien rendu.
+    bilan = next(b["bilan"] for b in bilans_profils if b["profil"] == "equilibre")
 
     # ── Comparaison pronostic vs résultat réel ───────────────────────────
     pos_by_num = {}
@@ -852,6 +882,7 @@ async def get_bilan_pronostic(
         "course_id": course_id,
         "montant": montant,
         "bilan": bilan,
+        "bilans_profils": bilans_profils,
         "comparaison": {
             "predicted_top3": predicted_top3,
             "actual_top3": actual_top3,

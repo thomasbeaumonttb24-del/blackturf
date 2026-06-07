@@ -1083,12 +1083,22 @@ function PronosticVerdictSection({ predictions, classement }: {
 // ─── Bilan du plan de mise 20€ (course terminée) ───────────────────────────────
 // Rejoue le plan de mise (20€) sur les pronostics réels et le règle contre le
 // résultat officiel (rapports PMU réels). Indique si le pari serait passé + le gain.
+interface BilanData {
+  paris: Array<{ type: string; niveau: string; chevaux: { numero: number; nom: string }[]; mise: number; gagne: boolean; statut: "gagne" | "perdu" | "en_attente"; rapport_reel: number | null; gain: number | null; note: string | null }>;
+  nb_paris: number; nb_gagnes: number; nb_en_attente: number; total_mise: number; total_gain: number; net: number; roi: number; en_attente: boolean; provisoire: boolean;
+}
+interface BilanProfil {
+  profil: "conservateur" | "equilibre" | "agressif";
+  profil_label: string;
+  mode_adaptatif: string;
+  esperance_gain: number;
+  bilan: BilanData;
+  verdict: "gagnant" | "perdant" | "en_attente";
+}
 interface BilanResp {
   montant: number;
-  bilan: {
-    paris: Array<{ type: string; niveau: string; chevaux: { numero: number; nom: string }[]; mise: number; gagne: boolean; statut: "gagne" | "perdu" | "en_attente"; rapport_reel: number | null; gain: number | null; note: string | null }>;
-    nb_paris: number; nb_gagnes: number; nb_en_attente: number; total_mise: number; total_gain: number; net: number; roi: number; en_attente: boolean; provisoire: boolean;
-  };
+  bilan: BilanData;
+  bilans_profils?: BilanProfil[];
   comparaison: { predicted_top3: number[]; actual_top3: number[]; gagnant_reel: number | null; rang_predit_gagnant: number | null; overlap_top3: number; modele_a_vu_gagnant: boolean };
   verdict: "gagnant" | "perdant" | "en_attente";
 }
@@ -1187,9 +1197,59 @@ function ConfrontationsSection({ courseId }: { courseId: string }) {
   );
 }
 
+/* Tableau de détail d'un bilan (paris réglés d'un profil) */
+function BilanDetail({ bilan }: { bilan: BilanData }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-muted-foreground border-b">
+            <th className="py-1 pr-2">Pari</th>
+            <th className="py-1 pr-2">Chevaux</th>
+            <th className="py-1 pr-2 text-right">Mise</th>
+            <th className="py-1 pr-2 text-right">Résultat</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bilan.paris.map((p, i) => (
+            <tr key={i} className="border-b border-border/40">
+              <td className="py-1 pr-2 font-medium">{p.type}</td>
+              <td className="py-1 pr-2 text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</td>
+              <td className="py-1 pr-2 text-right tabular-nums">{p.mise.toFixed(0)}€</td>
+              <td className="py-1 pr-2 text-right tabular-nums">
+                {p.statut === "gagne"
+                  ? <span className="text-emerald-600 font-semibold">✓ +{(p.gain ?? 0).toFixed(2)}€</span>
+                  : p.statut === "en_attente"
+                  ? <span className="text-amber-600 font-semibold" title="Rapport PMU pas encore publié">Gagné · rapport en attente</span>
+                  : <span className="text-muted-foreground">✗ perdu</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t font-semibold">
+            <td className="py-1.5 pr-2" colSpan={2}>Total ({bilan.nb_gagnes}/{bilan.nb_paris} gagné{bilan.nb_gagnes > 1 ? "s" : ""})</td>
+            <td className="py-1.5 pr-2 text-right tabular-nums">{bilan.total_mise.toFixed(0)}€</td>
+            <td className={cn("py-1.5 pr-2 text-right tabular-nums", bilan.total_gain > 0 ? "text-emerald-600" : "text-muted-foreground")}>
+              {bilan.total_gain.toFixed(2)}€
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+const PROFIL_TAB_META: Record<string, { emoji: string; label: string }> = {
+  conservateur: { emoji: "🛡️", label: "Prudent" },
+  equilibre: { emoji: "⚖️", label: "Modéré" },
+  agressif: { emoji: "🔥", label: "Risqué" },
+};
+
 function BilanMiseSection({ courseId }: { courseId: string }) {
   const [data, setData] = useState<BilanResp | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+  const [sel, setSel] = useState<"conservateur" | "equilibre" | "agressif">("equilibre");
 
   useEffect(() => {
     let alive = true;
@@ -1200,22 +1260,55 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
   }, [courseId]);
 
   if (state !== "ok" || !data) return null;
-  const { bilan, comparaison: cmp, verdict } = data;
+  const { comparaison: cmp } = data;
 
-  const vCfg = verdict === "gagnant"
-    ? { emoji: "🟢", label: "Plan gagnant", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
-    : verdict === "perdant"
-    ? { emoji: "🔴", label: "Plan perdant", cls: "border-rose-300 bg-rose-50 text-rose-800" }
-    : { emoji: "⏳", label: `En attente de ${bilan.nb_en_attente} rapport${bilan.nb_en_attente > 1 ? "s" : ""} PMU`, cls: "border-amber-300 bg-amber-50 text-amber-800" };
+  // Bilans par profil (fallback : bilan unique legacy mappé sur "modéré")
+  const profils: BilanProfil[] = data.bilans_profils && data.bilans_profils.length
+    ? data.bilans_profils
+    : [{ profil: "equilibre", profil_label: "Modéré", mode_adaptatif: "normal", esperance_gain: 0, bilan: data.bilan, verdict: data.verdict }];
+  const cur = profils.find((b) => b.profil === sel) ?? profils[0];
+  const bilan = cur.bilan;
+
+  const vCfg = cur.verdict === "gagnant"
+    ? { label: "Plan gagnant", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
+    : cur.verdict === "perdant"
+    ? { label: "Plan perdant", cls: "border-rose-300 bg-rose-50 text-rose-800" }
+    : { label: `En attente de ${bilan.nb_en_attente} rapport${bilan.nb_en_attente > 1 ? "s" : ""} PMU`, cls: "border-amber-300 bg-amber-50 text-amber-800" };
 
   return (
     <div className="mt-4 rounded-xl border border-brand-gold/30 bg-brand-gold/5 p-4">
       <h2 className="mb-1 flex items-center gap-2 text-base font-bold">
         Bilan du plan de mise — {data.montant}€
-        <span className="text-xs font-normal text-muted-foreground">· pronostic rejoué sur l&apos;arrivée réelle</span>
+        <span className="text-xs font-normal text-muted-foreground">· pronostic rejoué sur l&apos;arrivée réelle, par profil</span>
       </h2>
 
-      {/* Verdict + net */}
+      {/* Onglets profils — chaque profil = méthode de jeu différente */}
+      {profils.length > 1 && (
+        <div className="my-3 grid grid-cols-3 gap-1.5">
+          {profils.map((b) => {
+            const meta = PROFIL_TAB_META[b.profil] ?? { emoji: "•", label: b.profil_label };
+            const net = b.bilan.net;
+            return (
+              <button
+                key={b.profil}
+                onClick={() => setSel(b.profil)}
+                className={cn(
+                  "rounded-lg border px-2 py-1.5 text-left transition-colors",
+                  sel === b.profil ? "border-brand-gold bg-brand-gold/10" : "border-border hover:border-brand-gold/40"
+                )}
+              >
+                <div className="text-[11px] font-semibold">{meta.emoji} {meta.label}</div>
+                <div className={cn("text-xs font-mono font-bold tabular-nums",
+                  b.verdict === "en_attente" ? "text-amber-600" : net >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                  {b.verdict === "en_attente" ? "⏳" : `${net >= 0 ? "+" : ""}${net.toFixed(0)}€`}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Verdict + net du profil sélectionné */}
       <div className="my-3 flex flex-wrap items-center gap-3">
         <div className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold", vCfg.cls)}>
           {vCfg.label}
@@ -1232,7 +1325,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
         </div>
       </div>
 
-      {/* Comparaison prono vs réel */}
+      {/* Comparaison prono vs réel (commune à tous les profils) */}
       <div className="mb-3 grid gap-2 sm:grid-cols-2 text-xs">
         <div className="rounded-lg bg-white/70 p-2.5">
           <p className="mb-1 font-semibold text-muted-foreground">Top-3 pronostiqué (modèle)</p>
@@ -1263,46 +1356,12 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
         )}
       </p>
 
-      {/* Détail des paris */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted-foreground border-b">
-              <th className="py-1 pr-2">Pari</th>
-              <th className="py-1 pr-2">Chevaux</th>
-              <th className="py-1 pr-2 text-right">Mise</th>
-              <th className="py-1 pr-2 text-right">Résultat</th>
-            </tr>
-          </thead>
-          <tbody>
-            {bilan.paris.map((p, i) => (
-              <tr key={i} className="border-b border-border/40">
-                <td className="py-1 pr-2 font-medium">{p.type}</td>
-                <td className="py-1 pr-2 text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</td>
-                <td className="py-1 pr-2 text-right tabular-nums">{p.mise.toFixed(0)}€</td>
-                <td className="py-1 pr-2 text-right tabular-nums">
-                  {p.statut === "gagne"
-                    ? <span className="text-emerald-600 font-semibold">✓ +{(p.gain ?? 0).toFixed(2)}€</span>
-                    : p.statut === "en_attente"
-                    ? <span className="text-amber-600 font-semibold" title="Rapport PMU pas encore publié">Gagné · rapport en attente</span>
-                    : <span className="text-muted-foreground">✗ perdu</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t font-semibold">
-              <td className="py-1.5 pr-2" colSpan={2}>Total ({bilan.nb_gagnes}/{bilan.nb_paris} gagné{bilan.nb_gagnes > 1 ? "s" : ""})</td>
-              <td className="py-1.5 pr-2 text-right tabular-nums">{bilan.total_mise.toFixed(0)}€</td>
-              <td className={cn("py-1.5 pr-2 text-right tabular-nums", bilan.total_gain > 0 ? "text-emerald-600" : "text-muted-foreground")}>
-                {bilan.total_gain.toFixed(2)}€
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+      {/* Détail des paris du profil sélectionné */}
+      <BilanDetail bilan={bilan} />
+
       <p className="mt-2 text-[10px] text-muted-foreground/70">
-        Plan rejoué à l&apos;identique, réglé avec les rapports PMU définitifs réels. Simulation à but pédagogique — jouez responsable.
+        Chaque profil rejoue sa propre méthode (Prudent = placé fréquent · Modéré = équilibré · Risqué = gros gains),
+        réglée avec les rapports PMU définitifs réels. Simulation pédagogique — jouez responsable.
       </p>
     </div>
   );
