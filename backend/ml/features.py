@@ -1267,14 +1267,18 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         if len(hist_by_cheval[cid]) < 20:
             hist_by_cheval[cid].append(row[1:])   # (position, distance, terrain, hippodrome, date, nb_partants, cote, discipline, allocation)
 
-    # 3. ELO history (max 10 par cheval)
+    # 3. ELO history (max 10 par cheval) — POINT-IN-TIME : uniquement les deltas ELO
+    # des courses ANTÉRIEURES à celle-ci (anti-fuite : sinon delta_elo_5/velocity voient
+    # les variations ELO des courses futures du cheval). Pour une course à venir, tout
+    # son historique est antérieur → comportement correct.
     elo_r = await session.execute(text("""
         SELECT cheval_id, delta_elo, date_course
         FROM elo_historique
         WHERE cheval_id = ANY(:cids)
+          AND date_course < (SELECT date_heure FROM courses WHERE course_id = :cid)
         ORDER BY cheval_id, date_course DESC
         LIMIT 200
-    """), {"cids": cheval_ids})
+    """), {"cids": cheval_ids, "cid": course_id})
     elo_by_cheval: dict = {}
     for row in elo_r.fetchall():
         if row[0] not in elo_by_cheval:
