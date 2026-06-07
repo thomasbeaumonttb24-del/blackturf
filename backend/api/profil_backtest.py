@@ -150,9 +150,13 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
         roi_w = (at["gw"] - at["mise"]) / at["mise"]      # ROI net winsorisé
         shrink = at["n"] / (at["n"] + MIN_N)
         eff = roi_w * shrink
-        # asymétrie : on coupe vite les perdants (×0.5), on monte prudemment (×1.3)
-        w = 1.0 + (eff if eff < 0 else min(eff, 0.6))
-        w = max(0.5, min(1.3, w))
+        # ASYMÉTRIE volontaire : le signal PERDANT est robuste (on coupe fort, ×0.5),
+        # le signal GAGNANT est contaminé par la variance + les rapports approximatifs
+        # (Couplé/Simple Placé) → on monte PRUDEMMENT (cap ×1.15) pour ne pas chasser
+        # du "fool's gold". Mieux vaut sous-pondérer un vrai gagnant que sur-jouer un
+        # faux. Down jusqu'à ×0.5, up plafonné ×1.15.
+        w = 1.0 + (eff if eff < 0 else min(eff, 0.15))
+        w = max(0.5, min(1.15, w))
         type_weights[t] = round(w, 3)
         type_perf[t] = {
             "n": at["n"],
