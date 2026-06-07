@@ -189,6 +189,7 @@ def detect_value_bet(
     jockey_suspendu: bool = False,
     entraineur_suspendu: bool = False,
     non_partant: bool = False,
+    cote_calib: Optional[dict] = None,
 ) -> Optional[dict]:
     """
     Détecte si un partant est un value bet — version multi-sources.
@@ -222,6 +223,15 @@ def detect_value_bet(
         "unibet":  cote_unibet,
         "betfair": cote_betfair,
     }
+
+    # ── Calibration par tranche de cote (apprise des résultats réels, nightly) ──
+    # Corrige le biais favori-longshot AVANT le calcul d'EV : le modèle sous-estime
+    # les favoris et sur-estime les outsiders → sans ça, EV gonflées sur longshots
+    # (faux value bets perdants). On rapproche la P(victoire) de la réalité observée
+    # par bucket de cote → EV honnête → renta. Neutre (×1.0) si pas de calibration.
+    if cote_calib and cote_pmu and cote_pmu > 1:
+        from ml.cote_calibration import apply_factor
+        proba_top1 = float(max(1e-4, min(0.99, proba_top1 * apply_factor(cote_pmu, cote_calib, "win"))))
 
     evs, meilleure_source, cote_marche = triangulation_cotes_v2(proba_top1, cotes)
     if not evs:

@@ -354,6 +354,16 @@ async def run_nightly_retraining() -> None:
             await _iso3_compute(iso3_session)
     except Exception as e:
         log.warning("pipeline.nightly_isotonic_top3_skip", err=str(e)[:140])
+    # Recalcule la calibration par tranche de cote (corrige favori/longshot dans l'EV
+    # des value bets) — auto-apprentissage : s'affine à chaque nuit avec les résultats.
+    try:
+        from ml.cote_calibration import compute_cote_calibration, persist_cote_calibration
+        async with AsyncSessionLocal() as cc_session:
+            _cc = await compute_cote_calibration(cc_session)
+            await persist_cote_calibration(cc_session, _cc)
+            log.info("pipeline.cote_calibration_done", n=_cc.get("n_total"))
+    except Exception as e:
+        log.warning("pipeline.nightly_cote_calib_skip", err=str(e)[:140])
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
     try:
@@ -761,6 +771,14 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         _ci_low = np.clip(_p1_arr * (1.0 - K_CI * _ru), 1e-4, 0.999)
         _ci_high = np.clip(_p1_arr * (1.0 + K_CI * _ru), 1e-4, 0.999)
 
+        # Calibration par tranche de cote (apprise nightly des résultats réels) —
+        # chargée une fois, appliquée à l'EV des value bets (corrige favori/longshot).
+        try:
+            from ml.cote_calibration import load_cote_calibration
+            _cote_calib = await load_cote_calibration(session)
+        except Exception:
+            _cote_calib = None
+
         predictions = []
         for i, feat in enumerate(features_list):
             pid = feat.get("participation_id")
@@ -862,6 +880,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 steam_move_betclic_pct=steam_betclic_pct,
                 jockey_suspendu=jockey_susp,
                 entraineur_suspendu=entraineur_susp,
+                cote_calib=_cote_calib,
             )
             niveau_vb = 0
             ev_max = 0.0
