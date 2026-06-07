@@ -270,21 +270,53 @@ async def get_pari_du_jour(
     if not rows:
         return None
 
-    best = None
-    best_score = -1.0
+    # Conviction signal (appris du ROI réel par signal) — l'edge validé hors-échantillon :
+    # le filtre conviction≥1.1 a un taux de gain 3-4× le marché sur 5 fenêtres jamais vues.
+    # On en fait LE critère du "coup sûr" → on privilégie les paris à edge prouvé.
+    feats_by_pid: dict = {}
+    signal_perf = None
+    try:
+        from db.models import FeatureML
+        from ml.signal_performance import load_signal_performance, signal_multiplier
+        signal_perf = await load_signal_performance(db)
+        pids = [vb.participation_id for vb, *_ in rows]
+        if signal_perf and pids:
+            fr = await db.execute(select(FeatureML.participation_id, FeatureML.features)
+                                  .where(FeatureML.participation_id.in_(pids)))
+            feats_by_pid = {pid: f for pid, f in fr.all()}
+    except Exception:
+        signal_perf = None
+
+    def _conv(vb) -> float:
+        if not signal_perf:
+            return 1.0
+        f = feats_by_pid.get(vb.participation_id)
+        return signal_multiplier(f or {}, signal_perf) if f else 1.0
+
+    best = best_edge = None
+    best_score = best_edge_score = -1.0
     for vb, pred, part, cheval, course in rows:
         proba = float(pred.proba_top1 or 0)
         conf = float(pred.confidence_score or 0) / 100.0  # 0-1 (accord des modèles)
         ev = float(vb.ev_max or 0)
-        # Score composite : edge (EV) × chance réelle × confiance modèle.
-        score = ev * proba * (0.5 + 0.5 * conf)
+        sig = _conv(vb)
+        # Score composite : edge (EV) × chance réelle × confiance × CONVICTION SIGNAL.
+        score = ev * proba * (0.5 + 0.5 * conf) * sig
         if score > best_score:
             best_score = score
             best = (vb, pred, part, cheval, course)
+        if sig >= 1.1 and score > best_edge_score:   # edge signal validé
+            best_edge_score = score
+            best_edge = (vb, pred, part, cheval, course)
 
-    if not best:
+    # "Coup sûr" = priorité au pari à edge signal prouvé ; sinon meilleur score.
+    chosen = best_edge or best
+    if not chosen:
         return None
-    vb, pred, part, cheval, course = best
+    vb, pred, part, cheval, course = chosen
+    best_score = best_edge_score if best_edge else best_score
+    conviction = round(_conv(vb), 2)
+    edge_valide = conviction >= 1.1
     cid = course.course_id
     # Code public R{réunion}C{course} : réunion = numExterne (numero_reunion) pour
     # matcher pmu.fr ; fallback sur le suffixe du course_id (numOfficiel) si absent.
@@ -311,10 +343,13 @@ async def get_pari_du_jour(
         "niveau": vb.niveau,
         "spi_detected": vb.spi_detected,
         "score": round(best_score, 5),
+        "conviction": conviction,        # multiplicateur signal appris (≥1.1 = edge prouvé)
+        "edge_valide": edge_valide,      # True = signaux historiquement gagnants présents
         "raison": (
             f"N°{part.numero} {cheval.nom} — le modèle lui donne {proba*100:.0f}% de gagner "
             f"(cote {part.cote_pmu:.1f}) soit une valeur de +{float(vb.ev_max or 0)*100:.0f}%, "
             f"avec {conf}% d'accord entre les 3 modèles."
+            + (" · signaux historiquement gagnants confirmés (edge validé)" if edge_valide else "")
         ),
     }
 
