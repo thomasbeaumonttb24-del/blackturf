@@ -2078,43 +2078,102 @@ export default function CoursePage() {
                           {isExp && (
                             <tr className="bg-muted/20">
                               <td colSpan={predictions ? 8 : 5} className="px-3 pb-3 pt-1">
+                                {(() => {
+                                  const HEAD = "mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
+                                  const CARD = "rounded-xl border border-border bg-white p-3 shadow-sm";
+                                  const elo = partant.elo_global;
+                                  const eloColor = elo == null ? "#9CA3AF" : elo >= 1700 ? "#F59E0B" : elo >= 1500 ? "#3B82F6" : elo >= 1300 ? "#10B981" : "#6B7280";
+                                  const mv = partant.mouvement_cote_pct;  // >0 = cote baissée = argent venu = signal +
+                                  const sexeLbl = partant.sexe ? ({ M: "Mâle", H: "Hongre", F: "Femelle" } as Record<string, string>)[partant.sexe] ?? partant.sexe : null;
+                                  return (
                                 <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                                   {/* Musique */}
-                                  <div className="rounded-lg border border-border bg-white p-3 sm:col-span-2 lg:col-span-3">
-                                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Musique — forme récente</p>
+                                  <div className={cn(CARD, "sm:col-span-2 lg:col-span-3")}>
+                                    <p className={HEAD}><Activity className="h-3 w-3 text-violet-500" /> Musique — forme récente</p>
                                     <MusiqueDisplay musique={partant.musique} />
                                   </div>
+
+                                  {/* Niveau & forme (ELO) */}
+                                  {(elo != null || partant.age != null || partant.running_style || partant.jours_depuis_derniere != null) && (
+                                    <div className={CARD}>
+                                      <p className={HEAD}><BarChart2 className="h-3 w-3 text-emerald-500" /> Niveau & forme</p>
+                                      {elo != null && (
+                                        <p className="text-sm flex items-baseline gap-1.5">
+                                          <span className="text-muted-foreground text-xs">ELO</span>
+                                          <span className="font-bold tabular-nums" style={{ color: eloColor }}>{Math.round(elo)}</span>
+                                        </p>
+                                      )}
+                                      <p className="text-xs text-muted-foreground">
+                                        {partant.age != null ? `${partant.age} ans` : ""}{sexeLbl ? ` · ${sexeLbl}` : ""}
+                                        {partant.jours_depuis_derniere != null ? ` · ${partant.jours_depuis_derniere}j de repos` : ""}
+                                      </p>
+                                      {partant.running_style && <div className="mt-1.5"><RunningStyleBadge style={partant.running_style} /></div>}
+                                    </div>
+                                  )}
+
+                                  {/* Marché — cote + mouvement + fourchette */}
+                                  {partant.cote_pmu != null && (
+                                    <div className={CARD}>
+                                      <p className={HEAD}><TrendingUp className="h-3 w-3 text-amber-500" /> Marché</p>
+                                      <p className="text-sm flex items-center gap-2">
+                                        <span className="font-bold tabular-nums">{partant.cote_pmu.toFixed(1)}</span>
+                                        {mv != null && Math.abs(mv) >= 1 && (
+                                          <span className={cn("inline-flex items-center gap-0.5 text-[11px] font-semibold", mv > 0 ? "text-emerald-600" : "text-rose-600")}>
+                                            {mv > 0 ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
+                                            {mv > 0 ? "−" : "+"}{Math.abs(mv).toFixed(0)}%
+                                            <span className="text-muted-foreground font-normal">{mv > 0 ? "joué" : "délaissé"}</span>
+                                          </span>
+                                        )}
+                                      </p>
+                                      {partant.cote_min != null && partant.cote_max != null && partant.cote_min !== partant.cote_max && (
+                                        <p className="text-xs text-muted-foreground tabular-nums">Fourchette {partant.cote_min.toFixed(1)}–{partant.cote_max.toFixed(1)}{partant.nb_sources ? ` · ${partant.nb_sources} sources` : ""}</p>
+                                      )}
+                                    </div>
+                                  )}
+
                                   {/* Jockey / Entraîneur */}
-                                  <div className="rounded-lg border border-border bg-white p-3">
-                                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Jockey / Entraîneur</p>
-                                    <p className="text-sm font-medium leading-snug">{partant.jockey || "—"}</p>
-                                    <p className="text-xs text-muted-foreground">Entraîneur : {partant.entraineur || "—"}</p>
+                                  <div className={CARD}>
+                                    <p className={HEAD}><Users className="h-3 w-3 text-blue-500" /> Jockey / Entraîneur</p>
+                                    <p className="text-sm font-medium leading-snug">
+                                      {partant.jockey || "—"}
+                                      {partant.changement_jockey && <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700 align-middle">CHANGEMENT</span>}
+                                      {partant.jockey_suspendu && <span className="ml-1.5 rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-700 align-middle">SUSPENDU</span>}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">Entraîneur : {partant.entraineur || "—"}{partant.entraineur_suspendu && <span className="ml-1 text-[9px] font-bold text-rose-600">(suspendu)</span>}</p>
                                     {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 3 && (
-                                      <p className="mt-1.5 text-[11px] text-violet-600">Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% de réussite sur {partant.asso_jockey_entraineur_nb} courses</p>
+                                      <p className="mt-1.5 text-[11px] text-violet-600">🤝 Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% de réussite sur {partant.asso_jockey_entraineur_nb} courses</p>
                                     )}
                                   </div>
-                                  {/* Carrière (gains retirés — donnée source non fiable) */}
+
+                                  {/* Carrière */}
                                   {partant.nb_courses ? (
-                                    <div className="rounded-lg border border-border bg-white p-3">
-                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Carrière</p>
+                                    <div className={CARD}>
+                                      <p className={HEAD}><Trophy className="h-3 w-3 text-amber-500" /> Carrière</p>
                                       <p className="text-sm">
                                         <span className="font-bold tabular-nums">{partant.nb_victoires ?? 0}</span> victoire{(partant.nb_victoires ?? 0) > 1 ? "s" : ""}
                                         <span className="text-muted-foreground"> sur </span>
                                         <span className="font-medium tabular-nums">{partant.nb_courses}</span> courses
                                       </p>
-                                      <p className="text-xs text-muted-foreground">Réussite {Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%</p>
+                                      <div className="mt-1 flex items-center gap-2">
+                                        <div className="h-1.5 flex-1 rounded-full bg-muted/40 overflow-hidden">
+                                          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100))}%` }} />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground tabular-nums">{Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%</span>
+                                      </div>
                                     </div>
                                   ) : null}
+
                                   {/* Équipement */}
-                                  <div className="rounded-lg border border-border bg-white p-3">
-                                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Équipement</p>
-                                    <p className="text-sm">Déferré : <span className="font-medium capitalize">{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] font-semibold text-brand-gold">1ʳᵉ fois</span>}</p>
-                                    <p className="text-sm">Œillères : <span className="font-medium capitalize">{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "sans"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] font-semibold text-brand-blue">1ʳᵉ fois</span>}</p>
+                                  <div className={CARD}>
+                                    <p className={HEAD}><Zap className="h-3 w-3 text-orange-500" /> Équipement</p>
+                                    <p className="text-sm">Déferré : <span className="font-medium capitalize">{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] font-semibold text-brand-gold">1ʳᵉ fois ★</span>}</p>
+                                    <p className="text-sm">Œillères : <span className="font-medium capitalize">{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "sans"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] font-semibold text-brand-blue">1ʳᵉ fois ★</span>}</p>
                                   </div>
-                                  {/* Poids / Handicap / Corde */}
+
+                                  {/* Poids / Départ */}
                                   {(partant.handicap_poids || partant.poids_prevu || partant.numero_corde || partant.poids_reel_pesee) && (
-                                    <div className="rounded-lg border border-border bg-white p-3">
-                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Poids / Départ</p>
+                                    <div className={CARD}>
+                                      <p className={HEAD}><Ruler className="h-3 w-3 text-slate-500" /> Poids / Départ</p>
                                       {(partant.handicap_poids ?? partant.poids_prevu) != null && (
                                         <p className="text-sm">Poids : <span className="font-medium tabular-nums">{(partant.handicap_poids ?? partant.poids_prevu)} kg</span></p>
                                       )}
@@ -2126,16 +2185,19 @@ export default function CoursePage() {
                                       )}
                                     </div>
                                   )}
+
                                   {/* Origines */}
                                   {(partant.pere || partant.mere) && (
-                                    <div className="rounded-lg border border-border bg-white p-3">
-                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Origines</p>
+                                    <div className={CARD}>
+                                      <p className={HEAD}><Tag className="h-3 w-3 text-pink-500" /> Origines</p>
                                       {partant.pere && <p className="text-xs">Père : <span className="font-medium">{partant.pere}</span></p>}
                                       {partant.mere && <p className="text-xs">Mère : <span className="font-medium">{partant.mere}</span></p>}
                                       {partant.pere_de_mere && <p className="text-xs text-muted-foreground">Père de mère : {partant.pere_de_mere}</p>}
                                     </div>
                                   )}
                                 </div>
+                                  );
+                                })()}
                               </td>
                             </tr>
                           )}
