@@ -98,6 +98,7 @@ interface ProfilsBacktest {
   nb_courses: number;
   mise_par_course: number;
   updated_at?: string;
+  type_perf?: Record<string, { n: number; win_rate: number; roi_winsorise: number; poids_appris: number }>;
 }
 
 const NIVEAU_LABELS: Record<number, string> = {
@@ -413,6 +414,52 @@ export default function TrackRecordPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* ── Ce que l'IA a APPRIS (poids par type, auto-amélioration) ───── */}
+        {profilsData?.type_perf && Object.keys(profilsData.type_perf).length > 0 && (
+          <Card className="border-border/60">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Brain className="w-4 h-4 text-violet-400" />
+                Ce que l&apos;IA a appris — pondération par type de pari
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {Object.entries(profilsData.type_perf)
+                  .sort((a, b) => b[1].poids_appris - a[1].poids_appris)
+                  .map(([type, p]) => {
+                    const boost = p.poids_appris >= 1.0;
+                    // barre : 0.5 -> 0%, 1.3 -> 100%
+                    const pct = Math.max(0, Math.min(100, ((p.poids_appris - 0.5) / 0.8) * 100));
+                    return (
+                      <div key={type} className="flex items-center gap-3 text-xs">
+                        <span className="w-32 shrink-0 font-medium truncate">{type}</span>
+                        <div className="flex-1 h-2 rounded-full bg-muted/40 overflow-hidden">
+                          <div className="h-full rounded-full transition-all"
+                            style={{ width: `${pct}%`, background: boost ? "#059669" : "#DC2626" }} />
+                        </div>
+                        <span className="w-12 text-right font-mono font-bold tabular-nums"
+                          style={{ color: boost ? "#059669" : "#DC2626" }}>
+                          ×{p.poids_appris.toFixed(2)}
+                        </span>
+                        <span className="w-36 text-right text-muted-foreground tabular-nums hidden sm:block">
+                          win {p.win_rate}% · ROI {p.roi_winsorise >= 0 ? "+" : ""}{p.roi_winsorise}% · {p.n} paris
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+              <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/80">
+                L&apos;IA mesure le ROI RÉEL de chaque type de pari sur l&apos;historique réglé et en déduit un
+                <strong> poids de conviction</strong> (×0.5 à ×1.3) appliqué à la sélection future :
+                un type qui perd (ex. Simple Gagnant) est <strong>dé-pondéré</strong>, un type qui rapporte
+                (placé à valeur, couplé) est <strong>privilégié</strong>. Recalculé à chaque fin de course —
+                si un type se remet à gagner, son poids remonte. <strong>L&apos;algorithme s&apos;auto-corrige.</strong>
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── VB performance + Discipline ───────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
