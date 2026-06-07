@@ -167,6 +167,14 @@ export default function DashboardPage() {
                       <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-500 font-semibold">
                         EV +{(pariDuJour.ev * 100).toFixed(0)}%
                       </span>
+                      {pariDuJour.edge_valide && (
+                        <span
+                          className="text-xs rounded-full px-2 py-0.5 bg-amber-500/20 text-amber-600 font-semibold ring-1 ring-amber-400/40"
+                          title="Signaux historiquement gagnants confirmés — edge validé hors-échantillon (taux de gain 3-4× le marché sur le passé). Pas une garantie."
+                        >
+                          ✓ Edge validé
+                        </span>
+                      )}
                       {"⭐".repeat(Math.max(1, pariDuJour.niveau))}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{pariDuJour.raison}</p>

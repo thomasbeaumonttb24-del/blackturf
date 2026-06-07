@@ -389,6 +389,17 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.signal_performance_done", n=_sp.get("n_total"))
     except Exception as e:
         log.warning("pipeline.nightly_signal_perf_skip", err=str(e)[:140])
+    # Surveillance HONNÊTE de l'edge : test hors-échantillon (le filtre conviction≥1.1
+    # bat-il encore le marché ?) journalisé → on détecte une dégradation de l'edge.
+    try:
+        from ml.edge_monitor import compute_edge_monitor, persist_edge_monitor
+        async with AsyncSessionLocal() as em_session:
+            _em = await compute_edge_monitor(em_session)
+            await persist_edge_monitor(em_session, _em)
+            log.info("pipeline.edge_monitor_done", edge_ok=_em.get("edge_ok"),
+                     win_filt=_em.get("win_filt"), roi_cap=_em.get("roi_cap"))
+    except Exception as e:
+        log.warning("pipeline.nightly_edge_monitor_skip", err=str(e)[:140])
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
     try:
