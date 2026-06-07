@@ -272,6 +272,15 @@ class Participation(Base):
     numero: Mapped[int] = mapped_column(Integer)
     numero_corde: Mapped[int | None] = mapped_column(Integer)
 
+    # ELO POINT-IN-TIME : score ELO du cheval AVANT cette course (anti-fuite temporelle).
+    # Rempli au rejeu chronologique. Les features d'entraînement le lisent au lieu de
+    # l'ELO courant (qui inclut les courses futures). NULL pour les courses à venir
+    # → on retombe sur l'ELO courant (= pré-course pour une course non encore disputée).
+    elo_avant_global: Mapped[float | None] = mapped_column(Float)
+    elo_avant_plat: Mapped[float | None] = mapped_column(Float)
+    elo_avant_trot: Mapped[float | None] = mapped_column(Float)
+    elo_avant_obstacle: Mapped[float | None] = mapped_column(Float)
+
     # Poids
     poids_prevu: Mapped[float | None] = mapped_column(Float)
     poids_porte: Mapped[float | None] = mapped_column(Float)

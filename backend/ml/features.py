@@ -1197,7 +1197,13 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             c.corde, c.penetrometre_coef, c.pool_total_centimes, c.pool_gagnant_centimes,
             -- Cheval
             ch.age, ch.sexe, ch.running_style, ch.taux_en_tete, ch.prix_vente_yearling,
-            ch.elo_score_global, ch.elo_score_plat, ch.elo_score_trot, ch.elo_score_obstacle,
+            -- ELO POINT-IN-TIME : ELO avant cette course (snapshot) si dispo, sinon ELO
+            -- courant (= pré-course pour une course à venir). Évite la fuite temporelle
+            -- (entraîner sur l'ELO final qui inclut les courses futures).
+            COALESCE(p.elo_avant_global, ch.elo_score_global) AS elo_g,
+            COALESCE(p.elo_avant_plat, ch.elo_score_plat) AS elo_p,
+            COALESCE(p.elo_avant_trot, ch.elo_score_trot) AS elo_t,
+            COALESCE(p.elo_avant_obstacle, ch.elo_score_obstacle) AS elo_o,
             ch.pere, ch.mere, ch.pere_de_mere,
             -- Perf carrière
             pc.gains_carriere_total, pc.nb_courses_total, pc.nb_victoires_total,
