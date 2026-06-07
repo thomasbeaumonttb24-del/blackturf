@@ -188,73 +188,199 @@ export default async function HomePage() {
       <Navbar />
 
       {/* ══ HERO ══ */}
-      <section className="relative gradient-hero-v2 flex flex-col justify-center overflow-hidden grid-lines">
-        {/* Orbs dorés — discrets sur fond clair */}
+      <section className="relative gradient-hero-v2 min-h-[92vh] flex flex-col justify-center overflow-hidden grid-lines">
+        {/* Orbs + particules dorées */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
           <div className="orb-1 absolute top-[-40px] left-1/2 w-[640px] h-[320px] rounded-full bg-amber-400/10 blur-[90px]" />
-          <div className="orb-2 absolute bottom-10 right-[8%] w-64 h-64 rounded-full bg-amber-300/8 blur-[60px]" />
+          <div className="orb-2 absolute bottom-10 right-[8%] w-72 h-72 rounded-full bg-amber-300/10 blur-[70px]" />
           <div className="orb-3 absolute top-1/3 left-[6%] w-48 h-48 rounded-full bg-yellow-400/6 blur-[50px]" />
+          {[
+            { l: "12%", t: "22%", s: 6, d: "7s", delay: "0s" },
+            { l: "82%", t: "18%", s: 8, d: "9s", delay: "1.2s" },
+            { l: "68%", t: "70%", s: 5, d: "8s", delay: "0.6s" },
+            { l: "28%", t: "78%", s: 7, d: "10s", delay: "2s" },
+            { l: "92%", t: "52%", s: 4, d: "7.5s", delay: "1.6s" },
+            { l: "44%", t: "12%", s: 5, d: "11s", delay: "0.3s" },
+          ].map((p, i) => (
+            <span
+              key={i}
+              className="particle absolute rounded-full bg-amber-400/40"
+              style={{ left: p.l, top: p.t, width: p.s, height: p.s, animationDuration: p.d, animationDelay: p.delay }}
+            />
+          ))}
         </div>
 
-        <div className="relative mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 text-center pt-24 pb-20 sm:pt-32 sm:pb-24">
+        <div className="relative mx-auto max-w-6xl w-full px-4 sm:px-6 lg:px-8 pt-24 pb-16 sm:pt-28 sm:pb-20">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-10 items-center">
 
-          {/* Live badge */}
-          <div className="flex justify-center mb-8">
-            <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full border border-amber-300/60 bg-white/70 backdrop-blur-sm text-amber-700 text-[11px] font-semibold shadow-sm">
-              <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-              Terminal IA • Analyse hippique en direct
-            </span>
-          </div>
+            {/* ── Colonne texte ── */}
+            <div className="text-center lg:text-left">
+              <div className="flex justify-center lg:justify-start mb-7">
+                <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full border border-amber-300/60 bg-white/70 backdrop-blur-sm text-amber-700 text-[11px] font-semibold shadow-sm">
+                  <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                  Terminal IA • Analyse hippique en direct
+                </span>
+              </div>
 
-          {/* Titre principal */}
-          <h1 className="font-display text-[2.7rem] sm:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-[1.04] text-gray-900">
-            Votre{" "}
-            <span className="text-gradient-animated">Conseiller Expert</span>
-            <br className="hidden sm:block" />{" "}en Paris Hippiques
-          </h1>
+              <h1 className="font-display text-[2.6rem] sm:text-6xl lg:text-[4.1rem] font-extrabold tracking-tight mb-6 leading-[1.03] text-gray-900">
+                Misez avec un{" "}
+                <span className="relative inline-block text-gradient-animated">
+                  cerveau de pro
+                  <svg className="absolute -bottom-2 left-0 w-full" height="10" viewBox="0 0 200 10" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M2 7 Q 50 2 100 6 T 198 5" fill="none" stroke="#F59E0B" strokeWidth="3" strokeLinecap="round" opacity="0.6" />
+                  </svg>
+                </span>
+                <br className="hidden sm:block" /> pas avec votre instinct
+              </h1>
 
-          <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto mb-3 leading-relaxed">
-            Entrez combien vous voulez miser — BlackTurf génère votre plan de pari personnalisé
-            avec mise exacte, gain potentiel et probabilités calculées par l&apos;IA.
-          </p>
-          <p className="text-[13px] text-gray-400 max-w-xl mx-auto mb-10 font-mono tracking-tight">
-            XGBoost + LightGBM + CatBoost · 80+ variables · Paris de valeur en temps réel · Critère de Kelly
-          </p>
+              <p className="text-lg sm:text-xl text-gray-600 max-w-xl mx-auto lg:mx-0 mb-3 leading-relaxed">
+                Entrez votre mise — l&apos;IA calcule la course, les probabilités réelles et
+                votre plan de pari optimal. Mise exacte, gain potentiel, paris de valeur détectés.
+              </p>
+              <p className="text-[13px] text-gray-400 max-w-lg mx-auto lg:mx-0 mb-9 font-mono tracking-tight">
+                XGBoost + LightGBM + CatBoost · 80+ variables · Paris de valeur · Critère de Kelly
+              </p>
 
-          {/* CTA */}
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Button
-              size="xl"
-              asChild
-              className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30 transition-all duration-200"
-            >
-              <Link href="/inscription">
-                Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" />
-              </Link>
-            </Button>
-            <Button
-              variant="outline"
-              size="xl"
-              asChild
-              className="press border-gray-300 text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50 transition-all"
-            >
-              <Link href="/programme">Programme du jour</Link>
-            </Button>
-          </div>
+              {/* CTA */}
+              <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start">
+                <Button
+                  size="xl"
+                  asChild
+                  className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30 transition-all duration-200"
+                >
+                  <Link href="/inscription">
+                    Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" />
+                  </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="xl"
+                  asChild
+                  className="press border-gray-300 text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50 transition-all"
+                >
+                  <Link href="/programme">Programme du jour</Link>
+                </Button>
+              </div>
 
-          {/* Trust signals */}
-          <div className="mt-10 flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-gray-500">
-            {[
-              "Sans CB requis",
-              "7 jours gratuit",
-              "Annulation à tout moment",
-              "Données PMU officielles",
-            ].map((t) => (
-              <span key={t} className="flex items-center gap-1.5">
-                <Check className="h-3.5 w-3.5 text-emerald-600" />
-                {t}
-              </span>
-            ))}
+              {/* Chips de preuve — chiffres RÉELS ("—" si indisponible) */}
+              <div className="mt-8 flex flex-wrap justify-center lg:justify-start gap-2.5">
+                {[
+                  { icon: Gauge, label: "Précision Top-3", value: stats.precision_top3, color: "#D97706" },
+                  { icon: BarChart3, label: "Courses analysées", value: stats.nb_courses_analysees, color: "#2563EB" },
+                  { icon: Sparkles, label: "AUC modèle", value: stats.auc_roc, color: "#059669" },
+                ].map((c) => (
+                  <span key={c.label} className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/80 backdrop-blur-sm px-3 py-1.5 shadow-sm">
+                    <c.icon className="h-3.5 w-3.5" style={{ color: c.color }} />
+                    <span className="num-display text-sm font-bold" style={{ color: c.color }}>{c.value}</span>
+                    <span className="text-[11px] text-gray-500">{c.label}</span>
+                  </span>
+                ))}
+              </div>
+
+              {/* Trust signals */}
+              <div className="mt-6 flex flex-wrap justify-center lg:justify-start gap-x-5 gap-y-2 text-xs text-gray-500">
+                {["Sans CB requis", "7 jours gratuit", "Annulation à tout moment"].map((t) => (
+                  <span key={t} className="flex items-center gap-1.5">
+                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Colonne carte "analyse IA" (exemple illustratif) ── */}
+            <div className="relative">
+              {/* halo */}
+              <div className="absolute -inset-6 bg-gradient-to-tr from-amber-300/20 via-transparent to-emerald-300/10 blur-2xl rounded-[2rem] pointer-events-none" aria-hidden="true" />
+
+              <div className="hero-card-float relative">
+                <div className="card-scan rounded-3xl border border-amber-200/70 bg-white/95 backdrop-blur-sm p-6 shadow-[0_24px_70px_-20px_rgba(217,119,6,0.35)]">
+                  {/* En-tête carte */}
+                  <div className="flex items-center justify-between">
+                    <span className="eyebrow text-amber-700 text-[10px] font-bold">
+                      <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Analyse IA
+                    </span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">
+                      Exemple
+                    </span>
+                  </div>
+
+                  {/* Course */}
+                  <div className="mt-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <span className="text-base">🏇</span> Deauville
+                    <span className="text-gray-400 font-normal">· R4 C5 · Plat 1600m</span>
+                  </div>
+
+                  {/* Anneau de confiance */}
+                  <div className="mt-5 flex items-center gap-5">
+                    <div className="relative h-28 w-28 flex-shrink-0">
+                      <svg className="h-28 w-28 -rotate-90" viewBox="0 0 120 120">
+                        <circle cx="60" cy="60" r="52" fill="none" stroke="#F3F4F6" strokeWidth="11" />
+                        <circle
+                          cx="60" cy="60" r="52" fill="none" stroke="url(#confGrad)" strokeWidth="11" strokeLinecap="round"
+                          strokeDasharray="326.726"
+                          className="ring-anim"
+                          style={{ "--c": "326.726", "--off": "71.88", strokeDashoffset: "71.88" } as CSSProperties}
+                        />
+                        <defs>
+                          <linearGradient id="confGrad" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stopColor="#F59E0B" />
+                            <stop offset="100%" stopColor="#B45309" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="num-display text-3xl font-extrabold text-gray-900">78%</span>
+                        <span className="text-[9px] uppercase tracking-wider text-gray-400">Confiance</span>
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Indice de confiance IA</p>
+                      <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                        Probabilité que le vainqueur figure dans le Top-3 du modèle pour cette course.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Top picks */}
+                  <div className="mt-5 space-y-2">
+                    {[
+                      { rank: 1, nom: "Paladin Noir", cote: "3,4", p: 42, gold: true },
+                      { rank: 2, nom: "Royal Flush", cote: "5,1", p: 28, gold: false },
+                      { rank: 3, nom: "Vent d'Est", cote: "7,2", p: 19, gold: false },
+                    ].map((h, i) => (
+                      <div key={h.rank} className={`flex items-center gap-3 rounded-xl px-3 py-2 ${h.gold ? "bg-amber-50 ring-1 ring-amber-200" : "bg-gray-50"}`}>
+                        <span className={`num-display text-xs font-black w-5 ${h.gold ? "text-brand-gold-deep" : "text-gray-400"}`}>#{h.rank}</span>
+                        <span className="text-sm font-medium text-gray-900 flex-1 truncate">{h.nom}</span>
+                        <div className="hidden sm:block w-20 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                          <div
+                            className="proba-bar h-full rounded-full"
+                            style={{ "--w": `${h.p}%`, "--d": `${0.5 + i * 0.15}s`, background: h.gold ? "linear-gradient(90deg,#D97706,#F59E0B)" : "#9CA3AF" } as CSSProperties}
+                          />
+                        </div>
+                        <span className="num-display text-xs font-bold text-gray-700 w-9 text-right">{h.p}%</span>
+                        <span className="text-[11px] font-mono text-gray-500 w-9 text-right">{h.cote}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pari de valeur */}
+                  <div className="mt-4 vb-glow flex items-center justify-between rounded-xl bg-gradient-to-r from-emerald-50 to-white border border-emerald-200 px-3 py-2.5">
+                    <span className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
+                      <Zap className="h-3.5 w-3.5" /> Pari de valeur détecté ★★★
+                    </span>
+                    <span className="num-display text-sm font-extrabold text-emerald-600">EV +14,2%</span>
+                  </div>
+
+                  {/* Plan de mise */}
+                  <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
+                    <span className="text-gray-500">Mise <span className="font-semibold text-gray-900">10€</span> sur Paladin Noir</span>
+                    <span className="num-display font-bold text-brand-gold-deep">→ 34€ si gagnant</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
