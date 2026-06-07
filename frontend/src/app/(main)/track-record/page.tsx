@@ -431,7 +431,8 @@ export default function TrackRecordPage() {
                   Aucun pari de valeur résolu pour le moment
                 </div>
               ) : (
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[360px]">
                   <thead>
                     <tr className="border-b border-border/40">
                       <th className="text-left py-2 text-xs font-medium text-muted-foreground">Niveau</th>
@@ -472,6 +473,7 @@ export default function TrackRecordPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </CardContent>
           </Card>

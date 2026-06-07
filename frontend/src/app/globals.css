@@ -30,10 +30,18 @@
   * {
     @apply border-border;
   }
+  html {
+    -webkit-text-size-adjust: 100%;  /* pas de zoom auto iOS sur rotation */
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* Garde-fou global : aucune barre de scroll horizontale parasite sur mobile.
+       `clip` (≠ hidden) ne crée pas de conteneur de défilement → sticky navbar OK. */
+    overflow-x: clip;
   }
+  /* Médias jamais plus larges que leur conteneur */
+  img, svg, video, canvas { max-width: 100%; height: auto; }
 }
 
 /* Scrollbar light */

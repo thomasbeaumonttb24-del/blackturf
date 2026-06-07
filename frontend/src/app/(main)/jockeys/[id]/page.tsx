@@ -324,8 +324,8 @@ export default function JockeyPage() {
               </CardTitle>
             </div>
           </CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm min-w-[420px]">
               <thead>
                 <tr className="border-b border-border/30">
                   <th className="px-4 py-2 text-left text-xs text-muted-foreground font-medium">Entraîneur</th>

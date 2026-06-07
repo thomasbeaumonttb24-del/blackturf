@@ -137,8 +137,8 @@ export default function TarifsPage() {
       </div>
 
       {/* Comparison table */}
-      <div className="rounded-2xl border border-border overflow-hidden mb-12">
-        <table className="w-full text-sm">
+      <div className="rounded-2xl border border-border overflow-x-auto mb-12">
+        <table className="w-full text-sm min-w-[520px]">
           <thead>
             <tr className="border-b border-border bg-muted/30">
               <th className="text-left p-4 font-semibold">Fonctionnalité</th>

@@ -180,8 +180,8 @@ export default function AdminPage() {
           <CardHeader>
             <CardTitle className="text-base">Historique des modèles</CardTitle>
           </CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm min-w-[480px]">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="text-left p-3">Version</th>
@@ -281,8 +281,8 @@ export default function AdminPage() {
           <CardHeader>
             <CardTitle className="text-base">Derniers utilisateurs</CardTitle>
           </CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm min-w-[480px]">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="text-left p-3">Email</th>
