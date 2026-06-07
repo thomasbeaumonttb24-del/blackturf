@@ -648,6 +648,7 @@ function MiseCalculatorWidget({
   const [montant, setMontant] = useState("");
   const [plan, setPlan] = useState<MisePlan | null>(null);
   const [loading, setLoading] = useState(false);
+  const [profilChoisi, setProfilChoisi] = useState(profil || "equilibre");
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function generate() {
@@ -657,7 +658,7 @@ function MiseCalculatorWidget({
     try {
       const res = await api.post(`/courses/${courseId}/mise-plan`, {
         montant: m,
-        profil_risque: profil,
+        profil_risque: profilChoisi,
       });
       setPlan(res.data);
     } catch {
@@ -671,7 +672,7 @@ function MiseCalculatorWidget({
     const m = parseFloat(montant);
     try {
       const res = await api.post(`/courses/${courseId}/enregistrer-paris`, {
-        montant: m, profil_risque: profil,
+        montant: m, profil_risque: profilChoisi,
       });
       const n = res.data?.enregistres ?? 0;
       toast.success(`${n} pari${n > 1 ? "s" : ""} enregistré${n > 1 ? "s" : ""} dans votre capital`);
@@ -717,6 +718,30 @@ function MiseCalculatorWidget({
         Combien souhaitez-vous miser sur cette course ? BlackTurf répartit votre
         mise sur plusieurs paris selon son analyse.
       </p>
+      {/* Profil de risque — change quels paris ET la répartition */}
+      <div className="mb-3">
+        <p className="text-[10px] text-muted-foreground mb-1.5">Profil de risque</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {[
+            { key: "conservateur", label: "Prudent", emoji: "🛡️" },
+            { key: "equilibre", label: "Modéré", emoji: "⚖️" },
+            { key: "agressif", label: "Risqué", emoji: "🔥" },
+          ].map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setProfilChoisi(p.key)}
+              className={cn(
+                "text-[11px] px-2 py-1.5 rounded border font-semibold transition-colors",
+                profilChoisi === p.key
+                  ? "border-brand-gold bg-brand-gold/10 text-brand-gold"
+                  : "border-border text-muted-foreground hover:border-brand-gold/40"
+              )}
+            >
+              {p.emoji} {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="flex gap-2">
         <div className="relative flex-1">
           <input
