@@ -1213,7 +1213,9 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             aje.taux_victoire AS asso_win, aje.nb_courses AS asso_nb,
             -- Avis entraîneur + tendance cote + smart money (enrichissements PMU, en
             -- fin pour ne pas décaler les index positionnels existants)
-            p.avis_entraineur, p.tendance_force, c.pool_gagnant_evolution
+            p.avis_entraineur, p.tendance_force, c.pool_gagnant_evolution,
+            -- Données PMU dispo mais non exploitées : débutant + profil de places
+            p.indicateur_inedit, p.nb_places_second, p.nb_places_troisieme
         FROM participations p
         JOIN courses c ON c.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
@@ -1404,7 +1406,20 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         deferre_change, premier_deferre, oeilleres_change, equipement_nouveau,
         asso_win, asso_nb,
         avis_entraineur_raw, tendance_force_raw, pool_gagnant_evol_raw,
+        indicateur_inedit_raw, nb_places_2_raw, nb_places_3_raw,
     ) = row
+
+    # ── Données PMU nouvellement exploitées ──────────────────────────────────
+    # Débutant (n'a jamais couru) : pas d'historique → le modèle doit le savoir.
+    est_inedit = 1.0 if indicateur_inedit_raw else 0.0
+    _nbc = float(nb_courses_total or 0)
+    _v = float(nb_victoires_total or 0)
+    _p2 = float(nb_places_2_raw or 0)
+    _p3 = float(nb_places_3_raw or 0)
+    # Profil de places carrière (régularité podium) : taux de 2e/3e + taux podium global.
+    taux_place_2 = float(_p2 / _nbc) if _nbc > 0 else 0.0
+    taux_place_3 = float(_p3 / _nbc) if _nbc > 0 else 0.0
+    taux_podium_carriere = float((_v + _p2 + _p3) / _nbc) if _nbc > 0 else 0.0
 
     # Avis entraîneur PMU → score numérique (POSITIF=1, NEUTRE=0.5, NEGATIF=0)
     _avis_map = {"POSITIF": 1.0, "TRES_POSITIF": 1.0, "NEUTRE": 0.5, "NEGATIF": 0.0, "TRES_NEGATIF": 0.0}
@@ -1608,6 +1623,12 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "age": age_int, "age_squared": age_int ** 2,
         "sexe_code": SEXE_CODE.get(str(sexe or "H"), 0),
         "gains_log": float(math.log1p(int(gains_carriere or 0))),
+        # Gains rapportés à la carrière (qualité par sortie) + nouveaux signaux PMU
+        "gains_par_course_log": float(math.log1p((int(gains_carriere or 0)) / max(_nbc, 1.0))),
+        "est_inedit": est_inedit,
+        "taux_place_2": float(np.clip(taux_place_2, 0.0, 1.0)),
+        "taux_place_3": float(np.clip(taux_place_3, 0.0, 1.0)),
+        "taux_podium_carriere": float(np.clip(taux_podium_carriere, 0.0, 1.0)),
         "retard_gains": float(retard_gains or 0), "indice_valeur": 0.0,
         "running_style_code": rs_code, "taux_en_tete": float(taux_en_tete_raw or 0.0),
         "prix_vente_log": float(math.log1p(prix_vente_yl or 0)),
