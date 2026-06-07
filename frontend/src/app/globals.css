@@ -29,15 +29,22 @@
 @layer base {
   * {
     @apply border-border;
+    /* min-width:auto (défaut) empêche les enfants flex/grid de rétrécir → leur
+       contenu déborde le viewport sur mobile (ex. metric-rows 534px dans une
+       cellule de 350px). min-width:0 les laisse rentrer. Les utilitaires
+       min-w-[...] (tables scrollables) gardent priorité (specificité classe). */
+    min-width: 0;
   }
   html {
     -webkit-text-size-adjust: 100%;  /* pas de zoom auto iOS sur rotation */
+    /* scroll root sur mobile = html → clip ici aussi pour tuer tout scroll latéral
+       résiduel (transforms d'animation reveal, orbs décoratifs). clip ≠ hidden
+       → ne casse pas la navbar sticky. */
+    overflow-x: clip;
   }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
-    /* Garde-fou global : aucune barre de scroll horizontale parasite sur mobile.
-       `clip` (≠ hidden) ne crée pas de conteneur de défilement → sticky navbar OK. */
     overflow-x: clip;
   }
   /* Médias jamais plus larges que leur conteneur */
