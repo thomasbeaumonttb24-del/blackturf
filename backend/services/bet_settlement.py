@@ -35,6 +35,15 @@ _RAPPORT_KEYS = {
     "Couplé Placé":   ("e_couple_place",),
     "Trio":           ("e_trio",),
     "2sur4":          ("e_deux_sur_quatre",),
+    # Jackpots désordre — vrais rapports PMU (base 1€). Le rapport publié est celui
+    # de la combinaison gagnante ; si notre sélection == arrivée exacte, c'est le nôtre.
+    "Tiercé Désordre": ("e_tierce",),
+    "Tiercé Ordre":    ("e_tierce_ordre", "e_tierce"),
+    "Quarté+ Désordre": ("e_quarte_plus",),
+    "Quarté+":          ("e_quarte_plus",),
+    "Quinté+ Désordre": ("e_quinte_plus",),
+    "Quinté+ Flexi":    ("e_quinte_plus",),
+    "Quinté+":          ("e_quinte_plus",),
 }
 
 _APPROX_NOTE = "Rapport placé approximatif (le PMU publie un rapport par cheval placé)."
@@ -94,6 +103,7 @@ def settle_pari(
     top2 = {num_by_pos[p] for p in (1, 2) if p in num_by_pos}
     top3 = {num_by_pos[p] for p in (1, 2, 3) if p in num_by_pos}
     top4 = {num_by_pos[p] for p in (1, 2, 3, 4) if p in num_by_pos}
+    top5 = {num_by_pos[p] for p in (1, 2, 3, 4, 5) if p in num_by_pos}
     sel = set(int(n) for n in numeros)
 
     approx = False
@@ -115,8 +125,14 @@ def settle_pari(
         gagne = sel == top3 and len(sel) == 3
     elif type_pari == "2sur4":
         gagne = len(sel & top4) >= 2
+    elif type_pari in ("Tiercé Désordre", "Tiercé Ordre"):
+        gagne = sel == top3 and len(sel) == 3        # désordre : 3 premiers, ordre indifférent
+    elif type_pari in ("Quarté+ Désordre", "Quarté+"):
+        gagne = sel == top4 and len(sel) == 4
+    elif type_pari in ("Quinté+ Désordre", "Quinté+ Flexi", "Quinté+"):
+        gagne = sel == top5 and len(sel) == 5
     else:
-        # Type non géré (ex: Tiercé) → gagné déterminé sur top3 mais rapport indispo
+        # Type vraiment non géré → gagné déterminé sur top3, rapport indispo.
         gagne = sel == top3 and len(sel) == 3
         note = "Rapport non publié pour ce type de pari."
 
