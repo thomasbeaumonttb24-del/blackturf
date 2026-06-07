@@ -64,6 +64,7 @@ interface Reunion {
 export default function DashboardPage() {
   const { user } = useRequireAuth();
   const [equityHover, setEquityHover] = useState<number | null>(null);
+  const [eqProfil, setEqProfil] = useState<"conservateur" | "equilibre" | "agressif">("equilibre");
 
   const isPaid = user && !["free", "decouverte"].includes(user.plan ?? "free");
   const isExpert = user?.plan === "expert";
@@ -108,7 +109,11 @@ export default function DashboardPage() {
   const aDesProchaines = upcoming.length > 0;
 
   const topVbs = summary?.top_vbs ?? [];
-  const equityPoints: Array<{ date: string; bankroll: number }> = equity?.points ?? [];
+  // Source = nos plans de mise 10€ PAR PROFIL (equity.profils) ; repli sur points.
+  const eqProfilsSeries: Record<string, Array<{ date: string; bankroll: number }>> | undefined = equity?.profils;
+  const planBased = !!(eqProfilsSeries && Object.keys(eqProfilsSeries).length);
+  const equityPoints: Array<{ date: string; bankroll: number }> =
+    (planBased ? eqProfilsSeries[eqProfil] : equity?.points) ?? equity?.points ?? [];
   const lastEquity = equityPoints.at(-1)?.bankroll ?? 0;
   const firstEquity = equityPoints[0]?.bankroll ?? 0;
   const equityGain = equityPoints.length > 1 ? lastEquity - firstEquity : 0;
@@ -433,8 +438,27 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Simulation 10€/pari de valeur ★★★+ sur l&apos;historique — distinct de votre capital
+                  {planBased
+                    ? "Plan de mise IA 10€/course par profil, joué sur chaque course du programme — distinct de votre capital"
+                    : "Simulation 10€/pari de valeur ★★★+ sur l’historique — distinct de votre capital"}
                 </p>
+                {/* Sélecteur de profil (chaque profil = sa propre courbe) */}
+                {planBased && (
+                  <div className="mt-2 inline-flex gap-1">
+                    {([
+                      ["conservateur", "🛡️ Prudent"],
+                      ["equilibre", "⚖️ Modéré"],
+                      ["agressif", "🔥 Risqué"],
+                    ] as const).map(([k, lbl]) => (
+                      <button key={k} onClick={() => setEqProfil(k)}
+                        className={`rounded-md px-2 py-0.5 text-[10px] font-semibold border transition-colors ${
+                          eqProfil === k ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
+                          : "border-border text-muted-foreground hover:border-emerald-500/40"}`}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {equityPoints.length > 1 && (
                   <div className={`text-lg font-bold tabular-nums mt-1 ${equityGain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {equityGain >= 0 ? "+" : ""}€{equityGain.toFixed(0)}

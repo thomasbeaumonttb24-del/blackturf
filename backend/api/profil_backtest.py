@@ -56,6 +56,13 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
     agg_type = collections.defaultdict(lambda: {"mise": 0.0, "gw": 0.0, "n": 0, "win": 0})
     palier = _palier(MISE)
 
+    # Courbe d'équité CHRONOLOGIQUE par profil : capital cumulé en jouant le plan de
+    # mise 10€ de ce profil sur chaque course du programme, réglé au réel. Start 1000€.
+    EQUITY_START = 1000.0
+    equity_bk = {k: EQUITY_START for k, _ in PROFILS}
+    equity = {k: [] for k, _ in PROFILS}
+    courses = sorted(courses, key=lambda c: c.get("date") or "")   # chronologique
+
     for c in courses:
         preds = c["preds"]
         classement = c["classement"]
@@ -118,6 +125,9 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
             a["gain_w"] += gain_w_course
             if gain_course > mise_course:
                 a["benef"] += 1
+            # courbe d'équité chronologique : capital += net réel de la course
+            equity_bk[key] += (gain_course - mise_course)
+            equity[key].append({"date": c.get("date") or "", "bankroll": round(equity_bk[key], 2)})
 
     profils = []
     for key, label in PROFILS:
@@ -171,6 +181,7 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
         "mise_par_course": MISE,
         "type_weights": type_weights,    # {type: multiplicateur} pour la sélection future
         "type_perf": type_perf,          # détail (n, win%, ROI) — le "pourquoi"
+        "equity": equity,                # courbe d'équité chronologique PAR profil (10€/course)
     }
 
 
@@ -216,6 +227,7 @@ async def backtest_profils(db: AsyncSession, limit: int = 200, n_sims: int = 300
             continue
         payload.append({
             "course_id": c.course_id,
+            "date": c.date_heure.strftime("%Y-%m-%d") if c.date_heure else "",
             "preds": preds_by_course.get(c.course_id, []),
             "classement": res.classement if isinstance(res.classement, list) else [],
             "rapports": res.rapports or {},

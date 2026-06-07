@@ -149,23 +149,47 @@ async def equity_curve(
     redis: aioredis.Redis = Depends(get_redis),
 ):
     """
-    Courbe capital simulée : 10€ flat sur value bets ★★★+ (niveau >= 3).
-    Retourne is_real=False avec points=[] si pas assez de données.
-    Cache 30 min.
+    Courbe capital simulée — basée sur NOS PLANS DE MISE 10€ PAR PROFIL, joués sur
+    chaque course du programme et réglés au réel (vrais rapports PMU). Source =
+    backtest profils (cache stats:profils). Retourne une courbe par profil
+    (conservateur/equilibre/agressif) + `points` = profil par défaut (équilibre).
+    Repli sur l'ancien backtest value-bets si le cache profils n'est pas peuplé.
     """
-    CACHE_KEY = "stats:equity-curve"
-    cached = await _cache_get(redis, CACHE_KEY)
-    if cached:
-        return cached
+    cached = await _cache_get(redis, "stats:profils")
+    if cached and cached.get("equity"):
+        eq = cached["equity"]
+        profils_series = {k: v for k, v in eq.items() if v}
+        if profils_series:
+            START = 1000.0
+            default_pts = profils_series.get("equilibre") or next(iter(profils_series.values()))
+            gain = round((default_pts[-1]["bankroll"] - START), 2) if default_pts else 0.0
+            roi_by_profil = {}
+            for k, pts in profils_series.items():
+                g = pts[-1]["bankroll"] - START if pts else 0.0
+                roi_by_profil[k] = round(g / (len(pts) * (cached.get("mise_par_course") or 10)) * 100, 1) if pts else None
+            return {
+                "is_real": True,
+                "source": "plan_profils",
+                "mise_par_course": cached.get("mise_par_course", 10),
+                "points": default_pts,                 # rétro-compat : profil par défaut
+                "profils": profils_series,             # une courbe par profil
+                "roi_by_profil": roi_by_profil,
+                "gain_net": gain,
+            }
 
+    # ── Repli : ancien backtest value bets ★★★+ (si profils pas encore calculés) ──
+    CACHE_KEY = "stats:equity-curve"
+    fb = await _cache_get(redis, CACHE_KEY)
+    if fb:
+        return fb
     bt = await _vb_flat_backtest(db)
     if not bt["is_real"]:
         empty = {"is_real": False, "points": []}
         await _cache_set(redis, CACHE_KEY, empty, ttl=300)
         return empty
-
-    result = {"is_real": True, "points": bt["points"], "roi_pct": bt["roi_pct"], "gain_net": bt["gain_net"], "n_bets": bt["n_bets"]}
-    await _cache_set(redis, CACHE_KEY, result, ttl=1800)  # 30 min
+    result = {"is_real": True, "source": "value_bets", "points": bt["points"],
+              "roi_pct": bt["roi_pct"], "gain_net": bt["gain_net"], "n_bets": bt["n_bets"]}
+    await _cache_set(redis, CACHE_KEY, result, ttl=1800)
     return result
 
 
