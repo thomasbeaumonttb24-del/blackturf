@@ -830,6 +830,28 @@ function ResultatsSection({ resultats, partants }: {
   for (const p of partants) coteByNum[p.numero] = p.cote_pmu ?? null;
 
   const hasRedKm = podium.some((c) => c.reduction_km != null);
+  const hasTemps = podium.some((c) => c.temps != null);
+  const tempsGagnant = podium[0]?.temps ?? null;
+  // 214.82 (s) -> 3'34"82 ; réduction km 76.0 (s/km) -> 1'16"0
+  const fmtChrono = (sec: number) => {
+    const m = Math.floor(sec / 60), rest = sec - m * 60, si = Math.floor(rest);
+    const cc = Math.round((rest - si) * 100);
+    return `${m}'${String(si).padStart(2, "0")}"${String(cc).padStart(2, "0")}`;
+  };
+  const fmtRedKm = (rk: number) => {
+    const m = Math.floor(rk / 60), rest = rk - m * 60, si = Math.floor(rest);
+    const d = Math.round((rest - si) * 10);
+    return `${m}'${String(si).padStart(2, "0")}"${d}`;
+  };
+  // Écart au vainqueur (réel, depuis le temps) : ~0.17s = 1 longueur (trot/plat).
+  const fmtEcart = (c: { position: number; temps: number | null }) => {
+    if (c.position === 1) return "—";
+    if (c.temps == null || tempsGagnant == null) return "";
+    const d = c.temps - tempsGagnant;
+    if (d <= 0) return "";
+    const longueurs = d / 0.17;
+    return longueurs < 10 ? `+${longueurs.toFixed(1)} long.` : `+${d.toFixed(1)}s`;
+  };
   const rowTint = (pos: number) =>
     pos === 1 ? "bg-amber-50/80" : pos === 2 ? "bg-slate-100/70" : pos === 3 ? "bg-orange-50/70" : "";
   const medalBox = (pos: number) =>
@@ -846,10 +868,10 @@ function ResultatsSection({ resultats, partants }: {
     <div className="mt-4 overflow-hidden rounded-xl border border-brand-emerald/30 bg-gradient-to-br from-brand-emerald/[0.07] to-transparent">
       <div className="flex flex-wrap items-center gap-2 border-b border-brand-emerald/20 px-4 py-3">
         <h2 className="flex items-center gap-2 text-base font-bold">Arrivée officielle</h2>
-        {resultats.temps_gagnant && (
+        {(tempsGagnant != null || resultats.temps_gagnant) && (
           <span className="text-xs text-muted-foreground">
-            Chrono {resultats.temps_gagnant}s
-            {resultats.duree_course ? ` · durée ${(resultats.duree_course / 1000).toFixed(1)}s` : ""}
+            Chrono {tempsGagnant != null ? fmtChrono(tempsGagnant) : resultats.temps_gagnant}
+            {podium[0]?.reduction_km != null ? ` · réd. ${fmtRedKm(podium[0].reduction_km)}/km` : ""}
           </span>
         )}
       </div>
@@ -862,6 +884,7 @@ function ResultatsSection({ resultats, partants }: {
               <th className="px-2 py-1.5 font-medium">Pos.</th>
               <th className="px-2 py-1.5 font-medium">N°</th>
               <th className="px-2 py-1.5 font-medium">Cheval</th>
+              {hasTemps && <th className="px-2 py-1.5 text-right font-medium">Écart</th>}
               <th className="px-2 py-1.5 text-right font-medium">Cote finale</th>
               <th className="px-2 py-1.5 text-right font-medium">{hasRedKm ? "Réd. km" : "Temps"}</th>
             </tr>
@@ -869,6 +892,8 @@ function ResultatsSection({ resultats, partants }: {
           <tbody>
             {podium.map((c) => {
               const cote = coteByNum[c.numero];
+              const temps = c.reduction_km != null ? fmtRedKm(c.reduction_km)
+                : c.temps != null ? fmtChrono(c.temps) : "—";
               return (
                 <tr key={c.numero} className={cn("rounded-lg", rowTint(c.position), c.position <= 3 && "font-semibold")}>
                   <td className="px-2 py-2">
@@ -878,17 +903,34 @@ function ResultatsSection({ resultats, partants }: {
                   </td>
                   <td className="px-2 py-2 tabular-nums">{c.numero}</td>
                   <td className="px-2 py-2">{c.nom}</td>
+                  {hasTemps && (
+                    <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                      {fmtEcart(c)}
+                    </td>
+                  )}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
                     {cote != null ? cote.toFixed(1) : "—"}
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
-                    {c.reduction_km != null ? c.reduction_km : c.temps != null ? `${c.temps}s` : "—"}
+                    {temps}
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        {(() => {
+          const nbRunners = partants.filter((p) => !p.non_partant).length;
+          // Arrivée manifestement tronquée (peu de classés vs partants) → on le dit.
+          if (nbRunners >= 6 && podium.length > 0 && podium.length <= 4 && podium.length < nbRunners) {
+            return (
+              <p className="px-2 pt-1 text-[11px] text-amber-600">
+                ⚠️ Arrivée partielle — seuls les {podium.length} premiers ont été publiés par la source (sur {nbRunners} partants).
+              </p>
+            );
+          }
+          return null;
+        })()}
       </div>
 
       {/* Rapports PMU — détail RÉEL complet publié (par cheval / par combinaison) */}
@@ -1336,7 +1378,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
           <>
             <div className="mb-2 grid gap-2 sm:grid-cols-2 text-xs">
               <div className="rounded-lg bg-white/70 ring-1 ring-border/60 p-2.5">
-                <p className="mb-1.5 font-semibold text-muted-foreground">Top-5 pronostiqué (modèle)</p>
+                <p className="mb-1.5 font-semibold text-muted-foreground">Top-{predN.length} pronostiqué (modèle)</p>
                 <div className="flex flex-wrap gap-1.5">
                   {predN.map((n, i) => {
                     const hit = realSet.has(n);
@@ -1350,7 +1392,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
                 </div>
               </div>
               <div className="rounded-lg bg-white/70 ring-1 ring-border/60 p-2.5">
-                <p className="mb-1.5 font-semibold text-muted-foreground">Arrivée réelle (top-5)</p>
+                <p className="mb-1.5 font-semibold text-muted-foreground">Arrivée réelle (top-{realN.length})</p>
                 <div className="flex flex-wrap gap-1.5">
                   {realN.map((n, i) => {
                     const winner = i === 0;
