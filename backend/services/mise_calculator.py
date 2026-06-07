@@ -159,21 +159,36 @@ def _palier(montant: int) -> dict:
 #   bets_factor  : module le plafond de paris du palier (prudent → moins)
 #   risk_pref    : tilt de l'allocation Kelly par niveau (où va l'argent)
 # ─────────────────────────────────────────────────────────────
+# `types`    : familles de paris AUTORISÉES pour le profil (None = toutes). C'est
+#              ce qui rend chaque profil une MÉTHODE DE JEU distincte.
+# `objectif` : critère de classement des candidats —
+#              "proba" (gagner souvent, prudent) / "ev" (équilibre) /
+#              "gain"  (gros gain pour petite mise : outsiders à valeur, risqué).
+# Règle commune de PROFITABILITÉ (dans _select_conviction) : on ne retient JAMAIS un
+# pari à la fois EV<0 ET sans edge (edge≤0) — sinon on donne sa mise au PMU. On parie
+# donc soit du +EV, soit de la VALEUR détectée par l'IA (modèle > marché).
 PROFIL_CONFIG = {
     "conservateur": {
-        "cote_max": 10.0, "min_proba": 0.08, "ev_min": 0.05, "max_coup": 0,
+        "cote_max": 8.0, "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "bets_factor": 0.8,
+        "types": {"Simple Placé", "Couplé Placé", "2sur4"},   # haute fréquence, faible variance
+        "objectif": "proba",
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
     "equilibre": {
-        "cote_max": 25.0, "min_proba": 0.04, "ev_min": 0.0, "max_coup": 1,
+        "cote_max": 25.0, "min_proba": 0.05, "ev_min": -0.05, "max_coup": 1,
         "bets_factor": 1.0,
+        "types": {"Simple Placé", "Couplé Placé", "Couplé Gagnant", "2sur4",
+                  "Trio", "Simple Gagnant"},
+        "objectif": "ev",
         "risk_pref": {"securite": 1.0, "rendement": 1.1, "surprise": 0.8, "coup": 0.6},
     },
     "agressif": {
-        "cote_max": 80.0, "min_proba": 0.0, "ev_min": -0.05, "max_coup": 3,
+        "cote_max": 80.0, "min_proba": 0.0, "ev_min": -0.20, "max_coup": 3,
         "bets_factor": 1.2,
-        "risk_pref": {"securite": 0.5, "rendement": 1.0, "surprise": 1.3, "coup": 1.5},
+        "types": None,                                        # tout, outsiders + jackpots
+        "objectif": "gain",
+        "risk_pref": {"securite": 0.4, "rendement": 0.9, "surprise": 1.4, "coup": 1.6},
     },
 }
 
@@ -195,6 +210,8 @@ def _effective_config(profil: str, heat: float) -> dict:
         "ev_min":    base["ev_min"] - 0.04 * h,
         "max_coup":  max(0, base["max_coup"] + (1 if h > 0.5 else 0) - (1 if h < -0.5 else 0)),
         "bets_factor": base["bets_factor"],
+        "types":     base.get("types"),          # familles de paris du profil (None = toutes)
+        "objectif":  base.get("objectif", "ev"), # critère de classement des candidats
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -306,26 +323,44 @@ def _select_conviction(
     cote_max = cfg["cote_max"]
     min_proba = cfg["min_proba"]
     ev_min = cfg["ev_min"]
+    allowed_types = cfg.get("types")                         # None = toutes
+    objectif = cfg.get("objectif", "ev")
     max_per_type = 1 if max_bets <= 3 else 2
 
     def roi_w(c):
         return float(roi_weights.get(c["type_pari"], 1.0))
 
     def conviction(c):
-        base = (max(c["ev"], 0.0) * 0.6
-                + c["proba_gain"] * 0.5
+        """Classement selon l'OBJECTIF du profil (× ROI réel passé du type)."""
+        rw = roi_w(c)
+        if objectif == "proba":
+            # PRUDENT : gagner souvent. Proba d'abord, EV en bonus léger.
+            return (c["proba_gain"] + max(c["ev"], 0.0) * 0.2) * rw
+        if objectif == "gain":
+            # RISQUÉ : gros gain pour petite mise. Retour attendu (rapport×proba),
+            # bonus aux outsiders à VALEUR (edge>0 sur grosse cote) détectés par l'IA.
+            payout = c["rapport_estime"] * c["proba_gain"]   # espérance de retour (×mise)
+            bonus = 1.30 if (c.get("edge", 0.0) > 0 and c["rapport_estime"] >= 8) else 1.0
+            return payout * bonus * rw
+        # ÉQUILIBRE : compromis EV × proba × edge.
+        base = (max(c["ev"], 0.0) * 0.6 + c["proba_gain"] * 0.5
                 + max(c.get("edge", 0.0), 0.0) * 0.8)
-        # petite mise → privilégier une grosse cote PROBABLE (value à edge réel)
         if palier["favor_value"] and c.get("edge", 0.0) > 0:
-            base += min(c["rapport_estime"], 30.0) / 100.0   # jusqu'à +0.30
-        return base * roi_w(c)
+            base += min(c["rapport_estime"], 30.0) / 100.0
+        return base * rw
 
     def passes_gates(c):
+        if allowed_types is not None and c["type_pari"] not in allowed_types:
+            return False                                     # hors méthode du profil
         if _bet_cote_max(c) > cote_max:                      # longshot hors profil
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
-        # Profitabilité + seuil EV du profil : EV ≥ ev_min OU coup crédible (edge réel)
+        # RÈGLE DE PROFITABILITÉ : jamais un pari à la fois -EV ET sans edge (= don
+        # au PMU). On parie du +EV OU de la valeur détectée (modèle > marché).
+        if c["ev"] < 0 and c.get("edge", 0.0) <= 0:
+            return False
+        # Seuil EV propre au profil (sauf coup crédible : value outsider à gros rapport).
         if c["ev"] < ev_min and not _is_credible_coup(c):
             return False
         return True
@@ -351,11 +386,14 @@ def _select_conviction(
         if spec:
             n_coup += 1
 
-    # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba
-    # parmi les cotes raisonnables ≤ cote_max), sans plan vide. Aucune invention.
+    # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba),
+    # en restant si possible dans la méthode du profil. Sans plan vide. Aucune invention.
     if not selected:
-        eligibles = [c for c in cands if _bet_cote_max(c) <= cote_max] or cands
-        safe = max(eligibles, key=lambda c: c["proba_gain"])
+        pool = [c for c in cands
+                if (allowed_types is None or c["type_pari"] in allowed_types)
+                and _bet_cote_max(c) <= cote_max]
+        pool = pool or [c for c in cands if _bet_cote_max(c) <= cote_max] or cands
+        safe = max(pool, key=lambda c: c["proba_gain"])
         safe["_roi_w"] = roi_w(safe)
         selected = [safe]
     return selected

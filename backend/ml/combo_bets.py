@@ -344,6 +344,15 @@ def enumerate_bet_candidates(
                                  f"le modèle le voit plus haut que le marché.",
         })
 
+    # ── SIMPLE PLACÉ — socle du profil PRUDENT (gagne souvent, petit gain). ──
+    # Top favoris par proba placé : forte fréquence de réussite, faible variance.
+    for i in by_p1[:3]:
+        p_pl = sim.p_simple_place(i)
+        if p_pl < 0.30:                  # placé peu probable → on ne propose pas
+            continue
+        add("securite", "Simple Placé", [i], p_pl, sim_m.p_simple_place(i),
+            f"N°{numeros[i]} {noms[i]} dans les 3 premiers — {p_pl*100:.0f}% (placé, sécurité).")
+
     # ── 3-4 COUPLÉ GAGNANT différents ──
     pairs = []
     if len(by_p1) >= 2: pairs.append((by_p1[0], by_p1[1]))
@@ -364,6 +373,12 @@ def enumerate_bet_candidates(
         add("securite", "Couplé Placé", [by_p1[0], by_p1[2]],
             sim.p_couple_place([by_p1[0], by_p1[2]]), sim_m.p_couple_place([by_p1[0], by_p1[2]]),
             f"N°{numeros[by_p1[0]]} + N°{numeros[by_p1[2]]} tous deux dans les 3 premiers.")
+    # Couplé Placé favori + OUTSIDER à valeur : placer une grosse cote dans le top-3.
+    if out1 is not None and by_p1 and out1 != by_p1[0]:
+        add("surprise", "Couplé Placé", [by_p1[0], out1],
+            sim.p_couple_place([by_p1[0], out1]), sim_m.p_couple_place([by_p1[0], out1]),
+            f"Favori N°{numeros[by_p1[0]]} + outsider N°{numeros[out1]} (cote {cotes[out1]:.1f}) "
+            f"tous deux placés — placement d'une grosse cote.")
 
     # ── Trios (favoris + surprise) ──
     trios = []
@@ -380,6 +395,13 @@ def enumerate_bet_candidates(
         sel = list(by_p1[:4])
         add("rendement", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel),
             f"2 des 4 chevaux N°{','.join(str(numeros[i]) for i in sel)} dans les 4 premiers.")
+        # 2sur4 avec OUTSIDER : 3 favoris + une grosse cote à valeur → vise le
+        # placement d'un outsider dans le top-4 (gain rehaussé, proba encore bonne).
+        if out1 is not None and out1 not in by_p1[:3]:
+            sel_o = list(by_p1[:3]) + [out1]
+            add("surprise", "2sur4", sel_o, sim.p_2sur4(sel_o), sim_m.p_2sur4(sel_o),
+                f"3 favoris + outsider N°{numeros[out1]} (cote {cotes[out1]:.1f}) — 2 dans "
+                f"les 4 premiers (placement grosse cote dans le top-4).")
 
     # ── Jackpots désordre (Tiercé/Quarté+/Quinté+) — gros lot, 1 combinaison ──
     # Proba RÉELLE (simulation) du top-k exact des favoris modèle ; rapport ≈ TRJ /
