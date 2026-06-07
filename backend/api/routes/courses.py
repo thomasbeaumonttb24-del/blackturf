@@ -635,14 +635,16 @@ async def get_mise_plan(
         "nb_partants": course.nb_partants,
     }
 
-    # Pondération de sélection par le ROI RÉEL des paris passés (auto-amélioration)
+    # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
+    # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
     try:
-        from ml.bet_performance import get_type_roi_weights
+        from ml.bet_performance import get_type_roi_weights, get_model_heat
         roi_weights = await get_type_roi_weights(db)
+        heat = await get_model_heat(db)
     except Exception:
-        roi_weights = {}
+        roi_weights, heat = {}, 0.0
 
-    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights)
+    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat)
     return plan_to_dict(plan)
 
 
@@ -693,14 +695,15 @@ async def enregistrer_paris(
     } for pred, part, cheval in rows]
     course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "nb_partants": course.nb_partants}
 
-    # Même pondération ROI que l'aperçu (le plan enregistré = celui montré)
+    # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré)
     try:
-        from ml.bet_performance import get_type_roi_weights
+        from ml.bet_performance import get_type_roi_weights, get_model_heat
         roi_weights = await get_type_roi_weights(db)
+        heat = await get_model_heat(db)
     except Exception:
-        roi_weights = {}
+        roi_weights, heat = {}, 0.0
 
-    plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None, roi_weights))
+    plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None, roi_weights, heat))
 
     # Bankroll principale
     main = (await db.execute(

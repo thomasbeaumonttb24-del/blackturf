@@ -111,6 +111,8 @@ class MisePlan:
     kelly_warning: bool = False
     esperance_gain: float = 0.0      # espérance de PROFIT NET en € (Σ mise×EV)
     palier: str = ""                 # micro | petit | moyen | gros
+    profil: str = ""                 # conservateur | equilibre | agressif
+    mode_adaptatif: str = "normal"   # prudent | normal | offensif (selon heat)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -147,16 +149,70 @@ def _palier(montant: int) -> dict:
     return MONTANT_PALIERS[-1][1]
 
 
-# Nb max de "coups" spéculatifs (gros lot sans value avérée) selon le profil.
-PROFIL_MAX_COUP = {"conservateur": 0, "equilibre": 1, "agressif": 2}
-
-# Préférence de risque par niveau : tilt de l'allocation Kelly selon le profil.
-# Concentre la mise vers le sécuritaire (conservateur) ou le spéculatif (agressif).
-PROFIL_RISK_PREF = {
-    "conservateur": {"securite": 1.4, "rendement": 1.0, "surprise": 0.5, "coup": 0.3},
-    "equilibre":    {"securite": 1.0, "rendement": 1.1, "surprise": 0.8, "coup": 0.6},
-    "agressif":     {"securite": 0.6, "rendement": 1.0, "surprise": 1.2, "coup": 1.3},
+# ─────────────────────────────────────────────────────────────
+# Profils de risque — agissent sur la SÉLECTION (quels paris) ET l'allocation.
+#   cote_max     : cote max autorisée dans un pari (cape les longshots)
+#   min_proba    : proba de gain minimale d'un pari retenu
+#   ev_min       : seuil d'EV d'entrée (agressif accepte EV légèrement négative
+#                  si edge réel / coup crédible ; conservateur exige EV franche+)
+#   max_coup     : nb max de paris spéculatifs (gros lot sans value avérée)
+#   bets_factor  : module le plafond de paris du palier (prudent → moins)
+#   risk_pref    : tilt de l'allocation Kelly par niveau (où va l'argent)
+# ─────────────────────────────────────────────────────────────
+PROFIL_CONFIG = {
+    "conservateur": {
+        "cote_max": 10.0, "min_proba": 0.08, "ev_min": 0.05, "max_coup": 0,
+        "bets_factor": 0.8,
+        "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
+    },
+    "equilibre": {
+        "cote_max": 25.0, "min_proba": 0.04, "ev_min": 0.0, "max_coup": 1,
+        "bets_factor": 1.0,
+        "risk_pref": {"securite": 1.0, "rendement": 1.1, "surprise": 0.8, "coup": 0.6},
+    },
+    "agressif": {
+        "cote_max": 80.0, "min_proba": 0.0, "ev_min": -0.05, "max_coup": 3,
+        "bets_factor": 1.2,
+        "risk_pref": {"securite": 0.5, "rendement": 1.0, "surprise": 1.3, "coup": 1.5},
+    },
 }
+
+
+def _effective_config(profil: str, heat: float) -> dict:
+    """Profil EFFECTIF = config de base MODULÉE par `heat` ∈ [-1,+1], le thermostat
+    adaptatif (calibration du modèle + ROI récent réel).
+
+    heat > 0 (modèle chaud : bien calibré + gagnant récemment) → on assouplit :
+        seuil EV plus bas, cotes plus hautes autorisées, +1 coup, tilt vers le risqué.
+    heat < 0 (modèle froid : mal calibré / perdant) → on durcit pour TOUS les
+        profils : EV plus exigeante, cotes capées, moins de coups, repli sécurité.
+    """
+    base = PROFIL_CONFIG.get(profil, PROFIL_CONFIG["equilibre"])
+    h = max(-1.0, min(1.0, float(heat)))
+    cfg = {
+        "cote_max":  max(4.0, base["cote_max"] * (1.0 + 0.30 * h)),
+        "min_proba": max(0.0, base["min_proba"] * (1.0 - 0.30 * h)),
+        "ev_min":    base["ev_min"] - 0.04 * h,
+        "max_coup":  max(0, base["max_coup"] + (1 if h > 0.5 else 0) - (1 if h < -0.5 else 0)),
+        "bets_factor": base["bets_factor"],
+    }
+    # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
+    rp = {}
+    for niv, w in base["risk_pref"].items():
+        if niv == "securite":
+            rp[niv] = w * (1.0 - 0.20 * h)
+        else:
+            rp[niv] = max(0.05, w * (1.0 + 0.30 * h))
+    cfg["risk_pref"] = rp
+    return cfg
+
+
+def _mode_label(heat: float) -> str:
+    if heat >= 0.33:
+        return "offensif"
+    if heat <= -0.33:
+        return "prudent"
+    return "normal"
 
 
 def generer_plan(
@@ -166,28 +222,32 @@ def generer_plan(
     course_info: dict,
     bankroll: Optional[float] = None,
     roi_weights: Optional[dict] = None,
+    heat: float = 0.0,
 ) -> MisePlan:
-    """Plan de mise INTELLIGENT — moins de paris, plus de conviction.
+    """Plan de mise INTELLIGENT & ADAPTATIF — relie analyse, apprentissage, résultats.
 
-    Principe : le MONTANT définit la STRATÉGIE (palier micro/petit/moyen/gros),
-    pas seulement le split. Petite mise → 1-2 paris à VALEUR (cote probable plus
-    élevée, edge réel modèle > marché) pour viser un vrai gain. Gros montant +
-    coup fiable → mise concentrée sur les paris à forte espérance via Kelly réel.
+    Principe : le MONTANT définit la stratégie (palier micro/petit/moyen/gros) ; le
+    PROFIL (conservateur/equilibre/agressif) définit QUELS paris (gates cote/proba/EV
+    + nb de coups) et OÙ va l'argent (tilt Kelly par niveau) ; le `heat` ∈ [-1,+1]
+    est un THERMOSTAT adaptatif qui durcit/assouplit TOUS les profils selon la santé
+    réelle du modèle (calibration brier) et le ROI récent observé.
 
-    - Sélection par CONVICTION = f(EV, proba, edge) × pondération ROI passé du type.
-    - Ne retient un pari que si EV > 0 OU coup crédible (edge>0 & gros rapport).
-    - Dispatch par fraction de Kelly réelle (ev/(cote-1)) tiltée par le profil,
-      plafonds sur les paris spéculatifs. Probas RÉELLES (simulation Plackett-Luce).
-    - `roi_weights` : multiplicateur par type_pari issu du ROI RÉEL observé sur les
-      paris passés réglés (auto-amélioration) ; absent/insuffisant → neutre (1.0).
+    - Analyse : probas/edge RÉELS (simulation Plackett-Luce), EV = cote×proba−1.
+    - Apprentissage : `heat` dérivé de la calibration (race_learning_log).
+    - Résultats : `roi_weights` (ROI net réel par type, bankroll_entries) pondère la
+      sélection ; `heat` intègre le ROI récent → après une série perdante le système
+      devient prudent même en profil agressif ; après une bonne série, plus offensif.
+    Aucune valeur inventée : signaux absents → neutre (poids 1.0, heat 0).
     """
     from ml.combo_bets import enumerate_bet_candidates
 
-    profil = profil if profil in PROFIL_RISK_PREF else "equilibre"
+    profil = profil if profil in PROFIL_CONFIG else "equilibre"
     montant = max(2, int(round(float(montant))))            # euro, min 2
     kelly_warn = bankroll is not None and bankroll > 0 and montant > bankroll * 0.05
     palier = _palier(montant)
     roi_weights = roi_weights or {}
+    heat = max(-1.0, min(1.0, float(heat or 0.0)))
+    cfg = _effective_config(profil, heat)
 
     preds = []
     for p in predictions:
@@ -205,12 +265,12 @@ def generer_plan(
     if not cands:
         return _plan_vide(montant, profil)
 
-    selected = _select_conviction(cands, montant, palier, profil, roi_weights)
+    selected = _select_conviction(cands, montant, palier, cfg, roi_weights)
     if not selected:
         return _plan_vide(montant, profil)
 
-    _allocate_kelly(selected, montant, palier, profil)      # remplit "mise" (int €)
-    return _assemble_plan(selected, montant, palier, kelly_warn)
+    _allocate_kelly(selected, montant, palier, cfg)         # remplit "mise" (int €)
+    return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat)
 
 
 def _is_credible_coup(c: dict) -> bool:
@@ -225,16 +285,27 @@ def _is_speculative(c: dict) -> bool:
     return c["ev"] <= 0 and not _is_credible_coup(c)
 
 
+def _bet_cote_max(c: dict) -> float:
+    """Cote la plus élevée parmi les chevaux d'un pari (mesure de risque du pari)."""
+    cotes = [float(h.get("cote") or 0.0) for h in c.get("chevaux", [])]
+    return max(cotes) if cotes else 0.0
+
+
 def _select_conviction(
-    cands: list[dict], montant: int, palier: dict, profil: str, roi_weights: dict
+    cands: list[dict], montant: int, palier: dict, cfg: dict, roi_weights: dict
 ) -> list[dict]:
-    """Sélectionne PEU de paris à FORTE conviction (EV × proba × edge × ROI passé).
-    Profitabilité : ne retient que les EV>0 ou coups crédibles. Concentre.
+    """Sélectionne PEU de paris à FORTE conviction (EV × proba × edge × ROI passé),
+    filtrés par les GATES du profil EFFECTIF (cote_max, min_proba, ev_min, max_coup).
+    Profitabilité d'abord ; concentre. Le profil change donc VRAIMENT quels paris.
     """
     min_stake = palier["min_stake"]
     max_feasible = max(1, montant // min_stake)             # chaque pari ≥ min_stake
-    max_bets = min(palier["max_bets"], max_feasible, len(cands))
-    max_coup = PROFIL_MAX_COUP.get(profil, 1)
+    base_max = max(1, round(palier["max_bets"] * cfg.get("bets_factor", 1.0)))
+    max_bets = min(base_max, max_feasible, len(cands))
+    max_coup = cfg["max_coup"]
+    cote_max = cfg["cote_max"]
+    min_proba = cfg["min_proba"]
+    ev_min = cfg["ev_min"]
     max_per_type = 1 if max_bets <= 3 else 2
 
     def roi_w(c):
@@ -249,6 +320,16 @@ def _select_conviction(
             base += min(c["rapport_estime"], 30.0) / 100.0   # jusqu'à +0.30
         return base * roi_w(c)
 
+    def passes_gates(c):
+        if _bet_cote_max(c) > cote_max:                      # longshot hors profil
+            return False
+        if c["proba_gain"] < min_proba:                      # trop improbable
+            return False
+        # Profitabilité + seuil EV du profil : EV ≥ ev_min OU coup crédible (edge réel)
+        if c["ev"] < ev_min and not _is_credible_coup(c):
+            return False
+        return True
+
     ranked = sorted(cands, key=conviction, reverse=True)
     selected: list[dict] = []
     type_count: dict[str, int] = {}
@@ -257,8 +338,7 @@ def _select_conviction(
     for c in ranked:
         if len(selected) >= max_bets:
             break
-        # Profitabilité : EV>0 OU coup crédible uniquement
-        if c["ev"] <= 0 and not _is_credible_coup(c):
+        if not passes_gates(c):
             continue
         spec = _is_speculative(c)
         if spec and n_coup >= max_coup:
@@ -271,20 +351,21 @@ def _select_conviction(
         if spec:
             n_coup += 1
 
-    # Filet : aucune value sur la course → 1 pari le plus SÛR (meilleure proba),
-    # pour ne pas renvoyer un plan vide. Aucune valeur inventée.
+    # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba
+    # parmi les cotes raisonnables ≤ cote_max), sans plan vide. Aucune invention.
     if not selected:
-        safe = max(cands, key=lambda c: c["proba_gain"])
+        eligibles = [c for c in cands if _bet_cote_max(c) <= cote_max] or cands
+        safe = max(eligibles, key=lambda c: c["proba_gain"])
         safe["_roi_w"] = roi_w(safe)
         selected = [safe]
     return selected
 
 
-def _allocate_kelly(selected: list[dict], montant: int, palier: dict, profil: str) -> None:
+def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict) -> None:
     """Dispatch `montant` (€ entiers) par fraction de KELLY réelle (ev/(cote-1))
-    tiltée par le profil de risque et le ROI passé. min_stake plancher par pari ;
+    tiltée par le profil EFFECTIF (risk_pref) et le ROI passé. min_stake plancher ;
     plafond sur les paris spéculatifs (cap_spec). Total == montant exactement."""
-    rp = PROFIL_RISK_PREF.get(profil, PROFIL_RISK_PREF["equilibre"])
+    rp = cfg["risk_pref"]
     min_stake = palier["min_stake"]
 
     def weight(c):
@@ -356,7 +437,8 @@ def _apply_spec_cap(selected: list[dict], montant: int, palier: dict) -> None:
         k += 1
 
 
-def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn: bool) -> MisePlan:
+def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn: bool,
+                   profil: str = "equilibre", heat: float = 0.0) -> MisePlan:
     """Groupe les paris choisis par niveau → MisePlan (structure attendue par le front)."""
     niveaux_map: dict[str, list[PariRec]] = {}
     ev_pondere = 0.0
@@ -391,11 +473,18 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
     nb_paris = len(selected)
     nb_val = sum(1 for c in selected if c.get("edge", 0.0) > 0)
     esp = round(ev_pondere, 2)
+    mode = _mode_label(heat)
+    profil_label = {"conservateur": "conservateur", "equilibre": "modéré", "agressif": "risqué"}.get(profil, profil)
+    mode_txt = {
+        "prudent": " · mode adaptatif PRUDENT (modèle en froid / série difficile → repli sécurité)",
+        "offensif": " · mode adaptatif OFFENSIF (modèle calibré + en réussite → plus audacieux)",
+        "normal": "",
+    }[mode]
     resume = (
-        f"{nb_paris} pari{'s' if nb_paris > 1 else ''} ciblé{'s' if nb_paris > 1 else ''} "
-        f"(palier {palier['nom']}), mise concentrée de {montant_joue}€"
+        f"Profil {profil_label} — {nb_paris} pari{'s' if nb_paris > 1 else ''} ciblé"
+        f"{'s' if nb_paris > 1 else ''} (palier {palier['nom']}), mise concentrée de {montant_joue}€"
         + (f", dont {nb_val} à valeur réelle (cote probable)" if nb_val else "")
-        + f". Espérance de gain {'+' if esp >= 0 else ''}{esp:.2f}€."
+        + f". Espérance de gain {'+' if esp >= 0 else ''}{esp:.2f}€" + mode_txt + "."
     )
     return MisePlan(
         montant_total=montant,
@@ -408,6 +497,8 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         kelly_warning=kelly_warn,
         esperance_gain=esp,
         palier=palier["nom"],
+        profil=profil,
+        mode_adaptatif=mode,
     )
 
 
@@ -676,6 +767,7 @@ def _plan_vide(montant: float, profil: str) -> MisePlan:
         niveaux=[],
         resume_ia="Prédictions non disponibles pour cette course.",
         avertissement="Lancez l'analyse IA avant de générer un plan.",
+        profil=profil,
     )
 
 
@@ -690,6 +782,8 @@ def plan_to_dict(plan: MisePlan) -> dict:
         "ev_global": plan.ev_global,
         "esperance_gain": plan.esperance_gain,
         "palier": plan.palier,
+        "profil": plan.profil,
+        "mode_adaptatif": plan.mode_adaptatif,
         "kelly_warning": plan.kelly_warning,
         "resume_ia": plan.resume_ia,
         "avertissement": plan.avertissement,

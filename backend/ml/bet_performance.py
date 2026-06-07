@@ -87,3 +87,105 @@ async def get_type_roi_weights(session: AsyncSession) -> dict[str, float]:
     except Exception:
         pass
     return weights
+
+
+# ─────────────────────────────────────────────────────────────
+# Thermostat adaptatif "heat" ∈ [-1, +1]
+#   Relie APPRENTISSAGE (calibration du modèle, race_learning_log.brier_score) et
+#   RÉSULTATS (ROI net récent des paris IA réglés). Sert à durcir/assouplir TOUS
+#   les profils de mise : froid (modèle mal calibré OU série perdante) → prudence ;
+#   chaud (bien calibré + gagnant) → audace mesurée. 100% données réelles.
+# ─────────────────────────────────────────────────────────────
+_HEAT_CACHE_KEY = "bet_heat:v1"
+_HEAT_TTL = 1800           # 30 min
+_RECENT_RACES = 60         # fenêtre brier
+_RECENT_BETS = 80          # fenêtre ROI récent
+_BRIER_GOOD = 0.16         # brier ≤ → modèle bien calibré
+_BRIER_BAD = 0.26          # brier ≥ → mal calibré
+_MIN_BETS_FOR_ROI = 15     # en-deçà, le terme ROI est ignoré (pas assez de signal)
+
+
+async def compute_model_heat(session: AsyncSession) -> dict:
+    """Calcule le thermostat adaptatif depuis les données RÉELLES.
+
+    heat = 0.5 × terme_calibration + 0.5 × terme_roi_récent, borné [-1, +1].
+      - terme_calibration : brier moyen des dernières courses apprises (mappé
+        [_BRIER_GOOD, _BRIER_BAD] → [+1, -1]).
+      - terme_roi_récent : ROI net des derniers paris IA réglés (mappé ±30% → ±1) ;
+        ignoré si échantillon < _MIN_BETS_FOR_ROI.
+    Renvoie {heat, brier, roi_recent, n_races, n_bets} (tout réel ; None si absent).
+    """
+    # ── Calibration : brier moyen récent (race_learning_log) ──
+    brier = None
+    n_races = 0
+    try:
+        row = (await session.execute(text("""
+            SELECT AVG(brier_score), COUNT(*) FROM (
+                SELECT brier_score FROM race_learning_log
+                WHERE brier_score IS NOT NULL
+                ORDER BY analyzed_at DESC LIMIT :lim
+            ) q
+        """), {"lim": _RECENT_RACES})).first()
+        if row and row[0] is not None:
+            brier = float(row[0])
+            n_races = int(row[1] or 0)
+    except Exception:
+        brier = None
+
+    # ── Résultats : ROI net des derniers paris IA réglés (bankroll_entries) ──
+    roi_recent = None
+    n_bets = 0
+    try:
+        row = (await session.execute(text("""
+            SELECT COALESCE(SUM(gain_perte), 0), COALESCE(SUM(mise), 0), COUNT(*) FROM (
+                SELECT gain_perte, mise FROM bankroll_entries
+                WHERE resultat IN ('gagne','perd') AND gain_perte IS NOT NULL
+                  AND mise > 0 AND suivi_reco_ia = true
+                ORDER BY date DESC LIMIT :lim
+            ) q
+        """), {"lim": _RECENT_BETS})).first()
+        if row and float(row[1] or 0) > 0:
+            n_bets = int(row[2] or 0)
+            roi_recent = float(row[0]) / float(row[1])
+    except Exception:
+        roi_recent = None
+
+    # ── Termes ──
+    terms = []
+    if brier is not None:
+        # brier _BRIER_GOOD → +1, _BRIER_BAD → -1 (linéaire borné)
+        cal = (_BRIER_BAD - brier) / (_BRIER_BAD - _BRIER_GOOD) * 2.0 - 1.0
+        terms.append(max(-1.0, min(1.0, cal)))
+    if roi_recent is not None and n_bets >= _MIN_BETS_FOR_ROI:
+        terms.append(max(-1.0, min(1.0, roi_recent / 0.30)))
+
+    heat = round(sum(terms) / len(terms), 3) if terms else 0.0
+    return {
+        "heat": heat,
+        "brier": round(brier, 4) if brier is not None else None,
+        "roi_recent": round(roi_recent, 4) if roi_recent is not None else None,
+        "n_races": n_races,
+        "n_bets": n_bets,
+    }
+
+
+async def get_model_heat(session: AsyncSession) -> float:
+    """heat ∈ [-1,+1] avec cache Redis (best-effort). 0.0 si aucun signal."""
+    redis = None
+    try:
+        from db.redis_client import get_redis
+        redis = await get_redis()
+        cached = await redis.get(_HEAT_CACHE_KEY)
+        if cached is not None:
+            return float(cached)
+    except Exception:
+        redis = None
+
+    ctx = await compute_model_heat(session)
+    heat = float(ctx.get("heat", 0.0))
+    try:
+        if redis is not None:
+            await redis.set(_HEAT_CACHE_KEY, str(heat), ex=_HEAT_TTL)
+    except Exception:
+        pass
+    return heat
