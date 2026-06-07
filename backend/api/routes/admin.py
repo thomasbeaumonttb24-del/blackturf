@@ -298,7 +298,103 @@ async def update_user(
         if k in allowed:
             setattr(user, k, v)
     await db.commit()
+    log.info("admin.update_user", user_id=user_id, changes={k: body[k] for k in body if k in allowed})
     return {"ok": True}
+
+
+@router.post("/users/{user_id}/bankroll-adjust")
+async def adjust_bankroll(
+    user_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Crédite/débite le portefeuille d'un utilisateur (ajustement admin).
+    body: {montant: float (delta, +crédit / -débit), note?: str}. Ajuste le capital
+    initial du portefeuille principal + bankroll_initiale. Tracé dans les logs."""
+    from db.models import Bankroll
+    try:
+        delta = float(body.get("montant"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    main = (await db.execute(
+        select(Bankroll).where(and_(
+            Bankroll.user_id == user_id, Bankroll.est_principale == True, Bankroll.est_supprime == False,
+        ))
+    )).scalar_one_or_none()
+    if main:
+        main.montant_initial = round((main.montant_initial or 0.0) + delta, 2)
+        nouveau = main.montant_initial
+    else:
+        import uuid as _u
+        main = Bankroll(bankroll_id=str(_u.uuid4()), user_id=user_id, nom="Principal",
+                        montant_initial=round(delta, 2), est_principale=True)
+        db.add(main)
+        nouveau = main.montant_initial
+    user.bankroll_initiale = round((user.bankroll_initiale or 0.0) + delta, 2)
+    await db.commit()
+    log.info("admin.bankroll_adjust", user_id=user_id, delta=delta, nouveau_capital=nouveau,
+             note=str(body.get("note") or "")[:200])
+    return {"ok": True, "delta": delta, "nouveau_capital_initial": nouveau}
+
+
+@router.get("/users-export")
+async def export_users_csv(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Export CSV de TOUS les comptes + portefeuille (données réelles)."""
+    import csv as _csv
+    import io
+    from fastapi.responses import StreamingResponse
+    from db.models import Bankroll
+    try:
+        from api.routes.bankroll import settle_pending_bets
+        await settle_pending_bets(db, None)
+    except Exception:
+        pass
+
+    users = (await db.execute(select(User).order_by(desc(User.created_at)).limit(5000))).scalars().all()
+    uids = [u.user_id for u in users]
+    agg: dict = {}
+    if uids:
+        for uid, nb, mise, net, gagnes in (await db.execute(
+            select(BankrollEntry.user_id, func.count(BankrollEntry.entry_id),
+                   func.coalesce(func.sum(BankrollEntry.mise), 0.0),
+                   func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
+                   func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)))
+            .where(BankrollEntry.user_id.in_(uids)).group_by(BankrollEntry.user_id)
+        )).all():
+            agg[uid] = {"nb": int(nb), "mise": float(mise), "net": float(net), "gagnes": int(gagnes or 0)}
+        for uid, init in (await db.execute(
+            select(Bankroll.user_id, func.coalesce(func.sum(Bankroll.montant_initial), 0.0))
+            .where(Bankroll.user_id.in_(uids), Bankroll.est_supprime == False).group_by(Bankroll.user_id)
+        )).all():
+            agg.setdefault(uid, {})["cap"] = float(init)
+
+    out = io.StringIO()
+    w = _csv.writer(out)
+    w.writerow(["Email", "Nom", "Prenom", "Plan", "Profil", "Auth", "Email verifie", "Actif",
+                "Admin", "Inscrit le", "Capital", "Solde", "Mise totale", "Gain net", "ROI %",
+                "Paris", "Gagnes"])
+    for u in users:
+        a = agg.get(u.user_id, {})
+        mise = a.get("mise", 0.0); net = a.get("net", 0.0)
+        cap = a.get("cap", 0.0) or (u.bankroll_initiale or 0.0)
+        roi = round(net / mise * 100, 1) if mise > 0 else ""
+        w.writerow([u.email, u.nom or "", u.prenom or "", u.plan, u.profil_risque,
+                    "google" if u.google_id else "email", "oui" if u.email_verified else "non",
+                    "oui" if u.is_active else "non", "oui" if u.is_admin else "non",
+                    u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "",
+                    round(cap, 2), round(cap + net, 2), round(mise, 2), round(net, 2), roi,
+                    a.get("nb", 0), a.get("gagnes", 0)])
+    out.seek(0)
+    return StreamingResponse(iter([out.getvalue()]), media_type="text/csv",
+                             headers={"Content-Disposition": "attachment; filename=blackturf_comptes.csv"})
 
 
 # ─────────────────────────────────────────────

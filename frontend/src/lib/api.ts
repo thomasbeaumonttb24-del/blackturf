@@ -137,6 +137,10 @@ export const adminApi = {
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),
   updateUser: (id: string, data: Record<string, unknown>) =>
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
+  adjustBankroll: (id: string, montant: number, note?: string) =>
+    api.post(`/users/${id}/bankroll-adjust`, { montant, note }, { baseURL: `${API_URL}/admin/api` }),
+  exportUsers: () =>
+    api.get("/users-export", { baseURL: `${API_URL}/admin/api`, responseType: "blob" }),
   models: () => api.get("/models", { baseURL: `${API_URL}/admin/api` }),
   deployModel: (version: number) =>
     api.post(`/models/${version}/deploy`, null, { baseURL: `${API_URL}/admin/api` }),

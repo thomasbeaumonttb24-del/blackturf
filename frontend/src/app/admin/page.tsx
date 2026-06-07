@@ -80,11 +80,37 @@ export default function AdminPage() {
   );
 
   const [userSearch, setUserSearch] = useState("");
-  const { data: users } = useSWR(
+  const { data: users, mutate: mutateUsers } = useSWR(
     user?.is_admin ? ["/admin-users", userSearch] : null,
     () => adminApi.users({ limit: 200, search: userSearch || undefined }).then((r) => r.data),
     { refreshInterval: 30000, revalidateOnFocus: true }
   );
+
+  async function toggleActive(uid: string, current: boolean) {
+    try {
+      await adminApi.updateUser(uid, { is_active: !current });
+      mutateUsers();
+    } catch { /* noop */ }
+  }
+  async function adjustBankroll(uid: string, email: string) {
+    const v = window.prompt(`Ajuster le portefeuille de ${email}\nMontant à créditer (+) ou débiter (−), en € :`, "");
+    if (v == null) return;
+    const m = parseFloat(v.replace(",", "."));
+    if (isNaN(m) || m === 0) return;
+    try {
+      await adminApi.adjustBankroll(uid, m);
+      mutateUsers();
+    } catch { /* noop */ }
+  }
+  async function exportUsers() {
+    try {
+      const res = await adminApi.exportUsers();
+      const url = URL.createObjectURL(new Blob([res.data], { type: "text/csv" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = "blackturf_comptes.csv"; a.click();
+      URL.revokeObjectURL(url);
+    } catch { /* noop */ }
+  }
 
   async function handleRetrain() {
     setRetraining(true);
@@ -284,12 +310,17 @@ export default function AdminPage() {
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <CardTitle className="text-base">Gestion des comptes ({(users as unknown[]).length})</CardTitle>
-              <input
-                value={userSearch}
-                onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="Rechercher (email, nom)…"
-                className="rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="Rechercher (email, nom)…"
+                  className="rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
+                />
+                <button onClick={exportUsers} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:border-brand-gold/50 hover:text-brand-gold transition-colors whitespace-nowrap">
+                  ⬇ Export CSV
+                </button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
@@ -306,6 +337,7 @@ export default function AdminPage() {
                   <th className="text-center p-3">Paris</th>
                   <th className="text-center p-3">Statut</th>
                   <th className="text-right p-3">Inscrit le</th>
+                  <th className="text-center p-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -342,6 +374,21 @@ export default function AdminPage() {
                     <td className="p-3 text-center text-xs tabular-nums">{u.nb_gagnes}/{u.nb_paris}</td>
                     <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-400 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
                     <td className="p-3 text-right text-muted-foreground text-xs">{formatDateTime(u.created_at)}</td>
+                    <td className="p-3 text-center whitespace-nowrap">
+                      <button
+                        onClick={() => toggleActive(u.user_id, u.is_active)}
+                        className={cn("rounded px-2 py-1 text-[10px] font-semibold border transition-colors mr-1",
+                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-500 hover:bg-green-500/10")}
+                        title={u.is_active ? "Suspendre le compte" : "Réactiver le compte"}>
+                        {u.is_active ? "Suspendre" : "Réactiver"}
+                      </button>
+                      <button
+                        onClick={() => adjustBankroll(u.user_id, u.email)}
+                        className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold transition-colors"
+                        title="Créditer / débiter le portefeuille">
+                        💰 Ajuster
+                      </button>
+                    </td>
                   </tr>
                   );
                 })}
