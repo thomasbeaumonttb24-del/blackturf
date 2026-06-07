@@ -638,8 +638,8 @@ async def get_mise_plan(
     # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
     try:
-        from ml.bet_performance import get_type_roi_weights, get_model_heat
-        roi_weights = await get_type_roi_weights(db)
+        from ml.bet_performance import get_learned_type_weights, get_model_heat
+        roi_weights = await get_learned_type_weights(db)
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
@@ -697,8 +697,8 @@ async def enregistrer_paris(
 
     # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré)
     try:
-        from ml.bet_performance import get_type_roi_weights, get_model_heat
-        roi_weights = await get_type_roi_weights(db)
+        from ml.bet_performance import get_learned_type_weights, get_model_heat
+        roi_weights = await get_learned_type_weights(db)
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
@@ -813,8 +813,8 @@ async def get_bilan_pronostic(
     # Mêmes signaux adaptatifs que le live (le bilan reflète la VRAIE méthode de
     # chaque profil : sélection + mise + ROI passé + thermostat).
     try:
-        from ml.bet_performance import get_type_roi_weights, get_model_heat
-        roi_weights = await get_type_roi_weights(db)
+        from ml.bet_performance import get_learned_type_weights, get_model_heat
+        roi_weights = await get_learned_type_weights(db)
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0

@@ -49,7 +49,11 @@ PROFILS = [
 def _compute(courses: list[dict], n_sims: int) -> dict:
     """Boucle CPU pure (exécutée hors event-loop via asyncio.to_thread).
     Règlement 100% aux rapports PMU réels (settle_pari)."""
+    import collections
     agg = {k: {"nb": 0, "mise": 0.0, "gain": 0.0, "gain_w": 0.0, "benef": 0, "skip": 0} for k, _ in PROFILS}
+    # ROI RÉEL par TYPE de pari (winsorisé) → sert à FAIRE APPRENDRE les poids de
+    # sélection : un type qui perd (ex. Simple Gagnant) se fait dé-pondérer tout seul.
+    agg_type = collections.defaultdict(lambda: {"mise": 0.0, "gw": 0.0, "n": 0, "win": 0})
     palier = _palier(MISE)
 
     for c in courses:
@@ -82,6 +86,7 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
             gain_course = 0.0
             gain_w_course = 0.0
             indetermine = False
+            per_bet = []  # (type, mise, won, payout_winsorisé) pour l'apprentissage par type
             for x in sel:
                 nums = [h["numero"] for h in x["chevaux"]]
                 r = settle_pari(x["type_pari"], nums, classement, rapports, nb_part)
@@ -89,12 +94,21 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
                     indetermine = True  # gagnant sans rapport publié → course non réglable
                     break
                 mise_course += x["mise"]
-                if r["gagne"]:
+                won = bool(r["gagne"])
+                pw = min(x["mise"] * r["rapport_reel"], x["mise"] * WINSOR_CAP) if won else 0.0
+                if won:
                     payout = x["mise"] * r["rapport_reel"]
                     gain_course += payout
-                    gain_w_course += min(payout, x["mise"] * WINSOR_CAP)  # winsorisé
+                    gain_w_course += pw
+                per_bet.append((x["type_pari"], x["mise"], won, pw))
 
             a = agg[key]
+            if not indetermine and mise_course > 0:
+                for t, m, won, pw in per_bet:        # apprentissage ROI par type (réel)
+                    at = agg_type[t]
+                    at["mise"] += m; at["n"] += 1
+                    if won:
+                        at["win"] += 1; at["gw"] += pw
             if indetermine or mise_course <= 0:
                 a["skip"] += 1
                 continue
@@ -121,10 +135,38 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
             "roi_winsorise": roi_w,           # rendement TYPIQUE (gros gains plafonnés 30×)
             "taux_courses_beneficiaires": round(a["benef"] / a["nb"] * 100, 1) if a["nb"] else None,
         })
+
+    # ── Poids APPRIS par type (ROI réel winsorisé → multiplicateur de conviction) ──
+    # Borné [0.5, 1.3] (down franc sur les perdants, up modéré pour résister à la
+    # variance), shrinkage si peu d'échantillon. C'est ici que l'algo "apprend le
+    # pourquoi" : un type qui perd réellement (Simple Gagnant) descend, un type qui
+    # rapporte (placé à valeur) monte, et ça s'ajuste à chaque recalcul.
+    MIN_N = 20
+    type_perf = {}
+    type_weights = {}
+    for t, at in agg_type.items():
+        if at["mise"] <= 0 or at["n"] <= 0:
+            continue
+        roi_w = (at["gw"] - at["mise"]) / at["mise"]      # ROI net winsorisé
+        shrink = at["n"] / (at["n"] + MIN_N)
+        eff = roi_w * shrink
+        # asymétrie : on coupe vite les perdants (×0.5), on monte prudemment (×1.3)
+        w = 1.0 + (eff if eff < 0 else min(eff, 0.6))
+        w = max(0.5, min(1.3, w))
+        type_weights[t] = round(w, 3)
+        type_perf[t] = {
+            "n": at["n"],
+            "win_rate": round(at["win"] / at["n"] * 100, 1),
+            "roi_winsorise": round(roi_w * 100, 1),
+            "poids_appris": round(w, 3),
+        }
+
     return {
         "profils": profils,
         "nb_courses": max((p["nb_courses"] for p in profils), default=0),
         "mise_par_course": MISE,
+        "type_weights": type_weights,    # {type: multiplicateur} pour la sélection future
+        "type_perf": type_perf,          # détail (n, win%, ROI) — le "pourquoi"
     }
 
 

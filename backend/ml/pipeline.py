@@ -354,6 +354,19 @@ async def run_nightly_retraining() -> None:
             await _iso3_compute(iso3_session)
     except Exception as e:
         log.warning("pipeline.nightly_isotonic_top3_skip", err=str(e)[:140])
+    # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
+    # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
+    try:
+        import json as _json
+        from api.profil_backtest import backtest_profils
+        from db.redis_client import get_redis
+        async with AsyncSessionLocal() as bt_session:
+            data = await backtest_profils(bt_session, limit=300, n_sims=4000)
+        redis = await get_redis()
+        await redis.set("stats:profils", _json.dumps(data), ex=86400)
+        log.info("pipeline.nightly_learned_weights", type_weights=data.get("type_weights"))
+    except Exception as e:
+        log.warning("pipeline.nightly_learned_weights_skip", err=str(e)[:140])
 
 
 async def _do_retraining(mois: int, label: str) -> None:

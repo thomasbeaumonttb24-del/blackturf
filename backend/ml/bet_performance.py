@@ -67,6 +67,34 @@ async def compute_type_roi_weights(session: AsyncSession, only_ia: bool = True) 
     return weights
 
 
+async def get_learned_type_weights(session: AsyncSession) -> dict[str, float]:
+    """Poids de conviction APPRIS par type — c'est le cœur de l'auto-amélioration.
+
+    Source principale : ROI RÉEL winsorisé par type mesuré sur l'historique réglé
+    (backtest profils, cache `stats:profils`, recalculé à chaque fin de course et la
+    nuit) → un type qui perd (Simple Gagnant) descend, un type qui rapporte (placé à
+    valeur) monte. L'algo « apprend le pourquoi » et adapte les futurs paris.
+
+    Repli : si le cache n'est pas encore peuplé, on utilise le ROI des paris
+    utilisateur réglés (bankroll). Jamais d'invention : défaut neutre 1.0 par type.
+    """
+    learned: dict = {}
+    try:
+        from db.redis_client import get_redis
+        redis = await get_redis()
+        cached = await redis.get("stats:profils")
+        if cached:
+            data = json.loads(cached)
+            learned = data.get("type_weights") or {}
+    except Exception:
+        learned = {}
+
+    if learned:
+        return learned
+    # Repli : ROI réel des paris joués (échantillon souvent faible) → neutre sinon.
+    return await get_type_roi_weights(session)
+
+
 async def get_type_roi_weights(session: AsyncSession) -> dict[str, float]:
     """Poids ROI par type avec cache Redis (best-effort). Renvoie {} si rien."""
     redis = None
