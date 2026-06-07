@@ -621,9 +621,11 @@ async def track_record(
         daily_acc[key] = {
             "jour": day_dt.strftime("%d/%m"),
             "accuracy_top3": 0.0,
+            "brier_moyen": None,
             "nb_predictions": 0,
             "nb_surprises": 0,
             "_top3": 0,
+            "_brier": [],
         }
     for r in all_rll:
         if not r.analyzed_at:
@@ -640,13 +642,17 @@ async def track_record(
             daily_acc[key]["nb_surprises"] += 1
         if r.gagnant_rang_predit is not None and r.gagnant_rang_predit <= 3:
             daily_acc[key]["_top3"] += 1
+        if r.brier_score is not None:
+            daily_acc[key]["_brier"].append(float(r.brier_score))
 
     for v in daily_acc.values():
         nb = v["nb_predictions"]
+        briers = v.pop("_brier", [])
         if nb:
             v["accuracy_top3"] = round(v.pop("_top3") / nb * 100, 1)
         else:
             v.pop("_top3")
+        v["brier_moyen"] = round(sum(briers) / len(briers), 4) if briers else None
 
     daily_list = list(daily_acc.values())
 

@@ -37,6 +37,7 @@ interface TrackRecord {
   by_day: Array<{
     jour: string;
     accuracy_top3: number;
+    brier_moyen: number | null;
     nb_predictions: number;
     nb_surprises: number;
   }>;
@@ -293,8 +294,12 @@ export default function TrackRecordPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-amber-400" />
-              Précision Top-3 par jour (7 derniers jours)
+              Courbe d&apos;apprentissage — précision & erreur dans le temps
             </CardTitle>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              <span className="text-amber-500 font-semibold">▲ Précision Top-3</span> (monte = mieux) ·
+              <span className="text-blue-500 font-semibold ml-1">▼ Erreur Brier</span> (baisse = le modèle se calibre mieux). L&apos;IA réapprend après chaque course.
+            </p>
           </CardHeader>
           <CardContent>
             {(data.by_day ?? []).every((d) => d.nb_predictions === 0) ? (
@@ -312,20 +317,47 @@ export default function TrackRecordPage() {
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fontSize: 11, fill: "#9CA3AF" }}
+                    yAxisId="acc"
+                    tick={{ fontSize: 11, fill: "#F59E0B" }}
                     axisLine={false}
                     tickLine={false}
                     domain={[0, 100]}
                     tickFormatter={(v) => `${v}%`}
                   />
-                  <Tooltip content={<AccuracyTooltip />} cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }} />
+                  <YAxis
+                    yAxisId="brier"
+                    orientation="right"
+                    tick={{ fontSize: 11, fill: "#3B82F6" }}
+                    axisLine={false}
+                    tickLine={false}
+                    domain={[0, 0.4]}
+                    tickFormatter={(v) => v.toFixed(2)}
+                  />
+                  <Tooltip
+                    cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
+                    contentStyle={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, fontSize: 12 }}
+                    formatter={(v: number, name: string) => name === "Précision Top-3" ? [`${v}%`, name] : [v?.toFixed?.(3) ?? v, name]}
+                  />
                   <Line
+                    yAxisId="acc"
                     type="monotone"
+                    name="Précision Top-3"
                     dataKey="accuracy_top3"
                     stroke="#F59E0B"
                     strokeWidth={3}
                     dot={{ r: 4, fill: "#F59E0B", stroke: "#fff", strokeWidth: 2 }}
                     activeDot={{ r: 6, fill: "#F59E0B", stroke: "#fff", strokeWidth: 2 }}
+                  />
+                  <Line
+                    yAxisId="brier"
+                    type="monotone"
+                    name="Erreur Brier"
+                    dataKey="brier_moyen"
+                    stroke="#3B82F6"
+                    strokeWidth={2.5}
+                    strokeDasharray="5 3"
+                    connectNulls
+                    dot={{ r: 3, fill: "#3B82F6", stroke: "#fff", strokeWidth: 1.5 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
