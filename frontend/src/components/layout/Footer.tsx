@@ -1,65 +1,92 @@
 import Link from "next/link";
 import Image from "next/image";
+import { ShieldCheck, Database } from "lucide-react";
+
+const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string }> }> = [
+  {
+    title: "Produit",
+    links: [
+      { href: "/programme", label: "Programme du jour" },
+      { href: "/value-bets", label: "Paris de valeur" },
+      { href: "/bankroll", label: "Suivi du capital" },
+      { href: "/assistant", label: "Assistant IA" },
+    ],
+  },
+  {
+    title: "Plans",
+    links: [
+      { href: "/tarifs", label: "Gratuit" },
+      { href: "/tarifs", label: "Standard — 19€/mois" },
+      { href: "/tarifs", label: "Expert — 39€/mois" },
+    ],
+  },
+  {
+    title: "Légal",
+    links: [
+      { href: "/mentions-legales", label: "Mentions légales" },
+      { href: "/confidentialite", label: "Confidentialité" },
+      { href: "/cgu", label: "CGU" },
+    ],
+  },
+];
 
 export function Footer() {
   return (
-    <footer className="border-t border-gray-200 bg-gray-50 py-12 mt-auto">
+    <footer className="relative border-t border-gray-200 bg-brand-warm py-14 mt-auto">
+      {/* Accent doré en haut */}
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
+
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
 
           {/* Brand */}
-          <div className="col-span-1 md:col-span-1">
+          <div className="col-span-2">
             <div className="flex items-center gap-2.5 mb-3">
               <Image
                 src="/logo.png"
                 alt="BlackTurf"
-                width={28}
-                height={28}
-                className="rounded-md object-contain"
+                width={30}
+                height={30}
+                className="rounded-md object-contain ring-1 ring-amber-200/60"
               />
-              <span className="font-bold text-gray-900">
-                Black<span className="text-brand-gold-deep">Turf</span>
+              <span className="font-display text-lg font-bold text-gray-900">
+                Black<span className="text-gradient">Turf</span>
               </span>
             </div>
-            <p className="text-xs text-gray-500 leading-relaxed">
+            <p className="text-xs text-gray-500 leading-relaxed max-w-xs">
               Le terminal IA des parieurs gagnants.<br />
               Analyses propulsées par XGBoost + LightGBM + CatBoost.
             </p>
+
+            {/* Trust chips */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                <Database className="h-3 w-3" /> Données PMU officielles
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+                <ShieldCheck className="h-3 w-3" /> Chiffres vérifiables
+              </span>
+            </div>
           </div>
 
-          {/* Produit */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">Produit</h4>
-            <ul className="space-y-2 text-sm text-gray-500">
-              <li><Link href="/programme" className="hover:text-gray-900 transition-colors">Programme du jour</Link></li>
-              <li><Link href="/value-bets" className="hover:text-gray-900 transition-colors">Paris de valeur</Link></li>
-              <li><Link href="/bankroll" className="hover:text-gray-900 transition-colors">Suivi du capital</Link></li>
-              <li><Link href="/assistant" className="hover:text-gray-900 transition-colors">Assistant IA</Link></li>
-            </ul>
-          </div>
-
-          {/* Plans */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">Plans</h4>
-            <ul className="space-y-2 text-sm text-gray-500">
-              <li><Link href="/tarifs" className="hover:text-gray-900 transition-colors">Gratuit</Link></li>
-              <li><Link href="/tarifs" className="hover:text-gray-900 transition-colors">Standard — 19€/mois</Link></li>
-              <li><Link href="/tarifs" className="hover:text-gray-900 transition-colors">Expert — 39€/mois</Link></li>
-            </ul>
-          </div>
-
-          {/* Légal */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">Légal</h4>
-            <ul className="space-y-2 text-sm text-gray-500">
-              <li><Link href="/mentions-legales" className="hover:text-gray-900 transition-colors">Mentions légales</Link></li>
-              <li><Link href="/confidentialite" className="hover:text-gray-900 transition-colors">Confidentialité</Link></li>
-              <li><Link href="/cgu" className="hover:text-gray-900 transition-colors">CGU</Link></li>
-            </ul>
-          </div>
+          {/* Columns */}
+          {COLUMNS.map((col) => (
+            <div key={col.title}>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">{col.title}</h4>
+              <ul className="space-y-2 text-sm text-gray-500">
+                {col.links.map((l) => (
+                  <li key={l.label}>
+                    <Link href={l.href} className="transition-colors hover:text-brand-gold-deep">
+                      {l.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
-        <div className="mt-8 pt-8 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="mt-10 pt-8 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-gray-400">
             © 2026 BlackTurf. Tous droits réservés.
           </p>

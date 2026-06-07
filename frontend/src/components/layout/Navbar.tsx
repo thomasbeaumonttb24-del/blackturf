@@ -168,10 +168,11 @@ export function Navbar() {
                   key={link.href}
                   href={link.href}
                   className={cn(
-                    "px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5",
+                    "relative px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5",
+                    "after:absolute after:left-3.5 after:right-3.5 after:-bottom-0.5 after:h-0.5 after:rounded-full after:bg-gradient-gold after:transition-transform after:duration-200 after:origin-left",
                     pathname === link.href
-                      ? "bg-brand-gold-tint text-brand-gold-dark font-semibold"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                      ? "text-brand-gold-dark font-semibold after:scale-x-100"
+                      : "text-gray-600 hover:text-gray-900 after:scale-x-0 hover:after:scale-x-100"
                   )}
                 >
                   {Icon && <Icon className="h-3.5 w-3.5" />}
@@ -325,7 +326,7 @@ export function Navbar() {
                 </Button>
                 <Button
                   size="sm"
-                  className="bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 transition-all"
+                  className="btn-shimmer active:scale-[0.97] bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 transition-all"
                   onClick={() => router.push("/inscription")}
                 >
                   Essai gratuit

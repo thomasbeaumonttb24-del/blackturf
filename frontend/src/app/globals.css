@@ -177,6 +177,64 @@
   background: linear-gradient(90deg, transparent, rgba(245,158,11,0.25), rgba(217,119,6,0.18), transparent);
 }
 
+/* ── Bento : tuile vedette (lavis or coin haut-droit) ── */
+.bento-feature {
+  background:
+    radial-gradient(ellipse at 100% 0%, rgba(245,158,11,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse at 0% 100%, rgba(217,119,6,0.06) 0%, transparent 50%),
+    #FFFFFF;
+}
+
+/* ── Eyebrow (sur-titre) chip cohérent ── */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ── Gros chiffre display (bento / stats) ── */
+.num-display {
+  font-family: var(--font-space-grotesk, var(--font-inter));
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* ── Press feedback boutons / cartes cliquables ── */
+.press {
+  transition: transform 0.12s cubic-bezier(0.16,1,0.3,1);
+}
+.press:active { transform: scale(0.97); }
+
+/* ── Timeline "comment ça marche" : trait connecteur ── */
+.step-connector::after {
+  content: '';
+  position: absolute;
+  top: 2.75rem;
+  left: calc(50% + 2rem);
+  width: calc(100% - 4rem);
+  height: 2px;
+  background: linear-gradient(90deg, rgba(245,158,11,0.35), rgba(245,158,11,0.08));
+}
+@media (max-width: 768px) {
+  .step-connector::after { display: none; }
+}
+
+/* ── Mini barre comparative (précision vs aléatoire) ── */
+@keyframes barGrow {
+  from { width: 0; }
+  to   { width: var(--bar-pct, 0%); }
+}
+.bar-grow {
+  animation: barGrow 1.4s cubic-bezier(0.16,1,0.3,1) 0.2s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-grow { animation: none !important; width: var(--bar-pct, 0%) !important; }
+}
+
 /* ── Metric row hover ── */
 .metric-row {
   transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;

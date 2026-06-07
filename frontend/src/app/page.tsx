@@ -1,10 +1,11 @@
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import {
-  ArrowRight, TrendingUp, Zap, Shield, BarChart3, Brain,
-  Clock, Calculator, Target, ChevronRight, Check, Star,
+  ArrowRight, TrendingUp, Zap, Shield, Brain,
+  Clock, Calculator, ChevronRight, Check, Sparkles,
+  Gauge, Activity, BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { AnimatedCounter } from "@/components/ui/AnimatedCounter";
@@ -20,12 +21,12 @@ const FEATURES = [
     color: "#D97706",
     bg: "#FFFBEB",
     borderColor: "rgba(217,119,6,0.2)",
+    featured: true,
   },
   {
     icon: Brain,
     title: "IA d'ensemble XGBoost + LightGBM + CatBoost",
     desc: "3 modèles combinés. 80+ variables par partant. Calibration isotonique (Brier < 0.18). ELO 4 dimensions.",
-    badge: undefined,
     color: "#7C3AED",
     bg: "#F5F3FF",
     borderColor: "rgba(124,58,237,0.15)",
@@ -34,7 +35,6 @@ const FEATURES = [
     icon: Zap,
     title: "Paris de valeur en temps réel",
     desc: "Espérance (EV) = (Cote × Proba) − 1. Détection automatique 4 niveaux ★. Triangulation PMU / Geny / BZH. Indicateur d'afflux de mises.",
-    badge: undefined,
     color: "#059669",
     bg: "#ECFDF5",
     borderColor: "rgba(5,150,105,0.15)",
@@ -43,7 +43,6 @@ const FEATURES = [
     icon: TrendingUp,
     title: "Critère de Kelly & Capital",
     desc: "Mise optimale calculée automatiquement. Demi-Kelly, plafond 5%. Rendement personnel vs rendement du modèle en temps réel.",
-    badge: undefined,
     color: "#2563EB",
     bg: "#EFF6FF",
     borderColor: "rgba(37,99,235,0.15)",
@@ -52,7 +51,6 @@ const FEATURES = [
     icon: Shield,
     title: "ELO hippique 4 dimensions",
     desc: "Scores ELO global / plat / trot / obstacle. ELO de progression (vitesse d'évolution). Mis à jour après chaque course.",
-    badge: undefined,
     color: "#D97706",
     bg: "#FFFBEB",
     borderColor: "rgba(217,119,6,0.15)",
@@ -61,7 +59,6 @@ const FEATURES = [
     icon: Clock,
     title: "Alertes & Assistant IA",
     desc: "Claude API intégré. Push VAPID, email, in-app. Digest matinal. Posez vos questions en langage naturel.",
-    badge: undefined,
     color: "#0891B2",
     bg: "#ECFEFF",
     borderColor: "rgba(8,145,178,0.15)",
@@ -153,13 +150,16 @@ async function fetchEquityCurve() {
 export default async function HomePage() {
   const [apiStats, curveData] = await Promise.allSettled([fetchStats(), fetchEquityCurve()]);
 
-  const stats = apiStats.status === "fulfilled" && apiStats.value
+  // Mapping HONNÊTE : toute valeur nulle/absente devient "—" (jamais "+null%" ni 0 factice)
+  const v = apiStats.status === "fulfilled" && apiStats.value ? apiStats.value : null;
+  const has = (x: unknown) => x !== null && x !== undefined && !(typeof x === "number" && Number.isNaN(x));
+  const stats = v
     ? {
-        auc_roc: String(apiStats.value.auc_roc),
-        roi_simule_6mois: `+${String(apiStats.value.roi_simule_6mois).replace(".", ",")}%`,
-        nb_courses_analysees: Number(apiStats.value.nb_courses_analysees).toLocaleString("fr-FR") + "+",
-        nb_utilisateurs: String(apiStats.value.nb_utilisateurs),
-        precision_top3: `${Math.round(apiStats.value.precision_top3 * 100)}%`,
+        auc_roc: has(v.auc_roc) ? String(v.auc_roc) : "—",
+        roi_simule_6mois: has(v.roi_simule_6mois) ? `+${String(v.roi_simule_6mois).replace(".", ",")}%` : "—",
+        nb_courses_analysees: has(v.nb_courses_analysees) ? Number(v.nb_courses_analysees).toLocaleString("fr-FR") + "+" : "—",
+        nb_utilisateurs: has(v.nb_utilisateurs) ? String(v.nb_utilisateurs) : "—",
+        precision_top3: has(v.precision_top3) ? `${Math.round(v.precision_top3 * 100)}%` : "—",
       }
     : STATIC_STATS;
 
@@ -177,41 +177,47 @@ export default async function HomePage() {
 
   const parseStatNum = (v: string) => parseFloat(v.replace(",", ".").replace(/[^0-9.]/g, ""));
 
+  // Valeurs numériques pour les tuiles bento (NaN ⇒ on affiche "—", jamais d'invention)
+  const precisionNum = parseStatNum(stats.precision_top3);
+  const aucNum = parseStatNum(stats.auc_roc);
+  const roiNum = parseStatNum(stats.roi_simule_6mois);
+  const coursesNum = parseStatNum(stats.nb_courses_analysees);
+
   return (
-    <div className="flex flex-col min-h-screen bg-white">
+    <div className="flex flex-col min-h-screen bg-brand-warm">
       <Navbar />
 
       {/* ══ HERO ══ */}
-      <section className="relative gradient-hero-v2 min-h-[88vh] flex flex-col justify-center overflow-hidden grid-lines">
+      <section className="relative gradient-hero-v2 flex flex-col justify-center overflow-hidden grid-lines">
         {/* Orbs dorés — discrets sur fond clair */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-          <div className="orb-1 absolute top-[-40px] left-1/2 w-[600px] h-[300px] rounded-full bg-amber-400/10 blur-[80px]" />
+          <div className="orb-1 absolute top-[-40px] left-1/2 w-[640px] h-[320px] rounded-full bg-amber-400/10 blur-[90px]" />
           <div className="orb-2 absolute bottom-10 right-[8%] w-64 h-64 rounded-full bg-amber-300/8 blur-[60px]" />
           <div className="orb-3 absolute top-1/3 left-[6%] w-48 h-48 rounded-full bg-yellow-400/6 blur-[50px]" />
         </div>
 
-        <div className="relative mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 text-center py-24 sm:py-32">
+        <div className="relative mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 text-center pt-24 pb-20 sm:pt-32 sm:pb-24">
 
           {/* Live badge */}
           <div className="flex justify-center mb-8">
-            <span className="badge-pulse inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-amber-300/60 bg-amber-50 text-amber-700 text-xs font-semibold tracking-wider uppercase shadow-sm">
+            <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full border border-amber-300/60 bg-white/70 backdrop-blur-sm text-amber-700 text-[11px] font-semibold shadow-sm">
               <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
               Terminal IA • Analyse hippique en direct
             </span>
           </div>
 
           {/* Titre principal */}
-          <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-[1.05] text-gray-900">
+          <h1 className="font-display text-[2.7rem] sm:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-[1.04] text-gray-900">
             Votre{" "}
             <span className="text-gradient-animated">Conseiller Expert</span>
-            <br />en Paris Hippiques
+            <br className="hidden sm:block" />{" "}en Paris Hippiques
           </h1>
 
           <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto mb-3 leading-relaxed">
             Entrez combien vous voulez miser — BlackTurf génère votre plan de pari personnalisé
             avec mise exacte, gain potentiel et probabilités calculées par l&apos;IA.
           </p>
-          <p className="text-sm text-gray-400 max-w-xl mx-auto mb-10 font-mono tracking-tight">
+          <p className="text-[13px] text-gray-400 max-w-xl mx-auto mb-10 font-mono tracking-tight">
             XGBoost + LightGBM + CatBoost · 80+ variables · Paris de valeur en temps réel · Critère de Kelly
           </p>
 
@@ -220,7 +226,7 @@ export default async function HomePage() {
             <Button
               size="xl"
               asChild
-              className="btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30 transition-all duration-200"
+              className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30 transition-all duration-200"
             >
               <Link href="/inscription">
                 Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" />
@@ -230,14 +236,14 @@ export default async function HomePage() {
               variant="outline"
               size="xl"
               asChild
-              className="border-gray-300 text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50 transition-all"
+              className="press border-gray-300 text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50 transition-all"
             >
               <Link href="/programme">Programme du jour</Link>
             </Button>
           </div>
 
           {/* Trust signals */}
-          <div className="mt-10 flex flex-wrap justify-center gap-5 text-xs text-gray-500">
+          <div className="mt-10 flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-gray-500">
             {[
               "Sans CB requis",
               "7 jours gratuit",
@@ -256,32 +262,111 @@ export default async function HomePage() {
       {/* ══ LIVE TICKER ══ */}
       <LiveTicker />
 
-      {/* ══ STATS BAR ══ */}
-      <section className="py-14 border-b border-gray-100 bg-white">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {[
-              { value: parseStatNum(stats.auc_roc), label: "AUC-ROC", sub: "Précision modèle", suffix: "", decimals: 2 },
-              { value: parseStatNum(stats.precision_top3), label: "Précision Top-3", sub: "vs 33% aléatoire", suffix: "%", decimals: 0 },
-              { value: parseStatNum(stats.roi_simule_6mois), label: "Rendement simulé 6 mois", sub: "10€ fixe / pari de valeur ★★★+", suffix: "%", decimals: 1, prefix: "+" },
-              { value: parseStatNum(stats.nb_courses_analysees), label: "Courses analysées", sub: "Données réelles PMU", suffix: "+", decimals: 0 },
-            ].map((s, i) => (
-              <ScrollReveal key={s.label} delay={i * 80} className="text-center">
-                <div className="text-4xl font-extrabold font-display tabular-nums" style={{ color: "#D97706" }}>
-                  {/* Aucun chiffre inventé : "—" si la donnée réelle est indisponible */}
-                  {Number.isNaN(s.value) ? (
-                    <span>—</span>
-                  ) : (
-                    <>
-                      {s.prefix}
-                      <AnimatedCounter end={s.value} duration={2000 + i * 200} decimals={s.decimals} suffix={s.suffix} />
-                    </>
+      {/* ══ STATS — BENTO ══ */}
+      <section className="py-16 sm:py-20 bg-white">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="text-center mb-10">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <Activity className="h-3.5 w-3.5" /> Chiffres réels
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+                Une IA qui se mesure, pas qui se vante
+              </h2>
+              <p className="text-gray-500 text-sm mt-2 max-w-lg mx-auto">
+                Données calculées sur des courses passées et vérifiables — aucune valeur fabriquée.
+              </p>
+            </div>
+          </ScrollReveal>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 auto-rows-[150px] gap-4">
+
+            {/* Tuile vedette — Précision Top-3 (2×2) */}
+            <ScrollReveal className="col-span-2 row-span-2" delay={0}>
+              <div className="glass-card bento-feature rounded-2xl p-7 h-full flex flex-col justify-between">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Précision Top-3</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Part des courses où le vainqueur est dans le top-3 de l&apos;IA</p>
+                  </div>
+                  <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center" style={{ background: "#FFFBEB", border: "1px solid rgba(217,119,6,0.2)" }}>
+                    <Gauge className="h-5 w-5" style={{ color: "#D97706" }} />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="num-display text-6xl sm:text-7xl font-extrabold" style={{ color: "#D97706" }}>
+                    {Number.isNaN(precisionNum) ? "—" : <AnimatedCounter end={precisionNum} duration={2000} decimals={0} suffix="%" />}
+                  </div>
+                  {/* Barre comparative vs hasard (33%) */}
+                  {!Number.isNaN(precisionNum) && (
+                    <div className="mt-4">
+                      <div className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div
+                          className="bar-grow absolute inset-y-0 left-0 rounded-full bg-gradient-gold"
+                          style={{ "--bar-pct": `${Math.min(precisionNum, 100)}%` } as CSSProperties}
+                        />
+                        {/* repère 33% aléatoire */}
+                        <div className="absolute inset-y-0 w-px bg-gray-400/70" style={{ left: "33%" }} />
+                      </div>
+                      <div className="flex justify-between mt-1.5 text-[10px] text-gray-400">
+                        <span>0%</span>
+                        <span className="text-gray-500">33% = hasard</span>
+                        <span>100%</span>
+                      </div>
+                    </div>
                   )}
                 </div>
-                <div className="text-sm font-semibold text-gray-900 mt-1.5">{s.label}</div>
-                <div className="text-xs text-gray-500 mt-0.5">{s.sub}</div>
-              </ScrollReveal>
-            ))}
+              </div>
+            </ScrollReveal>
+
+            {/* AUC-ROC */}
+            <ScrollReveal delay={80}>
+              <div className="glass-card rounded-2xl p-6 h-full flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">AUC-ROC</p>
+                  <Sparkles className="h-4 w-4" style={{ color: "#2563EB" }} />
+                </div>
+                <div>
+                  <div className="num-display text-4xl font-extrabold" style={{ color: "#2563EB" }}>
+                    {Number.isNaN(aucNum) ? "—" : <AnimatedCounter end={aucNum} duration={2000} decimals={2} />}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">Calibration isotonique · Brier &lt; 0.18</p>
+                </div>
+              </div>
+            </ScrollReveal>
+
+            {/* Rendement simulé */}
+            <ScrollReveal delay={160}>
+              <div className="glass-card rounded-2xl p-6 h-full flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Rendement 6 mois</p>
+                  <TrendingUp className="h-4 w-4" style={{ color: "#059669" }} />
+                </div>
+                <div>
+                  <div className="num-display text-4xl font-extrabold" style={{ color: "#059669" }}>
+                    {Number.isNaN(roiNum) ? "—" : <>+<AnimatedCounter end={roiNum} duration={2200} decimals={1} suffix="%" /></>}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">10€ fixe / pari de valeur ★★★+</p>
+                </div>
+              </div>
+            </ScrollReveal>
+
+            {/* Courses analysées (2×1) */}
+            <ScrollReveal className="col-span-2" delay={240}>
+              <div className="glass-card rounded-2xl p-6 h-full flex items-center justify-between">
+                <div>
+                  <div className="num-display text-4xl sm:text-5xl font-extrabold" style={{ color: "#D97706" }}>
+                    {Number.isNaN(coursesNum) ? "—" : <><AnimatedCounter end={coursesNum} duration={2400} decimals={0} />+</>}
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900 mt-1">Courses analysées</p>
+                  <p className="text-[11px] text-gray-400">Données réelles PMU, mises à jour chaque nuit</p>
+                </div>
+                <div className="icon-box hidden sm:flex h-14 w-14 rounded-2xl items-center justify-center" style={{ background: "#FFFBEB", border: "1px solid rgba(217,119,6,0.2)" }}>
+                  <BarChart3 className="h-6 w-6" style={{ color: "#D97706" }} />
+                </div>
+              </div>
+            </ScrollReveal>
           </div>
         </div>
       </section>
@@ -289,14 +374,14 @@ export default async function HomePage() {
       <div className="section-divider" />
 
       {/* ══ HOW IT WORKS ══ */}
-      <section className="py-24 bg-white">
+      <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
-            <div className="text-center mb-14">
-              <span className="inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold uppercase tracking-wider mb-4">
-                Simple & Rapide
+            <div className="text-center mb-16">
+              <span className="eyebrow text-amber-800 text-[11px] font-semibold mb-3">
+                <Zap className="h-3.5 w-3.5" /> Simple & rapide
               </span>
-              <h2 className="font-display text-4xl font-bold text-gray-900 mb-3">
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
                 Comment BlackTurf fonctionne
               </h2>
               <p className="text-gray-500">3 étapes, moins de 10 secondes</p>
@@ -331,15 +416,17 @@ export default async function HomePage() {
               },
             ].map((s, i) => (
               <ScrollReveal key={s.step} delay={i * 100}>
-                <div className="glass-card rounded-2xl p-7 text-center h-full ring-1 ring-border shadow-sm hover:shadow-md transition-shadow">
-                  <div
-                    className="h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mx-auto mb-5"
-                    style={{ background: s.bg, border: `1px solid ${s.border}`, color: s.color }}
-                  >
-                    {s.step}
+                <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
+                  <div className="glass-card rounded-2xl p-7 text-center h-full">
+                    <div
+                      className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mx-auto mb-5"
+                      style={{ background: s.bg, border: `1px solid ${s.border}`, color: s.color }}
+                    >
+                      {s.step}
+                    </div>
+                    <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
+                    <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
                   </div>
-                  <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
-                  <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
                 </div>
               </ScrollReveal>
             ))}
@@ -349,15 +436,15 @@ export default async function HomePage() {
 
       <div className="section-divider" />
 
-      {/* ══ FEATURES ══ */}
-      <section className="py-24 bg-gray-50/60">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      {/* ══ FEATURES — BENTO ══ */}
+      <section className="py-24 bg-white">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
-            <div className="text-center mb-16">
-              <span className="inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold uppercase tracking-wider mb-4">
-                Technologie
+            <div className="text-center mb-14">
+              <span className="eyebrow text-emerald-800 text-[11px] font-semibold mb-3">
+                <Brain className="h-3.5 w-3.5" /> Technologie
               </span>
-              <h2 className="font-display text-4xl font-bold text-gray-900 mb-4">
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
                 L&apos;arsenal du parieur{" "}
                 <span className="text-gradient">professionnel</span>
               </h2>
@@ -367,16 +454,16 @@ export default async function HomePage() {
             </div>
           </ScrollReveal>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 auto-rows-fr gap-5">
             {FEATURES.map((f, i) => (
-              <ScrollReveal key={f.title} delay={i * 80}>
-                <div className="glass-card rounded-2xl p-6 h-full bg-white ring-1 ring-border shadow-sm hover:shadow-md transition-shadow">
+              <ScrollReveal key={f.title} delay={i * 70} className={f.featured ? "md:col-span-2 lg:row-span-2" : ""}>
+                <div className={`glass-card rounded-2xl h-full ${f.featured ? "bento-feature p-8 flex flex-col" : "p-6"}`}>
                   <div className="flex items-start justify-between mb-4">
                     <div
-                      className="icon-box h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                      className={`icon-box rounded-xl flex items-center justify-center flex-shrink-0 ${f.featured ? "h-14 w-14" : "h-11 w-11"}`}
                       style={{ background: f.bg, border: `1px solid ${f.borderColor}` }}
                     >
-                      <f.icon className="h-5 w-5" style={{ color: f.color }} />
+                      <f.icon className={f.featured ? "h-7 w-7" : "h-5 w-5"} style={{ color: f.color }} />
                     </div>
                     {f.badge && (
                       <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-200 font-semibold px-2 py-0.5 rounded-full">
@@ -384,8 +471,13 @@ export default async function HomePage() {
                       </span>
                     )}
                   </div>
-                  <h3 className="font-semibold text-gray-900 mb-2 text-sm leading-snug">{f.title}</h3>
-                  <p className="text-xs text-gray-500 leading-relaxed">{f.desc}</p>
+                  <h3 className={`font-semibold text-gray-900 leading-snug ${f.featured ? "text-xl mb-3" : "text-sm mb-2"}`}>{f.title}</h3>
+                  <p className={`text-gray-500 leading-relaxed ${f.featured ? "text-sm" : "text-xs"}`}>{f.desc}</p>
+                  {f.featured && (
+                    <Link href="/programme" className="press mt-auto pt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold-deep hover:gap-2.5 transition-all">
+                      Voir le calculateur <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  )}
                 </div>
               </ScrollReveal>
             ))}
@@ -396,14 +488,14 @@ export default async function HomePage() {
       <div className="section-divider" />
 
       {/* ══ PERFORMANCE ══ */}
-      <section className="py-24 bg-white">
+      <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-14">
-              <span className="inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold uppercase tracking-wider mb-4">
-                Performances vérifiables
+              <span className="eyebrow text-emerald-800 text-[11px] font-semibold mb-3">
+                <Shield className="h-3.5 w-3.5" /> Performances vérifiables
               </span>
-              <h2 className="font-display text-4xl font-bold text-gray-900 mb-3">
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
                 Nos résultats, chiffres réels
               </h2>
               <p className="text-gray-500 text-sm max-w-lg mx-auto">
@@ -431,7 +523,7 @@ export default async function HomePage() {
                       <p className="text-sm font-semibold text-gray-900">{m.label}</p>
                       <p className="text-xs text-gray-500 mt-0.5">{m.sub}</p>
                     </div>
-                    <div className="text-2xl font-extrabold tabular-nums font-mono" style={{ color: m.color }}>
+                    <div className="num-display text-2xl font-extrabold font-mono" style={{ color: m.color }}>
                       {m.value}
                     </div>
                   </div>
@@ -542,14 +634,14 @@ export default async function HomePage() {
       <div className="section-divider" />
 
       {/* ══ PRICING ══ */}
-      <section className="py-24 bg-gray-50/60" id="tarifs">
+      <section className="py-24 bg-white" id="tarifs">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
-              <span className="inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold uppercase tracking-wider mb-4">
-                Tarifs
+              <span className="eyebrow text-amber-800 text-[11px] font-semibold mb-3">
+                <Sparkles className="h-3.5 w-3.5" /> Tarifs
               </span>
-              <h2 className="font-display text-4xl font-bold text-gray-900 mb-3">Simples et transparents</h2>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-3">Simples et transparents</h2>
               <p className="text-gray-500">7 jours d&apos;essai gratuit sans carte bancaire.</p>
             </div>
           </ScrollReveal>
@@ -558,10 +650,10 @@ export default async function HomePage() {
             {PLANS.map((plan, i) => (
               <ScrollReveal key={plan.name} delay={i * 100}>
                 <div
-                  className={`relative rounded-2xl p-7 ${
+                  className={`relative rounded-2xl p-7 h-full ${
                     plan.popular
-                      ? "plan-popular bg-white border border-amber-300"
-                      : "bg-white border border-gray-200 shadow-sm"
+                      ? "plan-popular bg-white border border-amber-300 md:-translate-y-2"
+                      : "bg-white border border-gray-200 shadow-sm card-hover"
                   }`}
                 >
                   {plan.badge && (
@@ -576,7 +668,7 @@ export default async function HomePage() {
                     <h3 className="font-display text-xl font-bold text-gray-900 mb-0.5">{plan.name}</h3>
                     <p className="text-xs text-gray-500 mb-4">{plan.desc}</p>
                     <div className="flex items-baseline gap-1">
-                      <span className={`text-4xl font-extrabold font-display ${plan.popular ? "text-brand-gold-deep" : "text-gray-900"}`}>
+                      <span className={`num-display text-4xl font-extrabold ${plan.popular ? "text-brand-gold-deep" : "text-gray-900"}`}>
                         {plan.price}
                       </span>
                       <span className="text-gray-500 text-sm">{plan.period}</span>
@@ -594,7 +686,7 @@ export default async function HomePage() {
 
                   <Link
                     href={plan.href}
-                    className={`flex items-center justify-center gap-1.5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-all ${
+                    className={`press flex items-center justify-center gap-1.5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-all ${
                       plan.popular
                         ? "btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white shadow-md shadow-amber-400/25"
                         : "border border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:text-brand-gold-deep hover:bg-amber-50"
@@ -621,10 +713,10 @@ export default async function HomePage() {
         </div>
         <div className="relative mx-auto max-w-3xl px-4 sm:px-6 text-center">
           <ScrollReveal>
-            <span className="badge-pulse inline-block px-4 py-1.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold uppercase tracking-wider mb-6">
+            <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-semibold mb-6">
               Commencez dès aujourd&apos;hui
             </span>
-            <h2 className="font-display text-4xl sm:text-5xl font-extrabold text-gray-900 mb-5 leading-tight">
+            <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-gray-900 mb-5 leading-tight">
               Prêt à parier avec{" "}
               <span className="text-gradient-animated">l&apos;intelligence artificielle</span>
               {" "}?
@@ -636,7 +728,7 @@ export default async function HomePage() {
               <Button
                 size="xl"
                 asChild
-                className="btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-400/25"
+                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-400/25"
               >
                 <Link href="/inscription">
                   Essai gratuit 7 jours — sans CB <ArrowRight className="h-5 w-5 ml-1" />
@@ -646,7 +738,7 @@ export default async function HomePage() {
                 variant="outline"
                 size="xl"
                 asChild
-                className="border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:bg-amber-50"
+                className="press border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:bg-amber-50"
               >
                 <Link href="#tarifs">Voir les tarifs</Link>
               </Button>
@@ -656,7 +748,7 @@ export default async function HomePage() {
       </section>
 
       {/* ══ JEU RESPONSABLE ══ */}
-      <section className="py-8 border-t border-gray-100 bg-gray-50">
+      <section className="py-8 border-t border-gray-100 bg-brand-warm">
         <div className="mx-auto max-w-3xl px-4 text-center">
           <p className="text-xs text-gray-400 leading-relaxed">
             ⚠️ <strong className="text-gray-600">Jeu responsable.</strong> BlackTurf est un outil d&apos;aide à la décision,
