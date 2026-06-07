@@ -37,6 +37,7 @@ class PredictionOut(BaseModel):
     rang_predit: int
     confidence_score: Optional[float]
     cote_pmu: Optional[float]
+    cote_juste: Optional[float] = None  # cote "juste" IA = 1/proba_top1 (sans marge)
     value_bet: Optional[dict]
 
 
@@ -116,6 +117,8 @@ async def get_predictions(
             proba_top3=round(pred.proba_top3, 4),
             proba_top1_low=round(pred.proba_top1_low, 4) if pred.proba_top1_low is not None else None,
             proba_top1_high=round(pred.proba_top1_high, 4) if pred.proba_top1_high is not None else None,
+            # Cote juste IA = 1/proba de victoire (cote "équitable" sans marge bookmaker).
+            cote_juste=round(1.0 / pred.proba_top1, 1) if pred.proba_top1 and pred.proba_top1 > 0.001 else None,
             rang_predit=pred.rang_predit,
             confidence_score=pred.confidence_score,
             cote_pmu=part.cote_pmu,

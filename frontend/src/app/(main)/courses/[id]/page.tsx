@@ -1872,12 +1872,26 @@ export default function CoursePage() {
                             )}
                             {predictions && (
                               <td className="px-3 py-2.5 text-right">
-                                {pred?.value_bet ? (
-                                  <div className="flex flex-col items-end gap-0.5">
-                                    <EVBadge ev={pred.value_bet.ev_max} />
-                                    <span className="text-[10px]">{etoiles(pred.value_bet.niveau)}</span>
-                                  </div>
-                                ) : "—"}
+                                {(() => {
+                                  if (!pred) return <span className="text-muted-foreground">—</span>;
+                                  if (pred.value_bet) return (
+                                    <div className="flex flex-col items-end gap-0.5">
+                                      <EVBadge ev={pred.value_bet.ev_max} />
+                                      <span className="text-[10px]">{etoiles(pred.value_bet.niveau)}</span>
+                                    </div>
+                                  );
+                                  // Espérance pour TOUS : cote × proba victoire − 1 (gain moyen pour 1€).
+                                  if (cote && cote > 1 && pred.proba_top1 > 0) {
+                                    const ev = cote * pred.proba_top1 - 1;
+                                    return (
+                                      <span className={cn("text-xs font-mono font-semibold tabular-nums",
+                                        ev >= 0.05 ? "text-brand-emerald" : ev >= -0.2 ? "text-muted-foreground" : "text-muted-foreground/50")}>
+                                        {ev >= 0 ? "+" : ""}{(ev * 100).toFixed(0)}%
+                                      </span>
+                                    );
+                                  }
+                                  return <span className="text-muted-foreground">—</span>;
+                                })()}
                               </td>
                             )}
                           </tr>
