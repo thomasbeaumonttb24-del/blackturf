@@ -945,6 +945,8 @@ async def compute_features_for_participation(
         "entraineur_hippo_winrate": float(entraineur_hippo_winrate),
         "trainer_prep_score": float(trainer_prep_score),
         "allocation_per_kg": float(np.clip(allocation_per_kg, 0.0, 5000.0)),
+        # Poids porté (kg) — signal handicap direct (plus de poids = pénalisé).
+        "poids_porte": float(poids) if poids else 0.0,
     }
 
     # ── W. Field dynamics — concentration, outsider density ────────────────

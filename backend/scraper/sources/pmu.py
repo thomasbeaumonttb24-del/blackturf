@@ -32,6 +32,22 @@ def make_course_id(date_ddmmyyyy: str, reunion_id, course_num) -> str:
     """
     return f"{date_ddmmyyyy}R{reunion_id}C{course_num}"
 
+
+def _first_poids(p: dict):
+    """Poids porté en kg depuis le PMU (poidsConditionMonte/poidsJockey/handicapPoids).
+    handicapPoids est en décigrammes (560 = 56,0 kg). On normalise : toute valeur
+    > 120 est en décigrammes → /10 ; sinon déjà en kg. None si absent."""
+    for key in ("poidsConditionMonte", "poidsJockey", "handicapPoids"):
+        v = p.get(key)
+        if not v:
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        return round(v / 10.0, 1) if v > 120 else round(v, 1)
+    return None
+
 DISCIPLINE_MAP = {
     "PLAT": "Plat",
     "TROT_ATTELE": "Attelé",
@@ -501,7 +517,10 @@ class PmuScraper(BaseScraper):
                 proprietaire=p.get("proprietaire"),
                 age=p.get("age"),
                 sexe=p.get("sexe"),
-                poids=p.get("poidsConditionMonte") or p.get("poidsJockey"),
+                # Poids porté (kg). Selon le type de course le PMU renseigne soit
+                # poidsConditionMonte/poidsJockey, soit handicapPoids (en décigrammes,
+                # ex. 560 = 56,0 kg → /10). On retombe sur le 1er disponible.
+                poids=_first_poids(p),
                 decharge=p.get("handicapPoids"),
                 musique=p.get("musique"),
                 nb_victoires=p.get("nombreVictoires"),
