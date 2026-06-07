@@ -493,6 +493,7 @@ async def get_resultats(course_id: str, db: AsyncSession = Depends(get_db)):
         "course_id": course_id,
         "classement": res.classement,
         "rapports": res.rapports,
+        "rapports_detail": res.rapports_detail,      # détail PMU complet par combinaison
         "temps_gagnant": res.temps_gagnant,
         "incidents": res.incidents,
         "commentaire": res.commentaire,              # narratif post-course PMU/GENY

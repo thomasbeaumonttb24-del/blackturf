@@ -236,6 +236,7 @@ class ResultatScrape:
     course_id: str
     ordre_arrivee: list  # [{"numero": 1, "nom": "...", "position": 1, "temps": "..."}]
     rapports: dict  # {"gagnant": 4.5, "place": 2.1, "couple": 12.3, ...}
+    rapports_detail: Optional[dict] = None  # {type: [{combinaison, rapport}, …]} (détail PMU complet)
     temps_gagnant: Optional[str] = None
     incidents: Optional[str] = None
     commentaire: Optional[str] = None      # commentaireApresCourse.texte (narratif PMU/GENY)

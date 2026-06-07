@@ -457,6 +457,7 @@ async def save_resultat_to_db(session: AsyncSession, resultat: ResultatScrape) -
         course_id=resultat.course_id,
         classement=resultat.ordre_arrivee,
         rapports=resultat.rapports,
+        rapports_detail=getattr(resultat, "rapports_detail", None),
         temps_gagnant=resultat.temps_gagnant,
         incidents=resultat.incidents,
         commentaire=getattr(resultat, "commentaire", None),
@@ -466,6 +467,7 @@ async def save_resultat_to_db(session: AsyncSession, resultat: ResultatScrape) -
         set_={
             "classement": resultat.ordre_arrivee,
             "rapports": resultat.rapports,
+            "rapports_detail": getattr(resultat, "rapports_detail", None),
             "commentaire": getattr(resultat, "commentaire", None),
             "duree_course": getattr(resultat, "duree_course", None),
         },

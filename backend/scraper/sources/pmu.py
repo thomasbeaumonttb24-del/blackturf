@@ -323,7 +323,14 @@ class PmuScraper(BaseScraper):
         ordre.sort(key=lambda x: x["position"])
 
         # 2) Rapports (dividendes) via /rapports-definitifs (liste de typePari)
+        # On capture TOUT le détail PUBLIÉ : chaque type a une liste de rapports avec
+        # une `combinaison` (cheval pour le Simple Placé, combo pour 2sur4/Couplé…) et
+        # le dividende "pour 1€ misé". On garde :
+        #   - rapports        : {type: 1er rapport}  (rétro-compatibilité / agrégat)
+        #   - rapports_detail : {type: [{combinaison, rapport}, …]}  (détail réel complet)
+        # Aucune valeur inventée : seulement ce que le PMU publie.
         rapports = {}
+        rapports_detail = {}
         try:
             rd = await self._fetch_json(f"{base_rc}/rapports-definitifs?specialisation=INTERNET")
             if isinstance(rd, list):
@@ -332,10 +339,19 @@ class PmuScraper(BaseScraper):
                     raps = item.get("rapports") or []
                     if not type_pari or not raps:
                         continue
-                    # dividende exprimé "pour un euro" en centimes → euros
-                    div = raps[0].get("dividendePourUnEuro") or raps[0].get("dividende")
-                    if div:
-                        rapports[type_pari] = round(div / 100, 2)
+                    detail = []
+                    for rp in raps:
+                        div = rp.get("dividendePourUnEuro") or rp.get("dividende")
+                        if not div:
+                            continue
+                        detail.append({
+                            "combinaison": str(rp.get("combinaison") or "").strip() or None,
+                            "rapport": round(div / 100, 2),
+                        })
+                    if not detail:
+                        continue
+                    rapports_detail[type_pari] = detail
+                    rapports[type_pari] = detail[0]["rapport"]  # agrégat (1er) pour compat
         except Exception as e:
             log.warning("pmu.rapports_dividendes_skip", course_id=c_id, error=str(e)[:120])
 
@@ -359,6 +375,7 @@ class PmuScraper(BaseScraper):
             course_id=c_id,
             ordre_arrivee=ordre,
             rapports=rapports,
+            rapports_detail=rapports_detail or None,
             temps_gagnant=str(ordre[0]["temps"]) if ordre and ordre[0].get("temps") is not None else None,
             incidents=None,
             commentaire=commentaire,

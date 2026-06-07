@@ -440,7 +440,10 @@ class Resultat(Base):
 
     course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), primary_key=True)
     classement: Mapped[dict] = mapped_column(JSON)  # [{numero, cheval, position, temps, ...}]
-    rapports: Mapped[dict | None] = mapped_column(JSON)  # {gagnant, place, couple, ...}
+    rapports: Mapped[dict | None] = mapped_column(JSON)  # {gagnant, place, couple, ...} (agrégat)
+    # Détail complet PUBLIÉ par le PMU : {type: [{combinaison, rapport}, …]} — ex.
+    # Simple Placé par cheval, 2sur4 par combinaison. Aucune valeur inventée.
+    rapports_detail: Mapped[dict | None] = mapped_column(JSON)
     temps_gagnant: Mapped[str | None] = mapped_column(String(20))
     incidents: Mapped[str | None] = mapped_column(Text)
     commentaire: Mapped[str | None] = mapped_column(Text)       # narratif post-course (PMU/GENY)

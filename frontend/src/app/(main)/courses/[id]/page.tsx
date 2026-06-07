@@ -768,6 +768,7 @@ function ResultatsSection({ resultats, partants }: {
   resultats: {
     classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
     rapports: Record<string, number> | null;
+    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number }>> | null;
     temps_gagnant: string | null;
     commentaire: string | null;
     duree_course: number | null;
@@ -840,37 +841,90 @@ function ResultatsSection({ resultats, partants }: {
         </table>
       </div>
 
-      {/* Rapports PMU — tous les gains de combinaisons */}
-      {rapportsTries.length > 0 && (
-        <div className="border-t border-brand-emerald/20 px-4 py-3">
-          <p className="mb-2 text-xs font-semibold text-muted-foreground">Rapports PMU · gains pour 1€ misé</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {rapportsTries.map(([k, v]) => {
-              const meta = RAPPORT_META[k];
-              const abbr = meta?.abbr ?? _rapportAbbr(k);
-              const color = meta?.color ?? "#6B7280";
-              const label = meta?.label ?? k.replace(/^e_/, "").replace(/_/g, " ");
-              return (
-                <div key={k} className="flex items-center gap-2 rounded-lg border border-border bg-white px-2 py-1.5">
-                  <span
-                    className="flex h-6 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded px-1 text-[10px] font-bold tracking-tight text-white"
-                    style={{ background: color }}
-                  >
-                    {abbr}
-                  </span>
-                  <span className="flex-1 truncate text-xs text-muted-foreground capitalize">{label}</span>
-                  <span className="font-bold tabular-nums text-brand-emerald">{Number(v).toFixed(2)}€</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Rapports PMU — détail RÉEL complet publié (par cheval / par combinaison) */}
+      {(() => {
+        const nomByNum: Record<string, string> = {};
+        for (const c of resultats.classement || []) nomByNum[String(c.numero)] = c.nom;
+        // Formate une combinaison : "8" → "N°8 EL TRIPLO" ; "10-14" → "N°10 + N°14".
+        const fmtCombo = (combo: string | null): string => {
+          if (!combo) return "";
+          const parts = combo.split(/[-/]/).map((s) => s.trim()).filter(Boolean);
+          return parts.map((n) => nomByNum[n] ? `N°${n} ${nomByNum[n]}` : `N°${n}`).join(" + ");
+        };
+        const detail = resultats.rapports_detail;
+        const detailTypes = detail
+          ? Object.entries(detail)
+              .filter(([, arr]) => Array.isArray(arr) && arr.length > 0)
+              .sort((a, b) => (RAPPORT_META[a[0]]?.ordre ?? 99) - (RAPPORT_META[b[0]]?.ordre ?? 99))
+          : [];
+
+        if (detailTypes.length > 0) {
+          return (
+            <div className="border-t border-brand-emerald/20 px-4 py-3">
+              <p className="mb-2.5 text-xs font-semibold text-muted-foreground">Rapports PMU officiels · gains pour 1&nbsp;€ misé</p>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                {detailTypes.map(([k, arr]) => {
+                  const meta = RAPPORT_META[k];
+                  const abbr = meta?.abbr ?? _rapportAbbr(k);
+                  const color = meta?.color ?? "#6B7280";
+                  const label = meta?.label ?? k.replace(/^e_/, "").replace(/_/g, " ");
+                  // Placé / Gagnant : 1 ligne par cheval. Combos : on limite l'affichage.
+                  const isPlaceOrWin = k.includes("simple");
+                  const rows = isPlaceOrWin ? arr : arr.slice(0, 6);
+                  return (
+                    <div key={k} className="rounded-lg border border-border bg-white p-2.5">
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <span className="flex h-5 min-w-[1.6rem] items-center justify-center rounded px-1 text-[10px] font-bold text-white" style={{ background: color }}>{abbr}</span>
+                        <span className="text-xs font-semibold capitalize">{label}</span>
+                      </div>
+                      <div className="space-y-0.5">
+                        {rows.map((r, i) => (
+                          <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
+                            <span className="truncate text-muted-foreground">{fmtCombo(r.combinaison) || "—"}</span>
+                            <span className="font-bold tabular-nums text-brand-emerald whitespace-nowrap">{r.rapport.toFixed(2)} €</span>
+                          </div>
+                        ))}
+                        {!isPlaceOrWin && arr.length > rows.length && (
+                          <p className="text-[10px] text-muted-foreground/60">+ {arr.length - rows.length} autres combinaisons gagnantes</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
+        // Fallback : agrégat (résultats anciens sans détail re-scrapé)
+        if (rapportsTries.length > 0) {
+          return (
+            <div className="border-t border-brand-emerald/20 px-4 py-3">
+              <p className="mb-2 text-xs font-semibold text-muted-foreground">Rapports PMU · gains pour 1&nbsp;€ misé</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                {rapportsTries.map(([k, v]) => {
+                  const meta = RAPPORT_META[k];
+                  const abbr = meta?.abbr ?? _rapportAbbr(k);
+                  const color = meta?.color ?? "#6B7280";
+                  const label = meta?.label ?? k.replace(/^e_/, "").replace(/_/g, " ");
+                  return (
+                    <div key={k} className="flex items-center gap-2 rounded-lg border border-border bg-white px-2 py-1.5">
+                      <span className="flex h-6 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded px-1 text-[10px] font-bold tracking-tight text-white" style={{ background: color }}>{abbr}</span>
+                      <span className="flex-1 truncate text-xs text-muted-foreground capitalize">{label}</span>
+                      <span className="font-bold tabular-nums text-brand-emerald">{Number(v).toFixed(2)} €</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       {/* Commentaire narratif post-course */}
       {resultats.commentaire && (
         <div className="border-t border-brand-emerald/20 px-4 py-3 text-sm leading-relaxed text-foreground">
-          <p className="mb-1 text-xs font-semibold text-muted-foreground">📝 Analyse de course</p>
+          <p className="mb-1 text-xs font-semibold text-muted-foreground">Analyse de course</p>
           {resultats.commentaire}
         </div>
       )}
@@ -1449,6 +1503,7 @@ export default function CoursePage() {
   const [resultats, setResultats] = useState<{
     classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
     rapports: Record<string, number> | null;
+    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number }>> | null;
     temps_gagnant: string | null;
     commentaire: string | null;
     duree_course: number | null;
