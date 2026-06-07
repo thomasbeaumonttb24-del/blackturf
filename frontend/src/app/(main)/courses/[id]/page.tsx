@@ -1099,7 +1099,7 @@ interface BilanResp {
   montant: number;
   bilan: BilanData;
   bilans_profils?: BilanProfil[];
-  comparaison: { predicted_top3: number[]; actual_top3: number[]; gagnant_reel: number | null; rang_predit_gagnant: number | null; overlap_top3: number; modele_a_vu_gagnant: boolean };
+  comparaison: { predicted_top3: number[]; predicted_top5?: number[]; actual_top3: number[]; actual_top5?: number[]; gagnant_reel: number | null; rang_predit_gagnant: number | null; overlap_top3: number; modele_a_vu_gagnant: boolean };
   verdict: "gagnant" | "perdant" | "en_attente";
 }
 
@@ -1325,36 +1325,65 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
         </div>
       </div>
 
-      {/* Comparaison prono vs réel (commune à tous les profils) */}
-      <div className="mb-3 grid gap-2 sm:grid-cols-2 text-xs">
-        <div className="rounded-lg bg-white/70 p-2.5">
-          <p className="mb-1 font-semibold text-muted-foreground">Top-3 pronostiqué (modèle)</p>
-          <div className="flex gap-1.5">
-            {cmp.predicted_top3.map((n) => (
-              <span key={n} className="inline-flex items-center rounded-md bg-blue-50 ring-1 ring-blue-200 px-1.5 py-0.5 font-bold">N°{n}</span>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-lg bg-white/70 p-2.5">
-          <p className="mb-1 font-semibold text-muted-foreground">Arrivée réelle (top-3)</p>
-          <div className="flex gap-1.5">
-            {cmp.actual_top3.map((n, i) => (
-              <span key={n} className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold ring-1",
-                cmp.predicted_top3.includes(n) ? "bg-emerald-50 ring-emerald-300 text-emerald-700" : "bg-gray-50 ring-gray-200")}>
-                <span className="text-[9px] text-muted-foreground">{i + 1}.</span>N°{n}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-      <p className="mb-3 text-xs text-muted-foreground">
-        {cmp.gagnant_reel != null && (
-          <>Vainqueur N°{cmp.gagnant_reel} — {cmp.modele_a_vu_gagnant
-            ? <span className="text-emerald-700 font-medium">vu par le modèle (rang {cmp.rang_predit_gagnant})</span>
-            : <span className="text-rose-700 font-medium">manqué par le modèle{cmp.rang_predit_gagnant ? ` (rang ${cmp.rang_predit_gagnant})` : ""}</span>}
-          {" · "}{cmp.overlap_top3}/3 chevaux du top-3 trouvés</>
-        )}
-      </p>
+      {/* Comparaison prono vs réel — top-5 (couvre 2sur4 / Quarté / Quinté) */}
+      {(() => {
+        const predN = cmp.predicted_top5 ?? cmp.predicted_top3;
+        const realN = cmp.actual_top5 ?? cmp.actual_top3;
+        const realSet = new Set(realN);
+        const predSet = new Set(predN);
+        const overlap5 = predN.filter((n) => realSet.has(n)).length;
+        return (
+          <>
+            <div className="mb-2 grid gap-2 sm:grid-cols-2 text-xs">
+              <div className="rounded-lg bg-white/70 ring-1 ring-border/60 p-2.5">
+                <p className="mb-1.5 font-semibold text-muted-foreground">Top-5 pronostiqué (modèle)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {predN.map((n, i) => {
+                    const hit = realSet.has(n);
+                    return (
+                      <span key={n} className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold ring-1 tabular-nums",
+                        hit ? "bg-emerald-50 ring-emerald-300 text-emerald-700" : "bg-blue-50 ring-blue-200 text-blue-700")}>
+                        <span className="text-[9px] font-normal text-muted-foreground">{i + 1}</span>N°{n}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="rounded-lg bg-white/70 ring-1 ring-border/60 p-2.5">
+                <p className="mb-1.5 font-semibold text-muted-foreground">Arrivée réelle (top-5)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {realN.map((n, i) => {
+                    const winner = i === 0;
+                    const seen = predSet.has(n);
+                    return (
+                      <span key={n} className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold ring-1 tabular-nums",
+                        winner ? "bg-amber-100 ring-amber-400 text-amber-800"
+                          : seen ? "bg-emerald-50 ring-emerald-300 text-emerald-700"
+                          : "bg-gray-50 ring-gray-200 text-gray-600")}>
+                        <span className="text-[9px] font-normal text-muted-foreground">{i + 1}.</span>N°{n}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            {/* Légende + bilan modèle */}
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-300 ring-1 ring-amber-400" />Vainqueur</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-200 ring-1 ring-emerald-300" />Trouvé par le modèle</span>
+              {cmp.gagnant_reel != null && (
+                <span className="text-muted-foreground">
+                  · Vainqueur N°{cmp.gagnant_reel}{" "}
+                  {cmp.modele_a_vu_gagnant
+                    ? <span className="text-emerald-700 font-medium">vu (rang {cmp.rang_predit_gagnant})</span>
+                    : <span className="text-rose-700 font-medium">manqué{cmp.rang_predit_gagnant ? ` (rang ${cmp.rang_predit_gagnant})` : ""}</span>}
+                  {" · "}<span className="font-medium text-gray-700">{overlap5}/5</span> chevaux trouvés
+                </span>
+              )}
+            </div>
+          </>
+        );
+      })()}
 
       {/* Détail des paris du profil sélectionné */}
       <BilanDetail bilan={bilan} />

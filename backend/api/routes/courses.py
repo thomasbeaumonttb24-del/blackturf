@@ -850,17 +850,22 @@ async def get_bilan_pronostic(
             pos_by_num[int(e["numero"])] = int(e["position"]) if e.get("position") else None
         except (TypeError, ValueError, KeyError):
             continue
-    actual_top3 = [int(e["numero"]) for e in sorted(
+    # Arrivée officielle ordonnée — top-5 pour pouvoir justifier TOUS les types de
+    # paris (2sur4/Quarté = 4 chevaux, Quinté = 5), pas seulement le top-3.
+    arrivee_ordonnee = [int(e["numero"]) for e in sorted(
         [x for x in resultat.classement if x.get("position")],
         key=lambda x: x["position"]
-    )[:3]]
+    )]
+    actual_top5 = arrivee_ordonnee[:5]
+    actual_top3 = arrivee_ordonnee[:3]
     gagnant_reel = actual_top3[0] if actual_top3 else None
 
-    # Top-3 prédit par le modèle — ordonné par PROBABILITÉ (proba_top1 puis top3),
+    # Top prédit par le modèle — ordonné par PROBABILITÉ (proba_top1 puis top3),
     # c.-à-d. la même base que le plan de mise (cohérence bilan ↔ paris).
     predicted = [p for p in preds if not p.get("non_partant")]
     predicted.sort(key=lambda p: (-(p.get("proba_top1") or 0.0), -(p.get("proba_top3") or 0.0)))
     predicted_top3 = [p["numero"] for p in predicted[:3]]
+    predicted_top5 = [p["numero"] for p in predicted[:5]]
     rang_predit_gagnant = None
     if gagnant_reel is not None:
         for idx, p in enumerate(predicted, start=1):
@@ -885,7 +890,9 @@ async def get_bilan_pronostic(
         "bilans_profils": bilans_profils,
         "comparaison": {
             "predicted_top3": predicted_top3,
+            "predicted_top5": predicted_top5,
             "actual_top3": actual_top3,
+            "actual_top5": actual_top5,
             "gagnant_reel": gagnant_reel,
             "rang_predit_gagnant": rang_predit_gagnant,
             "overlap_top3": overlap_top3,
