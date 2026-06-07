@@ -196,8 +196,8 @@ function CourseRow({ course, reunionNum, vbCount }: { course: CourseSummary; reu
             {course.pool_total_eur != null && course.pool_total_eur > 0 && (
               <>
                 <span className="text-gray-200">·</span>
-                <span className="text-violet-600 font-medium tabular-nums">
-                  Cagnotte {course.pool_total_eur >= 1_000_000
+                <span className="text-violet-600 font-medium tabular-nums" title="Masse des enjeux PMU misés sur cette course (pas la dotation)">
+                  Enjeux {course.pool_total_eur >= 1_000_000
                     ? `${(course.pool_total_eur / 1_000_000).toFixed(1)}M€`
                     : `${Math.round(course.pool_total_eur / 1_000)}k€`}
                 </span>
