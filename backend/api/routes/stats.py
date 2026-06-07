@@ -160,21 +160,31 @@ async def equity_curve(
         eq = cached["equity"]
         profils_series = {k: v for k, v in eq.items() if v}
         if profils_series:
-            START = 1000.0
-            default_pts = profils_series.get("equilibre") or next(iter(profils_series.values()))
-            gain = round((default_pts[-1]["bankroll"] - START), 2) if default_pts else 0.0
-            roi_by_profil = {}
+            # Résumé RÉEL par profil (misé / gagné / net / ROI) issu du backtest.
+            summ = {p["profil"]: p for p in (cached.get("profils") or [])}
+            profils_resume = {}
             for k, pts in profils_series.items():
-                g = pts[-1]["bankroll"] - START if pts else 0.0
-                roi_by_profil[k] = round(g / (len(pts) * (cached.get("mise_par_course") or 10)) * 100, 1) if pts else None
+                s = summ.get(k, {})
+                mise_tot = s.get("mise_totale")
+                gain_tot = s.get("gain_total")
+                net = s.get("gain_net")
+                profils_resume[k] = {
+                    "mise_totale": mise_tot,
+                    "gain_total": gain_tot,
+                    "gain_net": net,
+                    "roi": s.get("roi"),
+                    "roi_typique": s.get("roi_winsorise"),
+                    "nb_courses": s.get("nb_courses"),
+                }
+            default_k = "equilibre" if "equilibre" in profils_series else next(iter(profils_series))
             return {
                 "is_real": True,
                 "source": "plan_profils",
                 "mise_par_course": cached.get("mise_par_course", 10),
-                "points": default_pts,                 # rétro-compat : profil par défaut
-                "profils": profils_series,             # une courbe par profil
-                "roi_by_profil": roi_by_profil,
-                "gain_net": gain,
+                "points": profils_series[default_k],   # rétro-compat : courbe P&L défaut
+                "profils": profils_series,             # courbe P&L cumulé par profil
+                "profils_resume": profils_resume,      # misé / gagné / net / ROI réels
+                "gain_net": (profils_resume.get(default_k) or {}).get("gain_net"),
             }
 
     # ── Repli : ancien backtest value bets ★★★+ (si profils pas encore calculés) ──

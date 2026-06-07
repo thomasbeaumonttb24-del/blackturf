@@ -112,11 +112,14 @@ export default function DashboardPage() {
   // Source = nos plans de mise 10€ PAR PROFIL (equity.profils) ; repli sur points.
   const eqProfilsSeries: Record<string, Array<{ date: string; bankroll: number }>> | undefined = equity?.profils;
   const planBased = !!(eqProfilsSeries && Object.keys(eqProfilsSeries).length);
+  const eqResume: Record<string, { mise_totale: number; gain_total: number; gain_net: number; roi: number | null; roi_typique: number | null; nb_courses: number }> | undefined = equity?.profils_resume;
+  const curResume = planBased ? eqResume?.[eqProfil] : undefined;
   const equityPoints: Array<{ date: string; bankroll: number }> =
     (planBased ? eqProfilsSeries[eqProfil] : equity?.points) ?? equity?.points ?? [];
   const lastEquity = equityPoints.at(-1)?.bankroll ?? 0;
   const firstEquity = equityPoints[0]?.bankroll ?? 0;
-  const equityGain = equityPoints.length > 1 ? lastEquity - firstEquity : 0;
+  // P&L cumulé réel : la courbe part de 0 → dernier point = net réel.
+  const equityGain = curResume ? curResume.gain_net : (equityPoints.length > 1 ? lastEquity - firstEquity : 0);
 
   const roi = bankrollStats?.roi_global ?? 0;
   const roiPositive = roi >= 0;
@@ -439,7 +442,7 @@ export default function DashboardPage() {
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
                   {planBased
-                    ? "Plan de mise IA 10€/course par profil, joué sur chaque course du programme — distinct de votre capital"
+                    ? "P&L RÉEL — plan de mise 10€/course par profil, réglé aux vrais rapports PMU"
                     : "Simulation 10€/pari de valeur ★★★+ sur l’historique — distinct de votre capital"}
                 </p>
                 {/* Sélecteur de profil (chaque profil = sa propre courbe) */}
@@ -460,9 +463,23 @@ export default function DashboardPage() {
                   </div>
                 )}
                 {equityPoints.length > 1 && (
-                  <div className={`text-lg font-bold tabular-nums mt-1 ${equityGain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {equityGain >= 0 ? "+" : ""}€{equityGain.toFixed(0)}
-                    <span className="text-xs font-normal text-muted-foreground ml-2">gain simulé · forte variance</span>
+                  <div className="mt-1">
+                    <span className={`text-lg font-bold tabular-nums ${equityGain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {equityGain >= 0 ? "+" : ""}€{equityGain.toFixed(0)}
+                    </span>
+                    <span className="text-xs font-normal text-muted-foreground ml-2">net réel · forte variance</span>
+                    {curResume && (
+                      <div className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
+                        Misé <span className="font-semibold text-foreground">{curResume.mise_totale}€</span>
+                        {" · "}Gagné <span className="font-semibold text-foreground">{curResume.gain_total}€</span>
+                        {" · "}ROI <span className={`font-semibold ${(curResume.roi ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                          {(curResume.roi ?? 0) >= 0 ? "+" : ""}{curResume.roi}%</span>
+                        {curResume.roi_typique != null && (
+                          <span className="text-muted-foreground/70"> (typique {curResume.roi_typique >= 0 ? "+" : ""}{curResume.roi_typique}%)</span>
+                        )}
+                        {curResume.nb_courses != null && <span className="text-muted-foreground/60"> · {curResume.nb_courses} courses</span>}
+                      </div>
+                    )}
                   </div>
                 )}
               </CardHeader>
@@ -485,7 +502,7 @@ export default function DashboardPage() {
                       <Tooltip
                         cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
                         contentStyle={{ background: "#ffffff", border: "1px solid #E5E7EB", borderRadius: 12, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}
-                        formatter={(v: number) => [`€${v.toFixed(0)}`, "Capital simulé"]}
+                        formatter={(v: number) => [`${v >= 0 ? "+" : ""}€${v.toFixed(0)}`, planBased ? "P&L cumulé" : "Capital simulé"]}
                         labelFormatter={(l) => l}
                       />
                       <Area

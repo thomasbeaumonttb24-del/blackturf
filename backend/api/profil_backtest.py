@@ -56,9 +56,10 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
     agg_type = collections.defaultdict(lambda: {"mise": 0.0, "gw": 0.0, "n": 0, "win": 0})
     palier = _palier(MISE)
 
-    # Courbe d'équité CHRONOLOGIQUE par profil : capital cumulé en jouant le plan de
-    # mise 10€ de ce profil sur chaque course du programme, réglé au réel. Start 1000€.
-    EQUITY_START = 1000.0
+    # Courbe de P&L RÉEL CHRONOLOGIQUE par profil : profit/perte CUMULÉ (départ 0€)
+    # en jouant le plan de mise 10€ de ce profil sur chaque course du programme,
+    # réglé au RÉEL (vrais rapports PMU). La courbe = (gains réels − mises réelles).
+    EQUITY_START = 0.0
     equity_bk = {k: EQUITY_START for k, _ in PROFILS}
     equity = {k: [] for k, _ in PROFILS}
     courses = sorted(courses, key=lambda c: c.get("date") or "")   # chronologique
