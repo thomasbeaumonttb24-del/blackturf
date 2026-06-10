@@ -54,7 +54,7 @@ export function Footer() {
               </span>
             </div>
             <p className="text-xs text-gray-500 leading-relaxed max-w-xs">
-              Le terminal IA des parieurs gagnants.<br />
+              Le terminal algorithmique des parieurs gagnants.<br />
               Analyses propulsées par XGBoost + LightGBM + CatBoost.
             </p>
 
