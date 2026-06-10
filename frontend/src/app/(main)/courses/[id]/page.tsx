@@ -1806,14 +1806,74 @@ export default function CoursePage() {
             )}
           </div>
 
-          {/* Confidence meter */}
-          {confGlobal !== null && course.statut !== "termine" && (
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground mb-1">Score IA</p>
-              <ConfidenceMeter score={confGlobal} size="md" />
-            </div>
-          )}
         </div>
+
+        {/* ── STAT HERO : chiffres clés en avant (look "salle de marché") ── */}
+        {course.statut !== "termine" && predictions && predictions.length > 0 && (() => {
+          const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];
+          const favCote = liveCoteMap[fav.numero] ?? fav.cote_pmu;
+          return (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mt-4 pt-4 border-t border-border/60">
+              {/* Favori IA */}
+              <div className="rounded-xl border border-brand-gold/30 bg-gradient-to-br from-brand-gold/[0.08] to-transparent p-3">
+                <p className="text-overline text-muted-foreground">Favori IA</p>
+                <p className="mt-0.5 text-[13px] font-bold truncate">N°{fav.numero} {fav.nom_cheval}</p>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold tabular-nums text-brand-gold leading-none">{Math.round(fav.proba_top1 * 100)}%</span>
+                  <span className="text-[11px] text-muted-foreground">victoire</span>
+                </div>
+                {favCote ? <p className="text-[11px] text-muted-foreground mt-0.5">cote {formatCote(favCote)}</p> : null}
+              </div>
+              {/* Meilleure valeur détectée */}
+              <div className={cn("rounded-xl border p-3",
+                topVB ? "border-brand-emerald/30 bg-gradient-to-br from-brand-emerald/[0.08] to-transparent"
+                      : "border-border bg-muted/20")}>
+                <p className="text-overline text-muted-foreground">Pari de valeur</p>
+                {topVB ? (
+                  <>
+                    <p className="mt-0.5 text-[13px] font-bold truncate">N°{topVB.numero} {topVB.nom_cheval}</p>
+                    <div className="mt-1 flex items-baseline gap-1.5">
+                      <span className="text-2xl font-bold tabular-nums text-brand-emerald leading-none">
+                        +{Math.round(topVB.value_bet!.ev_max * 100)}%
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">espérance</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{etoiles(topVB.value_bet!.niveau)}</p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">Aucune valeur franche sur cette course.</p>
+                )}
+              </div>
+              {/* Score de confiance IA */}
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-overline text-muted-foreground">Confiance IA</p>
+                {confGlobal !== null ? (
+                  <>
+                    <div className="mt-0.5 flex items-baseline gap-1.5">
+                      <span className={cn("text-2xl font-bold tabular-nums leading-none",
+                        confGlobal >= 70 ? "text-brand-emerald" : confGlobal >= 50 ? "text-brand-gold" : "text-brand-red")}>
+                        {Math.round(confGlobal)}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">/ 100</span>
+                    </div>
+                    <div className="mt-2"><ConfidenceMeter score={confGlobal} size="sm" /></div>
+                  </>
+                ) : <p className="mt-2 text-xs text-muted-foreground">—</p>}
+              </div>
+              {/* Champ */}
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-overline text-muted-foreground">Le champ</p>
+                <div className="mt-0.5 flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold tabular-nums leading-none">{course.nb_partants}</span>
+                  <span className="text-[11px] text-muted-foreground">partants</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {course.nb_partants >= 14 ? "champ ouvert" : course.nb_partants >= 10 ? "champ moyen" : "petit champ"}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Résultats officiels (course terminée) */}
         {course.statut === "termine" && resultats && (
@@ -2335,21 +2395,22 @@ export default function CoursePage() {
             </div>
           )}
 
-          {/* ── Comparaison multi-bookmakers ── */}
+          {/* ── Comparaison multi-bookmakers (repliable — désencombre) ── */}
           {course.partants.some((p) => p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_betfair_exchange) && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-0.5">
+            <details className="group rounded-xl border border-border bg-card/40">
+              <summary className="cursor-pointer list-none flex items-center gap-2 px-4 py-3 select-none">
                 <BarChart2 className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-sm font-semibold">Comparaison des cotes</h3>
-                <span className="text-xs text-muted-foreground">
-                  {course.partants.filter(p => !p.non_partant)[0]?.nb_sources ?? 1} sources actives
+                <span className="text-xs text-muted-foreground hidden sm:inline">
+                  {course.partants.filter(p => !p.non_partant)[0]?.nb_sources ?? 1} sources
                 </span>
-                <span className="ml-auto text-[10px] text-emerald-600 font-medium">
-                  Vert = meilleure cote disponible
-                </span>
+                <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="px-2 pb-3">
+                <p className="px-2 pb-2 text-[10px] text-emerald-600 font-medium">Vert = meilleure cote disponible</p>
+                <ComparaisonCotes partants={course.partants} />
               </div>
-              <ComparaisonCotes partants={course.partants} />
-            </div>
+            </details>
           )}
 
           {/* ── Pronostics presse ── */}
@@ -2357,7 +2418,7 @@ export default function CoursePage() {
             <PronosticsPresse pronostics={course.pronostics_presse} />
           )}
 
-          {/* ── Confrontations directes (head-to-head depuis l'historique) ── */}
+          {/* ── Confrontations directes (head-to-head historique) ── */}
           <ConfrontationsSection courseId={id} />
 
           {course.statut !== "termine" && (
