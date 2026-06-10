@@ -1023,10 +1023,14 @@ async def stats_palmares_gagnants(
             "taux_courses_beneficiaires": round(a["courses_benef"] / nc * 100, 1) if nc else None,
         })
 
+    # Top 30 des plus gros gains (par bénéfice net du pari), toutes courses.
+    top_gains = sorted(gagnants, key=lambda x: x["benefice"], reverse=True)[:30]
+
     return {
         # Liste = 100 paris gagnants les plus récents (le résumé par profil + les
         # totaux ci-dessous portent eux sur TOUTES les courses analysées).
         "gagnants": gagnants[:100],
+        "top_gains": top_gains,
         "n": len(gagnants),
         "n_courses": len({x["course_id"] for x in gagnants}),
         "total_gain": total_gain,

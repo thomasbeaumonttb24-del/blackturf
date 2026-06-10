@@ -142,7 +142,7 @@ export default function TrackRecordPage() {
 
   // Paris RÉELLEMENT gagnés par l'algorithme, par profil (pronos émis réglés)
   const { data: gagnantsData } = useSWR<{
-    gagnants: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
+    gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
     profils?: Array<{ profil: string; label: string; nb_courses: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
     updated_at?: string;
   }>(
@@ -454,6 +454,62 @@ export default function TrackRecordPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* ── Top 30 des plus gros gains ──────────────────────────────────── */}
+        {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
+          <Card className="border-brand-gold/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Star className="w-4 h-4 text-brand-gold fill-brand-gold" />
+                Top 30 des plus gros gains
+              </CardTitle>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Les 30 paris générés ayant rapporté le plus gros bénéfice — réels, réglés aux rapports PMU.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[600px]">
+                  <thead>
+                    <tr className="border-b border-border/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <th className="text-left py-2 font-medium w-8">#</th>
+                      <th className="text-left py-2 font-medium">Date</th>
+                      <th className="text-left py-2 font-medium">Course</th>
+                      <th className="text-left py-2 font-medium">Pari</th>
+                      <th className="text-right py-2 font-medium">Mise</th>
+                      <th className="text-right py-2 font-medium">Cote</th>
+                      <th className="text-right py-2 font-medium">Bénéfice</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/30">
+                    {gagnantsData.top_gains.map((b, i) => {
+                      const pm = PROFIL_LABELS[b.profil] ?? { label: b.profil, cls: "" };
+                      return (
+                        <tr key={i} className={cn("hover:bg-accent/20 transition-colors", i < 3 && "bg-brand-gold/[0.04]")}>
+                          <td className="py-2.5 font-black text-muted-foreground tabular-nums">{i + 1}</td>
+                          <td className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                            {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                          </td>
+                          <td className="py-2.5">
+                            <Link href={`/courses/${b.course_id}`} className="font-medium hover:text-brand-gold transition-colors">{b.code ?? "—"}</Link>
+                            <span className="block text-[10px] text-muted-foreground truncate max-w-[130px]">{b.hippodrome}</span>
+                          </td>
+                          <td className="py-2.5">
+                            <span className="font-medium">{b.type_pari}</span>
+                            <span className="block text-[10px] text-muted-foreground">{b.chevaux.map((n) => `N°${n}`).join(" + ")} · {pm.label}</span>
+                          </td>
+                          <td className="py-2.5 text-right font-mono tabular-nums text-muted-foreground">{b.mise.toFixed(0)}€</td>
+                          <td className="py-2.5 text-right font-mono tabular-nums">{b.rapport ? `×${b.rapport.toFixed(1)}` : "—"}</td>
+                          <td className="py-2.5 text-right font-mono tabular-nums font-black text-emerald-600">+{b.benefice.toFixed(2)}€</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── Précision par discipline (donnée simple, lisible) ───────────── */}
         <div className="grid grid-cols-1 gap-6">
