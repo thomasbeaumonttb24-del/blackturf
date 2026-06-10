@@ -937,7 +937,7 @@ async def stats_profils(
     if cached:
         return cached
 
-    data = await backtest_profils(db, limit=100, n_sims=3000)
+    data = await backtest_profils(db, limit=400, n_sims=3000)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     # Cache 1h en filet ; surtout invalidé à CHAQUE fin de course
     # (_invalidate_stats_caches) → recalcul immédiat sur données réelles.
@@ -950,38 +950,45 @@ async def stats_palmares_gagnants(
     db: AsyncSession = Depends(get_db),
 ):
     """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — issus des
-    pronostics ÉMIS avant chaque course (profil_run_log) et réglés aux VRAIS
-    rapports PMU. Aucune donnée inventée : seulement des paris réglés gagnants
-    avec rapport publié. Borné aux 100 DERNIÈRES courses réglées. Le palmarès
+    pronostics ÉMIS/rejoués sur TOUTES les courses analysées (profil_run_log),
+    réglés aux VRAIS rapports PMU. Aucune donnée inventée : seulement des paris
+    réglés gagnants avec rapport publié. Résumé par profil = vrais nb de courses
+    + gains nets (paris gagnants ET perdants comptés dans le ROI). Le palmarès
     public prouve l'efficacité des paris générés là-dessus."""
     from sqlalchemy import text as _text
     try:
         rows = (await db.execute(_text("""
-            WITH recent AS (
-                SELECT course_id
-                FROM profil_run_log
-                WHERE statut = 'settled' AND resultat IS NOT NULL
-                GROUP BY course_id
-                ORDER BY MAX(settled_at) DESC NULLS LAST
-                LIMIT 100
-            )
-            SELECT r.profil, r.resultat, r.roi_reel, r.settled_at,
+            SELECT r.profil, r.resultat, r.settled_at,
                    c.hippodrome_nom, c.date_heure, c.course_id, c.numero_reunion, c.numero
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
-              AND r.course_id IN (SELECT course_id FROM recent)
             ORDER BY r.settled_at DESC NULLS LAST
         """))).all()
     except Exception:
-        return {"gagnants": [], "n": 0, "n_courses": 0, "updated_at": datetime.now(timezone.utc).isoformat()}
+        return {"gagnants": [], "n": 0, "n_courses": 0, "profils": [],
+                "updated_at": datetime.now(timezone.utc).isoformat()}
 
+    PROFIL_LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
     gagnants = []
-    for profil, resultat, roi, settled_at, hippo, dh, cid, n_reunion, n_course in rows:
+    # Résumé par profil : compte TOUTES les courses réglées (gagnées + perdues)
+    # pour un ROI honnête, et les courses bénéficiaires.
+    by_profil: dict = {p: {"courses": set(), "mise": 0.0, "gain": 0.0,
+                           "courses_benef": 0, "paris_gagnes": 0} for p in PROFIL_LBL}
+    for profil, resultat, settled_at, hippo, dh, cid, n_reunion, n_course in rows:
         res = resultat if isinstance(resultat, dict) else json.loads(resultat or "{}")
+        agg = by_profil.get(profil)
+        if agg is not None:
+            agg["courses"].add(cid)
+            agg["mise"] += float(res.get("total_mise") or 0)
+            agg["gain"] += float(res.get("total_gain") or 0)
+            if float(res.get("net") or 0) > 0:
+                agg["courses_benef"] += 1
         for pari in res.get("paris", []):
             if pari.get("statut") != "gagne" or pari.get("gain") is None:
                 continue
+            if agg is not None:
+                agg["paris_gagnes"] += 1
             mise = float(pari.get("mise") or 0)
             gain = float(pari.get("gain") or 0)
             gagnants.append({
@@ -1000,11 +1007,28 @@ async def stats_palmares_gagnants(
     gagnants.sort(key=lambda g: g.get("date") or "", reverse=True)
     total_gain = round(sum(x["gain"] for x in gagnants), 2)
     total_mise = round(sum(x["mise"] for x in gagnants), 2)
+
+    profils = []
+    for pk, lbl in PROFIL_LBL.items():
+        a = by_profil[pk]
+        nc = len(a["courses"])
+        profils.append({
+            "profil": pk, "label": lbl,
+            "nb_courses": nc,
+            "mise_totale": round(a["mise"], 2),
+            "gain_total": round(a["gain"], 2),
+            "gain_net": round(a["gain"] - a["mise"], 2),
+            "roi": round((a["gain"] - a["mise"]) / a["mise"] * 100, 1) if a["mise"] > 0 else None,
+            "paris_gagnes": a["paris_gagnes"],
+            "taux_courses_beneficiaires": round(a["courses_benef"] / nc * 100, 1) if nc else None,
+        })
+
     return {
         "gagnants": gagnants,
         "n": len(gagnants),
         "n_courses": len({x["course_id"] for x in gagnants}),
         "total_gain": total_gain,
         "total_benefice": round(total_gain - total_mise, 2),
+        "profils": profils,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

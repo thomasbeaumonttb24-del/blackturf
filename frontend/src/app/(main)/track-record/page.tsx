@@ -201,7 +201,7 @@ export default function TrackRecordPage() {
             </div>
             <p className="mt-3 text-[11px] text-muted-foreground/60 max-w-xl mx-auto">
               Les gains ci-dessous proviennent des paris RÉELLEMENT générés par l&apos;algorithme
-              (par profil), réglés aux rapports PMU officiels sur les 100 dernières courses.
+              (par profil), réglés aux rapports PMU officiels sur toutes les courses analysées.
               Performances passées — aucune garantie de gain futur.
             </p>
             {data.updated_at && (
@@ -361,7 +361,7 @@ export default function TrackRecordPage() {
             </div>
             <p className="text-[11px] text-muted-foreground mt-1">
               Chaque ligne = un pari réellement émis avant la course par un profil, réglé au
-              rapport PMU officiel. 100 dernières courses. Mis à jour à chaque arrivée. Aucune donnée inventée.
+              rapport PMU officiel. Toutes les courses analysées. Mis à jour à chaque arrivée. Aucune donnée inventée.
             </p>
           </CardHeader>
           <CardContent>
@@ -469,77 +469,6 @@ export default function TrackRecordPage() {
             </CardContent>
           </Card>
         </div>
-
-        {/* ── Best predictions ──────────────────── */}
-        <Card className="border-border/60">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Star className="w-4 h-4 text-amber-400" />
-                Les meilleurs pronostics
-              </CardTitle>
-              <span className="text-xs text-muted-foreground">
-                Gagnant prédit rang 1, cote &gt; 5.0
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {data.best_pronostics.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Aucun pronostic à haute cote archivé pour le moment
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {data.best_pronostics.map((p, i) => (
-                  <Link
-                    key={p.course_id + i}
-                    href={`/courses/${p.course_id}`}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="text-lg font-black text-muted-foreground w-6 text-center shrink-0">
-                        #{i + 1}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-foreground text-sm">{p.cheval_predit}</span>
-                          <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 shrink-0">
-                            {p.discipline}
-                          </Badge>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          {p.hippodrome} · {p.date}
-                          {p.gagnant_reel && (
-                            <span className="ml-2">
-                              → Vainqueur réel: <span className="text-foreground font-medium">{p.gagnant_reel}</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4 shrink-0 ml-3">
-                      <div className="text-right">
-                        <div className="text-sm font-bold text-foreground tabular-nums">
-                          {p.proba_top1}% de probabilité
-                        </div>
-                        {p.cote && (
-                          <div className="text-xs text-muted-foreground">Cote {p.cote}</div>
-                        )}
-                      </div>
-                      {p.correct === true && (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                      )}
-                      {p.correct === false && (
-                        <XCircle className="w-5 h-5 text-red-400 shrink-0" />
-                      )}
-                      <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
 
         {/* Détails techniques (Brier, calibration, apprentissage) déplacés dans
             l'espace admin — le palmarès public reste sur des résultats simples. */}
