@@ -157,4 +157,6 @@ export const adminApi = {
     api.get("/adaptive-learning/bias-matrix", { baseURL: `${API_URL}/admin/api` }),
   calibrationQuality: () =>
     api.get("/calibration-quality", { baseURL: `${API_URL}/admin/api` }),
+  learningSignals: () =>
+    api.get("/learning-signals", { baseURL: `${API_URL}/admin/api` }),
 };

@@ -639,6 +639,58 @@ async def get_calibration_quality(
     return await compute_calibration_quality(db)
 
 
+@router.get("/learning-signals")
+async def get_learning_signals(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Santé de l'apprentissage RÉELLE (admin) — preuve live que l'algo apprend :
+      - poids appris PAR PROFIL × type de pari (profil_run_log réglés)
+      - ROI réel par signal qualitatif (signal_performance)
+      - edge hors-échantillon (edge_monitor : le filtre conviction bat-il le marché ?)
+    100% mesuré, aucune valeur inventée. Rien d'appris encore → listes vides."""
+    out: dict = {"profil_weights": None, "signaux": [], "edge": None}
+
+    # 1. Poids par profil (pronos émis réglés)
+    try:
+        from ml.profil_learning import load_profil_weights
+        out["profil_weights"] = await load_profil_weights(db)
+    except Exception as e:
+        log.warning("admin.learning_signals.profil_skip", err=str(e)[:120])
+
+    # 2. ROI par signal (global) — top gagnants + top pièges
+    try:
+        from ml.signal_performance import load_signal_performance
+        perf = await load_signal_performance(db)
+        signals = (perf or {}).get("signals") or {}
+        rows = [
+            {"signal": k, "n": v.get("n"), "win_rate": v.get("win_rate"),
+             "roi": v.get("roi"), "multiplier": v.get("multiplier")}
+            for k, v in signals.items() if (v.get("n") or 0) >= 30
+        ]
+        rows.sort(key=lambda x: (x["roi"] if x["roi"] is not None else 0), reverse=True)
+        out["signaux"] = rows
+    except Exception as e:
+        log.warning("admin.learning_signals.signal_skip", err=str(e)[:120])
+
+    # 3. Edge monitor (dernière mesure hors-échantillon)
+    try:
+        r = (await db.execute(text("""
+            SELECT n_test, win_filt, win_base, roi_cap, edge_ok, created_at
+            FROM edge_monitor ORDER BY created_at DESC LIMIT 1
+        """))).first()
+        if r:
+            out["edge"] = {
+                "n_test": r[0], "win_filtre": r[1], "win_baseline": r[2],
+                "roi_plafonne": r[3], "edge_ok": r[4],
+                "mesure_le": r[5].isoformat() if r[5] else None,
+            }
+    except Exception as e:
+        log.warning("admin.learning_signals.edge_skip", err=str(e)[:120])
+
+    return out
+
+
 @router.get("/adaptive-learning/history")
 async def get_adaptive_learning_history(
     limit: int = Query(default=50, le=200),

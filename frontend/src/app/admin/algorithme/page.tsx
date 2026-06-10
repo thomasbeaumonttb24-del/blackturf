@@ -111,6 +111,12 @@ export default function AlgorithmeMonitoringPage() {
     () => statsApi.mlStatus().then((r) => r.data),
     { refreshInterval: 30_000 }
   );
+  // Santé de l'apprentissage : poids par profil + ROI par signal + edge (live 30s)
+  const { data: learning } = useSWR(
+    isAdmin ? "admin-learning-signals" : null,
+    () => adminApi.learningSignals().then((r) => r.data),
+    { refreshInterval: 30_000 }
+  );
 
   // Garde d'accès APRÈS tous les hooks.
   if (!isAdmin) {
@@ -315,6 +321,97 @@ export default function AlgorithmeMonitoringPage() {
                 ))}
               </div>
               <p className="text-[10px] text-muted-foreground mt-2">ECE bas = probas fiables (un cheval à 30% gagne ~30% du temps). Mesuré sur résultats réels.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Santé de l'apprentissage : poids par profil + ROI par signal + edge */}
+        {learning && (
+          <Card className="border-border/60">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Cpu className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm font-medium">Santé de l&apos;apprentissage — preuve live</span>
+                {learning.edge && (
+                  <Badge className={`ml-auto text-[10px] ${learning.edge.edge_ok ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-rose-500/20 text-rose-300 border-rose-500/30"}`}>
+                    edge {learning.edge.edge_ok ? "OK" : "à surveiller"}
+                  </Badge>
+                )}
+              </div>
+
+              {/* Edge hors-échantillon */}
+              {learning.edge && (
+                <div className="grid grid-cols-3 gap-3 text-xs mb-4">
+                  <div className="rounded bg-muted/40 p-2">
+                    <span className="text-muted-foreground">Win filtré</span>
+                    <div className="font-bold mt-0.5 text-emerald-400">{(learning.edge.win_filtre * 100).toFixed(1)}%</div>
+                  </div>
+                  <div className="rounded bg-muted/40 p-2">
+                    <span className="text-muted-foreground">Win baseline</span>
+                    <div className="font-bold mt-0.5">{(learning.edge.win_baseline * 100).toFixed(1)}%</div>
+                  </div>
+                  <div className="rounded bg-muted/40 p-2">
+                    <span className="text-muted-foreground">ROI plafonné</span>
+                    <div className={`font-bold mt-0.5 ${learning.edge.roi_plafonne >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {learning.edge.roi_plafonne >= 0 ? "+" : ""}{learning.edge.roi_plafonne}%
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Poids appris par profil */}
+              {learning.profil_weights?.profils && (
+                <div className="mb-4">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">Poids appris par profil (pronos émis réglés)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {(["conservateur", "equilibre", "agressif"] as const).map((pk) => {
+                      const p = learning.profil_weights.profils[pk];
+                      if (!p) return null;
+                      return (
+                        <div key={pk} className="rounded bg-muted/30 p-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold capitalize">{pk}</span>
+                            <span className="text-muted-foreground">{p.n_runs} runs</span>
+                          </div>
+                          {p.roi_global != null && (
+                            <div className={`text-sm font-bold ${p.roi_global >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              ROI {p.roi_global >= 0 ? "+" : ""}{p.roi_global}%
+                            </div>
+                          )}
+                          <div className="mt-1 space-y-0.5">
+                            {Object.entries(p.type_weights || {}).slice(0, 4).map(([t, w]) => (
+                              <div key={t} className="flex justify-between text-[10px]">
+                                <span className="text-muted-foreground truncate">{t}</span>
+                                <span className={`font-mono ${(w as number) >= 1 ? "text-emerald-400" : "text-rose-400"}`}>×{(w as number).toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">Actif dès 10 runs réglés/profil. En-dessous = neutre (jamais inventé).</p>
+                </div>
+              )}
+
+              {/* ROI par signal */}
+              {learning.signaux?.length > 0 && (
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">ROI réel par signal (gagnants ↑ / pièges ↓)</p>
+                  <div className="space-y-1">
+                    {learning.signaux.map((s: { signal: string; n: number; win_rate: number; roi: number }) => (
+                      <div key={s.signal} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-40 shrink-0 truncate font-medium">{s.signal}</span>
+                        <span className={`w-16 text-right font-mono font-bold ${s.roi >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {s.roi >= 0 ? "+" : ""}{Math.round(s.roi)}%
+                        </span>
+                        <span className="text-muted-foreground tabular-nums">win {Math.round(s.win_rate)}% · {s.n}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground mt-3">Recalculé à chaque fin de course + chaque nuit. 100% mesuré sur résultats réels.</p>
             </CardContent>
           </Card>
         )}
