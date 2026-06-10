@@ -593,10 +593,13 @@ export default function ChevalPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/30">
-                    {["Date", "Hippodrome", "Disc.", "Dist.", "Terrain", "Pos.", "Cote", "Gains", "Jockey"].map((h) => (
+                    {/* Colonnes secondaires masquées sur mobile (Disc./Terrain/Gains/Jockey) */}
+                    {([["Date", ""], ["Hippodrome", ""], ["Disc.", "hidden sm:table-cell"],
+                       ["Dist.", ""], ["Terrain", "hidden md:table-cell"], ["Pos.", ""],
+                       ["Cote", ""], ["Gains", "hidden sm:table-cell"], ["Jockey", "hidden lg:table-cell"]] as const).map(([h, cls]) => (
                       <th
                         key={h}
-                        className="px-3 py-2 text-left text-muted-foreground font-medium whitespace-nowrap"
+                        className={cn("px-3 py-2 text-left text-muted-foreground font-medium whitespace-nowrap", cls)}
                       >
                         {h}
                       </th>
@@ -616,11 +619,11 @@ export default function ChevalPage() {
                         {h.date ? String(h.date).slice(0, 10) : "—"}
                       </td>
                       <td className="px-3 py-2 max-w-[120px] truncate">{h.hippodrome || "—"}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{h.discipline || "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap hidden sm:table-cell">{h.discipline || "—"}</td>
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
                         {h.distance ? `${h.distance}m` : "—"}
                       </td>
-                      <td className="px-3 py-2 capitalize whitespace-nowrap">
+                      <td className="px-3 py-2 capitalize whitespace-nowrap hidden md:table-cell">
                         {h.terrain || "—"}
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -629,10 +632,10 @@ export default function ChevalPage() {
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
                         {h.cote ? `${h.cote.toFixed(1)}` : "—"}
                       </td>
-                      <td className="px-3 py-2 font-mono whitespace-nowrap text-emerald-400">
+                      <td className="px-3 py-2 font-mono whitespace-nowrap text-emerald-400 hidden sm:table-cell">
                         {h.gains ? formatGains(h.gains) : "—"}
                       </td>
-                      <td className="px-3 py-2 max-w-[100px] truncate text-muted-foreground">
+                      <td className="px-3 py-2 max-w-[100px] truncate text-muted-foreground hidden lg:table-cell">
                         {h.jockey || "—"}
                       </td>
                     </tr>

@@ -51,6 +51,13 @@
   img, svg, video, canvas { max-width: 100%; height: auto; }
 }
 
+@layer components {
+  /* Typo data mobile-first : jamais < 11px pour du contenu lisible */
+  .text-overline { @apply text-[11px] uppercase tracking-wider font-semibold; }
+  .text-caption  { @apply text-xs text-muted-foreground; }
+  .text-stat     { @apply text-lg sm:text-xl font-bold tabular-nums; }
+}
+
 /* Scrollbar light */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #F5F5F0; }

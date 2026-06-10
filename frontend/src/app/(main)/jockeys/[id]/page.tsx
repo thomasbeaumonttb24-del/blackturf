@@ -385,10 +385,11 @@ export default function JockeyPage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border/30">
-                  {["Date", "Cheval", "Hippodrome", "Disc.", "Pos.", "Cote"].map((h) => (
+                  {([["Date", ""], ["Cheval", ""], ["Hippodrome", "hidden sm:table-cell"],
+                     ["Disc.", "hidden sm:table-cell"], ["Pos.", ""], ["Cote", ""]] as const).map(([h, cls]) => (
                     <th
                       key={h}
-                      className="px-3 py-2 text-left text-muted-foreground font-medium whitespace-nowrap"
+                      className={cn("px-3 py-2 text-left text-muted-foreground font-medium whitespace-nowrap", cls)}
                     >
                       {h}
                     </th>
@@ -415,8 +416,8 @@ export default function JockeyPage() {
                         {p.nom_cheval}
                       </Link>
                     </td>
-                    <td className="px-3 py-2 max-w-[110px] truncate">{p.hippodrome || "—"}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{p.discipline || "—"}</td>
+                    <td className="px-3 py-2 max-w-[110px] truncate hidden sm:table-cell">{p.hippodrome || "—"}</td>
+                    <td className="px-3 py-2 whitespace-nowrap hidden sm:table-cell">{p.discipline || "—"}</td>
                     <td className="px-3 py-2 text-center">{positionBadge(p.position)}</td>
                     <td className="px-3 py-2 font-mono">
                       {p.cote ? p.cote.toFixed(1) : "—"}

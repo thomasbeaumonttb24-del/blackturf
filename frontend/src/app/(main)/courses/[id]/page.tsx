@@ -140,6 +140,15 @@ interface PariRec {
   gain_potentiel: number;
   probabilite: number;
   description: string;
+  raisons?: string[];          // justification complète du pari (backend)
+}
+
+interface PariEcarte {
+  type: string;
+  chevaux: { numero: number; nom: string }[];
+  probabilite: number;
+  ev_estime: number;
+  motif: string;
 }
 
 interface NiveauPlan {
@@ -165,6 +174,7 @@ interface MisePlan {
   resume_ia: string;
   avertissement: string;
   niveaux: NiveauPlan[];
+  paris_ecartes?: PariEcarte[];   // candidats rejetés + motif (transparence)
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -302,26 +312,70 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
             </div>
             <div className="space-y-1.5">
               {niv.paris.map((p, i) => (
-                <div key={i} className="flex items-start justify-between gap-2 text-xs">
-                  <div className="flex-1">
-                    <span className="font-semibold">{p.type}</span>
-                    <span className="text-muted-foreground ml-1">
-                      {p.chevaux.map(c => `N°${c.numero}`).join(" + ")}
-                    </span>
-                    <span className="ml-2 text-muted-foreground/60">
-                      Proba ~{(p.probabilite * 100).toFixed(0)}%
-                    </span>
+                <div key={i} className="text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <span className="font-semibold">{p.type}</span>
+                      <span className="text-muted-foreground ml-1">
+                        {p.chevaux.map(c => `N°${c.numero}`).join(" + ")}
+                      </span>
+                      <span className="ml-2 text-muted-foreground/60">
+                        Proba ~{(p.probabilite * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="font-mono font-bold">{p.mise.toFixed(2)}€</div>
+                      <div className="text-brand-emerald font-mono">→ ~{p.gain_potentiel.toFixed(0)}€</div>
+                    </div>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="font-mono font-bold">{p.mise.toFixed(2)}€</div>
-                    <div className="text-brand-emerald font-mono">→ ~{p.gain_potentiel.toFixed(0)}€</div>
-                  </div>
+                  {p.raisons && p.raisons.length > 0 && (
+                    <details className="mt-1 ml-1">
+                      <summary className="cursor-pointer text-[11px] text-brand-gold/90 font-semibold list-none select-none">
+                        Pourquoi ce pari ? ▾
+                      </summary>
+                      <ul className="mt-1 space-y-0.5 rounded bg-muted/30 p-2 text-[11px] text-muted-foreground leading-relaxed">
+                        {p.raisons.map((r, j) => (
+                          <li key={j} className="flex gap-1.5">
+                            <span className="text-brand-gold flex-shrink-0">·</span>
+                            <span className="min-w-0">{r}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
               ))}
             </div>
           </div>
         ))}
       </div>
+
+      {/* Paris écartés — transparence : ce que l'IA refuse et POURQUOI */}
+      {plan.paris_ecartes && plan.paris_ecartes.length > 0 && (
+        <details className="mt-4 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-semibold text-muted-foreground list-none select-none">
+            Paris écartés par l&apos;IA ({plan.paris_ecartes.length}) ▾
+          </summary>
+          <div className="mt-2 space-y-2">
+            {plan.paris_ecartes.map((e, i) => (
+              <div key={i} className="rounded bg-background/60 border border-border/60 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">
+                    {e.type}{" "}
+                    <span className="text-muted-foreground font-normal">
+                      {e.chevaux.map(c => `N°${c.numero}`).join(" + ")}
+                    </span>
+                  </span>
+                  <span className="text-muted-foreground/70 font-mono tabular-nums flex-shrink-0">
+                    {(e.probabilite * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <p className="mt-0.5 text-brand-red/90">{e.motif}</p>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* Résumé totaux */}
       <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
@@ -1688,6 +1742,18 @@ export default function CoursePage() {
       proba_gain: number; rapport_estime: number; ev: number; edge: number;
       texte_explication: string;
     } | null;
+    chevaux_a_eviter?: Array<{
+      numero: number; nom: string; cote: number; raisons: string[];
+    }>;
+    detection_outsider?: {
+      score: number; course_a_outsider: boolean;
+      candidats: Array<{
+        numero: number; nom: string; cote: number;
+        proba_modele: number; proba_marche: number; edge: number; raisons: string[];
+      }>;
+      signaux: string[];
+      taux_surprises_historique: number | null;
+    };
   } | null>(null);
 
   const [resultats, setResultats] = useState<{
@@ -1924,9 +1990,9 @@ export default function CoursePage() {
                       <th className="text-left px-3 py-2.5 w-8">N°</th>
                       <th className="text-left px-3 py-2.5">Cheval</th>
                       <th className="text-left px-3 py-2.5 hidden md:table-cell">Jockey</th>
-                      <th className="text-right px-3 py-2.5">ELO</th>
+                      <th className="text-right px-3 py-2.5 hidden sm:table-cell">ELO</th>
                       <th className="text-right px-3 py-2.5">Cote PMU</th>
-                      {predictions && <th className="text-right px-3 py-2.5">Cote IA</th>}
+                      {predictions && <th className="text-right px-3 py-2.5 hidden sm:table-cell">Cote IA</th>}
                       {predictions && <th className="text-right px-3 py-2.5">Proba IA</th>}
                       {predictions && <th className="text-right px-3 py-2.5">Espérance</th>}
                     </tr>
@@ -2029,7 +2095,7 @@ export default function CoursePage() {
                                 </div>
                               )}
                             </td>
-                            <td className="px-3 py-2.5 text-right">
+                            <td className="px-3 py-2.5 text-right hidden sm:table-cell">
                               <ELOBadge elo={partant.elo_global} />
                             </td>
                             <td className="px-3 py-2.5 text-right">
@@ -2039,7 +2105,7 @@ export default function CoursePage() {
                               {liveCote && <span className="text-brand-emerald text-[10px] ml-1">↓</span>}
                             </td>
                             {predictions && (
-                              <td className="px-3 py-2.5 text-right text-muted-foreground font-mono text-xs">
+                              <td className="px-3 py-2.5 text-right text-muted-foreground font-mono text-xs hidden sm:table-cell">
                                 {pred?.cote_juste ? formatCote(pred.cote_juste) : "—"}
                               </td>
                             )}
@@ -2326,6 +2392,71 @@ export default function CoursePage() {
               )}
               <p className="text-[10px] text-muted-foreground/70 pt-1">
                 Synthèse de l&apos;analyse IA. Les paris à jouer (selon ton montant et ton profil) sont dans le plan de mise ci-contre.
+              </p>
+            </div>
+          )}
+
+          {/* ── Course à outsider (champ ouvert + grosses cotes à valeur détectée) ── */}
+          {analysis?.detection_outsider?.course_a_outsider && (
+            <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-violet-600" />
+                <h3 className="text-sm font-bold text-violet-800">Course à outsider détectée</h3>
+                <span className="ml-auto text-[10px] font-bold rounded-full bg-violet-100 text-violet-700 px-2 py-0.5">
+                  Score {Math.round(analysis.detection_outsider.score * 100)}/100
+                </span>
+              </div>
+              {analysis.detection_outsider.signaux.length > 0 && (
+                <ul className="text-xs text-violet-900/80 space-y-0.5">
+                  {analysis.detection_outsider.signaux.map((s, i) => (
+                    <li key={i} className="flex gap-1.5"><span>·</span><span>{s}</span></li>
+                  ))}
+                </ul>
+              )}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {analysis.detection_outsider.candidats.map((c) => (
+                  <div key={c.numero} className="rounded-lg bg-white/80 border border-violet-200/70 p-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
+                      <span className="font-mono text-xs font-bold text-violet-700">cote {c.cote}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-600 leading-relaxed">{c.raisons[0]}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-violet-900/60">
+                Détection : ouverture du marché + écart modèle/marché + taux de surprises réel sur ce type de course.
+                Grosse cote = risque élevé ; réservé aux profils offensifs.
+              </p>
+            </div>
+          )}
+
+          {/* ── Chevaux à éviter (surcotés par le public / facteurs défavorables) ── */}
+          {analysis?.chevaux_a_eviter && analysis.chevaux_a_eviter.length > 0 && (
+            <div className="rounded-xl border border-red-200 bg-red-50/50 p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-red-500" />
+                <h3 className="text-sm font-bold text-red-700">Chevaux à éviter</h3>
+              </div>
+              <div className="space-y-2">
+                {analysis.chevaux_a_eviter.map((c) => (
+                  <div key={c.numero} className="rounded-lg bg-white/80 border border-red-200/70 p-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
+                      <span className="font-mono text-xs text-gray-500">cote {c.cote}</span>
+                    </div>
+                    <ul className="mt-1 space-y-0.5">
+                      {c.raisons.map((r, i) => (
+                        <li key={i} className="text-[11px] text-gray-600 leading-relaxed flex gap-1.5">
+                          <span className="text-red-400 flex-shrink-0">·</span><span>{r}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-red-900/50">
+                Basé sur l&apos;écart modèle/marché et les facteurs réels — pas une garantie de défaite, un avertissement de valeur.
               </p>
             </div>
           )}
