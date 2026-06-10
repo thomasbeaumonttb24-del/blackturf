@@ -106,7 +106,8 @@ def test_triangulation_ev_calcule_correctement():
 # detect_value_bet intégration
 # ─────────────────────────────────────────────
 def test_detect_value_bet_found():
-    vb = detect_value_bet(proba_top1=0.60, cote_pmu=4.5)
+    # proba 0.35 à cote 4.5 → ratio modèle/marché 1.58 < 1.7 (gate longshot) ; EV +57%.
+    vb = detect_value_bet(proba_top1=0.35, cote_pmu=4.5)
     assert vb is not None
     assert vb["niveau"] >= 1
     assert vb["ev_max"] > 0
