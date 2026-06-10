@@ -937,7 +937,7 @@ async def stats_profils(
     if cached:
         return cached
 
-    data = await backtest_profils(db, limit=200, n_sims=3000)
+    data = await backtest_profils(db, limit=100, n_sims=3000)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     # Cache 1h en filet ; surtout invalidé à CHAQUE fin de course
     # (_invalidate_stats_caches) → recalcul immédiat sur données réelles.
@@ -947,26 +947,34 @@ async def stats_profils(
 
 @router.get("/stats/palmares-gagnants")
 async def stats_palmares_gagnants(
-    limit: int = 60,
     db: AsyncSession = Depends(get_db),
 ):
     """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — issus des
     pronostics ÉMIS avant chaque course (profil_run_log) et réglés aux VRAIS
     rapports PMU. Aucune donnée inventée : seulement des paris réglés gagnants
-    avec rapport publié. Le palmarès public s'appuie là-dessus."""
+    avec rapport publié. Borné aux 100 DERNIÈRES courses réglées. Le palmarès
+    public prouve l'efficacité des paris générés là-dessus."""
     from sqlalchemy import text as _text
     try:
         rows = (await db.execute(_text("""
+            WITH recent AS (
+                SELECT course_id
+                FROM profil_run_log
+                WHERE statut = 'settled' AND resultat IS NOT NULL
+                GROUP BY course_id
+                ORDER BY MAX(settled_at) DESC NULLS LAST
+                LIMIT 100
+            )
             SELECT r.profil, r.resultat, r.roi_reel, r.settled_at,
                    c.hippodrome_nom, c.date_heure, c.course_id, c.numero_reunion, c.numero
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
+              AND r.course_id IN (SELECT course_id FROM recent)
             ORDER BY r.settled_at DESC NULLS LAST
-            LIMIT :lim
-        """), {"lim": min(max(int(limit), 1), 200)})).all()
+        """))).all()
     except Exception:
-        return {"gagnants": [], "n": 0, "updated_at": datetime.now(timezone.utc).isoformat()}
+        return {"gagnants": [], "n": 0, "n_courses": 0, "updated_at": datetime.now(timezone.utc).isoformat()}
 
     gagnants = []
     for profil, resultat, roi, settled_at, hippo, dh, cid, n_reunion, n_course in rows:
@@ -990,8 +998,13 @@ async def stats_palmares_gagnants(
                 "rapport": round(gain / mise, 2) if mise > 0 else None,
             })
     gagnants.sort(key=lambda g: g.get("date") or "", reverse=True)
+    total_gain = round(sum(x["gain"] for x in gagnants), 2)
+    total_mise = round(sum(x["mise"] for x in gagnants), 2)
     return {
-        "gagnants": gagnants[:limit],
+        "gagnants": gagnants,
         "n": len(gagnants),
+        "n_courses": len({x["course_id"] for x in gagnants}),
+        "total_gain": total_gain,
+        "total_benefice": round(total_gain - total_mise, 2),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

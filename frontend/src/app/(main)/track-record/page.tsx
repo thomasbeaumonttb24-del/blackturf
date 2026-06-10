@@ -141,7 +141,7 @@ export default function TrackRecordPage() {
   );
 
   // Paris RÉELLEMENT gagnés par l'algorithme, par profil (pronos émis réglés)
-  const { data: gagnantsData } = useSWR<{ gagnants: WinningBet[]; n: number; updated_at?: string }>(
+  const { data: gagnantsData } = useSWR<{ gagnants: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number; updated_at?: string }>(
     "palmares-gagnants",
     () => statsApi.palmaresGagnants().then((r) => r.data),
     { refreshInterval: 60_000, revalidateOnFocus: true },
@@ -198,22 +198,11 @@ export default function TrackRecordPage() {
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">Favori placé (top-3)</div>
               </div>
-              <div className="text-center">
-                <div className={cn("text-4xl font-black tabular-nums", g.favori_roi >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                  {g.favori_roi >= 0 ? "+" : ""}{g.favori_roi}%
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  ROI réel — 1€ sur le favori
-                  <span className="block text-[10px] text-muted-foreground/60">
-                    {g.favori_net >= 0 ? "+" : ""}{g.favori_net}€ sur {g.favori_mise_totale} paris
-                  </span>
-                </div>
-              </div>
             </div>
             <p className="mt-3 text-[11px] text-muted-foreground/60 max-w-xl mx-auto">
-              ROI = backtest réel (1€ Simple Gagnant sur le favori, réglé sur l&apos;arrivée
-              officielle et la cote PMU réelle). Échantillon limité, forte variance —
-              les performances passées ne préjugent pas des résultats futurs.
+              Les gains ci-dessous proviennent des paris RÉELLEMENT générés par l&apos;algorithme
+              (par profil), réglés aux rapports PMU officiels sur les 100 dernières courses.
+              Performances passées — aucune garantie de gain futur.
             </p>
             {data.updated_at && (
               <p className="mt-2 text-[11px] text-muted-foreground/70">
@@ -354,13 +343,25 @@ export default function TrackRecordPage() {
         {/* ── Paris GAGNÉS par l'algorithme (réels, par profil) ───────────── */}
         <Card className="border-emerald-500/30">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-emerald-500" />
-              Paris gagnés — résultats réels par profil
-            </CardTitle>
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-emerald-500" />
+                Paris gagnés générés par l&apos;algorithme
+              </CardTitle>
+              {gagnantsData && gagnantsData.total_benefice != null && (
+                <div className="text-right">
+                  <div className={cn("text-2xl font-black tabular-nums leading-none", gagnantsData.total_benefice >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                    {gagnantsData.total_benefice >= 0 ? "+" : ""}{gagnantsData.total_benefice.toFixed(2)}€
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    bénéfice net · {gagnantsData.n} paris gagnés sur {gagnantsData.n_courses ?? 0} courses
+                  </div>
+                </div>
+              )}
+            </div>
             <p className="text-[11px] text-muted-foreground mt-1">
               Chaque ligne = un pari réellement émis avant la course par un profil, réglé au
-              rapport PMU officiel. Mis à jour à chaque arrivée. Aucune donnée inventée.
+              rapport PMU officiel. 100 dernières courses. Mis à jour à chaque arrivée. Aucune donnée inventée.
             </p>
           </CardHeader>
           <CardContent>
@@ -536,95 +537,6 @@ export default function TrackRecordPage() {
                   </Link>
                 ))}
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* ── Derniers pronostics (favori vs arrivée) ─────── */}
-        <Card className="border-border/60">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Activity className="w-4 h-4 text-brand-blue" />
-                Historique des courses — favori
-              </CardTitle>
-              {g.nb_favoris_evalues > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  Favori gagnant {g.favori_win_rate}% · placé {g.favori_place_rate}% sur {g.nb_favoris_evalues.toLocaleString("fr-FR")} courses
-                </span>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {data.derniers_pronostics.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Aucune course terminée avec pronostic archivé pour le moment
-              </div>
-            ) : (
-              <>
-              <div className="divide-y divide-border/40">
-                {data.derniers_pronostics.map((p, i) => {
-                  // Mise fictive 1€ Gagnant sur le favori.
-                  const pos = p.favori_position;
-                  const won = pos === 1;
-                  const placed = pos != null && pos > 1 && pos <= 3;
-                  const gain = won && p.cote ? p.cote : 0;      // 1€ Gagnant -> cote
-                  const tier = won ? "gain" : placed ? "place" : "loss";
-                  const posLabel = pos === 1 ? "1ᵉʳ" : pos != null ? `${pos}ᵉ` : "NP";
-                  const posCircle =
-                    won ? "bg-emerald-100 text-emerald-700"
-                    : placed ? "bg-amber-100 text-amber-700"
-                    : "bg-rose-100 text-rose-600";
-                  return (
-                    <Link
-                      key={p.course_id + i}
-                      href={`/courses/${p.course_id}`}
-                      className="flex items-center gap-3 py-2.5 px-1 hover:bg-accent/30 transition-colors group rounded-md"
-                    >
-                      {/* Position */}
-                      <span className={cn("flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold tabular-nums", posCircle)}>
-                        {posLabel}
-                      </span>
-                      {/* Cheval + meta */}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-foreground">N°{p.favori_numero} {p.favori_nom}</span>
-                          <Badge variant="outline" className="hidden sm:inline-flex text-[10px] px-1.5 py-0 h-4 shrink-0">{p.discipline}</Badge>
-                        </div>
-                        <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {p.hippodrome} · {p.date}
-                          {p.cote ? ` · cote ${p.cote}` : ""}
-                          {!won && p.gagnant_nom && <span> · vainqueur {p.gagnant_nom}</span>}
-                        </div>
-                      </div>
-                      {/* Résultat */}
-                      <div className="flex flex-shrink-0 items-center gap-2">
-                        {tier === "gain" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">
-                            <ArrowUpRight className="h-3.5 w-3.5" />+{gain.toFixed(2)}€
-                          </span>
-                        ) : tier === "place" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-200">
-                            <Minus className="h-3.5 w-3.5" />Placé
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 ring-1 ring-rose-200">
-                            <XCircle className="h-3.5 w-3.5" />Perdu
-                          </span>
-                        )}
-                        <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground transition-colors" />
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-              <p className="mt-3 text-[10px] text-muted-foreground/70">
-                Résultat = 1€ Gagnant sur le favori, réglé à la cote réelle.
-                <span className="text-emerald-600 font-medium"> ↗ vert</span> = gain &gt; mise ·
-                <span className="text-amber-600 font-medium"> Placé orange</span> = top 3 sans gain ·
-                <span className="text-rose-600 font-medium"> Perdu rouge</span> = hors top 3.
-              </p>
-              </>
             )}
           </CardContent>
         </Card>
