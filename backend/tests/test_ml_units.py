@@ -130,7 +130,9 @@ def test_detect_picks_best_source():
 
 
 def test_detect_value_bet_inclut_spi_fields():
-    vb = detect_value_bet(proba_top1=0.65, cote_pmu=4.0)
+    # proba 0.40 à cote 4.0 → ratio modèle/marché 1.6 < MAX_MODEL_MARKET_RATIO (1.7) :
+    # passe le gate longshot resserré (le 0.65 historique = ratio 2.6, rejeté by design).
+    vb = detect_value_bet(proba_top1=0.40, cote_pmu=4.0)
     assert vb is not None
     assert "spi_detected" in vb
     assert "spi_score" in vb
@@ -187,15 +189,16 @@ def test_cote_max_vb_rejette_outsider_extreme():
 def test_winners_curse_ev_plafonnee_a_mediane():
     """EV calculée sur cote plafonnée (médiane × COTE_CEIL_FACTOR), pas sur la cote
     isolée la plus haute des 7 sources (stale → EV gonflée)."""
-    # médiane de [4,4,4,10] = 4 ; cote isolée winamax = 10
+    # médiane de [4,4,4,10] = 4 ; cote isolée winamax = 10. proba 0.28 → ratio vs
+    # cote_marché (~5.8 pondérée) ≈ 1.63 < 1.7 : passe le gate longshot resserré.
     vb = detect_value_bet(
-        proba_top1=0.40, cote_pmu=4.0, cote_geny=4.0, cote_bzh=4.0,
+        proba_top1=0.28, cote_pmu=4.0, cote_geny=4.0, cote_bzh=4.0,
         cote_winamax=10.0,
     )
     assert vb is not None
     assert vb["meilleure_source"] == "winamax"   # on parie quand même la meilleure cote
     cote_plafond = 4.0 * COTE_CEIL_FACTOR
-    ev_attendu = cote_plafond * 0.40 - 1.0
+    ev_attendu = cote_plafond * 0.28 - 1.0
     assert vb["ev_max"] == pytest.approx(ev_attendu, rel=1e-6)
     # sans plafond l'EV serait 10×0.40−1 = 3.0 ; le plafond la garde crédible
     assert vb["ev_max"] < 1.0
