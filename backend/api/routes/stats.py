@@ -4,6 +4,7 @@ Métriques du modèle + courbe équité simulée + ML monitoring.
 Cache Redis pour éviter requêtes lourdes répétées.
 """
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -991,10 +992,17 @@ async def stats_palmares_gagnants(
                 agg["paris_gagnes"] += 1
             mise = float(pari.get("mise") or 0)
             gain = float(pari.get("gain") or 0)
+            # Code RxCy : numero_reunion public si dispo, sinon extrait du course_id
+            # ("05062026R3C1" → "R3C1") pour les courses legacy sans numero_reunion.
+            if n_reunion and n_course:
+                _code = f"R{n_reunion}C{n_course}"
+            else:
+                _m = re.search(r"(R\d+C\d+)", str(cid))
+                _code = _m.group(1) if _m else None
             gagnants.append({
                 "profil": profil,
                 "course_id": cid,
-                "code": (f"R{n_reunion}C{n_course}" if n_reunion and n_course else None),
+                "code": _code,
                 "hippodrome": hippo,
                 "date": dh.isoformat() if dh else None,
                 "type_pari": pari.get("type"),
