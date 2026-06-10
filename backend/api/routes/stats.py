@@ -943,3 +943,55 @@ async def stats_profils(
     # (_invalidate_stats_caches) → recalcul immédiat sur données réelles.
     await _cache_set(redis, CACHE_KEY, data, ttl=3600)
     return data
+
+
+@router.get("/stats/palmares-gagnants")
+async def stats_palmares_gagnants(
+    limit: int = 60,
+    db: AsyncSession = Depends(get_db),
+):
+    """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — issus des
+    pronostics ÉMIS avant chaque course (profil_run_log) et réglés aux VRAIS
+    rapports PMU. Aucune donnée inventée : seulement des paris réglés gagnants
+    avec rapport publié. Le palmarès public s'appuie là-dessus."""
+    from sqlalchemy import text as _text
+    try:
+        rows = (await db.execute(_text("""
+            SELECT r.profil, r.resultat, r.roi_reel, r.settled_at,
+                   c.hippodrome_nom, c.date_heure, c.course_id, c.numero_reunion, c.numero
+            FROM profil_run_log r
+            JOIN courses c ON c.course_id = r.course_id
+            WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
+            ORDER BY r.settled_at DESC NULLS LAST
+            LIMIT :lim
+        """), {"lim": min(max(int(limit), 1), 200)})).all()
+    except Exception:
+        return {"gagnants": [], "n": 0, "updated_at": datetime.now(timezone.utc).isoformat()}
+
+    gagnants = []
+    for profil, resultat, roi, settled_at, hippo, dh, cid, n_reunion, n_course in rows:
+        res = resultat if isinstance(resultat, dict) else json.loads(resultat or "{}")
+        for pari in res.get("paris", []):
+            if pari.get("statut") != "gagne" or pari.get("gain") is None:
+                continue
+            mise = float(pari.get("mise") or 0)
+            gain = float(pari.get("gain") or 0)
+            gagnants.append({
+                "profil": profil,
+                "course_id": cid,
+                "code": (f"R{n_reunion}C{n_course}" if n_reunion and n_course else None),
+                "hippodrome": hippo,
+                "date": dh.isoformat() if dh else None,
+                "type_pari": pari.get("type"),
+                "chevaux": [c.get("numero") for c in pari.get("chevaux", [])],
+                "mise": round(mise, 2),
+                "gain": round(gain, 2),
+                "benefice": round(gain - mise, 2),
+                "rapport": round(gain / mise, 2) if mise > 0 else None,
+            })
+    gagnants.sort(key=lambda g: g.get("date") or "", reverse=True)
+    return {
+        "gagnants": gagnants[:limit],
+        "n": len(gagnants),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }

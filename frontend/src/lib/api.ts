@@ -120,6 +120,7 @@ export const statsApi = {
   perfPersonnelle: () => api.get("/stats/perf-personnelle"),
   trackRecord: () => api.get("/stats/track-record"),
   profils: () => api.get("/stats/profils"),
+  palmaresGagnants: () => api.get("/stats/palmares-gagnants"),
 };
 
 export const notificationsApi = {
