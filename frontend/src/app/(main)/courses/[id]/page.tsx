@@ -319,7 +319,7 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
       {plan.paris_ecartes && plan.paris_ecartes.length > 0 && (
         <details className="mt-4 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
           <summary className="cursor-pointer font-semibold text-muted-foreground list-none select-none">
-            Paris écartés par l&apos;IA ({plan.paris_ecartes.length}) ▾
+            Paris écartés par l&apos;algorithme ({plan.paris_ecartes.length}) ▾
           </summary>
           <div className="mt-2 space-y-2">
             {plan.paris_ecartes.map((e, i) => (
@@ -643,7 +643,7 @@ function MiseCalculatorWidget({
         <Brain className="h-8 w-8 mx-auto mb-2 opacity-40" />
         {statut === "termine"
           ? "Course non analysée par l'IA — calculateur indisponible."
-          : "Lancez l'analyse IA d'abord pour activer le calculateur."}
+          : "Lancez l'analyse d'abord pour activer le calculateur."}
       </div>
     );
   }
@@ -963,7 +963,7 @@ function ResultatsSection({ resultats, partants }: {
 }
 
 // ─── Bilan du pronostic (course terminée) ──────────────────────────────────────
-// Compare le pronostic IA FIGÉ avant la course à l'arrivée réelle. Aucune donnée
+// Compare le pronostic FIGÉ avant la course à l'arrivée réelle. Aucune donnée
 // recalculée : on lit les Prediction stockées (immuables) + le classement officiel.
 function PronosticVerdictSection({ predictions, classement }: {
   predictions: Prediction[];
@@ -988,9 +988,9 @@ function PronosticVerdictSection({ predictions, classement }: {
 
   // Verdict global, du meilleur au moins bon
   const verdict = favGagne
-    ? { emoji: "🎯", label: "Gagnant trouvé — favori IA vainqueur", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
+    ? { emoji: "🎯", label: "Gagnant trouvé — favori vainqueur", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
     : favPlace
-    ? { emoji: "✅", label: `Favori IA placé (${favPos}${favPos === 1 ? "er" : "e"})`, cls: "border-amber-300 bg-amber-50 text-amber-800" }
+    ? { emoji: "✅", label: `Favori placé (${favPos}${favPos === 1 ? "er" : "e"})`, cls: "border-amber-300 bg-amber-50 text-amber-800" }
     : gagnantDansTop3IA
     ? { emoji: "➕", label: `Vainqueur dans le top 3 IA (classé #${rangIAduGagnant})`, cls: "border-blue-300 bg-blue-50 text-blue-800" }
     : { emoji: "❌", label: "Pronostic manqué", cls: "border-rose-300 bg-rose-50 text-rose-800" };
@@ -1005,7 +1005,7 @@ function PronosticVerdictSection({ predictions, classement }: {
   return (
     <div className="mt-4 rounded-xl border border-brand-blue/30 bg-brand-blue/5 p-4">
       <h2 className="mb-3 flex items-center gap-2 text-base font-bold">
-        Bilan du pronostic IA
+        Bilan du pronostic
         <span className="text-xs font-normal text-muted-foreground">
           · pronostic figé avant la course
         </span>
@@ -1019,8 +1019,8 @@ function PronosticVerdictSection({ predictions, classement }: {
         <p className="mb-3 text-sm text-muted-foreground">
           Vainqueur : <span className="font-semibold text-foreground">N°{gagnant.numero} {gagnant.nom}</span>
           {rangIAduGagnant != null
-            ? <> — l&apos;IA le classait <span className="font-semibold text-foreground">#{rangIAduGagnant}</span></>
-            : <> — non pronostiqué par l&apos;IA</>}
+            ? <> — l&apos;algorithme le classait <span className="font-semibold text-foreground">#{rangIAduGagnant}</span></>
+            : <> — non pronostiqué par l&apos;algorithme</>}
         </p>
       )}
 
@@ -1028,7 +1028,7 @@ function PronosticVerdictSection({ predictions, classement }: {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted-foreground border-b">
-              <th className="py-1 pr-2">Pronostic IA</th>
+              <th className="py-1 pr-2">Pronostic</th>
               <th className="py-1 pr-2">N°</th>
               <th className="py-1 pr-2">Cheval</th>
               <th className="py-1 pr-2 text-right">Proba top-3</th>
@@ -1682,7 +1682,7 @@ export default function CoursePage() {
     setTriggeringPred(true);
     try {
       await predictionsApi.trigger(id, 100);
-      toast.success("Analyse IA lancée — résultats dans quelques secondes.");
+      toast.success("Analyse algorithme lancée — résultats dans quelques secondes.");
       setTimeout(() => {
         setLoadingPred(true);
         predictionsApi.get(id, 100)
@@ -1814,9 +1814,9 @@ export default function CoursePage() {
           const favCote = liveCoteMap[fav.numero] ?? fav.cote_pmu;
           return (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mt-4 pt-4 border-t border-border/60">
-              {/* Favori IA */}
+              {/* Favori */}
               <div className="rounded-xl border border-brand-gold/30 bg-gradient-to-br from-brand-gold/[0.08] to-transparent p-3">
-                <p className="text-overline text-muted-foreground">Favori IA</p>
+                <p className="text-overline text-muted-foreground">Favori</p>
                 <p className="mt-0.5 text-[13px] font-bold truncate">N°{fav.numero} {fav.nom_cheval}</p>
                 <div className="mt-1 flex items-baseline gap-1.5">
                   <span className="text-2xl font-bold tabular-nums text-brand-gold leading-none">{Math.round(fav.proba_top1 * 100)}%</span>
@@ -1846,7 +1846,7 @@ export default function CoursePage() {
               </div>
               {/* Score de confiance IA */}
               <div className="rounded-xl border border-border bg-muted/20 p-3">
-                <p className="text-overline text-muted-foreground">Confiance IA</p>
+                <p className="text-overline text-muted-foreground">Confiance algo</p>
                 {confGlobal !== null ? (
                   <>
                     <div className="mt-0.5 flex items-baseline gap-1.5">
@@ -1880,7 +1880,7 @@ export default function CoursePage() {
           <ResultatsSection resultats={resultats} partants={course.partants} />
         )}
 
-        {/* Bilan du pronostic IA vs arrivée (course terminée) */}
+        {/* Bilan du pronostic vs arrivée (course terminée) */}
         {course.statut === "termine" && resultats && predictions && predictions.length > 0 && (
           <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
         )}
@@ -1926,8 +1926,8 @@ export default function CoursePage() {
                       <th className="text-left px-3 py-2.5 hidden md:table-cell">Jockey</th>
                       <th className="text-right px-3 py-2.5 hidden sm:table-cell">ELO</th>
                       <th className="text-right px-3 py-2.5">Cote PMU</th>
-                      {predictions && <th className="text-right px-3 py-2.5 hidden sm:table-cell">Cote IA</th>}
-                      {predictions && <th className="text-right px-3 py-2.5">Proba IA</th>}
+                      {predictions && <th className="text-right px-3 py-2.5 hidden sm:table-cell">Cote algo</th>}
+                      {predictions && <th className="text-right px-3 py-2.5">Proba algo</th>}
                       {predictions && <th className="text-right px-3 py-2.5">Espérance</th>}
                     </tr>
                   </thead>
@@ -2109,7 +2109,7 @@ export default function CoursePage() {
                                   {/* Points clés (le pourquoi) */}
                                   {a?.points && a.points.length > 0 && (
                                     <div className={cn(CARD, "sm:col-span-2 lg:col-span-3 border-brand-gold/30 bg-brand-gold/[0.04]")}>
-                                      <p className={HEAD}><Target className="h-3 w-3 text-brand-gold" /> Points clés de l&apos;analyse IA</p>
+                                      <p className={HEAD}><Target className="h-3 w-3 text-brand-gold" /> Points clés de l&apos;analyse</p>
                                       <div className="flex flex-wrap gap-1.5">
                                         {a.points.map((pt, i) => (
                                           <span key={i} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1",
@@ -2298,7 +2298,7 @@ export default function CoursePage() {
             <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/60 to-white p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Brain className="h-4 w-4 text-violet-600" />
-                <h3 className="text-sm font-semibold text-gray-900">Analyse BlackTurf IA</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Analyse BlackTurf</h3>
                 {analysis.field_confidence > 0 && (
                   <span className={cn(
                     "ml-auto text-[10px] font-semibold rounded-full px-2 py-0.5",
@@ -2325,7 +2325,7 @@ export default function CoursePage() {
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground/70 pt-1">
-                Synthèse de l&apos;analyse IA. Les paris à jouer (selon ton montant et ton profil) sont dans le plan de mise ci-contre.
+                Synthèse de l&apos;analyse. Les paris à jouer (selon ton montant et ton profil) sont dans le plan de mise ci-contre.
               </p>
             </div>
           )}
@@ -2429,12 +2429,12 @@ export default function CoursePage() {
 
         {/* ── RIGHT SIDEBAR ── */}
         <div className="space-y-4">
-          {/* Analyse IA */}
+          {/* Analyse algorithme */}
           <Card className="border-border/70">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Brain className="h-4 w-4 text-brand-gold" />
-                Analyse IA
+                Analyse algorithme
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -2461,7 +2461,7 @@ export default function CoursePage() {
                 course.statut === "termine" ? (
                   <div className="text-center py-4">
                     <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                    <p className="text-sm font-medium text-muted-foreground">Course non analysée par l&apos;IA</p>
+                    <p className="text-sm font-medium text-muted-foreground">Course non analysée par l&apos;algorithme</p>
                     <p className="text-xs text-muted-foreground/70 mt-1">
                       Cette course (souvent étrangère) n&apos;a pas été couverte par le modèle.
                     </p>
@@ -2471,7 +2471,7 @@ export default function CoursePage() {
                     <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
                     <p className="text-sm text-muted-foreground mb-3">Aucune analyse disponible</p>
                     <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
-                      {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse IA"}
+                      {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse"}
                     </Button>
                   </div>
                 )
@@ -2479,7 +2479,7 @@ export default function CoursePage() {
                 <div className="space-y-3">
                   <div className="flex items-baseline justify-between">
                     <p className="text-[11px] font-medium text-muted-foreground">
-                      Classement IA — {predictions.length} partant{predictions.length > 1 ? "s" : ""}
+                      Classement algorithme — {predictions.length} partant{predictions.length > 1 ? "s" : ""}
                     </p>
                     <div className="flex items-center gap-2 text-[9px] uppercase tracking-wide text-muted-foreground/70">
                       <span>Gagnant</span><span>·</span><span>Top-3</span>

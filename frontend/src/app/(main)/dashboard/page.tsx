@@ -227,7 +227,7 @@ export default function DashboardPage() {
               <div className={`text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {bankrollStats ? `${bankrollStats.roi_ia_only > 0 ? "+" : ""}${bankrollStats.roi_ia_only}%` : "—"}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Rendement paris IA</div>
+              <div className="text-xs text-muted-foreground mt-1">Rendement paris algorithme</div>
             </CardContent>
           </Card>
 
@@ -440,7 +440,7 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <TrendingUp className="w-4 h-4 text-emerald-400" />
-                    Performance IA — backtest
+                    Performance algorithme — backtest
                   </CardTitle>
                   {equity?.is_real ? (
                     <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">Réel</Badge>
@@ -533,7 +533,7 @@ export default function DashboardPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-blue-400" />
-                  Santé du modèle IA
+                  Santé du modèle
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -581,7 +581,7 @@ export default function DashboardPage() {
                 {[
                   { href: "/bankroll", label: "Suivi du capital", icon: Wallet },
                   { href: "/strategies", label: "Mes stratégies", icon: BarChart3 },
-                  { href: "/assistant", label: "Assistant IA", icon: Cpu },
+                  { href: "/assistant", label: "Assistant algorithme", icon: Cpu },
                 ].map(({ href, label, icon: Icon }) => (
                   <Link
                     key={href}
