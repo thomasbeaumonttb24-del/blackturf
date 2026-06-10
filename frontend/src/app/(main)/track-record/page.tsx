@@ -141,7 +141,11 @@ export default function TrackRecordPage() {
   );
 
   // Paris RÉELLEMENT gagnés par l'algorithme, par profil (pronos émis réglés)
-  const { data: gagnantsData } = useSWR<{ gagnants: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number; updated_at?: string }>(
+  const { data: gagnantsData } = useSWR<{
+    gagnants: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
+    profils?: Array<{ profil: string; label: string; nb_courses: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
+    updated_at?: string;
+  }>(
     "palmares-gagnants",
     () => statsApi.palmaresGagnants().then((r) => r.data),
     { refreshInterval: 60_000, revalidateOnFocus: true },
@@ -365,6 +369,29 @@ export default function TrackRecordPage() {
             </p>
           </CardHeader>
           <CardContent>
+            {/* Résumé par profil — vrai nombre de courses + gain net réel */}
+            {gagnantsData?.profils && gagnantsData.profils.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+                {gagnantsData.profils.map((p) => {
+                  const pm = PROFIL_LABELS[p.profil] ?? { label: p.label, cls: "bg-muted text-muted-foreground ring-border" };
+                  return (
+                    <div key={p.profil} className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                      <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
+                      <div className={cn("mt-2 text-2xl font-black tabular-nums leading-none", p.gain_net >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                        {p.gain_net >= 0 ? "+" : ""}{p.gain_net.toFixed(0)}€
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-1">
+                        gain net · ROI {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground/70 mt-1.5">
+                        {p.nb_courses} courses · {p.paris_gagnes} paris gagnés
+                        {p.taux_courses_beneficiaires != null ? ` · ${p.taux_courses_beneficiaires}% bénéf.` : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {!gagnantsData ? (
               <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
             ) : gagnantsData.gagnants.length === 0 ? (
