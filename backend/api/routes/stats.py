@@ -1024,7 +1024,9 @@ async def stats_palmares_gagnants(
         })
 
     return {
-        "gagnants": gagnants,
+        # Liste = 100 paris gagnants les plus récents (le résumé par profil + les
+        # totaux ci-dessous portent eux sur TOUTES les courses analysées).
+        "gagnants": gagnants[:100],
         "n": len(gagnants),
         "n_courses": len({x["course_id"] for x in gagnants}),
         "total_gain": total_gain,

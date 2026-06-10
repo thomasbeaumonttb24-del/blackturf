@@ -402,9 +402,10 @@ export default function TrackRecordPage() {
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[560px]">
+                  <table className="w-full text-sm min-w-[620px]">
                     <thead>
                       <tr className="border-b border-border/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <th className="text-left py-2 font-medium">Date</th>
                         <th className="text-left py-2 font-medium">Profil</th>
                         <th className="text-left py-2 font-medium">Course</th>
                         <th className="text-left py-2 font-medium">Pari</th>
@@ -418,6 +419,9 @@ export default function TrackRecordPage() {
                         const pm = PROFIL_LABELS[b.profil] ?? { label: b.profil, cls: "bg-muted text-muted-foreground ring-border" };
                         return (
                           <tr key={i} className="hover:bg-accent/20 transition-colors">
+                            <td className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                              {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                            </td>
                             <td className="py-2.5">
                               <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
                             </td>
@@ -443,8 +447,8 @@ export default function TrackRecordPage() {
                   </table>
                 </div>
                 <p className="mt-3 text-[11px] text-muted-foreground/70">
-                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total ·
-                  mise de référence 10€/course · réglé aux rapports PMU réels.
+                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total
+                  (100 plus récents affichés) · mise de référence 10€/course · réglé aux rapports PMU réels.
                 </p>
               </>
             )}

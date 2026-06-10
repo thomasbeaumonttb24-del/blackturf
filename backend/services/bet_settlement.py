@@ -21,6 +21,7 @@ Les rapports PMU stockés sont les rapports de la COMBINAISON GAGNANTE réelle :
 from __future__ import annotations
 
 import math
+import re
 from typing import Optional
 
 # type_pari -> clés candidates du rapport PMU (base 1€). On essaie chaque clé et on
@@ -59,12 +60,33 @@ def _nb_places(nb_partants: int) -> int:
     return 1
 
 
+def _place_rapport_exact(rapports_detail: Optional[dict], key: str,
+                         numeros: list[int]) -> Optional[float]:
+    """Rapport placé EXACT du cheval/de la combinaison depuis rapports_detail
+    (le PMU publie un rapport par cheval placé). Match par numéro(s) dans la
+    `combinaison`. None si introuvable → l'appelant retombe sur l'agrégat."""
+    if not rapports_detail:
+        return None
+    entries = rapports_detail.get(key) or []
+    want = sorted(str(int(n)) for n in numeros)
+    for e in entries:
+        combi = str(e.get("combinaison") or "")
+        nums = sorted(re.findall(r"\d+", combi))
+        if nums == want and e.get("rapport"):
+            try:
+                return float(e["rapport"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def settle_pari(
     type_pari: str,
     numeros: list[int],
     classement: list[dict],
     rapports: Optional[dict],
     nb_partants: int,
+    rapports_detail: Optional[dict] = None,
 ) -> dict:
     """
     Règle un pari unique.
@@ -77,6 +99,9 @@ def settle_pari(
           "note": str | None,
         }
     Le gain monétaire est calculé par l'appelant : mise * rapport_reel.
+
+    `rapports_detail` (optionnel) = détail PMU {type: [{combinaison, rapport}]} :
+    permet le rapport placé EXACT du cheval précis (sinon agrégat approximatif).
     """
     rapports = rapports or {}
 
@@ -152,10 +177,19 @@ def settle_pari(
     rapport_reel: Optional[float] = None
     if gagne:
         val = None
-        for k in _RAPPORT_KEYS.get(type_pari, ()):
-            if rapports.get(k) is not None:
-                val = rapports.get(k)
-                break
+        keys = _RAPPORT_KEYS.get(type_pari, ())
+        # Placé : tenter le rapport EXACT du cheval/combi via rapports_detail.
+        if type_pari in ("Simple Placé", "Couplé Placé") and keys:
+            exact = _place_rapport_exact(rapports_detail, keys[0], list(sel))
+            if exact and exact > 0:
+                val = exact
+                approx = False
+                note = None
+        if val is None:
+            for k in keys:
+                if rapports.get(k) is not None:
+                    val = rapports.get(k)
+                    break
         try:
             rapport_reel = float(val) if val is not None and float(val) > 0 else None
         except (TypeError, ValueError):
@@ -173,11 +207,12 @@ def settle_pari(
 
 
 def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
-                nb_partants: int) -> dict:
+                nb_partants: int, rapports_detail: Optional[dict] = None) -> dict:
     """
     Règle un plan de mise complet (dict issu de plan_to_dict) contre le résultat.
 
     Retourne le bilan agrégé + le détail par pari (avec gagné/gain).
+    `rapports_detail` → rapport placé EXACT (sinon agrégat).
     """
     paris_bilan: list[dict] = []
     total_mise = 0.0
@@ -188,7 +223,7 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
         for pari in niveau.get("paris", []):
             numeros = [c["numero"] for c in pari.get("chevaux", [])]
             mise = float(pari.get("mise", 0) or 0)
-            res = settle_pari(pari["type"], numeros, classement, rapports, nb_partants)
+            res = settle_pari(pari["type"], numeros, classement, rapports, nb_partants, rapports_detail)
             gain = None
             # statut : "gagne" | "perdu" | "en_attente" (gagné mais rapport pas publié)
             if res["gagne"]:

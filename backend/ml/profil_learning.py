@@ -193,7 +193,7 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
     await ensure_tables(session)
 
     res = (await session.execute(text("""
-        SELECT r.classement, r.rapports, c.nb_partants
+        SELECT r.classement, r.rapports, c.nb_partants, r.rapports_detail
         FROM resultats r JOIN courses c ON c.course_id = r.course_id
         WHERE r.course_id = :cid
     """), {"cid": course_id})).first()
@@ -202,6 +202,7 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
     classement = res[0] if isinstance(res[0], list) else []
     rapports = res[1] or {}
     nb_partants = res[2] or len(classement)
+    rapports_detail = res[3] or None
 
     runs = (await session.execute(text("""
         SELECT log_id, plan FROM profil_run_log
@@ -211,7 +212,7 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
     n_settled = 0
     for log_id, plan in runs:
         plan_d = plan if isinstance(plan, dict) else json.loads(plan)
-        bilan = settle_plan(plan_d, classement, rapports, nb_partants)
+        bilan = settle_plan(plan_d, classement, rapports, nb_partants, rapports_detail)
         statut = "partial" if bilan.get("en_attente") else "settled"
         roi = bilan.get("roi")
         await session.execute(text("""

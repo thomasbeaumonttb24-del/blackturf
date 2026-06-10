@@ -168,7 +168,8 @@ async def settle_pending_bets(db: AsyncSession, user_id: Optional[str] = None) -
             nums = [int(n) for n in re.findall(r"\d+", e.chevaux or "")]
             if not nums:
                 continue
-            r = settle_pari(e.type_pari, nums, res.classement, res.rapports, nb_part)
+            r = settle_pari(e.type_pari, nums, res.classement, res.rapports, nb_part,
+                            getattr(res, "rapports_detail", None))
             if r["gagne"]:
                 if r["rapport_reel"] is not None:
                     # gain_mult < 1 sur formules combinées (ex. 2sur4 4 chevaux =

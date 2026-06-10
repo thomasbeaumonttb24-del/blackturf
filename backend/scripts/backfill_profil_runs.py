@@ -31,7 +31,7 @@ async def main(limit: int = 400) -> None:
         await ensure_tables(session)
         courses = (await session.execute(text("""
             SELECT c.course_id, c.nb_partants, c.est_quinte, c.est_quarte, c.est_tierce,
-                   r.classement, r.rapports
+                   r.classement, r.rapports, r.rapports_detail
             FROM courses c
             JOIN resultats r ON r.course_id = c.course_id
             WHERE c.statut = 'termine' AND r.classement IS NOT NULL
@@ -42,7 +42,7 @@ async def main(limit: int = 400) -> None:
 
         n_done = 0
         n_runs = 0
-        for cid, nb_part, est_q, est_qa, est_t, classement, rapports in courses:
+        for cid, nb_part, est_q, est_qa, est_t, classement, rapports, rapports_detail in courses:
             preds = (await session.execute(text("""
                 SELECT p.numero, ch.nom, pr.proba_top1, pr.proba_top3, p.cote_pmu, p.non_partant
                 FROM predictions pr
@@ -79,7 +79,7 @@ async def main(limit: int = 400) -> None:
                 nb_paris = sum(len(nv.get("paris", [])) for nv in plan.get("niveaux", []))
                 if nb_paris == 0:
                     continue
-                bilan = settle_plan(plan, cl, rp, nbp)
+                bilan = settle_plan(plan, cl, rp, nbp, rapports_detail or None)
                 statut = "partial" if bilan.get("en_attente") else "settled"
                 roi = bilan.get("roi")
                 await session.execute(text("""
