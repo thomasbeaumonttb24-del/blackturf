@@ -13,6 +13,7 @@ from ml.profil_learning import shrunk_weight
 from services.mise_calculator import (
     generer_plan, plan_to_dict, _motif_rejet, _effective_config,
 )
+from services.bet_settlement import settle_pari
 
 
 # ── Features dormantes ───────────────────────────────────────────────────────
@@ -148,6 +149,49 @@ class TestOutsiderDetector:
                            (0.12, 11.0), (0.1, 14.0), (0.06, 22.0), (0.04, 30.0)])
         r = compute_outsider_score(field, surprise_rate=None)
         assert 0.0 <= r["score"] <= 1.0
+
+
+# ── Règlement 2sur4 en formule combinée (gain_mult) ──────────────────────────
+def _classement(*nums):
+    return [{"numero": n, "position": i + 1} for i, n in enumerate(nums)]
+
+
+class TestSettle2sur4Combine:
+    """Un 2sur4 à N chevaux = C(N,2) combinaisons : le rapport PMU (base 1€) paie
+    PAR combinaison gagnante. Avant fix : mise entière × rapport (jusqu'à 6× trop)."""
+    RAPPORTS = {"e_deux_sur_quatre": 14.0}
+
+    def test_4_chevaux_2_places_paie_un_sixieme(self):
+        # top-4 = 1,2,3,4 ; sélection 1,2,90,91 → 2 dans top-4 → 1 combinaison / 6
+        r = settle_pari("2sur4", [1, 2, 90, 91], _classement(1, 2, 3, 4, 5, 6, 7, 8),
+                        self.RAPPORTS, 12)
+        assert r["gagne"] and r["rapport_reel"] == 14.0
+        assert r["gain_mult"] == pytest.approx(1 / 6)
+
+    def test_4_chevaux_3_places(self):
+        r = settle_pari("2sur4", [1, 2, 3, 90], _classement(1, 2, 3, 4, 5, 6, 7, 8),
+                        self.RAPPORTS, 12)
+        assert r["gain_mult"] == pytest.approx(3 / 6)
+
+    def test_4_chevaux_tous_places_paie_plein(self):
+        r = settle_pari("2sur4", [1, 2, 3, 4], _classement(1, 2, 3, 4, 5, 6, 7, 8),
+                        self.RAPPORTS, 12)
+        assert r["gain_mult"] == pytest.approx(1.0)
+
+    def test_formule_simple_2_chevaux_inchangee(self):
+        r = settle_pari("2sur4", [1, 3], _classement(1, 2, 3, 4, 5, 6, 7, 8),
+                        self.RAPPORTS, 12)
+        assert r["gagne"] and r["gain_mult"] == 1.0
+
+    def test_perdu_aucune_combinaison(self):
+        r = settle_pari("2sur4", [90, 91, 92, 93], _classement(1, 2, 3, 4, 5, 6, 7, 8),
+                        self.RAPPORTS, 12)
+        assert not r["gagne"]
+
+    def test_autres_types_gain_mult_neutre(self):
+        r = settle_pari("Simple Gagnant", [1], _classement(1, 2, 3, 4),
+                        {"e_simple_gagnant": 4.2}, 8)
+        assert r["gain_mult"] == 1.0
 
 
 # ── Apprentissage par profil ─────────────────────────────────────────────────

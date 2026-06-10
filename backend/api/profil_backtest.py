@@ -103,9 +103,10 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
                     break
                 mise_course += x["mise"]
                 won = bool(r["gagne"])
-                pw = min(x["mise"] * r["rapport_reel"], x["mise"] * WINSOR_CAP) if won else 0.0
+                gm = r.get("gain_mult", 1.0)
+                pw = min(x["mise"] * r["rapport_reel"] * gm, x["mise"] * WINSOR_CAP) if won else 0.0
                 if won:
-                    payout = x["mise"] * r["rapport_reel"]
+                    payout = x["mise"] * r["rapport_reel"] * gm
                     gain_course += payout
                     gain_w_course += pw
                 per_bet.append((x["type_pari"], x["mise"], won, pw))

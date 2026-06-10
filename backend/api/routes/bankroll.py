@@ -171,7 +171,9 @@ async def settle_pending_bets(db: AsyncSession, user_id: Optional[str] = None) -
             r = settle_pari(e.type_pari, nums, res.classement, res.rapports, nb_part)
             if r["gagne"]:
                 if r["rapport_reel"] is not None:
-                    gain_brut = round(e.mise * r["rapport_reel"], 2)
+                    # gain_mult < 1 sur formules combinées (ex. 2sur4 4 chevaux =
+                    # 6 combinaisons, seules les gagnantes paient).
+                    gain_brut = round(e.mise * r["rapport_reel"] * r.get("gain_mult", 1.0), 2)
                     e.gain_perte = round(gain_brut - e.mise, 2)  # NET
                     e.cote = round(float(r["rapport_reel"]), 2)
                     e.resultat = "gagne"

@@ -20,6 +20,7 @@ Les rapports PMU stockés sont les rapports de la COMBINAISON GAGNANTE réelle :
 """
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 # type_pari -> clés candidates du rapport PMU (base 1€). On essaie chaque clé et on
@@ -95,10 +96,11 @@ def settle_pari(
         pos_by_num.setdefault(num, pos)
 
     if not num_by_pos:
-        return {"gagne": False, "rapport_reel": None, "rapport_approximatif": False,
-                "note": "Résultat indisponible"}
+        return {"gagne": False, "rapport_reel": None, "gain_mult": 1.0,
+                "rapport_approximatif": False, "note": "Résultat indisponible"}
 
     nb_pl = _nb_places(nb_partants or len(pos_by_num))
+    gain_mult = 1.0   # part de la mise payée au rapport (formules combinées : <1 possible)
     placed = {num_by_pos[p] for p in range(1, nb_pl + 1) if p in num_by_pos}
     top2 = {num_by_pos[p] for p in (1, 2) if p in num_by_pos}
     top3 = {num_by_pos[p] for p in (1, 2, 3) if p in num_by_pos}
@@ -124,7 +126,18 @@ def settle_pari(
     elif type_pari == "Trio":
         gagne = sel == top3 and len(sel) == 3
     elif type_pari == "2sur4":
-        gagne = len(sel & top4) >= 2
+        # Formule combinée : jouer N chevaux en 2sur4 = C(N,2) combinaisons, la mise
+        # se répartit dessus. Le rapport PMU paie PAR combinaison gagnante →
+        # gain = mise × rapport × C(n_dans_top4, 2) / C(N, 2). Avec 4 chevaux dont
+        # 2 placés : 1/6 de la mise au rapport (PAS la mise entière — c'était
+        # l'erreur qui gonflait les gains 2sur4).
+        n_in = len(sel & top4)
+        gagne = n_in >= 2
+        if gagne and len(sel) > 2:
+            n_combis = math.comb(len(sel), 2)
+            n_win = math.comb(n_in, 2)
+            gain_mult = n_win / n_combis
+            note = f"Formule {len(sel)} chevaux : {n_win}/{n_combis} combinaison(s) gagnante(s)."
     elif type_pari in ("Tiercé Désordre", "Tiercé Ordre"):
         gagne = sel == top3 and len(sel) == 3        # désordre : 3 premiers, ordre indifférent
     elif type_pari in ("Quarté+ Désordre", "Quarté+"):
@@ -153,6 +166,7 @@ def settle_pari(
     return {
         "gagne": bool(gagne),
         "rapport_reel": rapport_reel,
+        "gain_mult": float(gain_mult),
         "rapport_approximatif": approx,
         "note": note,
     }
@@ -179,7 +193,7 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
             # statut : "gagne" | "perdu" | "en_attente" (gagné mais rapport pas publié)
             if res["gagne"]:
                 if res["rapport_reel"] is not None:
-                    gain = round(mise * res["rapport_reel"], 2)
+                    gain = round(mise * res["rapport_reel"] * res.get("gain_mult", 1.0), 2)
                     total_gain += gain
                     statut = "gagne"
                 else:

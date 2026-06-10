@@ -851,15 +851,30 @@ async def enregistrer_paris(
     } for pred, part, cheval in rows]
     course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "nb_partants": course.nb_partants}
 
-    # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré)
+    # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré) :
+    # poids par type APPRIS POUR CE PROFIL + multiplicateurs de signaux par profil.
     try:
         from ml.bet_performance import get_learned_type_weights, get_model_heat
-        roi_weights = await get_learned_type_weights(db)
+        roi_weights = await get_learned_type_weights(db, profil=profil)
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
+    signal_mults: dict = {}
+    try:
+        from ml.signal_performance import load_signal_performance, signal_multiplier
+        from db.models import FeatureML as _FM2
+        perf = await load_signal_performance(db)
+        if perf:
+            fq = (select(Participation.numero, _FM2.features)
+                  .join(_FM2, _FM2.participation_id == Participation.participation_id)
+                  .where(Participation.course_id == course_id))
+            for numero, feats in (await db.execute(fq)).all():
+                signal_mults[int(numero)] = signal_multiplier(feats or {}, perf, profil)
+    except Exception:
+        signal_mults = {}
 
-    plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None, roi_weights, heat))
+    plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None,
+                                     roi_weights, heat, signal_mults))
 
     # Bankroll principale
     main = (await db.execute(
@@ -871,12 +886,16 @@ async def enregistrer_paris(
     )).scalar_one_or_none()
     bankroll_id = main.bankroll_id if main else None
 
-    # Remplace un éventuel plan déjà enregistré (non réglé) pour cette course
+    # Remplace un éventuel plan déjà enregistré (non réglé) DU MÊME PROFIL pour
+    # cette course — on peut donc cumuler Prudent + Modéré + Risqué sur une même
+    # course (avant : tout plan IA non réglé était écrasé, seul le dernier restait).
+    note_profil = f"Plan de mise IA · {profil}"
     await db.execute(_delete(BankrollEntry).where(_and(
         BankrollEntry.user_id == user.user_id,
         BankrollEntry.course_id == course_id,
         BankrollEntry.resultat.is_(None),
         BankrollEntry.suivi_reco_ia == True,
+        BankrollEntry.notes.in_([note_profil, "Plan de mise IA"]),  # legacy sans profil
     )))
 
     now = _dt.now()
@@ -896,7 +915,7 @@ async def enregistrer_paris(
                 suivi_reco_ia=True,
                 resultat=None,
                 gain_perte=None,
-                notes="Plan de mise IA",
+                notes=note_profil,
             ))
             nb += 1
     await db.commit()
