@@ -106,6 +106,148 @@ def get_dist_cat(dist: int) -> str:
     return "longue"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Données dormantes réveillées (terrain/corde/vitesse/poids historiques + géo)
+# ─────────────────────────────────────────────────────────────────────────────
+# Familles de terrain pour les libellés PMU de l'historique (etatTerrain) —
+# plus larges que TERRAIN_CATEGORIES (libellés bruts type "TRES_SOUPLE").
+def get_terrain_famille(terrain: Optional[str]) -> str:
+    """Mappe un libellé terrain (courses ou historique PMU) vers 3 familles :
+    ferme / intermediaire / lourd. Inconnu → 'inconnu' (pas de fausse famille)."""
+    t = (terrain or "").lower().replace("_", " ").strip()
+    if not t:
+        return "inconnu"
+    if any(k in t for k in ("très lourd", "tres lourd", "lourd", "collant", "bourbeux")):
+        return "lourd"
+    if any(k in t for k in ("très souple", "tres souple", "souple", "léger", "leger")):
+        return "intermediaire"
+    if any(k in t for k in ("bon", "ferme", "dur", "rapide", "standard", "sec")):
+        return "ferme"
+    return "inconnu"
+
+
+def corde_zone(num: Optional[int]) -> str:
+    """Zone de corde (numéro de départ) : intérieure 1-4 / milieu 5-8 / extérieure 9+."""
+    if num is None or num <= 0:
+        return "inconnu"
+    if num <= 4:
+        return "interieure"
+    if num <= 8:
+        return "milieu"
+    return "exterieure"
+
+
+def compute_vitesse_relative(vitesses_recentes: list[float], mediane_ref: Optional[float]) -> float:
+    """Niveau de vitesse des courses récentes du cheval vs la référence
+    (médiane d'indice_vitesse à même discipline/distance). indice_vitesse =
+    vitesse du VAINQUEUR de chaque course historique → proxy du NIVEAU des
+    courses fréquentées (qualité d'opposition), pas la vitesse propre du cheval.
+    Ratio 0.95→1.05 mappé sur 0→1 ; données absentes → 0.5 neutre."""
+    vs = [v for v in (vitesses_recentes or []) if v and v > 0]
+    if not vs or not mediane_ref or mediane_ref <= 0:
+        return 0.5
+    ratio = (sum(vs) / len(vs)) / mediane_ref
+    return float(np.clip((ratio - 0.95) / 0.10, 0.0, 1.0))
+
+
+def compute_delta_poids(poids_jour: Optional[float], poids_hist: list[float]) -> float:
+    """Écart de poids porté aujourd'hui vs la moyenne des dernières courses
+    (plat/obstacle). Négatif = allègement (souvent favorable). Normalisé sur
+    ±5 kg → [-1, +1]. Données absentes → 0 neutre."""
+    ph = [p for p in (poids_hist or []) if p and 30.0 <= p <= 80.0]
+    if not poids_jour or not (30.0 <= float(poids_jour) <= 80.0) or not ph:
+        return 0.0
+    delta = float(poids_jour) - (sum(ph) / len(ph))
+    return float(np.clip(delta / 5.0, -1.0, 1.0))
+
+
+# Lat/lon des principaux hippodromes français (+ quelques étrangers fréquents).
+# Sert au PROXY de déplacement : distance entre l'hippodrome « domicile » du
+# cheval (mode de son historique) et l'hippodrome du jour. On n'a PAS l'adresse
+# des écuries → c'est un proxy honnête du dépaysement, documenté comme tel.
+HIPPODROME_GEO: dict[str, tuple[float, float]] = {
+    "VINCENNES": (48.821, 2.452), "PARIS-VINCENNES": (48.821, 2.452),
+    "LONGCHAMP": (48.861, 2.233), "PARISLONGCHAMP": (48.861, 2.233),
+    "SAINT-CLOUD": (48.853, 2.205), "AUTEUIL": (48.854, 2.258),
+    "CHANTILLY": (49.182, 2.470), "DEAUVILLE": (49.357, 0.086),
+    "ENGHIEN": (48.975, 2.302), "ENGHIEN SOISY": (48.975, 2.302),
+    "MAISONS-LAFFITTE": (48.952, 2.146), "COMPIEGNE": (49.400, 2.893),
+    "FONTAINEBLEAU": (48.420, 2.673), "EVREUX": (49.017, 1.142),
+    "CAGNES-SUR-MER": (43.663, 7.139), "MARSEILLE-BORELY": (43.260, 5.379),
+    "MARSEILLE BORELY": (43.260, 5.379), "MARSEILLE-VIVAUX": (43.276, 5.413),
+    "HYERES": (43.105, 6.143), "SALON-DE-PROVENCE": (43.640, 5.094),
+    "VICHY": (46.117, 3.439), "LYON-PARILLY": (45.715, 4.900),
+    "LYON PARILLY": (45.715, 4.900), "LYON-LA SOIE": (45.761, 4.972),
+    "TOULOUSE": (43.575, 1.478), "BORDEAUX-LE BOUSCAT": (44.866, -0.610),
+    "BORDEAUX LE BOUSCAT": (44.866, -0.610), "PAU": (43.320, -0.339),
+    "TARBES": (43.246, 0.040), "MONT-DE-MARSAN": (43.886, -0.498),
+    "STRASBOURG": (48.553, 7.703), "NANCY": (48.633, 6.207),
+    "REIMS": (49.222, 4.000), "AMIENS": (49.873, 2.260),
+    "LE CROISE-LAROCHE": (50.679, 3.085), "LE CROISÉ-LAROCHE": (50.679, 3.085),
+    "CAEN": (49.176, -0.378), "GRAIGNES": (49.243, -1.205),
+    "ARGENTAN": (48.752, -0.014), "LISIEUX": (49.137, 0.234),
+    "CABOURG": (49.286, -0.122), "CLAIREFONTAINE": (49.348, 0.062),
+    "LAVAL": (48.060, -0.787), "LE MANS": (47.945, 0.225),
+    "NANTES": (47.255, -1.593), "ANGERS": (47.456, -0.594),
+    "CHOLET": (47.052, -0.890), "CORDEMAIS": (47.292, -1.866),
+    "MESLAY-DU-MAINE": (47.951, -0.546), "SABLE-SUR-SARTHE": (47.838, -0.346),
+    "RAMBOUILLET": (48.652, 1.821), "CHARTRES": (48.464, 1.503),
+    "LA CAPELLE": (49.965, 3.921), "ROYAN": (45.625, -1.043),
+    "LA TESTE": (44.640, -1.130), "LA TESTE DE BUCH": (44.640, -1.130),
+    "AGEN": (44.190, 0.598), "BEAUMONT-DE-LOMAGNE": (43.882, 0.984),
+    "CASTERA-VERDUZAN": (43.806, 0.428), "DAX": (43.694, -1.057),
+    "NIMES": (43.812, 4.351), "AVIGNON": (43.921, 4.876),
+    "BEAUCAIRE": (43.797, 4.633), "CAVAILLON": (43.835, 5.025),
+    "FEURS": (45.733, 4.232), "SAINT-GALMIER": (45.595, 4.301),
+    "MOULINS": (46.561, 3.341), "CHATILLON-SUR-CHALARONNE": (46.116, 4.955),
+    "DIVONNE-LES-BAINS": (46.357, 6.133), "AIX-LES-BAINS": (45.694, 5.896),
+    "CHATEAUBRIANT": (47.706, -1.392), "PORNICHET": (47.262, -2.343),
+    "SAINT-MALO": (48.633, -1.975), "MAURE-DE-BRETAGNE": (47.890, -1.997),
+    "VITRE": (48.118, -1.204), "RANES": (48.640, -0.211),
+    "MAUQUENCHY": (49.589, 1.392), "ROUEN-MAUQUENCHY": (49.589, 1.392),
+}
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Distance haversine en km entre deux points (lat/lon en degrés)."""
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def bucket_distance_km(km: Optional[float]) -> float:
+    """Bucketise une distance de déplacement en [0,1] : <50km→0 (local),
+    600km+→1 (très loin). None → 0.5 neutre (géo inconnue)."""
+    if km is None:
+        return 0.5
+    return float(np.clip((km - 50.0) / 550.0, 0.0, 1.0))
+
+
+def compute_distance_deplacement(hippodrome_jour: Optional[str],
+                                 hippos_historique: list[str]) -> float:
+    """PROXY de déplacement : distance entre l'hippodrome le plus fréquenté du
+    cheval (« domicile ») et celui du jour. Hippodrome(s) hors référentiel géo
+    ou historique vide → 0.5 neutre (jamais inventé)."""
+    if not hippodrome_jour or not hippos_historique:
+        return 0.5
+    freq: dict[str, int] = {}
+    for h in hippos_historique:
+        if h:
+            k = h.upper().strip()
+            freq[k] = freq.get(k, 0) + 1
+    if not freq:
+        return 0.5
+    domicile = max(freq, key=lambda k: freq[k])
+    g1 = HIPPODROME_GEO.get(domicile)
+    g2 = HIPPODROME_GEO.get(hippodrome_jour.upper().strip())
+    if not g1 or not g2:
+        return 0.5
+    return bucket_distance_km(haversine_km(g1[0], g1[1], g2[0], g2[1]))
+
+
 async def compute_features_for_participation(
     session: AsyncSession,
     participation_id: str,
@@ -1252,7 +1394,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         SELECT h.cheval_id, h.position_arrivee, h.distance, h.terrain,
                h.hippodrome, h.date_course, h.nb_partants, h.cote_depart,
                h.discipline, h.allocation,
-               h.acceleration_label, h.reduction_km
+               h.acceleration_label, h.reduction_km,
+               -- Données dormantes réveillées (backfill API PMU) — en FIN pour ne
+               -- pas décaler les index positionnels existants :
+               h.corde, h.poids_porte_course, h.indice_vitesse
         FROM historique_courses h
         WHERE h.cheval_id = ANY(:cids)
           AND h.date_course < :today
@@ -1265,7 +1410,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         if cid not in hist_by_cheval:
             hist_by_cheval[cid] = []
         if len(hist_by_cheval[cid]) < 20:
-            hist_by_cheval[cid].append(row[1:])   # (position, distance, terrain, hippodrome, date, nb_partants, cote, discipline, allocation)
+            # (0 position, 1 distance, 2 terrain, 3 hippodrome, 4 date, 5 nb_partants,
+            #  6 cote, 7 discipline, 8 allocation, 9 acceleration_label, 10 reduction_km,
+            #  11 corde, 12 poids_porte_course, 13 indice_vitesse)
+            hist_by_cheval[cid].append(row[1:])
 
     # 3. ELO history (max 10 par cheval) — POINT-IN-TIME : uniquement les deltas ELO
     # des courses ANTÉRIEURES à celle-ci (anti-fuite : sinon delta_elo_5/velocity voient
@@ -1384,6 +1532,111 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     except Exception as e:  # noqa: BLE001
         log.warning("features.sire_dist_failed", err=str(e)[:120])
 
+    # 11. Référence de vitesse (médiane indice_vitesse à même discipline + distance
+    #     ±200m sur tout l'historique) — pour situer le NIVEAU des courses récentes
+    #     du cheval. indice_vitesse = vitesse du vainqueur (proxy qualité d'opposition).
+    course_disc = partants_raw[0][24]
+    course_dist = partants_raw[0][25]
+    course_terrain = partants_raw[0][26]
+    vitesse_ref_median = None
+    try:
+        vref_r = await session.execute(text("""
+            SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY h.indice_vitesse)
+            FROM historique_courses h
+            WHERE h.indice_vitesse IS NOT NULL AND h.indice_vitesse > 0
+              AND lower(h.discipline) = lower(:disc)
+              AND h.distance IS NOT NULL AND ABS(h.distance - :dist) <= 200
+        """), {"disc": course_disc or "plat", "dist": int(course_dist or 2000)})
+        v = vref_r.scalar()
+        vitesse_ref_median = float(v) if v else None
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.vitesse_ref_failed", err=str(e)[:120])
+
+    # 12. Pedigree × TERRAIN (réveillé : terrain historique backfillé) — top3-rate de
+    #     la progéniture du père par libellé terrain, agrégé en familles côté Python.
+    sire_terrain_by_cheval: dict = {}
+    try:
+        famille_jour = get_terrain_famille(course_terrain)
+        if famille_jour != "inconnu":
+            sire_t_r = await session.execute(text("""
+                WITH field AS (
+                    SELECT p.cheval_id, c.pere
+                    FROM participations p
+                    JOIN chevaux c ON c.cheval_id = p.cheval_id
+                    WHERE p.course_id = :cid AND c.pere IS NOT NULL AND c.pere <> ''
+                )
+                SELECT f.cheval_id, lower(h.terrain) AS t,
+                       COUNT(*) FILTER (WHERE h.position_arrivee <= 3) AS top3,
+                       COUNT(*) AS n
+                FROM field f
+                JOIN chevaux sib ON sib.pere = f.pere
+                JOIN historique_courses h ON h.cheval_id = sib.cheval_id
+                WHERE h.position_arrivee IS NOT NULL
+                  AND h.terrain IS NOT NULL AND h.terrain <> ''
+                GROUP BY f.cheval_id, lower(h.terrain)
+            """), {"cid": course_id})
+            acc: dict = {}
+            for cid_, t_label, top3, n in sire_t_r.fetchall():
+                if get_terrain_famille(t_label) != famille_jour:
+                    continue
+                a = acc.setdefault(cid_, [0, 0])
+                a[0] += int(top3 or 0)
+                a[1] += int(n or 0)
+            for cid_, (top3, n) in acc.items():
+                if n >= 10:
+                    sire_terrain_by_cheval[cid_] = float(max(0.0, min(1.0, top3 / n)))
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.sire_terrain_failed", err=str(e)[:120])
+
+    # 13. FORME RÉCENTE jockey (7j) / entraîneur (14j) — fenêtre AVANT la course
+    #     (point-in-time, pas de fuite même en recompute sur courses passées).
+    #     Top-3 réel depuis resultats.classement. Min 5 montes sinon absent (fallback
+    #     taux global dans le compute).
+    jockey_forme_7j_map: dict = {}
+    entr_forme_14j_map: dict = {}
+    entraineur_ids = [r[4] for r in partants_raw if r[4]]
+    try:
+        if jockey_ids:
+            jf_r = await session.execute(text("""
+                SELECT p2.jockey_id, COUNT(*) AS n,
+                       COUNT(*) FILTER (WHERE EXISTS (
+                           SELECT 1 FROM json_array_elements(r2.classement::json) e
+                           WHERE (e->>'numero')::int = p2.numero
+                             AND COALESCE((e->>'position')::int, 99) <= 3
+                       )) AS top3
+                FROM participations p2
+                JOIN courses c2 ON c2.course_id = p2.course_id
+                JOIN resultats r2 ON r2.course_id = c2.course_id
+                WHERE p2.jockey_id = ANY(:jids)
+                  AND c2.date_heure >= CAST(:dref AS timestamptz) - INTERVAL '7 days'
+                  AND c2.date_heure < CAST(:dref AS timestamptz)
+                GROUP BY p2.jockey_id
+            """), {"jids": jockey_ids, "dref": str(date_heure)})
+            for jid, n, top3 in jf_r.fetchall():
+                if n and int(n) >= 5:
+                    jockey_forme_7j_map[jid] = float(int(top3 or 0) / int(n))
+        if entraineur_ids:
+            ef_r = await session.execute(text("""
+                SELECT p2.entraineur_id, COUNT(*) AS n,
+                       COUNT(*) FILTER (WHERE EXISTS (
+                           SELECT 1 FROM json_array_elements(r2.classement::json) e
+                           WHERE (e->>'numero')::int = p2.numero
+                             AND COALESCE((e->>'position')::int, 99) <= 3
+                       )) AS top3
+                FROM participations p2
+                JOIN courses c2 ON c2.course_id = p2.course_id
+                JOIN resultats r2 ON r2.course_id = c2.course_id
+                WHERE p2.entraineur_id = ANY(:eids)
+                  AND c2.date_heure >= CAST(:dref AS timestamptz) - INTERVAL '14 days'
+                  AND c2.date_heure < CAST(:dref AS timestamptz)
+                GROUP BY p2.entraineur_id
+            """), {"eids": entraineur_ids, "dref": str(date_heure)})
+            for eid, n, top3 in ef_r.fetchall():
+                if n and int(n) >= 5:
+                    entr_forme_14j_map[eid] = float(int(top3 or 0) / int(n))
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.forme_recente_failed", err=str(e)[:120])
+
     return {
         "partants": partants_raw,
         "hist_by_cheval": hist_by_cheval,
@@ -1397,6 +1650,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         "elo_max": elo_max,
         "field_cotes": field_cotes,
         "sire_dist_by_cheval": sire_dist_by_cheval,
+        "sire_terrain_by_cheval": sire_terrain_by_cheval,
+        "vitesse_ref_median": vitesse_ref_median,
+        "jockey_forme_7j": jockey_forme_7j_map,
+        "entraineur_forme_14j": entr_forme_14j_map,
     }
 
 
@@ -1581,8 +1838,29 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     pref_hippo = float(np.mean(hippo_scores)) if hippo_scores else 0.5
     hippo_wins = sum(1 for h in hippo_hist if h[0] == 1)
     record_hippodrome = hippo_wins / len(hippo_hist) if hippo_hist else 0.0
+
+    # corde_preference RÉVEILLÉE : taux de top-3 du cheval quand il partait dans la
+    # MÊME zone de corde (int. 1-4 / milieu 5-8 / ext. 9+) que son numéro du jour.
+    # Plat/obstacle uniquement (trot : pas de corde) ; min 3 obs sinon 0.5 neutre.
+    corde_pref = 0.5
+    if "trot" not in disc_lower and "attelé" not in disc_lower and "monté" not in disc_lower:
+        zone_jour = corde_zone(int(numero) if numero else None)
+        if zone_jour != "inconnu":
+            same_zone = []
+            for h in historique:
+                c_h = h[11] if len(h) > 11 else None
+                try:
+                    z_h = corde_zone(int(str(c_h))) if c_h not in (None, "") else "inconnu"
+                except (TypeError, ValueError):
+                    z_h = "inconnu"
+                if z_h == zone_jour and h[0] and h[0] < 20:
+                    same_zone.append(1 if h[0] <= 3 else 0)
+            if len(same_zone) >= 3:
+                corde_pref = float(sum(same_zone) / len(same_zone))
+
     feat_hippodrome = {"pref_hippodrome": pref_hippo, "nb_courses_hippodrome": len(hippo_hist),
-                       "record_hippodrome": float(record_hippodrome), "corde_preference": 0.5}
+                       "record_hippodrome": float(record_hippodrome),
+                       "corde_preference": float(np.clip(corde_pref, 0.0, 1.0))}
 
     # ── G. Cotes ─────────────────────────────────────────────────────────────
     cote = float(cote_pmu or 5.0)
@@ -1734,7 +2012,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_temporal = {"mois_course": mois_course, "saison_code": saison, "saison_form": 0.5, "market_timing_score": mouvement_30min}
 
     # ── Pace conflict (running style × terrain × adversaires) ──────────────────
-    nb_meneurs = sum(1 for r in batch["partants"] if r[35] == "mene")  # col 35 = running_style
+    nb_meneurs = sum(1 for r in batch["partants"] if r[39] == "mene")  # col 39 = running_style
     pace_conflict = 0.0
     rs_terrain_fit = 0.5
     if running_style_raw == "mene":
@@ -1749,13 +2027,13 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_pace_conflict = {"pace_conflict_score": float(pace_conflict), "running_style_terrain_fit": float(rs_terrain_fit),
                           "nb_meneurs_course": nb_meneurs}
 
-    # ── Pedigree — affinité lignée du PÈRE à la distance (calculé en batch) ───
-    # sire_dist_winrate = top3-rate réel de la progéniture du père à cette distance
-    # (0.5 = neutre si père inconnu ou < 10 courses de lignée). sire_terrain_winrate
-    # reste neutre tant que le terrain n'est pas scrapé dans l'historique.
+    # ── Pedigree — affinité lignée du PÈRE à la distance + au TERRAIN (batch) ──
+    # sire_dist_winrate = top3-rate réel de la progéniture du père à cette distance.
+    # sire_terrain_winrate RÉVEILLÉ : idem sur la famille de terrain du jour
+    # (terrain historique backfillé). 0.5 = neutre si lignée inconnue ou < 10 courses.
     feat_pedigree = {
         "sire_dist_winrate": float(batch.get("sire_dist_by_cheval", {}).get(cheval_id, 0.5)),
-        "sire_terrain_winrate": 0.5,
+        "sire_terrain_winrate": float(batch.get("sire_terrain_by_cheval", {}).get(cheval_id, 0.5)),
     }
 
     # ── Synergy jockey × cheval ───────────────────────────────────────────────
@@ -1969,6 +2247,23 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "pool_gagnant_evolution": float(np.clip(pool_evol_val, -1.0, 1.0)),
     }
 
+    # ── EE. Données dormantes réveillées (vitesse, poids, forme J/E, dépaysement) ──
+    # h[12]=poids_porte_course, h[13]=indice_vitesse (vitesse du vainqueur = proxy du
+    # NIVEAU des courses fréquentées). Toutes neutres si données absentes (no-fake).
+    vitesses_recentes = [h[13] for h in historique[:3] if len(h) > 13 and h[13]]
+    poids_hist = [h[12] for h in historique[:3] if len(h) > 12 and h[12]]
+    is_trot = "trot" in disc_lower or "attelé" in disc_lower or "monté" in disc_lower
+    feat_dormant = {
+        "vitesse_relative": compute_vitesse_relative(vitesses_recentes,
+                                                     batch.get("vitesse_ref_median")),
+        "delta_poids": compute_delta_poids(poids, poids_hist) if not is_trot else 0.0,
+        "jockey_forme_7j": float(batch.get("jockey_forme_7j", {}).get(jockey_id, j_win or 0.12)),
+        "entraineur_forme_14j": float(batch.get("entraineur_forme_14j", {}).get(entraineur_id, e_win or 0.12)),
+        "distance_deplacement": compute_distance_deplacement(
+            hippodrome, [h[3] for h in historique if h[3]]
+        ),
+    }
+
     # ── Assemblage final ──────────────────────────────────────────────────────
     return {
         "participation_id": participation_id, "course_id": course_id,
@@ -1978,7 +2273,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         **feat_field, **feat_temporal, **feat_pace_conflict, **feat_pedigree,
         **feat_synergy, **feat_fingerprint, **feat_advanced, **feat_pace,
         **feat_class, **feat_bounce, **feat_draw, **feat_trainer,
-        **feat_career, **feat_confidence, **feat_pmu,
+        **feat_career, **feat_confidence, **feat_pmu, **feat_dormant,
     }
 
 

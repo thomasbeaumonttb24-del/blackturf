@@ -765,28 +765,42 @@ async def get_mise_plan(
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
     try:
         from ml.bet_performance import get_learned_type_weights, get_model_heat
-        roi_weights = await get_learned_type_weights(db)
+        roi_weights = await get_learned_type_weights(db, profil=profil)
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
 
     # Multiplicateurs appris PAR SIGNAL × PROFIL → le pronostic/plan s'adapte au profil
     # sélectionné (ex. "premier déferré" boosté en conservateur=placé, ignoré en agressif).
+    # Les features chargées servent aussi aux JUSTIFICATIFS par pari (facteurs réels).
     signal_mults: dict = {}
+    facteurs_chevaux: dict = {}
     try:
         from ml.signal_performance import load_signal_performance, signal_multiplier
+        from ml.narrative import explain_prediction
         from db.models import FeatureML as _FM
         perf = await load_signal_performance(db)
-        if perf:
-            fq = (_s(Participation.numero, _FM.features)
-                  .join(_FM, _FM.participation_id == Participation.participation_id)
-                  .where(Participation.course_id == course_id))
-            for numero, feats in (await db.execute(fq)).all():
-                signal_mults[int(numero)] = signal_multiplier(feats or {}, perf, profil)
+        fq = (_s(Participation.numero, _FM.features)
+              .join(_FM, _FM.participation_id == Participation.participation_id)
+              .where(Participation.course_id == course_id))
+        probas_by_num = {int(p["numero"]): p for p in preds}
+        for numero, feats in (await db.execute(fq)).all():
+            n = int(numero)
+            if perf:
+                signal_mults[n] = signal_multiplier(feats or {}, perf, profil)
+            pr = probas_by_num.get(n) or {}
+            exp = explain_prediction(feats or {}, float(pr.get("proba_top3") or 0),
+                                     float(pr.get("proba_top1") or 0))
+            facteurs_chevaux[n] = {
+                "positifs": exp.get("facteurs_positifs", []),
+                "negatifs": exp.get("facteurs_negatifs", []),
+            }
     except Exception:
         signal_mults = {}
+        facteurs_chevaux = {}
 
-    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat, signal_mults)
+    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
+                        signal_mults, facteurs_chevaux=facteurs_chevaux)
     return plan_to_dict(plan)
 
 

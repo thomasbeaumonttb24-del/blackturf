@@ -67,10 +67,16 @@ async def compute_type_roi_weights(session: AsyncSession, only_ia: bool = True) 
     return weights
 
 
-async def get_learned_type_weights(session: AsyncSession) -> dict[str, float]:
+async def get_learned_type_weights(session: AsyncSession,
+                                   profil: str | None = None) -> dict[str, float]:
     """Poids de conviction APPRIS par type — c'est le cœur de l'auto-amélioration.
 
-    Source principale : ROI RÉEL winsorisé par type mesuré sur l'historique réglé
+    Source PRIORITAIRE (si `profil` fourni et historique suffisant) : ROI réel des
+    PRONOS ÉMIS par CE profil (profil_run_log : plans figés avant course, réglés aux
+    vrais rapports PMU). C'est l'apprentissage sur les recommandations réellement
+    faites — pas sur le top-3 du modèle ni un rejeu.
+
+    Source suivante : ROI RÉEL winsorisé par type mesuré sur l'historique réglé
     (backtest profils, cache `stats:profils`, recalculé à chaque fin de course et la
     nuit) → un type qui perd (Simple Gagnant) descend, un type qui rapporte (placé à
     valeur) monte. L'algo « apprend le pourquoi » et adapte les futurs paris.
@@ -78,6 +84,18 @@ async def get_learned_type_weights(session: AsyncSession) -> dict[str, float]:
     Repli : si le cache n'est pas encore peuplé, on utilise le ROI des paris
     utilisateur réglés (bankroll). Jamais d'invention : défaut neutre 1.0 par type.
     """
+    # 1. Pronos émis par profil (le plus fidèle à ce que l'utilisateur a vu).
+    if profil:
+        try:
+            from ml.profil_learning import load_profil_weights, MIN_RUNS_FOR_WEIGHTS
+            state = await load_profil_weights(session)
+            if state:
+                pdata = (state.get("profils") or {}).get(profil) or {}
+                if (pdata.get("n_runs") or 0) >= MIN_RUNS_FOR_WEIGHTS and pdata.get("type_weights"):
+                    return pdata["type_weights"]
+        except Exception:
+            pass
+
     learned: dict = {}
     try:
         from db.redis_client import get_redis

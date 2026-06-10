@@ -86,6 +86,7 @@ class PariRec:
     probabilite: float
     description: str
     ev_estime: float = 0.0
+    raisons: list[str] = field(default_factory=list)   # justification complète du pari
 
 
 @dataclass
@@ -113,6 +114,7 @@ class MisePlan:
     palier: str = ""                 # micro | petit | moyen | gros
     profil: str = ""                 # conservateur | equilibre | agressif
     mode_adaptatif: str = "normal"   # prudent | normal | offensif (selon heat)
+    paris_ecartes: list[dict] = field(default_factory=list)  # candidats rejetés + motif
 
 
 # ─────────────────────────────────────────────────────────────
@@ -241,6 +243,7 @@ def generer_plan(
     roi_weights: Optional[dict] = None,
     heat: float = 0.0,
     signal_mults: Optional[dict] = None,
+    facteurs_chevaux: Optional[dict] = None,
 ) -> MisePlan:
     """Plan de mise INTELLIGENT & ADAPTATIF — relie analyse, apprentissage, résultats.
 
@@ -288,7 +291,9 @@ def generer_plan(
         return _plan_vide(montant, profil)
 
     _allocate_kelly(selected, montant, palier, cfg)         # remplit "mise" (int €)
-    return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat)
+    ecartes = _paris_ecartes(cands, selected, cfg)
+    return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
+                          facteurs_chevaux=facteurs_chevaux, ecartes=ecartes)
 
 
 def _is_credible_coup(c: dict) -> bool:
@@ -394,6 +399,7 @@ def _select_conviction(
         if type_count.get(c["type_pari"], 0) >= max_per_type:
             continue
         c["_roi_w"] = roi_w(c)
+        c["_sig"] = sig_factor(c)
         selected.append(c)
         type_count[c["type_pari"]] = type_count.get(c["type_pari"], 0) + 1
         if spec:
@@ -408,6 +414,7 @@ def _select_conviction(
         pool = pool or [c for c in cands if _bet_cote_max(c) <= cote_max] or cands
         safe = max(pool, key=lambda c: c["proba_gain"])
         safe["_roi_w"] = roi_w(safe)
+        safe["_sig"] = sig_factor(safe)
         selected = [safe]
     return selected
 
@@ -422,6 +429,7 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
     def weight(c):
         b = max(c["rapport_estime"] - 1.0, 0.1)
         f = max(c["ev"] / b, 0.0)                # fraction de Kelly pleine
+        c["_kelly_f"] = round(f, 4)              # trace pour la justification du pari
         if f <= 0:                              # coup à upside : poids plancher
             f = 0.02
         return max(f * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0), 1e-3)
@@ -488,8 +496,107 @@ def _apply_spec_cap(selected: list[dict], montant: int, palier: dict) -> None:
         k += 1
 
 
+# Pourquoi ce TYPE de pari sert ce PROFIL — pédagogie de la méthode de jeu.
+_TYPE_RAISON_PROFIL = {
+    ("conservateur", "Simple Placé"):  "Placé = le pari qui tombe le plus souvent — socle du profil prudent (faible variance).",
+    ("conservateur", "Couplé Placé"):  "Duo placé : 2 chevaux dans les 3 premiers — fréquence élevée, rapport supérieur au placé sec.",
+    ("conservateur", "2sur4"):         "2sur4 : 2 des 4 choisis dans le top-4 — tolère une défaillance, parfait pour jouer prudent.",
+    ("equilibre", "Simple Gagnant"):   "Gagnant à cote moyenne : meilleure espérance (EV) détectée par le modèle.",
+    ("equilibre", "Couplé Gagnant"):   "Couplé gagnant : rapport rehaussé pour une proba encore solide — cœur du profil modéré.",
+    ("agressif", "Simple Gagnant"):    "Gagnant grosse cote : gain élevé visé, fréquence faible assumée — profil risqué.",
+    ("agressif", "Couplé Gagnant"):    "Duo gagnant : rapport multiplié, le modèle voit ces 2 chevaux au-dessus du marché.",
+}
+
+
+def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict]) -> list[str]:
+    """Justification COMPLÈTE d'un pari retenu : pourquoi ce type pour ce profil,
+    valeur détectée, signaux appris, ROI réel passé du type, trace Kelly de la mise.
+    Tout dérive de valeurs RÉELLEMENT calculées — aucune raison décorative."""
+    raisons: list[str] = []
+    # 1. Pourquoi ce type pour ce profil
+    r_type = _TYPE_RAISON_PROFIL.get((profil, c["type_pari"]))
+    if r_type:
+        raisons.append(r_type)
+    # 2. Valeur modèle vs marché (edge)
+    edge = float(c.get("edge", 0.0) or 0.0)
+    if edge > 0.005:
+        raisons.append(
+            f"Valeur détectée : le modèle estime ce pari {edge*100:.1f} pt au-dessus du marché."
+        )
+    # 3. Facteurs réels des chevaux (issus de l'analyse par partant)
+    if facteurs_chevaux:
+        for h in c.get("chevaux", [])[:3]:
+            fc = facteurs_chevaux.get(int(h.get("numero", -1)))
+            if not fc:
+                continue
+            pos = [p.get("label", "") for p in fc.get("positifs", [])[:2] if p.get("label")]
+            if pos:
+                raisons.append(f"N°{h['numero']} {h.get('nom','')} : {' · '.join(pos)}.")
+            neg = [n.get("label", "") for n in fc.get("negatifs", [])[:1] if n.get("label")]
+            if neg:
+                raisons.append(f"N°{h['numero']} — point de vigilance : {neg[0]}.")
+    # 4. Signaux appris (profil)
+    sig = float(c.get("_sig", 1.0) or 1.0)
+    if sig >= 1.10:
+        raisons.append(f"Signaux historiquement GAGNANTS pour ce profil (conviction ×{sig:.2f}).")
+    elif sig <= 0.90:
+        raisons.append(f"Signaux mitigés pour ce profil (conviction ×{sig:.2f}) — mise réduite en conséquence.")
+    # 5. ROI réel passé du type de pari
+    rw = float(c.get("_roi_w", 1.0) or 1.0)
+    if rw >= 1.05:
+        raisons.append(f"Ce type de pari a un ROI réel positif sur l'historique (poids ×{rw:.2f}).")
+    elif rw <= 0.95:
+        raisons.append(f"Ce type de pari a sous-performé sur l'historique (poids ×{rw:.2f}).")
+    # 6. Trace Kelly de la mise
+    kf = c.get("_kelly_f")
+    if kf is not None:
+        raisons.append(
+            f"Mise {c.get('mise', 0):.0f}€ : fraction de Kelly {kf*100:.1f}% "
+            f"(EV {c['ev']*100:+.0f}% / rapport {c['rapport_estime']:.1f}×), ajustée au profil."
+        )
+    return raisons
+
+
+def _motif_rejet(c: dict, cfg: dict) -> str:
+    """Motif honnête pour lequel un candidat n'a PAS été retenu par ce profil."""
+    allowed = cfg.get("types")
+    if allowed is not None and c["type_pari"] not in allowed:
+        return "Type de pari hors méthode de ce profil."
+    if _bet_cote_max(c) > cfg["cote_max"]:
+        return f"Cote trop élevée pour ce profil (max {cfg['cote_max']:.0f})."
+    if c["proba_gain"] < cfg["min_proba"]:
+        return f"Probabilité trop faible ({c['proba_gain']*100:.0f}%) pour ce profil."
+    if c["ev"] < 0 and c.get("edge", 0.0) <= 0:
+        return "Espérance négative SANS valeur détectée — ce pari donnerait sa mise au PMU."
+    if c["ev"] < cfg["ev_min"] and not _is_credible_coup(c):
+        return f"EV insuffisante ({c['ev']*100:+.0f}%) pour le seuil du profil."
+    return "Conviction inférieure aux paris retenus (place limitée par le palier de mise)."
+
+
+def _paris_ecartes(cands: list[dict], selected: list[dict], cfg: dict) -> list[dict]:
+    """Top candidats NON retenus + motif — transparence sur ce que l'IA écarte et pourquoi."""
+    sel_keys = {(c["type_pari"], tuple(sorted(h["numero"] for h in c["chevaux"]))) for c in selected}
+    out = []
+    for c in sorted(cands, key=lambda x: x["proba_gain"], reverse=True):
+        key = (c["type_pari"], tuple(sorted(h["numero"] for h in c["chevaux"])))
+        if key in sel_keys:
+            continue
+        out.append({
+            "type": c["type_pari"],
+            "chevaux": [{"numero": h["numero"], "nom": h["nom"]} for h in c["chevaux"]],
+            "probabilite": c["proba_gain"],
+            "ev_estime": c["ev"],
+            "motif": _motif_rejet(c, cfg),
+        })
+        if len(out) >= 4:
+            break
+    return out
+
+
 def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn: bool,
-                   profil: str = "equilibre", heat: float = 0.0) -> MisePlan:
+                   profil: str = "equilibre", heat: float = 0.0,
+                   facteurs_chevaux: Optional[dict] = None,
+                   ecartes: Optional[list[dict]] = None) -> MisePlan:
     """Groupe les paris choisis par niveau → MisePlan (structure attendue par le front)."""
     niveaux_map: dict[str, list[PariRec]] = {}
     ev_pondere = 0.0
@@ -504,6 +611,7 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             probabilite=c["proba_gain"],
             description=c["texte_explication"],
             ev_estime=c["ev"],
+            raisons=_raisons_pari(c, profil, facteurs_chevaux),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
         ev_pondere += mise * c["ev"]            # espérance de profit net (€)
@@ -550,6 +658,7 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         palier=palier["nom"],
         profil=profil,
         mode_adaptatif=mode,
+        paris_ecartes=ecartes or [],
     )
 
 
@@ -855,10 +964,12 @@ def plan_to_dict(plan: MisePlan) -> dict:
                         "probabilite": p.probabilite,
                         "description": p.description,
                         "ev_estime": p.ev_estime,
+                        "raisons": p.raisons,
                     }
                     for p in n.paris
                 ],
             }
             for n in plan.niveaux
         ],
+        "paris_ecartes": plan.paris_ecartes,
     }

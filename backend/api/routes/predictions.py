@@ -516,6 +516,16 @@ async def get_course_analysis(
     except Exception as e:
         log.warning("analyse.combo_bets_failed", course_id=course_id, err=str(e)[:160])
 
+    # ── Détection COURSE À OUTSIDER (champ ouvert + grosses cotes à edge +
+    # taux de surprises historique réel) — pour le profil risqué et l'affichage.
+    try:
+        from ml.outsider_detector import detect_for_course
+        result["detection_outsider"] = await detect_for_course(
+            db, course_id, predictions, course.discipline, course.nb_partants,
+        )
+    except Exception as e:
+        log.warning("analyse.outsider_detect_failed", course_id=course_id, err=str(e)[:160])
+
     # Cache 2 min
     try:
         await redis.setex(cache_key, 120, json.dumps(result, default=str))

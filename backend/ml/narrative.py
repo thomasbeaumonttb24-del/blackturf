@@ -425,6 +425,52 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     return "\n".join(lines).replace("**", "")
 
 
+def _chevaux_a_eviter(enriched: list[dict]) -> list[dict]:
+    """Chevaux que l'analyse déconseille de jouer, avec MOTIFS réels (pas de décor) :
+      - « surcoté par le public » : cote courte mais proba modèle nettement sous la
+        proba implicite du marché → jouer ce cheval = payer trop cher sa chance ;
+      - facteurs négatifs dominants (forme basse, terrain défavorable, ELO inférieur…).
+    On ne liste que des chevaux que le public risque VRAIMENT de jouer (cote ≤ 15) —
+    déconseiller un 80/1 n'apprend rien à personne."""
+    out = []
+    for p in enriched:
+        cote = float(p.get("cote_pmu") or 0)
+        if cote <= 1.0 or cote > 15.0:
+            continue
+        exp = p.get("explanation", {})
+        raisons = []
+        severite = 0.0
+        # Surcote marché : proba modèle « victoire » très en-dessous de la proba implicite.
+        p1 = float(p.get("proba_top1") or 0)
+        implied = 1.0 / cote
+        if p1 > 0 and p1 < implied * 0.55 and cote <= 9.0:
+            raisons.append(
+                f"Surcoté par le public : le marché lui donne ~{implied*100:.0f}% de chances, "
+                f"le modèle {p1*100:.0f}% — sa cote ne paie pas son vrai risque."
+            )
+            severite += (implied - p1) * 3
+        negs = exp.get("facteurs_negatifs", [])
+        if len(negs) >= 2:
+            labels = " · ".join(_strip_emoji(n.get("label", "")) for n in negs[:3])
+            raisons.append(f"Facteurs défavorables : {labels}.")
+            severite += sum(float(n.get("score", 0)) for n in negs[:3]) * 0.5
+        if exp.get("verdict") == "DÉFAVORABLE":
+            severite += 0.3
+        if not raisons:
+            continue
+        out.append({
+            "numero": p.get("numero"),
+            "nom": p.get("nom"),
+            "cote": round(cote, 1),
+            "raisons": raisons,
+            "_sev": severite,
+        })
+    out.sort(key=lambda x: x["_sev"], reverse=True)
+    for o in out:
+        o.pop("_sev", None)
+    return out[:3]
+
+
 async def generate_full_course_analysis(
     session,
     course_id: str,
@@ -489,6 +535,7 @@ async def generate_full_course_analysis(
         "narrative": narrative,
         "predictions": enriched,
         "market_signals": sorted(market_signals, key=lambda x: x["score"], reverse=True)[:5],
+        "chevaux_a_eviter": _chevaux_a_eviter(enriched),
         "field_confidence": round(field_confidence, 3),
         "top_recommendation": {
             "numero": top_reco.get("numero") if top_reco else None,

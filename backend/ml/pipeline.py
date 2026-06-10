@@ -299,6 +299,19 @@ async def run_post_course(course_id: str) -> None:
     except Exception as e:
         log.warning("pipeline.settle_all_skip", course_id=course_id, err=str(e)[:140])
 
+    # ── 6d. Régler les PRONOS ÉMIS PAR PROFIL (profil_run_log) sur cette course :
+    # l'apprentissage se fait sur les recommandations réellement émises (figées
+    # avant course), réglées aux vrais rapports PMU — pas sur le top-3 du modèle.
+    try:
+        from ml.profil_learning import settle_profil_runs, compute_profil_weights
+        async with AsyncSessionLocal() as pl_session:
+            n_pl = await settle_profil_runs(pl_session, course_id)
+            if n_pl:
+                # Recalcul léger des poids appris → la prochaine sélection en profite.
+                await compute_profil_weights(pl_session)
+    except Exception as e:
+        log.warning("pipeline.profil_learning_settle_skip", course_id=course_id, err=str(e)[:140])
+
     # 7. Mini-retraining si nb_resultats_depuis_dernier_retrain % 20 == 0
     nb_new = await _count_recent_results()
     if nb_new % settings.retrain_every_n_results == 0:
@@ -389,6 +402,15 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.signal_performance_done", n=_sp.get("n_total"))
     except Exception as e:
         log.warning("pipeline.nightly_signal_perf_skip", err=str(e)[:140])
+    # Ré-apprend les poids PAR PROFIL depuis les PRONOS ÉMIS réglés (profil_run_log) :
+    # l'algo apprend de SES recommandations réelles par profil, pas du top-3.
+    try:
+        from ml.profil_learning import compute_profil_weights
+        async with AsyncSessionLocal() as plw_session:
+            _plw = await compute_profil_weights(plw_session)
+            log.info("pipeline.profil_weights_done", n_runs=_plw.get("n_total_runs"))
+    except Exception as e:
+        log.warning("pipeline.nightly_profil_weights_skip", err=str(e)[:140])
     # Surveillance HONNÊTE de l'edge : test hors-échantillon (le filtre conviction≥1.1
     # bat-il encore le marché ?) journalisé → on détecte une dégradation de l'edge.
     try:
@@ -1093,6 +1115,15 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             session.add(r)
 
         await session.commit()
+
+        # ── FIGER les pronos par profil (profil_run_log) : le plan 10€ des 3
+        # profils est journalisé AVANT la course → c'est sur CES pronos émis que
+        # l'algorithme apprendra (règlement post-course aux vrais rapports PMU).
+        try:
+            from ml.profil_learning import record_profil_runs
+            await record_profil_runs(session, course_id, model_version_id=mv_id)
+        except Exception as e:
+            log.warning("pipeline.profil_runs_record_skip", course_id=course_id, err=str(e)[:140])
 
         # Confiance globale = accord moyen des 3 modèles sur le top-3 prédit
         top3_indices = [i for i, p in enumerate(predictions) if p["rang_predit"] <= 3]
