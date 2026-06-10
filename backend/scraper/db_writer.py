@@ -277,6 +277,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         est_tierce=course.est_tierce,
         # ── Enrichissements PMU course ──
         conditions_texte=course.conditions_texte,
+        penetrometre_coef=course.penetrometre_coef,
         categorie_particularite=_t(course.categorie_particularite, 30),
         montant_offert_1er=course.montant_offert_1er,
         nombre_declares_partants=course.nombre_declares_partants,
@@ -287,6 +288,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             "numero_reunion": course.numero_reunion,
             "terrain_officiel": course.terrain,
             "terrain_code": course.terrain_code,
+            "penetrometre_coef": course.penetrometre_coef,
             "nb_partants": course.nb_partants,
             "allocation": course.dotation,
             "conditions_texte": course.conditions_texte,

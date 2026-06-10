@@ -226,6 +226,27 @@ def bucket_distance_km(km: Optional[float]) -> float:
     return float(np.clip((km - 50.0) / 550.0, 0.0, 1.0))
 
 
+def _geo_lookup(nom: Optional[str]) -> Optional[tuple[float, float]]:
+    """Résout un nom d'hippodrome (formats variés : « HIPPODROME DE PARIS-VINCENNES »,
+    « Vincennes », « TOULOUSE LA CEPIERE ») vers ses coordonnées. None si inconnu."""
+    if not nom:
+        return None
+    k = nom.upper().strip()
+    # Retire le préfixe administratif PMU
+    for pref in ("HIPPODROME DE LA ", "HIPPODROME DE L'", "HIPPODROME DU ",
+                 "HIPPODROME DES ", "HIPPODROME DE ", "HIPPODROME D'", "HIPPODROME "):
+        if k.startswith(pref):
+            k = k[len(pref):].strip()
+            break
+    if k in HIPPODROME_GEO:
+        return HIPPODROME_GEO[k]
+    # Match par inclusion (« TOULOUSE LA CEPIERE » contient « TOULOUSE »)
+    for key, geo in HIPPODROME_GEO.items():
+        if key in k or k in key:
+            return geo
+    return None
+
+
 def compute_distance_deplacement(hippodrome_jour: Optional[str],
                                  hippos_historique: list[str]) -> float:
     """PROXY de déplacement : distance entre l'hippodrome le plus fréquenté du
@@ -241,8 +262,8 @@ def compute_distance_deplacement(hippodrome_jour: Optional[str],
     if not freq:
         return 0.5
     domicile = max(freq, key=lambda k: freq[k])
-    g1 = HIPPODROME_GEO.get(domicile)
-    g2 = HIPPODROME_GEO.get(hippodrome_jour.upper().strip())
+    g1 = _geo_lookup(domicile)
+    g2 = _geo_lookup(hippodrome_jour)
     if not g1 or not g2:
         return 0.5
     return bucket_distance_km(haversine_km(g1[0], g1[1], g2[0], g2[1]))

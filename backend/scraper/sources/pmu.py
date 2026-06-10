@@ -183,11 +183,23 @@ class PmuScraper(BaseScraper):
                 est_quarte = any(("QUARTE" in c) or ("SUPER_QUATRE" in c) for c in pari_codes)
                 est_quinte = any("QUINTE" in c for c in pari_codes)
 
-                # Terrain
+                # Terrain — conditionPiste/libellePiste n'existent PLUS dans le payload
+                # programme 2026 : le PMU publie `penetrometre` {valeurMesure, intitule}
+                # au niveau course (plat/obstacle). C'est la seule source terrain
+                # course-level réelle → intitule = libellé officiel (Bon/Souple/…).
                 terrain_code = c_data.get("conditionPiste")
                 terrain_libelle = TERRAIN_MAP.get(terrain_code) if terrain_code else None
                 if not terrain_libelle:
                     terrain_libelle = c_data.get("libellePiste")
+                pen = c_data.get("penetrometre") or {}
+                if not terrain_libelle:
+                    terrain_libelle = pen.get("intitule") or None
+                pen_coef = None
+                try:
+                    _vm = str(pen.get("valeurMesure") or "").replace(",", ".").strip()
+                    pen_coef = float(_vm) if _vm else None
+                except (ValueError, TypeError):
+                    pen_coef = None
 
                 # Dotation en centimes
                 dotation_raw = c_data.get("montantTotalOffert")
@@ -214,6 +226,7 @@ class PmuScraper(BaseScraper):
                     est_tierce=est_tierce,
                     nom=re.sub(r"\s+", " ", c_data.get("libelle") or "").strip() or None,
                     conditions_texte=conditions or None,
+                    penetrometre_coef=pen_coef,
                     categorie_particularite=c_data.get("categorieParticularite"),
                     montant_offert_1er=c_data.get("montantOffert1er"),
                     nombre_declares_partants=c_data.get("nombreDeclaresPartants"),

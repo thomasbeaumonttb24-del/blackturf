@@ -95,9 +95,18 @@ class TestGeo:
         assert v == 0.0
 
     def test_deplacement_inconnu(self):
-        assert compute_distance_deplacement("HIPPODROME MYSTERE", ["VINCENNES"]) == 0.5
+        assert compute_distance_deplacement("HIPPODROME MYSTERE XYZ", ["VINCENNES"]) == 0.5
         assert compute_distance_deplacement(None, ["VINCENNES"]) == 0.5
         assert compute_distance_deplacement("VINCENNES", []) == 0.5
+
+    def test_deplacement_noms_pmu_prefixes(self):
+        # Formats réels DB : "HIPPODROME DE PARIS-VINCENNES", "HIPPODROME DE VICHY",
+        # "HIPPODROME DE TOULOUSE LA CEPIERE" (match par inclusion)
+        hist = ["HIPPODROME DE PARIS-VINCENNES"] * 4 + ["Vincennes"] * 2
+        v = compute_distance_deplacement("HIPPODROME DE TOULOUSE LA CEPIERE", hist)
+        assert v > 0.9  # Vincennes → Toulouse ≈ 590 km
+        v2 = compute_distance_deplacement("HIPPODROME DE VICHY", ["HIPPODROME DE VICHY"] * 3)
+        assert v2 == 0.0
 
     def test_geo_table_coords_valides(self):
         for nom, (lat, lon) in HIPPODROME_GEO.items():

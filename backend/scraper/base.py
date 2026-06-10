@@ -215,6 +215,7 @@ class CourseScrape:
     nom: Optional[str] = None
     # ── Enrichissements PMU (course) ─────────────────────────────────────────
     conditions_texte: Optional[str] = None        # conditions complètes (texte long)
+    penetrometre_coef: Optional[float] = None      # PMU penetrometre.valeurMesure (plat/obstacle)
     categorie_particularite: Optional[str] = None  # EUROPEENNE / NATIONALE / ...
     montant_offert_1er: Optional[int] = None       # dotation au gagnant (euros)
     nombre_declares_partants: Optional[int] = None # déclarés (vs réels = scratchings)
