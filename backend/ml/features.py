@@ -1596,6 +1596,11 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     entr_forme_14j_map: dict = {}
     entraineur_ids = [r[4] for r in partants_raw if r[4]]
     try:
+        from datetime import timedelta
+        # Bornes calculées en Python (asyncpg exige des params datetime, pas str).
+        dref = date_heure
+        d7 = dref - timedelta(days=7)
+        d14 = dref - timedelta(days=14)
         if jockey_ids:
             jf_r = await session.execute(text("""
                 SELECT p2.jockey_id, COUNT(*) AS n,
@@ -1608,10 +1613,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
                 JOIN courses c2 ON c2.course_id = p2.course_id
                 JOIN resultats r2 ON r2.course_id = c2.course_id
                 WHERE p2.jockey_id = ANY(:jids)
-                  AND c2.date_heure >= CAST(:dref AS timestamptz) - INTERVAL '7 days'
-                  AND c2.date_heure < CAST(:dref AS timestamptz)
+                  AND c2.date_heure >= :d7
+                  AND c2.date_heure < :dref
                 GROUP BY p2.jockey_id
-            """), {"jids": jockey_ids, "dref": str(date_heure)})
+            """), {"jids": jockey_ids, "d7": d7, "dref": dref})
             for jid, n, top3 in jf_r.fetchall():
                 if n and int(n) >= 5:
                     jockey_forme_7j_map[jid] = float(int(top3 or 0) / int(n))
@@ -1627,10 +1632,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
                 JOIN courses c2 ON c2.course_id = p2.course_id
                 JOIN resultats r2 ON r2.course_id = c2.course_id
                 WHERE p2.entraineur_id = ANY(:eids)
-                  AND c2.date_heure >= CAST(:dref AS timestamptz) - INTERVAL '14 days'
-                  AND c2.date_heure < CAST(:dref AS timestamptz)
+                  AND c2.date_heure >= :d14
+                  AND c2.date_heure < :dref
                 GROUP BY p2.entraineur_id
-            """), {"eids": entraineur_ids, "dref": str(date_heure)})
+            """), {"eids": entraineur_ids, "d14": d14, "dref": dref})
             for eid, n, top3 in ef_r.fetchall():
                 if n and int(n) >= 5:
                     entr_forme_14j_map[eid] = float(int(top3 or 0) / int(n))
