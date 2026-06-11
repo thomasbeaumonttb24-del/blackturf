@@ -873,13 +873,12 @@ function ResultatsSection({ resultats, partants }: {
 
       {/* Rapports PMU — détail RÉEL complet publié (par cheval / par combinaison) */}
       {(() => {
-        const nomByNum: Record<string, string> = {};
-        for (const c of resultats.classement || []) nomByNum[String(c.numero)] = c.nom;
-        // Formate une combinaison : "8" → "N°8 EL TRIPLO" ; "10-14" → "N°10 + N°14".
+        // Formate une combinaison : "8" → "N°8" ; "10-14" → "N°10 + N°14".
+        // (Noms de chevaux retirés : trop d'info, débordait des blocs — numéros seuls.)
         const fmtCombo = (combo: string | null): string => {
           if (!combo) return "";
           const parts = combo.split(/[-/]/).map((s) => s.trim()).filter(Boolean);
-          return parts.map((n) => nomByNum[n] ? `N°${n} ${nomByNum[n]}` : `N°${n}`).join(" + ");
+          return parts.map((n) => `N°${n}`).join(" + ");
         };
         const detail = resultats.rapports_detail;
         const detailTypes = detail
