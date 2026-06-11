@@ -215,24 +215,27 @@ export default function AlgorithmeMonitoringPage() {
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded bg-muted/40 p-2">
-                  <span className="text-muted-foreground">AUC-ROC</span>
+                  <span className="text-muted-foreground" title="Capacité à classer un gagnant devant un perdant. 0.5 = hasard, 1 = parfait. ~0.70-0.78 = bon pour le turf.">AUC-ROC ⓘ</span>
                   <div className="font-bold mt-0.5">{model.auc_roc ?? "—"}</div>
                 </div>
                 <div className="rounded bg-muted/40 p-2">
-                  <span className="text-muted-foreground">Brier</span>
+                  <span className="text-muted-foreground" title="Écart entre proba annoncée et réalité. Plus BAS = mieux calibré. ~0.17 = bon.">Brier ⓘ</span>
                   <div className="font-bold mt-0.5">{model.brier_score ?? "—"}</div>
                 </div>
                 <div className="rounded bg-muted/40 p-2">
-                  <span className="text-muted-foreground">Top-3</span>
+                  <span className="text-muted-foreground" title="% de fois où le gagnant réel est dans les 3 chevaux prédits en tête.">Top-3 ⓘ</span>
                   <div className="font-bold mt-0.5">{model.precision_top3 ? `${(model.precision_top3 * 100).toFixed(1)}%` : "—"}</div>
                 </div>
                 <div className="rounded bg-muted/40 p-2">
-                  <span className="text-muted-foreground">ROI sim.</span>
+                  <span className="text-muted-foreground" title="ROI simulé d'un backtest 10€ flat sur les value bets — indicatif, forte variance.">ROI sim. ⓘ</span>
                   <div className={`font-bold mt-0.5 ${(model.roi_simule ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                     {model.roi_simule != null ? `${model.roi_simule > 0 ? "+" : ""}${model.roi_simule}%` : "—"}
                   </div>
                 </div>
               </div>
+              <p className="text-[10px] text-muted-foreground/70">
+                En clair : <b>AUC</b> = à quel point l&apos;algo trie bien les chevaux · <b>Brier</b> = ses probas sont-elles justes · <b>Top-3</b> = il vise juste · <b>ROI</b> = rentabilité simulée.
+              </p>
               {model.trained_at && (
                 <div className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <Clock className="w-3 h-3" />
@@ -518,6 +521,33 @@ export default function AlgorithmeMonitoringPage() {
                   })()}
                 </div>
               )}
+
+              {/* Dernières victoires de l'algorithme — concret, parlant */}
+              {converge.victoires?.length > 0 && (
+                <div className="mt-5">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">
+                    Dernières victoires de l&apos;algorithme (plan profil net positif)
+                  </p>
+                  <div className="space-y-1">
+                    {converge.victoires.map((v: { course_id: string; code: string | null; hippodrome: string; date: string | null; profil: string; net: number }, i: number) => (
+                      <a key={i} href={`/courses/${v.course_id}`}
+                        className="flex items-center gap-2 text-[11px] rounded px-2 py-1.5 hover:bg-accent/30 transition-colors">
+                        <span className="text-muted-foreground tabular-nums w-12 shrink-0">
+                          {v.date ? new Date(v.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) : "—"}
+                        </span>
+                        <span className="font-medium w-14 shrink-0">{v.code ?? "—"}</span>
+                        <span className="text-muted-foreground truncate flex-1">{v.hippodrome}</span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{v.profil}</span>
+                        <span className="font-mono font-bold text-emerald-500 w-16 text-right shrink-0">+{v.net.toFixed(2)}€</span>
+                      </a>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    Meilleur profil gagnant par course · gain net réel (rapports PMU) · cliquable.
+                  </p>
+                </div>
+              )}
+
               <p className="text-[10px] text-muted-foreground/60 mt-3">
                 Recalculé à chaque fin de course + chaque nuit. Aucune donnée inventée.
               </p>

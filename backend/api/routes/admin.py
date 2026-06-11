@@ -775,6 +775,38 @@ async def get_learning_convergence(
         await db.rollback()
         log.warning("admin.convergence.profil_skip", err=str(e)[:120])
 
+    # 4. DERNIÈRES VICTOIRES : courses récentes où un plan profil a été NET positif,
+    #    avec le meilleur profil + son gain net (rapports PMU réels). Concret, parlant.
+    out["victoires"] = []
+    try:
+        rows = (await db.execute(text("""
+            SELECT c.course_id, c.hippodrome_nom, c.date_heure, c.numero_reunion, c.numero,
+                   r.profil, (r.resultat->>'net')::numeric AS net
+            FROM profil_run_log r
+            JOIN courses c ON c.course_id = r.course_id
+            WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
+              AND (r.resultat->>'net')::numeric > 0
+            ORDER BY c.date_heure DESC, net DESC
+        """))).all()
+        LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
+        best: dict = {}
+        for cid, hippo, dh, n_r, n_c, profil, net in rows:
+            cur = best.get(cid)
+            netf = float(net or 0)
+            if cur is None or netf > cur["net"]:
+                code = f"R{n_r}C{n_c}" if n_r and n_c else None
+                if not code:
+                    import re as _re
+                    m = _re.search(r"(R\d+C\d+)", str(cid))
+                    code = m.group(1) if m else None
+                best[cid] = {"course_id": cid, "code": code, "hippodrome": hippo,
+                             "date": dh.isoformat() if dh else None,
+                             "profil": LBL.get(profil, profil), "net": round(netf, 2)}
+        out["victoires"] = sorted(best.values(), key=lambda x: x["date"] or "", reverse=True)[:25]
+    except Exception as e:
+        await db.rollback()
+        log.warning("admin.convergence.victoires_skip", err=str(e)[:120])
+
     return out
 
 
