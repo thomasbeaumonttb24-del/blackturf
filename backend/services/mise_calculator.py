@@ -8,15 +8,6 @@ from typing import Optional
 import math
 
 
-# ─────────────────────────────────────────────────────────────
-# Allocations par profil (sec / rend / coup)
-# ─────────────────────────────────────────────────────────────
-PROFIL_ALLOCATION = {
-    "conservateur": (0.60, 0.30, 0.10),
-    "equilibre":    (0.30, 0.40, 0.30),
-    "agressif":     (0.10, 0.30, 0.60),
-}
-
 # Montant minimum PMU par type de pari
 MISE_MIN = {
     "Simple Gagnant":   1.0,
@@ -30,39 +21,6 @@ MISE_MIN = {
     "Quarté+":          1.5,
     "Quinté+ Flexi":    2.0,
 }
-
-# Multiplicateur de gain estimé (hors mise)
-# Formule : rapport_net ≈ base × produit_cotes^exposant
-# Ces valeurs sont conservatrices (PMU prélève 15-20%)
-def _rapport_place(cote: float) -> float:
-    """Cote placé PMU ≈ cote gagnant / 4 (min 1.1)."""
-    return max(1.1, (cote - 1) / 4 + 1)
-
-def _rapport_couple_gagnant(c1: float, c2: float) -> float:
-    return max(2.0, c1 * c2 * 0.55)
-
-def _rapport_couple_place(c1: float, c2: float) -> float:
-    return max(1.5, c1 * c2 * 0.18)
-
-def _rapport_2sur4(c1: float, c2: float, c3: float, c4: float) -> float:
-    moy = (c1 + c2 + c3 + c4) / 4
-    return max(3.0, moy ** 1.6 * 0.9)
-
-def _rapport_trio(c1: float, c2: float, c3: float) -> float:
-    return max(5.0, c1 * c2 * c3 * 0.45)
-
-def _rapport_tierce_desordre(c1: float, c2: float, c3: float) -> float:
-    return max(8.0, c1 * c2 * c3 * 0.75)
-
-def _rapport_tierce_ordre(c1: float, c2: float, c3: float) -> float:
-    return max(15.0, c1 * c2 * c3 * 2.0)
-
-def _rapport_quarte(c1: float, c2: float, c3: float, c4: float) -> float:
-    return max(20.0, c1 * c2 * c3 * c4 * 0.3)
-
-def _rapport_quinte_flexi(pct: float) -> float:
-    return max(50.0, 1200.0 * pct)
-
 
 # ─────────────────────────────────────────────────────────────
 # Data classes
@@ -199,9 +157,13 @@ PROFIL_CONFIG = {
     # RISQUÉ — vise les GROSSES cotes (PLANCHER 15) : gagnant grosse cote, duo gagnant
     # d'outsiders, trios et jackpots désordre (Tiercé/Quarté+/Quinté+). PAS de Simple
     # Placé. Beaucoup de PETITES mises sur un large spectre de combinaisons à fort rapport.
+    # `max_per_type` : nb max de paris d'un MÊME type. Le risqué l'ouvre à 5 pour
+    # proposer un large éventail (« 4 duo gagnant », « 5 trio », « 2 simple gagnant
+    # grosse cote ») au lieu d'1-2 paris pauvres. min_stake_factor bas (0.34) → mises
+    # planchers à 1€ : PLUS de paris ET des sommes VARIÉES (le reste se répartit par Kelly).
     "agressif": {
-        "cote_min": 15.0, "cote_max": 300.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 4,
-        "bets_factor": 2.0, "min_stake_factor": 0.5,
+        "cote_min": 15.0, "cote_max": 300.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 5,
+        "bets_factor": 2.4, "min_stake_factor": 0.34, "max_per_type": 5,
         "types": {"Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant",
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "objectif": "gain",
@@ -231,6 +193,7 @@ def _effective_config(profil: str, heat: float) -> dict:
         "min_stake_factor": base.get("min_stake_factor", 1.0),  # <1 = plus de petites mises
         "types":     base.get("types"),          # familles de paris du profil (None = toutes)
         "objectif":  base.get("objectif", "ev"), # critère de classement des candidats
+        "max_per_type": base.get("max_per_type"),  # plafond paris d'un même type (None = auto)
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -353,9 +316,12 @@ def _select_conviction(
     ev_min = cfg["ev_min"]
     allowed_types = cfg.get("types")                         # None = toutes
     objectif = cfg.get("objectif", "ev")
-    # Spectre large de combinaisons : on tolère 2 paris du même type (ex. 2 trios
-    # différents) quand le profil saupoudre, pour couvrir plus de combinaisons PMU.
-    max_per_type = 1 if max_bets <= 3 else (3 if cfg.get("min_stake_factor", 1.0) < 0.7 else 2)
+    # Spectre large de combinaisons : on tolère plusieurs paris du même type (ex. 5
+    # trios différents) quand le profil saupoudre, pour couvrir plus de combinaisons PMU.
+    # Le profil peut fixer son propre plafond (`max_per_type`) ; sinon auto selon palier.
+    max_per_type = cfg.get("max_per_type")
+    if max_per_type is None:
+        max_per_type = 1 if max_bets <= 3 else (3 if cfg.get("min_stake_factor", 1.0) < 0.7 else 2)
 
     def roi_w(c):
         return float(roi_weights.get(c["type_pari"], 1.0))
@@ -733,241 +699,15 @@ def _pari(type_: str, chevs: list[ChevPred], mise: float, gain: float, proba: fl
     )
 
 
-def _plan_micro(montant: float, chevaux: list[ChevPred], profil: str, kelly_warn: bool) -> MisePlan:
-    c = chevaux[0]
-    if profil == "agressif":
-        gain = montant * c.cote_pmu
-        p = _pari("Simple Gagnant", [c], montant, gain, c.proba_top1)
-        proba = c.proba_top1
-    else:
-        gain = montant * _rapport_place(c.cote_pmu)
-        p = _pari("Simple Placé", [c], montant, gain, c.proba_top3)
-        proba = c.proba_top3
-
-    niveau = NiveauPlan(
-        niveau="securite", label="SÉCURITÉ", emoji="🟢", couleur="#10B981",
-        montant=montant, pct=100, paris=[p],
-    )
-    ev = (gain / montant - 1) * proba - (1 - proba)
-    return MisePlan(
-        montant_total=montant, montant_joue=montant, montant_reserve=0,
-        ev_global=round(ev, 3),
-        niveaux=[niveau],
-        resume_ia=_resume(chevaux, 1),
-        avertissement="Mise micro — 1 pari optimisé sur le favori IA.",
-        kelly_warning=kelly_warn,
-    )
-
-
-def _plan_simple(montant, sec, rend, coup, chevaux, is_quinte, nb_partants, kelly_warn) -> MisePlan:
-    m_sec  = _round2(montant * sec)
-    m_rend = _round2(montant * rend)
-    m_coup = montant - m_sec - m_rend
-    joue = 0.0
-    niveaux = []
-
-    # Sécurité — Simple Placé
-    if m_sec >= 1.0 and chevaux:
-        c = chevaux[0]
-        gain = m_sec * _rapport_place(c.cote_pmu)
-        niveaux.append(NiveauPlan("securite", "SÉCURITÉ", "🟢", "#10B981", m_sec, int(sec*100),
-            paris=[_pari("Simple Placé", [c], m_sec, gain, c.proba_top3)]))
-        joue += m_sec
-
-    # Rendement — Couplé Gagnant
-    if m_rend >= 1.0 and len(chevaux) >= 2:
-        c1, c2 = chevaux[0], chevaux[1]
-        gain = m_rend * _rapport_couple_gagnant(c1.cote_pmu, c2.cote_pmu)
-        prob = c1.proba_top1 * c2.proba_top1 * 2
-        niveaux.append(NiveauPlan("rendement", "RENDEMENT", "🔵", "#3B82F6", m_rend, int(rend*100),
-            paris=[_pari("Couplé Gagnant", [c1, c2], m_rend, gain, min(prob, 0.25))]))
-        joue += m_rend
-
-    # Coup — Trio (si >2 chevaux)
-    if m_coup >= 1.0 and len(chevaux) >= 3:
-        c1, c2, c3 = chevaux[0], chevaux[1], chevaux[2]
-        gain = m_coup * _rapport_trio(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu)
-        prob = c1.proba_top3 * c2.proba_top3 * c3.proba_top3
-        niveaux.append(NiveauPlan("coup", "COUP", "🟡", "#F59E0B", m_coup, int(coup*100),
-            paris=[_pari("Trio", [c1, c2, c3], m_coup, gain, min(prob, 0.1))]))
-        joue += m_coup
-
-    return _finaliser(montant, joue, niveaux, chevaux, kelly_warn)
-
-
-def _plan_standard(montant, sec, rend, coup, chevaux, is_quinte, nb_partants, kelly_warn) -> MisePlan:
-    m_sec  = _round2(montant * sec)
-    m_rend = _round2(montant * rend)
-    m_coup = montant - m_sec - m_rend
-    joue = 0.0
-    niveaux = []
-
-    # Sécurité — Simple Placé + Couplé Placé
-    paris_sec = []
-    if chevaux and m_sec >= 2:
-        c = chevaux[0]
-        m1 = _round2(m_sec * 0.55)
-        m2 = m_sec - m1
-        paris_sec.append(_pari("Simple Placé", [c], m1, m1 * _rapport_place(c.cote_pmu), c.proba_top3))
-        if len(chevaux) >= 2 and m2 >= 1:
-            c2 = chevaux[1]
-            gain2 = m2 * _rapport_couple_place(c.cote_pmu, c2.cote_pmu)
-            paris_sec.append(_pari("Couplé Placé", [c, c2], m2, gain2, c.proba_top3 * c2.proba_top3))
-        joue += m_sec
-        niveaux.append(NiveauPlan("securite", "SÉCURITÉ", "🟢", "#10B981", m_sec, int(sec*100), paris=paris_sec))
-
-    # Rendement — Couplé Gagnant + 2sur4
-    paris_rend = []
-    if len(chevaux) >= 2 and m_rend >= 2:
-        c1, c2 = chevaux[0], chevaux[1]
-        m1 = _round2(m_rend * 0.5)
-        m2 = m_rend - m1
-        gain1 = m1 * _rapport_couple_gagnant(c1.cote_pmu, c2.cote_pmu)
-        paris_rend.append(_pari("Couplé Gagnant", [c1, c2], m1, gain1, c1.proba_top1 * c2.proba_top1 * 2))
-        if len(chevaux) >= 4 and m2 >= 1:
-            c3, c4 = chevaux[2], chevaux[3]
-            gain2 = m2 * _rapport_2sur4(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu, c4.cote_pmu)
-            p2 = c1.proba_top3 * c2.proba_top3 * (1 - (1-c3.proba_top3)*(1-c4.proba_top3))
-            paris_rend.append(_pari("2sur4", [c1, c2, c3, c4], m2, gain2, min(p2, 0.3)))
-        joue += m_rend
-        niveaux.append(NiveauPlan("rendement", "RENDEMENT", "🔵", "#3B82F6", m_rend, int(rend*100), paris=paris_rend))
-
-    # Coup — Tiercé Désordre
-    if len(chevaux) >= 3 and m_coup >= 1:
-        c1, c2, c3 = chevaux[0], chevaux[1], chevaux[2]
-        gain = m_coup * _rapport_tierce_desordre(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu)
-        prob = c1.proba_top3 * c2.proba_top3 * c3.proba_top3 * 6  # 6 ordres possibles
-        niveaux.append(NiveauPlan("coup", "COUP", "🟡", "#F59E0B", m_coup, int(coup*100),
-            paris=[_pari("Tiercé Désordre", [c1, c2, c3], m_coup, gain, min(prob, 0.2))]))
-        joue += m_coup
-
-    return _finaliser(montant, joue, niveaux, chevaux, kelly_warn)
-
-
-def _plan_complet(montant, sec, rend, coup, chevaux, is_quinte, is_quarte, nb_partants, kelly_warn) -> MisePlan:
-    m_sec  = _round2(montant * sec)
-    m_rend = _round2(montant * rend)
-    m_coup = montant - m_sec - m_rend
-    joue = 0.0
-    niveaux = []
-
-    # Sécurité
-    if chevaux and m_sec >= 1:
-        c = chevaux[0]
-        m1 = _round2(m_sec * 0.60)
-        m2 = m_sec - m1
-        paris_sec = [_pari("Simple Placé", [c], m1, m1 * _rapport_place(c.cote_pmu), c.proba_top3)]
-        if len(chevaux) >= 2 and m2 >= 1:
-            c2 = chevaux[1]
-            gain2 = m2 * _rapport_couple_place(c.cote_pmu, c2.cote_pmu)
-            paris_sec.append(_pari("Couplé Placé", [c, c2], m2, gain2, c.proba_top3 * c2.proba_top3))
-        niveaux.append(NiveauPlan("securite", "SÉCURITÉ", "🟢", "#10B981", m_sec, int(sec*100), paris=paris_sec))
-        joue += m_sec
-
-    # Rendement
-    if len(chevaux) >= 4 and m_rend >= 2:
-        c1, c2, c3, c4 = chevaux[0], chevaux[1], chevaux[2], chevaux[3]
-        m1 = _round2(m_rend * 0.45)
-        m2 = _round2(m_rend * 0.30)
-        m3 = m_rend - m1 - m2
-        paris_rend = [
-            _pari("Couplé Gagnant", [c1, c2], m1, m1 * _rapport_couple_gagnant(c1.cote_pmu, c2.cote_pmu), c1.proba_top1 * c2.proba_top1 * 2),
-            _pari("2sur4", [c1, c2, c3, c4], m2, m2 * _rapport_2sur4(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu, c4.cote_pmu), 0.22),
-        ]
-        if m3 >= 1:
-            gain3 = m3 * _rapport_trio(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu)
-            paris_rend.append(_pari("Trio", [c1, c2, c3], m3, gain3, 0.08))
-        niveaux.append(NiveauPlan("rendement", "RENDEMENT", "🔵", "#3B82F6", m_rend, int(rend*100), paris=paris_rend))
-        joue += m_rend
-
-    # Coup
-    if len(chevaux) >= 3 and m_coup >= 1:
-        paris_coup = []
-        c1, c2, c3 = chevaux[0], chevaux[1], chevaux[2]
-        m1 = _round2(m_coup * 0.55)
-        m2 = m_coup - m1
-        gain1 = m1 * _rapport_tierce_desordre(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu)
-        paris_coup.append(_pari("Tiercé Désordre", [c1, c2, c3], m1, gain1, 0.12))
-        if is_quinte and len(chevaux) >= 5 and m2 >= 2:
-            flexi = min(1.0, m2 / 10)
-            gain2 = m2 * _rapport_quinte_flexi(flexi)
-            paris_coup.append(_pari("Quinté+ Flexi", chevaux[:5], m2, gain2, 0.01))
-        elif is_quarte and len(chevaux) >= 4 and m2 >= 1.5:
-            gain2 = m2 * _rapport_quarte(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu, chevaux[3].cote_pmu)
-            paris_coup.append(_pari("Quarté+", chevaux[:4], m2, gain2, 0.04))
-        elif m2 >= 1:
-            gain2 = m2 * _rapport_tierce_ordre(c1.cote_pmu, c2.cote_pmu, c3.cote_pmu)
-            paris_coup.append(_pari("Tiercé Ordre", [c1, c2, c3], m2, gain2, 0.03))
-        niveaux.append(NiveauPlan("coup", "COUP", "🟡", "#F59E0B", m_coup, int(coup*100), paris=paris_coup))
-        joue += m_coup
-
-    return _finaliser(montant, joue, niveaux, chevaux, kelly_warn)
-
-
-def _plan_premium(montant, sec, rend, coup, chevaux, is_quinte, is_quarte, nb_partants, kelly_warn) -> MisePlan:
-    """Kelly avancé — tous types, optimisation EV."""
-    # Base = plan complet, puis ajouter Quinté+ full
-    plan = _plan_complet(montant * 0.85, sec, rend, coup, chevaux, is_quinte, is_quarte, nb_partants, False)
-    # Reserve 15% pour pari premium
-    reserve = montant - plan.montant_joue
-    if is_quinte and len(chevaux) >= 5 and reserve >= 5:
-        flexi = min(1.0, reserve / 50)
-        gain = reserve * _rapport_quinte_flexi(flexi)
-        p = _pari(f"Quinté+ Flexi {int(flexi*100)}%", chevaux[:5], reserve, gain, 0.02)
-        plan.niveaux.append(NiveauPlan("coup", "JACKPOT", "⭐", "#F59E0B", reserve, 15, paris=[p]))
-        plan.montant_joue += reserve
-    plan.montant_total = montant
-    plan.montant_reserve = montant - plan.montant_joue
-    plan.kelly_warning = kelly_warn
-    return plan
+# NOTE : l'ancien moteur de plan (_plan_micro/simple/standard/complet/premium) a été
+# supprimé — code mort (aucun appelant ; generer_plan passe par enumerate_bet_candidates
+# + _select_conviction + _allocate_kelly). Il portait des probas combinées fausses
+# (p1·p2·2, produits indépendants) et des rapports magiques non calibrés.
 
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
-def _finaliser(montant: float, joue: float, niveaux: list, chevaux: list, kelly_warn: bool) -> MisePlan:
-    reserve = max(0.0, montant - joue)
-    # EV global = somme(EV_pari × prob)
-    ev_total = 0.0
-    for niv in niveaux:
-        for p in niv.paris:
-            ev_total += p.ev_estime * p.probabilite
-    ev_global = round(ev_total / max(1, sum(len(n.paris) for n in niveaux)), 3)
-
-    avert = "Paris simulés sur données historiques. Aucune garantie de gain."
-    if kelly_warn:
-        avert = "⚠️ Mise supérieure à 5% de votre bankroll déclarée — réduisez pour protéger votre capital."
-
-    return MisePlan(
-        montant_total=montant,
-        montant_joue=round(joue, 2),
-        montant_reserve=round(reserve, 2),
-        ev_global=ev_global,
-        niveaux=niveaux,
-        resume_ia=_resume(chevaux, len(niveaux)),
-        avertissement=avert,
-        kelly_warning=kelly_warn,
-    )
-
-
-def _resume(chevaux: list[ChevPred], nb_niveaux: int) -> str:
-    if not chevaux:
-        return "Données insuffisantes pour générer un résumé."
-    top = chevaux[0]
-    lines = []
-    if top.ev and top.ev > 0.05:
-        lines.append(f"N°{top.numero} {top.nom} est sous-évalué par le PMU (EV +{top.ev*100:.0f}%). Recommandé.")
-    elif top.proba_top3 > 0.55:
-        lines.append(f"N°{top.numero} {top.nom} ressort en tête (probabilité top-3 : {top.proba_top3*100:.0f}%).")
-    else:
-        lines.append(f"N°{top.numero} {top.nom} en tête des sélections IA.")
-    if len(chevaux) >= 2:
-        c2 = chevaux[1]
-        lines.append(f"N°{c2.numero} {c2.nom} confirme en 2ème position ({c2.proba_top3*100:.0f}% top-3).")
-    lines.append("Plan réparti en " + ("1 niveau" if nb_niveaux == 1 else f"{nb_niveaux} niveaux") + " selon votre profil.")
-    return " ".join(lines)
-
-
 def _plan_vide(montant: float, profil: str) -> MisePlan:
     return MisePlan(
         montant_total=montant, montant_joue=0, montant_reserve=montant,

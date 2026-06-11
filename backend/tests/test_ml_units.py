@@ -276,8 +276,11 @@ def test_kelly_capped_at_5pct():
 
 
 def test_kelly_half_fraction():
-    full = calculer_mise_kelly(ev=0.20, cote=4.0, bankroll=1000.0, fraction=1.0)
-    half = calculer_mise_kelly(ev=0.20, cote=4.0, bankroll=1000.0, fraction=0.5)
+    # EV faible → la mise pleine reste SOUS le plafond 5% : la demi-fraction vaut
+    # alors exactement la moitié (au-dessus du plafond, full est écrêté et la
+    # relation ne tient plus — cf. test_kelly_capped_at_5pct).
+    full = calculer_mise_kelly(ev=0.05, cote=4.0, bankroll=1000.0, fraction=1.0)
+    half = calculer_mise_kelly(ev=0.05, cote=4.0, bankroll=1000.0, fraction=0.5)
     assert half == pytest.approx(full / 2, rel=0.01)
 
 

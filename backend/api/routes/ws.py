@@ -38,7 +38,7 @@ class ConnectionManager:
         self._last_pong: dict[int, float] = {}         # id(ws) → monotonic timestamp
 
     async def connect(self, user_id: str, ws: WebSocket):
-        await ws.accept()
+        # NB : la socket est déjà acceptée par l'endpoint (auth via 1er message).
         self._connections.setdefault(user_id, []).append(ws)
         self._connected_at[id(ws)] = datetime.now(timezone.utc)
         self._last_pong[id(ws)] = asyncio.get_event_loop().time()
@@ -92,18 +92,40 @@ async def _get_user_from_token(token: str) -> str | None:
         return None
 
 
+async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None:
+    """Authentifie une connexion WS SANS exposer le JWT dans l'URL.
+
+    La socket DOIT déjà être acceptée (accept) avant l'appel.
+    - Voie privilégiée : le client envoie en 1er message {"type":"auth","token":"..."}.
+      Le token ne transite donc pas en query string (qui finit dans les access logs
+      des proxies = fuite de credential).
+    - Voie LEGACY (dépréciée) : token en query string — conservée le temps qu'un
+      ancien front en cache se reconnecte. À retirer une fois le front à jour partout.
+    """
+    if token_query:
+        return await _get_user_from_token(token_query)
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        msg = json.loads(raw)
+        if msg.get("type") == "auth":
+            return await _get_user_from_token(msg.get("token") or "")
+    except Exception:
+        return None
+    return None
+
+
 # ─────────────────────────────────────────────
 # Cotes live
 # ─────────────────────────────────────────────
 @router.websocket("/courses/{course_id}/cotes")
 async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query(default="")):
     """Stream des cotes live pour une course. Refresh 30s + ping/pong heartbeat."""
-    user_id = await _get_user_from_token(token)
+    await websocket.accept()
+    user_id = await _authenticate_ws(websocket, token)
     if not user_id:
         await websocket.close(code=4401)
         return
 
-    await websocket.accept()
     connected_at = datetime.now(timezone.utc)
     last_pong = asyncio.get_event_loop().time()
     log.info("ws.cotes.connect", course_id=course_id, user_id=user_id)
@@ -184,12 +206,12 @@ async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query
 @router.websocket("/value-bets")
 async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
     """Stream des value bets actifs. Refresh 60s + ping/pong heartbeat."""
-    user_id = await _get_user_from_token(token)
+    await websocket.accept()
+    user_id = await _authenticate_ws(websocket, token)
     if not user_id:
         await websocket.close(code=4401)
         return
 
-    await websocket.accept()
     last_pong = asyncio.get_event_loop().time()
     log.info("ws.valuebets.connect", user_id=user_id)
 
@@ -280,7 +302,8 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
 @router.websocket("/user/alertes")
 async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
     """Canal d'alertes in-app personnalisées avec ping/pong heartbeat."""
-    user_id = await _get_user_from_token(token)
+    await websocket.accept()
+    user_id = await _authenticate_ws(websocket, token)
     if not user_id:
         await websocket.close(code=4401)
         return

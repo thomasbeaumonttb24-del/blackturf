@@ -1384,10 +1384,14 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             -- fin pour ne pas décaler les index positionnels existants)
             p.avis_entraineur, p.tendance_force, c.pool_gagnant_evolution,
             -- Données PMU dispo mais non exploitées : débutant + profil de places
-            p.indicateur_inedit, p.nb_places_second, p.nb_places_troisieme
+            p.indicateur_inedit, p.nb_places_second, p.nb_places_troisieme,
+            -- Identité (en FIN pour ne pas décaler les index positionnels existants)
+            ch.nom AS cheval_nom, j.nom AS jockey_nom, ent.nom AS entraineur_nom
         FROM participations p
         JOIN courses c ON c.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
+        LEFT JOIN jockeys j ON j.jockey_id = p.jockey_id
+        LEFT JOIN entraineurs ent ON ent.entraineur_id = p.entraineur_id
         LEFT JOIN performances_carriere pc ON pc.cheval_id = p.cheval_id
         LEFT JOIN stats_jockeys sj ON sj.jockey_id = p.jockey_id
             AND sj.saison = EXTRACT(YEAR FROM NOW())
@@ -1730,6 +1734,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         asso_win, asso_nb,
         avis_entraineur_raw, tendance_force_raw, pool_gagnant_evol_raw,
         indicateur_inedit_raw, nb_places_2_raw, nb_places_3_raw,
+        cheval_nom, jockey_nom, entraineur_nom,
     ) = row
 
     # ── Données PMU nouvellement exploitées ──────────────────────────────────
@@ -2293,6 +2298,13 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # ── Assemblage final ──────────────────────────────────────────────────────
     return {
         "participation_id": participation_id, "course_id": course_id,
+        # Identité réelle du partant (dossard + noms) — sert aux tickets de paris,
+        # recommandations, narratif et vérif suspensions. NE PAS confondre numero
+        # (dossard officiel) avec rang_cote (rang par cote).
+        "numero": int(numero) if numero is not None else None,
+        "nom": cheval_nom or "",
+        "jockey_nom": jockey_nom or "",
+        "entraineur_nom": entraineur_nom or "",
         **feat_elo, **feat_forme, **feat_dynamics, **feat_confrontation, **feat_repos, **feat_distance, **feat_terrain,
         **feat_hippodrome, **feat_cotes, **feat_equip, **feat_jockey, **feat_entraineur,
         **feat_cheval, **feat_course, **feat_populaire, **feat_signal,

@@ -283,7 +283,7 @@ export default function AdminPage() {
                 <div key={source} className="rounded-lg border border-border p-3">
                   <div className="flex items-center gap-2 mb-1">
                     {status.statut === "ok" ? (
-                      <CheckCircle className="h-4 w-4 text-green-400" />
+                      <CheckCircle className="h-4 w-4 text-green-600" />
                     ) : (
                       <XCircle className="h-4 w-4 text-destructive" />
                     )}
@@ -359,7 +359,7 @@ export default function AdminPage() {
                       <div className="text-xs text-muted-foreground flex items-center gap-1.5">
                         {u.email}
                         <span className="text-[9px]" title={u.auth_method === "google" ? "Google" : "Email"}>{u.auth_method === "google" ? "🔵 G" : "✉"}</span>
-                        {u.email_verified ? <span className="text-[9px] text-green-500" title="Email vérifié">✓</span> : <span className="text-[9px] text-amber-500" title="Non vérifié">⚠</span>}
+                        {u.email_verified ? <span className="text-[9px] text-green-600" title="Email vérifié">✓</span> : <span className="text-[9px] text-amber-500" title="Non vérifié">⚠</span>}
                         {u.stripe_client && <span className="text-[9px] text-violet-500" title="Client Stripe">💳</span>}
                       </div>
                     </td>
@@ -369,16 +369,16 @@ export default function AdminPage() {
                     <td className="p-3 text-center text-xs text-muted-foreground capitalize">{u.profil_risque}</td>
                     <td className="p-3 text-right font-mono tabular-nums">{u.solde_actuel?.toFixed(0)}€</td>
                     <td className="p-3 text-right font-mono tabular-nums text-muted-foreground">{u.mise_totale?.toFixed(0)}€</td>
-                    <td className={cn("p-3 text-right font-mono tabular-nums font-semibold", u.gain_net >= 0 ? "text-green-500" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</td>
-                    <td className={cn("p-3 text-right font-mono tabular-nums", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-500" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</td>
+                    <td className={cn("p-3 text-right font-mono tabular-nums font-semibold", u.gain_net >= 0 ? "text-green-600" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</td>
+                    <td className={cn("p-3 text-right font-mono tabular-nums", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-600" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</td>
                     <td className="p-3 text-center text-xs tabular-nums">{u.nb_gagnes}/{u.nb_paris}</td>
-                    <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-400 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
+                    <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-600 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
                     <td className="p-3 text-right text-muted-foreground text-xs">{formatDateTime(u.created_at)}</td>
                     <td className="p-3 text-center whitespace-nowrap">
                       <button
                         onClick={() => toggleActive(u.user_id, u.is_active)}
                         className={cn("rounded px-2 py-1 text-[10px] font-semibold border transition-colors mr-1",
-                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-500 hover:bg-green-500/10")}
+                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-600 hover:bg-green-500/10")}
                         title={u.is_active ? "Suspendre le compte" : "Réactiver le compte"}>
                         {u.is_active ? "Suspendre" : "Réactiver"}
                       </button>

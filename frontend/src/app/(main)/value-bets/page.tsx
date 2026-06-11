@@ -17,8 +17,8 @@ import { formatCote, formatEV, etoiles, formatDateTime, cn } from "@/lib/utils";
 
 // ─── constants ───────────────────────────────────────────────
 const NIVEAU_COLORS: Record<number, string> = {
-  1: "text-muted-foreground", 2: "text-blue-400",
-  3: "text-amber-400", 4: "text-emerald-400",
+  1: "text-muted-foreground", 2: "text-blue-600",
+  3: "text-amber-600", 4: "text-emerald-600",
 };
 const NIVEAU_LABELS: Record<number, string> = {
   1: "Intéressant", 2: "Bon signal", 3: "Fort signal", 4: "Exceptionnel",
@@ -55,13 +55,13 @@ type VB = {
 
 // ─── Source badge ─────────────────────────────────────────────
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
-  pmu:     { label: "PMU",     color: "text-blue-400" },
-  geny:    { label: "Geny",    color: "text-purple-400" },
-  bzh:     { label: "BZH",     color: "text-gray-400" },
-  winamax: { label: "Winamax", color: "text-orange-400" },
-  betclic: { label: "Betclic", color: "text-red-400" },
-  unibet:  { label: "Unibet",  color: "text-green-400" },
-  betfair: { label: "Betfair 🔵", color: "text-cyan-400" },
+  pmu:     { label: "PMU",     color: "text-blue-600" },
+  geny:    { label: "Geny",    color: "text-purple-600" },
+  bzh:     { label: "BZH",     color: "text-gray-600" },
+  winamax: { label: "Winamax", color: "text-orange-600" },
+  betclic: { label: "Betclic", color: "text-red-600" },
+  unibet:  { label: "Unibet",  color: "text-green-600" },
+  betfair: { label: "Betfair 🔵", color: "text-cyan-600" },
 };
 
 const SPI_METHOD_LABELS: Record<string, string> = {
@@ -116,7 +116,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             <div className="flex items-center gap-2">
               <span className="font-semibold text-sm truncate">{vb.nom_cheval}</span>
               {isExpert && vb.spi_detected && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-400 text-amber-400 shrink-0">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 shrink-0">
                   ⚡ Afflux
                 </Badge>
               )}
@@ -146,7 +146,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             </div>
             <div className="text-right">
               <div className="text-xs text-muted-foreground">Espérance</div>
-              <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
                 {formatEV(vb.ev_max)}
               </div>
             </div>
@@ -156,7 +156,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
                 <div className="text-[10px] text-muted-foreground">Mouv.</div>
                 <div className={cn(
                   "font-bold text-xs font-mono tabular-nums",
-                  vb.mouvement_cote_pct > 0 ? "text-emerald-400" : "text-red-400"
+                  vb.mouvement_cote_pct > 0 ? "text-emerald-600" : "text-red-600"
                 )}>
                   {vb.mouvement_cote_pct > 0 ? "↓" : "↑"}{Math.abs(vb.mouvement_cote_pct).toFixed(0)}%
                 </div>
@@ -192,7 +192,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             </div>
             <div className="flex flex-col items-end gap-1">
               {isExpert && vb.spi_detected && vb.spi_method && (
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-400 text-amber-400 gap-0.5">
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 gap-0.5">
                   {SPI_METHOD_LABELS[vb.spi_method] ?? "⚡ Afflux"}
                 </Badge>
               )}
@@ -222,7 +222,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           <div className={cn("grid gap-2 mt-3", vb.mouvement_cote_pct != null && Math.abs(vb.mouvement_cote_pct) >= 5 ? "grid-cols-3" : "grid-cols-2")}>
             <div className="rounded-lg bg-muted/50 p-2 text-center">
               <div className="text-[10px] text-muted-foreground">Espérance</div>
-              <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
                 {formatEV(vb.ev_max)}
               </div>
             </div>
@@ -239,7 +239,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
                 <div className="text-[10px] text-muted-foreground">Mouv.</div>
                 <div className={cn(
                   "font-bold text-sm font-mono tabular-nums",
-                  vb.mouvement_cote_pct > 0 ? "text-emerald-400" : "text-red-400"
+                  vb.mouvement_cote_pct > 0 ? "text-emerald-600" : "text-red-600"
                 )}>
                   {vb.mouvement_cote_pct > 0 ? "↓" : "↑"}{Math.abs(vb.mouvement_cote_pct).toFixed(0)}%
                 </div>
@@ -249,10 +249,10 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
 
           {/* Betfair vs PMU gap si disponible */}
           {vb.cote_betfair_exchange != null && vb.cote_pmu != null && vb.cote_pmu > vb.cote_betfair_exchange * 1.05 && (
-            <div className="mt-2 flex items-center justify-between rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5 text-[10px]">
-              <span className="text-cyan-400 font-semibold">Betfair: {vb.cote_betfair_exchange.toFixed(1)}</span>
+            <div className="mt-2 flex items-center justify-between rounded-lg border border-cyan-500/20 bg-cyan-50 px-2 py-1.5 text-[10px]">
+              <span className="text-cyan-700 font-semibold">Betfair: {vb.cote_betfair_exchange.toFixed(1)}</span>
               <span className="text-muted-foreground">PMU: {vb.cote_pmu?.toFixed(1)}</span>
-              <span className="text-cyan-400 font-bold">
+              <span className="text-cyan-700 font-bold">
                 +{(((vb.cote_pmu / vb.cote_betfair_exchange) - 1) * 100).toFixed(0)}% d&apos;écart
               </span>
             </div>
@@ -347,7 +347,7 @@ export default function ValueBetsPage() {
         <div className="grid sm:grid-cols-3 gap-4 mb-8 text-left max-w-xl mx-auto">
           {["Alertes en temps réel", "Espérance > 0 garantie", "4 niveaux de confiance"].map((f) => (
             <div key={f} className="flex items-center gap-2 text-sm">
-              <span className="text-emerald-400">✓</span>{f}
+              <span className="text-emerald-600">✓</span>{f}
             </div>
           ))}
         </div>
@@ -368,8 +368,8 @@ export default function ValueBetsPage() {
             <Zap className="h-6 w-6 text-brand-gold" />
             Paris de valeur
             {connected && (
-              <span className="flex items-center gap-1 text-sm font-normal text-emerald-400 ml-2">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />En direct
+              <span className="flex items-center gap-1 text-sm font-normal text-emerald-600 ml-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />En direct
               </span>
             )}
           </h1>
@@ -417,15 +417,15 @@ export default function ValueBetsPage() {
           <span className="font-semibold text-foreground">{rawBets.length}</span> pari{rawBets.length !== 1 ? "s" : ""} de valeur actif{rawBets.length !== 1 ? "s" : ""}
         </span>
         {nbPremium > 0 && (
-          <span className="text-amber-400 flex items-center gap-1">
-            <Star className="w-3 h-3 fill-amber-400" />
+          <span className="text-amber-600 flex items-center gap-1">
+            <Star className="w-3 h-3 fill-amber-500" />
             <span className="font-semibold">{nbPremium}</span> premium (★★★+)
           </span>
         )}
         {avgEV && (
           <span className="text-muted-foreground flex items-center gap-1">
-            <TrendingUp className="w-3 h-3 text-emerald-400" />
-            Espérance moyenne : <span className="font-semibold text-emerald-400">+{avgEV}%</span>
+            <TrendingUp className="w-3 h-3 text-emerald-600" />
+            Espérance moyenne : <span className="font-semibold text-emerald-600">+{avgEV}%</span>
           </span>
         )}
       </div>

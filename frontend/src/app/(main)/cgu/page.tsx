@@ -23,8 +23,8 @@ export default function CguPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">2. Avertissement jeu responsable</h2>
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-          <p className="text-sm font-semibold text-amber-400 mb-2">⚠️ Avertissement obligatoire</p>
+        <div className="rounded-xl border border-amber-500/30 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-700 mb-2">⚠️ Avertissement obligatoire</p>
           <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
             <li><strong>Interdit aux mineurs de moins de 18 ans.</strong></li>
             <li>Le jeu peut créer une dépendance. Jouez de façon responsable.</li>

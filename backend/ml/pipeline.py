@@ -1015,7 +1015,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
 
             predictions.append({
                 "participation_id": pid,
-                "numero": feat.get("rang_cote", i + 1),  # Approximation
+                "numero": feat.get("numero") if feat.get("numero") is not None else feat.get("rang_cote", i + 1),
                 "nom": feat.get("nom", ""),
                 "proba_top3": proba_t3,
                 "proba_top1": proba_t1,
@@ -1050,6 +1050,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             "est_quinte": course.est_quinte,
             "est_quarte": course.est_quarte,
             "est_tierce": course.est_tierce,
+            "est_2sur4": course.est_2sur4,
         }
         recos = generer_recommandations_course(predictions, course_info, bankroll=user_bankroll)
 

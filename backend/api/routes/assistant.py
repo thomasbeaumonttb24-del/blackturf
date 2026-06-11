@@ -17,6 +17,7 @@ from sqlalchemy import select, func, desc
 import anthropic
 
 from api.config import get_settings
+from api.model_metrics import real_model_metrics
 from api.routes.auth import get_current_user
 from api.middleware.rate_limit import rate_limit_assistant
 from db.database import get_db
@@ -188,26 +189,19 @@ async def _execute_tool(
             )).scalar_one_or_none()
             if not mv:
                 return json.dumps({"error": "Pas de modèle actif."})
-            # Précision RÉELLE observée (race_learning_log), pas la métadonnée d'entraînement
-            rll_total = (await db.execute(
-                select(func.count(RaceLearningLog.log_id))
-            )).scalar() or 0
-            rll_top3 = (await db.execute(
-                select(func.count(RaceLearningLog.log_id)).where(
-                    RaceLearningLog.gagnant_rang_predit <= 3
-                )
-            )).scalar() or 0
+            # Source UNIQUE de masquage (api.model_metrics) : précision réelle observée
+            # (race_learning_log), gardée par la crédibilité AUC ; AUC/ROI masqués si
+            # aberrants. Évite la divergence avec /stats et /model/version.
+            m = await real_model_metrics(db, mv)
             out: dict = {
-                "auc_roc": round(float(mv.auc_roc), 4) if mv.auc_roc else None,
+                "auc_roc": m["auc_roc"],
                 "nb_courses_train": mv.nb_courses_train,
-                "nb_courses_evaluees": rll_total,
+                "nb_courses_evaluees": m["nb_courses_evaluees"],
             }
-            if rll_total >= 10:
-                out["precision_top3_reelle"] = f"{rll_top3 / rll_total * 100:.0f}%"
-            # ROI simulé : n'afficher que s'il est plausible (sinon métadonnée non fiable)
-            roi = float(mv.roi_simule) if mv.roi_simule is not None else None
-            if roi is not None and -0.5 <= roi <= 1.0:
-                out["roi_simule"] = f"{roi * 100:+.1f}%"
+            if m["precision_top3"] is not None:
+                out["precision_top3_reelle"] = f"{m['precision_top3'] * 100:.0f}%"
+            if m["roi_simule"] is not None:
+                out["roi_simule"] = f"{m['roi_simule'] * 100:+.1f}%"
             return json.dumps(out)
 
         elif tool_name == "get_bankroll_stats":

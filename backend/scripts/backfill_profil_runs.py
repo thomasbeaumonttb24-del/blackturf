@@ -37,7 +37,7 @@ async def main(limit: int = 400) -> None:
         await ensure_tables(session)
         courses = (await session.execute(text("""
             SELECT c.course_id, c.nb_partants, c.est_quinte, c.est_quarte, c.est_tierce,
-                   r.classement, r.rapports, r.rapports_detail
+                   c.est_2sur4, r.classement, r.rapports, r.rapports_detail
             FROM courses c
             JOIN resultats r ON r.course_id = c.course_id
             WHERE c.statut = 'termine' AND r.classement IS NOT NULL
@@ -48,7 +48,7 @@ async def main(limit: int = 400) -> None:
 
         n_done = 0
         n_runs = 0
-        for cid, nb_part, est_q, est_qa, est_t, classement, rapports, rapports_detail in courses:
+        for cid, nb_part, est_q, est_qa, est_t, est_2s4, classement, rapports, rapports_detail in courses:
             preds = (await session.execute(text("""
                 SELECT p.numero, ch.nom, pr.proba_top1, pr.proba_top3, p.cote_pmu, p.non_partant
                 FROM predictions pr
@@ -66,6 +66,7 @@ async def main(limit: int = 400) -> None:
             course_info = {
                 "nb_partants": nb_part, "est_quinte": bool(est_q),
                 "est_quarte": bool(est_qa), "est_tierce": bool(est_t),
+                "est_2sur4": bool(est_2s4),
             }
             cl = classement if isinstance(classement, list) else []
             rp = rapports or {}

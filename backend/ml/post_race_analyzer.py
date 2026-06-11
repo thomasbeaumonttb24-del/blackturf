@@ -149,7 +149,9 @@ class PostRaceAnalyzer:
             session,
             course_id=course_id,
             gagnant_numero=gagnant_numero,
-            winner_predicted=top3_ia_numeros,
+            # Liste ORDONNÉE (proba_top3 desc), pas le set : sinon le rang prédit
+            # du gagnant (1/2/3) serait tiré au hasard dans le top-3.
+            winner_predicted=[num for num, _ in top3_ia],
             gagnant_proba_ia=gagnant_proba_ia,
             gagnant_cote_pmu=gagnant_cote_pmu,
             top3_precision=top3_precision,
@@ -391,7 +393,7 @@ class PostRaceAnalyzer:
         session: AsyncSession,
         course_id: str,
         gagnant_numero: Optional[int],
-        winner_predicted: set,
+        winner_predicted: list,  # top-3 ORDONNÉ par proba desc (rang significatif)
         gagnant_proba_ia: float,
         gagnant_cote_pmu: float,
         top3_precision: bool,
@@ -542,19 +544,28 @@ class PostRaceAnalyzer:
         Utilisé pour l'interface admin et pour déclencher le ré-entraînement.
         """
         try:
+            # Agrégation sur les N dernières courses analysées. Sous-requête
+            # obligatoire : ORDER BY/LIMIT ne peut pas coexister avec un AGG sans
+            # GROUP BY. precision_top3 = gagnant prédit dans le top-3 (pas de colonne
+            # dédiée) ; surprise moyenne = 1 − proba donnée au vrai gagnant.
             r = await session.execute(text("""
                 SELECT
                     COUNT(*) as total,
-                    AVG(brier_course)::float as brier_moyen,
-                    AVG(log_loss_course)::float as logloss_moyen,
-                    SUM(CASE WHEN top3_precision THEN 1 ELSE 0 END)::float /
+                    AVG(brier_score)::float as brier_moyen,
+                    AVG(log_loss)::float as logloss_moyen,
+                    SUM(CASE WHEN gagnant_rang_predit <= 3 THEN 1 ELSE 0 END)::float /
                         NULLIF(COUNT(*), 0) as precision_top3,
                     SUM(CASE WHEN was_surprise THEN 1 ELSE 0 END)::float /
                         NULLIF(COUNT(*), 0) as taux_surprise,
-                    AVG(surprise_score)::float as surprise_score_moyen
-                FROM race_learning_log
-                ORDER BY created_at DESC
-                LIMIT :n
+                    AVG(1.0 - COALESCE(gagnant_proba_ia, 0.0))::float as surprise_score_moyen
+                FROM (
+                    SELECT brier_score, log_loss, gagnant_rang_predit,
+                           was_surprise, gagnant_proba_ia
+                    FROM race_learning_log
+                    WHERE brier_score IS NOT NULL
+                    ORDER BY analyzed_at DESC
+                    LIMIT :n
+                ) sub
             """), {"n": last_n})
             row = r.fetchone()
             if not row:
@@ -575,9 +586,11 @@ class PostRaceAnalyzer:
     async def get_bias_report(self, session: AsyncSession) -> list[dict]:
         """Retourne les biais systémiques confirmés."""
         try:
+            # taux_erreur n'est pas stocké : dérivé = nb_surprises / nb_courses.
             r = await session.execute(text("""
                 SELECT discipline, terrain, hippodrome, nb_courses,
-                       taux_erreur, correction_factor
+                       (nb_surprises::float / NULLIF(nb_courses, 0)) as taux_erreur,
+                       correction_factor
                 FROM bias_matrix
                 WHERE nb_courses >= :seuil AND correction_factor != 0
                 ORDER BY taux_erreur DESC
@@ -588,9 +601,9 @@ class PostRaceAnalyzer:
                 {
                     "contexte": f"{r[0]} × {r[1]} @ {r[2]}",
                     "nb_courses": int(r[3]),
-                    "taux_erreur": round(float(r[4]), 3),
-                    "correction_factor": round(float(r[5]), 3),
-                    "alerte": float(r[4]) > 0.70,
+                    "taux_erreur": round(float(r[4] or 0.0), 3),
+                    "correction_factor": round(float(r[5] or 0.0), 3),
+                    "alerte": float(r[4] or 0.0) > 0.70,
                 }
                 for r in rows
             ]
@@ -612,13 +625,13 @@ class PostRaceAnalyzer:
             r = await session.execute(text("""
                 SELECT
                     COUNT(*) as nb_nouvelles,
-                    AVG(brier_course) as brier_recent,
+                    AVG(brier_score) as brier_recent,
                     SUM(CASE WHEN was_surprise THEN 1 ELSE 0 END)::float /
                         NULLIF(COUNT(*), 0) as taux_surprise
                 FROM race_learning_log
-                WHERE created_at > (
-                    SELECT COALESCE(MAX(trained_at), '2000-01-01'::timestamp)
-                    FROM model_versions WHERE is_active = true
+                WHERE analyzed_at > (
+                    SELECT COALESCE(MAX(created_at), '2000-01-01'::timestamp)
+                    FROM model_versions WHERE est_actif = true
                 )
             """))
             row = r.fetchone()

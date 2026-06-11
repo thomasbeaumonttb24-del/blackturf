@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import Link from "next/link";
 import {
   Plus, Download, TrendingUp, TrendingDown, Loader2,
@@ -19,7 +19,7 @@ import { fr } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRequireAuth } from "@/hooks/useAuth";
-import { bankrollApi } from "@/lib/api";
+import { bankrollApi, coursesApi } from "@/lib/api";
 import { formatEuro, formatDateTime, cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -46,6 +46,14 @@ interface Stats {
   gains_totaux: number; pertes_totales: number;
   roi_global: number; roi_ia_only: number;
   nb_paris: number; nb_gagnants: number; nb_perdants: number; taux_reussite: number;
+}
+
+interface ProgrammeCourse {
+  course_id: string;
+  nom: string | null;
+  hippodrome_nom: string;
+  date_heure: string;
+  statut: string;
 }
 
 type Period = "7j" | "30j" | "3m" | "tout";
@@ -105,7 +113,7 @@ export default function BankrollPage() {
   const [searchQ, setSearchQ] = useState("");
   const [sortCol, setSortCol] = useState<"date" | "mise" | "cote" | "gain">("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  const [formData, setFormData] = useState({ type_pari: "Simple Gagnant", mise: "", cote: "", chevaux: "", notes: "" });
+  const [formData, setFormData] = useState({ type_pari: "Simple Gagnant", mise: "", cote: "", chevaux: "", notes: "", course_id: "" });
 
   const { data: entries, mutate: mutateEntries, isLoading } = useSWR<Entry[]>(
     "/bankroll/entries",
@@ -117,6 +125,35 @@ export default function BankrollPage() {
     () => bankrollApi.stats().then((r) => r.data),
     { refreshInterval: 30_000 }
   );
+
+  // Courses du jour — pour lier un pari à une course (auto-règlement + filtre des
+  // types de paris réellement proposés par le PMU). Chargé uniquement quand le form
+  // est ouvert.
+  const { data: programme } = useSWR<ProgrammeCourse[]>(
+    showForm ? "/programme/bankroll-form" : null,
+    () => coursesApi.programme().then((r) =>
+      (r.data?.reunions ?? []).flatMap((rn: { courses: ProgrammeCourse[] }) => rn.courses)
+    )
+  );
+
+  // Types de paris jouables pour la course liée (source de vérité = backend).
+  const { data: parisDispo } = useSWR<{ paris_disponibles: string[] }>(
+    formData.course_id ? `/courses/${formData.course_id}/paris-disponibles` : null,
+    () => coursesApi.parisDisponibles(formData.course_id).then((r) => r.data)
+  );
+
+  // Options du <select> Type : restreintes à la course liée si choisie, sinon liste complète.
+  const typeOptions = formData.course_id && parisDispo?.paris_disponibles?.length
+    ? parisDispo.paris_disponibles
+    : TYPE_PARIS;
+
+  // Si le type courant n'est plus jouable après changement de course → reset sur le 1er dispo.
+  useEffect(() => {
+    if (formData.course_id && parisDispo?.paris_disponibles?.length &&
+        !parisDispo.paris_disponibles.includes(formData.type_pari)) {
+      setFormData((f) => ({ ...f, type_pari: parisDispo.paris_disponibles[0] }));
+    }
+  }, [parisDispo, formData.course_id, formData.type_pari]);
 
   const analytics = useMemo(() => {
     if (!entries || !stats) return null;
@@ -175,20 +212,19 @@ export default function BankrollPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await bankrollApi.create({ ...formData, mise: parseFloat(formData.mise), cote: formData.cote ? parseFloat(formData.cote) : null, date: new Date().toISOString() });
+      const { course_id, ...rest } = formData;
+      await bankrollApi.create({
+        ...rest,
+        course_id: course_id || null,   // lié → auto-règlement par les vrais rapports PMU
+        mise: parseFloat(formData.mise),
+        cote: formData.cote ? parseFloat(formData.cote) : null,
+        date: new Date().toISOString(),
+      });
       toast.success("Pari enregistré !");
       setShowForm(false);
-      setFormData({ type_pari: "Simple Gagnant", mise: "", cote: "", chevaux: "", notes: "" });
+      setFormData({ type_pari: "Simple Gagnant", mise: "", cote: "", chevaux: "", notes: "", course_id: "" });
       mutateEntries(); mutateStats();
     } catch { toast.error("Erreur lors de l'enregistrement"); }
-  }
-
-  async function handleResultat(id: string, resultat: string, gainPerte: number) {
-    try {
-      await bankrollApi.update(id, { resultat, gain_perte: gainPerte });
-      toast.success("Résultat enregistré");
-      mutateEntries(); mutateStats();
-    } catch { toast.error("Erreur"); }
   }
 
   async function handleExport() {
@@ -241,6 +277,33 @@ export default function BankrollPage() {
           <CardContent className="p-5">
             <p className="text-sm font-semibold text-gray-700 mb-3">Enregistrer un pari</p>
             <form onSubmit={handleSubmit}>
+              {/* Course liée (optionnel) — restreint les types de paris à ceux RÉELLEMENT
+                  proposés par le PMU pour la course + active l'auto-règlement du gain. */}
+              <div className="mb-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Course (optionnel) — pour le règlement auto & les paris jouables
+                </label>
+                <select
+                  value={formData.course_id}
+                  onChange={(e) => setFormData({ ...formData, course_id: e.target.value })}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+                >
+                  <option value="">Aucune (pari libre)</option>
+                  {(programme ?? [])
+                    .filter((c) => c.statut !== "termine" && c.statut !== "annule")
+                    .map((c) => (
+                      <option key={c.course_id} value={c.course_id}>
+                        {(c.course_id.match(/R\d+C\d+$/)?.[0] ?? c.course_id)} · {c.hippodrome_nom}
+                        {c.date_heure ? ` · ${format(parseISO(c.date_heure), "HH:mm")}` : ""}
+                      </option>
+                    ))}
+                </select>
+                {formData.course_id && (
+                  <p className="mt-1 text-[11px] text-amber-600">
+                    Types limités aux paris proposés par le PMU pour cette course.
+                  </p>
+                )}
+              </div>
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
                 {[
                   { label: "Type *", field: "type_pari", type: "select" },
@@ -256,7 +319,7 @@ export default function BankrollPage() {
                         onChange={(e) => setFormData({ ...formData, [field]: e.target.value })}
                         className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/50"
                       >
-                        {TYPE_PARIS.map((t) => <option key={t}>{t}</option>)}
+                        {typeOptions.map((t) => <option key={t}>{t}</option>)}
                       </select>
                     ) : (
                       <input
@@ -453,12 +516,10 @@ export default function BankrollPage() {
                       <td className="px-4 py-3 text-right font-mono text-sm font-semibold text-gray-800">{formatEuro(e.mise)}</td>
                       <td className="px-4 py-3 text-right text-gray-500 hidden sm:table-cell font-mono text-xs">{e.cote?.toFixed(2) || "—"}</td>
                       <td className="px-4 py-3 text-center">
-                        {e.resultat ? <ResultBadge r={e.resultat} /> : (
-                          <div className="flex gap-1 justify-center">
-                            <button onClick={() => handleResultat(e.entry_id, "gagne", (e.cote || 2) * e.mise - e.mise)} className="p-1 rounded text-emerald-500 hover:bg-emerald-50 transition-colors" title="Gagné"><CheckCircle2 className="w-4 h-4" /></button>
-                            <button onClick={() => handleResultat(e.entry_id, "perd", -e.mise)} className="p-1 rounded text-red-400 hover:bg-red-50 transition-colors" title="Perdu"><XCircle className="w-4 h-4" /></button>
-                          </div>
-                        )}
+                        {/* Résultat réglé automatiquement (vrais rapports PMU). Tant que la
+                            course n'est pas terminée / le rapport pas publié → « En attente ».
+                            Plus de validation manuelle gagné/perdu. */}
+                        <ResultBadge r={e.resultat} />
                       </td>
                       <td className={cn("px-4 py-3 text-right font-bold font-mono tabular-nums text-sm",
                         (e.gain_perte ?? 0) > 0 ? "text-emerald-600" : (e.gain_perte ?? 0) < 0 ? "text-red-500" : "text-gray-400")}>

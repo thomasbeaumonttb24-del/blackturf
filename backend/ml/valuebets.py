@@ -383,13 +383,15 @@ def calculer_mise_kelly(
     """
     Critère de Kelly pour la mise optimale.
 
-    Mise Kelly = (EV × Bankroll) / Cote
-    Plafonnée à 5% de bankroll.
+    Fraction de Kelly f* = EV / (cote − 1)  (b = cote − 1 = gain net par unité).
+    Diviser par `cote` au lieu de `(cote − 1)` sous-mise systématiquement et ne
+    correspond à aucun critère standard.
+    Mise = bankroll × f* × fraction, plafonnée à `max_pct` de bankroll.
     fraction=0.5 = demi-Kelly (recommandé pour débutants).
     """
     if cote <= 1.0 or ev <= 0:
         return 0.0
-    mise = (ev * bankroll) / cote * fraction
+    mise = (ev * bankroll) / (cote - 1.0) * fraction
     mise = min(mise, bankroll * max_pct)
     return round(max(0.0, mise), 2)
 

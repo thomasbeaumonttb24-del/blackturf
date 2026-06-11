@@ -182,6 +182,12 @@ class PmuScraper(BaseScraper):
                 est_tierce = any("TIERCE" in c for c in pari_codes)
                 est_quarte = any(("QUARTE" in c) or ("SUPER_QUATRE" in c) for c in pari_codes)
                 est_quinte = any("QUINTE" in c for c in pari_codes)
+                # 2sur4 (DEUX_SUR_QUATRE) — proposé seulement sur CERTAINES courses par
+                # le PMU, indépendamment du nb de partants. On ne se fie donc PAS à une
+                # heuristique « ≥8 partants » (fausse : ex. R6C7 a ≥8 partants mais PAS
+                # de 2sur4) mais aux paris RÉELLEMENT offerts. Pas dans la liste → on ne
+                # génèrera jamais de prono 2sur4 pour cette course.
+                est_2sur4 = any(("DEUX_SUR_QUATRE" in c) or ("2SUR4" in c) for c in pari_codes)
 
                 # Terrain — conditionPiste/libellePiste n'existent PLUS dans le payload
                 # programme 2026 : le PMU publie `penetrometre` {valeurMesure, intitule}
@@ -224,6 +230,7 @@ class PmuScraper(BaseScraper):
                     est_quinte=est_quinte,
                     est_quarte=est_quarte,
                     est_tierce=est_tierce,
+                    est_2sur4=est_2sur4,
                     nom=re.sub(r"\s+", " ", c_data.get("libelle") or "").strip() or None,
                     conditions_texte=conditions or None,
                     penetrometre_coef=pen_coef,

@@ -16,6 +16,7 @@ export function ScrollReveal({ children, delay = 0, className = "", direction = 
     if (!el) return;
 
     let revealed = false;
+    let observer: IntersectionObserver | null = null;
     const reveal = () => {
       if (revealed) return;
       revealed = true;
@@ -29,20 +30,24 @@ export function ScrollReveal({ children, delay = 0, className = "", direction = 
         reveal();
         return;
       }
-      const observer = new IntersectionObserver(
+      observer = new IntersectionObserver(
         ([entry]) => {
           if (entry.isIntersecting) {
             reveal();
-            observer.unobserve(el);
+            observer?.unobserve(el);
           }
         },
         { threshold: 0.05, rootMargin: "0px 0px -20px 0px" }
       );
       observer.observe(el);
-      return () => observer.disconnect();
     }, 80);
 
-    return () => clearTimeout(timer);
+    // Cleanup RÉEL du useEffect : déconnecte l'observer (avant, le disconnect était
+    // le return du setTimeout → jamais appelé → fuite d'observers sur remount).
+    return () => {
+      clearTimeout(timer);
+      observer?.disconnect();
+    };
   }, [delay]);
 
   const dirClass = direction === "left" ? "reveal-left" : direction === "right" ? "reveal-right" : "reveal-up";

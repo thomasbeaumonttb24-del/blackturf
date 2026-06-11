@@ -212,6 +212,7 @@ class CourseScrape:
     est_quinte: bool = False
     est_quarte: bool = False
     est_tierce: bool = False
+    est_2sur4: bool = False   # 2sur4 réellement proposé par le PMU pour cette course
     nom: Optional[str] = None
     # ── Enrichissements PMU (course) ─────────────────────────────────────────
     conditions_texte: Optional[str] = None        # conditions complètes (texte long)

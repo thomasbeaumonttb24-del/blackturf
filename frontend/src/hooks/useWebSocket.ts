@@ -10,17 +10,27 @@ export function useWebSocket(path: string, enabled = true) {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout>>();
+  const attemptRef = useRef(0);     // compteur de tentatives (backoff)
+  const closingRef = useRef(false); // true après unmount → bloque la reconnexion
 
   const connect = useCallback(() => {
-    if (!enabled) return;
+    if (!enabled || closingRef.current) return;
     const token = getAccessToken();
     if (!token) return;
 
-    const url = `${WS_URL}${path}?token=${token}`;
+    // Token NON exposé dans l'URL (les query strings finissent dans les access logs
+    // des proxies = fuite de credential). Envoyé en 1er message après ouverture.
+    const url = `${WS_URL}${path}`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => {
+      attemptRef.current = 0; // connexion OK → reset du backoff
+      try {
+        ws.send(JSON.stringify({ type: "auth", token }));
+      } catch {}
+      setConnected(true);
+    };
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -29,15 +39,23 @@ export function useWebSocket(path: string, enabled = true) {
     };
     ws.onclose = () => {
       setConnected(false);
-      // Reconnect 5s
-      retryRef.current = setTimeout(connect, 5000);
+      // Pas de reconnexion si démonté/désactivé, et plafond de tentatives (évite la
+      // tempête : avant, reconnexion toutes les 5s à l'infini même serveur down).
+      if (closingRef.current || !enabled || attemptRef.current >= 8) return;
+      const delay = Math.min(30000, 1000 * 2 ** attemptRef.current) + Math.random() * 500;
+      attemptRef.current += 1;
+      retryRef.current = setTimeout(connect, delay);
     };
     ws.onerror = () => ws.close();
   }, [path, enabled]);
 
   useEffect(() => {
+    closingRef.current = false;
     connect();
     return () => {
+      // Marque le démontage AVANT close() pour que onclose ne ré-arme pas un timer
+      // (sinon WS zombie qui reconnecte un composant démonté).
+      closingRef.current = true;
       clearTimeout(retryRef.current);
       wsRef.current?.close();
     };

@@ -59,6 +59,11 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
         JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pa.course_id
         WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
+          -- ANTI-LEAKAGE : ne garder que les features FIGÉES AVANT le départ.
+          -- Tout backfill/recompute post-course bump computed_at à now() (> date_heure)
+          -- → exclu. Sinon on apprend "ce qui rapporte" sur des features reconstruites
+          -- a posteriori (fuite temporelle) qui pilotent ensuite les value bets en prod.
+          AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
     """))).fetchall()
 
     agg = {name: {"n": 0, "wins": 0, "stake": 0.0, "payout": 0.0} for name in SIGNALS}
@@ -131,6 +136,8 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
         JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pa.course_id
         WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
+          -- ANTI-LEAKAGE (cf. compute_signal_performance) : features pré-départ only.
+          AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
     """))).fetchall()
 
     profils = ["conservateur", "equilibre", "agressif"]

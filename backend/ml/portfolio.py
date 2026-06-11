@@ -388,7 +388,7 @@ class BetPortfolioEngine:
                 "type": "Simple Gagnant",
                 "chevaux": [_cheval(o)],
                 "mise": round(mise, 2),
-                "ev": round(o.get("ev_max", 0), 3),
+                "ev": round(o["ev_max"], 3) if o.get("ev_max") is not None else None,
                 "proba": round(o.get("proba_top3", 0), 3),
                 "signal": o.get("signal_principal", ""),
                 "force_signal": round(o.get("force_signal", 0), 3),
@@ -411,7 +411,10 @@ class BetPortfolioEngine:
             ),
             "paris": paris,
             "cout_total": round(cout_total, 2),
-            "ev_moyen": round(float(np.mean([p.get("ev", 0) for p in paris if p.get("ev", 0) > 0])), 3),
+            # EV moyenne sur les EV RÉELLES connues (peut être négative = honnête) ;
+            # None si aucune EV calculable.
+            "ev_moyen": (round(float(np.mean(_de)), 3)
+                         if (_de := [p["ev"] for p in paris if p.get("ev") is not None]) else None),
             "confidence": round(avg_force * 0.4, 3),  # Confidence réduite car outsider
             "risque": "élevé — potentiel multiplicateur",
             "couleur": "#7C3AED",
@@ -452,7 +455,10 @@ class BetPortfolioEngine:
                 "type": "Quinté+ Flexi",
                 "chevaux": [_cheval(p) for p in selection_omega[:5]],
                 "mise": round(cout_flexi, 2),
-                "ev": 0.35,
+                # EV d'un combo parimutuel NON calculable de façon fiable ici (rapport
+                # inconnu) → None ("—"), jamais une valeur inventée. La vraie couverture
+                # probabiliste du portefeuille est donnée par simulate_portfolio_coverage.
+                "ev": None,
                 "proba": float(np.mean([p.get("proba_top3", 0) for p in selection_omega[:5]])),
                 "nb_combinaisons": 120,
                 "explication": (
@@ -473,7 +479,7 @@ class BetPortfolioEngine:
                 "type": "Tiercé Désordre",
                 "chevaux": [_cheval(p) for p in sel_tierce],
                 "mise": round(cout_t, 2),
-                "ev": 0.25,
+                "ev": None,  # cf. note Quinté Flexi : EV combo non fiable → None
                 "proba": float(np.mean([p.get("proba_top3", 0) for p in sel_tierce])),
                 "nb_combinaisons": nb_combis,
                 "explication": (
@@ -492,7 +498,7 @@ class BetPortfolioEngine:
                 "type": "2sur4",
                 "chevaux": [_cheval(p) for p in sel4],
                 "mise": cout_2s4,
-                "ev": 0.15,
+                "ev": None,  # cf. note Quinté Flexi : EV combo non fiable → None
                 "proba": float(np.mean([p.get("proba_top3", 0) for p in sel4])),
                 "nb_combinaisons": 6,
                 "explication": f"2sur4 — N°{','.join(str(p['numero']) for p in sel4)}",
@@ -510,7 +516,9 @@ class BetPortfolioEngine:
             ),
             "paris": paris,
             "cout_total": round(cout_total, 2),
-            "ev_moyen": round(float(np.mean([p.get("ev", 0) for p in paris])), 3),
+            # EV des combos OMEGA non calculable de façon fiable → None (couverture
+            # mesurée via simulate_portfolio_coverage, pas via une EV inventée).
+            "ev_moyen": None,
             "confidence": round(float(np.mean([p.get("proba", 0) for p in paris])) * 0.6, 3),
             "risque": "variable — couverture maximale",
             "couleur": "#0891B2",
@@ -559,13 +567,18 @@ class BetPortfolioEngine:
             signal_principal = max(signals, key=lambda x: x[1])[0]
 
             cote = float(p.get("cote_pmu") or 10.0)
-            ev_signal = (cote * max(proba + force * 0.3, 0.05)) - 1.0
+            # EV RÉELLE Simple Gagnant = cote × P(victoire) − 1. On utilise la vraie
+            # proba_top1 du modèle (déjà calibrée), PAS proba_top3 (placé) gonflée par
+            # force*0.3. Pour un outsider l'EV est souvent négative → c'est honnête ;
+            # la force du signal reste exposée à part (force_signal), pas fabriquée en EV.
+            p_win = float(p.get("proba_top1") or 0.0)
+            ev_reel = (cote * p_win) - 1.0 if (cote > 1.0 and p_win > 0.0) else None
 
             candidates.append({
                 **p,
                 "force_signal": round(force, 4),
                 "signal_principal": signal_principal,
-                "ev_max": round(ev_signal, 4),
+                "ev_max": round(ev_reel, 4) if ev_reel is not None else None,
                 "spi_score": spi,
                 "mouvement_30min": mouvement,
             })
@@ -639,7 +652,9 @@ class BetPortfolioEngine:
                 continue
 
             sc_confidence = float(scenario.get("confidence", 0))
-            sc_ev = float(scenario.get("ev_moyen", 0))
+            # ev_moyen peut être None (OMEGA/DELTA sans EV fiable) → 0 pour le tri :
+            # une couverture sans EV connue ne doit pas être priorisée sur une EV réelle.
+            sc_ev = float(scenario.get("ev_moyen") or 0.0)
             priority_score = (sc_ev + 0.3) * sc_confidence
 
             for pari in scenario.get("paris", []):
@@ -682,9 +697,9 @@ class BetPortfolioEngine:
         )
 
         ev_scenarios = [
-            s.get("ev_moyen", 0)
+            s["ev_moyen"]
             for s in scenarios.values()
-            if s and s.get("ev_moyen", 0) > 0
+            if s and s.get("ev_moyen") is not None and s["ev_moyen"] > 0
         ]
 
         avg_proba_top1 = float(np.mean([
@@ -742,25 +757,29 @@ def _cheval(p: dict) -> dict:
 
 
 def _kelly(ev: float, cote: float, budget: float, fraction: float = 0.5) -> float:
+    # Fraction de Kelly = EV / (cote − 1), pas EV / cote.
     if ev <= 0 or cote <= 1.0:
         return MISE_MIN.get("Simple Gagnant", 1.50)
-    mise = (ev * budget / cote) * fraction
+    mise = (ev * budget / (cote - 1.0)) * fraction
     return max(mise, 1.50)
 
 
 def _kelly_outsider(force_signal: float, cote: float, budget: float) -> float:
-    """Kelly adapté aux outsiders DELTA — mise très conservative."""
+    """Mise outsider DELTA — TRÈS conservative, dimensionnée sur la FORCE DU SIGNAL
+    (pas une EV : la force du signal pilote un petit stake, quart-Kelly sur b=cote−1)."""
     if cote <= 1.0:
         return 1.50
-    # EV synthétique basé sur la force du signal
-    ev_synth = force_signal * 0.8
-    mise = (ev_synth * budget / cote) * 0.25  # fraction très faible
+    # Stake proportionnel à la force du signal (heuristique de dimensionnement, pas
+    # une espérance affichée). Dénominateur Kelly correct = cote − 1.
+    mise = (force_signal * 0.8 * budget / (cote - 1.0)) * 0.25  # fraction très faible
     return max(mise, 1.50)
 
 
 def _types_disponibles(nb_partants: int, course_info: dict) -> list[str]:
     paris = ["Simple Gagnant", "Simple Placé", "Couplé Gagnant", "Couplé Placé", "Couplé Ordre", "Trio"]
-    if nb_partants >= 8:
+    # 2sur4 seulement si réellement proposé par le PMU (paris[].codePari), pas sur une
+    # heuristique de partants : certaines courses ≥8 partants n'offrent pas de 2sur4.
+    if course_info.get("est_2sur4"):
         paris.append("2sur4")
     if course_info.get("est_tierce") or course_info.get("est_quarte") or course_info.get("est_quinte"):
         paris.extend(["Tiercé Désordre", "Tiercé Ordre"])
@@ -1028,9 +1047,10 @@ def kelly_fraction_adaptatif(
     if cote <= 1.0 or ev <= 0:
         return 0.0
 
-    # Kelly brut
-    b = cote - 1.0  # gain si victoire
-    p_win = ev / b + 1 / cote  # approximation depuis EV
+    # Kelly brut. Inversion EXACTE proba depuis l'EV : EV = p·cote − 1 ⇒ p = (EV+1)/cote
+    # (l'ancienne formule ev/b + 1/cote ne redonnait pas p).
+    b = cote - 1.0  # gain net si victoire
+    p_win = (ev + 1.0) / cote
     p_win = min(max(p_win, 0.05), 0.95)
     kelly_brut = (b * p_win - (1 - p_win)) / b
 

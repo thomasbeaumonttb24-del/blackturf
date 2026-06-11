@@ -6,8 +6,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="flex flex-col min-h-screen">
       <Navbar />
-      {/* pb mobile = hauteur BottomNav (n'écrase pas le bas de page) */}
-      <main className="flex-1 pb-16 md:pb-0">{children}</main>
+      {/* pb mobile = hauteur réelle BottomNav (item 52px + marge) + safe-area iPhone,
+          sinon le bas du contenu passe sous la barre sur écran à encoche. */}
+      <main className="flex-1 pb-[calc(68px+env(safe-area-inset-bottom))] md:pb-0">{children}</main>
       <Footer />
       <BottomNav />
     </div>

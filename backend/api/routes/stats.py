@@ -44,24 +44,6 @@ async def _cache_set(redis: aioredis.Redis, key: str, data: Any, ttl: int) -> No
     except Exception:
         pass
 
-_STATIC_STATS = {
-    "auc_roc": 0.71,
-    "roi_simule_6mois": 8.4,
-    "nb_courses_analysees": 12450,
-    "nb_utilisateurs": 487,
-    "precision_top3": 0.59,
-}
-
-_STATIC_CURVE = [
-    {"date": "Jan", "bankroll": 1000}, {"date": "Fév", "bankroll": 1048},
-    {"date": "Mar", "bankroll": 1032}, {"date": "Avr", "bankroll": 1091},
-    {"date": "Mai", "bankroll": 1074}, {"date": "Jun", "bankroll": 1118},
-    {"date": "Jul", "bankroll": 1103}, {"date": "Aoû", "bankroll": 1142},
-    {"date": "Sep", "bankroll": 1138}, {"date": "Oct", "bankroll": 1165},
-    {"date": "Nov", "bankroll": 1152}, {"date": "Déc", "bankroll": 1184},
-]
-
-
 async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float = 10.0, start: float = 1000.0) -> dict:
     """Backtest HONNÊTE : 10€ flat en Simple Gagnant sur chaque value bet ★★★+
     (niveau ≥ 3) des `since_days` derniers jours, réglé sur l'arrivée RÉELLE à la
@@ -251,8 +233,12 @@ async def ml_status(
         dd_data = {
             "severity": dd_state.severity,
             "n_updates": dd_state.n_updates,
-            "brier_mean": round(float(state_json.get("brier_mean", 0.20)), 4),
-            "surprise_rate": round(float(state_json.get("surprise_rate", 0.30)), 4),
+            # Pas de défaut inventé : si non mesuré → null (le front affiche "—"),
+            # jamais un 0.20/0.30 présenté comme une vraie mesure.
+            "brier_mean": (round(float(state_json["brier_mean"]), 4)
+                           if state_json.get("brier_mean") is not None else None),
+            "surprise_rate": (round(float(state_json["surprise_rate"]), 4)
+                              if state_json.get("surprise_rate") is not None else None),
             "adwin_triggered": bool(state_json.get("adwin_triggered", False)),
             "ph_triggered": bool(state_json.get("ph_triggered", False)),
             "last_drift_at": dd_state.last_drift_at.isoformat() if dd_state.last_drift_at else None,
@@ -470,12 +456,17 @@ async def perf_personnelle(
                 disc = disc_map.get(e.course_id, "Autre") if e.course_id else "Autre"
                 if disc not in disc_stats:
                     disc_stats[disc] = {"mise": 0.0, "gain": 0.0, "nb": 0, "wins": 0}
-                disc_stats[disc]["mise"] += e.mise
-                disc_stats[disc]["nb"] += 1
-                if e.resultat == "gagne" and e.gain_perte:
+                # On ne compte QUE les paris réglés (gagné/perdu) : sinon la mise des
+                # paris en attente gonflait le dénominateur sans gain au numérateur
+                # → ROI par discipline biaisé à la baisse.
+                if e.resultat == "gagne" and e.gain_perte is not None:
+                    disc_stats[disc]["mise"] += e.mise
+                    disc_stats[disc]["nb"] += 1
                     disc_stats[disc]["gain"] += e.gain_perte
                     disc_stats[disc]["wins"] += 1
-                elif e.resultat == "perd" and e.gain_perte:
+                elif e.resultat == "perd" and e.gain_perte is not None:
+                    disc_stats[disc]["mise"] += e.mise
+                    disc_stats[disc]["nb"] += 1
                     disc_stats[disc]["gain"] += e.gain_perte
 
     roi_par_discipline = [
@@ -491,8 +482,12 @@ async def perf_personnelle(
     # ── 3. P&L mensuel (12 derniers mois) ────────────────────
     now = datetime.now(timezone.utc)
     monthly: dict[str, dict] = {}
+    # Vrais mois CALENDAIRES (avant : now − 30*i jours → dérive, un mois pouvait être
+    # sauté ou compté deux fois → paris exclus du graphe).
+    base_idx = now.year * 12 + (now.month - 1)
     for i in range(11, -1, -1):
-        month_dt = now - timedelta(days=30 * i)
+        yy, mm = divmod(base_idx - i, 12)
+        month_dt = datetime(yy, mm + 1, 1, tzinfo=timezone.utc)
         key = month_dt.strftime("%Y-%m")
         monthly[key] = {"mois": month_dt.strftime("%b %Y"), "gain_perte": 0.0, "nb_paris": 0}
     for e in entries:
@@ -729,15 +724,15 @@ async def track_record(
         n = vb.niveau
         if n not in vb_stats:
             continue
+        # Pas d'arrivée publiée (outerjoin → resultat None) : on NE règle PAS le pari.
+        # Avant, il tombait dans le `else` et était compté perdant → ROI faussé à la baisse.
+        if not (resultat and isinstance(resultat.classement, list) and resultat.classement):
+            continue
         mise = 10.0
         vb_stats[n]["nb"] += 1
         vb_stats[n]["mise"] += mise
-        gagne = False
-        if resultat and resultat.classement and isinstance(resultat.classement, list):
-            if resultat.classement:
-                premier = resultat.classement[0]
-                if isinstance(premier, dict) and premier.get("numero") == part.numero:
-                    gagne = True
+        premier = resultat.classement[0]
+        gagne = isinstance(premier, dict) and premier.get("numero") == part.numero
         if gagne and part.cote_pmu and part.cote_pmu > 1:
             vb_stats[n]["wins"] += 1
             vb_stats[n]["gains"] += (part.cote_pmu - 1) * mise

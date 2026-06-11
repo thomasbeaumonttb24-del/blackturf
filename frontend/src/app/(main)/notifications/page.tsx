@@ -63,9 +63,9 @@ function typeCategory(type: string): FilterTab {
 
 function NotifIcon({ type }: { type: string }) {
   const cat = typeCategory(type);
-  if (cat === "value_bet") return <Zap className="w-4 h-4 text-amber-400" />;
-  if (cat === "resultat") return <Trophy className="w-4 h-4 text-emerald-400" />;
-  return <Info className="w-4 h-4 text-blue-400" />;
+  if (cat === "value_bet") return <Zap className="w-4 h-4 text-amber-600" />;
+  if (cat === "resultat") return <Trophy className="w-4 h-4 text-emerald-600" />;
+  return <Info className="w-4 h-4 text-blue-600" />;
 }
 
 function timeAgo(dateStr: string | null): string {
@@ -90,7 +90,7 @@ function ToggleSwitch({
     >
       <div className="mt-0.5 shrink-0">
         {checked
-          ? <ToggleRight className="w-8 h-8 text-amber-400 transition-colors" />
+          ? <ToggleRight className="w-8 h-8 text-amber-600 transition-colors" />
           : <ToggleLeft className="w-8 h-8 text-muted-foreground transition-colors group-hover:text-muted-foreground/70" />
         }
       </div>
@@ -187,7 +187,7 @@ export default function NotificationsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Bell className="w-6 h-6 text-amber-400" />
+              <Bell className="w-6 h-6 text-amber-600" />
               Notifications
               {unread > 0 && (
                 <Badge className="bg-amber-500 text-white text-xs px-2 py-0.5 ml-1">
@@ -268,15 +268,15 @@ export default function NotificationsPage() {
             >
               {/* Unread dot */}
               {!n.lue && (
-                <span className="absolute top-4 right-4 w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                <span className="absolute top-4 right-4 w-2 h-2 rounded-full bg-amber-500 shrink-0" />
               )}
 
               {/* Icon */}
               <div className={cn(
                 "mt-0.5 p-2 rounded-lg shrink-0",
-                typeCategory(n.type_alerte) === "value_bet" ? "bg-amber-500/10" :
-                typeCategory(n.type_alerte) === "resultat" ? "bg-emerald-500/10" :
-                "bg-blue-500/10"
+                typeCategory(n.type_alerte) === "value_bet" ? "bg-amber-50" :
+                typeCategory(n.type_alerte) === "resultat" ? "bg-emerald-50" :
+                "bg-blue-50"
               )}>
                 <NotifIcon type={n.type_alerte} />
               </div>
@@ -303,7 +303,7 @@ export default function NotificationsPage() {
                   <Link
                     href={`/courses/${n.course_id}`}
                     onClick={(e) => e.stopPropagation()}
-                    className="inline-flex items-center gap-1 text-xs text-amber-500 hover:text-amber-400 mt-1.5 transition-colors"
+                    className="inline-flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 mt-1.5 transition-colors"
                   >
                     Voir la course <ChevronRight className="w-3 h-3" />
                   </Link>
@@ -344,7 +344,7 @@ export default function NotificationsPage() {
                       className={cn(
                         "flex flex-col items-center gap-1 p-3 rounded-xl border text-xs font-medium transition-all",
                         isMin
-                          ? "border-amber-500/60 bg-amber-500/15 text-amber-400"
+                          ? "border-amber-500/60 bg-amber-50 text-amber-700"
                           : selected
                           ? "border-border/60 bg-card text-foreground"
                           : "border-border/30 bg-card/50 text-muted-foreground hover:border-border/60"
@@ -355,14 +355,14 @@ export default function NotificationsPage() {
                           <span
                             key={i}
                             className={cn("text-[10px]",
-                              isMin ? "text-amber-400" : "text-muted-foreground"
+                              isMin ? "text-amber-600" : "text-muted-foreground"
                             )}
                           >★</span>
                         ))}
                       </span>
                       <span>{n === 1 ? "1+ étoile" : `${n}+ étoiles`}</span>
                       {isMin && (
-                        <Badge className="bg-amber-500/20 text-amber-400 border-0 text-[9px] px-1.5 py-0 h-4">
+                        <Badge className="bg-amber-50 text-amber-700 border-0 text-[9px] px-1.5 py-0 h-4">
                           Actif
                         </Badge>
                       )}

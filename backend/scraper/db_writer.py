@@ -275,6 +275,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         est_quinte=course.est_quinte,
         est_quarte=course.est_quarte,
         est_tierce=course.est_tierce,
+        est_2sur4=course.est_2sur4,
         # ── Enrichissements PMU course ──
         conditions_texte=course.conditions_texte,
         penetrometre_coef=course.penetrometre_coef,

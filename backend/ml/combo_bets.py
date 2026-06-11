@@ -152,6 +152,7 @@ def build_combo_proposals(
     est_quinte = bool(course_info.get("est_quinte"))
     est_quarte = bool(course_info.get("est_quarte"))
     est_tierce = bool(course_info.get("est_tierce"))
+    est_2sur4 = bool(course_info.get("est_2sur4"))   # 2sur4 réellement offert PMU
 
     proposals: list[dict] = []
 
@@ -196,8 +197,8 @@ def build_combo_proposals(
         add("equilibre", "Couplé Gagnant", [a, b], sim.p_couple_gagnant([a, b]), sim_m.p_couple_gagnant([a, b]), 2.0, 1,
             f"N°{numeros[a]} et N°{numeros[b]} aux 2 premières places.")
 
-    # ── 2sur4 (4 meilleurs) — équilibré ──
-    if len(top) >= 4 and nb_partants >= 8:
+    # ── 2sur4 (4 meilleurs) — équilibré ── (uniquement si offert par le PMU)
+    if len(top) >= 4 and est_2sur4:
         sel = list(top[:4])
         add("equilibre", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel), 3.0, 6,
             f"2 des 4 chevaux N°{','.join(str(numeros[i]) for i in sel)} dans les 4 premiers.")
@@ -287,6 +288,13 @@ def enumerate_bet_candidates(
     # proba de victoire) MAIS à cote élevée (≥ 8). Ils DOIVENT être proposables (en
     # Simple Gagnant coup + dans les combos top-k), sinon on ignore notre propre analyse.
     big_model_picks = [i for i in by_p1[:5] if cotes[i] >= 8.0]
+    # GROSSES COTES jouables pour le profil RISQUÉ : cote ≥ 12 que le modèle ne déclasse
+    # PAS (edge > 0 OU classé dans son top-8 par proba de victoire). Servent à FABRIQUER
+    # un large spectre de combos à gros rapport (plusieurs duos/trios d'outsiders) : le
+    # profil risqué exige une cote plancher élevée → sans ces combos il manque de paris
+    # à jouer (cause du « risqué pauvre »). Triés par proba modèle (ordre de by_p1).
+    gros_cote = [i for i in by_p1
+                 if cotes[i] >= 12.0 and (edge_by_idx[i] > 0 or i in by_p1[:8])][:4]
 
     cands: list[dict] = []
     seen: set = set()
@@ -318,6 +326,7 @@ def enumerate_bet_candidates(
     est_quinte = bool(course_info.get("est_quinte"))
     est_quarte = bool(course_info.get("est_quarte"))
     est_tierce = bool(course_info.get("est_tierce"))
+    est_2sur4 = bool(course_info.get("est_2sur4"))   # 2sur4 réellement offert PMU
 
     # ── SIMPLE GAGNANT — uniquement sur cote >= 3. Sous 3, le gain est trop
     # faible pour le risque (surtout en petite mise) : un favori court se joue
@@ -362,6 +371,24 @@ def enumerate_bet_candidates(
             "texte_explication": f"SURPRISE — N°{numeros[out1]} {noms[out1]} (cote {cotes[out1]:.1f}) : "
                                  f"le modèle le voit plus haut que le marché.",
         })
+    # SIMPLE GAGNANT grosse cote (spectre RISQUÉ) : chaque grosse cote crédible en coup
+    # à petite mise — permet « 2 (ou +) simple gagnant à grosse cote » sur une course.
+    for g in gros_cote:
+        if ("Simple Gagnant", (g,)) in seen:
+            continue
+        p_win = float(p1[g]); rap = float(cotes[g])
+        if rap * p_win - 1 <= -0.55:          # franchement perdant même pour un coup
+            continue
+        has_edge = edge_by_idx[g] > 0
+        cands.append({
+            "niveau": "coup", "type_pari": "Simple Gagnant", "chevaux": [H(g)],
+            "proba_gain": round(p_win, 4), "rapport_estime": round(rap, 1),
+            "ev": round(rap * p_win - 1, 3), "edge": round(float(edge_by_idx[g]), 4),
+            "texte_explication": f"N°{numeros[g]} {noms[g]} — coup grosse cote {cotes[g]:.1f} "
+                                 f"({p_win*100:.0f}% de gagner)"
+                                 + (" · le modèle le classe au-dessus du marché" if has_edge else "") + ".",
+        })
+        seen.add(("Simple Gagnant", (g,)))
 
     # ── SIMPLE PLACÉ à VALEUR — socle du profil PRUDENT. ──────────────────────
     # On NE veut PAS l'ultra-favori placé (rapport ~1.1× = argent mort même gagné).
@@ -396,14 +423,23 @@ def enumerate_bet_candidates(
             ),
         })
 
-    # ── 3-4 COUPLÉ GAGNANT différents ──
+    # ── COUPLÉ GAGNANT — large spectre (favoris + duos d'outsiders à grosse cote) ──
     pairs = []
     if len(by_p1) >= 2: pairs.append((by_p1[0], by_p1[1]))
     if len(by_p1) >= 3: pairs.append((by_p1[0], by_p1[2]))
     if len(by_p1) >= 3: pairs.append((by_p1[1], by_p1[2]))
     if out1 is not None: pairs.append((by_p1[0], out1))   # favori + surprise
+    # Duos GAGNANT à GROSSE COTE pour le risqué : chaque grosse cote couplée aux 2
+    # premiers favoris, plus les paires d'outsiders entre eux → « 4 duo gagnant ».
+    for g in gros_cote:
+        if by_p1[0] != g: pairs.append((by_p1[0], g))
+        if len(by_p1) >= 2 and by_p1[1] != g: pairs.append((by_p1[1], g))
+    for gi in range(len(gros_cote)):
+        for gj in range(gi + 1, len(gros_cote)):
+            pairs.append((gros_cote[gi], gros_cote[gj]))
     for a, b in pairs:
-        niv = "surprise" if (out1 is not None and b == out1) else "rendement"
+        mx = max(float(cotes[a]), float(cotes[b]))
+        niv = "coup" if mx >= 25 else "surprise" if mx >= 12 else "rendement"
         add(niv, "Couplé Gagnant", [a, b], sim.p_couple_gagnant([a, b]), sim_m.p_couple_gagnant([a, b]),
             f"N°{numeros[a]} + N°{numeros[b]} aux 2 premières places.")
 
@@ -423,18 +459,30 @@ def enumerate_bet_candidates(
             f"Favori N°{numeros[by_p1[0]]} + outsider N°{numeros[out1]} (cote {cotes[out1]:.1f}) "
             f"tous deux placés — placement d'une grosse cote.")
 
-    # ── Trios (favoris + surprise) ──
+    # ── Trios — large spectre (favoris + grosses cotes) pour viser « 5 trio » ──
     trios = []
     if len(by_p1) >= 3: trios.append((by_p1[0], by_p1[1], by_p1[2]))
     if len(by_p1) >= 4: trios.append((by_p1[0], by_p1[1], by_p1[3]))
     if out1 is not None and len(by_p1) >= 2: trios.append((by_p1[0], by_p1[1], out1))
+    # Trios à GROS RAPPORT : 2 favoris + une grosse cote, et 1 favori + 2 grosses cotes.
+    for g in gros_cote:
+        if len(by_p1) >= 2 and g not in (by_p1[0], by_p1[1]):
+            trios.append((by_p1[0], by_p1[1], g))
+        if len(by_p1) >= 3 and g not in (by_p1[0], by_p1[2]):
+            trios.append((by_p1[0], by_p1[2], g))
+    for gi in range(len(gros_cote)):
+        for gj in range(gi + 1, len(gros_cote)):
+            if by_p1 and by_p1[0] not in (gros_cote[gi], gros_cote[gj]):
+                trios.append((by_p1[0], gros_cote[gi], gros_cote[gj]))
     for t in trios:
-        niv = "surprise" if (out1 is not None and out1 in t) else "coup"
+        mx = max(float(cotes[i]) for i in t)
+        has_val_out = any(edge_by_idx[i] > 0 and cotes[i] >= 8 for i in t)
+        niv = "surprise" if has_val_out and mx < 40 else "coup"
         add(niv, "Trio", list(t), sim.p_trio(list(t)), sim_m.p_trio(list(t)),
             f"N°{'+N°'.join(str(numeros[i]) for i in t)} aux 3 premières places (sans ordre).")
 
-    # ── 2sur4 ──
-    if len(by_p1) >= 4 and nb_partants >= 8:
+    # ── 2sur4 ── (uniquement si le PMU propose ce pari pour la course)
+    if len(by_p1) >= 4 and est_2sur4:
         sel = list(by_p1[:4])
         add("rendement", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel),
             f"2 des 4 chevaux N°{','.join(str(numeros[i]) for i in sel)} dans les 4 premiers.")
@@ -530,6 +578,7 @@ def build_coverage_bets(
     est_quinte = bool(course_info.get("est_quinte"))
     est_quarte = bool(course_info.get("est_quarte"))
     est_tierce = bool(course_info.get("est_tierce"))
+    est_2sur4 = bool(course_info.get("est_2sur4"))   # 2sur4 réellement offert PMU
 
     budget = budget if budget and budget > 0 else max(bankroll * 0.10, 10.0)
 
@@ -594,8 +643,8 @@ def build_coverage_bets(
         for n_sel in (5, 6, 7):
             add_coverage("Quinté+", 5, TRJ["Quinté+ Désordre"], n_sel)
 
-    # ── 2sur4 (≥ 2 des 4 favoris dans le top-4) ──
-    if nb_partants >= 8 and len(by_p1) >= 4:
+    # ── 2sur4 (≥ 2 des 4 favoris dans le top-4) ── (si offert par le PMU)
+    if est_2sur4 and len(by_p1) >= 4:
         sel = list(by_p1[:4])
         p_model = sim.p_2sur4(sel)
         p_market = max(sim_m.p_2sur4(sel), 1e-4)

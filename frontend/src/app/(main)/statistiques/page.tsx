@@ -70,14 +70,14 @@ function KpiCard({
           </div>
           {positive !== undefined && (
             <span className={cn("flex items-center gap-1 text-xs font-medium",
-              positive ? "text-emerald-400" : "text-red-400"
+              positive ? "text-emerald-600" : "text-red-600"
             )}>
               {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
             </span>
           )}
         </div>
         <div className={cn("text-2xl font-bold tabular-nums",
-          positive === true ? "text-emerald-400" : positive === false ? "text-red-400" : "text-foreground"
+          positive === true ? "text-emerald-600" : positive === false ? "text-red-600" : "text-foreground"
         )}>
           {value}
         </div>
@@ -111,7 +111,7 @@ function BetTable({ bets, title, color }: { bets: BetRow[]; title: string; color
   return (
     <div>
       <h3 className={cn("text-sm font-semibold mb-3",
-        color === "green" ? "text-emerald-400" : "text-red-400"
+        color === "green" ? "text-emerald-600" : "text-red-600"
       )}>{title}</h3>
       <div className="space-y-2">
         {bets.map((b) => (
@@ -131,7 +131,7 @@ function BetTable({ bets, title, color }: { bets: BetRow[]; title: string; color
               </div>
             </div>
             <div className={cn("font-bold tabular-nums shrink-0 ml-4",
-              (b.gain_perte ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
+              (b.gain_perte ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"
             )}>
               {(b.gain_perte ?? 0) >= 0 ? "+" : ""}{(b.gain_perte ?? 0).toFixed(2)}€
             </div>
@@ -162,16 +162,31 @@ function PnlTooltip({ active, payload, label }: {
 export default function StatistiquesPage() {
   useRequireAuth();
 
-  const { data, isLoading } = useSWR<PerfData>(
+  const { data, isLoading, error } = useSWR<PerfData>(
     "perf-personnelle",
     () => statsApi.perfPersonnelle().then((r) => r.data),
-    { refreshInterval: 120_000 }
+    { refreshInterval: 120_000, shouldRetryOnError: false }
   );
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-muted-foreground text-sm animate-pulse">Chargement des statistiques…</div>
+      </div>
+    );
+  }
+
+  // État d'erreur/vide explicite : sans ça, une erreur API (ex. 404 utilisateur sans
+  // paris) laissait `data` undefined → spinner infini.
+  if (error || !data) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="text-center space-y-2">
+          <p className="text-foreground font-semibold">Statistiques indisponibles</p>
+          <p className="text-muted-foreground text-sm">
+            Aucune donnée à afficher pour le moment. Place des paris pour suivre tes performances.
+          </p>
+        </div>
       </div>
     );
   }
@@ -187,7 +202,7 @@ export default function StatistiquesPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <BarChart3 className="w-6 h-6 text-amber-400" />
+              <BarChart3 className="w-6 h-6 text-amber-600" />
               Mes Statistiques
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -198,8 +213,8 @@ export default function StatistiquesPage() {
             <Badge className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 text-sm",
               data.streak.type === "win"
-                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                : "bg-red-500/20 text-red-400 border-red-500/30"
+                ? "bg-emerald-50 text-emerald-700 border-emerald-500/30"
+                : "bg-red-50 text-red-700 border-red-500/30"
             )}>
               <Flame className="w-4 h-4" />
               Série de {data.streak.count} {data.streak.type === "win" ? "victoires" : "défaites"}
@@ -214,14 +229,14 @@ export default function StatistiquesPage() {
             value={`${data.mise_totale.toFixed(0)}€`}
             sub={`${data.nb_paris} paris`}
             icon={Wallet}
-            iconBg="bg-amber-500/10"
+            iconBg="bg-amber-50"
           />
           <KpiCard
             label="Rendement global"
             value={`${roiPositive ? "+" : ""}${data.roi}%`}
             positive={roiPositive}
             icon={BarChart3}
-            iconBg="bg-blue-500/10"
+            iconBg="bg-blue-50"
           />
           <KpiCard
             label="Taux de réussite"
@@ -229,14 +244,14 @@ export default function StatistiquesPage() {
             sub={`Cote moy. ${data.cote_moyenne}`}
             positive={data.win_rate >= 20}
             icon={Target}
-            iconBg="bg-purple-500/10"
+            iconBg="bg-purple-50"
           />
           <KpiCard
             label="Gain net"
             value={`${gainPositive ? "+" : ""}${data.gain_net.toFixed(2)}€`}
             positive={gainPositive}
             icon={Trophy}
-            iconBg="bg-emerald-500/10"
+            iconBg="bg-emerald-50"
           />
         </div>
 
@@ -247,7 +262,7 @@ export default function StatistiquesPage() {
           <Card className="lg:col-span-2 border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-amber-400" />
+                <TrendingUp className="w-4 h-4 text-amber-600" />
                 Gains et pertes par mois (12 derniers mois)
               </CardTitle>
             </CardHeader>
@@ -286,7 +301,7 @@ export default function StatistiquesPage() {
           <Card className="border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-blue-400" />
+                <BarChart3 className="w-4 h-4 text-blue-600" />
                 Rendement par discipline
               </CardTitle>
             </CardHeader>
@@ -305,7 +320,7 @@ export default function StatistiquesPage() {
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-foreground font-medium">{d.discipline}</span>
                           <span className={cn("text-xs font-bold tabular-nums",
-                            isPos ? "text-emerald-400" : "text-red-400"
+                            isPos ? "text-emerald-600" : "text-red-600"
                           )}>
                             {isPos ? "+" : ""}{d.roi}%
                           </span>
@@ -313,7 +328,7 @@ export default function StatistiquesPage() {
                         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                           <div
                             className={cn("h-full rounded-full transition-all",
-                              isPos ? "bg-emerald-400" : "bg-red-400"
+                              isPos ? "bg-emerald-500" : "bg-red-500"
                             )}
                             style={{ width: `${barW}%` }}
                           />
@@ -363,7 +378,7 @@ export default function StatistiquesPage() {
         <Card className="border-border/60">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Brain className="w-4 h-4 text-blue-400" />
+              <Brain className="w-4 h-4 text-blue-600" />
               Suivi des recommandations IA
             </CardTitle>
           </CardHeader>
@@ -382,13 +397,13 @@ export default function StatistiquesPage() {
               </div>
 
               {/* Paris IA */}
-              <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <div className="p-4 rounded-xl bg-blue-50 border border-blue-500/20">
                 <div className="flex items-center gap-1.5 mb-2">
-                  <Zap className="w-4 h-4 text-blue-400" />
+                  <Zap className="w-4 h-4 text-blue-600" />
                   <span className="text-sm font-semibold text-foreground">Avec IA</span>
                 </div>
                 <div className={cn("text-xl font-bold tabular-nums",
-                  data.suivi_ia.roi_ia >= 0 ? "text-emerald-400" : "text-red-400"
+                  data.suivi_ia.roi_ia >= 0 ? "text-emerald-600" : "text-red-600"
                 )}>
                   Rendement {data.suivi_ia.roi_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_ia}%
                 </div>
@@ -404,7 +419,7 @@ export default function StatistiquesPage() {
                   <span className="text-sm font-semibold text-foreground">Sans IA</span>
                 </div>
                 <div className={cn("text-xl font-bold tabular-nums",
-                  data.suivi_ia.roi_non_ia >= 0 ? "text-emerald-400" : "text-red-400"
+                  data.suivi_ia.roi_non_ia >= 0 ? "text-emerald-600" : "text-red-600"
                 )}>
                   Rendement {data.suivi_ia.roi_non_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_non_ia}%
                 </div>

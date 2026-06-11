@@ -310,6 +310,7 @@ async def seed(reset: bool = False):
                     est_quinte=est_quinte,
                     est_quarte=rng.random() < 0.1,
                     est_tierce=rng.random() < 0.15,
+                    est_2sur4=nb_partants >= 8 and rng.random() < 0.5,
                 )
                 session.add(course)
 

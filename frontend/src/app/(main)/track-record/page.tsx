@@ -166,27 +166,39 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
 
 // ─── Main page ────────────────────────────────────────────────
 export default function TrackRecordPage() {
-  const { data, isLoading } = useSWR<TrackRecord>(
+  const { data, isLoading, error } = useSWR<TrackRecord>(
     "track-record",
     () => statsApi.trackRecord().then((r) => r.data),
-    { refreshInterval: 60_000, revalidateOnFocus: true }  // recalcul ~ à chaque fin de course
+    { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false }  // recalcul ~ à chaque fin de course
   );
 
   // Paris RÉELLEMENT gagnés par l'algorithme, par profil (pronos émis réglés)
-  const { data: gagnantsData } = useSWR<{
+  const { data: gagnantsData, error: gagnantsError } = useSWR<{
     gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
     profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
     updated_at?: string;
   }>(
     "palmares-gagnants",
     () => statsApi.palmaresGagnants().then((r) => r.data),
-    { refreshInterval: 60_000, revalidateOnFocus: true },
+    { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-muted-foreground text-sm animate-pulse">Chargement du palmarès…</div>
+      </div>
+    );
+  }
+
+  // Erreur API → message clair au lieu d'un spinner infini.
+  if (error || !data) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="text-center space-y-2">
+          <p className="text-foreground font-semibold">Palmarès indisponible</p>
+          <p className="text-muted-foreground text-sm">Réessaie dans un instant.</p>
+        </div>
       </div>
     );
   }
@@ -197,12 +209,12 @@ export default function TrackRecordPage() {
     <div className="min-h-screen bg-background">
 
       {/* ── Hero ──────────────────────────────────────────── */}
-      <div className="relative overflow-hidden border-b border-border/40 bg-gradient-to-br from-background via-background to-amber-950/10">
+      <div className="relative overflow-hidden border-b border-border/40 bg-gradient-to-br from-background via-background to-amber-50">
         <div className="max-w-7xl mx-auto px-4 py-14 sm:py-20">
           <div className="text-center max-w-2xl mx-auto">
             <Badge className="mb-4 inline-flex items-center gap-1.5 bg-emerald-500/15 text-emerald-600 border-emerald-500/30 px-3 py-1">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
               </span>
               Données réelles — mises à jour à chaque fin de course
@@ -217,7 +229,7 @@ export default function TrackRecordPage() {
             {/* Hero stats */}
             <div className="flex flex-wrap justify-center gap-6 sm:gap-10">
               <div className="text-center">
-                <div className="text-4xl font-black text-amber-400 tabular-nums">
+                <div className="text-4xl font-black text-amber-600 tabular-nums">
                   {g.accuracy_top3}%
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">Fiabilité Top-3</div>
@@ -229,7 +241,7 @@ export default function TrackRecordPage() {
                 <div className="text-xs text-muted-foreground mt-1">Courses analysées</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-black text-emerald-400 tabular-nums">
+                <div className="text-4xl font-black text-emerald-600 tabular-nums">
                   {g.favori_place_rate}%
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">Favori placé (top-3)</div>
@@ -308,7 +320,9 @@ export default function TrackRecordPage() {
             </p>
           </CardHeader>
           <CardContent>
-            {!gagnantsData ? (
+            {gagnantsError ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">Indisponible pour le moment.</div>
+            ) : !gagnantsData ? (
               <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
             ) : (
               <>
@@ -420,7 +434,7 @@ export default function TrackRecordPage() {
           <Card className="border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Trophy className="w-4 h-4 text-purple-400" />
+                <Trophy className="w-4 h-4 text-purple-600" />
                 Précision par discipline
               </CardTitle>
             </CardHeader>
@@ -439,15 +453,15 @@ export default function TrackRecordPage() {
                           <span className="text-xs text-muted-foreground ml-2">{d.nb_courses} courses</span>
                         </div>
                         <span className={cn("text-sm font-bold tabular-nums",
-                          d.accuracy_top3 >= 50 ? "text-emerald-400" :
-                          d.accuracy_top3 >= 35 ? "text-amber-400" : "text-muted-foreground"
+                          d.accuracy_top3 >= 50 ? "text-emerald-600" :
+                          d.accuracy_top3 >= 35 ? "text-amber-600" : "text-muted-foreground"
                         )}>
                           {d.accuracy_top3}%
                         </span>
                       </div>
                       <div className="h-2 rounded-full bg-muted overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-amber-400 transition-all"
+                          className="h-full rounded-full bg-amber-500 transition-all"
                           style={{ width: `${Math.min(d.accuracy_top3, 100)}%` }}
                         />
                       </div>

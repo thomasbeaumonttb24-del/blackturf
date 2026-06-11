@@ -293,10 +293,31 @@ async def update_me(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    allowed = {"nom", "prenom", "profil_risque", "bankroll_initiale"}
+    # Validation par champ : sans elle, profil_risque/bankroll_initiale étaient posés
+    # bruts (ex. "abc", négatif, profil inconnu) → calculs de plan de mise corrompus.
+    VALID_PROFILS = {"conservateur", "equilibre", "agressif"}
+    updates: dict = {}
     for k, v in body.items():
-        if k in allowed:
-            setattr(user, k, v)
+        if k not in {"nom", "prenom", "profil_risque", "bankroll_initiale"}:
+            continue
+        if k == "profil_risque":
+            if v not in VALID_PROFILS:
+                raise HTTPException(status_code=422, detail="profil_risque invalide")
+            updates[k] = v
+        elif k == "bankroll_initiale":
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="bankroll_initiale invalide")
+            if not (0 < fv <= 1_000_000):
+                raise HTTPException(status_code=422, detail="bankroll_initiale hors plage")
+            updates[k] = round(fv, 2)
+        else:  # nom / prenom
+            if v is None:
+                continue
+            updates[k] = str(v).strip()[:100]
+    for k, v in updates.items():
+        setattr(user, k, v)
     await db.commit()
     return {"ok": True}
 
@@ -438,6 +459,21 @@ async def save_push_subscription(
     db: AsyncSession = Depends(get_db),
 ):
     """Enregistre la souscription Web Push."""
-    user.push_subscription = body
+    # Validation + assainissement : ne JAMAIS stocker un JSON arbitraire tel quel
+    # (re-servi ensuite → risque de stored XSS / pollution). On ne garde que la forme
+    # attendue d'une PushSubscription.
+    endpoint = body.get("endpoint")
+    keys = body.get("keys")
+    if not isinstance(endpoint, str) or not endpoint.startswith("https://") or not isinstance(keys, dict):
+        raise HTTPException(status_code=422, detail="Souscription push invalide")
+    exp = body.get("expirationTime")
+    user.push_subscription = {
+        "endpoint": endpoint[:1000],
+        "keys": {
+            "p256dh": str(keys.get("p256dh", ""))[:300],
+            "auth": str(keys.get("auth", ""))[:300],
+        },
+        "expirationTime": exp if isinstance(exp, (int, float)) else None,
+    }
     await db.commit()
     return {"ok": True}

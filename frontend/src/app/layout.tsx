@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { Toaster } from "sonner";
+import { AuthProvider } from "@/hooks/useAuth";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -68,7 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
       </head>
       <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased min-h-screen bg-background`}>
-        {children}
+        <AuthProvider>{children}</AuthProvider>
         <Toaster
           theme="light"
           position="top-right"

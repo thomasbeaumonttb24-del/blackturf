@@ -78,8 +78,8 @@ function pct(v: number) {
 }
 
 function roiColor(roi: number) {
-  if (roi > 0.05) return "text-emerald-400";
-  if (roi < -0.05) return "text-red-400";
+  if (roi > 0.05) return "text-emerald-600";
+  if (roi < -0.05) return "text-red-600";
   return "text-muted-foreground";
 }
 
@@ -129,13 +129,13 @@ function positionBadge(pos: number | null) {
   if (!pos) return <span className="text-muted-foreground text-xs">—</span>;
   if (pos === 1)
     return (
-      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 text-xs font-bold border border-amber-500/30">
+      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-500/30">
         1
       </span>
     );
   if (pos <= 3)
     return (
-      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold border border-emerald-500/30">
+      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-500/30">
         {pos}
       </span>
     );
@@ -318,7 +318,7 @@ export default function JockeyPage() {
         <Card className="bg-card/60 border-border/40">
           <CardHeader className="pb-2">
             <div className="flex items-center gap-2">
-              <Users className="h-4 w-4 text-blue-400" />
+              <Users className="h-4 w-4 text-blue-600" />
               <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
                 Top associations entraîneurs
               </CardTitle>
@@ -343,15 +343,11 @@ export default function JockeyPage() {
                       className="border-b border-border/20 hover:bg-muted/20 transition-colors"
                     >
                       <td className="px-4 py-2 font-semibold">
-                        <Link
-                          href={`/entraineurs/${a.entraineur_id}`}
-                          className="hover:text-brand-gold transition-colors"
-                        >
-                          {a.entraineur}
-                        </Link>
+                        {/* Pas de page /entraineurs/[id] → texte simple (évite un lien 404). */}
+                        {a.entraineur}
                       </td>
                       <td className="px-4 py-2 text-right font-mono tabular-nums">{a.nb_courses}</td>
-                      <td className="px-4 py-2 text-right font-mono tabular-nums text-amber-400">
+                      <td className="px-4 py-2 text-right font-mono tabular-nums text-amber-600">
                         {a.nb_victoires}
                       </td>
                       <td className="px-4 py-2 text-right">

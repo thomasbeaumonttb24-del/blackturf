@@ -32,6 +32,9 @@ async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) ->
         JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pa.course_id
         WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
+          -- ANTI-LEAKAGE : features figées avant départ uniquement (le backfill/recompute
+          -- post-course a computed_at > date_heure → exclu). Test edge honnête.
+          AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
         ORDER BY c.date_heure
     """))).fetchall()
     data = [((f if isinstance(f, dict) else json.loads(f)), float(cote), int(win)) for f, cote, win in rows]

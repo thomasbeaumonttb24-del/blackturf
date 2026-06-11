@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, text
 
 from api.routes.auth import get_current_user, require_pro
-from api.middleware.rate_limit import rate_limit_public
+from api.middleware.rate_limit import rate_limit_public, rate_limit_predictions
 from db.database import get_db
 from db.redis_client import get_redis
 from db.models import (
@@ -150,6 +150,7 @@ class CourseDetailOut(BaseModel):
     est_quinte: bool
     est_quarte: bool
     est_tierce: bool
+    est_2sur4: bool = False
     statut: str
     # Nouvelles données course
     penetrometre_coef: Optional[float]        # coefficient 0-9 France Galop
@@ -187,6 +188,7 @@ class CourseSummary(BaseModel):
     est_quinte: bool
     est_quarte: bool
     est_tierce: bool
+    est_2sur4: bool = False
     # Données synthèse pour la liste
     penetrometre_coef: Optional[float] = None
     penetrometre_desc: Optional[str] = None
@@ -514,6 +516,7 @@ async def get_programme(
             est_quinte=course.est_quinte,
             est_quarte=course.est_quarte,
             est_tierce=course.est_tierce,
+            est_2sur4=course.est_2sur4,
             penetrometre_coef=course.penetrometre_coef,
             penetrometre_desc=course.penetrometre_desc,
             pool_total_eur=int(course.pool_total_centimes / 100) if course.pool_total_centimes else None,
@@ -606,6 +609,7 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
         est_quinte=course.est_quinte,
         est_quarte=course.est_quarte,
         est_tierce=course.est_tierce,
+        est_2sur4=course.est_2sur4,
         statut=course.statut,
         penetrometre_coef=course.penetrometre_coef,
         penetrometre_desc=course.penetrometre_desc,
@@ -662,6 +666,38 @@ async def get_resultats(course_id: str, db: AsyncSession = Depends(get_db)):
         "incidents": res.incidents,
         "commentaire": res.commentaire,              # narratif post-course PMU/GENY
         "duree_course": res.duree_course,            # ms
+    }
+
+
+@router.get("/courses/{course_id}/paris-disponibles")
+async def get_paris_disponibles(course_id: str, db: AsyncSession = Depends(get_db)):
+    """Types de paris RÉELLEMENT proposés par le PMU pour cette course.
+
+    Déduit des désignations officielles captées au scrape (`paris[].codePari` du
+    programme PMU) : est_tierce / est_quarte / est_quinte / est_2sur4. Permet au
+    frontend de n'afficher / ne laisser sélectionner que des paris JOUABLES — on ne
+    propose plus un 2sur4 sur une course qui n'en offre pas (ex. R6C7). Couplé /
+    Simple / Trio sont offerts sur toute course à assez de partants.
+    """
+    course = await db.get(Course, course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+
+    from ml.recommendations import disponibles_selon_course
+    paris = disponibles_selon_course(
+        course.nb_partants or 0,
+        bool(course.est_quinte), bool(course.est_quarte),
+        bool(course.est_tierce), bool(course.est_2sur4),
+    )
+    return {
+        "course_id": course_id,
+        "paris_disponibles": paris,
+        "designations": {
+            "est_tierce": bool(course.est_tierce),
+            "est_quarte": bool(course.est_quarte),
+            "est_quinte": bool(course.est_quinte),
+            "est_2sur4": bool(course.est_2sur4),
+        },
     }
 
 
@@ -1663,6 +1699,7 @@ async def get_portfolio(
     profil: str = Query(default="equilibre", description="conservateur | equilibre | agressif"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rl: None = Depends(rate_limit_predictions),  # Monte Carlo + coverage 5000 = lourd
 ):
     """
     Retourne le portfolio de paris multi-scénarios (ALPHA/BETA/GAMMA/DELTA/OMEGA)
@@ -1739,6 +1776,7 @@ async def get_portfolio(
         "est_quinte": course.est_quinte,
         "est_quarte": course.est_quarte,
         "est_tierce": course.est_tierce,
+        "est_2sur4": course.est_2sur4,
     }
 
     # Récupérer les poids adaptatifs courants
@@ -1913,29 +1951,10 @@ async def get_jockey(jockey_id: str, db: AsyncSession = Depends(get_db)):
         for r in asso_res.fetchall()
     ]
 
-    # Last 20 participations
+    # 20 dernières participations + position d'arrivée réelle (LEFT JOIN historique).
+    # (Avant : une 1re requête morte avec une jointure cartésienne sur date_heure,
+    # exécutée pour rien à chaque appel, et position toujours None.)
     participations_res = await db.execute(text("""
-        SELECT
-            c.date_heure,
-            ch.nom AS nom_cheval,
-            ch.cheval_id,
-            co.hippodrome_nom,
-            co.discipline,
-            p.numero,
-            h.position_arrivee,
-            p.cote_pmu
-        FROM participations p
-        JOIN courses co ON co.course_id = p.course_id
-        JOIN chevaux ch ON ch.cheval_id = p.cheval_id
-        LEFT JOIN historique_courses h ON h.course_id = co.course_id AND h.cheval_id = ch.cheval_id
-        JOIN (SELECT date_heure FROM courses) c ON c.date_heure = co.date_heure
-        WHERE p.jockey_id = :jid
-        ORDER BY co.date_heure DESC
-        LIMIT 20
-    """), {"jid": jockey_id})
-
-    # Simpler query without ambiguous joins
-    participations_res2 = await db.execute(text("""
         SELECT
             co.date_heure,
             ch.nom AS nom_cheval,
@@ -1943,17 +1962,19 @@ async def get_jockey(jockey_id: str, db: AsyncSession = Depends(get_db)):
             co.hippodrome_nom,
             co.discipline,
             p.numero,
-            p.cote_pmu
+            p.cote_pmu,
+            h.position_arrivee
         FROM participations p
         JOIN courses co ON co.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
+        LEFT JOIN historique_courses h
+            ON h.course_id = co.course_id AND h.cheval_id = ch.cheval_id
         WHERE p.jockey_id = :jid
         ORDER BY co.date_heure DESC
         LIMIT 20
     """), {"jid": jockey_id})
-    part_rows = participations_res2.fetchall()
+    part_rows = participations_res.fetchall()
 
-    # Get positions from historique_courses
     derniere_participations = []
     for r in part_rows:
         derniere_participations.append({
@@ -1964,7 +1985,7 @@ async def get_jockey(jockey_id: str, db: AsyncSession = Depends(get_db)):
             "discipline": r[4],
             "numero": r[5],
             "cote": r[6],
-            "position": None,  # enrichi depuis historique si disponible
+            "position": r[7],  # position d'arrivée réelle (None si non disponible)
         })
 
     return {

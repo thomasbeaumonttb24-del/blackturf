@@ -116,10 +116,10 @@ function eloTier(elo: number) {
 }
 
 const RUNNING_STYLE_CONFIG: Record<string, { label: string; color: string }> = {
-  mene:      { label: "Mène",       color: "bg-red-500/20 text-red-400 border-red-500/30" },
-  suit_tete: { label: "Suit tête",  color: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
-  placier:   { label: "Placier",    color: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
-  ferme:     { label: "Ferme",      color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
+  mene:      { label: "Mène",       color: "bg-red-50 text-red-700 border-red-500/30" },
+  suit_tete: { label: "Suit tête",  color: "bg-orange-50 text-orange-700 border-orange-500/30" },
+  placier:   { label: "Placier",    color: "bg-blue-50 text-blue-700 border-blue-500/30" },
+  ferme:     { label: "Ferme",      color: "bg-emerald-50 text-emerald-700 border-emerald-500/30" },
 };
 
 function formatGains(val: number | null) {
@@ -131,9 +131,9 @@ function positionBadge(pos: number | null, incident: string | null) {
   if (incident) return <span className="text-xs font-bold text-amber-500">{incident.slice(0, 4)}</span>;
   if (!pos) return <span className="text-muted-foreground text-xs">—</span>;
   if (pos === 1)
-    return <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 text-xs font-bold border border-amber-500/30">1</span>;
+    return <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-500/30">1</span>;
   if (pos <= 3)
-    return <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold border border-emerald-500/30">{pos}</span>;
+    return <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-500/30">{pos}</span>;
   return <span className="text-muted-foreground text-xs font-mono">{pos}</span>;
 }
 
@@ -247,15 +247,15 @@ export default function ChevalPage() {
               <div className="flex flex-col items-center gap-0.5">
                 <span className="text-[10px] text-muted-foreground">30j</span>
                 {lastDelta > 5 ? (
-                  <TrendingUp className="h-5 w-5 text-emerald-400" />
+                  <TrendingUp className="h-5 w-5 text-emerald-600" />
                 ) : lastDelta < -5 ? (
-                  <TrendingDown className="h-5 w-5 text-red-400" />
+                  <TrendingDown className="h-5 w-5 text-red-600" />
                 ) : (
                   <Minus className="h-5 w-5 text-muted-foreground" />
                 )}
                 <span className={cn(
                   "text-[10px] font-mono font-bold",
-                  lastDelta > 5 ? "text-emerald-400" : lastDelta < -5 ? "text-red-400" : "text-muted-foreground"
+                  lastDelta > 5 ? "text-emerald-600" : lastDelta < -5 ? "text-red-600" : "text-muted-foreground"
                 )}>
                   {lastDelta > 0 ? "+" : ""}{Math.round(lastDelta)}
                 </span>
@@ -632,7 +632,7 @@ export default function ChevalPage() {
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
                         {h.cote ? `${h.cote.toFixed(1)}` : "—"}
                       </td>
-                      <td className="px-3 py-2 font-mono whitespace-nowrap text-emerald-400 hidden sm:table-cell">
+                      <td className="px-3 py-2 font-mono whitespace-nowrap text-emerald-600 hidden sm:table-cell">
                         {h.gains ? formatGains(h.gains) : "—"}
                       </td>
                       <td className="px-3 py-2 max-w-[100px] truncate text-muted-foreground hidden lg:table-cell">

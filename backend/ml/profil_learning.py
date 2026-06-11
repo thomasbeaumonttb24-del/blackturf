@@ -99,7 +99,7 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         return 0
 
     course = (await session.execute(text("""
-        SELECT statut, nb_partants, est_quinte, est_quarte, est_tierce
+        SELECT statut, nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4
         FROM courses WHERE course_id = :cid
     """), {"cid": course_id})).first()
     if not course or course[0] not in ("a_venir", "en_cours"):
@@ -118,6 +118,7 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
     course_info = {
         "nb_partants": course[1], "est_quinte": bool(course[2]),
         "est_quarte": bool(course[3]), "est_tierce": bool(course[4]),
+        "est_2sur4": bool(course[5]),
     }
 
     # Contexte d'apprentissage réel (mêmes sources que /mise-plan)

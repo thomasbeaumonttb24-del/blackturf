@@ -25,6 +25,7 @@ Persistance :
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import pickle
 import structlog
@@ -79,25 +80,39 @@ _DISCIPLINE_DIST_NORMAL: dict[str, tuple[int, int]] = {
 }
 
 
+# Lookup INSENSIBLE À LA CASSE : race_learning_log stocke discipline/terrain en
+# minuscules (post_race fait .lower()) alors que les maps sont capitalisées. Sans
+# normalisation, _encode_* renvoyait -1 pour TOUTES les lignes → discipline/terrain
+# = features constantes → le méta-modèle n'apprenait rien de ces dimensions.
+_DISCIPLINE_MAP_NORM: dict[str, int] = {k.lower(): v for k, v in _DISCIPLINE_MAP.items()}
+_TERRAIN_MAP_NORM: dict[str, int] = {k.lower(): v for k, v in _TERRAIN_MAP.items()}
+
+
 def _encode_discipline(discipline: Optional[str]) -> int:
     """Encode la discipline en entier. Retourne -1 si inconnue."""
     if not discipline:
         return -1
-    return _DISCIPLINE_MAP.get(discipline.strip(), -1)
+    return _DISCIPLINE_MAP_NORM.get(discipline.strip().lower(), -1)
 
 
 def _encode_terrain(terrain: Optional[str]) -> int:
     """Encode le terrain en entier. Retourne -1 si inconnu."""
     if not terrain:
         return -1
-    return _TERRAIN_MAP.get(terrain.strip(), -1)
+    return _TERRAIN_MAP_NORM.get(terrain.strip().lower(), -1)
 
 
 def _encode_hippodrome(hippodrome: Optional[str]) -> int:
-    """Encode le nom d'hippodrome en hash entier stable [0, 999]."""
+    """Encode le nom d'hippodrome en hash entier stable [0, 999].
+
+    hashlib (pas hash() built-in) : hash() est randomisé par PYTHONHASHSEED →
+    valeur différente entre le process d'entraînement et celui d'inférence pour
+    le même hippodrome. md5 est déterministe entre process.
+    """
     if not hippodrome:
         return -1
-    return hash(hippodrome.strip().lower()) % 1000
+    digest = hashlib.md5(hippodrome.strip().lower().encode("utf-8")).hexdigest()
+    return int(digest, 16) % 1000
 
 
 def _build_feature_vector(base_proba: float, context: dict) -> list[float]:
@@ -282,6 +297,17 @@ class MetaLearner:
                 WHERE rll.analyzed_at >= :cutoff
                   AND rll.gagnant_rang_predit IS NOT NULL
                   AND rll.gagnant_proba_ia IS NOT NULL
+                  -- ANTI-LEAKAGE : ne garder que les courses dont les features ont été
+                  -- FIGÉES AVANT le départ (prédiction live). Une course seulement
+                  -- backfillée/recalculée (features_ml.computed_at > date_heure) est
+                  -- exclue : sa base_proba est reconstruite a posteriori.
+                  AND c.date_heure IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM features_ml fm
+                      JOIN participations pp ON pp.participation_id = fm.participation_id
+                      WHERE pp.course_id = rll.course_id
+                        AND fm.computed_at < c.date_heure
+                  )
                 GROUP BY
                     rll.course_id,
                     rll.gagnant_rang_predit,

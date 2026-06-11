@@ -243,6 +243,7 @@ class Course(Base):
     est_quinte: Mapped[bool] = mapped_column(Boolean, default=False)
     est_quarte: Mapped[bool] = mapped_column(Boolean, default=False)
     est_tierce: Mapped[bool] = mapped_column(Boolean, default=False)
+    est_2sur4: Mapped[bool] = mapped_column(Boolean, default=False)   # 2sur4 proposé par le PMU
     est_pick5: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Statut

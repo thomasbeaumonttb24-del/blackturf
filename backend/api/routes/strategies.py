@@ -245,7 +245,9 @@ async def backtest_strategy(
         if ev < ev_min:
             continue
 
-        if elo_min and cheval.elo_score_global < elo_min:
+        # `or 0` : un cheval sans ELO (None) faisait planter la comparaison None < float
+        # (TypeError) → tout le backtest de la stratégie tombait.
+        if elo_min and (cheval.elo_score_global or 0) < elo_min:
             continue
 
         # Ce cheval satisfait la stratégie → on parie

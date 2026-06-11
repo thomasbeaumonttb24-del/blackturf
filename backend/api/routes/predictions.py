@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func
 
-from api.model_metrics import real_model_metrics
+from api.model_metrics import real_model_metrics, plausible_brier
+from api.middleware.rate_limit import rate_limit_predictions
 from api.routes.auth import get_current_user, require_pro
 from db.database import get_db
 from db.models import (
@@ -168,6 +169,7 @@ async def trigger_prediction(
     bankroll: float = Query(default=100.0, ge=0),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_pro),
+    _rl: None = Depends(rate_limit_predictions),  # anti-abus de calcul (pipeline ML)
 ):
     """Déclenche le calcul de prédiction pour une course (async)."""
     course_res = await db.execute(select(Course).where(Course.course_id == course_id))
@@ -452,6 +454,7 @@ async def get_course_analysis(
     course_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _rl: None = Depends(rate_limit_predictions),  # Claude + Monte Carlo = coûteux
 ):
     """
     Analyse narrative complète d'une course :
@@ -540,6 +543,7 @@ async def get_course_analysis(
         "est_quinte": course.est_quinte,
         "est_quarte": course.est_quarte,
         "est_tierce": course.est_tierce,
+        "est_2sur4": course.est_2sur4,
     }
 
     result = await generate_full_course_analysis(
@@ -682,8 +686,10 @@ async def get_model_version(db: AsyncSession = Depends(get_db)):
         pass
     return {
         "version_num": mv.version_num,
-        "auc_roc": round(mv.auc_roc, 4),
-        "brier_score": round(mv.brier_score, 4),
+        # Endpoint PUBLIC : ne jamais exposer une AUC/Brier aberrante (ex. AUC 0.06
+        # d'un modèle seed) → masquées si hors plage plausible (None → front "—").
+        "auc_roc": m_real["auc_roc"],
+        "brier_score": plausible_brier(mv.brier_score),
         "precision_top3": m_real["precision_top3"],
         "roi_simule": m_real["roi_simule"],
         "nb_courses_evaluees": m_real["nb_courses_evaluees"],

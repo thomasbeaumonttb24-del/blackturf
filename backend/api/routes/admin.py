@@ -3,6 +3,7 @@ Admin routes — BlackTurf back-office.
 Accès admin uniquement.
 """
 import json
+import secrets
 import structlog
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -1282,7 +1283,11 @@ async def ingest_betfair(payload: dict, request: Request, db: AsyncSession = Dep
 
     settings = get_settings()
     token = request.headers.get("X-Ingest-Token", "")
-    if not settings.betfair_ingest_token or token != settings.betfair_ingest_token:
+    # compare_digest = comparaison à temps constant (anti timing-attack ; `!=` fuit la
+    # longueur du préfixe commun). Refuse aussi si le token n'est pas configuré.
+    if not settings.betfair_ingest_token or not secrets.compare_digest(
+        token, settings.betfair_ingest_token
+    ):
         raise HTTPException(status_code=401, detail="Token d'ingestion invalide")
 
     markets = payload.get("markets") or []

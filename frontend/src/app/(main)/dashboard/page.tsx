@@ -24,7 +24,7 @@ const NIVEAU_LABELS: Record<number, string> = {
   1: "Intéressant", 2: "Bon", 3: "Fort", 4: "Exceptionnel",
 };
 const NIVEAU_COLORS: Record<number, string> = {
-  1: "text-zinc-400", 2: "text-blue-400", 3: "text-amber-400", 4: "text-emerald-400",
+  1: "text-zinc-500", 2: "text-blue-600", 3: "text-amber-600", 4: "text-emerald-600",
 };
 
 function StarRating({ n }: { n: number }) {
@@ -33,7 +33,7 @@ function StarRating({ n }: { n: number }) {
       {Array.from({ length: 4 }).map((_, i) => (
         <Star
           key={i}
-          className={`w-3 h-3 ${i < n ? "fill-amber-400 text-amber-400" : "text-zinc-600"}`}
+          className={`w-3 h-3 ${i < n ? "fill-amber-500 text-amber-500" : "text-zinc-600"}`}
         />
       ))}
     </span>
@@ -42,10 +42,10 @@ function StarRating({ n }: { n: number }) {
 
 function DriftBadge({ severity }: { severity: string }) {
   if (severity === "critical")
-    return <Badge className="bg-red-500/20 text-red-400 border-red-500/30 gap-1"><AlertTriangle className="w-3 h-3" />Dérive critique</Badge>;
+    return <Badge className="bg-red-50 text-red-700 border-red-500/30 gap-1"><AlertTriangle className="w-3 h-3" />Dérive critique</Badge>;
   if (severity === "warning")
-    return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 gap-1"><AlertTriangle className="w-3 h-3" />Avertissement</Badge>;
-  return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 gap-1"><CheckCircle className="w-3 h-3" />Stable</Badge>;
+    return <Badge className="bg-amber-50 text-amber-700 border-amber-500/30 gap-1"><AlertTriangle className="w-3 h-3" />Avertissement</Badge>;
+  return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-500/30 gap-1"><CheckCircle className="w-3 h-3" />Stable</Badge>;
 }
 
 interface Reunion {
@@ -170,11 +170,11 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-foreground">N°{pariDuJour.numero} {pariDuJour.nom_cheval}</span>
                       <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-500 font-semibold">
-                        EV +{(pariDuJour.ev * 100).toFixed(0)}%
+                        EV +{((pariDuJour.ev ?? 0) * 100).toFixed(0)}%
                       </span>
                       {pariDuJour.edge_valide && (
                         <span
-                          className="text-xs rounded-full px-2 py-0.5 bg-amber-500/20 text-amber-600 font-semibold ring-1 ring-amber-400/40"
+                          className="text-xs rounded-full px-2 py-0.5 bg-amber-50 text-amber-700 font-semibold ring-1 ring-amber-200"
                           title="Signaux historiquement gagnants confirmés — edge validé hors-échantillon (taux de gain 3-4× le marché sur le passé). Pas une garantie."
                         >
                           ✓ Edge validé
@@ -186,7 +186,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex items-center gap-4 shrink-0">
                     <div className="text-right">
-                      <div className="text-lg font-bold tabular-nums">{(pariDuJour.proba_top1 * 100).toFixed(0)}%</div>
+                      <div className="text-lg font-bold tabular-nums">{((pariDuJour.proba_top1 ?? 0) * 100).toFixed(0)}%</div>
                       <div className="text-[10px] text-muted-foreground">gagnant{pariDuJour.cote_pmu ? ` · cote ${pariDuJour.cote_pmu}` : ""}</div>
                     </div>
                     <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-brand-gold transition-colors" />
@@ -220,9 +220,9 @@ export default function DashboardPage() {
                       <span className="text-[10px] text-muted-foreground">{p.code}</span>
                     </div>
                     <div className="mt-1.5 text-sm font-semibold">{p.type_pari}</div>
-                    <div className="text-xs text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</div>
+                    <div className="text-xs text-muted-foreground">{(p.chevaux ?? []).map((c) => `N°${c.numero}`).join(" + ")}</div>
                     <div className="mt-1.5 flex items-baseline gap-2">
-                      <span className="text-lg font-bold tabular-nums">{Math.round(p.probabilite * 100)}%</span>
+                      <span className="text-lg font-bold tabular-nums">{Math.round((p.probabilite ?? 0) * 100)}%</span>
                       <span className="text-[10px] text-muted-foreground">de toucher</span>
                       {p.ev > 0 && <span className="text-[10px] font-bold text-emerald-600">EV +{Math.round(p.ev * 100)}%</span>}
                     </div>
@@ -241,10 +241,10 @@ export default function DashboardPage() {
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
             <CardContent className="p-5">
               <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-amber-500/10">
-                  <Wallet className="w-4 h-4 text-amber-400" />
+                <div className="p-2 rounded-lg bg-amber-50">
+                  <Wallet className="w-4 h-4 text-amber-600" />
                 </div>
-                <span className={`text-xs font-medium flex items-center gap-1 ${roiPositive ? "text-emerald-400" : "text-red-400"}`}>
+                <span className={`text-xs font-medium flex items-center gap-1 ${roiPositive ? "text-emerald-600" : "text-red-600"}`}>
                   {roiPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                   {roi > 0 ? "+" : ""}{roi}%
                 </span>
@@ -262,12 +262,12 @@ export default function DashboardPage() {
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
             <CardContent className="p-5">
               <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-blue-500/10">
-                  <BarChart3 className="w-4 h-4 text-blue-400" />
+                <div className="p-2 rounded-lg bg-blue-50">
+                  <BarChart3 className="w-4 h-4 text-blue-600" />
                 </div>
                 <span className="text-xs text-muted-foreground">{bankrollStats?.nb_paris ?? 0} paris</span>
               </div>
-              <div className={`text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                 {bankrollStats ? `${bankrollStats.roi_ia_only > 0 ? "+" : ""}${bankrollStats.roi_ia_only}%` : "—"}
               </div>
               <div className="text-xs text-muted-foreground mt-1">Rendement paris algorithme</div>
@@ -278,11 +278,11 @@ export default function DashboardPage() {
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
             <CardContent className="p-5">
               <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-emerald-500/10">
-                  <Zap className="w-4 h-4 text-emerald-400" />
+                <div className="p-2 rounded-lg bg-emerald-50">
+                  <Zap className="w-4 h-4 text-emerald-600" />
                 </div>
                 {(summary?.nb_vbs_premium ?? 0) > 0 && (
-                  <Badge className="bg-amber-500/20 text-amber-400 border-0 text-xs">
+                  <Badge className="bg-amber-50 text-amber-700 border-0 text-xs">
                     {summary.nb_vbs_premium} ★★★+
                   </Badge>
                 )}
@@ -298,12 +298,12 @@ export default function DashboardPage() {
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
             <CardContent className="p-5">
               <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-purple-500/10">
-                  <Trophy className="w-4 h-4 text-purple-400" />
+                <div className="p-2 rounded-lg bg-purple-50">
+                  <Trophy className="w-4 h-4 text-purple-600" />
                 </div>
                 {(summary?.nb_en_cours ?? 0) > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="flex items-center gap-1 text-xs text-emerald-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     En cours
                   </span>
                 )}
@@ -327,7 +327,7 @@ export default function DashboardPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-amber-400" />
+                    <Zap className="w-4 h-4 text-amber-600" />
                     Meilleurs paris de valeur du moment
                   </CardTitle>
                   <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
@@ -340,7 +340,7 @@ export default function DashboardPage() {
               <CardContent className="space-y-3">
                 {!isPaid ? (
                   <div className="rounded-lg border border-dashed border-border/60 p-6 text-center">
-                    <Star className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+                    <Star className="w-8 h-8 text-amber-600 mx-auto mb-2" />
                     <p className="text-sm font-medium text-foreground mb-1">Fonctionnalité Premium</p>
                     <p className="text-xs text-muted-foreground mb-3">
                       Accédez aux paris de valeur en temps réel à partir de Standard.
@@ -387,7 +387,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-600" : "text-red-600"}`}>
                             Espérance {vb.ev > 0 ? "+" : ""}{(vb.ev * 100).toFixed(0)}%
                           </div>
                           {vb.cote && (
@@ -407,7 +407,7 @@ export default function DashboardPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-blue-400" />
+                    <Calendar className="w-4 h-4 text-blue-600" />
                     {aDesProchaines ? "Prochaines courses" : "Programme du jour"}
                   </CardTitle>
                   <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
@@ -459,7 +459,7 @@ export default function DashboardPage() {
                         </div>
                         {c.statut === "en_cours" ? (
                           <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-500">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />En direct
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />En direct
                           </span>
                         ) : c.statut === "termine" ? (
                           <span className="shrink-0 text-xs text-muted-foreground">Terminée</span>
@@ -482,11 +482,11 @@ export default function DashboardPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
                     Performance algorithme — backtest
                   </CardTitle>
                   {equity?.is_real ? (
-                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">Réel</Badge>
+                    <Badge className="bg-emerald-50 text-emerald-700 border-emerald-500/30 text-xs">Réel</Badge>
                   ) : (
                     <Badge variant="secondary" className="text-xs">En construction</Badge>
                   )}
@@ -515,7 +515,7 @@ export default function DashboardPage() {
                 )}
                 {equityPoints.length > 1 && (
                   <div className="mt-1">
-                    <span className={`text-lg font-bold tabular-nums ${equityGain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    <span className={`text-lg font-bold tabular-nums ${equityGain >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                       {equityGain >= 0 ? "+" : ""}€{equityGain.toFixed(0)}
                     </span>
                     <span className="text-xs font-normal text-muted-foreground ml-2">net réel · forte variance</span>
@@ -575,7 +575,7 @@ export default function DashboardPage() {
             <Card className="border-border/60">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Cpu className="w-4 h-4 text-blue-400" />
+                  <Cpu className="w-4 h-4 text-blue-600" />
                   Santé du modèle
                 </CardTitle>
               </CardHeader>

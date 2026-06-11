@@ -74,8 +74,8 @@ function StrategieCard({
 
         {/* Indicateurs résumé */}
         <div className="text-xs text-muted-foreground mb-4 space-y-1">
-          <div>Proba min : {((strat.indicateurs.proba_top3_min as number) * 100).toFixed(0)}%</div>
-          <div>EV min : +{((strat.indicateurs.ev_min as number) * 100).toFixed(0)}%</div>
+          <div>Proba min : {(((strat.indicateurs?.proba_top3_min as number) ?? 0) * 100).toFixed(0)}%</div>
+          <div>EV min : +{(((strat.indicateurs?.ev_min as number) ?? 0) * 100).toFixed(0)}%</div>
         </div>
 
         <div className="flex gap-2">

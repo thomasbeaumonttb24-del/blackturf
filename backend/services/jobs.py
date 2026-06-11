@@ -58,7 +58,8 @@ async def job_meta_learner_retrain() -> None:
         async with AsyncSessionLocal() as session:
             ml = get_meta_learner()
             result = await ml.train(session)
-            if result.get("status") == "trained":
+            # train() renvoie status="ok" en cas de succès (pas "trained").
+            if result.get("status") == "ok":
                 ml.save()
                 log.info(
                     "jobs.meta_learner_retrain.done",

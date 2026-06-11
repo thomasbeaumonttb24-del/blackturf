@@ -39,10 +39,16 @@ TRJ = {
 }
 
 
-def disponibles_selon_course(nb_partants: int, est_quinte: bool, est_quarte: bool, est_tierce: bool) -> list[str]:
-    """Retourne les types de paris disponibles selon les caractéristiques de la course."""
+def disponibles_selon_course(nb_partants: int, est_quinte: bool, est_quarte: bool,
+                             est_tierce: bool, est_2sur4: bool = False) -> list[str]:
+    """Retourne les types de paris disponibles selon les caractéristiques de la course.
+
+    `est_2sur4` = 2sur4 réellement proposé par le PMU (déduit de paris[].codePari).
+    On NE se fie PLUS au nb de partants : certaines courses à ≥8 partants n'offrent
+    pas de 2sur4 (ex. R6C7) → un prono 2sur4 y serait impossible à jouer.
+    """
     paris = ["Simple Gagnant", "Simple Placé", "Couplé Gagnant", "Couplé Placé", "Couplé Ordre", "Trio"]
-    if nb_partants >= 8:
+    if est_2sur4:
         paris.append("2sur4")
     if est_tierce or est_quarte or est_quinte:
         paris.append("Tiercé")
@@ -70,14 +76,15 @@ def cout_combo(type_pari: str, nb_chevaux: int, flexi_pct: float = 1.0) -> float
         n_combis = math.comb(nb_chevaux, 3)
         cout = n_combis * mise_flexi
     elif type_pari == "Tiercé":
-        n_combis = nb_chevaux * (nb_chevaux - 1) * (nb_chevaux - 2)
+        # Base DÉSORDRE = combinaisons C(n,k), pas arrangements n(n-1)... (×6/×24 trop
+        # cher). Cohérent avec combo_bets/portfolio qui jouent le désordre.
+        n_combis = math.comb(nb_chevaux, 3)
         cout = n_combis * mise_flexi
     elif type_pari == "Quarté+":
-        n_combis = nb_chevaux * (nb_chevaux - 1) * (nb_chevaux - 2) * (nb_chevaux - 3)
+        n_combis = math.comb(nb_chevaux, 4)
         cout = n_combis * mise_flexi
     elif type_pari == "Quinté+":
-        n = nb_chevaux
-        n_combis = n * (n - 1) * (n - 2) * (n - 3) * (n - 4)
+        n_combis = math.comb(nb_chevaux, 5)
         cout = n_combis * mise_flexi
     else:
         cout = mise_flexi
@@ -104,8 +111,9 @@ def generer_recommandations_course(
     est_quinte = course_info.get("est_quinte", False)
     est_quarte = course_info.get("est_quarte", False)
     est_tierce = course_info.get("est_tierce", False)
+    est_2sur4 = course_info.get("est_2sur4", False)
 
-    paris_dispo = disponibles_selon_course(nb_partants, est_quinte, est_quarte, est_tierce)
+    paris_dispo = disponibles_selon_course(nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4)
 
     # Trier par proba_top3 décroissante
     pred_sorted = sorted(predictions, key=lambda x: x.get("proba_top3", 0), reverse=True)
@@ -221,7 +229,9 @@ def generer_recommandations_course(
                 {"numero": top3["numero"], "nom": top3["nom"]},
             ],
             "mise_suggeree": 3.0,
-            "ev_calcule": 0.15,
+            # EV d'un Trio (combo désordre) non calculable de façon fiable ici → None
+            # (jamais une valeur inventée). Cohérent avec les autres combos (jackpots).
+            "ev_calcule": None,
             "confidence": top3.get("proba_top3", 0),
             "cout_total": 3.0,
             "nb_combinaisons": 1,
@@ -243,7 +253,9 @@ def generer_recommandations_course(
                     {"numero": top3["numero"], "nom": top3["nom"]},
                 ],
                 "mise_suggeree": 2.0,
-                "ev_calcule": vbs_forts[0].get("ev_max", 0.20),
+                # EV d'un Tiercé combo ≠ EV d'un seul cheval → None (cohérent avec le
+                # bloc Quarté+ ci-dessous ; la vraie EV/couverture vient du pipeline).
+                "ev_calcule": None,
                 "confidence": top3.get("proba_top3", 0),
                 "cout_total": 2.0,
                 "nb_combinaisons": 1,
@@ -308,10 +320,14 @@ def generer_recommandations_course(
 
 
 def _kelly_mise(ev: float, cote: float, bankroll: float, fraction: float = 0.5) -> float:
-    """Mise Kelly demi-fraction, plafonnée à 5% bankroll."""
+    """Mise Kelly demi-fraction, plafonnée à 5% bankroll.
+
+    f* = EV / (cote − 1) (pas EV / cote). EV ≤ 0 ⇒ pas de valeur ⇒ pas de mise (0),
+    on ne force plus un stake plancher de 2€ sur un pari sans espérance positive.
+    """
     if ev <= 0 or cote <= 1.0:
-        return 2.0
-    mise = (ev * bankroll / cote) * fraction
+        return 0.0
+    mise = (ev * bankroll / (cote - 1.0)) * fraction
     return min(mise, bankroll * 0.05)
 
 

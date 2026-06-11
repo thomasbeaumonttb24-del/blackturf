@@ -65,6 +65,22 @@ def plausible_auc(auc: float | None) -> float | None:
     return None
 
 
+# Brier crédible ∈ (0, 0.5]. 0 exact = impossible (valeur seed parfaite) ; > 0.5 =
+# pire qu'un tirage → modèle cassé. Hors plage ⇒ None ("—") plutôt qu'un faux score.
+BRIER_MIN_PLAUSIBLE = 0.0   # exclusif
+BRIER_MAX_PLAUSIBLE = 0.5
+
+
+def plausible_brier(brier: float | None) -> float | None:
+    """Retourne le Brier s'il est crédible (∈ ]0, 0.5]), sinon None."""
+    if brier is None:
+        return None
+    b = float(brier)
+    if BRIER_MIN_PLAUSIBLE < b <= BRIER_MAX_PLAUSIBLE:
+        return b
+    return None
+
+
 async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
     """
     Métriques fiables du modèle pour affichage.

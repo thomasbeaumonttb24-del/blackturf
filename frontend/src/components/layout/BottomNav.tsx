@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils";
 const ITEMS = [
   { href: "/dashboard", label: "Accueil", icon: LayoutDashboard },
   { href: "/programme", label: "Programme", icon: CalendarDays },
-  { href: "/value-bets", label: "Value Bets", icon: Star },
+  { href: "/value-bets", label: "Value bets", icon: Star },
   { href: "/track-record", label: "Palmarès", icon: Trophy },
-  { href: "/bankroll", label: "Bankroll", icon: Wallet },
+  { href: "/bankroll", label: "Capital", icon: Wallet },
 ];
 
 /** Barre de navigation mobile (pouce) — utilisateurs connectés uniquement. */
@@ -33,6 +33,7 @@ export function BottomNav() {
             <Link
               key={href}
               href={href}
+              aria-current={active ? "page" : undefined}
               className={cn(
                 "flex flex-col items-center justify-center gap-0.5 py-2 min-h-[52px]",
                 active ? "text-brand-gold" : "text-muted-foreground"

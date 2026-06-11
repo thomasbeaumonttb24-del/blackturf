@@ -37,9 +37,9 @@ interface BiasRow {
 // ─── helpers ─────────────────────────────────────────────────
 function SeverityCard({ severity }: { severity: string }) {
   const cfg: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-    critical: { label: "Dérive critique", color: "text-red-400", bg: "bg-red-500/10 border-red-500/30", icon: <AlertTriangle className="w-5 h-5 text-red-400" /> },
-    warning: { label: "Avertissement", color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30", icon: <AlertTriangle className="w-5 h-5 text-amber-400" /> },
-    none: { label: "Stable", color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/30", icon: <CheckCircle className="w-5 h-5 text-emerald-400" /> },
+    critical: { label: "Dérive critique", color: "text-red-600", bg: "bg-red-50 border-red-500/30", icon: <AlertTriangle className="w-5 h-5 text-red-600" /> },
+    warning: { label: "Avertissement", color: "text-amber-600", bg: "bg-amber-50 border-amber-500/30", icon: <AlertTriangle className="w-5 h-5 text-amber-600" /> },
+    none: { label: "Stable", color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-500/30", icon: <CheckCircle className="w-5 h-5 text-emerald-600" /> },
   };
   const c = cfg[severity] ?? cfg.none;
   return (
@@ -129,7 +129,7 @@ export default function AlgorithmeMonitoringPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <AlertTriangle className="w-12 h-12 text-amber-400 mx-auto mb-4" />
+          <AlertTriangle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
           <h2 className="text-xl font-bold mb-2">Accès refusé</h2>
           <p className="text-muted-foreground">Réservé aux administrateurs.</p>
         </div>
@@ -160,7 +160,7 @@ export default function AlgorithmeMonitoringPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Brain className="w-6 h-6 text-blue-400" />
+              <Brain className="w-6 h-6 text-blue-600" />
               Monitoring Algorithme
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -188,7 +188,7 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-border/60">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Thermometer className="w-4 h-4 text-amber-400" />
+                <Thermometer className="w-4 h-4 text-amber-600" />
                 <span className="text-sm font-medium">Température calibration</span>
               </div>
               <TemperatureGauge temp={al.temperature ?? 1.0} />
@@ -203,11 +203,11 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-border/60">
             <CardContent className="p-4 space-y-2">
               <div className="flex items-center gap-2 mb-1">
-                <Cpu className="w-4 h-4 text-blue-400" />
+                <Cpu className="w-4 h-4 text-blue-600" />
                 <span className="text-sm font-medium">
                   Modèle v{model.version ?? "—"}
                   {mlStatus?.meta_learner?.is_trained && (
-                    <Badge className="ml-2 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
+                    <Badge className="ml-2 bg-emerald-50 text-emerald-700 border-emerald-500/30 text-xs">
                       Meta-learner ✓
                     </Badge>
                   )}
@@ -228,7 +228,7 @@ export default function AlgorithmeMonitoringPage() {
                 </div>
                 <div className="rounded bg-muted/40 p-2">
                   <span className="text-muted-foreground" title="ROI simulé d'un backtest 10€ flat sur les value bets — indicatif, forte variance.">ROI sim. ⓘ</span>
-                  <div className={`font-bold mt-0.5 ${(model.roi_simule ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  <div className={`font-bold mt-0.5 ${(model.roi_simule ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                     {model.roi_simule != null ? `${model.roi_simule > 0 ? "+" : ""}${model.roi_simule}%` : "—"}
                   </div>
                 </div>
@@ -251,14 +251,14 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-border/60">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Cpu className="w-4 h-4 text-emerald-400" />
+                <Cpu className="w-4 h-4 text-emerald-600" />
                 <span className="text-sm font-medium">Calibrations appliquées à l&apos;inférence</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div className="rounded bg-muted/40 p-3">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Calibration isotonique</span>
-                    <Badge className={`text-[10px] ${alState.calibration.isotonique?.actif ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+                    <Badge className={`text-[10px] ${alState.calibration.isotonique?.actif ? "bg-emerald-50 text-emerald-700 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
                       {alState.calibration.isotonique?.actif ? "active" : "en attente"}
                     </Badge>
                   </div>
@@ -269,7 +269,7 @@ export default function AlgorithmeMonitoringPage() {
                 <div className="rounded bg-muted/40 p-3">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Calibration longshots</span>
-                    <Badge className={`text-[10px] ${alState.calibration.longshots?.actif ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+                    <Badge className={`text-[10px] ${alState.calibration.longshots?.actif ? "bg-emerald-50 text-emerald-700 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
                       {alState.calibration.longshots?.actif ? "active" : "en attente"}
                     </Badge>
                   </div>
@@ -280,7 +280,7 @@ export default function AlgorithmeMonitoringPage() {
                 <div className="rounded bg-muted/40 p-3">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Tilt poids features</span>
-                    <Badge className={`text-[10px] ${alState.calibration.feature_weight_tilt?.actif ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+                    <Badge className={`text-[10px] ${alState.calibration.feature_weight_tilt?.actif ? "bg-emerald-50 text-emerald-700 border-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
                       {alState.calibration.feature_weight_tilt?.actif ? "actif" : "en attente"}
                     </Badge>
                   </div>
@@ -298,9 +298,9 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-border/60">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Cpu className="w-4 h-4 text-violet-400" />
+                <Cpu className="w-4 h-4 text-violet-600" />
                 <span className="text-sm font-medium">Qualité de calibration — proba de victoire</span>
-                <Badge className="ml-auto text-[10px] bg-violet-500/20 text-violet-300 border-violet-500/30">
+                <Badge className="ml-auto text-[10px] bg-violet-50 text-violet-700 border-violet-500/30">
                   {calib.verdict} · {calib.n_obs} obs
                 </Badge>
               </div>
@@ -339,10 +339,10 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-border/60">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Cpu className="w-4 h-4 text-emerald-400" />
+                <Cpu className="w-4 h-4 text-emerald-600" />
                 <span className="text-sm font-medium">Santé de l&apos;apprentissage — preuve live</span>
                 {learning.edge && (
-                  <Badge className={`ml-auto text-[10px] ${learning.edge.edge_ok ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-rose-500/20 text-rose-300 border-rose-500/30"}`}>
+                  <Badge className={`ml-auto text-[10px] ${learning.edge.edge_ok ? "bg-emerald-50 text-emerald-700 border-emerald-500/30" : "bg-rose-50 text-rose-700 border-rose-500/30"}`}>
                     edge {learning.edge.edge_ok ? "OK" : "à surveiller"}
                   </Badge>
                 )}
@@ -353,7 +353,7 @@ export default function AlgorithmeMonitoringPage() {
                 <div className="grid grid-cols-3 gap-3 text-xs mb-4">
                   <div className="rounded bg-muted/40 p-2">
                     <span className="text-muted-foreground">Win filtré</span>
-                    <div className="font-bold mt-0.5 text-emerald-400">{(learning.edge.win_filtre * 100).toFixed(1)}%</div>
+                    <div className="font-bold mt-0.5 text-emerald-600">{(learning.edge.win_filtre * 100).toFixed(1)}%</div>
                   </div>
                   <div className="rounded bg-muted/40 p-2">
                     <span className="text-muted-foreground">Win baseline</span>
@@ -361,7 +361,7 @@ export default function AlgorithmeMonitoringPage() {
                   </div>
                   <div className="rounded bg-muted/40 p-2">
                     <span className="text-muted-foreground">ROI plafonné</span>
-                    <div className={`font-bold mt-0.5 ${learning.edge.roi_plafonne >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <div className={`font-bold mt-0.5 ${learning.edge.roi_plafonne >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                       {learning.edge.roi_plafonne >= 0 ? "+" : ""}{learning.edge.roi_plafonne}%
                     </div>
                   </div>
@@ -383,7 +383,7 @@ export default function AlgorithmeMonitoringPage() {
                             <span className="text-muted-foreground">{p.n_runs} runs</span>
                           </div>
                           {p.roi_global != null && (
-                            <div className={`text-sm font-bold ${p.roi_global >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                            <div className={`text-sm font-bold ${p.roi_global >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                               ROI {p.roi_global >= 0 ? "+" : ""}{p.roi_global}%
                             </div>
                           )}
@@ -391,7 +391,7 @@ export default function AlgorithmeMonitoringPage() {
                             {Object.entries(p.type_weights || {}).slice(0, 4).map(([t, w]) => (
                               <div key={t} className="flex justify-between text-[10px]">
                                 <span className="text-muted-foreground truncate">{t}</span>
-                                <span className={`font-mono ${(w as number) >= 1 ? "text-emerald-400" : "text-rose-400"}`}>×{(w as number).toFixed(2)}</span>
+                                <span className={`font-mono ${(w as number) >= 1 ? "text-emerald-600" : "text-rose-600"}`}>×{(w as number).toFixed(2)}</span>
                               </div>
                             ))}
                           </div>
@@ -411,7 +411,7 @@ export default function AlgorithmeMonitoringPage() {
                     {learning.signaux.map((s: { signal: string; n: number; win_rate: number; roi: number }) => (
                       <div key={s.signal} className="flex items-center gap-2 text-[11px]">
                         <span className="w-40 shrink-0 truncate font-medium">{s.signal}</span>
-                        <span className={`w-16 text-right font-mono font-bold ${s.roi >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                        <span className={`w-16 text-right font-mono font-bold ${s.roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                           {s.roi >= 0 ? "+" : ""}{Math.round(s.roi)}%
                         </span>
                         <span className="text-muted-foreground tabular-nums">win {Math.round(s.win_rate)}% · {s.n}</span>
@@ -430,13 +430,13 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-border/60">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
                 <span className="text-sm font-medium">L&apos;algorithme s&apos;améliore-t-il ? — convergence</span>
               </div>
               <p className="text-[11px] text-muted-foreground mb-4">
                 Tout est mesuré sur les vraies courses terminées. Si l&apos;algorithme apprend bien :
-                la <b className="text-amber-500">précision monte</b>, l&apos;<b className="text-blue-400">erreur Brier baisse</b>,
-                et les <b className="text-emerald-400">gains cumulés montent</b>.
+                la <b className="text-amber-500">précision monte</b>, l&apos;<b className="text-blue-600">erreur Brier baisse</b>,
+                et les <b className="text-emerald-600">gains cumulés montent</b>.
               </p>
 
               {/* Précision top-3 (↑) + erreur Brier (↓) par semaine */}
@@ -459,7 +459,7 @@ export default function AlgorithmeMonitoringPage() {
                   </ResponsiveContainer>
                   <p className="text-[10px] text-muted-foreground/60 mt-1">
                     <span className="text-amber-500">▲ Précision top-3</span> = le gagnant finit dans les 3 premiers prédits.
-                    <span className="text-blue-400 ml-2">▼ Brier</span> = écart proba/réalité (plus bas = mieux calibré).
+                    <span className="text-blue-600 ml-2">▼ Brier</span> = écart proba/réalité (plus bas = mieux calibré).
                   </p>
                 </div>
               )}
@@ -512,9 +512,9 @@ export default function AlgorithmeMonitoringPage() {
                     return (
                       <p className="text-[11px] text-muted-foreground">
                         Sur des courses jamais apprises, les paris à forte conviction gagnent{" "}
-                        <b className={last.win_filtre >= (last.win_baseline || 0) ? "text-emerald-400" : "text-rose-400"}>{last.win_filtre}%</b>{" "}
+                        <b className={last.win_filtre >= (last.win_baseline || 0) ? "text-emerald-600" : "text-rose-600"}>{last.win_filtre}%</b>{" "}
                         contre <b>{last.win_baseline}%</b> en jouant tout — ROI plafonné{" "}
-                        <b className={last.roi >= 0 ? "text-emerald-400" : "text-rose-400"}>{last.roi >= 0 ? "+" : ""}{last.roi}%</b>.{" "}
+                        <b className={last.roi >= 0 ? "text-emerald-600" : "text-rose-600"}>{last.roi >= 0 ? "+" : ""}{last.roi}%</b>.{" "}
                         {last.edge_ok ? "L'avantage tient ✓" : "Avantage à surveiller"}.
                       </p>
                     );
@@ -560,15 +560,15 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-amber-500/40 bg-amber-500/5">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-2">
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
-                <span className="text-sm font-semibold text-amber-400">Signaux de dérive actifs</span>
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span className="text-sm font-semibold text-amber-700">Signaux de dérive actifs</span>
               </div>
               <div className="flex gap-3 text-xs">
                 {dd.adwin_triggered && (
-                  <Badge className="bg-red-500/20 text-red-400 border-red-500/30">ADWIN déclenché</Badge>
+                  <Badge className="bg-red-50 text-red-700 border-red-500/30">ADWIN déclenché</Badge>
                 )}
                 {dd.ph_triggered && (
-                  <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">Page-Hinkley déclenché</Badge>
+                  <Badge className="bg-orange-50 text-orange-700 border-orange-500/30">Page-Hinkley déclenché</Badge>
                 )}
                 <span className="text-muted-foreground">
                   Brier moyen : {dd.brier_mean?.toFixed(4) ?? "—"} ·
@@ -587,7 +587,7 @@ export default function AlgorithmeMonitoringPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-blue-400" />
+                  <Activity className="w-4 h-4 text-blue-600" />
                   Historique Brier score
                 </CardTitle>
                 <div className="flex gap-1">
@@ -656,7 +656,7 @@ export default function AlgorithmeMonitoringPage() {
           <Card className="border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-amber-400" />
+                <BarChart3 className="w-4 h-4 text-amber-600" />
                 Poids features adaptatifs
               </CardTitle>
             </CardHeader>
@@ -695,7 +695,7 @@ export default function AlgorithmeMonitoringPage() {
         <Card className="border-border/60">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Zap className="w-4 h-4 text-emerald-400" />
+              <Zap className="w-4 h-4 text-emerald-600" />
               Journal d&apos;apprentissage récent
             </CardTitle>
           </CardHeader>
@@ -730,7 +730,7 @@ export default function AlgorithmeMonitoringPage() {
                         </td>
                         <td className="px-4 py-2 font-medium">{h.hippodrome ?? "—"}</td>
                         <td className="px-4 py-2 text-muted-foreground">{h.discipline ?? "—"}</td>
-                        <td className={`px-4 py-2 text-right font-mono ${(h.brier_score ?? 0) > 0.25 ? "text-red-400" : (h.brier_score ?? 0) < 0.18 ? "text-emerald-400" : "text-foreground"}`}>
+                        <td className={`px-4 py-2 text-right font-mono ${(h.brier_score ?? 0) > 0.25 ? "text-red-600" : (h.brier_score ?? 0) < 0.18 ? "text-emerald-600" : "text-foreground"}`}>
                           {h.brier_score?.toFixed(4) ?? "—"}
                         </td>
                         <td className="px-4 py-2 text-right font-mono">
@@ -738,21 +738,21 @@ export default function AlgorithmeMonitoringPage() {
                         </td>
                         <td className="px-4 py-2 text-right">
                           {h.gagnant_rang_predit != null ? (
-                            <span className={`font-bold ${h.gagnant_rang_predit === 1 ? "text-emerald-400" : h.gagnant_rang_predit <= 3 ? "text-amber-400" : "text-muted-foreground"}`}>
+                            <span className={`font-bold ${h.gagnant_rang_predit === 1 ? "text-emerald-600" : h.gagnant_rang_predit <= 3 ? "text-amber-600" : "text-muted-foreground"}`}>
                               #{h.gagnant_rang_predit}
                             </span>
                           ) : "—"}
                         </td>
                         <td className="px-4 py-2 text-center">
                           {h.was_surprise ? (
-                            <span className="text-red-400 font-bold">⚡</span>
+                            <span className="text-red-600 font-bold">⚡</span>
                           ) : (
                             <span className="text-muted-foreground">·</span>
                           )}
                         </td>
                         <td className="px-4 py-2 text-right font-mono">
                           {h.temperature_update != null ? (
-                            <span className={`text-xs ${h.temperature_update > 0 ? "text-red-400" : "text-emerald-400"} flex items-center justify-end gap-0.5`}>
+                            <span className={`text-xs ${h.temperature_update > 0 ? "text-red-600" : "text-emerald-600"} flex items-center justify-end gap-0.5`}>
                               {h.temperature_update > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                               {h.temperature_update > 0 ? "+" : ""}{h.temperature_update.toFixed(4)}
                             </span>
@@ -772,7 +772,7 @@ export default function AlgorithmeMonitoringPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
-                <Brain className="w-4 h-4 text-purple-400" />
+                <Brain className="w-4 h-4 text-purple-600" />
                 Matrice de biais contextuels
               </CardTitle>
               {biasRows.length > 0 && (
@@ -821,7 +821,7 @@ export default function AlgorithmeMonitoringPage() {
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">{row.terrain ?? "—"}</td>
                         <td className="px-4 py-2 text-right">{row.nb_courses}</td>
-                        <td className="px-4 py-2 text-right text-amber-400">
+                        <td className="px-4 py-2 text-right text-amber-600">
                           {(((row.taux_surprise ?? 0) * 100)).toFixed(1)}%
                         </td>
                         <td className="px-4 py-2 text-right font-mono">
@@ -829,7 +829,7 @@ export default function AlgorithmeMonitoringPage() {
                         </td>
                         <td className="px-4 py-2 text-right">
                           <span
-                            className={`font-bold font-mono ${Math.abs(row.correction_factor ?? 0) > 0.08 ? ((row.correction_factor ?? 0) > 0 ? "text-red-400" : "text-blue-400") : "text-muted-foreground"}`}
+                            className={`font-bold font-mono ${Math.abs(row.correction_factor ?? 0) > 0.08 ? ((row.correction_factor ?? 0) > 0 ? "text-red-600" : "text-blue-600") : "text-muted-foreground"}`}
                           >
                             {(row.correction_factor ?? 0) > 0 ? "+" : ""}{(row.correction_factor ?? 0).toFixed(4)}
                           </span>

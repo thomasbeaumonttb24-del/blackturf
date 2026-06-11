@@ -26,26 +26,32 @@ from typing import Optional
 
 # type_pari -> clés candidates du rapport PMU (base 1€). On essaie chaque clé et on
 # prend la première publiée. ⚠️ NE PAS mélanger des paris DIFFÉRENTS : le « 2sur4 »
-# (≥2 de 4 dans le top-4) n'a RIEN à voir avec le « Super 4 » (e_super_quatre, top-4
-# exact en ordre) dont le rapport est ~100× plus gros. Utiliser e_super_quatre pour
+# (≥2 de 4 dans le top-4) n'a RIEN à voir avec le « Super 4 » (super_quatre, top-4
+# exact en ordre) dont le rapport est ~100× plus gros. Utiliser super_quatre pour
 # régler un 2sur4 crédite un gain fictif énorme → bankroll faussée. Si le vrai
-# rapport 2sur4 (e_deux_sur_quatre) n'est pas publié, on laisse en attente (None).
+# rapport 2sur4 (deux_sur_quatre) n'est pas publié, on laisse en attente (None).
+#
+# ⚠️ CLÉS RÉELLES = typePari PMU mis en minuscules par le scraper (cf.
+# scraper/sources/pmu.py : `rapports[item["typePari"].lower()]`). Ex. "deux_sur_quatre",
+# "simple_gagnant"… PAS de préfixe `e_` (celui-ci est le codePari des COTES live, jamais
+# stocké dans les rapports définitifs). On garde les variantes `e_*` en second pour
+# rétro-compat avec d'éventuelles vieilles lignes. Mettre la clé réelle EN PREMIER.
 _RAPPORT_KEYS = {
-    "Simple Gagnant": ("e_simple_gagnant", "simple_gagnant_international"),
-    "Simple Placé":   ("e_simple_place", "simple_place_international"),
-    "Couplé Gagnant": ("e_couple_gagnant",),
-    "Couplé Placé":   ("e_couple_place",),
-    "Trio":           ("e_trio",),
-    "2sur4":          ("e_deux_sur_quatre",),
+    "Simple Gagnant": ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international"),
+    "Simple Placé":   ("simple_place", "e_simple_place", "simple_place_international"),
+    "Couplé Gagnant": ("couple_gagnant", "e_couple_gagnant"),
+    "Couplé Placé":   ("couple_place", "e_couple_place"),
+    "Trio":           ("trio", "e_trio"),
+    "2sur4":          ("deux_sur_quatre", "e_deux_sur_quatre"),
     # Jackpots désordre — vrais rapports PMU (base 1€). Le rapport publié est celui
     # de la combinaison gagnante ; si notre sélection == arrivée exacte, c'est le nôtre.
-    "Tiercé Désordre": ("e_tierce",),
-    "Tiercé Ordre":    ("e_tierce_ordre", "e_tierce"),
-    "Quarté+ Désordre": ("e_quarte_plus",),
-    "Quarté+":          ("e_quarte_plus",),
-    "Quinté+ Désordre": ("e_quinte_plus",),
-    "Quinté+ Flexi":    ("e_quinte_plus",),
-    "Quinté+":          ("e_quinte_plus",),
+    "Tiercé Désordre": ("tierce", "e_tierce"),
+    "Tiercé Ordre":    ("tierce_ordre", "e_tierce_ordre", "tierce", "e_tierce"),
+    "Quarté+ Désordre": ("quarte_plus", "e_quarte_plus"),
+    "Quarté+":          ("quarte_plus", "e_quarte_plus"),
+    "Quinté+ Désordre": ("quinte_plus", "e_quinte_plus"),
+    "Quinté+ Flexi":    ("quinte_plus", "e_quinte_plus"),
+    "Quinté+":          ("quinte_plus", "e_quinte_plus"),
 }
 
 _APPROX_NOTE = "Rapport placé approximatif (le PMU publie un rapport par cheval placé)."
