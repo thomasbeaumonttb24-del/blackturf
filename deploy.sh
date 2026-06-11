@@ -26,8 +26,11 @@ git checkout "$BRANCH"
 git pull origin "$BRANCH"
 
 # ─── Build images ────────────────────────────────────────────
+# frontend INCLUS : le site blackturf.fr est servi par le conteneur `frontend`
+# (nginx → frontend:3000), pas par Vercel. Sans ça, les changements front ne
+# partaient jamais en prod (le conteneur gardait l'ancien build).
 log "Building images..."
-$COMPOSE build --no-cache api scraper worker
+$COMPOSE build --no-cache api scraper worker frontend
 
 # ─── Migrate DB ──────────────────────────────────────────────
 log "Running migrations..."
@@ -56,6 +59,10 @@ sleep 3
 log "Restarting scraper..."
 $COMPOSE up -d --no-deps scraper
 sleep 2
+
+log "Restarting frontend..."
+$COMPOSE up -d --no-deps frontend
+sleep 3
 
 log "Reloading nginx..."
 $COMPOSE exec -T nginx nginx -s reload
