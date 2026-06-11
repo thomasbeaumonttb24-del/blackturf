@@ -745,18 +745,23 @@ async def get_learning_convergence(
 
     # 3. Gain net CUMULÉ par profil dans le temps (profil_run_log réglés)
     try:
+        # On étale sur la DATE DE COURSE (date_heure), pas settled_at (= maintenant
+        # pour les runs backfillés) → courbe d'évolution réelle sur l'historique.
         rows = (await db.execute(text("""
-            SELECT profil, to_char(date_trunc('day', settled_at), 'DD/MM') AS jour,
-                   sum((resultat->>'net')::numeric) AS net_jour
-            FROM profil_run_log
-            WHERE statut = 'settled' AND resultat IS NOT NULL AND settled_at IS NOT NULL
-            GROUP BY profil, date_trunc('day', settled_at)
-            ORDER BY profil, date_trunc('day', settled_at)
+            SELECT r.profil,
+                   date_trunc('day', c.date_heure) AS j,
+                   to_char(date_trunc('day', c.date_heure), 'DD/MM') AS jour,
+                   sum((r.resultat->>'net')::numeric) AS net_jour
+            FROM profil_run_log r
+            JOIN courses c ON c.course_id = r.course_id
+            WHERE r.statut = 'settled' AND r.resultat IS NOT NULL AND c.date_heure IS NOT NULL
+            GROUP BY r.profil, date_trunc('day', c.date_heure)
+            ORDER BY r.profil, date_trunc('day', c.date_heure)
         """))).all()
         LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
         cumul: dict = {}
         running: dict = {}
-        for profil, jour, net in rows:
+        for profil, _j, jour, net in rows:
             running[profil] = running.get(profil, 0.0) + float(net or 0)
             cumul.setdefault(profil, []).append({"jour": jour, "cumul": round(running[profil], 2)})
         out["profil_cumul"] = {LBL.get(k, k): v for k, v in cumul.items()}
