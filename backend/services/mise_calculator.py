@@ -186,7 +186,7 @@ PROFIL_CONFIG = {
     # (le placé sec rapporte trop peu) : on joue le duo gagnant, le couplé placé, le
     # 2/4 et le trio. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
     "equilibre": {
-        "cote_max": 30.0, "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
+        "cote_max": 45.0, "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
         "bets_factor": 1.6, "min_stake_factor": 0.55,
         "types": {"Couplé Placé", "Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant"},
         "objectif": "ev",
@@ -196,7 +196,7 @@ PROFIL_CONFIG = {
     # duo gagnant, trios et jackpots désordre (Tiercé/Quarté+/Quinté+). PAS de Simple
     # Placé. Beaucoup de PETITES mises sur un large spectre de combinaisons.
     "agressif": {
-        "cote_max": 90.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 4,
+        "cote_max": 300.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 4,
         "bets_factor": 2.0, "min_stake_factor": 0.5,
         "types": {"Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant",
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},

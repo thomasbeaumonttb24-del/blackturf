@@ -274,12 +274,19 @@ def enumerate_bet_candidates(
     implied = pm                                   # proba marché par cheval
     edge_by_idx = p1 - implied                     # avantage modèle vs marché
 
-    # Meilleur(s) outsider(s) : cote 6-40 où le modèle a un edge positif
+    # Outsider(s) à VALEUR : grosse cote où le modèle a un edge positif. Plage large
+    # (6-200) pour que les GROSSES cotes que le modèle classe haut (ex. un cheval à
+    # cote 180 vu top-3) entrent dans les combos surprise/coup — le profil risqué les
+    # joue en petite mise. C'est la cohérence demandée : tout pick du modèle est jouable.
     outsiders = sorted(
-        [i for i in range(len(parts)) if 6.0 <= cotes[i] <= 40.0 and edge_by_idx[i] > 0],
+        [i for i in range(len(parts)) if 6.0 <= cotes[i] <= 200.0 and edge_by_idx[i] > 0],
         key=lambda i: edge_by_idx[i], reverse=True,
     )
     out1 = outsiders[0] if outsiders else None
+    # Picks GROSSE COTE du modèle : chevaux que le modèle classe dans son top-5 (par
+    # proba de victoire) MAIS à cote élevée (≥ 8). Ils DOIVENT être proposables (en
+    # Simple Gagnant coup + dans les combos top-k), sinon on ignore notre propre analyse.
+    big_model_picks = [i for i in by_p1[:5] if cotes[i] >= 8.0]
 
     cands: list[dict] = []
     seen: set = set()
@@ -317,21 +324,33 @@ def enumerate_bet_candidates(
     # mieux en Couplé/Trio comme base. On privilégie la VALEUR : edge positif
     # (modèle > marché) d'abord, puis proba modèle.
     SG_COTE_MIN = 3.0
+    # On inclut TOUS les picks grosse cote du modèle dans le pool (pas juste les 3
+    # meilleurs par proba) pour ne JAMAIS écarter un cheval que l'analyse classe haut.
     sg_pool = [i for i in by_p1 if cotes[i] >= SG_COTE_MIN]
     sg_pool.sort(key=lambda i: (1 if edge_by_idx[i] > 0 else 0, p1[i]), reverse=True)
-    for i in sg_pool[:3]:
+    sg_take = list(dict.fromkeys(sg_pool[:3] + big_model_picks))  # top-3 + grosses cotes du modèle
+    for i in sg_take:
         p_win = float(p1[i]); rap = float(cotes[i])
         ev = rap * p_win - 1
         if ev <= -0.45:                 # franchement perdant → on évite
             continue
         has_edge = edge_by_idx[i] > 0
-        niv = "coup" if (rap >= 10 and not has_edge) else "rendement"
+        # Niveau selon la cote : grosse cote = COUP (petite mise spéculative), cote
+        # moyenne à edge = SURPRISE, cote raisonnable = RENDEMENT. Une grosse cote ne
+        # doit jamais passer en "rendement" (mise franche) — c'est un coup à tenter.
+        if rap >= 25:
+            niv = "coup"
+        elif rap >= 9:
+            niv = "surprise" if has_edge else "coup"
+        else:
+            niv = "rendement"
         cands.append({
             "niveau": niv, "type_pari": "Simple Gagnant", "chevaux": [H(i)],
             "proba_gain": round(p_win, 4), "rapport_estime": round(rap, 1),
             "ev": round(ev, 3), "edge": round(float(edge_by_idx[i]), 4),
             "texte_explication": f"N°{numeros[i]} {noms[i]} — {p_win*100:.0f}% de gagner, cote {cotes[i]:.1f}"
-                                 + (" · valeur détectée (modèle > marché)" if has_edge else "") + ".",
+                                 + (" · le modèle le classe au-dessus du marché (grosse cote à tenter)" if has_edge and rap >= 9
+                                    else " · valeur détectée (modèle > marché)" if has_edge else "") + ".",
         })
         seen.add(("Simple Gagnant", (i,)))
     if out1 is not None and ("Simple Gagnant", (out1,)) not in seen:

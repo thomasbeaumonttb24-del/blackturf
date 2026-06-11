@@ -226,6 +226,112 @@ def explain_prediction(features: dict, proba_top3: float, proba_top1: float,
                          "detail": f"Numéro de départ historiquement favorable sur cet hippodrome",
                          "score": draw, "categorie": "conditions"})
 
+    # ── FIGURE DE VITESSE (niveau des courses fréquentées) ──────────────────
+    vit = features.get("vitesse_relative", 0.5)
+    if vit >= 0.62:
+        positifs.append({"feature": "vitesse_relative", "label": "Vitesse de référence",
+                         "detail": f"Chronos récents au-dessus du niveau type de la distance ({vit*100:.0f}/100) — bon référentiel de vitesse.",
+                         "score": min((vit - 0.5) * 2.2, 1.0), "categorie": "vitesse"})
+    elif vit <= 0.35 and vit > 0:
+        negatifs.append({"feature": "vitesse_relative", "label": "Vitesse en retrait",
+                         "detail": f"Chronos récents sous le niveau de la distance ({vit*100:.0f}/100).",
+                         "score": min((0.5 - vit) * 2.2, 1.0), "categorie": "vitesse"})
+
+    # ── PEDIGREE (lignée du père à la distance) ─────────────────────────────
+    sire = features.get("sire_dist_winrate", 0.5)
+    if sire >= 0.6:
+        positifs.append({"feature": "sire_dist_winrate", "label": "Pedigree adapté",
+                         "detail": f"La lignée du père réussit à cette distance ({sire*100:.0f}% de top-3 sur la descendance).",
+                         "score": min((sire - 0.5) * 2, 1.0), "categorie": "pedigree"})
+    sire_t = features.get("sire_terrain_winrate", 0.5)
+    if sire_t >= 0.6:
+        positifs.append({"feature": "sire_terrain_winrate", "label": "Lignée + terrain",
+                         "detail": f"La descendance du père performe sur ce type de terrain ({sire_t*100:.0f}%).",
+                         "score": min((sire_t - 0.5) * 2, 1.0), "categorie": "pedigree"})
+
+    # ── POIDS porté (plat/obstacle) ─────────────────────────────────────────
+    dpoids = features.get("delta_poids", 0)
+    if dpoids <= -0.3:
+        positifs.append({"feature": "delta_poids", "label": "Allègement",
+                         "detail": "Porte moins de poids que lors de ses dernières sorties — avantage.",
+                         "score": min(abs(dpoids), 1.0) * 0.7, "categorie": "conditions"})
+    elif dpoids >= 0.4:
+        negatifs.append({"feature": "delta_poids", "label": "Surcharge de poids",
+                         "detail": "Porte plus lourd que d'habitude — handicap réel.",
+                         "score": min(dpoids, 1.0) * 0.7, "categorie": "conditions"})
+
+    # ── CORDE (plat/obstacle) ───────────────────────────────────────────────
+    corde = features.get("corde_preference", 0.5)
+    if corde >= 0.62:
+        positifs.append({"feature": "corde_preference", "label": "Corde favorable",
+                         "detail": f"Réussit bien depuis cette zone de corde ({corde*100:.0f}% de top-3).",
+                         "score": min((corde - 0.5) * 2, 1.0), "categorie": "conditions"})
+
+    # ── FORME RÉCENTE du jockey / de l'entraîneur ──────────────────────────
+    jf = features.get("jockey_forme_7j")
+    if jf is not None and jf >= 0.28:
+        positifs.append({"feature": "jockey_forme_7j", "label": "Jockey en forme",
+                         "detail": f"Jockey à {jf*100:.0f}% de top-3 sur les 7 derniers jours.",
+                         "score": min(jf * 1.8, 1.0), "categorie": "professionnel"})
+    ef = features.get("entraineur_forme_14j")
+    if ef is not None and ef >= 0.28:
+        positifs.append({"feature": "entraineur_forme_14j", "label": "Écurie en réussite",
+                         "detail": f"Entraîneur à {ef*100:.0f}% de top-3 sur 14 jours — écurie chaude.",
+                         "score": min(ef * 1.7, 1.0), "categorie": "professionnel"})
+
+    # ── RÉGULARITÉ carrière (podiums) ───────────────────────────────────────
+    podium = features.get("taux_podium_carriere", 0)
+    if podium >= 0.5:
+        positifs.append({"feature": "taux_podium_carriere", "label": "Régulier au podium",
+                         "detail": f"{podium*100:.0f}% de podiums en carrière — valeur sûre pour le placé.",
+                         "score": min(podium, 1.0), "categorie": "regularite"})
+
+    # ── DÉPLACEMENT (proxy fatigue voyage) ──────────────────────────────────
+    depl = features.get("distance_deplacement", 0.5)
+    if depl >= 0.8:
+        negatifs.append({"feature": "distance_deplacement", "label": "Gros déplacement",
+                         "detail": "Court très loin de ses hippodromes habituels — voyage exigeant.",
+                         "score": (depl - 0.5) * 1.4, "categorie": "conditions"})
+
+    # ── REPOS / FRAÎCHEUR ───────────────────────────────────────────────────
+    fr = features.get("fraicheur_score", 0.5)
+    jours = features.get("jours_repos") or features.get("jours_depuis_derniere_db")
+    if fr >= 0.95:
+        positifs.append({"feature": "fraicheur_score", "label": "Fraîcheur idéale",
+                         "detail": f"Repos optimal ({int(jours)} j) — revient frais et affûté." if jours else "Repos dans la fenêtre idéale.",
+                         "score": 0.55, "categorie": "forme"})
+    elif jours and jours > 75:
+        alertes.append({"label": "Longue absence",
+                        "detail": f"{int(jours)} jours sans courir — condition à confirmer."})
+
+    # ── DÉBUTANT / inexpérience ─────────────────────────────────────────────
+    if features.get("est_inedit", 0):
+        alertes.append({"label": "Inédit",
+                        "detail": "N'a jamais couru — aucune référence, pari à l'aveugle."})
+    nbc = features.get("nb_courses_total") or features.get("nb_courses")
+    if nbc is not None and 0 < nbc <= 3:
+        alertes.append({"label": "Peu d'expérience",
+                        "detail": f"Seulement {int(nbc)} course(s) en carrière — marge de progression mais incertitude."})
+
+    # ── AVIS ENTRAÎNEUR + afflux de mises ──────────────────────────────────
+    avis = features.get("avis_entraineur_score", 0.5)
+    if avis >= 0.9:
+        positifs.append({"feature": "avis_entraineur_score", "label": "Avis entraîneur positif",
+                         "detail": "L'entourage affiche de la confiance pour cette course.",
+                         "score": 0.5, "categorie": "professionnel"})
+    pool_ev = features.get("pool_gagnant_evolution", 0)
+    if pool_ev >= 0.15:
+        positifs.append({"feature": "pool_gagnant_evolution", "label": "Afflux de mises",
+                         "detail": "Volume de jeu en forte hausse sur ce cheval — argent qui arrive.",
+                         "score": min(pool_ev, 1.0), "categorie": "marche"})
+
+    # ── PROGRESSION ELO long terme ──────────────────────────────────────────
+    velo = features.get("velocity_elo", 0)
+    if velo >= 12:
+        positifs.append({"feature": "velocity_elo", "label": "Cote ELO en hausse",
+                         "detail": "Niveau (ELO) en nette progression sur ses dernières courses.",
+                         "score": min(velo / 40, 1.0), "categorie": "elo"})
+
     # Trier par score décroissant
     positifs.sort(key=lambda x: x["score"], reverse=True)
     negatifs.sort(key=lambda x: x["score"], reverse=True)
