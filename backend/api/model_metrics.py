@@ -19,6 +19,14 @@ from db.models import ModelVersion, RaceLearningLog
 # ROI simulé considéré crédible uniquement dans cette plage (fraction, pas %).
 ROI_MIN_PLAUSIBLE = -0.5   # -50%
 ROI_MAX_PLAUSIBLE = 1.0    # +100%
+# Même plage exprimée en POURCENTAGE (pour le ROI backtest renvoyé en %).
+ROI_PCT_MIN_PLAUSIBLE = -50.0
+ROI_PCT_MAX_PLAUSIBLE = 100.0
+# AUC crédible uniquement dans [0.5, 1.0]. < 0.5 = pire que le hasard ⇒ modèle
+# cassé / sous-entraîné (ex. valeur 0.06) : on n'affiche RIEN ("—") plutôt qu'un
+# chiffre qui décrédibilise. > 1.0 = impossible.
+AUC_MIN_PLAUSIBLE = 0.5
+AUC_MAX_PLAUSIBLE = 1.0
 # Minimum de courses évaluées avant de publier une précision réelle.
 MIN_RACES_FOR_PRECISION = 10
 
@@ -30,6 +38,30 @@ def plausible_roi(roi_simule: float | None) -> float | None:
     roi = float(roi_simule)
     if ROI_MIN_PLAUSIBLE <= roi <= ROI_MAX_PLAUSIBLE:
         return roi
+    return None
+
+
+def plausible_roi_pct(roi_pct: float | None) -> float | None:
+    """Retourne le ROI (en %) s'il est crédible, sinon None.
+
+    Un backtest flat sur un petit échantillon biaisé longshot peut sortir des ROI
+    aberrants (+307%). On ne publie que la plage plausible, sinon None → "—".
+    """
+    if roi_pct is None:
+        return None
+    r = float(roi_pct)
+    if ROI_PCT_MIN_PLAUSIBLE <= r <= ROI_PCT_MAX_PLAUSIBLE:
+        return r
+    return None
+
+
+def plausible_auc(auc: float | None) -> float | None:
+    """Retourne l'AUC si crédible (∈ [0.5, 1.0]), sinon None."""
+    if auc is None:
+        return None
+    a = float(auc)
+    if AUC_MIN_PLAUSIBLE <= a <= AUC_MAX_PLAUSIBLE:
+        return a
     return None
 
 
@@ -51,7 +83,12 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
         )
     )).scalar() or 0
 
-    if rll_total >= MIN_RACES_FOR_PRECISION:
+    # AUC crédible (ou None). Sert aussi de garde-fou : si le modèle actif n'est
+    # pas crédible (AUC hors [0.5,1]), sa précision observée n'est pas représentative
+    # ⇒ on ne la publie pas (None → "—"), au lieu d'un 0% trompeur.
+    auc = plausible_auc(mv.auc_roc if mv else None)
+
+    if rll_total >= MIN_RACES_FOR_PRECISION and auc is not None:
         precision_top3 = round(rll_top3 / rll_total, 4)
     else:
         precision_top3 = None
@@ -59,6 +96,7 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
     roi = plausible_roi(mv.roi_simule if mv else None)
 
     return {
+        "auc_roc": auc,
         "precision_top3": precision_top3,
         "roi_simule": roi,
         "nb_courses_evaluees": rll_total,
