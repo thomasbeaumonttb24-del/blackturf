@@ -4,7 +4,7 @@ import useSWR from "swr";
 import Link from "next/link";
 import {
   TrendingUp, Trophy, CheckCircle2, XCircle, ArrowUpRight, Minus,
-  ChevronRight, Star, Activity,
+  ChevronRight, Star, Activity, Receipt,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -80,24 +80,6 @@ interface TrackRecord {
   };
 }
 
-interface ProfilsBacktest {
-  profils: Array<{
-    profil: string;
-    label: string;
-    nb_courses: number;
-    mise_totale: number;
-    gain_total: number;
-    gain_net: number;
-    roi: number | null;
-    roi_winsorise: number | null;
-    taux_courses_beneficiaires: number | null;
-  }>;
-  nb_courses: number;
-  mise_par_course: number;
-  updated_at?: string;
-  type_perf?: Record<string, { n: number; win_rate: number; roi_winsorise: number; poids_appris: number }>;
-}
-
 interface WinningBet {
   profil: string;
   course_id: string;
@@ -128,6 +110,60 @@ const VERDICTS: Record<string, { emoji: string; label: string; cls: string }> = 
   manque: { emoji: "❌", label: "Manqué", cls: "border-rose-300 bg-rose-50 text-rose-700" },
 };
 
+// ─── Table de paris gagnés (réutilisée : 50 derniers + 30 meilleurs) ───
+function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: boolean }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[760px]">
+        <thead>
+          <tr className="border-b border-border/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+            {ranked && <th className="text-left py-2 font-medium w-8">#</th>}
+            <th className="text-left py-2 font-medium">Date</th>
+            <th className="text-left py-2 font-medium">Course</th>
+            <th className="text-right py-2 font-medium">Cote</th>
+            <th className="text-right py-2 font-medium">Mise</th>
+            <th className="text-right py-2 font-medium">Gain</th>
+            <th className="text-left py-2 font-medium pl-3">Profil</th>
+            <th className="text-left py-2 font-medium">Type</th>
+            <th className="text-right py-2 font-medium">Résultat</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/30">
+          {bets.map((b, i) => {
+            const pm = PROFIL_LABELS[b.profil] ?? { label: b.profil, cls: "bg-muted text-muted-foreground ring-border" };
+            return (
+              <tr key={i} className={cn("hover:bg-accent/20 transition-colors", ranked && i < 3 && "bg-brand-gold/[0.04]")}>
+                {ranked && <td className="py-2.5 font-black text-muted-foreground tabular-nums">{i + 1}</td>}
+                <td className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                  {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                </td>
+                <td className="py-2.5">
+                  <Link href={`/courses/${b.course_id}`} className="font-medium hover:text-brand-gold transition-colors">{b.code ?? "—"}</Link>
+                  <span className="block text-[10px] text-muted-foreground truncate max-w-[130px]">{b.hippodrome}</span>
+                </td>
+                <td className="py-2.5 text-right font-mono tabular-nums">{b.rapport ? `×${b.rapport.toFixed(1)}` : "—"}</td>
+                <td className="py-2.5 text-right font-mono tabular-nums text-muted-foreground">{b.mise.toFixed(0)}€</td>
+                <td className="py-2.5 text-right font-mono tabular-nums font-semibold">{b.gain.toFixed(2)}€</td>
+                <td className="py-2.5 pl-3">
+                  <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
+                </td>
+                <td className="py-2.5">
+                  <span className="font-medium">{b.type_pari}</span>
+                  <span className="block text-[10px] text-muted-foreground">{b.chevaux.map((n) => `N°${n}`).join(" + ")}</span>
+                </td>
+                <td className="py-2.5 text-right whitespace-nowrap">
+                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">Gagné</span>
+                  <span className="block text-[11px] font-bold text-emerald-600 tabular-nums mt-0.5">+{b.benefice.toFixed(2)}€</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────
 export default function TrackRecordPage() {
   const { data, isLoading } = useSWR<TrackRecord>(
@@ -136,17 +172,10 @@ export default function TrackRecordPage() {
     { refreshInterval: 60_000, revalidateOnFocus: true }  // recalcul ~ à chaque fin de course
   );
 
-  // Backtest par profil — calcul lourd côté API (cache 6h), pas de refresh agressif
-  const { data: profilsData } = useSWR<ProfilsBacktest>(
-    "stats-profils",
-    () => statsApi.profils().then((r) => r.data),
-    { refreshInterval: 300_000, revalidateOnFocus: true },  // maj ~ à chaque fin de course
-  );
-
   // Paris RÉELLEMENT gagnés par l'algorithme, par profil (pronos émis réglés)
   const { data: gagnantsData } = useSWR<{
     gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
-    profils?: Array<{ profil: string; label: string; nb_courses: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
+    profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
     updated_at?: string;
   }>(
     "palmares-gagnants",
@@ -265,259 +294,121 @@ export default function TrackRecordPage() {
           </Card>
         )}
 
-        {/* ── Performance par profil de risque (backtest simulé) ───────── */}
-        <Card className="border-border/60">
+        {/* ── BILAN RÉEL : l'algo joue les 3 profils sur chaque course ───────── */}
+        <Card className="border-emerald-500/30">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-amber-400" />
-              Performance par profil de risque
+              <Trophy className="w-4 h-4 text-emerald-500" />
+              Bilan réel — 10€ par profil sur chaque course
             </CardTitle>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Sur chaque course analysée, l&apos;algorithme joue le pronostic <strong>figé avant le départ</strong> des
+              3 profils de risque (10€ chacun, soit 30€/course), réglé aux <strong>vrais rapports PMU</strong> à l&apos;arrivée.
+              Cumul réel ci-dessous — aucune donnée inventée.
+            </p>
           </CardHeader>
           <CardContent>
-            {!profilsData ? (
-              <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">
-                Calcul du backtest par profil…
-              </div>
-            ) : profilsData.nb_courses === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Pas encore assez d&apos;historique pour le backtest par profil.
-              </div>
+            {!gagnantsData ? (
+              <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
             ) : (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {profilsData.profils.map((p) => {
-                    const accent =
-                      p.profil === "conservateur" ? "#059669"
-                      : p.profil === "equilibre" ? "#2563EB"
-                      : "#D97706";
-                    const tcb = p.taux_courses_beneficiaires;
-                    // ROI typique = winsorisé (gros rapports plafonnés) pour ne pas
-                    // afficher un chiffre gonflé par la variance (jeu responsable).
-                    const roiT = p.roi_winsorise;
-                    const roiPos = (roiT ?? 0) >= 0;
-                    return (
-                      <div key={p.profil} className="rounded-2xl border border-border/60 bg-white p-5">
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-sm font-semibold" style={{ color: accent }}>{p.label}</span>
-                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                            {p.nb_courses} courses
-                          </span>
-                        </div>
-                        {/* Métrique PRINCIPALE : % de courses où le profil gagne (robuste, intuitif) */}
-                        <div className="text-3xl font-black tabular-nums" style={{ color: accent }}>
-                          {tcb == null ? "—" : `${tcb}%`}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          courses gagnantes (mise {profilsData.mise_par_course}€/course)
-                        </div>
-                        <div className="mt-4 space-y-1.5 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">ROI typique</span>
-                            <span className="font-semibold tabular-nums" style={{ color: roiT == null ? "#9CA3AF" : roiPos ? "#059669" : "#DC2626" }}>
-                              {roiT == null ? "—" : `${roiPos ? "+" : ""}${roiT}%`}
-                            </span>
+                {(() => {
+                  const tg = gagnantsData.total_gain ?? 0;
+                  const tb = gagnantsData.total_benefice ?? 0;
+                  const tm = Math.round((tg - tb) * 100) / 100;   // misé = gagné − bénéfice
+                  return (
+                    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-50/40 p-5 mb-5">
+                      <div className="flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Bénéfice net total</div>
+                          <div className={cn("text-4xl font-black tabular-nums leading-none mt-1", tb >= 0 ? "text-emerald-600" : "text-rose-500")}>
+                            {tb >= 0 ? "+" : ""}{tb.toFixed(2)}€
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Gain net (brut)</span>
-                            <span className="font-medium tabular-nums" style={{ color: p.gain_net >= 0 ? "#059669" : "#DC2626" }}>
-                              {p.gain_net >= 0 ? "+" : ""}{p.gain_net}€
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Misé total</span>
-                            <span className="font-medium tabular-nums">{p.mise_totale}€</span>
-                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                          <div><div className="text-muted-foreground text-xs">Total misé</div><div className="font-bold tabular-nums">{tm.toFixed(0)}€</div></div>
+                          <div><div className="text-muted-foreground text-xs">Total gagné</div><div className="font-bold tabular-nums text-emerald-600">{tg.toFixed(0)}€</div></div>
+                          <div><div className="text-muted-foreground text-xs">Paris gagnés</div><div className="font-bold tabular-nums">{gagnantsData.n}</div></div>
+                          <div><div className="text-muted-foreground text-xs">Courses</div><div className="font-bold tabular-nums">{gagnantsData.n_courses ?? 0}</div></div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-                <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/80">
-                  Backtest sur les {profilsData.nb_courses} dernières courses réglables : le plan de mise de chaque profil est
-                  figé <strong>avant la course</strong> (mêmes prédictions que celles servies), réglé sur l&apos;arrivée
-                  officielle <strong>et les rapports PMU RÉELS</strong> (Simple Gagnant, Couplé, Trio, 2sur4). Mis à jour à
-                  chaque fin de course. <strong>Courses gagnantes</strong> = part des courses où le profil finit bénéficiaire
-                  (le Prudent gagne souvent peu, le Risqué rarement mais gros). Le <strong>ROI typique</strong> plafonne les
-                  très gros rapports (×30) pour refléter le rendement courant ; le <strong>gain net brut</strong> les inclut,
-                  d&apos;où sa forte variance. Les courses dont un pari gagnant n&apos;a pas de rapport publié sont exclues
-                  (jamais estimées). <strong>Simulation — résultats passés, aucune garantie de gain futur.</strong>
-                </p>
+                    </div>
+                  );
+                })()}
+                {gagnantsData.profils && gagnantsData.profils.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {gagnantsData.profils.map((p) => {
+                      const pm = PROFIL_LABELS[p.profil] ?? { label: p.label, cls: "bg-muted text-muted-foreground ring-border" };
+                      return (
+                        <div key={p.profil} className="rounded-xl border border-border/60 bg-white p-4">
+                          <div className="flex items-center justify-between">
+                            <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{p.nb_courses} courses</span>
+                          </div>
+                          <div className={cn("mt-3 text-2xl font-black tabular-nums leading-none", p.gain_net >= 0 ? "text-emerald-600" : "text-rose-500")}>
+                            {p.gain_net >= 0 ? "+" : ""}{p.gain_net.toFixed(0)}€
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">bénéfice net · ROI {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}</div>
+                          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                            <span className="text-muted-foreground">Misé</span><span className="text-right font-medium tabular-nums">{(p.mise_totale ?? 0).toFixed(0)}€</span>
+                            <span className="text-muted-foreground">Gagné</span><span className="text-right font-medium tabular-nums text-emerald-600">{(p.gain_total ?? 0).toFixed(0)}€</span>
+                            <span className="text-muted-foreground">Paris gagnés</span><span className="text-right font-medium tabular-nums">{p.paris_gagnes}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             )}
           </CardContent>
         </Card>
 
-        {/* ── Paris GAGNÉS par l'algorithme (réels, par profil) ───────────── */}
-        <Card className="border-emerald-500/30">
+        {/* ── 50 derniers paris gagnés (tous profils) ───────────────────────── */}
+        <Card className="border-border/60">
           <CardHeader className="pb-3">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Trophy className="w-4 h-4 text-emerald-500" />
-                Paris gagnés générés par l&apos;algorithme
-              </CardTitle>
-              {gagnantsData && gagnantsData.total_benefice != null && (
-                <div className="text-right">
-                  <div className={cn("text-2xl font-black tabular-nums leading-none", gagnantsData.total_benefice >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                    {gagnantsData.total_benefice >= 0 ? "+" : ""}{gagnantsData.total_benefice.toFixed(2)}€
-                  </div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                    bénéfice net · {gagnantsData.n} paris gagnés sur {gagnantsData.n_courses ?? 0} courses
-                  </div>
-                </div>
-              )}
-            </div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-emerald-500" />
+              Les 50 derniers paris gagnés
+            </CardTitle>
             <p className="text-[11px] text-muted-foreground mt-1">
-              Chaque ligne = un pari réellement émis avant la course par un profil, réglé au
-              rapport PMU officiel. Toutes les courses analysées. Mis à jour à chaque arrivée. Aucune donnée inventée.
+              Tous profils confondus, les plus récents. Chaque pari a été <strong>figé avant le départ</strong> et réglé
+              au <strong>rapport PMU réel</strong> à l&apos;arrivée.
             </p>
           </CardHeader>
           <CardContent>
-            {/* Résumé par profil — vrai nombre de courses + gain net réel */}
-            {gagnantsData?.profils && gagnantsData.profils.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-                {gagnantsData.profils.map((p) => {
-                  const pm = PROFIL_LABELS[p.profil] ?? { label: p.label, cls: "bg-muted text-muted-foreground ring-border" };
-                  return (
-                    <div key={p.profil} className="rounded-xl border border-border/60 bg-muted/20 p-3">
-                      <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
-                      <div className={cn("mt-2 text-2xl font-black tabular-nums leading-none", p.gain_net >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                        {p.gain_net >= 0 ? "+" : ""}{p.gain_net.toFixed(0)}€
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-1">
-                        gain net · ROI {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground/70 mt-1.5">
-                        {p.nb_courses} courses · {p.paris_gagnes} paris gagnés
-                        {p.taux_courses_beneficiaires != null ? ` · ${p.taux_courses_beneficiaires}% bénéf.` : ""}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
             {!gagnantsData ? (
               <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
             ) : gagnantsData.gagnants.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
-                Les paris gagnants apparaîtront ici dès les prochaines arrivées (l&apos;historique se
-                construit course après course, en temps réel).
+                Les paris gagnants apparaîtront ici dès les prochaines arrivées (l&apos;historique se construit en temps réel).
               </div>
             ) : (
               <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[620px]">
-                    <thead>
-                      <tr className="border-b border-border/40 text-[11px] uppercase tracking-wide text-muted-foreground">
-                        <th className="text-left py-2 font-medium">Date</th>
-                        <th className="text-left py-2 font-medium">Profil</th>
-                        <th className="text-left py-2 font-medium">Course</th>
-                        <th className="text-left py-2 font-medium">Pari</th>
-                        <th className="text-right py-2 font-medium">Mise</th>
-                        <th className="text-right py-2 font-medium">Gain</th>
-                        <th className="text-right py-2 font-medium">Bénéfice</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/30">
-                      {gagnantsData.gagnants.map((b, i) => {
-                        const pm = PROFIL_LABELS[b.profil] ?? { label: b.profil, cls: "bg-muted text-muted-foreground ring-border" };
-                        return (
-                          <tr key={i} className="hover:bg-accent/20 transition-colors">
-                            <td className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                              {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
-                            </td>
-                            <td className="py-2.5">
-                              <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
-                            </td>
-                            <td className="py-2.5">
-                              <Link href={`/courses/${b.course_id}`} className="font-medium hover:text-brand-gold transition-colors">
-                                {b.code ?? "—"}
-                              </Link>
-                              <span className="block text-[10px] text-muted-foreground truncate max-w-[140px]">{b.hippodrome}</span>
-                              {b.fige_avant_course && (
-                                <span
-                                  title={b.fige_le ? `Pronostic figé le ${new Date(b.fige_le).toLocaleString("fr-FR")}, avant le départ` : "Pronostic figé avant le départ"}
-                                  className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                                >
-                                  ✓ Figé avant départ
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5">
-                              <span className="font-medium">{b.type_pari}</span>
-                              <span className="block text-[10px] text-muted-foreground">{b.chevaux.map((n) => `N°${n}`).join(" + ")}</span>
-                            </td>
-                            <td className="py-2.5 text-right font-mono tabular-nums text-muted-foreground">{b.mise.toFixed(0)}€</td>
-                            <td className="py-2.5 text-right font-mono tabular-nums font-semibold">{b.gain.toFixed(2)}€</td>
-                            <td className="py-2.5 text-right font-mono tabular-nums font-bold text-emerald-600">
-                              +{b.benefice.toFixed(2)}€{b.rapport ? <span className="block text-[10px] font-normal text-muted-foreground">×{b.rapport.toFixed(1)}</span> : null}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <BetsTable bets={gagnantsData.gagnants.slice(0, 50)} />
                 <p className="mt-3 text-[11px] text-muted-foreground/70">
-                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total
-                  (100 plus récents affichés) · mise de référence 10€/course · réglé aux rapports PMU réels.
+                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total ·
+                  les 50 plus récents affichés · mise de référence 10€/course.
                 </p>
               </>
             )}
           </CardContent>
         </Card>
 
-        {/* ── Top 30 des plus gros gains ──────────────────────────────────── */}
+        {/* ── 30 meilleurs gains ────────────────────────────────────────────── */}
         {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
           <Card className="border-brand-gold/30">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Star className="w-4 h-4 text-brand-gold fill-brand-gold" />
-                Top 30 des plus gros gains
+                Les 30 plus gros gains
               </CardTitle>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Les 30 paris générés ayant rapporté le plus gros bénéfice — réels, réglés aux rapports PMU.
+                Les 30 paris au plus gros bénéfice net — réels, figés avant le départ, réglés aux rapports PMU.
               </p>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[600px]">
-                  <thead>
-                    <tr className="border-b border-border/40 text-[11px] uppercase tracking-wide text-muted-foreground">
-                      <th className="text-left py-2 font-medium w-8">#</th>
-                      <th className="text-left py-2 font-medium">Date</th>
-                      <th className="text-left py-2 font-medium">Course</th>
-                      <th className="text-left py-2 font-medium">Pari</th>
-                      <th className="text-right py-2 font-medium">Mise</th>
-                      <th className="text-right py-2 font-medium">Cote</th>
-                      <th className="text-right py-2 font-medium">Bénéfice</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/30">
-                    {gagnantsData.top_gains.map((b, i) => {
-                      const pm = PROFIL_LABELS[b.profil] ?? { label: b.profil, cls: "" };
-                      return (
-                        <tr key={i} className={cn("hover:bg-accent/20 transition-colors", i < 3 && "bg-brand-gold/[0.04]")}>
-                          <td className="py-2.5 font-black text-muted-foreground tabular-nums">{i + 1}</td>
-                          <td className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                            {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
-                          </td>
-                          <td className="py-2.5">
-                            <Link href={`/courses/${b.course_id}`} className="font-medium hover:text-brand-gold transition-colors">{b.code ?? "—"}</Link>
-                            <span className="block text-[10px] text-muted-foreground truncate max-w-[130px]">{b.hippodrome}</span>
-                          </td>
-                          <td className="py-2.5">
-                            <span className="font-medium">{b.type_pari}</span>
-                            <span className="block text-[10px] text-muted-foreground">{b.chevaux.map((n) => `N°${n}`).join(" + ")} · {pm.label}</span>
-                          </td>
-                          <td className="py-2.5 text-right font-mono tabular-nums text-muted-foreground">{b.mise.toFixed(0)}€</td>
-                          <td className="py-2.5 text-right font-mono tabular-nums">{b.rapport ? `×${b.rapport.toFixed(1)}` : "—"}</td>
-                          <td className="py-2.5 text-right font-mono tabular-nums font-black text-emerald-600">+{b.benefice.toFixed(2)}€</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <BetsTable bets={gagnantsData.top_gains} ranked />
             </CardContent>
           </Card>
         )}
