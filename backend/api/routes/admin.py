@@ -673,10 +673,11 @@ async def get_learning_signals(
     except Exception as e:
         log.warning("admin.learning_signals.signal_skip", err=str(e)[:120])
 
-    # 3. Edge monitor (dernière mesure hors-échantillon)
+    # 3. Edge monitor (dernière mesure hors-échantillon — data JSONB)
     try:
         r = (await db.execute(text("""
-            SELECT n_test, win_filt, win_base, roi_cap, edge_ok, created_at
+            SELECT (data->>'n_test')::int, (data->>'win_filt')::float, (data->>'win_base')::float,
+                   (data->>'roi_cap')::float, (data->>'edge_ok')::bool, created_at
             FROM edge_monitor ORDER BY created_at DESC LIMIT 1
         """))).first()
         if r:
@@ -686,6 +687,7 @@ async def get_learning_signals(
                 "mesure_le": r[5].isoformat() if r[5] else None,
             }
     except Exception as e:
+        await db.rollback()
         log.warning("admin.learning_signals.edge_skip", err=str(e)[:120])
 
     return out
@@ -726,12 +728,15 @@ async def get_learning_convergence(
             for r in rows
         ]
     except Exception as e:
+        await db.rollback()
         log.warning("admin.convergence.week_skip", err=str(e)[:120])
 
-    # 2. Edge hors-échantillon dans le temps (edge_monitor)
+    # 2. Edge hors-échantillon dans le temps (edge_monitor — tout dans data JSONB)
     try:
         rows = (await db.execute(text("""
-            SELECT to_char(created_at, 'DD/MM') AS d, win_filt, win_base, roi_cap, edge_ok
+            SELECT to_char(created_at, 'DD/MM') AS d,
+                   (data->>'win_filt')::float, (data->>'win_base')::float,
+                   (data->>'roi_cap')::float, (data->>'edge_ok')::bool
             FROM edge_monitor ORDER BY created_at DESC LIMIT 20
         """))).all()
         out["edge_histo"] = [
@@ -741,6 +746,7 @@ async def get_learning_convergence(
             for r in reversed(rows)
         ]
     except Exception as e:
+        await db.rollback()
         log.warning("admin.convergence.edge_skip", err=str(e)[:120])
 
     # 3. Gain net CUMULÉ par profil dans le temps (profil_run_log réglés)
@@ -766,6 +772,7 @@ async def get_learning_convergence(
             cumul.setdefault(profil, []).append({"jour": jour, "cumul": round(running[profil], 2)})
         out["profil_cumul"] = {LBL.get(k, k): v for k, v in cumul.items()}
     except Exception as e:
+        await db.rollback()
         log.warning("admin.convergence.profil_skip", err=str(e)[:120])
 
     return out
