@@ -63,7 +63,7 @@ export function CalculatorDemo() {
       {/* Plan de mise calculé en direct */}
       <div className="mt-3 space-y-2">
         {lines.map((l) => (
-          <div key={l.key} className={`${l.key} flex items-center justify-between rounded-md py-2 pl-3 pr-3 text-xs`}>
+          <div key={l.key} className="flex items-center justify-between rounded-md bg-gray-50 py-2 pl-3 pr-3 text-xs">
             <div className="w-24">
               <div className="font-semibold text-gray-800">{l.label}</div>
               <div className="text-[10px] text-gray-400">cote {cote(l.cote)}</div>
@@ -71,7 +71,7 @@ export function CalculatorDemo() {
             <span className="text-gray-500">
               mise <span className="font-mono text-gray-700">{eur(l.stake)}€</span>
             </span>
-            <span className="num-display font-bold tabular-nums" style={{ color: l.color }}>
+            <span className="num-display font-bold tabular-nums text-gray-900">
               +{eur(l.gainNet)}€
             </span>
           </div>

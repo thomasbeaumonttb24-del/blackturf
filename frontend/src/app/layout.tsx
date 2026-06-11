@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     template: "%s | BlackTurf",
   },
   description:
-    "Entrez votre mise → BlackTurf génère votre plan de pari personnalisé. Paris de valeur détectés par IA (XGBoost + LightGBM + CatBoost) sur le programme PMU du jour, entraînée sur les résultats réels.",
+    "Entrez votre mise → BlackTurf génère votre plan de pari personnalisé. Un algorithme propulsé par l'IA (XGBoost + LightGBM + CatBoost) qui se réentraîne après chaque course sur les résultats réels du PMU.",
   keywords: [
     "pronostics hippiques", "pari de valeur", "intelligence artificielle",
     "PMU", "analyse hippique", "tiercé", "quinté", "critère de Kelly",
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "BlackTurf — IA Hippique",
+    title: "BlackTurf — Le moteur qui réapprend chaque course",
     description: "Plan de mise personnalisé. Paris de valeur en temps réel.",
   },
   robots: { index: true, follow: true },

@@ -432,3 +432,56 @@
   .btn-shimmer::after { animation: none !important; transition: none !important; }
   .reveal-up, .reveal-left, .reveal-right { opacity: 1 !important; transform: none !important; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   LANDING — refonte (brand blanc premium × or, dynamique & épuré)
+   Réutilise le design system existant (.font-display, .glass-card,
+   .text-gradient, brand-gold). On ajoute ici UNIQUEMENT ce qui est
+   propre à la landing : la boucle d'apprentissage + 2-3 helpers.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Numéro de section / valeur monospace tabulaire */
+.folio {
+  font-family: var(--font-space-grotesk, monospace);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+/* Trait d'accent or sous un mot-clé du titre (signature brand) */
+.accent-underline {
+  background-image: linear-gradient(90deg, #B45309, #F59E0B);
+  background-repeat: no-repeat;
+  background-position: 0 92%;
+  background-size: 100% 3px;
+  padding-bottom: 0.08em;
+}
+
+/* ════ BOUCLE D'APPRENTISSAGE (hero centerpiece) ════ */
+/* Orbite pointillée qui tourne lentement = le cycle continu */
+@keyframes loopSpin { to { transform: rotate(360deg); } }
+.loop-orbit { animation: loopSpin 26s linear infinite; transform-origin: 50% 50%; }
+
+/* Flux qui circule le long du cycle (stroke-dashoffset) */
+@keyframes loopFlow { to { stroke-dashoffset: -300; } }
+.loop-flow {
+  stroke-dasharray: 6 10;
+  animation: loopFlow 5s linear infinite;
+}
+
+/* Nœuds (Course / Pari / Résultat / Correction) qui s'allument en séquence */
+@keyframes nodePulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.06); }
+}
+.loop-node { animation: nodePulse 4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.loop-node.n2 { animation-delay: 1s; }
+.loop-node.n3 { animation-delay: 2s; }
+.loop-node.n4 { animation-delay: 3s; }
+
+/* Compteur de "delta" qui clignote discrètement (le moteur se corrige) */
+@keyframes deltaBlink { 0%, 92%, 100% { opacity: 1; } 96% { opacity: 0.35; } }
+.delta-blink { animation: deltaBlink 3.2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .loop-orbit, .loop-flow, .loop-node, .delta-blink { animation: none !important; }
+}

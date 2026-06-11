@@ -91,7 +91,7 @@ export function Footer() {
             © 2026 BlackTurf. Tous droits réservés.
           </p>
           <p className="text-xs text-gray-400 text-center">
-            ⚠️ Le jeu peut être dangereux. Jouez de façon responsable. Interdit aux mineurs.{" "}
+            Le jeu peut être dangereux. Jouez de façon responsable. Interdit aux mineurs.{" "}
             <a
               href="https://www.joueurs-info-service.fr"
               target="_blank"
