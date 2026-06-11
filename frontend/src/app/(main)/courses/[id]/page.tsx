@@ -1074,9 +1074,13 @@ interface BilanProfil {
   esperance_gain: number;
   bilan: BilanData;
   verdict: "gagnant" | "perdant" | "en_attente";
+  source?: "fige" | "simulation";   // "fige" = plan réellement figé avant départ (= palmarès)
+  fige_le?: string | null;          // horodatage du gel pré-course
+  regle_le?: string | null;         // horodatage du règlement post-arrivée
 }
 interface BilanResp {
   montant: number;
+  source?: "fige" | "simulation";
   bilan: BilanData;
   bilans_profils?: BilanProfil[];
   comparaison: { predicted_top3: number[]; predicted_top5?: number[]; actual_top3: number[]; actual_top5?: number[]; gagnant_reel: number | null; rang_predit_gagnant: number | null; overlap_top3: number; modele_a_vu_gagnant: boolean };
@@ -1245,7 +1249,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
   // Bilans par profil (fallback : bilan unique legacy mappé sur "modéré")
   const profils: BilanProfil[] = data.bilans_profils && data.bilans_profils.length
     ? data.bilans_profils
-    : [{ profil: "equilibre", profil_label: "Modéré", mode_adaptatif: "normal", esperance_gain: 0, bilan: data.bilan, verdict: data.verdict }];
+    : [{ profil: "equilibre", profil_label: "Modéré", mode_adaptatif: "normal", esperance_gain: 0, bilan: data.bilan, verdict: data.verdict, source: data.source }];
   const cur = profils.find((b) => b.profil === sel) ?? profils[0];
   const bilan = cur.bilan;
 
@@ -1257,9 +1261,21 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
 
   return (
     <div className="mt-4 rounded-xl border border-brand-gold/30 bg-brand-gold/5 p-4">
-      <h2 className="mb-1 flex items-center gap-2 text-base font-bold">
+      <h2 className="mb-1 flex flex-wrap items-center gap-2 text-base font-bold">
         Bilan du plan de mise — {data.montant}€
-        <span className="text-xs font-normal text-muted-foreground">· pronostic rejoué sur l&apos;arrivée réelle, par profil</span>
+        <span className="text-xs font-normal text-muted-foreground">
+          {cur.source === "fige"
+            ? "· plan figé AVANT le départ, réglé sur l'arrivée réelle (par profil)"
+            : "· simulation rétrospective sur l'arrivée réelle, par profil"}
+        </span>
+        {cur.source === "fige" && (
+          <span
+            title={cur.fige_le ? `Plan figé le ${new Date(cur.fige_le).toLocaleString("fr-FR")}, avant le départ — identique au palmarès` : "Plan figé avant le départ — identique au palmarès"}
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+          >
+            ✓ Figé avant départ
+          </span>
+        )}
       </h2>
 
       {/* Onglets profils — chaque profil = méthode de jeu différente */}
@@ -1369,8 +1385,9 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
       <BilanDetail bilan={bilan} />
 
       <p className="mt-2 text-[10px] text-muted-foreground/70">
-        Chaque profil rejoue sa propre méthode (Prudent = placé fréquent · Modéré = équilibré · Risqué = gros gains),
-        réglée avec les rapports PMU définitifs réels. Simulation pédagogique — jouez responsable.
+        {cur.source === "fige"
+          ? "Ce plan a été RÉELLEMENT figé avant le départ (un par profil : Prudent = placé fréquent · Modéré = équilibré · Risqué = gros gains), puis réglé aux rapports PMU définitifs réels — c'est le même prono que celui compté au palmarès. Jouez responsable."
+          : "Aucun plan figé pour ce profil sur cette course (antérieure au gel automatique) : simulation rétrospective de la méthode, réglée aux rapports PMU réels. Jouez responsable."}
       </p>
     </div>
   );

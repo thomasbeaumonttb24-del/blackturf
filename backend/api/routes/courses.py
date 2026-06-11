@@ -995,11 +995,58 @@ async def get_bilan_pronostic(
         roi_weights, heat = {}, 0.0
 
     # ── Bilan PAR PROFIL (prudent / modéré / risqué) ─────────────────────
+    # SOURCE DE VÉRITÉ : le PLAN RÉELLEMENT FIGÉ avant le départ (profil_run_log),
+    # réglé aux vrais rapports PMU — EXACTEMENT ce que montre le palmarès. On NE
+    # régénère PAS le plan à la volée (sinon le bilan diverge du prono figé : cotes,
+    # heat et ROI weights ont changé depuis → paris différents = incohérence vue par
+    # l'utilisateur). Fallback simulation UNIQUEMENT si aucune trace figée (course
+    # legacy jamais figée en live), et CLAIREMENT marquée comme telle.
+    from sqlalchemy import text as _text
+    import json as _json
+    from ml.profil_learning import PROFILS, MISE_REF, ensure_tables
+
     PROFIL_LABELS = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
+
+    try:
+        await ensure_tables(db)
+        frozen_rows = (await db.execute(_text("""
+            SELECT profil, plan, resultat, created_at, settled_at, statut
+            FROM profil_run_log
+            WHERE course_id = :cid AND statut IN ('settled', 'partial')
+              AND COALESCE(meta->>'backfill', '') <> 'true'
+              AND created_at < :depart
+        """), {"cid": course_id, "depart": course.date_heure})).all()
+    except Exception:
+        frozen_rows = []
+    frozen: dict = {}
+    for prof, plan_j, res_j, c_at, s_at, st in frozen_rows:
+        frozen[prof] = {
+            "plan": plan_j if isinstance(plan_j, dict) else _json.loads(plan_j or "{}"),
+            "resultat": res_j if isinstance(res_j, dict) else _json.loads(res_j or "{}"),
+            "created_at": c_at, "settled_at": s_at, "statut": st,
+        }
+
+    has_fige = any(fr.get("resultat") for fr in frozen.values())
+    # Le plan figé est toujours à la mise de référence (10€) → le bilan l'affiche tel quel.
+    if has_fige:
+        montant = float(MISE_REF)
+
     bilans_profils = []
-    for prof in ("conservateur", "equilibre", "agressif"):
-        plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None, roi_weights, heat))
-        bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants)
+    for prof in PROFILS:
+        fr = frozen.get(prof)
+        if fr and fr.get("resultat"):
+            # VRAI prono figé avant course + réglé (identique au palmarès).
+            plan_p = fr["plan"]
+            bilan_p = fr["resultat"]
+            source = "fige"
+            fige_le = fr["created_at"].isoformat() if fr["created_at"] else None
+            regle_le = fr["settled_at"].isoformat() if fr["settled_at"] else None
+        else:
+            # Aucune trace figée → SIMULATION rétrospective (pas un vrai prono émis).
+            plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None, roi_weights, heat))
+            bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants)
+            source = "simulation"
+            fige_le = regle_le = None
         if bilan_p.get("en_attente"):
             verdict_p = "en_attente"
         elif bilan_p["net"] >= 0:
@@ -1013,6 +1060,9 @@ async def get_bilan_pronostic(
             "esperance_gain": plan_p.get("esperance_gain", 0.0),
             "bilan": bilan_p,
             "verdict": verdict_p,
+            "source": source,        # "fige" = vrai prono pré-course | "simulation" = legacy
+            "fige_le": fige_le,
+            "regle_le": regle_le,
         })
 
     # Bilan principal (Modéré) — rétro-compat avec l'ancien rendu.
@@ -1061,6 +1111,9 @@ async def get_bilan_pronostic(
     return {
         "course_id": course_id,
         "montant": montant,
+        # source globale : "fige" = plans réellement figés avant départ (= palmarès) ;
+        # "simulation" = aucune trace figée, rejeu rétrospectif (course legacy).
+        "source": "fige" if has_fige else "simulation",
         "bilan": bilan,
         "bilans_profils": bilans_profils,
         "comparaison": {
