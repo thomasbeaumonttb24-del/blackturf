@@ -117,6 +117,12 @@ export default function AlgorithmeMonitoringPage() {
     () => adminApi.learningSignals().then((r) => r.data),
     { refreshInterval: 30_000 }
   );
+  // Convergence : preuve d'amélioration dans le temps (précision/Brier/edge/gains)
+  const { data: converge } = useSWR(
+    isAdmin ? "admin-learning-convergence" : null,
+    () => adminApi.learningConvergence().then((r) => r.data),
+    { refreshInterval: 60_000 }
+  );
 
   // Garde d'accès APRÈS tous les hooks.
   if (!isAdmin) {
@@ -412,6 +418,109 @@ export default function AlgorithmeMonitoringPage() {
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground mt-3">Recalculé à chaque fin de course + chaque nuit. 100% mesuré sur résultats réels.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Convergence de l'apprentissage — preuve VISUELLE que l'algo s'améliore */}
+        {converge && (
+          <Card className="border-border/60">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingUp className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm font-medium">L&apos;algorithme s&apos;améliore-t-il ? — convergence</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mb-4">
+                Tout est mesuré sur les vraies courses terminées. Si l&apos;algorithme apprend bien :
+                la <b className="text-amber-500">précision monte</b>, l&apos;<b className="text-blue-400">erreur Brier baisse</b>,
+                et les <b className="text-emerald-400">gains cumulés montent</b>.
+              </p>
+
+              {/* Précision top-3 (↑) + erreur Brier (↓) par semaine */}
+              {converge.par_semaine?.length > 1 && (
+                <div className="mb-5">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                    Précision &amp; erreur, semaine par semaine
+                  </p>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={converge.par_semaine} margin={{ top: 6, right: 6, bottom: 0, left: -10 }}>
+                      <CartesianGrid {...GRID} />
+                      <XAxis dataKey="semaine" tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
+                      <YAxis yAxisId="p" domain={[0, 100]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v}%`} />
+                      <YAxis yAxisId="b" orientation="right" domain={[0, 0.4]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
+                      <Tooltip contentStyle={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 12 }}
+                        formatter={(v: number, n: string) => n.includes("Brier") ? [v?.toFixed?.(3) ?? v, "Erreur Brier"] : [`${v}%`, n]} />
+                      <Line yAxisId="p" type="monotone" name="Précision top-3" dataKey="precision_top3" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3 }} />
+                      <Line yAxisId="b" type="monotone" name="Erreur Brier" dataKey="brier" stroke="#3B82F6" strokeWidth={2} strokeDasharray="5 3" connectNulls dot={{ r: 2 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    <span className="text-amber-500">▲ Précision top-3</span> = le gagnant finit dans les 3 premiers prédits.
+                    <span className="text-blue-400 ml-2">▼ Brier</span> = écart proba/réalité (plus bas = mieux calibré).
+                  </p>
+                </div>
+              )}
+
+              {/* Gain net cumulé par profil (doit monter) */}
+              {converge.profil_cumul && Object.keys(converge.profil_cumul).length > 0 && (() => {
+                const COLORS: Record<string, string> = { Prudent: "#10B981", Modéré: "#3B82F6", Risqué: "#EF4444" };
+                // Fusionne les 3 séries par jour
+                const jours: string[] = [];
+                Object.values(converge.profil_cumul as Record<string, Array<{ jour: string; cumul: number }>>).forEach((s) =>
+                  s.forEach((p) => { if (!jours.includes(p.jour)) jours.push(p.jour); }));
+                const data = jours.map((j) => {
+                  const row: Record<string, number | string> = { jour: j };
+                  Object.entries(converge.profil_cumul as Record<string, Array<{ jour: string; cumul: number }>>).forEach(([k, s]) => {
+                    const pt = s.find((p) => p.jour === j); if (pt) row[k] = pt.cumul;
+                  });
+                  return row;
+                });
+                return (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                      Gain net cumulé par profil (10€/course, rapports PMU réels)
+                    </p>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <LineChart data={data} margin={{ top: 6, right: 6, bottom: 0, left: -6 }}>
+                        <CartesianGrid {...GRID} />
+                        <XAxis dataKey="jour" tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
+                        <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v}€`} />
+                        <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="2 2" />
+                        <Tooltip contentStyle={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 12 }}
+                          formatter={(v: number, n: string) => [`${v >= 0 ? "+" : ""}${v}€`, n]} />
+                        {Object.keys(converge.profil_cumul).map((k) => (
+                          <Line key={k} type="monotone" dataKey={k} name={k} stroke={COLORS[k] || "#6B7280"} strokeWidth={2} dot={false} connectNulls />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                    <p className="text-[10px] text-muted-foreground/60 mt-1">
+                      Chaque courbe = capital cumulé d&apos;un profil en jouant 10€/course sur l&apos;historique réglé. Monte = profil rentable.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* Edge hors-échantillon : le filtre bat-il le marché ? */}
+              {converge.edge_histo?.length > 0 && (
+                <div className="mt-4 rounded bg-muted/30 p-2.5">
+                  <p className="text-[11px] font-medium mb-1">Edge hors-échantillon (dernière mesure)</p>
+                  {(() => {
+                    const last = converge.edge_histo[converge.edge_histo.length - 1];
+                    return (
+                      <p className="text-[11px] text-muted-foreground">
+                        Sur des courses jamais apprises, les paris à forte conviction gagnent{" "}
+                        <b className={last.win_filtre >= (last.win_baseline || 0) ? "text-emerald-400" : "text-rose-400"}>{last.win_filtre}%</b>{" "}
+                        contre <b>{last.win_baseline}%</b> en jouant tout — ROI plafonné{" "}
+                        <b className={last.roi >= 0 ? "text-emerald-400" : "text-rose-400"}>{last.roi >= 0 ? "+" : ""}{last.roi}%</b>.{" "}
+                        {last.edge_ok ? "L'avantage tient ✓" : "Avantage à surveiller"}.
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground/60 mt-3">
+                Recalculé à chaque fin de course + chaque nuit. Aucune donnée inventée.
+              </p>
             </CardContent>
           </Card>
         )}

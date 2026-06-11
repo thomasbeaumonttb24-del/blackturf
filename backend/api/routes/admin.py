@@ -691,6 +691,81 @@ async def get_learning_signals(
     return out
 
 
+@router.get("/learning-convergence")
+async def get_learning_convergence(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """CONVERGENCE de l'apprentissage — preuve VISUELLE que l'algo s'améliore :
+      - par semaine : précision top-3 (monte = mieux) + erreur Brier (baisse = mieux)
+      - edge hors-échantillon dans le temps (le filtre conviction bat-il le marché ?)
+      - gain net CUMULÉ par profil (la courbe qui doit monter)
+    100% mesuré sur résultats réels. Compréhensible : tout est expliqué côté front."""
+    out: dict = {"par_semaine": [], "edge_histo": [], "profil_cumul": {}}
+
+    # 1. Précision + Brier par semaine (race_learning_log)
+    try:
+        rows = (await db.execute(text("""
+            SELECT to_char(date_trunc('week', analyzed_at), 'DD/MM') AS sem,
+                   count(*) AS n,
+                   round(avg(brier_score)::numeric, 3) AS brier,
+                   round((count(*) FILTER (WHERE gagnant_rang_predit <= 3)::numeric
+                          / NULLIF(count(*), 0)) * 100, 1) AS prec_top3,
+                   round((count(*) FILTER (WHERE gagnant_rang_predit = 1)::numeric
+                          / NULLIF(count(*), 0)) * 100, 1) AS prec_top1
+            FROM race_learning_log
+            WHERE analyzed_at > now() - interval '12 weeks'
+              AND gagnant_rang_predit IS NOT NULL
+            GROUP BY date_trunc('week', analyzed_at)
+            ORDER BY date_trunc('week', analyzed_at)
+        """))).all()
+        out["par_semaine"] = [
+            {"semaine": r[0], "n": r[1], "brier": float(r[2]) if r[2] is not None else None,
+             "precision_top3": float(r[3]) if r[3] is not None else None,
+             "precision_top1": float(r[4]) if r[4] is not None else None}
+            for r in rows
+        ]
+    except Exception as e:
+        log.warning("admin.convergence.week_skip", err=str(e)[:120])
+
+    # 2. Edge hors-échantillon dans le temps (edge_monitor)
+    try:
+        rows = (await db.execute(text("""
+            SELECT to_char(created_at, 'DD/MM') AS d, win_filt, win_base, roi_cap, edge_ok
+            FROM edge_monitor ORDER BY created_at DESC LIMIT 20
+        """))).all()
+        out["edge_histo"] = [
+            {"date": r[0], "win_filtre": round(float(r[1]) * 100, 1) if r[1] is not None else None,
+             "win_baseline": round(float(r[2]) * 100, 1) if r[2] is not None else None,
+             "roi": round(float(r[3]), 1) if r[3] is not None else None, "edge_ok": r[4]}
+            for r in reversed(rows)
+        ]
+    except Exception as e:
+        log.warning("admin.convergence.edge_skip", err=str(e)[:120])
+
+    # 3. Gain net CUMULÉ par profil dans le temps (profil_run_log réglés)
+    try:
+        rows = (await db.execute(text("""
+            SELECT profil, to_char(date_trunc('day', settled_at), 'DD/MM') AS jour,
+                   sum((resultat->>'net')::numeric) AS net_jour
+            FROM profil_run_log
+            WHERE statut = 'settled' AND resultat IS NOT NULL AND settled_at IS NOT NULL
+            GROUP BY profil, date_trunc('day', settled_at)
+            ORDER BY profil, date_trunc('day', settled_at)
+        """))).all()
+        LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
+        cumul: dict = {}
+        running: dict = {}
+        for profil, jour, net in rows:
+            running[profil] = running.get(profil, 0.0) + float(net or 0)
+            cumul.setdefault(profil, []).append({"jour": jour, "cumul": round(running[profil], 2)})
+        out["profil_cumul"] = {LBL.get(k, k): v for k, v in cumul.items()}
+    except Exception as e:
+        log.warning("admin.convergence.profil_skip", err=str(e)[:120])
+
+    return out
+
+
 @router.get("/adaptive-learning/history")
 async def get_adaptive_learning_history(
     limit: int = Query(default=50, le=200),

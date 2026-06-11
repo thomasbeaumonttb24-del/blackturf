@@ -159,4 +159,6 @@ export const adminApi = {
     api.get("/calibration-quality", { baseURL: `${API_URL}/admin/api` }),
   learningSignals: () =>
     api.get("/learning-signals", { baseURL: `${API_URL}/admin/api` }),
+  learningConvergence: () =>
+    api.get("/learning-convergence", { baseURL: `${API_URL}/admin/api` }),
 };
