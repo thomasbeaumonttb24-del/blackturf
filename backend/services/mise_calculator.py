@@ -161,8 +161,13 @@ PROFIL_CONFIG = {
     # proposer un large éventail (« 4 duo gagnant », « 5 trio », « 2 simple gagnant
     # grosse cote ») au lieu d'1-2 paris pauvres. min_stake_factor bas (0.34) → mises
     # planchers à 1€ : PLUS de paris ET des sommes VARIÉES (le reste se répartit par Kelly).
+    # `spec_coup`: le risqué ASSUME des paris GROS-LOT spéculatifs (EV<0 même sans
+    # edge) — c'est un profil loterie par nature. On ne les rejette donc PAS sur la
+    # règle de profitabilité ; le garde-fou est le NOMBRE (max_coup) + la PART du
+    # budget (cap_spec) + un plancher d'EV (SPEC_EV_FLOOR) qui exclut la loterie pure.
     "agressif": {
         "cote_min": 15.0, "cote_max": 300.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 5,
+        "spec_coup": True,
         "bets_factor": 2.4, "min_stake_factor": 0.34, "max_per_type": 5,
         "types": {"Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant",
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
@@ -194,6 +199,7 @@ def _effective_config(profil: str, heat: float) -> dict:
         "types":     base.get("types"),          # familles de paris du profil (None = toutes)
         "objectif":  base.get("objectif", "ev"), # critère de classement des candidats
         "max_per_type": base.get("max_per_type"),  # plafond paris d'un même type (None = auto)
+        "spec_coup": base.get("spec_coup", False), # autorise les coups gros-lot spéculatifs
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -316,6 +322,8 @@ def _select_conviction(
     ev_min = cfg["ev_min"]
     allowed_types = cfg.get("types")                         # None = toutes
     objectif = cfg.get("objectif", "ev")
+    spec_ok = cfg.get("spec_coup", False)                     # profil loterie : coups -EV assumés
+    SPEC_EV_FLOOR = -0.80                                     # plancher d'EV même pour un coup assumé
     # Spectre large de combinaisons : on tolère plusieurs paris du même type (ex. 5
     # trios différents) quand le profil saupoudre, pour couvrir plus de combinaisons PMU.
     # Le profil peut fixer son propre plafond (`max_per_type`) ; sinon auto selon palier.
@@ -368,13 +376,18 @@ def _select_conviction(
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
-        # RÈGLE DE PROFITABILITÉ : jamais un pari à la fois -EV ET sans edge (= don
-        # au PMU). On parie du +EV OU de la valeur détectée (modèle > marché).
+        # RÈGLE DE PROFITABILITÉ : jamais un pari à la fois -EV ET sans edge (= don au
+        # PMU) — SAUF profil "coup" (risqué) qui assume des paris gros-lot spéculatifs,
+        # bornés ensuite par max_coup + cap_spec. On exclut quand même la loterie pure
+        # (EV sous le plancher SPEC_EV_FLOOR).
         if c["ev"] < 0 and c.get("edge", 0.0) <= 0:
-            return False
-        # Seuil EV propre au profil (sauf coup crédible : value outsider à gros rapport).
+            if not spec_ok or c["ev"] < SPEC_EV_FLOOR:
+                return False
+        # Seuil EV propre au profil (exempté : coup crédible à valeur, ou coup spéculatif
+        # assumé au-dessus du plancher pour le profil risqué).
         if c["ev"] < ev_min and not _is_credible_coup(c):
-            return False
+            if not (spec_ok and c["ev"] >= SPEC_EV_FLOOR):
+                return False
         return True
 
     ranked = sorted(cands, key=conviction, reverse=True)
@@ -458,20 +471,24 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
     for i, c in enumerate(selected):
         c["mise"] = min_stake + extra[i]
 
-    _apply_spec_cap(selected, montant, palier)
+    _apply_spec_cap(selected, montant, palier, min_stake)
 
 
-def _apply_spec_cap(selected: list[dict], montant: int, palier: dict) -> None:
+def _apply_spec_cap(selected: list[dict], montant: int, palier: dict,
+                    min_stake: Optional[int] = None) -> None:
     """Plafonne la part totale misée sur les paris SPÉCULATIFS (EV≤0) à cap_spec ×
-    montant, en transférant l'excédent vers les paris fiables (EV>0). Garde le
-    plancher min_stake. Conserve le total. Best-effort (petit n)."""
+    montant. L'excédent va aux paris fiables (EV>0) s'il y en a, SINON il reste en
+    RÉSERVE (non joué) — un profil 100% spéculatif (risqué sans value) ne mise donc
+    jamais plus que cap_spec du budget. Plancher = le min_stake EFFECTIF (pas le
+    plancher brut du palier : sinon mise<plancher ⇒ reducible négatif ⇒ surmise)."""
     cap = palier["cap_spec"]
     if cap >= 1.0:
         return
-    min_stake = palier["min_stake"]
+    if min_stake is None:
+        min_stake = palier["min_stake"]
     spec_idx = [i for i, c in enumerate(selected) if c["ev"] <= 0]
     safe_idx = [i for i, c in enumerate(selected) if c["ev"] > 0]
-    if not spec_idx or not safe_idx:
+    if not spec_idx:
         return
     max_spec = int(montant * cap)
     spec_total = sum(selected[i]["mise"] for i in spec_idx)
@@ -479,16 +496,18 @@ def _apply_spec_cap(selected: list[dict], montant: int, palier: dict) -> None:
         return
 
     to_move = spec_total - max_spec
-    # Réduire les spéculatifs (mise desc) jusqu'au plancher min_stake.
+    # Réduire les spéculatifs (mise desc) jusqu'au plancher EFFECTIF (reducible ≥ 0).
     for i in sorted(spec_idx, key=lambda i: selected[i]["mise"], reverse=True):
         if to_move <= 0:
             break
-        reducible = selected[i]["mise"] - min_stake
+        reducible = max(0, selected[i]["mise"] - min_stake)
         cut = min(reducible, to_move)
         selected[i]["mise"] -= cut
         to_move -= cut
-    moved = (spec_total - max_spec) - to_move
-    # Transférer l'euro coupé sur les paris fiables (mise desc).
+    moved = (spec_total - max_spec) - to_move      # € réellement libérés
+    if not safe_idx:
+        return    # aucun pari fiable → l'excédent reste en RÉSERVE (montant_joue < montant)
+    # Transférer l'euro coupé sur les paris fiables (mise desc). Conserve le total.
     safe_order = sorted(safe_idx, key=lambda i: selected[i]["mise"], reverse=True)
     k = 0
     while moved > 0 and safe_order:
@@ -580,9 +599,13 @@ def _motif_rejet(c: dict, cfg: dict) -> str:
         return f"Cote trop courte pour le profil risqué (min {cfg['cote_min']:.0f}) — gardée pour le modéré."
     if c["proba_gain"] < cfg["min_proba"]:
         return f"Probabilité trop faible ({c['proba_gain']*100:.0f}%) pour ce profil."
+    spec_ok = cfg.get("spec_coup", False)
     if c["ev"] < 0 and c.get("edge", 0.0) <= 0:
-        return "Espérance négative SANS valeur détectée — ce pari donnerait sa mise au PMU."
-    if c["ev"] < cfg["ev_min"] and not _is_credible_coup(c):
+        if not spec_ok:
+            return "Espérance négative SANS valeur détectée — ce pari donnerait sa mise au PMU."
+        if c["ev"] < -0.80:
+            return "Coup trop improbable (espérance sous le plancher) même pour le profil risqué."
+    if c["ev"] < cfg["ev_min"] and not _is_credible_coup(c) and not spec_ok:
         return f"EV insuffisante ({c['ev']*100:+.0f}%) pour le seuil du profil."
     return "Conviction inférieure aux paris retenus (place limitée par le palier de mise)."
 
