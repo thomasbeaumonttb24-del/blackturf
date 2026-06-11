@@ -94,6 +94,11 @@ export default function DashboardPage() {
     () => predictionsApi.pariDuJour().then((r) => r.data),
     { refreshInterval: 120_000 }
   );
+  const { data: parisProfils } = useSWR(
+    "pari-du-jour-profils",
+    () => predictionsApi.pariDuJourProfils().then((r) => r.data),
+    { refreshInterval: 120_000 }
+  );
 
   // flatten today's courses from programme reunions
   const reunions: Reunion[] = programme?.reunions ?? [];
@@ -190,6 +195,44 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           </Link>
+        )}
+
+        {/* ── Le pari du jour PAR PROFIL ──────────── */}
+        {parisProfils?.profils?.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2 px-0.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold">Le pari du jour, par profil</span>
+              <span className="text-[11px] text-muted-foreground">— issu de l&apos;analyse + apprentissage de chaque profil</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {parisProfils.profils.map((p: {
+                profil: string; profil_label: string; course_id: string; code: string; hippodrome: string;
+                type_pari: string; chevaux: Array<{ numero: number; nom: string }>; mise: number;
+                probabilite: number; ev: number; raisons: string[];
+              }) => {
+                const col = p.profil === "conservateur" ? "border-emerald-300 bg-emerald-50/40"
+                  : p.profil === "equilibre" ? "border-blue-300 bg-blue-50/40" : "border-rose-300 bg-rose-50/40";
+                return (
+                  <Link key={p.profil} href={`/courses/${p.course_id}`}
+                    className={`block rounded-xl border p-3 hover:shadow-md transition-shadow ${col}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wide">{p.profil_label}</span>
+                      <span className="text-[10px] text-muted-foreground">{p.code}</span>
+                    </div>
+                    <div className="mt-1.5 text-sm font-semibold">{p.type_pari}</div>
+                    <div className="text-xs text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</div>
+                    <div className="mt-1.5 flex items-baseline gap-2">
+                      <span className="text-lg font-bold tabular-nums">{Math.round(p.probabilite * 100)}%</span>
+                      <span className="text-[10px] text-muted-foreground">de toucher</span>
+                      {p.ev > 0 && <span className="text-[10px] font-bold text-emerald-600">EV +{Math.round(p.ev * 100)}%</span>}
+                    </div>
+                    {p.raisons?.[0] && <p className="mt-1 text-[10px] text-muted-foreground/80 leading-snug line-clamp-2">{p.raisons[0]}</p>}
+                    <div className="mt-1 text-[10px] text-muted-foreground/60 truncate">{p.hippodrome}</div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         )}
 
         {/* ── KPI cards ──────────────────────────── */}

@@ -239,6 +239,63 @@ async def get_value_bets_live(
     ]
 
 
+@router.get("/pari-du-jour-profils")
+async def get_pari_du_jour_profils(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """LE meilleur pari du jour POUR CHAQUE PROFIL (Prudent / Modéré / Risqué).
+    Lit les plans DÉJÀ FIGÉS avant course (profil_run_log pending) sur les courses
+    à venir, et choisit pour chaque profil le pari à plus forte conviction. 100% issu
+    de l'analyse + apprentissage par profil. null par profil si rien de crédible."""
+    if user.plan in ("free", "decouverte"):
+        return {"profils": []}
+    from sqlalchemy import text as _t
+    import json as _json
+    LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
+    try:
+        rows = (await db.execute(_t("""
+            SELECT r.profil, r.plan, c.course_id, c.hippodrome_nom, c.date_heure,
+                   c.numero_reunion, c.numero, c.discipline
+            FROM profil_run_log r
+            JOIN courses c ON c.course_id = r.course_id
+            WHERE r.statut = 'pending' AND c.statut IN ('a_venir', 'en_cours')
+              AND c.date_heure >= now() - interval '2 hours'
+        """))).all()
+    except Exception:
+        return {"profils": []}
+
+    best: dict = {}
+    for profil, plan, cid, hippo, dh, n_r, n_c, disc in rows:
+        pl = plan if isinstance(plan, dict) else _json.loads(plan or "{}")
+        for niv in pl.get("niveaux", []):
+            for p in niv.get("paris", []):
+                proba = float(p.get("probabilite") or 0)
+                ev = float(p.get("ev_estime") or 0)
+                # Score : on veut une vraie chance ET de la valeur. Prudent privilégie
+                # la proba, Risqué le rapport ; ici score commun proba×(1+max(ev,0)).
+                score = proba * (1.0 + max(ev, 0.0)) * (1.0 + max(float(p.get("gain_potentiel") or 0) / max(float(p.get("mise") or 1), 1) / 50.0, 0))
+                cur = best.get(profil)
+                if cur is None or score > cur["_score"]:
+                    code = (f"R{n_r}C{n_c}" if n_r and n_c else
+                            (cid[8:] if len(cid) > 8 and "R" in cid[8:] else cid))
+                    best[profil] = {
+                        "_score": score, "profil": profil, "profil_label": LBL.get(profil, profil),
+                        "course_id": cid, "code": code, "hippodrome": hippo,
+                        "date_heure": dh.isoformat() if dh else None, "discipline": disc,
+                        "type_pari": p.get("type"),
+                        "chevaux": p.get("chevaux", []),
+                        "mise": p.get("mise"), "gain_potentiel": p.get("gain_potentiel"),
+                        "probabilite": round(proba, 4), "ev": round(ev, 4),
+                        "raisons": p.get("raisons", []),
+                    }
+    out = []
+    for k in ("conservateur", "equilibre", "agressif"):
+        if k in best:
+            b = best[k]; b.pop("_score", None); out.append(b)
+    return {"profils": out}
+
+
 @router.get("/pari-du-jour")
 async def get_pari_du_jour(
     db: AsyncSession = Depends(get_db),

@@ -77,6 +77,7 @@ export const predictionsApi = {
   valueBetsHistory: (limit = 50, offset = 0) =>
     api.get("/value-bets/historique", { params: { limit, offset } }),
   pariDuJour: () => api.get("/pari-du-jour"),
+  pariDuJourProfils: () => api.get("/pari-du-jour-profils"),
   modelVersion: () => api.get("/model/version"),
 };
 
