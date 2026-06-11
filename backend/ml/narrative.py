@@ -431,11 +431,20 @@ def _chevaux_a_eviter(enriched: list[dict]) -> list[dict]:
         proba implicite du marché → jouer ce cheval = payer trop cher sa chance ;
       - facteurs négatifs dominants (forme basse, terrain défavorable, ELO inférieur…).
     On ne liste que des chevaux que le public risque VRAIMENT de jouer (cote ≤ 15) —
-    déconseiller un 80/1 n'apprend rien à personne."""
+    déconseiller un 80/1 n'apprend rien à personne.
+
+    COHÉRENCE : on n'inscrit JAMAIS dans « à éviter » un cheval que le modèle classe
+    en tête (top-3) ou qu'il aime au placé (proba top-3 ≥ 0.45) — sinon on se
+    contredirait (ces chevaux servent de base aux paris recommandés)."""
+    ranked = sorted(enriched, key=lambda x: float(x.get("proba_top1") or 0), reverse=True)
+    top_nums = {p.get("numero") for p in ranked[:3]}
     out = []
     for p in enriched:
         cote = float(p.get("cote_pmu") or 0)
         if cote <= 1.0 or cote > 15.0:
+            continue
+        # Pas de contradiction : ce cheval est un pick du modèle → on ne l'évite pas.
+        if p.get("numero") in top_nums or float(p.get("proba_top3") or 0) >= 0.45:
             continue
         exp = p.get("explanation", {})
         raisons = []

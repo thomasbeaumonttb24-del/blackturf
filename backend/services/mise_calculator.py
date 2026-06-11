@@ -169,28 +169,39 @@ def _palier(montant: int) -> dict:
 # Règle commune de PROFITABILITÉ (dans _select_conviction) : on ne retient JAMAIS un
 # pari à la fois EV<0 ET sans edge (edge≤0) — sinon on donne sa mise au PMU. On parie
 # donc soit du +EV, soit de la VALEUR détectée par l'IA (modèle > marché).
+# `min_stake_factor` : multiplie la mise PLANCHER du palier. <1 = "petites mises
+#   sur PLUSIEURS combinaisons" (équilibré/risqué saupoudrent un large spectre PMU) ;
+#   =1 = mises franches concentrées (prudent).
 PROFIL_CONFIG = {
+    # PRUDENT — privilégie le PLACÉ : Simple Placé, Duo Placé (Couplé Placé), 2/4.
+    # Mises prudentes (peu de paris, plancher franc), cotes courtes, gagner souvent.
     "conservateur": {
-        "cote_max": 8.0, "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
-        "bets_factor": 0.8,
-        "types": {"Simple Placé", "Couplé Placé", "2sur4"},   # haute fréquence, faible variance
+        "cote_max": 9.0, "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
+        "bets_factor": 0.9, "min_stake_factor": 1.0,
+        "types": {"Simple Placé", "Couplé Placé", "2sur4"},
         "objectif": "proba",
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
+    # NORMAL — cotes un peu plus élevées à PROBABILITÉ réelle. PAS de Simple Placé
+    # (le placé sec rapporte trop peu) : on joue le duo gagnant, le couplé placé, le
+    # 2/4 et le trio. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
     "equilibre": {
-        "cote_max": 25.0, "min_proba": 0.05, "ev_min": -0.05, "max_coup": 1,
-        "bets_factor": 1.0,
-        "types": {"Simple Placé", "Couplé Placé", "Couplé Gagnant", "2sur4",
-                  "Trio", "Simple Gagnant"},
+        "cote_max": 30.0, "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
+        "bets_factor": 1.6, "min_stake_factor": 0.55,
+        "types": {"Couplé Placé", "Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant"},
         "objectif": "ev",
-        "risk_pref": {"securite": 1.0, "rendement": 1.1, "surprise": 0.8, "coup": 0.6},
+        "risk_pref": {"securite": 0.8, "rendement": 1.2, "surprise": 1.0, "coup": 0.7},
     },
+    # RISQUÉ — vise les GROSSES cotes : plusieurs chevaux en gagnant grosse cote,
+    # duo gagnant, trios et jackpots désordre (Tiercé/Quarté+/Quinté+). PAS de Simple
+    # Placé. Beaucoup de PETITES mises sur un large spectre de combinaisons.
     "agressif": {
-        "cote_max": 80.0, "min_proba": 0.0, "ev_min": -0.20, "max_coup": 3,
-        "bets_factor": 1.2,
-        "types": None,                                        # tout, outsiders + jackpots
+        "cote_max": 90.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 4,
+        "bets_factor": 2.0, "min_stake_factor": 0.5,
+        "types": {"Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant",
+                  "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "objectif": "gain",
-        "risk_pref": {"securite": 0.4, "rendement": 0.9, "surprise": 1.4, "coup": 1.6},
+        "risk_pref": {"securite": 0.3, "rendement": 0.8, "surprise": 1.5, "coup": 1.9},
     },
 }
 
@@ -212,6 +223,7 @@ def _effective_config(profil: str, heat: float) -> dict:
         "ev_min":    base["ev_min"] - 0.04 * h,
         "max_coup":  max(0, base["max_coup"] + (1 if h > 0.5 else 0) - (1 if h < -0.5 else 0)),
         "bets_factor": base["bets_factor"],
+        "min_stake_factor": base.get("min_stake_factor", 1.0),  # <1 = plus de petites mises
         "types":     base.get("types"),          # familles de paris du profil (None = toutes)
         "objectif":  base.get("objectif", "ev"), # critère de classement des candidats
     }
@@ -322,7 +334,10 @@ def _select_conviction(
     filtrés par les GATES du profil EFFECTIF (cote_max, min_proba, ev_min, max_coup).
     Profitabilité d'abord ; concentre. Le profil change donc VRAIMENT quels paris.
     """
-    min_stake = palier["min_stake"]
+    # Mise plancher EFFECTIVE : le profil peut la réduire (<1) pour saupoudrer de
+    # PETITES mises sur PLUSIEURS combinaisons (équilibré/risqué), ou la garder
+    # franche (prudent). Plancher PMU = 1€.
+    min_stake = max(1, round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
     max_feasible = max(1, montant // min_stake)             # chaque pari ≥ min_stake
     base_max = max(1, round(palier["max_bets"] * cfg.get("bets_factor", 1.0)))
     max_bets = min(base_max, max_feasible, len(cands))
@@ -332,7 +347,9 @@ def _select_conviction(
     ev_min = cfg["ev_min"]
     allowed_types = cfg.get("types")                         # None = toutes
     objectif = cfg.get("objectif", "ev")
-    max_per_type = 1 if max_bets <= 3 else 2
+    # Spectre large de combinaisons : on tolère 2 paris du même type (ex. 2 trios
+    # différents) quand le profil saupoudre, pour couvrir plus de combinaisons PMU.
+    max_per_type = 1 if max_bets <= 3 else (3 if cfg.get("min_stake_factor", 1.0) < 0.7 else 2)
 
     def roi_w(c):
         return float(roi_weights.get(c["type_pari"], 1.0))
@@ -424,7 +441,8 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
     tiltée par le profil EFFECTIF (risk_pref) et le ROI passé. min_stake plancher ;
     plafond sur les paris spéculatifs (cap_spec). Total == montant exactement."""
     rp = cfg["risk_pref"]
-    min_stake = palier["min_stake"]
+    # Même plancher effectif que la sélection (petites mises multiples si profil le veut).
+    min_stake = max(1, round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
 
     def weight(c):
         b = max(c["rapport_estime"] - 1.0, 0.1)
@@ -498,13 +516,24 @@ def _apply_spec_cap(selected: list[dict], montant: int, palier: dict) -> None:
 
 # Pourquoi ce TYPE de pari sert ce PROFIL — pédagogie de la méthode de jeu.
 _TYPE_RAISON_PROFIL = {
+    # PRUDENT — placé / duo placé / 2sur4.
     ("conservateur", "Simple Placé"):  "Placé = le pari qui tombe le plus souvent — socle du profil prudent (faible variance).",
     ("conservateur", "Couplé Placé"):  "Duo placé : 2 chevaux dans les 3 premiers — fréquence élevée, rapport supérieur au placé sec.",
     ("conservateur", "2sur4"):         "2sur4 : 2 des 4 choisis dans le top-4 — tolère une défaillance, parfait pour jouer prudent.",
-    ("equilibre", "Simple Gagnant"):   "Gagnant à cote moyenne : meilleure espérance (EV) détectée par le modèle.",
-    ("equilibre", "Couplé Gagnant"):   "Couplé gagnant : rapport rehaussé pour une proba encore solide — cœur du profil modéré.",
-    ("agressif", "Simple Gagnant"):    "Gagnant grosse cote : gain élevé visé, fréquence faible assumée — profil risqué.",
+    # NORMAL — cotes moyennes à proba, plusieurs petites combinaisons, pas de placé sec.
+    ("equilibre", "Simple Gagnant"):   "Gagnant à cote moyenne-haute : meilleure espérance (EV) détectée, vise une chance réelle.",
+    ("equilibre", "Couplé Gagnant"):   "Duo gagnant : rapport rehaussé pour une proba encore solide — petite mise, bon rendement.",
+    ("equilibre", "Couplé Placé"):     "Duo placé sécurisant le ticket — combiné aux paris à rendement (petite mise répartie).",
+    ("equilibre", "2sur4"):            "2sur4 : large filet sur le top-4 — une des combinaisons du spectre joué en petite mise.",
+    ("equilibre", "Trio"):             "Trio désordre : 3 chevaux dans l'ordre des arrivants — gros rapport pour une petite mise.",
+    # RISQUÉ — grosses cotes gagnant, duo gagnant, trios, jackpots désordre.
+    ("agressif", "Simple Gagnant"):    "Gagnant GROSSE cote : gain élevé visé sur un cheval que le modèle place au-dessus du marché.",
     ("agressif", "Couplé Gagnant"):    "Duo gagnant : rapport multiplié, le modèle voit ces 2 chevaux au-dessus du marché.",
+    ("agressif", "2sur4"):             "2sur4 avec outsider : place une grosse cote dans le top-4 — petite mise, gros levier.",
+    ("agressif", "Trio"):              "Trio : 3 chevaux dont une grosse cote — rapport énorme pour une mise minime.",
+    ("agressif", "Tiercé Désordre"):   "Tiercé désordre : les 3 premiers sans l'ordre — jackpot visé en petite mise.",
+    ("agressif", "Quarté+ Désordre"):  "Quarté+ désordre : 4 premiers sans l'ordre — très gros lot, mise minime assumée.",
+    ("agressif", "Quinté+ Désordre"):  "Quinté+ désordre : le gros lot du jour — petite mise pour viser très haut.",
 }
 
 
