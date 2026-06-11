@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
 
-from api.model_metrics import real_model_metrics
+from api.model_metrics import real_model_metrics, plausible_auc, plausible_roi_pct
 from api.profil_backtest import backtest_profils
 from api.routes.auth import get_current_user
 from db.database import get_db
@@ -129,12 +129,13 @@ async def public_stats(
     # marketing. Plus de _STATIC_STATS (487 users / 12 450 courses / roi 8,4% fictifs).
     metrics = await real_model_metrics(db, mv)
     # ROI simulé 6 mois = backtest réel 10€ flat sur value bets ★★★+ (même source que
-    # la courbe d'équité). null si pas assez d'historique → le front affiche "—".
+    # la courbe d'équité). null si pas assez d'historique OU si aberrant (+307% =
+    # biais longshot sur petit échantillon) → le front affiche "—".
     _bt = await _vb_flat_backtest(db)
-    roi_pct = _bt["roi_pct"] if _bt["is_real"] else None
+    roi_pct = plausible_roi_pct(_bt["roi_pct"] if _bt["is_real"] else None)
 
     result = {
-        "auc_roc": round(mv.auc_roc, 4) if mv else None,
+        "auc_roc": metrics["auc_roc"],               # gardé ∈ [0.5,1], sinon null (jamais 0.06)
         "roi_simule_6mois": roi_pct,
         "nb_courses_analysees": nb_courses,          # vrai nombre de courses terminées
         "nb_utilisateurs": nb_users,                 # vrai nombre d'utilisateurs
@@ -264,7 +265,7 @@ async def ml_status(
         m_real = await real_model_metrics(db, model)
         model_data = {
             "version": model.version_num,
-            "auc_roc": round(model.auc_roc, 4) if model.auc_roc else None,
+            "auc_roc": m_real["auc_roc"],
             "brier_score": round(model.brier_score, 4) if model.brier_score else None,
             "precision_top3": m_real["precision_top3"],
             "roi_simule": round(m_real["roi_simule"] * 100, 2) if m_real["roi_simule"] is not None else None,
@@ -383,14 +384,17 @@ async def dashboard_summary(
     mv = (await db.execute(
         select(ModelVersion).where(ModelVersion.est_actif == True)
     )).scalars().first()
-    model_auc = round(float(mv.auc_roc), 3) if mv and mv.auc_roc else None
+    # AUC bornée à [0.5,1] (jamais 0.06). Modèle non crédible ⇒ on ne publie pas non
+    # plus la précision (sinon 0% trompeur), et on évite le fallback seed peu fiable.
+    _auc = plausible_auc(float(mv.auc_roc)) if mv and mv.auc_roc is not None else None
+    model_auc = round(_auc, 3) if _auc is not None else None
     rll_total = (await db.execute(select(func.count()).select_from(RaceLearningLog))).scalar() or 0
     rll_top3 = (await db.execute(
         select(func.count()).select_from(RaceLearningLog)
         .where(RaceLearningLog.gagnant_rang_predit <= 3)
     )).scalar() or 0
-    precision_top3 = round(rll_top3 / rll_total, 3) if rll_total else (
-        round(float(mv.precision_top3), 3) if mv and mv.precision_top3 else None
+    precision_top3 = (
+        round(rll_top3 / rll_total, 3) if rll_total >= 10 and model_auc is not None else None
     )
 
     result = {
@@ -950,20 +954,30 @@ async def stats_profils(
 async def stats_palmares_gagnants(
     db: AsyncSession = Depends(get_db),
 ):
-    """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — issus des
-    pronostics ÉMIS/rejoués sur TOUTES les courses analysées (profil_run_log),
-    réglés aux VRAIS rapports PMU. Aucune donnée inventée : seulement des paris
-    réglés gagnants avec rapport publié. Résumé par profil = vrais nb de courses
-    + gains nets (paris gagnants ET perdants comptés dans le ROI). Le palmarès
-    public prouve l'efficacité des paris générés là-dessus."""
+    """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — UNIQUEMENT
+    les pronostics RÉELLEMENT FIGÉS AVANT LE DÉPART de la course (profil_run_log),
+    puis réglés aux VRAIS rapports PMU à l'arrivée.
+
+    INTÉGRITÉ STRICTE (exigence produit) — un pari ne compte au palmarès QUE si :
+      1. il a été journalisé AVANT le départ : `r.created_at < c.date_heure`
+         (preuve temporelle : le prono existait avant que la course parte) ;
+      2. ce n'est PAS une reconstruction a posteriori (`meta.backfill` exclu) :
+         un plan régénéré après la course n'a jamais été « proposé » → mensonge ;
+      3. le pari est réglé gagnant avec rapport PMU publié.
+    Sans ces gardes, le palmarès afficherait des paris jamais réellement émis."""
     from sqlalchemy import text as _text
     try:
         rows = (await db.execute(_text("""
-            SELECT r.profil, r.resultat, r.settled_at,
+            SELECT r.profil, r.resultat, r.settled_at, r.created_at,
                    c.hippodrome_nom, c.date_heure, c.course_id, c.numero_reunion, c.numero
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
+              -- Pronostic FIGÉ AVANT LE DÉPART (preuve temporelle réelle)
+              AND c.date_heure IS NOT NULL
+              AND r.created_at < c.date_heure
+              -- Jamais une reconstruction post-course (backfill = pas un vrai prono émis)
+              AND COALESCE(r.meta->>'backfill', '') <> 'true'
             ORDER BY r.settled_at DESC NULLS LAST
         """))).all()
     except Exception:
@@ -976,7 +990,7 @@ async def stats_palmares_gagnants(
     # pour un ROI honnête, et les courses bénéficiaires.
     by_profil: dict = {p: {"courses": set(), "mise": 0.0, "gain": 0.0,
                            "courses_benef": 0, "paris_gagnes": 0} for p in PROFIL_LBL}
-    for profil, resultat, settled_at, hippo, dh, cid, n_reunion, n_course in rows:
+    for profil, resultat, settled_at, created_at, hippo, dh, cid, n_reunion, n_course in rows:
         res = resultat if isinstance(resultat, dict) else json.loads(resultat or "{}")
         agg = by_profil.get(profil)
         if agg is not None:
@@ -1011,6 +1025,10 @@ async def stats_palmares_gagnants(
                 "gain": round(gain, 2),
                 "benefice": round(gain - mise, 2),
                 "rapport": round(gain / mise, 2) if mise > 0 else None,
+                # Preuve d'intégrité : prono figé AVANT le départ, réglé après l'arrivée.
+                "fige_avant_course": True,
+                "fige_le": created_at.isoformat() if created_at else None,
+                "regle_le": settled_at.isoformat() if settled_at else None,
             })
     gagnants.sort(key=lambda g: g.get("date") or "", reverse=True)
     total_gain = round(sum(x["gain"] for x in gagnants), 2)
@@ -1044,5 +1062,10 @@ async def stats_palmares_gagnants(
         "total_gain": total_gain,
         "total_benefice": round(total_gain - total_mise, 2),
         "profils": profils,
+        "integrite": (
+            "Tous les paris affichés ont été figés AVANT le départ de la course "
+            "puis réglés aux vrais rapports PMU à l'arrivée. Aucune reconstruction "
+            "a posteriori (backfill) n'est comptée."
+        ),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

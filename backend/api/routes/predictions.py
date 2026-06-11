@@ -575,11 +575,21 @@ async def get_course_analysis(
 
     # ── Détection COURSE À OUTSIDER (champ ouvert + grosses cotes à edge +
     # taux de surprises historique réel) — pour le profil risqué et l'affichage.
+    # On passe les prédictions ENRICHIES (avec `explanation`) → chaque candidat
+    # outsider porte ses facteurs réels + une justification complète.
     try:
         from ml.outsider_detector import detect_for_course
-        result["detection_outsider"] = await detect_for_course(
-            db, course_id, predictions, course.discipline, course.nb_partants,
+        from ml.narrative import _chevaux_a_eviter
+        enriched_preds = result.get("predictions", predictions)
+        det = await detect_for_course(
+            db, course_id, enriched_preds, course.discipline, course.nb_partants,
         )
+        result["detection_outsider"] = det
+        # COHÉRENCE STRICTE : un cheval listé comme OUTSIDER (à jouer) ne peut JAMAIS
+        # figurer dans « à éviter ». On recalcule la liste à éviter en excluant les
+        # numéros outsiders (en plus de la garde edge>0 déjà appliquée).
+        outs_nums = {c.get("numero") for c in det.get("candidats", [])}
+        result["chevaux_a_eviter"] = _chevaux_a_eviter(enriched_preds, exclude_nums=outs_nums)
     except Exception as e:
         log.warning("analyse.outsider_detect_failed", course_id=course_id, err=str(e)[:160])
 

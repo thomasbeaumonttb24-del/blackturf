@@ -531,7 +531,58 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     return "\n".join(lines).replace("**", "")
 
 
-def _chevaux_a_eviter(enriched: list[dict]) -> list[dict]:
+def _market_edge(p: dict) -> float:
+    """Edge modèle vs marché sur la VICTOIRE : proba_top1 − proba implicite (1/cote,
+    overround non retiré, suffisant comme garde-fou de cohérence). >0 = le modèle
+    aime ce cheval PLUS que le marché → ne peut PAS être « à éviter »."""
+    cote = float(p.get("cote_pmu") or 0)
+    if cote <= 1.0:
+        return 0.0
+    return float(p.get("proba_top1") or 0) - 1.0 / cote
+
+
+def _horse_facts(p: dict) -> dict:
+    """Fiche d'identité COMPLÈTE et factuelle d'un partant pour l'affichage — toutes
+    les infos dérivées de l'analyse réelle (aucune invention). Sert les justificatifs
+    des outsiders ET des chevaux à éviter (même base de faits → zéro contradiction)."""
+    exp = p.get("explanation", {}) or {}
+    cote = float(p.get("cote_pmu") or 0)
+    p1 = float(p.get("proba_top1") or 0)
+    p3 = float(p.get("proba_top3") or 0)
+    implied = 1.0 / cote if cote > 1.0 else 0.0
+    pos = exp.get("facteurs_positifs", []) or []
+    neg = exp.get("facteurs_negatifs", []) or []
+    return {
+        "numero": p.get("numero"),
+        "nom": p.get("nom") or p.get("nom_cheval") or "",
+        "cote": round(cote, 1) if cote else None,
+        "rang_predit": p.get("rang_predit"),
+        "proba_victoire": round(p1, 4),         # modèle, victoire
+        "proba_top3": round(p3, 4),             # modèle, placé
+        "proba_marche": round(implied, 4),      # implicite marché (victoire)
+        "edge": round(p1 - implied, 4),         # avantage modèle vs marché
+        "verdict": exp.get("verdict"),
+        "confiance": round(float(exp.get("confiance_composite") or 0), 3),
+        "nb_signaux_positifs": exp.get("nb_signaux_positifs", len(pos)),
+        "nb_signaux_negatifs": exp.get("nb_signaux_negatifs", len(neg)),
+        "facteurs_positifs": [
+            {"label": _strip_emoji(f.get("label", "")), "detail": _strip_emoji(f.get("detail", "")),
+             "categorie": f.get("categorie"), "score": round(float(f.get("score") or 0), 3)}
+            for f in pos[:5]
+        ],
+        "facteurs_negatifs": [
+            {"label": _strip_emoji(f.get("label", "")), "detail": _strip_emoji(f.get("detail", "")),
+             "categorie": f.get("categorie"), "score": round(float(f.get("score") or 0), 3)}
+            for f in neg[:5]
+        ],
+        "alertes": [
+            {"label": _strip_emoji(a.get("label", "")), "detail": _strip_emoji(a.get("detail", ""))}
+            for a in (exp.get("alertes", []) or [])[:3]
+        ],
+    }
+
+
+def _chevaux_a_eviter(enriched: list[dict], exclude_nums: Optional[set] = None) -> list[dict]:
     """Chevaux que l'analyse déconseille de jouer, avec MOTIFS réels (pas de décor) :
       - « surcoté par le public » : cote courte mais proba modèle nettement sous la
         proba implicite du marché → jouer ce cheval = payer trop cher sa chance ;
@@ -539,9 +590,12 @@ def _chevaux_a_eviter(enriched: list[dict]) -> list[dict]:
     On ne liste que des chevaux que le public risque VRAIMENT de jouer (cote ≤ 15) —
     déconseiller un 80/1 n'apprend rien à personne.
 
-    COHÉRENCE : on n'inscrit JAMAIS dans « à éviter » un cheval que le modèle classe
-    en tête (top-3) ou qu'il aime au placé (proba top-3 ≥ 0.45) — sinon on se
-    contredirait (ces chevaux servent de base aux paris recommandés)."""
+    COHÉRENCE (zéro contradiction) : on n'inscrit JAMAIS dans « à éviter » un cheval
+    qui est (1) un pick du modèle en tête (top-3) ou aimé au placé (proba top-3 ≥ 0.45),
+    (2) à EDGE POSITIF (le modèle l'aime plus que le marché → c'est un outsider à valeur,
+    pas un piège), ou (3) déjà listé comme candidat outsider (`exclude_nums`). Ces trois
+    gardes garantissent qu'un même cheval ne peut pas être « à jouer » ET « à éviter »."""
+    exclude_nums = exclude_nums or set()
     ranked = sorted(enriched, key=lambda x: float(x.get("proba_top1") or 0), reverse=True)
     top_nums = {p.get("numero") for p in ranked[:3]}
     out = []
@@ -549,41 +603,52 @@ def _chevaux_a_eviter(enriched: list[dict]) -> list[dict]:
         cote = float(p.get("cote_pmu") or 0)
         if cote <= 1.0 or cote > 15.0:
             continue
-        # Pas de contradiction : ce cheval est un pick du modèle → on ne l'évite pas.
+        # Garde 1 : pick du modèle → on ne l'évite pas.
         if p.get("numero") in top_nums or float(p.get("proba_top3") or 0) >= 0.45:
+            continue
+        # Garde 2 : edge positif → outsider à VALEUR, pas un piège (contradiction évitée).
+        if _market_edge(p) > 0:
+            continue
+        # Garde 3 : déjà recommandé comme outsider ailleurs.
+        if p.get("numero") in exclude_nums:
             continue
         exp = p.get("explanation", {})
         raisons = []
         severite = 0.0
-        # Surcote marché : proba modèle « victoire » très en-dessous de la proba implicite.
         p1 = float(p.get("proba_top1") or 0)
         implied = 1.0 / cote
+        # Surcote marché : proba modèle « victoire » très en-dessous de la proba implicite.
         if p1 > 0 and p1 < implied * 0.55 and cote <= 9.0:
             raisons.append(
                 f"Surcoté par le public : le marché lui donne ~{implied*100:.0f}% de chances, "
-                f"le modèle {p1*100:.0f}% — sa cote ne paie pas son vrai risque."
+                f"le modèle {p1*100:.0f}% (×{p1/max(implied,1e-6):.1f}) — sa cote ne paie pas son vrai risque."
             )
             severite += (implied - p1) * 3
         negs = exp.get("facteurs_negatifs", [])
         if len(negs) >= 2:
-            labels = " · ".join(_strip_emoji(n.get("label", "")) for n in negs[:3])
-            raisons.append(f"Facteurs défavorables : {labels}.")
+            for n in negs[:3]:
+                lbl = _strip_emoji(n.get("label", "")); det = _strip_emoji(n.get("detail", ""))
+                raisons.append(f"{lbl} : {det}" if det else lbl)
             severite += sum(float(n.get("score", 0)) for n in negs[:3]) * 0.5
         if exp.get("verdict") == "DÉFAVORABLE":
+            raisons.append("Verdict global de l'analyse : DÉFAVORABLE (faisceau de signaux négatifs).")
             severite += 0.3
         if not raisons:
             continue
-        out.append({
-            "numero": p.get("numero"),
-            "nom": p.get("nom"),
-            "cote": round(cote, 1),
-            "raisons": raisons,
-            "_sev": severite,
-        })
+        facts = _horse_facts(p)
+        facts["raisons"] = raisons
+        facts["justification"] = (
+            f"N°{facts['numero']} {facts['nom']} (cote {facts['cote']}) — à éviter : "
+            f"le modèle ne lui donne que {p1*100:.0f}% de victoire / {facts['proba_top3']*100:.0f}% de placé, "
+            f"sous l'estimation du marché ({implied*100:.0f}%), avec {facts['nb_signaux_negatifs']} "
+            f"signal(aux) défavorable(s). Jouer ce cheval, c'est payer une cote qui ne couvre pas son risque réel."
+        )
+        facts["_sev"] = severite
+        out.append(facts)
     out.sort(key=lambda x: x["_sev"], reverse=True)
     for o in out:
         o.pop("_sev", None)
-    return out[:3]
+    return out[:4]
 
 
 async def generate_full_course_analysis(
@@ -618,6 +683,12 @@ async def generate_full_course_analysis(
         )
 
         enriched.append({**pred, "explanation": explanation})
+
+    # Fiche consolidée par partant (edge marché, proba placé/victoire, verdict,
+    # confiance, tous les facteurs) → un maximum d'infos exploitables côté front,
+    # sur la MÊME base de faits que les outsiders et les « à éviter ».
+    for e in enriched:
+        e["fiche"] = _horse_facts(e)
 
     # Narrative globale
     top_reco = max(enriched, key=lambda x: x.get("proba_top3", 0)) if enriched else None

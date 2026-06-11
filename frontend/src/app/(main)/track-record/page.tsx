@@ -110,6 +110,9 @@ interface WinningBet {
   gain: number;
   benefice: number;
   rapport: number | null;
+  fige_avant_course?: boolean;   // prono figé avant le départ (preuve d'intégrité)
+  fige_le?: string | null;       // horodatage du gel pré-course
+  regle_le?: string | null;      // horodatage du règlement post-arrivée
 }
 
 const PROFIL_LABELS: Record<string, { label: string; cls: string }> = {
@@ -430,6 +433,14 @@ export default function TrackRecordPage() {
                                 {b.code ?? "—"}
                               </Link>
                               <span className="block text-[10px] text-muted-foreground truncate max-w-[140px]">{b.hippodrome}</span>
+                              {b.fige_avant_course && (
+                                <span
+                                  title={b.fige_le ? `Pronostic figé le ${new Date(b.fige_le).toLocaleString("fr-FR")}, avant le départ` : "Pronostic figé avant le départ"}
+                                  className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                                >
+                                  ✓ Figé avant départ
+                                </span>
+                              )}
                             </td>
                             <td className="py-2.5">
                               <span className="font-medium">{b.type_pari}</span>

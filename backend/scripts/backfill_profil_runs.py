@@ -1,11 +1,17 @@
-"""Backfill profil_run_log sur TOUTES les courses analysées terminées.
+"""Backfill profil_run_log sur les courses terminées — POUR L'APPRENTISSAGE SEULEMENT.
 
-Génère le plan de mise 10€ des 3 profils (depuis les prédictions FIGÉES) pour
-chaque course terminée ayant prédictions + résultat, le règle aux VRAIS rapports
-PMU, et persiste dans profil_run_log (statut settled/partial). Idempotent.
+Reconstruit a posteriori le plan 10€ des 3 profils sur des courses DÉJÀ TERMINÉES,
+le règle aux vrais rapports PMU, et persiste avec meta.backfill=true.
 
-→ La table "Paris gagnés" du palmarès couvre alors TOUTES les courses, pas
-seulement celles prédites en live depuis l'ajout de la feature.
+⚠️ CES RUNS N'APPARAISSENT JAMAIS AU PALMARÈS PUBLIC : ce sont des reconstructions
+a posteriori, pas des pronostics réellement émis/figés avant le départ. Le palmarès
+(/stats/palmares-gagnants) n'affiche QUE les pronos figés avant course
+(created_at < date_heure ET meta.backfill ≠ true). Ce backfill ne sert qu'à donner
+plus d'historique au moteur d'apprentissage (compute_profil_weights) — du backtest,
+pas une preuve de performance affichée à l'utilisateur.
+
+Garde d'intégrité : ce script n'écrase JAMAIS un run live genuine (figé avant course) ;
+il ne touche que des lignes inexistantes ou elles-mêmes issues d'un backfill.
 
 Usage : cd /app && PYTHONPATH=/app python scripts/backfill_profil_runs.py [N]
 (N = nb de courses récentes, défaut 400). Aucune donnée inventée : gagnant sans
@@ -91,8 +97,10 @@ async def main(limit: int = 400) -> None:
                     ON CONFLICT (course_id, profil) DO UPDATE SET
                         plan = EXCLUDED.plan, resultat = EXCLUDED.resultat,
                         roi_reel = EXCLUDED.roi_reel, nb_paris = EXCLUDED.nb_paris,
-                        statut = EXCLUDED.statut, settled_at = now()
-                    WHERE profil_run_log.statut <> 'settled'
+                        statut = EXCLUDED.statut, meta = EXCLUDED.meta, settled_at = now()
+                    -- INTÉGRITÉ : ne JAMAIS écraser un run live genuine (figé avant
+                    -- course). On ne ré-écrit que des lignes déjà issues d'un backfill.
+                    WHERE COALESCE(profil_run_log.meta->>'backfill', '') = 'true'
                 """), {
                     "id": str(uuid.uuid4()), "cid": cid, "p": profil,
                     "plan": json.dumps(plan), "res": json.dumps(bilan),

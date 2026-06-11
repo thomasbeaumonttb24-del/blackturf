@@ -172,31 +172,35 @@ def _palier(montant: int) -> dict:
 # `min_stake_factor` : multiplie la mise PLANCHER du palier. <1 = "petites mises
 #   sur PLUSIEURS combinaisons" (équilibré/risqué saupoudrent un large spectre PMU) ;
 #   =1 = mises franches concentrées (prudent).
+# `cote_min` : cote PLANCHER d'un pari (cote la plus élevée parmi ses chevaux). C'est
+#   ce qui SÉPARE modéré et risqué : modéré est CAPÉ à cote_max=15, risqué exige
+#   cote_min=15 → les deux profils ne peuvent PAS proposer le même pari. Risqué porte
+#   donc TOUJOURS des cotes plus élevées que modéré (demande produit).
 PROFIL_CONFIG = {
     # PRUDENT — privilégie le PLACÉ : Simple Placé, Duo Placé (Couplé Placé), 2/4.
     # Mises prudentes (peu de paris, plancher franc), cotes courtes, gagner souvent.
     "conservateur": {
-        "cote_max": 9.0, "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
+        "cote_min": 0.0, "cote_max": 9.0, "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "bets_factor": 0.9, "min_stake_factor": 1.0,
         "types": {"Simple Placé", "Couplé Placé", "2sur4"},
         "objectif": "proba",
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
-    # NORMAL — cotes un peu plus élevées à PROBABILITÉ réelle. PAS de Simple Placé
-    # (le placé sec rapporte trop peu) : on joue le duo gagnant, le couplé placé, le
-    # 2/4 et le trio. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
+    # MODÉRÉ — cotes COURTES à MOYENNES (capé à 15) à PROBABILITÉ réelle. PAS de Simple
+    # Placé (le placé sec rapporte trop peu) : duo gagnant, couplé placé, 2/4, trio de
+    # favoris. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
     "equilibre": {
-        "cote_max": 45.0, "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
+        "cote_min": 0.0, "cote_max": 15.0, "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
         "bets_factor": 1.6, "min_stake_factor": 0.55,
         "types": {"Couplé Placé", "Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant"},
         "objectif": "ev",
         "risk_pref": {"securite": 0.8, "rendement": 1.2, "surprise": 1.0, "coup": 0.7},
     },
-    # RISQUÉ — vise les GROSSES cotes : plusieurs chevaux en gagnant grosse cote,
-    # duo gagnant, trios et jackpots désordre (Tiercé/Quarté+/Quinté+). PAS de Simple
-    # Placé. Beaucoup de PETITES mises sur un large spectre de combinaisons.
+    # RISQUÉ — vise les GROSSES cotes (PLANCHER 15) : gagnant grosse cote, duo gagnant
+    # d'outsiders, trios et jackpots désordre (Tiercé/Quarté+/Quinté+). PAS de Simple
+    # Placé. Beaucoup de PETITES mises sur un large spectre de combinaisons à fort rapport.
     "agressif": {
-        "cote_max": 300.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 4,
+        "cote_min": 15.0, "cote_max": 300.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 4,
         "bets_factor": 2.0, "min_stake_factor": 0.5,
         "types": {"Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant",
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
@@ -218,6 +222,7 @@ def _effective_config(profil: str, heat: float) -> dict:
     base = PROFIL_CONFIG.get(profil, PROFIL_CONFIG["equilibre"])
     h = max(-1.0, min(1.0, float(heat)))
     cfg = {
+        "cote_min":  max(0.0, base.get("cote_min", 0.0) * (1.0 - 0.20 * h)),
         "cote_max":  max(4.0, base["cote_max"] * (1.0 + 0.30 * h)),
         "min_proba": max(0.0, base["min_proba"] * (1.0 - 0.30 * h)),
         "ev_min":    base["ev_min"] - 0.04 * h,
@@ -342,6 +347,7 @@ def _select_conviction(
     base_max = max(1, round(palier["max_bets"] * cfg.get("bets_factor", 1.0)))
     max_bets = min(base_max, max_feasible, len(cands))
     max_coup = cfg["max_coup"]
+    cote_min = cfg.get("cote_min", 0.0)
     cote_max = cfg["cote_max"]
     min_proba = cfg["min_proba"]
     ev_min = cfg["ev_min"]
@@ -387,7 +393,12 @@ def _select_conviction(
     def passes_gates(c):
         if allowed_types is not None and c["type_pari"] not in allowed_types:
             return False                                     # hors méthode du profil
-        if _bet_cote_max(c) > cote_max:                      # longshot hors profil
+        bet_cote = _bet_cote_max(c)
+        if bet_cote > cote_max:                              # longshot hors profil
+            return False
+        # Plancher de cote (sépare modéré ≤15 de risqué ≥15). Exempté pour les jackpots
+        # désordre : déjà exclusifs au profil risqué et risqués par construction (gros lot).
+        if bet_cote < cote_min and "Désordre" not in c["type_pari"]:
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
@@ -427,9 +438,15 @@ def _select_conviction(
     if not selected:
         pool = [c for c in cands
                 if (allowed_types is None or c["type_pari"] in allowed_types)
-                and _bet_cote_max(c) <= cote_max]
-        pool = pool or [c for c in cands if _bet_cote_max(c) <= cote_max] or cands
-        safe = max(pool, key=lambda c: c["proba_gain"])
+                and cote_min <= _bet_cote_max(c) <= cote_max]
+        # Replis successifs : cote_min seul (garde l'esprit du profil risqué), puis cote_max, puis tout.
+        pool = pool or [c for c in cands if _bet_cote_max(c) >= cote_min] \
+            or [c for c in cands if _bet_cote_max(c) <= cote_max] or cands
+        # Pour le risqué, viser le plus gros RAPPORT du repli ; sinon la meilleure proba.
+        if cote_min > 0:
+            safe = max(pool, key=lambda c: c["rapport_estime"])
+        else:
+            safe = max(pool, key=lambda c: c["proba_gain"])
         safe["_roi_w"] = roi_w(safe)
         safe["_sig"] = sig_factor(safe)
         selected = [safe]
@@ -593,6 +610,8 @@ def _motif_rejet(c: dict, cfg: dict) -> str:
         return "Type de pari hors méthode de ce profil."
     if _bet_cote_max(c) > cfg["cote_max"]:
         return f"Cote trop élevée pour ce profil (max {cfg['cote_max']:.0f})."
+    if _bet_cote_max(c) < cfg.get("cote_min", 0.0) and "Désordre" not in c["type_pari"]:
+        return f"Cote trop courte pour le profil risqué (min {cfg['cote_min']:.0f}) — gardée pour le modéré."
     if c["proba_gain"] < cfg["min_proba"]:
         return f"Probabilité trop faible ({c['proba_gain']*100:.0f}%) pour ce profil."
     if c["ev"] < 0 and c.get("edge", 0.0) <= 0:

@@ -19,6 +19,7 @@ outsider, quel que soit le « feeling ».
 """
 from __future__ import annotations
 
+import re
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,18 @@ log = structlog.get_logger()
 OUTSIDER_COTE_MIN = 8.0
 OUTSIDER_COTE_MAX = 40.0
 SCORE_SEUIL_COURSE = 0.55     # au-delà : course "à outsider"
+
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF"
+    "\U0001F1E6-\U0001F1FF\U00002190-\U000021FF️✅⚡⤵⤴✨]"
+)
+
+
+def _strip(s) -> str:
+    """Retire emojis + espaces superflus (affichage propre, aligné sur narrative)."""
+    if not isinstance(s, str):
+        return s
+    return re.sub(r"\s{2,}", " ", _EMOJI_RE.sub("", s)).strip()
 
 
 def _field_bucket(nb: int) -> str:
@@ -80,18 +93,53 @@ def compute_outsider_score(predictions: list[dict],
         if edge <= 0.005:
             continue
         ratio = p1[i] / max(implied[i], 1e-6)
+        exp = p.get("explanation", {}) or {}
+        p3 = float(p.get("proba_top3") or exp.get("proba_top3") or 0)
+        # Raison #1 : la VALEUR marché (cœur du signal outsider).
         raisons = [
-            f"Le modèle lui donne {p1[i]*100:.1f}% de victoire, le marché {implied[i]*100:.1f}% "
-            f"(×{ratio:.1f}) — grosse cote sous-estimée par le public."
+            f"Le modèle lui donne {p1[i]*100:.1f}% de victoire et {p3*100:.0f}% de placé, "
+            f"le marché seulement {implied[i]*100:.1f}% (×{ratio:.1f}) — grosse cote sous-estimée par le public."
         ]
+        # Raisons #2+ : les FACTEURS POSITIFS réels qui appuient le choix (forme, ELO,
+        # terrain, marché, pedigree…) → justification concrète, pas juste l'edge.
+        pos = exp.get("facteurs_positifs", []) or []
+        for f in pos[:4]:
+            lbl = _strip(f.get("label", "")); det = _strip(f.get("detail", ""))
+            if lbl:
+                raisons.append(f"{lbl} : {det}" if det else lbl)
+        negs = exp.get("facteurs_negatifs", []) or []
+        # Points de vigilance (honnêteté : un outsider garde des risques) — sans le
+        # disqualifier (il reste à valeur), on les signale.
+        vigilance = [f"{_strip(n.get('label',''))} : {_strip(n.get('detail',''))}".strip(" :")
+                     for n in negs[:2] if n.get("label")]
+        justification = (
+            f"N°{p.get('numero')} {p.get('nom') or p.get('nom_cheval') or ''} (cote {c:.1f}) — "
+            f"OUTSIDER À VALEUR : le modèle l'estime {ratio:.1f}× au-dessus du marché "
+            f"({p1[i]*100:.1f}% vs {implied[i]*100:.1f}% de victoire), porté par "
+            f"{len(pos)} signal(aux) favorable(s)"
+            + (f" malgré {len(negs)} point(s) de vigilance" if negs else "")
+            + f". À jouer en PETITE mise (gros rapport pour un risque assumé)."
+        )
         candidats.append({
             "numero": p.get("numero"),
             "nom": p.get("nom") or p.get("nom_cheval") or "",
             "cote": round(c, 1),
+            "rang_predit": p.get("rang_predit"),
             "proba_modele": round(p1[i], 4),
+            "proba_top3": round(p3, 4),
             "proba_marche": round(implied[i], 4),
             "edge": round(edge, 4),
+            "ratio_valeur": round(ratio, 2),
+            "verdict": exp.get("verdict"),
+            "confiance": round(float(exp.get("confiance_composite") or 0), 3),
+            "facteurs_positifs": [
+                {"label": _strip(f.get("label", "")), "detail": _strip(f.get("detail", "")),
+                 "categorie": f.get("categorie")}
+                for f in pos[:5]
+            ],
+            "points_vigilance": vigilance,
             "raisons": raisons,
+            "justification": justification,
         })
     candidats.sort(key=lambda x: x["edge"], reverse=True)
     candidats = candidats[:3]

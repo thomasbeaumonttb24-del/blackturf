@@ -173,7 +173,10 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             "id": str(uuid.uuid4()), "cid": course_id, "prof": profil,
             "mv": model_version_id, "plan": json.dumps(plan_d),
             "nb": nb_paris,
-            "meta": json.dumps({"heat": round(float(heat), 3), "mise": MISE_REF}),
+            # pre_course=true : marqueur explicite « prono figé AVANT le départ »
+            # (preuve d'intégrité pour le palmarès, en plus de created_at < date_heure).
+            "meta": json.dumps({"heat": round(float(heat), 3), "mise": MISE_REF,
+                                "pre_course": True}),
         })
         n_written += 1
     await session.commit()

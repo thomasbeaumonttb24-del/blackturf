@@ -1617,13 +1617,19 @@ export default function CoursePage() {
       texte_explication: string;
     } | null;
     chevaux_a_eviter?: Array<{
-      numero: number; nom: string; cote: number; raisons: string[];
+      numero: number; nom: string; cote: number | null; raisons: string[];
+      justification?: string; verdict?: string | null;
+      proba_victoire?: number; proba_top3?: number; proba_marche?: number; edge?: number;
+      facteurs_negatifs?: Array<{ label: string; detail: string; categorie?: string }>;
     }>;
     detection_outsider?: {
       score: number; course_a_outsider: boolean;
       candidats: Array<{
         numero: number; nom: string; cote: number;
-        proba_modele: number; proba_marche: number; edge: number; raisons: string[];
+        proba_modele: number; proba_marche: number; proba_top3?: number;
+        edge: number; ratio_valeur?: number; verdict?: string | null;
+        raisons: string[]; justification?: string; points_vigilance?: string[];
+        facteurs_positifs?: Array<{ label: string; detail: string; categorie?: string }>;
       }>;
       signaux: string[];
       taux_surprises_historique: number | null;
@@ -2349,12 +2355,49 @@ export default function CoursePage() {
               )}
               <div className="grid gap-2 sm:grid-cols-2">
                 {analysis.detection_outsider.candidats.map((c) => (
-                  <div key={c.numero} className="rounded-lg bg-white/80 border border-violet-200/70 p-2.5">
+                  <div key={c.numero} className="rounded-lg bg-white/80 border border-violet-200/70 p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
                       <span className="font-mono text-xs font-bold text-violet-700">cote {c.cote}</span>
                     </div>
-                    <p className="mt-1 text-[11px] text-gray-600 leading-relaxed">{c.raisons[0]}</p>
+                    {/* Chiffres clés : valeur modèle vs marché */}
+                    <div className="flex flex-wrap gap-1 text-[10px]">
+                      <span className="rounded bg-violet-100 text-violet-800 px-1.5 py-0.5 font-medium">
+                        Modèle {Math.round(c.proba_modele * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
+                      </span>
+                      {c.ratio_valeur != null && (
+                        <span className="rounded bg-emerald-100 text-emerald-800 px-1.5 py-0.5 font-bold">
+                          ×{c.ratio_valeur} valeur
+                        </span>
+                      )}
+                      {c.verdict && (
+                        <span className="rounded bg-gray-100 text-gray-700 px-1.5 py-0.5">{c.verdict}</span>
+                      )}
+                    </div>
+                    {c.justification && (
+                      <p className="text-[11px] text-gray-700 leading-relaxed">{c.justification}</p>
+                    )}
+                    {/* Facteurs qui appuient le choix */}
+                    {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
+                      <ul className="space-y-0.5">
+                        {c.facteurs_positifs.slice(0, 4).map((f, i) => (
+                          <li key={i} className="text-[10px] text-emerald-800 flex gap-1">
+                            <span className="flex-shrink-0">✓</span>
+                            <span><b>{f.label}</b>{f.detail ? ` — ${f.detail}` : ""}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {/* Points de vigilance (honnêteté : un outsider garde des risques) */}
+                    {c.points_vigilance && c.points_vigilance.length > 0 && (
+                      <ul className="space-y-0.5">
+                        {c.points_vigilance.map((v, i) => (
+                          <li key={i} className="text-[10px] text-amber-700 flex gap-1">
+                            <span className="flex-shrink-0">⚠</span><span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2374,12 +2417,26 @@ export default function CoursePage() {
               </div>
               <div className="space-y-2">
                 {analysis.chevaux_a_eviter.map((c) => (
-                  <div key={c.numero} className="rounded-lg bg-white/80 border border-red-200/70 p-2.5">
+                  <div key={c.numero} className="rounded-lg bg-white/80 border border-red-200/70 p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
                       <span className="font-mono text-xs text-gray-500">cote {c.cote}</span>
                     </div>
-                    <ul className="mt-1 space-y-0.5">
+                    {/* Chiffres clés : le modèle sous le marché */}
+                    <div className="flex flex-wrap gap-1 text-[10px]">
+                      {c.proba_victoire != null && c.proba_marche != null && (
+                        <span className="rounded bg-red-100 text-red-800 px-1.5 py-0.5 font-medium">
+                          Modèle {Math.round(c.proba_victoire * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
+                        </span>
+                      )}
+                      {c.verdict && (
+                        <span className="rounded bg-gray-100 text-gray-700 px-1.5 py-0.5">{c.verdict}</span>
+                      )}
+                    </div>
+                    {c.justification && (
+                      <p className="text-[11px] text-gray-700 leading-relaxed font-medium">{c.justification}</p>
+                    )}
+                    <ul className="space-y-0.5">
                       {c.raisons.map((r, i) => (
                         <li key={i} className="text-[11px] text-gray-600 leading-relaxed flex gap-1.5">
                           <span className="text-red-400 flex-shrink-0">·</span><span>{r}</span>
