@@ -116,6 +116,8 @@ interface CourseData {
   est_quarte: boolean;
   est_tierce: boolean;
   statut: string;
+  prono_fige?: boolean;        // pronostic figé (T-10 min) — ne change plus
+  prono_fige_a?: string | null;
   // Nouvelles données
   penetrometre_coef: number | null;
   penetrometre_desc: string | null;
@@ -1774,6 +1776,11 @@ export default function CoursePage() {
               <Badge variant={course.statut === "en_cours" ? "success" : course.statut === "termine" ? "secondary" : "warning"}>
                 {course.statut === "en_cours" ? "En cours" : course.statut === "termine" ? "Terminée" : "À venir"}
               </Badge>
+              {course.statut === "a_venir" && course.prono_fige && (
+                <Badge variant="secondary" title="À moins de 10 min du départ, le pronostic est figé. Les cotes affichées continuent d'évoluer.">
+                  Pronostic figé
+                </Badge>
+              )}
               {wsConnected && (
                 <span className="flex items-center gap-1 text-[10px] font-semibold text-brand-emerald">
                   <span className="h-1.5 w-1.5 rounded-full bg-brand-emerald animate-pulse" /> En direct

@@ -3,7 +3,7 @@ Courses routes — BlackTurf.
 Programme du jour, détail course, partants.
 """
 import structlog
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,6 +29,30 @@ from ml.monte_carlo import MonteCarloSimulator
 
 log = structlog.get_logger()
 router = APIRouter()
+
+# Gel du pronostic : à moins de PRONO_LOCK_MIN minutes du départ, le pronostic
+# (proba + sélection + plan de mise) est FIGÉ. Le plan s'appuie alors sur la cote
+# figée (predictions.cote_figee) et non sur la cote live → il ne change plus, que
+# l'utilisateur l'ouvre 9 min ou 2 min avant le départ. Les cotes affichées
+# continuent d'évoluer (scraper cotes-live).
+PRONO_LOCK_MIN = 10
+
+
+def _prono_lock_state(date_heure: Optional[datetime]) -> tuple[bool, Optional[datetime]]:
+    """(prono_figé, instant_de_gel). Le gel intervient à date_heure - PRONO_LOCK_MIN."""
+    if not date_heure:
+        return False, None
+    fige_a = date_heure - timedelta(minutes=PRONO_LOCK_MIN)
+    now = datetime.now(timezone.utc) if date_heure.tzinfo else datetime.now()
+    return now >= fige_a, fige_a
+
+
+def _cote_plan(pred, part) -> Optional[float]:
+    """Cote utilisée par le plan de mise : la cote FIGÉE au calcul du prono si
+    disponible, sinon la cote live (legacy / tout premier calcul). Garantit que le
+    plan est stable une fois le prono gelé."""
+    cf = getattr(pred, "cote_figee", None)
+    return cf if cf else part.cote_pmu
 
 
 # ─────────────────────────────────────────────
@@ -139,6 +163,10 @@ class CourseDetailOut(BaseModel):
     categorie_particularite: Optional[str] = None
     montant_offert_1er: Optional[int] = None        # dotation gagnant (euros)
     nombre_declares_partants: Optional[int] = None
+    # Gel du pronostic à T-10 min : prono_fige=True → la sélection/plan ne bouge plus
+    # (cotes affichées continuent d'évoluer). prono_fige_a = instant du gel.
+    prono_fige: bool = False
+    prono_fige_a: Optional[datetime] = None
     meteo: Optional[MeteoOut]
     pronostics_presse: list[PronosticPresseOut] = []
     partants: list[PartantOut]
@@ -518,7 +546,12 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
         cache_key = f"course_detail:{course_id}"
         cached = await redis.get(cache_key)
         if cached:
-            return CourseDetailOut(**json.loads(cached))
+            out = CourseDetailOut(**json.loads(cached))
+            # Le gel dépend de l'heure courante → recalculé hors cache (sinon il
+            # basculerait avec jusqu'à 30s de retard près de la limite T-10 min).
+            if out.statut == "a_venir":
+                out.prono_fige, out.prono_fige_a = _prono_lock_state(out.date_heure)
+            return out
     except Exception as e:
         log.debug("courses.detail_cache_read_failed", error=str(e))
 
@@ -588,6 +621,11 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
         pronostics_presse=pronostics_presse,
         partants=partants,
     )
+    # Gel du pronostic (seulement pertinent sur une course à venir)
+    if course.statut == "a_venir":
+        fige, fige_a = _prono_lock_state(course.date_heure)
+        response.prono_fige = fige
+        response.prono_fige_a = fige_a
 
     # Cache TTL selon statut
     try:
@@ -750,7 +788,8 @@ async def get_mise_plan(
             "nom_cheval": cheval.nom,
             "proba_top3": pred.proba_top3,
             "proba_top1": pred.proba_top1,
-            "cote_pmu": part.cote_pmu,
+            # Cote FIGÉE au calcul du prono (sinon le plan bougerait avec la cote live).
+            "cote_pmu": _cote_plan(pred, part),
             "non_partant": part.non_partant,
             "value_bet": {"ev_max": vb.ev_max, "niveau": vb.niveau} if vb else None,
         })
@@ -801,7 +840,12 @@ async def get_mise_plan(
 
     plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
                         signal_mults, facteurs_chevaux=facteurs_chevaux)
-    return plan_to_dict(plan)
+    out = plan_to_dict(plan)
+    # Indique si le pronostic est figé (T-10 min) → le plan ne changera plus.
+    fige, fige_a = _prono_lock_state(course.date_heure)
+    out["prono_fige"] = fige
+    out["prono_fige_a"] = fige_a.isoformat() if fige_a else None
+    return out
 
 
 @router.post("/courses/{course_id}/enregistrer-paris")
@@ -847,7 +891,9 @@ async def enregistrer_paris(
     preds = [{
         "numero": part.numero, "nom_cheval": cheval.nom,
         "proba_top3": pred.proba_top3, "proba_top1": pred.proba_top1,
-        "cote_pmu": part.cote_pmu, "non_partant": part.non_partant,
+        # Cote FIGÉE → le plan enregistré est identique à celui affiché, quel que
+        # soit l'instant d'enregistrement une fois le prono gelé.
+        "cote_pmu": _cote_plan(pred, part), "non_partant": part.non_partant,
     } for pred, part, cheval in rows]
     course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "nb_partants": course.nb_partants}
 
@@ -971,7 +1017,8 @@ async def get_bilan_pronostic(
             "nom_cheval": cheval.nom,
             "proba_top3": pred.proba_top3,
             "proba_top1": pred.proba_top1,
-            "cote_pmu": part.cote_pmu,
+            # Cote FIGÉE au prono (cohérence avec ce qui était affiché avant départ).
+            "cote_pmu": _cote_plan(pred, part),
             "non_partant": part.non_partant,
             "rang_predit": pred.rang_predit,
         })

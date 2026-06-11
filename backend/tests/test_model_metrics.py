@@ -13,7 +13,9 @@ import pytest
 from api.model_metrics import (
     ROI_MAX_PLAUSIBLE,
     ROI_MIN_PLAUSIBLE,
+    plausible_auc,
     plausible_roi,
+    plausible_roi_pct,
     real_model_metrics,
 )
 from db.models import ModelVersion, RaceLearningLog
@@ -39,14 +41,41 @@ def test_bornes_coherentes():
     assert ROI_MIN_PLAUSIBLE < ROI_MAX_PLAUSIBLE
 
 
+@pytest.mark.parametrize("auc,attendu", [
+    (None, None),
+    (0.06, None),        # le bug réel : pire que le hasard → masqué
+    (0.49, None),        # juste sous 0.5
+    (0.5, 0.5),          # borne basse incluse
+    (0.71, 0.71),        # plausible
+    (1.0, 1.0),          # borne haute incluse
+    (1.2, None),         # impossible
+])
+def test_plausible_auc(auc, attendu):
+    assert plausible_auc(auc) == attendu
+
+
+@pytest.mark.parametrize("roi_pct,attendu", [
+    (None, None),
+    (307.0, None),       # +307% → aberrant longshot, masqué
+    (150.0, None),       # > borne haute
+    (-60.0, None),       # < borne basse
+    (15.6, 15.6),        # plausible
+    (-50.0, -50.0),      # borne basse incluse
+    (100.0, 100.0),      # borne haute incluse
+    (0.0, 0.0),
+])
+def test_plausible_roi_pct(roi_pct, attendu):
+    assert plausible_roi_pct(roi_pct) == attendu
+
+
 # ─── real_model_metrics (DB) ──────────────────────────────────────────
 
-def _mv(roi_simule: float, precision_top3: float = 0.0) -> ModelVersion:
+def _mv(roi_simule: float, precision_top3: float = 0.0, auc_roc: float = 0.71) -> ModelVersion:
     return ModelVersion(
         version_id=str(uuid.uuid4()),
         version_num=1,
         nom_fichier="model_v0001.pkl",
-        auc_roc=0.71,
+        auc_roc=auc_roc,
         brier_score=0.18,
         precision_top3=precision_top3,
         roi_simule=roi_simule,
@@ -101,9 +130,29 @@ async def test_roi_plausible_conserve(db):
 
 
 @pytest.mark.asyncio
+async def test_auc_credible_expose(db):
+    """AUC plausible exposée telle quelle dans le dict."""
+    await _add_rll(db, n_total=20, n_top3=14)
+    out = await real_model_metrics(db, _mv(roi_simule=0.084, auc_roc=0.71))
+    assert out["auc_roc"] == pytest.approx(0.71)
+    assert out["precision_top3"] == pytest.approx(14 / 20, abs=1e-4)
+
+
+@pytest.mark.asyncio
+async def test_modele_casse_masque_auc_et_precision(db):
+    """AUC=0.06 (modèle cassé) → auc_roc None ET precision None malgré assez de courses."""
+    await _add_rll(db, n_total=77, n_top3=0)  # 0% observé sur modèle cassé
+    out = await real_model_metrics(db, _mv(roi_simule=0.084, auc_roc=0.06))
+    assert out["auc_roc"] is None
+    assert out["precision_top3"] is None
+    assert out["nb_courses_evaluees"] == 77
+
+
+@pytest.mark.asyncio
 async def test_sans_modele(db):
     """mv=None → aucune valeur fabriquée."""
     out = await real_model_metrics(db, None)
+    assert out["auc_roc"] is None
     assert out["roi_simule"] is None
     assert out["precision_top3"] is None
     assert out["nb_courses_evaluees"] == 0

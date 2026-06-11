@@ -969,6 +969,13 @@ class BlackTurfOrchestrator:
                 log.info("orchestrator.vb_deactivated", n=res.rowcount)
 
         async with AsyncSessionLocal() as session:
+            # GEL DU PRONOSTIC À T-10 MIN : on ne (re)calcule une course que si elle
+            # est encore à plus de 10 min du départ, OU si elle n'a pas encore de
+            # pronostic (premier calcul toujours autorisé). Dès qu'on entre dans la
+            # fenêtre des 10 dernières minutes, le dernier prono (proba + cote_figee +
+            # value bets) reste FIGÉ — il ne flip-flope plus avec les cotes live. Les
+            # cotes affichées (participations.cote_pmu / cotes-live) continuent, elles,
+            # d'évoluer normalement (scrapées par les autres cycles).
             r = await session.execute(text("""
                 SELECT c.course_id
                 FROM courses c
@@ -977,6 +984,15 @@ class BlackTurfOrchestrator:
                   AND EXISTS (
                       SELECT 1 FROM participations p
                       WHERE p.course_id = c.course_id AND p.non_partant = false
+                  )
+                  AND (
+                      c.date_heure > now() + interval '10 minutes'
+                      OR NOT EXISTS (
+                          SELECT 1 FROM predictions pr
+                          JOIN participations pp
+                            ON pp.participation_id = pr.participation_id
+                          WHERE pp.course_id = c.course_id
+                      )
                   )
                 ORDER BY c.date_heure
             """))

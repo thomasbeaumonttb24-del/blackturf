@@ -85,7 +85,8 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
     await ensure_tables(session)
 
     rows = (await session.execute(text("""
-        SELECT p.numero, ch.nom, pr.proba_top1, pr.proba_top3, p.cote_pmu,
+        SELECT p.numero, ch.nom, pr.proba_top1, pr.proba_top3,
+               COALESCE(pr.cote_figee, p.cote_pmu) AS cote_pmu,
                p.non_partant, f.features
         FROM predictions pr
         JOIN participations p ON p.participation_id = pr.participation_id

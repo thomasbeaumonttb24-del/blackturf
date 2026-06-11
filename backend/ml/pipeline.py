@@ -41,6 +41,42 @@ from api.config import get_settings
 log = structlog.get_logger()
 settings = get_settings()
 
+# Plancher de qualité absolu pour la mise en production d'un modèle. Un walk-forward
+# AUC sous ce seuil = modèle au mieux aléatoire (0.5) / au pire inversé → JAMAIS déployé.
+# 0.52 laisse une petite marge au-dessus du hasard pur tout en bloquant les runs cassés.
+MIN_DEPLOYABLE_AUC = 0.52
+
+
+def _should_deploy(
+    new_wf: float,
+    current_wf: float,
+    *,
+    current_is_synth: bool,
+    no_current: bool,
+    current_unreliable: bool,
+    data_jump: bool,
+    seuil_regression: float = 0.005,
+    min_auc: float = MIN_DEPLOYABLE_AUC,
+) -> bool:
+    """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
+
+    GARDE-FOU ABSOLU d'abord : sous `min_auc` (walk-forward), on ne déploie JAMAIS, quelle
+    que soit la situation de l'actif. C'est ce plancher qui manquait et qui a laissé un
+    modèle à AUC 0.06 passer en prod (l'actif "non fiable" déployait n'importe quoi).
+
+    Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
+    saut de données massif, OU walk-forward au moins aussi bon (tolérance régression).
+    """
+    if new_wf < min_auc:
+        return False
+    return (
+        current_is_synth
+        or no_current
+        or current_unreliable
+        or data_jump
+        or new_wf >= current_wf - seuil_regression
+    )
+
 
 # ─────────────────────────────────────────────
 # Post-course pipeline
@@ -507,11 +543,14 @@ async def _do_retraining(mois: int, label: str) -> None:
         data_jump = (new_train_n >= 1.5 * max(current_train_n, 1)
                      and new_wf >= current_wf - 0.08 and new_wf >= 0.6)
 
-        # Déployer si : prior synthétique, OU pas de modèle, OU actif non fiable (peu de
-        # données), OU saut de données massif, OU walk-forward au moins aussi bon (tol 0.5%).
-        seuil_regression = 0.005
-        if (current_is_synth or current is None or current_mv is None
-                or current_unreliable or data_jump or new_wf >= current_wf - seuil_regression):
+        # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
+        if _should_deploy(
+            new_wf, current_wf,
+            current_is_synth=current_is_synth,
+            no_current=(current is None or current_mv is None),
+            current_unreliable=current_unreliable,
+            data_jump=data_jump,
+        ):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
 
@@ -555,6 +594,7 @@ async def _do_retraining(mois: int, label: str) -> None:
                 "pipeline.retrain.rollback",
                 new_wf_auc=round(new_wf, 4),
                 current_wf_auc=round(current_wf, 4),
+                reason=("below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC else "worse_wf"),
             )
 
         await session.commit()
@@ -871,6 +911,10 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 proba_top1_high=ci_high,
                 rang_predit=rang,
                 confidence_score=round(confidence * 100, 2),  # accord des 3 modèles
+                # Snapshot de la cote PMU servant de base au plan de mise. Recalculée
+                # à chaque cycle TANT que la course est > 10 min du départ ; figée dès
+                # que le cycle s'arrête (T-10 min) → plan stable, cotes affichées libres.
+                cote_figee=feat.get("cote_pmu"),
                 created_at=datetime.now(),
             ).on_conflict_do_update(
                 index_elements=["participation_id"],
@@ -881,6 +925,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                     "proba_top1_high": ci_high,
                     "rang_predit": rang,
                     "confidence_score": round(confidence * 100, 2),
+                    "cote_figee": feat.get("cote_pmu"),
                 },
             ).returning(PredictionModel.prediction_id)
             result = await session.execute(stmt)

@@ -512,6 +512,11 @@ class Prediction(Base):
     score_borda: Mapped[float | None] = mapped_column(Float)
     confidence_score: Mapped[float | None] = mapped_column(Float)  # 0-100
 
+    # Cote PMU AU MOMENT du calcul du pronostic. Le plan de mise s'appuie dessus
+    # (pas sur la cote live) → une fois le prono figé (T-10 min, cycle stoppé), le
+    # plan ne bouge plus, même si la cote affichée continue d'évoluer.
+    cote_figee: Mapped[float | None] = mapped_column(Float)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
