@@ -8,7 +8,13 @@ from typing import Optional
 import math
 
 
-# Montant minimum PMU par type de pari
+# Mise PLANCHER par pari joué (€) — règle produit : jamais moins de 2€ sur un
+# pari (un pari à 1€ ne vaut pas le coup, surtout sur le profil risqué). C'est le
+# plancher EFFECTIF du moteur, indépendant des minima PMU ci-dessous.
+MISE_PLANCHER = 2
+
+# Montant minimum PMU par type de pari (référence réglementaire ; le moteur
+# applique MISE_PLANCHER=2€ par-dessus).
 MISE_MIN = {
     "Simple Gagnant":   1.0,
     "Simple Placé":     1.0,
@@ -130,43 +136,54 @@ def _palier(montant: int) -> dict:
 # `min_stake_factor` : multiplie la mise PLANCHER du palier. <1 = "petites mises
 #   sur PLUSIEURS combinaisons" (équilibré/risqué saupoudrent un large spectre PMU) ;
 #   =1 = mises franches concentrées (prudent).
-# `cote_min` : cote PLANCHER d'un pari (cote la plus élevée parmi ses chevaux). C'est
-#   ce qui SÉPARE modéré et risqué : modéré est CAPÉ à cote_max=15, risqué exige
-#   cote_min=15 → les deux profils ne peuvent PAS proposer le même pari. Risqué porte
-#   donc TOUJOURS des cotes plus élevées que modéré (demande produit).
+# `cote_min`/`cote_max` : bornes sur la cote des CHEVAUX d'un pari (garde-fou — ex.
+#   le prudent ne touche pas un cheval à cote 30). Ce N'EST PLUS le séparateur principal.
+# `rapport_min`/`rapport_max` : bornes sur le RAPPORT (multiplicateur de gain) du PARI
+#   lui-même. C'EST le séparateur produit demandé, en cohérence avec l'analyse :
+#     • PRUDENT  : gain quasi assuré, viser ~×2          → rapport_min ≈ 1.8.
+#     • MODÉRÉ   : plus de risque, viser entre ×2 et ×10 → rapport ∈ [2, 10].
+#     • RISQUÉ   : gros rapport, au moins ×10            → rapport_min = 10.
+#   Un même pari ne peut donc PAS tomber dans deux profils : ses bandes de rapport
+#   sont contiguës. Le « pourquoi » de chaque pari est ainsi justifié par son rapport.
 PROFIL_CONFIG = {
     # PRUDENT — privilégie le PLACÉ : Simple Placé, Duo Placé (Couplé Placé), 2/4.
-    # Mises prudentes (peu de paris, plancher franc), cotes courtes, gagner souvent.
+    # Cote des chevaux COURTE (cote_max 9) = gain quasi assuré, MAIS on exige un
+    # rapport ≥ ~1.8 (viser ×2) : on écarte le placé sec à 1.1× (argent mort).
+    # Mises prudentes : peu de paris, plancher franc.
     "conservateur": {
-        "cote_min": 0.0, "cote_max": 9.0, "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
+        "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.8, "rapport_max": None,
+        "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "bets_factor": 0.9, "min_stake_factor": 1.0,
         "types": {"Simple Placé", "Couplé Placé", "2sur4"},
         "objectif": "proba",
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
-    # MODÉRÉ — cotes COURTES à MOYENNES (capé à 15) à PROBABILITÉ réelle. PAS de Simple
-    # Placé (le placé sec rapporte trop peu) : duo gagnant, couplé placé, 2/4, trio de
-    # favoris. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
+    # MODÉRÉ — viser un rapport ENTRE ×2 et ×10 : duo gagnant, couplé placé, 2/4, trio
+    # de favoris. PAS de Simple Placé (le placé sec rapporte trop peu, < ×2). Cotes
+    # chevaux capées à 15. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
     "equilibre": {
-        "cote_min": 0.0, "cote_max": 15.0, "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
+        "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 2.0, "rapport_max": 10.0,
+        "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
         "bets_factor": 1.6, "min_stake_factor": 0.55,
         "types": {"Couplé Placé", "Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant"},
         "objectif": "ev",
         "risk_pref": {"securite": 0.8, "rendement": 1.2, "surprise": 1.0, "coup": 0.7},
     },
-    # RISQUÉ — vise les GROSSES cotes (PLANCHER 15) : gagnant grosse cote, duo gagnant
+    # RISQUÉ — vise les GROS RAPPORTS (PLANCHER ×10) : gagnant grosse cote, duo gagnant
     # d'outsiders, trios et jackpots désordre (Tiercé/Quarté+/Quinté+). PAS de Simple
-    # Placé. Beaucoup de PETITES mises sur un large spectre de combinaisons à fort rapport.
+    # Placé. Le séparateur est le RAPPORT (≥10), pas la cote du cheval : un duo de deux
+    # chevaux à cote moyenne qui paie ×15 est bien un pari risqué. Beaucoup de PETITES
+    # mises sur un large spectre de combinaisons à fort rapport.
     # `max_per_type` : nb max de paris d'un MÊME type. Le risqué l'ouvre à 5 pour
     # proposer un large éventail (« 4 duo gagnant », « 5 trio », « 2 simple gagnant
-    # grosse cote ») au lieu d'1-2 paris pauvres. min_stake_factor bas (0.34) → mises
-    # planchers à 1€ : PLUS de paris ET des sommes VARIÉES (le reste se répartit par Kelly).
+    # grosse cote ») au lieu d'1-2 paris pauvres.
     # `spec_coup`: le risqué ASSUME des paris GROS-LOT spéculatifs (EV<0 même sans
     # edge) — c'est un profil loterie par nature. On ne les rejette donc PAS sur la
     # règle de profitabilité ; le garde-fou est le NOMBRE (max_coup) + la PART du
     # budget (cap_spec) + un plancher d'EV (SPEC_EV_FLOOR) qui exclut la loterie pure.
     "agressif": {
-        "cote_min": 15.0, "cote_max": 300.0, "min_proba": 0.0, "ev_min": -0.25, "max_coup": 5,
+        "cote_min": 0.0, "cote_max": 300.0, "rapport_min": 10.0, "rapport_max": None,
+        "min_proba": 0.0, "ev_min": -0.25, "max_coup": 5,
         "spec_coup": True,
         "bets_factor": 2.4, "min_stake_factor": 0.34, "max_per_type": 5,
         "types": {"Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant",
@@ -191,6 +208,10 @@ def _effective_config(profil: str, heat: float) -> dict:
     cfg = {
         "cote_min":  max(0.0, base.get("cote_min", 0.0) * (1.0 - 0.20 * h)),
         "cote_max":  max(4.0, base["cote_max"] * (1.0 + 0.30 * h)),
+        # Bandes de RAPPORT = contrat produit (×2 / ×2–×10 / ≥×10) → NON modulées par
+        # le heat : le profil risqué doit TOUJOURS viser ≥×10, etc.
+        "rapport_min": base.get("rapport_min", 0.0),
+        "rapport_max": base.get("rapport_max"),
         "min_proba": max(0.0, base["min_proba"] * (1.0 - 0.30 * h)),
         "ev_min":    base["ev_min"] - 0.04 * h,
         "max_coup":  max(0, base["max_coup"] + (1 if h > 0.5 else 0) - (1 if h < -0.5 else 0)),
@@ -308,16 +329,19 @@ def _select_conviction(
     filtrés par les GATES du profil EFFECTIF (cote_max, min_proba, ev_min, max_coup).
     Profitabilité d'abord ; concentre. Le profil change donc VRAIMENT quels paris.
     """
-    # Mise plancher EFFECTIVE : le profil peut la réduire (<1) pour saupoudrer de
-    # PETITES mises sur PLUSIEURS combinaisons (équilibré/risqué), ou la garder
-    # franche (prudent). Plancher PMU = 1€.
-    min_stake = max(1, round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
+    # Mise plancher EFFECTIVE : le profil peut réduire l'EXTRA réparti (<1) pour
+    # saupoudrer de PETITES mises sur PLUSIEURS combinaisons (équilibré/risqué), ou
+    # rester franc (prudent), mais le PLANCHER reste MISE_PLANCHER=2€ par pari
+    # (= max(2, plancher du palier × facteur profil)). Jamais 1€ (règle produit).
+    min_stake = max(MISE_PLANCHER, round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
     max_feasible = max(1, montant // min_stake)             # chaque pari ≥ min_stake
     base_max = max(1, round(palier["max_bets"] * cfg.get("bets_factor", 1.0)))
     max_bets = min(base_max, max_feasible, len(cands))
     max_coup = cfg["max_coup"]
     cote_min = cfg.get("cote_min", 0.0)
     cote_max = cfg["cote_max"]
+    rapport_min = cfg.get("rapport_min", 0.0)               # bande de rapport du profil
+    rapport_max = cfg.get("rapport_max")                    # None = pas de plafond
     min_proba = cfg["min_proba"]
     ev_min = cfg["ev_min"]
     allowed_types = cfg.get("types")                         # None = toutes
@@ -370,9 +394,16 @@ def _select_conviction(
         bet_cote = _bet_cote_max(c)
         if bet_cote > cote_max:                              # longshot hors profil
             return False
-        # Plancher de cote (sépare modéré ≤15 de risqué ≥15). Exempté pour les jackpots
-        # désordre : déjà exclusifs au profil risqué et risqués par construction (gros lot).
+        # Garde-fou cote PLANCHER du cheval (rarement utilisé désormais ; le séparateur
+        # est le rapport). Exempté pour les jackpots désordre.
         if bet_cote < cote_min and "Désordre" not in c["type_pari"]:
+            return False
+        # BANDE DE RAPPORT = séparateur produit (×2 / ×2–×10 / ≥×10). Le pari doit
+        # rapporter dans la fourchette du profil, sinon il appartient à un autre profil.
+        rap = float(c.get("rapport_estime", 0.0) or 0.0)
+        if rap < rapport_min:                                # rapport trop faible pour ce profil
+            return False
+        if rapport_max is not None and rap > rapport_max:    # rapport trop élevé → profil plus risqué
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
@@ -415,14 +446,21 @@ def _select_conviction(
     # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba),
     # en restant si possible dans la méthode du profil. Sans plan vide. Aucune invention.
     if not selected:
-        pool = [c for c in cands
-                if (allowed_types is None or c["type_pari"] in allowed_types)
+        def _in_type(c):
+            return allowed_types is None or c["type_pari"] in allowed_types
+
+        def _in_rapport(c):
+            r = float(c.get("rapport_estime", 0.0) or 0.0)
+            return r >= rapport_min and (rapport_max is None or r <= rapport_max)
+
+        # Replis successifs : type+rapport+cote → type+rapport → type → tout. On garde
+        # la bande de rapport du profil le plus longtemps possible (contrat ×2/×10).
+        pool = [c for c in cands if _in_type(c) and _in_rapport(c)
                 and cote_min <= _bet_cote_max(c) <= cote_max]
-        # Replis successifs : cote_min seul (garde l'esprit du profil risqué), puis cote_max, puis tout.
-        pool = pool or [c for c in cands if _bet_cote_max(c) >= cote_min] \
-            or [c for c in cands if _bet_cote_max(c) <= cote_max] or cands
-        # Pour le risqué, viser le plus gros RAPPORT du repli ; sinon la meilleure proba.
-        if cote_min > 0:
+        pool = pool or [c for c in cands if _in_type(c) and _in_rapport(c)] \
+            or [c for c in cands if _in_type(c)] or cands
+        # Risqué (objectif gain) : viser le plus gros RAPPORT du repli ; prudent/modéré : le plus sûr.
+        if objectif == "gain":
             safe = max(pool, key=lambda c: c["rapport_estime"])
         else:
             safe = max(pool, key=lambda c: c["proba_gain"])
@@ -437,8 +475,8 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
     tiltée par le profil EFFECTIF (risk_pref) et le ROI passé. min_stake plancher ;
     plafond sur les paris spéculatifs (cap_spec). Total == montant exactement."""
     rp = cfg["risk_pref"]
-    # Même plancher effectif que la sélection (petites mises multiples si profil le veut).
-    min_stake = max(1, round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
+    # Même plancher effectif que la sélection — jamais sous MISE_PLANCHER=2€ par pari.
+    min_stake = max(MISE_PLANCHER, round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
 
     def weight(c):
         b = max(c["rapport_estime"] - 1.0, 0.1)
@@ -544,6 +582,18 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict]) -> lis
     valeur détectée, signaux appris, ROI réel passé du type, trace Kelly de la mise.
     Tout dérive de valeurs RÉELLEMENT calculées — aucune raison décorative."""
     raisons: list[str] = []
+    # 0. Objectif du profil + rapport RÉEL de ce pari → justifie « pourquoi je joue ça ».
+    rap = float(c.get("rapport_estime", 0.0) or 0.0)
+    _obj = {
+        "conservateur": f"Objectif PRUDENT : cote courte, gain quasi assuré — viser ~×2. "
+                        f"Ce pari rapporte ~×{rap:.1f}.",
+        "equilibre":    f"Objectif MODÉRÉ : plus de cote/risque — viser entre ×2 et ×10. "
+                        f"Ce pari rapporte ~×{rap:.1f}.",
+        "agressif":     f"Objectif RISQUÉ : viser gros, au moins ×10. "
+                        f"Ce pari rapporte ~×{rap:.1f}.",
+    }.get(profil)
+    if _obj:
+        raisons.append(_obj)
     # 1. Pourquoi ce type pour ce profil
     r_type = _TYPE_RAISON_PROFIL.get((profil, c["type_pari"]))
     if r_type:
@@ -597,6 +647,13 @@ def _motif_rejet(c: dict, cfg: dict) -> str:
         return f"Cote trop élevée pour ce profil (max {cfg['cote_max']:.0f})."
     if _bet_cote_max(c) < cfg.get("cote_min", 0.0) and "Désordre" not in c["type_pari"]:
         return f"Cote trop courte pour le profil risqué (min {cfg['cote_min']:.0f}) — gardée pour le modéré."
+    rap = float(c.get("rapport_estime", 0.0) or 0.0)
+    rmin = cfg.get("rapport_min", 0.0)
+    rmax = cfg.get("rapport_max")
+    if rap < rmin:
+        return f"Rapport trop faible (~×{rap:.1f}) pour l'objectif du profil (viser ≥ ×{rmin:.1f})."
+    if rmax is not None and rap > rmax:
+        return f"Rapport trop élevé (~×{rap:.1f}) pour ce profil (max ×{rmax:.0f}) — réservé au profil risqué."
     if c["proba_gain"] < cfg["min_proba"]:
         return f"Probabilité trop faible ({c['proba_gain']*100:.0f}%) pour ce profil."
     spec_ok = cfg.get("spec_coup", False)
