@@ -1940,8 +1940,8 @@ export default function CoursePage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 Partants
-                <span className="text-xs font-normal text-muted-foreground ml-1">
-                  — cliquez un cheval pour musique, équipement, poids, carrière
+                <span className="text-xs font-normal text-muted-foreground/70 ml-1">
+                  — cliquez une ligne pour le détail
                 </span>
               </CardTitle>
             </CardHeader>
@@ -1949,15 +1949,15 @@ export default function CoursePage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border bg-muted/30 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <th className="text-left px-3 py-2.5 w-8">N°</th>
-                      <th className="text-left px-3 py-2.5">Cheval</th>
-                      <th className="text-left px-3 py-2.5 hidden md:table-cell">Jockey</th>
-                      <th className="text-right px-3 py-2.5 hidden sm:table-cell">ELO</th>
-                      <th className="text-right px-3 py-2.5">Cote PMU</th>
-                      {predictions && <th className="text-right px-3 py-2.5 hidden sm:table-cell">Cote algo</th>}
-                      {predictions && <th className="text-right px-3 py-2.5">Proba algo</th>}
-                      {predictions && <th className="text-right px-3 py-2.5">Espérance</th>}
+                    <tr className="border-b border-border text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                      <th className="text-center px-2 py-2 w-8">N°</th>
+                      <th className="text-left px-3 py-2">Cheval</th>
+                      <th className="text-left px-3 py-2 hidden md:table-cell">Jockey</th>
+                      <th className="text-right px-3 py-2 hidden sm:table-cell">ELO</th>
+                      <th className="text-right px-3 py-2">Cote</th>
+                      {predictions && <th className="text-right px-3 py-2 hidden sm:table-cell">Algo</th>}
+                      {predictions && <th className="text-right px-3 py-2">Proba</th>}
+                      {predictions && <th className="text-right px-3 py-2">Valeur</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1978,7 +1978,7 @@ export default function CoursePage() {
                           <tr
                             onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
                             className={cn(
-                              "cursor-pointer border-b border-border/40 transition-colors hover:bg-accent/20",
+                              "cursor-pointer border-b border-border/40 align-top transition-colors hover:bg-accent/20",
                               rang === 1 && "row-top1",
                               rang === 2 && "row-top2",
                               rang === 3 && "row-top3",
@@ -1988,58 +1988,52 @@ export default function CoursePage() {
                             <td className="px-3 py-2.5 font-bold text-muted-foreground text-center">
                               {partant.numero}
                             </td>
-                            <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-1.5 flex-wrap leading-tight">
-                                <span className="font-medium">{partant.nom_cheval}</span>
+                            <td className="px-3 py-3 min-w-0 max-w-0 sm:max-w-none">
+                              {/* Ligne 1 — nom + style + alertes (couleur réservée aux alertes) */}
+                              <div className="flex items-center gap-2 flex-wrap leading-tight">
+                                <span className="font-semibold text-[15px]">{partant.nom_cheval}</span>
                                 {partant.running_style && (
                                   <RunningStyleBadge style={partant.running_style} />
                                 )}
                                 {partant.changement_jockey && (
-                                  <span title="Changement de jockey vs dernière course" className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0 text-[9px] font-bold bg-orange-50 ring-1 ring-orange-200 text-orange-600">
-                                    <RefreshCw className="h-2.5 w-2.5" /> Jockey ↗
+                                  <span title="Changement de jockey vs dernière course" className="inline-flex items-center gap-0.5 rounded px-1 py-0 text-[9px] font-semibold bg-orange-50 ring-1 ring-orange-200 text-orange-600">
+                                    <RefreshCw className="h-2.5 w-2.5" /> Jockey
                                   </span>
                                 )}
                                 {(partant.jockey_suspendu || partant.entraineur_suspendu) && (
-                                  <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0 text-[9px] font-bold bg-red-50 ring-1 ring-red-200 text-red-600">
+                                  <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} className="inline-flex items-center gap-0.5 rounded px-1 py-0 text-[9px] font-semibold bg-red-50 ring-1 ring-red-200 text-red-600">
                                     <ShieldAlert className="h-2.5 w-2.5" />
-                                    {partant.jockey_suspendu ? "Jockey susp." : "Entr. susp."}
+                                    {partant.jockey_suspendu ? "J. susp." : "E. susp."}
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[10px] text-muted-foreground flex gap-1 mt-0.5 flex-wrap">
-                                {partant.age && <span>{partant.age}a</span>}
-                                {partant.sexe && <span>{partant.sexe}</span>}
-                                {partant.premier_deferre && <span className="text-brand-gold">★ Déferré</span>}
-                                {partant.premieres_oeilleres && <span className="text-brand-blue">★ Œillères</span>}
-                                {partant.jours_depuis_derniere != null && (
-                                  <span className={cn(
-                                    partant.jours_depuis_derniere >= 14 && partant.jours_depuis_derniere <= 35
-                                      ? "text-emerald-600 font-medium"
-                                      : partant.jours_depuis_derniere > 60
-                                      ? "text-orange-500"
-                                      : "text-muted-foreground"
-                                  )}>
-                                    {partant.jours_depuis_derniere}j repos
-                                  </span>
-                                )}
-                                {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 5 && (
-                                  <span className="text-violet-600 font-medium">
-                                    Duo {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}%w
-                                  </span>
-                                )}
-                                {partant.pere && (
-                                  <span className="text-muted-foreground/70">Par {partant.pere}</span>
-                                )}
-                              </div>
+
+                              {/* Ligne 2 — méta sobre, neutre, séparée par · */}
+                              {(() => {
+                                const meta = [
+                                  partant.age != null && `${partant.age}a`,
+                                  partant.sexe,
+                                  partant.jours_depuis_derniere != null && `${partant.jours_depuis_derniere}j repos`,
+                                  partant.premier_deferre && "Déferré",
+                                  partant.premieres_oeilleres && "Œillères",
+                                ].filter(Boolean).join("  ·  ");
+                                return meta ? (
+                                  <div className="mt-1 text-[11px] text-muted-foreground/80">{meta}</div>
+                                ) : null;
+                              })()}
+
+                              {/* Musique — texte sobre ici, détail coloré dans l'expand */}
                               {partant.musique && (
-                                <div className="mt-1.5 flex items-center gap-1.5">
-                                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60">Musique</span>
-                                  <MusiqueDisplay musique={partant.musique} />
+                                <div className="mt-1 flex items-baseline gap-1.5">
+                                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground/50">Mus.</span>
+                                  <MusiqueDisplay musique={partant.musique} plain />
                                 </div>
                               )}
-                              <div className="mt-0.5 flex items-center gap-1 text-[10px] text-brand-gold/80">
+
+                              {/* Toggle détail — label court */}
+                              <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
                                 <ChevronDown className={cn("h-3 w-3 transition-transform", isExp && "rotate-180")} />
-                                {isExp ? "Masquer" : "Détails (équipement, poids, carrière, origines)"}
+                                {isExp ? "Masquer" : "Détails"}
                               </div>
                             </td>
                             <td className="px-3 py-2.5 hidden md:table-cell text-xs">

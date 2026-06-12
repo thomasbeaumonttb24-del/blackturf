@@ -66,14 +66,22 @@ export function RunningStyleBadge({ style }: { style: string | null }) {
 const DISCIPLINE_MUSIQUE: Record<string, string> = {
   a: "attelé", m: "monté", p: "plat", h: "haies", s: "steeple", c: "cross", e: "épreuve",
 };
-export function MusiqueDisplay({ musique }: { musique: string | null }) {
+export function MusiqueDisplay({ musique, plain = false }: { musique: string | null; plain?: boolean }) {
   if (!musique || !musique.trim()) {
-    return <span className="text-xs text-muted-foreground/50">Aucune musique</span>;
+    return <span className="text-xs text-muted-foreground/50">{plain ? "—" : "Aucune musique"}</span>;
   }
   const tokens = (musique.match(/\(\d{2,4}\)|[0-9A-Za-z][a-z]/g) || [])
     .filter((t) => !t.startsWith("("))
     .slice(0, 10);
   const headOf = (t: string) => t[0];
+  // Variante sobre : texte mono discret, sans boîtes colorées (ligne du tableau).
+  if (plain) {
+    return (
+      <span className="font-mono text-[11px] tracking-tight text-muted-foreground/80">
+        {tokens.join(" ")}
+      </span>
+    );
+  }
   const cls = (h: string) =>
     h === "1" ? "bg-amber-100 text-amber-700 ring-amber-300"
     : h === "2" || h === "3" ? "bg-blue-50 text-blue-700 ring-blue-200"
