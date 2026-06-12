@@ -1947,17 +1947,17 @@ export default function CoursePage() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full table-fixed text-sm">
                   <thead>
-                    <tr className="border-b border-border text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                    <tr className="border-b border-border bg-muted/40 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       <th className="text-center px-2 py-2 w-8">N°</th>
-                      <th className="text-left px-3 py-2">Cheval</th>
-                      <th className="text-left px-3 py-2 hidden md:table-cell">Jockey</th>
-                      <th className="text-right px-3 py-2 hidden sm:table-cell">ELO</th>
-                      <th className="text-right px-3 py-2">Cote</th>
-                      {predictions && <th className="text-right px-3 py-2 hidden sm:table-cell">Algo</th>}
-                      {predictions && <th className="text-right px-3 py-2">Proba</th>}
-                      {predictions && <th className="text-right px-3 py-2">Valeur</th>}
+                      <th className="text-left px-2 sm:px-3 py-2">Cheval</th>
+                      <th className="text-left px-3 py-2 hidden md:table-cell w-28">Jockey</th>
+                      <th className="text-right px-2 py-2 hidden sm:table-cell w-12">ELO</th>
+                      <th className="text-right px-2 sm:px-3 py-2 w-14">Cote</th>
+                      {predictions && <th className="text-right px-3 py-2 hidden sm:table-cell w-14">Algo</th>}
+                      {predictions && <th className="text-right px-2 sm:px-3 py-2 w-14">Proba</th>}
+                      {predictions && <th className="text-right px-2 sm:px-3 py-2 w-14">Valeur</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1985,53 +1985,61 @@ export default function CoursePage() {
                               isExp && "bg-accent/20",
                             )}
                           >
-                            <td className="px-3 py-2.5 font-bold text-muted-foreground text-center">
+                            <td className="px-2 py-2.5 font-bold text-foreground/70 text-center tabular-nums">
                               {partant.numero}
                             </td>
-                            <td className="px-3 py-3 min-w-0 max-w-0 sm:max-w-none">
-                              {/* Ligne 1 — nom + style + alertes (couleur réservée aux alertes) */}
-                              <div className="flex items-center gap-2 flex-wrap leading-tight">
-                                <span className="font-semibold text-[15px]">{partant.nom_cheval}</span>
+                            <td className="px-2 sm:px-3 py-3 align-top">
+                              {/* Ligne 1 — nom + style + alertes */}
+                              <div className="flex items-center gap-x-2 gap-y-1 flex-wrap leading-tight">
+                                <span className="font-bold text-[15px] text-foreground break-words">{partant.nom_cheval}</span>
                                 {partant.running_style && (
                                   <RunningStyleBadge style={partant.running_style} />
                                 )}
                                 {partant.changement_jockey && (
-                                  <span title="Changement de jockey vs dernière course" className="inline-flex items-center gap-0.5 rounded px-1 py-0 text-[9px] font-semibold bg-orange-50 ring-1 ring-orange-200 text-orange-600">
+                                  <span title="Changement de jockey vs dernière course" className="inline-flex items-center gap-0.5 rounded px-1.5 py-0 text-[9px] font-bold bg-orange-100 ring-1 ring-orange-300 text-orange-700">
                                     <RefreshCw className="h-2.5 w-2.5" /> Jockey
                                   </span>
                                 )}
                                 {(partant.jockey_suspendu || partant.entraineur_suspendu) && (
-                                  <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} className="inline-flex items-center gap-0.5 rounded px-1 py-0 text-[9px] font-semibold bg-red-50 ring-1 ring-red-200 text-red-600">
+                                  <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} className="inline-flex items-center gap-0.5 rounded px-1.5 py-0 text-[9px] font-bold bg-red-100 ring-1 ring-red-300 text-red-700">
                                     <ShieldAlert className="h-2.5 w-2.5" />
                                     {partant.jockey_suspendu ? "J. susp." : "E. susp."}
                                   </span>
                                 )}
                               </div>
 
-                              {/* Ligne 2 — méta sobre, neutre, séparée par · */}
-                              {(() => {
-                                const meta = [
-                                  partant.age != null && `${partant.age}a`,
-                                  partant.sexe,
-                                  partant.jours_depuis_derniere != null && `${partant.jours_depuis_derniere}j repos`,
-                                  partant.premier_deferre && "Déferré",
-                                  partant.premieres_oeilleres && "Œillères",
-                                ].filter(Boolean).join("  ·  ");
-                                return meta ? (
-                                  <div className="mt-1 text-[11px] text-muted-foreground/80">{meta}</div>
-                                ) : null;
-                              })()}
+                              {/* Ligne 2 — méta colorée, contrastée */}
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium leading-tight">
+                                {partant.age != null && <span className="text-foreground/70">{partant.age}a</span>}
+                                {partant.sexe && <span className="text-foreground/70">{partant.sexe}</span>}
+                                {partant.jours_depuis_derniere != null && (
+                                  <span className={cn(
+                                    partant.jours_depuis_derniere >= 14 && partant.jours_depuis_derniere <= 35
+                                      ? "text-emerald-600"
+                                      : partant.jours_depuis_derniere > 60
+                                      ? "text-orange-600"
+                                      : "text-foreground/70"
+                                  )}>
+                                    {partant.jours_depuis_derniere}j repos
+                                  </span>
+                                )}
+                                {partant.premier_deferre && <span className="text-amber-600 font-semibold">★ Déferré</span>}
+                                {partant.premieres_oeilleres && <span className="text-blue-600 font-semibold">★ Œillères</span>}
+                                {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 5 && (
+                                  <span className="text-violet-600 font-semibold">Duo {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}%</span>
+                                )}
+                              </div>
 
-                              {/* Musique — texte sobre ici, détail coloré dans l'expand */}
+                              {/* Musique colorée */}
                               {partant.musique && (
-                                <div className="mt-1 flex items-baseline gap-1.5">
-                                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground/50">Mus.</span>
-                                  <MusiqueDisplay musique={partant.musique} plain />
+                                <div className="mt-1.5 flex items-center gap-1.5">
+                                  <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Mus.</span>
+                                  <MusiqueDisplay musique={partant.musique} />
                                 </div>
                               )}
 
-                              {/* Toggle détail — label court */}
-                              <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
+                              {/* Toggle détail */}
+                              <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-brand-gold">
                                 <ChevronDown className={cn("h-3 w-3 transition-transform", isExp && "rotate-180")} />
                                 {isExp ? "Masquer" : "Détails"}
                               </div>
@@ -2055,7 +2063,7 @@ export default function CoursePage() {
                             <td className="px-3 py-2.5 text-right hidden sm:table-cell">
                               <ELOBadge elo={partant.elo_global} />
                             </td>
-                            <td className="px-3 py-2.5 text-right">
+                            <td className="px-2 sm:px-3 py-2.5 text-right">
                               <span className={cn("font-mono font-semibold", coteMoved && "text-brand-emerald")}>
                                 {formatCote(cote)}
                               </span>
@@ -2067,7 +2075,7 @@ export default function CoursePage() {
                               </td>
                             )}
                             {predictions && (
-                              <td className="px-3 py-2.5 text-right">
+                              <td className="px-2 sm:px-3 py-2.5 text-right">
                                 {pred ? (
                                   <div className="flex flex-col items-end leading-tight">
                                     <span className={cn(
@@ -2084,7 +2092,7 @@ export default function CoursePage() {
                               </td>
                             )}
                             {predictions && (
-                              <td className="px-3 py-2.5 text-right">
+                              <td className="px-2 sm:px-3 py-2.5 text-right">
                                 {(() => {
                                   if (!pred) return <span className="text-muted-foreground">—</span>;
                                   if (pred.value_bet) return (
