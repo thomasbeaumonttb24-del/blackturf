@@ -833,6 +833,8 @@ async def get_mise_plan(
     course_info = {
         "est_quinte": course.est_quinte,
         "est_quarte": course.est_quarte,
+        "est_2sur4": course.est_2sur4,
+        "est_tierce": course.est_tierce,
         "nb_partants": course.nb_partants,
     }
 
@@ -931,7 +933,7 @@ async def enregistrer_paris(
         # soit l'instant d'enregistrement une fois le prono gelé.
         "cote_pmu": _cote_plan(pred, part), "non_partant": part.non_partant,
     } for pred, part, cheval in rows]
-    course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "nb_partants": course.nb_partants}
+    course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "est_2sur4": course.est_2sur4, "est_tierce": course.est_tierce, "nb_partants": course.nb_partants}
 
     # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré) :
     # poids par type APPRIS POUR CE PROFIL + multiplicateurs de signaux par profil.
@@ -1062,6 +1064,8 @@ async def get_bilan_pronostic(
     course_info = {
         "est_quinte": course.est_quinte,
         "est_quarte": course.est_quarte,
+        "est_2sur4": course.est_2sur4,
+        "est_tierce": course.est_tierce,
         "nb_partants": course.nb_partants,
     }
 
