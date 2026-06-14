@@ -356,7 +356,7 @@ def generer_plan(
     if not selected:
         return _plan_vide(montant, profil)
 
-    _allocate_kelly(selected, montant, palier, cfg)         # remplit "mise" (int €)
+    _allocate_kelly(selected, montant, palier, cfg, respect_montant=respect_montant)  # remplit "mise"
     ecartes = _paris_ecartes(cands, selected, cfg)
     return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
                           facteurs_chevaux=facteurs_chevaux, ecartes=ecartes)
@@ -567,7 +567,8 @@ def _select_conviction(
     return selected
 
 
-def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict) -> None:
+def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
+                    respect_montant: bool = False) -> None:
     """Dispatch `montant` (€ entiers) par fraction de KELLY réelle (ev/(cote-1))
     tiltée par le profil EFFECTIF (risk_pref) et le ROI passé. min_stake plancher ;
     plafond sur les paris spéculatifs (cap_spec). Total == montant exactement."""
@@ -618,13 +619,14 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
         c["mise"] = min_stake + extra[i]
 
     _apply_spec_cap(selected, montant, palier, min_stake)
-    # FLAG staking_safe : on NE force PAS le "gain target" qui jette le demi-Kelly et
-    # concentre tout le budget sur le longshot au plus gros rapport (maximisation de
-    # variance = accélère la ruine sur un système -EV, cf. audit edge). On garde la
-    # répartition demi-Kelly diversifiée. Flag off → comportement historique.
+    # FLAG staking_safe : en staking AUTO on NE force PAS le "gain target" (qui concentre
+    # le budget vers la cible = plus de variance ; à éviter sur un système -EV, cf. audit
+    # edge). MAIS sur le calculateur MANUEL (respect_montant) l'utilisateur a saisi un
+    # montant et attend qu'il soit JOUÉ (pas une réserve de 60%) et un gain visé (≥×2.5
+    # modéré) → on force le gain target. respect_montant prime sur staking_safe ici.
     try:
         from ml.algo_flags import FLAGS as _AF
-        _skip_gain_target = _AF.staking_safe
+        _skip_gain_target = _AF.staking_safe and not respect_montant
     except Exception:
         _skip_gain_target = False
     if not _skip_gain_target:
