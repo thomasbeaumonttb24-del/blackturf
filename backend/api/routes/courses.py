@@ -798,13 +798,15 @@ async def get_mise_plan(
     if not course:
         raise HTTPException(status_code=404, detail="Course introuvable")
 
-    # ── PRONO FIGÉ (T-10) → on sert le PLAN FIGÉ tel quel ─────────────────────
-    # Une fois gelé (10 min avant le départ), le calculateur affiche EXACTEMENT le plan
-    # journalisé dans profil_run_log = celui qui apparaîtra dans le bilan/palmarès après
-    # la course (gagné/perdu + montants). Garantit prono AVANT = résultat APRÈS.
-    # Avant le gel : on (re)calcule en live (cotes en direct) plus bas.
+    # ── PRONO FIGÉ (T-10) → plan figé tel quel, UNIQUEMENT à la mise de référence 10€ ──
+    # Le plan figé (profil_run_log) est journalisé à 10€ = celui qui apparaîtra dans le
+    # bilan/palmarès après course. On ne le sert donc QUE si l'utilisateur demande 10€
+    # (→ prono AVANT = résultat APRÈS, identiques). Pour TOUTE autre mise (5€, 20€…), on
+    # recalcule plus bas au montant saisi (cotes figées une fois gelé → même sélection,
+    # mises mises à l'échelle du montant). Avant le gel : recalcul en live.
     fige_now, fige_a_now = _prono_lock_state(course.date_heure)
-    if fige_now:
+    from ml.profil_learning import MISE_REF as _MISE_REF
+    if fige_now and int(round(montant)) == int(_MISE_REF):
         try:
             from sqlalchemy import text as _text
             from ml.profil_learning import ensure_tables
@@ -847,26 +849,26 @@ async def get_mise_plan(
     )
     vbs = {v.participation_id: v for v in (await db.execute(vb_q)).scalars()}
 
-    # COTES EN DIRECT : l'estimatif de gain DOIT suivre le marché live (même cote que
-    # le tableau des partants et le widget "Marché des cotes EN DIRECT"). On recalcule
-    # donc TOUJOURS sur la cote PMU live du moment, figé ou non — sinon l'estimatif
-    # s'appuie sur la cote gelée (périmée) et diverge du live affiché. Le prono reste
-    # « figé » pour la SÉLECTION/proba (cycle de prédiction stoppé à T-10) ; le bilan
-    # et le palmarès, eux, règlent aux VRAIS rapports PMU (cf. profil_run_log).
+    # COTES : AVANT le gel (T-10), l'estimatif suit le marché LIVE (même cote que le
+    # tableau et le widget « Marché EN DIRECT »). APRÈS le gel, on utilise la cote FIGÉE
+    # (cote_figee) → à 10€ la sélection est IDENTIQUE au plan figé = bilan ; pour les
+    # autres mises, même sélection, mises à l'échelle du montant. Le bilan/palmarès
+    # règlent aux VRAIS rapports PMU.
     fige, fige_a = _prono_lock_state(course.date_heure)
     live_cotes: dict[int, float] = {}
-    try:
-        from services.pmu_cotes import fetch_live_cotes
-        live_cotes = {int(c["numero"]): float(c["cote"])
-                      for c in await fetch_live_cotes(course_id) if c.get("cote")}
-    except Exception:
-        live_cotes = {}
+    if not fige:
+        try:
+            from services.pmu_cotes import fetch_live_cotes
+            live_cotes = {int(c["numero"]): float(c["cote"])
+                          for c in await fetch_live_cotes(course_id) if c.get("cote")}
+        except Exception:
+            live_cotes = {}
 
     preds = []
     for pred, part, cheval in rows:
         vb = vbs.get(pred.participation_id)
-        # Cote du plan = LIVE (PMU) si disponible, sinon cote du partant (figée/stockée).
-        cote = live_cotes.get(part.numero) or _cote_plan(pred, part)
+        # Cote = LIVE avant gel, FIGÉE après (sinon cote stockée du partant).
+        cote = (live_cotes.get(part.numero) if not fige else None) or _cote_plan(pred, part)
         preds.append({
             "numero": part.numero,
             "nom_cheval": cheval.nom,
@@ -927,8 +929,8 @@ async def get_mise_plan(
     # Indique si le pronostic est figé (T-10 min) → le plan ne changera plus.
     out["prono_fige"] = fige
     out["prono_fige_a"] = fige_a.isoformat() if fige_a else None
-    # Transparence : plan recalculé sur les cotes EN DIRECT (corrélé au marché live).
-    out["cotes_live_utilisees"] = bool(live_cotes)
+    # Transparence : cotes live (avant gel) → corrélé au marché ; figées après gel.
+    out["cotes_live_utilisees"] = bool(live_cotes) and not fige
     return out
 
 
@@ -972,19 +974,21 @@ async def enregistrer_paris(
     if not rows:
         raise HTTPException(status_code=404, detail="Aucun pronostic — analyse IA requise")
 
-    # Mêmes cotes LIVE que l'aperçu mise-plan (« ce que tu vois = ce que tu enregistres »,
-    # corrélé au marché en direct). Le règlement final se fera aux VRAIS rapports PMU.
+    # Mêmes cotes que l'aperçu mise-plan : LIVE avant le gel, FIGÉES après (« ce que tu
+    # vois = ce que tu enregistres »). Le règlement final se fera aux VRAIS rapports PMU.
+    fige_e, _ = _prono_lock_state(course.date_heure)
     live_cotes: dict[int, float] = {}
-    try:
-        from services.pmu_cotes import fetch_live_cotes
-        live_cotes = {int(c["numero"]): float(c["cote"])
-                      for c in await fetch_live_cotes(course_id) if c.get("cote")}
-    except Exception:
-        live_cotes = {}
+    if not fige_e:
+        try:
+            from services.pmu_cotes import fetch_live_cotes
+            live_cotes = {int(c["numero"]): float(c["cote"])
+                          for c in await fetch_live_cotes(course_id) if c.get("cote")}
+        except Exception:
+            live_cotes = {}
     preds = [{
         "numero": part.numero, "nom_cheval": cheval.nom,
         "proba_top3": pred.proba_top3, "proba_top1": pred.proba_top1,
-        "cote_pmu": live_cotes.get(part.numero) or _cote_plan(pred, part),
+        "cote_pmu": (live_cotes.get(part.numero) if not fige_e else None) or _cote_plan(pred, part),
         "non_partant": part.non_partant,
     } for pred, part, cheval in rows]
     from services.bet_catalog import course_info_bets
@@ -1180,9 +1184,10 @@ async def get_bilan_pronostic(
         }
 
     has_fige = any(fr.get("resultat") for fr in frozen.values())
-    # Le plan figé est toujours à la mise de référence (10€) → le bilan l'affiche tel quel.
-    if has_fige:
-        montant = float(MISE_REF)
+    # Le BILAN (résultats) est TOUJOURS à la mise de référence 10€ par profil — figé
+    # comme simulation. C'est une vue comparable « 10€ par type de risque » (demande
+    # user), indépendante de la mise que l'utilisateur a pu saisir au calculateur.
+    montant = float(MISE_REF)
 
     bilans_profils = []
     for prof in PROFILS:
