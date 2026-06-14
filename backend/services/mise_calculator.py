@@ -171,12 +171,15 @@ PROFIL_CONFIG = {
         # PMU) — l'utilisateur préfère un vrai gain si ça passe à des micro-tickets +EV.
         "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 3.0, "rapport_max": 12.0,
         "min_proba": 0.04, "ev_min": -0.45, "max_coup": 1,
-        # CONCENTRÉ : PEU de paris à mise FRANCHE (plus de saupoudrage de Simple
-        # Gagnant à 2€). bets_factor bas + min_stake_factor=1 + 1 pari par type.
-        "bets_factor": 0.9, "min_stake_factor": 1.0, "max_per_type": 1,
-        # GAIN VISÉ : un pari gagnant doit rapporter ≥ ×3 du TOTAL misé (demande user :
-        # 10€ misés → ≥30€ si un seul pari passe). Le moteur concentre pour l'atteindre.
-        "gain_cible_mult": 3.0,
+        # CONCENTRÉ mais FLEXIBLE : 1 à 3 paris à mise FRANCHE (plus de saupoudrage de
+        # SG à 2€). Le moteur peut COUVRIR le risque avec 2 paris différents (ex. 2
+        # Simple Gagnant 5€ à cote ≥5, ou 1 couplé + 1 SG) plutôt qu'un seul ticket.
+        "bets_factor": 1.2, "min_stake_factor": 1.0, "max_per_type": 2,
+        # GAIN VISÉ : un pari gagnant ≥ ×2.5 du TOTAL misé (10€ → ≥25€). Assez bas pour
+        # autoriser 2 paris de couverture (2×5€ cote 5 = ×2.5 chacun), assez haut pour
+        # rester un VRAI gain (plus de micro-tickets dilués). Le moteur garde autant de
+        # paris que possible atteignant la cible, par conviction (couverture + profit).
+        "gain_cible_mult": 2.5,
         "types": {"Couplé Placé", "Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio", "Simple Gagnant"},
         "objectif": "ev",
         "risk_pref": {"securite": 0.8, "rendement": 1.2, "surprise": 1.0, "coup": 0.7},

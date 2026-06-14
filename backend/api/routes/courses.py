@@ -819,16 +819,33 @@ async def get_mise_plan(
     )
     vbs = {v.participation_id: v for v in (await db.execute(vb_q)).scalars()}
 
+    # GEL T-10 : avant le gel, on RECALCULE le plan sur les cotes EN DIRECT (PMU) au
+    # moment de la génération → EV / rapport / sélection collent au marché live. Une
+    # fois le prono figé (T-10), on fige aussi les cotes (cote_figee) pour que le plan
+    # ne bouge plus (cohérence avec le bilan et le palmarès).
+    fige, fige_a = _prono_lock_state(course.date_heure)
+    live_cotes: dict[int, float] = {}
+    if not fige:
+        try:
+            from services.pmu_cotes import fetch_live_cotes
+            live_cotes = {int(c["numero"]): float(c["cote"])
+                          for c in await fetch_live_cotes(course_id) if c.get("cote")}
+        except Exception:
+            live_cotes = {}
+
     preds = []
     for pred, part, cheval in rows:
         vb = vbs.get(pred.participation_id)
+        # Cote du plan : LIVE si dispo et prono non figé, sinon cote figée (stable).
+        cote = live_cotes.get(part.numero) if not fige else None
+        if not cote:
+            cote = _cote_plan(pred, part)
         preds.append({
             "numero": part.numero,
             "nom_cheval": cheval.nom,
             "proba_top3": pred.proba_top3,
             "proba_top1": pred.proba_top1,
-            # Cote FIGÉE au calcul du prono (sinon le plan bougerait avec la cote live).
-            "cote_pmu": _cote_plan(pred, part),
+            "cote_pmu": cote,
             "non_partant": part.non_partant,
             "value_bet": {"ev_max": vb.ev_max, "niveau": vb.niveau} if vb else None,
         })
@@ -879,9 +896,10 @@ async def get_mise_plan(
                         signal_mults, facteurs_chevaux=facteurs_chevaux)
     out = plan_to_dict(plan)
     # Indique si le pronostic est figé (T-10 min) → le plan ne changera plus.
-    fige, fige_a = _prono_lock_state(course.date_heure)
     out["prono_fige"] = fige
     out["prono_fige_a"] = fige_a.isoformat() if fige_a else None
+    # Transparence : plan recalculé sur les cotes EN DIRECT (avant gel) ou figées.
+    out["cotes_live_utilisees"] = bool(live_cotes) and not fige
     return out
 
 
@@ -925,12 +943,22 @@ async def enregistrer_paris(
     if not rows:
         raise HTTPException(status_code=404, detail="Aucun pronostic — analyse IA requise")
 
+    # Mêmes cotes que l'aperçu mise-plan : LIVE avant gel, FIGÉES après (cohérence
+    # « ce que tu vois = ce que tu enregistres »).
+    fige, _ = _prono_lock_state(course.date_heure)
+    live_cotes: dict[int, float] = {}
+    if not fige:
+        try:
+            from services.pmu_cotes import fetch_live_cotes
+            live_cotes = {int(c["numero"]): float(c["cote"])
+                          for c in await fetch_live_cotes(course_id) if c.get("cote")}
+        except Exception:
+            live_cotes = {}
     preds = [{
         "numero": part.numero, "nom_cheval": cheval.nom,
         "proba_top3": pred.proba_top3, "proba_top1": pred.proba_top1,
-        # Cote FIGÉE → le plan enregistré est identique à celui affiché, quel que
-        # soit l'instant d'enregistrement une fois le prono gelé.
-        "cote_pmu": _cote_plan(pred, part), "non_partant": part.non_partant,
+        "cote_pmu": (live_cotes.get(part.numero) if not fige else None) or _cote_plan(pred, part),
+        "non_partant": part.non_partant,
     } for pred, part, cheval in rows]
     from services.bet_catalog import course_info_bets
     course_info = course_info_bets(course)
