@@ -1,7 +1,7 @@
 /**
- * DisciplineIcon — pictogramme distinct par épreuve hippique.
- * Cheval stylisé (galop vers la droite) + élément propre à l'épreuve
- * (jockey, sulky, haie, drapeau) et badge teinté par discipline.
+ * DisciplineIcon — pictogramme cheval (silhouette réaliste) par épreuve.
+ * Même cheval réaliste, teinté à la couleur de la discipline (repérage immédiat).
+ * Silhouette : Material Design Icons « horse » (Pictogrammers, licence Apache 2.0).
  */
 import { cn } from "@/lib/utils";
 
@@ -22,114 +22,19 @@ export function disciplineMeta(d: string) {
   return DISCIPLINE_META[d] ?? { color: "#6B7280", bg: "bg-gray-100", ring: "ring-gray-200", short: d };
 }
 
-/* ── Glyphes SVG (viewBox 0 0 32 24) — cheval duotone (corps plein + détails) ── */
-function Glyph({ discipline }: { discipline: string }) {
-  const line = {
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.7,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-  };
+/* Silhouette de cheval réaliste (viewBox 24, fill currentColor). */
+const HORSE_D =
+  "M22 6v3.5l-1.5.5l-1.54-2.46c-.13-.21-.46-.12-.46.13v3.58c0 .98-.39 1.86-1 2.53V21H15v-6h-.25c-.21 0-.42-.03-.62-.06l-4.44-.74l-1.12 2.01l.96 4.79H7l-1-4.75c-.03-.3 0-.6.16-.86l1.02-1.81a3.27 3.27 0 0 1-1.68-2.77c-.04.15-.06.37-.03.69c.03.44.14 1.09.07 1.81c-.04.72-.37 1.46-.79 1.95c-.43.49-.9.83-1.4 1.09l-.7-.7c.19-.47.38-.89.42-1.28c.06-.37-.01-.67-.12-.94l-.53-1.13c-.21-.51-.47-1.25-.42-2.12c.03-.85.5-1.96 1.39-2.57c.9-.61 1.87-.69 2.66-.53c.5.1 1.01.34 1.45.68c.37-.17.8-.26 1.25-.26h5.75V7c0-2.21 1.79-4 4-4H22l-.89 1.34c.54.36.89.97.89 1.66";
 
-  // Corps plein (masse → look « designé », pas filaire) : croupe, dos, encolure, tête.
-  const body = (
-    <path
-      fill="currentColor"
-      opacity="0.16"
-      d="M5.6 14.2c1.7-1.9 4.3-2.8 6.9-2.4 1.4.2 2.5-.3 3.3-1.4l1.5-2c.5-.7 1.4-1 2.2-.8l1.4.4c.6.2 1 .8.9 1.4-.1.5-.5.9-1 1l-.7.1c.8.9 1.2 2 1.2 3.2 0 .5-.1 1-.2 1.5-.2.7-.9 1.2-1.6 1.2H7c-.8 0-1.5-.5-1.8-1.2-.2-.5-.2-1.1 0-1.6l.4-.1z"
-    />
+function HorseGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d={HORSE_D} />
+    </svg>
   );
-
-  // Tête + encolure + naseau + oreille (contour net par-dessus la masse).
-  const headNeck = (
-    <>
-      <path d="M5.6 14.2C7.3 12.3 9.9 11.4 12.5 11.8c1.4.2 2.5-.3 3.3-1.4l1.5-2c.5-.7 1.4-1 2.2-.8" {...line} />
-      <path d="M19.5 7.6l1.6.5c.6.2.9.8.7 1.4l-.4 1.2" {...line} />
-      <path d="M19.2 7.5l.4-1.6" {...line} />
-      <path d="M21.4 9.5l-1.5.4" {...line} />
-    </>
-  );
-
-  // Queue flottante.
-  const tail = <path d="M5.6 14.2c-1.7.1-3.2.9-4.2 2.3-.5.7-.6 1.6-.3 2.5" {...line} />;
-
-  // Jambes au galop (réutilisées).
-  const galop = <path d="M8.4 16.4l-1.6 4.4M11.8 16.6l-.7 4.4M15.4 16.2l1 4.4M18.4 15.4l1.9 4.2" {...line} />;
-
-  // Jockey (calotte pleine + buste).
-  const jockey = (cx: number, cy: number) => (
-    <>
-      <circle cx={cx} cy={cy} r="1.7" fill="currentColor" stroke="none" />
-      <path d={`M${cx - 1.4} ${cy + 1.5}c.9-.9 2.2-1 3.2-.4`} {...line} />
-    </>
-  );
-
-  switch (discipline) {
-    case "Plat": // galop monté — jockey ramassé
-      return (
-        <svg viewBox="0 0 32 24" className="h-full w-full">
-          {body}{headNeck}{tail}{galop}{jockey(12.5, 8.2)}
-        </svg>
-      );
-    case "Monté": // trot monté — cavalier plus vertical
-      return (
-        <svg viewBox="0 0 32 24" className="h-full w-full">
-          {body}{headNeck}{tail}
-          <path d="M8.6 16.4l-1 4.4M12 16.6l-.4 4.4M15.4 16.2l.8 4.4M18.6 15.6l1.4 4.4" {...line} />
-          <circle cx="12.8" cy="6.6" r="1.7" fill="currentColor" stroke="none" />
-          <path d="M12.8 8.3v3" {...line} />
-        </svg>
-      );
-    case "Attelé": // trot attelé — sulky (roue + brancards) + driver
-      return (
-        <svg viewBox="0 0 32 24" className="h-full w-full">
-          {body}{headNeck}
-          <path d="M8.6 16.4l-1 4.2M12.2 16.6v4.2M15.6 16.2l.5 4.2" {...line} />
-          <path d="M5.8 15.2L1.8 18M6.2 16.8L2.4 19.4" {...line} />
-          <circle cx="2.6" cy="19" r="3" {...line} />
-          <circle cx="2.6" cy="19" r="0.7" fill="currentColor" stroke="none" />
-          <circle cx="5.6" cy="12.4" r="1.4" fill="currentColor" stroke="none" />
-        </svg>
-      );
-    case "Haies": // saut bas — cheval en suspension + haie légère
-      return (
-        <svg viewBox="0 0 32 24" className="h-full w-full">
-          {body}{headNeck}
-          {/* jambes repliées (saut) */}
-          <path d="M8.6 16l-1 3M12.2 15.6l-.5 3M15.8 15.4l.5 3M18.8 15l1 3" {...line} />
-          {jockey(12.5, 8)}
-          {/* haie */}
-          <path d="M3 21h7M6.5 21v-3.4M4.5 18.4h4" {...line} />
-        </svg>
-      );
-    case "Steeple": // steeple — obstacle massif
-      return (
-        <svg viewBox="0 0 32 24" className="h-full w-full">
-          {body}{headNeck}
-          <path d="M8.6 15.6l-1 3M12.2 15.2l-.4 3.2M15.8 15l.5 3.2M18.8 14.6l1 3" {...line} />
-          {jockey(12.5, 7.6)}
-          <path d="M2.5 21h8M4 21v-4.6M6.5 21v-4.6M9 21v-4.6M3 17.2h7" {...line} />
-        </svg>
-      );
-    case "Cross": // cross — cheval + drapeau de jalonnement
-      return (
-        <svg viewBox="0 0 32 24" className="h-full w-full">
-          {body}{headNeck}{tail}{galop}{jockey(12.5, 7.6)}
-          <path d="M27 4.5v10" {...line} />
-          <path d="M27 4.5l4 1.6-4 1.6z" fill="currentColor" stroke="none" />
-        </svg>
-      );
-    default: // fallback — cheval au galop
-      return (
-        <svg viewBox="0 0 32 24" className="h-full w-full">
-          {body}{headNeck}{tail}{galop}
-        </svg>
-      );
-  }
 }
 
-/** Badge teinté contenant le pictogramme de l'épreuve (dégradé + anneau + ombre douce). */
+/** Badge teinté contenant le cheval (dégradé + anneau + ombre douce). */
 export function DisciplineIcon({
   discipline, size = "md", className,
 }: { discipline: string; size?: "sm" | "md" | "lg"; className?: string }) {
@@ -148,16 +53,12 @@ export function DisciplineIcon({
       title={discipline}
       aria-label={discipline}
     >
-      <Glyph discipline={discipline} />
+      <HorseGlyph className="h-full w-full" />
     </span>
   );
 }
 
-/** Variante inline (juste le glyphe, hérite la couleur du parent). */
-export function DisciplineGlyph({ discipline, className }: { discipline: string; className?: string }) {
-  return (
-    <span className={cn("inline-block h-4 w-5 align-middle", className)}>
-      <Glyph discipline={discipline} />
-    </span>
-  );
+/** Variante inline (juste le cheval, hérite la couleur du parent). */
+export function DisciplineGlyph({ className }: { discipline?: string; className?: string }) {
+  return <HorseGlyph className={cn("inline-block align-middle h-4 w-4", className)} />;
 }
