@@ -68,13 +68,19 @@ async def compute_type_roi_weights(session: AsyncSession, only_ia: bool = True) 
 
 
 async def get_learned_type_weights(session: AsyncSession,
-                                   profil: str | None = None) -> dict[str, float]:
+                                   profil: str | None = None,
+                                   discipline: str | None = None,
+                                   nb_partants: int | None = None) -> dict[str, float]:
     """Poids de conviction APPRIS par type — c'est le cœur de l'auto-amélioration.
 
     Source PRIORITAIRE (si `profil` fourni et historique suffisant) : ROI réel des
     PRONOS ÉMIS par CE profil (profil_run_log : plans figés avant course, réglés aux
     vrais rapports PMU). C'est l'apprentissage sur les recommandations réellement
     faites — pas sur le top-3 du modèle ni un rejeu.
+
+    Si `discipline`/`nb_partants` sont fournis, les poids sont RAFFINÉS par contexte
+    (discipline × bande de peloton) via effective_type_weights — quand ce bucket a
+    suffisamment appris ; sinon on garde le poids type global (zéro effet sinon).
 
     Source suivante : ROI RÉEL winsorisé par type mesuré sur l'historique réglé
     (backtest profils, cache `stats:profils`, recalculé à chaque fin de course et la
@@ -87,12 +93,15 @@ async def get_learned_type_weights(session: AsyncSession,
     # 1. Pronos émis par profil (le plus fidèle à ce que l'utilisateur a vu).
     if profil:
         try:
-            from ml.profil_learning import load_profil_weights, MIN_RUNS_FOR_WEIGHTS
+            from ml.profil_learning import (
+                load_profil_weights, effective_type_weights, MIN_RUNS_FOR_WEIGHTS,
+            )
             state = await load_profil_weights(session)
             if state:
                 pdata = (state.get("profils") or {}).get(profil) or {}
                 if (pdata.get("n_runs") or 0) >= MIN_RUNS_FOR_WEIGHTS and pdata.get("type_weights"):
-                    return pdata["type_weights"]
+                    # raffinage contextuel (additif : retombe sur le global si bucket vide)
+                    return effective_type_weights(pdata, discipline, nb_partants)
         except Exception:
             pass
 

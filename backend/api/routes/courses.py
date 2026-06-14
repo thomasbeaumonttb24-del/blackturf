@@ -887,7 +887,10 @@ async def get_mise_plan(
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
     try:
         from ml.bet_performance import get_learned_type_weights, get_model_heat
-        roi_weights = await get_learned_type_weights(db, profil=profil)
+        roi_weights = await get_learned_type_weights(
+            db, profil=profil,
+            discipline=getattr(course, "discipline", None),
+            nb_partants=getattr(course, "nb_partants", None))
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
@@ -998,7 +1001,10 @@ async def enregistrer_paris(
     # poids par type APPRIS POUR CE PROFIL + multiplicateurs de signaux par profil.
     try:
         from ml.bet_performance import get_learned_type_weights, get_model_heat
-        roi_weights = await get_learned_type_weights(db, profil=profil)
+        roi_weights = await get_learned_type_weights(
+            db, profil=profil,
+            discipline=getattr(course, "discipline", None),
+            nb_partants=getattr(course, "nb_partants", None))
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
@@ -1130,7 +1136,9 @@ async def get_bilan_pronostic(
     # chaque profil : sélection + mise + ROI passé + thermostat).
     try:
         from ml.bet_performance import get_learned_type_weights, get_model_heat
-        roi_weights = await get_learned_type_weights(db)
+        roi_weights = await get_learned_type_weights(
+            db, discipline=getattr(course, "discipline", None),
+            nb_partants=getattr(course, "nb_partants", None))
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
@@ -1204,7 +1212,10 @@ async def get_bilan_pronostic(
             # Mêmes entrées que le live/le gel : ROI weights + signal_mults PAR PROFIL
             # → la simulation reflète la VRAIE méthode (réduit l'écart prono↔bilan).
             try:
-                roi_weights_p = await get_learned_type_weights(db, profil=prof)
+                roi_weights_p = await get_learned_type_weights(
+                    db, profil=prof,
+                    discipline=getattr(course, "discipline", None),
+                    nb_partants=getattr(course, "nb_partants", None))
             except Exception:
                 roi_weights_p = roi_weights
             sig_mults_p = {}

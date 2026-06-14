@@ -550,10 +550,11 @@ async def compute_features_for_participation(
         SELECT cote FROM cotes_historique
         WHERE participation_id = :pid
           AND source = 'pmu'
-          AND time > NOW() - INTERVAL '45 minutes'
+          AND time >  (:as_of)::timestamptz - INTERVAL '45 minutes'
+          AND time <= (:as_of)::timestamptz
           AND cote > 1.0
         ORDER BY time ASC
-    """), {"pid": participation_id})
+    """), {"pid": participation_id, "as_of": date_heure})
     cotes_hist = [float(r[0]) for r in cotes_hist_r.fetchall()]
 
     mouvement_30min = 0.0
@@ -658,8 +659,9 @@ async def compute_features_for_participation(
             FROM historique_courses h
             JOIN participations p ON h.course_id = p.course_id AND h.cheval_id = p.cheval_id
             WHERE p.jockey_id = :jid
-              AND h.date_course > NOW() - INTERVAL '30 days'
-        """), {"jid": jockey_id})
+              AND h.date_course >  (:as_of)::timestamptz - INTERVAL '30 days'
+              AND h.date_course <  (:as_of)::timestamptz
+        """), {"jid": jockey_id, "as_of": date_heure})
         j30 = j30_r.fetchone()
         if j30 and j30[0] and j30[0] >= 3:
             jockey_forme_30j = float(j30[1] or 0) / float(j30[0])
@@ -669,7 +671,9 @@ async def compute_features_for_participation(
     asso_nb = 0
     if jockey_id and entraineur_id:
         from datetime import datetime as dt_mod
-        saison = dt_mod.now().year
+        # saison = ANNÉE DE LA COURSE (pas l'année courante) — sinon une course passée
+        # lirait les stats d'asso de l'année en cours = fuite de données futures.
+        saison = date_heure.year if hasattr(date_heure, "year") else dt_mod.now().year
         asso_r = await session.execute(text("""
             SELECT taux_victoire, nb_courses
             FROM associations_jockey_entraineur
@@ -816,9 +820,10 @@ async def compute_features_for_participation(
     cotes_7j_r = await session.execute(text("""
         SELECT cote FROM cotes_historique
         WHERE participation_id = :pid AND source = 'pmu'
-          AND time > NOW() - INTERVAL '7 days' AND cote > 1.0
+          AND time >  (:as_of)::timestamptz - INTERVAL '7 days'
+          AND time <= (:as_of)::timestamptz AND cote > 1.0
         ORDER BY time ASC
-    """), {"pid": participation_id})
+    """), {"pid": participation_id, "as_of": date_heure})
     cotes_7j = [float(r[0]) for r in cotes_7j_r.fetchall()]
     variance_cotes = float(np.var(cotes_7j)) if len(cotes_7j) >= 3 else 0.0
 
@@ -943,8 +948,9 @@ async def compute_features_for_participation(
             JOIN chevaux ch2 ON ch2.cheval_id = p2.cheval_id
             WHERE h1.cheval_id = :cid
               AND h1.position_arrivee <= 3
-              AND h1.date_course > NOW() - INTERVAL '18 months'
-        """), {"cid": cheval_id})
+              AND h1.date_course >  (:as_of)::timestamptz - INTERVAL '18 months'
+              AND h1.date_course <  (:as_of)::timestamptz
+        """), {"cid": cheval_id, "as_of": date_heure})
         opp_row = opp_r.fetchone()
         if opp_row and opp_row[0]:
             opp_quality = float(np.clip(opp_row[0] / ELO_INITIAL - 1.0, -0.5, 1.0))
@@ -1059,8 +1065,9 @@ async def compute_features_for_participation(
             JOIN participations p ON h.course_id = p.course_id AND h.cheval_id = p.cheval_id
             WHERE p.jockey_id = :jid
               AND h.hippodrome ILIKE :hippo
-              AND h.date_course > NOW() - INTERVAL '24 months'
-        """), {"jid": jockey_id, "hippo": f"%{hippodrome}%"})
+              AND h.date_course >  (:as_of)::timestamptz - INTERVAL '24 months'
+              AND h.date_course <  (:as_of)::timestamptz
+        """), {"jid": jockey_id, "hippo": f"%{hippodrome}%", "as_of": date_heure})
         jh_row = jh_r.fetchone()
         jockey_hippo_winrate = float(jh_row[0] or 0.0) if jh_row else 0.0
 
@@ -1073,8 +1080,9 @@ async def compute_features_for_participation(
             JOIN participations p ON h.course_id = p.course_id AND h.cheval_id = p.cheval_id
             WHERE p.entraineur_id = :eid
               AND h.hippodrome ILIKE :hippo
-              AND h.date_course > NOW() - INTERVAL '24 months'
-        """), {"eid": entraineur_id, "hippo": f"%{hippodrome}%"})
+              AND h.date_course >  (:as_of)::timestamptz - INTERVAL '24 months'
+              AND h.date_course <  (:as_of)::timestamptz
+        """), {"eid": entraineur_id, "hippo": f"%{hippodrome}%", "as_of": date_heure})
         eh_row = eh_r.fetchone()
         entraineur_hippo_winrate = float(eh_row[0] or 0.0) if eh_row else 0.0
 
@@ -1394,13 +1402,13 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         LEFT JOIN entraineurs ent ON ent.entraineur_id = p.entraineur_id
         LEFT JOIN performances_carriere pc ON pc.cheval_id = p.cheval_id
         LEFT JOIN stats_jockeys sj ON sj.jockey_id = p.jockey_id
-            AND sj.saison = EXTRACT(YEAR FROM NOW())
+            AND sj.saison = EXTRACT(YEAR FROM c.date_heure)
         LEFT JOIN stats_entraineurs se ON se.entraineur_id = p.entraineur_id
-            AND se.saison = EXTRACT(YEAR FROM NOW())
+            AND se.saison = EXTRACT(YEAR FROM c.date_heure)
         LEFT JOIN equipements eq ON eq.participation_id = p.participation_id
         LEFT JOIN associations_jockey_entraineur aje
             ON aje.jockey_id = p.jockey_id AND aje.entraineur_id = p.entraineur_id
-            AND aje.saison = EXTRACT(YEAR FROM NOW())
+            AND aje.saison = EXTRACT(YEAR FROM c.date_heure)
         WHERE p.course_id = :cid AND p.non_partant = false
         ORDER BY p.numero
     """), {"cid": course_id})
@@ -1465,10 +1473,11 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         FROM cotes_historique
         WHERE participation_id = ANY(:pids)
           AND source = 'pmu'
-          AND time > NOW() - INTERVAL '45 minutes'
+          AND time >  (:as_of)::timestamptz - INTERVAL '45 minutes'
+          AND time <= (:as_of)::timestamptz
           AND cote > 1.0
         ORDER BY participation_id, time ASC
-    """), {"pids": pid_list})
+    """), {"pids": pid_list, "as_of": date_heure})
     cotes_hist_by_pid: dict = {}
     for row in cotes_hist_r.fetchall():
         if row[0] not in cotes_hist_by_pid:
@@ -1481,10 +1490,11 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         FROM cotes_historique
         WHERE participation_id = ANY(:pids)
           AND source = 'pmu'
-          AND time > NOW() - INTERVAL '7 days'
+          AND time >  (:as_of)::timestamptz - INTERVAL '7 days'
+          AND time <= (:as_of)::timestamptz
           AND cote > 1.0
         ORDER BY participation_id, time ASC
-    """), {"pids": pid_list})
+    """), {"pids": pid_list, "as_of": date_heure})
     cotes_7j_by_pid: dict = {}
     for row in cotes_7j_r.fetchall():
         if row[0] not in cotes_7j_by_pid:

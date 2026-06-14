@@ -27,8 +27,30 @@ log = structlog.get_logger()
 PROFILS = ("conservateur", "equilibre", "agressif")
 MISE_REF = 10            # € fixes par run (comparabilité inter-profils)
 MIN_RUNS_FOR_WEIGHTS = 10   # en-dessous, poids neutres (pas d'invention)
+MIN_RUNS_FOR_WEIGHTS_CTX = 12   # seuil par bucket CONTEXTE (plus haut : plus granulaire)
+MIN_RUNS_FOR_SUPPRESS = 25   # preuve solide avant de COUPER un (type×contexte)
+ROI_SUPPRESS = -0.40         # ROI réel ≤ -40% sur n≥seuil → suppression dure (poids 0)
 SHRINK_K = 15            # shrinkage du ROI vers 0 (anti sur-réaction petit n)
 W_MIN, W_MAX = 0.5, 1.6
+
+
+def ctx_key(discipline, nb_partants) -> str:
+    """Clé de contexte d'une course : discipline + bande de taille de peloton.
+    Permet d'apprendre des poids par (profil × type × contexte) — ex. « Couplé au
+    trot, grand peloton » ≠ « Couplé au plat, petit peloton ». Gardé GROSSIER
+    (3 disciplines × 3 bandes = 9 buckets) pour que chaque bucket se remplisse vite."""
+    d = (discipline or "?").lower()
+    if "trot" in d or "attel" in d or "mont" in d:
+        disc = "trot"
+    elif "haies" in d or "steeple" in d or "obstacle" in d:
+        disc = "obstacle"
+    elif "plat" in d:
+        disc = "plat"
+    else:
+        disc = "autre"
+    n = int(nb_partants or 0)
+    band = "p" if n <= 8 else ("m" if n <= 12 else "g")   # petit / moyen / grand
+    return f"{disc}|{band}"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -100,11 +122,12 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
 
     course = (await session.execute(text("""
         SELECT statut, nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4,
-               paris_disponibles
+               paris_disponibles, discipline
         FROM courses WHERE course_id = :cid
     """), {"cid": course_id})).first()
     if not course or course[0] not in ("a_venir", "en_cours"):
         return 0
+    _discipline = course[7]   # contexte d'apprentissage (discipline × peloton)
 
     preds = []
     feats_by_num: dict[int, dict] = {}
@@ -140,7 +163,10 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
     for profil in PROFILS:
         try:
             from ml.bet_performance import get_learned_type_weights
-            roi_weights = await get_learned_type_weights(session, profil=profil)
+            roi_weights = await get_learned_type_weights(
+                session, profil=profil,
+                discipline=_discipline, nb_partants=course[1],
+            )
         except Exception:
             roi_weights = {}
         sig_mults = {}
@@ -269,7 +295,7 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
     from ml.algo_flags import FLAGS as _AF
     if _AF.oos_weights:
         rows = (await session.execute(text("""
-            SELECT r.profil, r.resultat, r.roi_reel
+            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
@@ -279,20 +305,16 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         """))).all()
     else:
         rows = (await session.execute(text("""
-            SELECT profil, resultat, roi_reel
-            FROM profil_run_log
-            WHERE statut = 'settled' AND resultat IS NOT NULL
+            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants
+            FROM profil_run_log r
+            JOIN courses c ON c.course_id = r.course_id
+            WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
         """))).all()
 
-    by_profil: dict[str, dict] = {
-        p: {"types": {}, "n_runs": 0, "mise": 0.0, "gain": 0.0, "runs_benef": 0}
-        for p in PROFILS
-    }
-    for profil, resultat, _roi in rows:
-        if profil not in by_profil:
-            continue
-        res = resultat if isinstance(resultat, dict) else json.loads(resultat)
-        agg = by_profil[profil]
+    def _new_agg():
+        return {"types": {}, "n_runs": 0, "mise": 0.0, "gain": 0.0, "runs_benef": 0}
+
+    def _accumulate(agg, res):
         agg["n_runs"] += 1
         agg["mise"] += float(res.get("total_mise") or 0)
         agg["gain"] += float(res.get("total_gain") or 0)
@@ -309,6 +331,17 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                 ts["win"] += 1
                 ts["gain"] += float(pari.get("gain") or 0)
 
+    by_profil: dict[str, dict] = {p: _new_agg() for p in PROFILS}
+    # buckets contextuels : by_ctx[profil][ctx_key] = agg
+    by_ctx: dict[str, dict] = {p: {} for p in PROFILS}
+    for profil, resultat, _roi, discipline, nb_partants in rows:
+        if profil not in by_profil:
+            continue
+        res = resultat if isinstance(resultat, dict) else json.loads(resultat)
+        _accumulate(by_profil[profil], res)
+        ck = ctx_key(discipline, nb_partants)
+        _accumulate(by_ctx[profil].setdefault(ck, _new_agg()), res)
+
     out = {"profils": {}, "n_total_runs": sum(a["n_runs"] for a in by_profil.values())}
     for profil, agg in by_profil.items():
         weights = {}
@@ -324,6 +357,30 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                 "roi": round((ts["gain"] - ts["mise"]) / ts["mise"] * 100, 1) if ts["mise"] > 0 else None,
                 "poids": round(w, 3),
             }
+        # ── Poids CONTEXTUELS : {ctx_key: {type: poids}} ────────────────────
+        # Un bucket (discipline×peloton) n'émet un poids que s'il a ≥ seuil runs ;
+        # sinon absent → la conso retombe sur le poids type global (puis 1.0).
+        # Additif et sûr : zéro effet tant que les buckets ne sont pas remplis.
+        ctx_weights: dict[str, dict] = {}
+        suppressed: list[str] = []
+        for ck, cagg in by_ctx.get(profil, {}).items():
+            cw = {}
+            for t, ts in cagg["types"].items():
+                n, mise, gain = ts["n"], ts["mise"], ts["gain"]
+                roi = (gain - mise) / mise if mise > 0 else 0.0
+                if n >= MIN_RUNS_FOR_SUPPRESS and roi <= ROI_SUPPRESS:
+                    # GATE DUR : type prouvé perdant DANS CE CONTEXTE → poids 0 = jamais
+                    # proposé. Contextuel (pas global) : le même type reste jouable là où
+                    # il gagne (ex. Couplé nul au plat, +660% au trot → seul le plat coupé).
+                    cw[t] = 0.0
+                    suppressed.append(f"{ck}:{t} (roi={round(roi*100)}% n={n})")
+                elif n >= MIN_RUNS_FOR_WEIGHTS_CTX:
+                    cw[t] = round(shrunk_weight(gain - mise, mise, n), 3)
+            if cw:
+                ctx_weights[ck] = cw
+        if suppressed:
+            log.info("profil_learning.suppressed", profil=profil, buckets=suppressed)
+
         mise, gain = agg["mise"], agg["gain"]
         out["profils"][profil] = {
             "n_runs": agg["n_runs"],
@@ -331,6 +388,8 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
             "taux_runs_beneficiaires": round(agg["runs_benef"] / agg["n_runs"] * 100, 1) if agg["n_runs"] else None,
             "type_weights": weights,
             "type_detail": detail,
+            "ctx_weights": ctx_weights,
+            "suppressed": suppressed,
         }
 
     await session.execute(text("""
@@ -356,3 +415,26 @@ async def load_profil_weights(session: AsyncSession) -> dict | None:
     except Exception as e:
         log.warning("profil_learning.load_failed", err=str(e)[:140])
         return None
+
+
+def effective_type_weights(pdata: dict, discipline=None, nb_partants=None) -> dict:
+    """Poids effectifs {type: w} pour CE contexte de course.
+
+    Part du poids type GLOBAL appris, puis le raffine par le poids CONTEXTUEL
+    (discipline × bande de peloton) quand ce bucket a suffisamment appris. Blend
+    60% contexte / 40% global : le contexte est plus pertinent mais sur moins de
+    runs → on amortit son bruit avec le global. Fonction PURE (testable sans DB).
+    Sans contexte ou bucket vide → poids global inchangé (comportement historique)."""
+    base = dict(pdata.get("type_weights") or {})
+    if discipline is None and nb_partants is None:
+        return base
+    cw = (pdata.get("ctx_weights") or {}).get(ctx_key(discipline, nb_partants)) or {}
+    out = dict(base)
+    for t, wc in cw.items():
+        wc = float(wc)
+        if wc <= 0.001:
+            out[t] = 0.0            # bucket SUPPRIMÉ (prouvé perdant) → jamais proposé,
+            continue                # pas de blend avec le global (la suppression prime)
+        wg = base.get(t, 1.0)
+        out[t] = round(0.6 * wc + 0.4 * float(wg), 3)
+    return out

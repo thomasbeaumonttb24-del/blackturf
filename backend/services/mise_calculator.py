@@ -482,6 +482,11 @@ def _select_conviction(
     def passes_gates(c):
         if allowed_types is not None and c["type_pari"] not in allowed_types:
             return False                                     # hors méthode du profil
+        # GATE DUR appris : un type au poids ~0 = bucket (type×contexte) PROUVÉ perdant
+        # (ROI réel ≤ seuil sur n suffisant, cf. profil_learning.suppressed) → on ne le
+        # propose plus du tout pour ce profil dans ce contexte. Couper > sous-pondérer.
+        if roi_weights.get(c["type_pari"], 1.0) <= 0.001:
+            return False
         bet_cote = _bet_cote_max(c)
         if bet_cote > cote_max:                              # longshot hors profil
             return False
