@@ -1668,6 +1668,29 @@ export default function CoursePage() {
     course?.statut === "en_cours"
   );
 
+  // Cotes LIVE par HTTP (même source que le widget « Marché des cotes EN DIRECT »),
+  // pollées dès « à venir » (le WS n'est branché qu'« en cours » → la table restait
+  // sur la cote stockée périmée). Garantit : table = marché = estimatif, tout corrélé.
+  const [liveCoteHttp, setLiveCoteHttp] = useState<Record<number, number>>({});
+  useEffect(() => {
+    if (!course || !["a_venir", "en_cours"].includes(course.statut)) return;
+    let alive = true;
+    const poll = () =>
+      api.get(`/courses/${id}/cotes-live`)
+        .then((res) => {
+          if (!alive) return;
+          const cotes: Array<{ numero: number; cote: number }> = res.data?.cotes ?? [];
+          if (!cotes.length) return;
+          const m: Record<number, number> = {};
+          for (const c of cotes) m[c.numero] = c.cote;
+          setLiveCoteHttp(m);
+        })
+        .catch(() => {});
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [id, course?.statut]);
+
   // Chargement + rafraîchissement auto du statut. Sans poll, une fiche ouverte
   // en "À venir"/"En cours" ne passait JAMAIS à "Terminée" sans recharger (fetch
   // unique) → l'arrivée ne s'affichait pas pour un onglet resté ouvert.
@@ -1758,12 +1781,15 @@ export default function CoursePage() {
   }
   if (!course) return null;
 
-  // Merge live cotes
+  // Merge live cotes : HTTP (fiable, = widget Marché) PRIME sur le WS.
   const liveCoteMap: Record<number, number | null> = {};
   if (liveCotes.length > 0) {
     for (const p of liveCotes as Array<{ numero: number; cote_pmu: number | null }>) {
       liveCoteMap[p.numero] = p.cote_pmu;
     }
+  }
+  for (const [num, cote] of Object.entries(liveCoteHttp)) {
+    liveCoteMap[Number(num)] = cote;
   }
 
   const profil = user?.profil_risque || "equilibre";
