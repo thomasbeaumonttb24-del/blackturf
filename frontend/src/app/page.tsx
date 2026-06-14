@@ -151,35 +151,33 @@ export default async function HomePage() {
     <div className="flex flex-col min-h-screen bg-brand-warm">
       <Navbar />
 
-      {/* ═══════════ HERO (image plein cadre, dégradé BLANC) ═══════════ */}
-      <section className="relative overflow-hidden bg-brand-warm">
+      {/* ═══════════ HERO (épuré, image plein cadre dégradé blanc) ═══════════ */}
+      <section className="relative overflow-hidden bg-brand-warm min-h-[82vh] flex items-center">
         {/* Image plein cadre */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/img/hero.jpg" alt="Départ d'une course de chevaux aux portes numérotées"
-          className="absolute inset-0 h-full w-full object-cover object-[72%_center] ken-burns" />
-        {/* Dégradés BLANCS : l'image se fond dans le fond clair */}
-        <div className="absolute inset-0 bg-gradient-to-r from-brand-warm via-brand-warm/92 to-brand-warm/10" />
-        <div className="absolute inset-0 bg-gradient-to-t from-brand-warm via-transparent to-brand-warm/20" />
-        {/* Voile renforcé sur mobile (lisibilité du texte foncé) */}
-        <div className="absolute inset-0 bg-brand-warm/45 sm:bg-transparent" />
+          className="absolute inset-0 h-full w-full object-cover object-[68%_center] ken-burns" />
+        {/* Dégradés vers le blanc */}
+        <div className="absolute inset-0 bg-gradient-to-r from-brand-warm via-brand-warm/90 to-brand-warm/20" />
+        <div className="absolute inset-0 bg-gradient-to-t from-brand-warm via-transparent to-brand-warm/10" />
+        {/* Voile renforcé sur mobile (texte foncé bien lisible) */}
+        <div className="absolute inset-0 bg-brand-warm/55 sm:bg-transparent" />
 
-        <div className="relative mx-auto max-w-6xl w-full px-4 sm:px-6 lg:px-8 pt-28 pb-16 sm:pt-36 sm:pb-28">
+        <div className="relative mx-auto max-w-6xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16">
           <div className="max-w-xl">
-            <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-gold-deep mb-6">
+            <span className="inline-flex items-center gap-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.16em] text-brand-gold-deep mb-5">
               <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500" />
-              Pronostics hippiques PMU · paris de valeur
+              Pronostics hippiques PMU
             </span>
 
-            <h1 className="font-display text-[2.5rem] leading-[1.05] sm:text-6xl font-extrabold tracking-tight text-gray-900">
+            <h1 className="font-display text-[2.25rem] leading-[1.06] sm:text-6xl font-extrabold tracking-tight text-gray-900">
               Le PMU,{" "}
               <span className="text-gradient-animated">version méthode.</span>
             </h1>
 
-            <p className="mt-6 text-base sm:text-lg text-gray-700 leading-relaxed max-w-lg">
-              BlackTurf analyse chaque course, repère les paris où la cote{" "}
-              <span className="font-semibold text-gray-900">sous-estime</span> les chances, puis vous donne un{" "}
-              <span className="font-semibold text-gray-900">plan de mise adapté à votre profil</span>.
-              Vous pariez avec des chiffres — plus au hasard.
+            <p className="mt-5 text-base sm:text-lg text-gray-700 leading-relaxed max-w-md">
+              On repère les paris où la cote <span className="font-semibold text-gray-900">sous-estime</span> les
+              chances, et on vous donne un <span className="font-semibold text-gray-900">plan de mise</span> selon votre profil.
             </p>
 
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
@@ -189,39 +187,50 @@ export default async function HomePage() {
               </Button>
               <Button variant="outline" size="xl" asChild
                 className="press border-gray-300 bg-white/70 backdrop-blur-sm text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50">
-                <Link href="/programme">Voir le programme du jour</Link>
+                <Link href="/programme">Programme du jour</Link>
               </Button>
             </div>
+            <p className="mt-5 text-[11px] text-gray-500">Sans carte bancaire · annulation à tout moment</p>
+          </div>
+        </div>
+      </section>
 
-            {/* 3 piliers = le but du site */}
-            <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { icon: Search, t: "On analyse", d: "80 critères / cheval" },
-                { icon: Zap, t: "On détecte la valeur", d: "cote vs vraie chance" },
-                { icon: Wallet, t: "Vous misez malin", d: "plan selon le risque" },
-              ].map((p) => (
-                <div key={p.t} className="rounded-2xl bg-white/85 backdrop-blur-sm border border-white/60 shadow-sm px-4 py-3.5">
-                  <p.icon className="h-4 w-4 text-brand-gold-deep mb-2" />
+      {/* ═══════════ BANDE PILIERS + STATS (épurée) ═══════════ */}
+      <section className="bg-white border-b border-gray-100">
+        <div className="mx-auto max-w-6xl px-5 sm:px-6 lg:px-8 py-10 sm:py-12">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+            {[
+              { icon: Search, t: "On analyse", d: "80 critères par cheval" },
+              { icon: Zap, t: "On détecte la valeur", d: "cote vs vraie chance" },
+              { icon: Wallet, t: "Vous misez malin", d: "un plan selon votre risque" },
+            ].map((p) => (
+              <div key={p.t} className="flex items-start gap-3">
+                <div className="icon-box h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.16)" }}>
+                  <p.icon className="h-5 w-5 text-brand-gold-deep" />
+                </div>
+                <div>
                   <div className="text-sm font-bold text-gray-900 leading-tight">{p.t}</div>
-                  <div className="text-[11px] text-gray-500 mt-0.5">{p.d}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{p.d}</div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
+          </div>
 
-            {/* Stats réelles — rangée sobre */}
-            <div className="mt-9 flex items-stretch gap-6 sm:gap-8">
-              {[
-                { v: fmtPct(tr?.accuracy_top3 ?? null), l: "Précision Top-3", c: "#B45309" },
-                { v: fmtPct(tr?.favori_place_rate ?? null), l: "Favori placé", c: "#059669" },
-                { v: coursesAnalysees == null ? "—" : `${fmtInt(coursesAnalysees)}+`, l: "Courses analysées", c: "#111827" },
-              ].map((s, i) => (
-                <div key={s.l} className={`${i > 0 ? "pl-6 sm:pl-8 border-l border-gray-300/70" : ""}`}>
-                  <div className="num-display text-2xl sm:text-3xl font-extrabold" style={{ color: s.c }}>{s.v}</div>
-                  <div className="text-[10px] sm:text-[11px] uppercase tracking-wide text-gray-500 mt-1">{s.l}</div>
-                </div>
-              ))}
-            </div>
-            <p className="mt-4 text-[11px] text-gray-500 max-w-lg">Chiffres réels, mesurés sur les arrivées PMU officielles. Sans carte bancaire · annulation à tout moment.</p>
+          <div className="mt-8 pt-7 border-t border-gray-100 flex flex-wrap items-end justify-center sm:justify-start gap-8 sm:gap-12">
+            {[
+              { v: fmtPct(tr?.accuracy_top3 ?? null), l: "Précision Top-3", c: "#B45309" },
+              { v: fmtPct(tr?.favori_place_rate ?? null), l: "Favori placé", c: "#059669" },
+              { v: coursesAnalysees == null ? "—" : `${fmtInt(coursesAnalysees)}+`, l: "Courses analysées", c: "#111827" },
+            ].map((s) => (
+              <div key={s.l} className="text-center sm:text-left">
+                <div className="num-display text-2xl sm:text-3xl font-extrabold" style={{ color: s.c }}>{s.v}</div>
+                <div className="text-[10px] sm:text-[11px] uppercase tracking-wide text-gray-400 mt-1">{s.l}</div>
+              </div>
+            ))}
+            <span className="hidden lg:inline text-[11px] text-gray-400 ml-auto self-center max-w-[220px] text-right">
+              Chiffres réels, mesurés sur les arrivées PMU officielles.
+            </span>
           </div>
         </div>
       </section>
