@@ -650,7 +650,8 @@ async def compute_features_for_participation(
         js = None
 
     # jockey_forme_30j — taux de victoire réel sur 30 jours depuis historique_courses
-    jockey_forme_30j = float(js[0]) if js else 0.12  # fallback sur global
+    # null-guard : la ligne stats_jockeys peut exister avec des colonnes NULL.
+    jockey_forme_30j = float(js[0]) if (js and js[0] is not None) else 0.12  # fallback global
     if jockey_id:
         j30_r = await session.execute(text("""
             SELECT
@@ -686,11 +687,11 @@ async def compute_features_for_participation(
             asso_nb = int(asso_row[1] or 0)
 
     feat_jockey = {
-        "jockey_taux_victoire_global": float(js[0]) if js else 0.12,
-        "jockey_taux_place_global": float(js[1]) if js else 0.30,
-        "jockey_roi": float(js[2]) if js else 0.0,
-        "jockey_montes_30j": int(js[3]) if js else 0,
-        "jockey_victoires_saison": int(js[4]) if js else 0,
+        "jockey_taux_victoire_global": float(js[0]) if (js and js[0] is not None) else 0.12,
+        "jockey_taux_place_global": float(js[1]) if (js and js[1] is not None) else 0.30,
+        "jockey_roi": float(js[2]) if (js and js[2] is not None) else 0.0,
+        "jockey_montes_30j": int(js[3]) if (js and js[3] is not None) else 0,
+        "jockey_victoires_saison": int(js[4]) if (js and js[4] is not None) else 0,
         "jockey_forme_30j": jockey_forme_30j,
         "changement_jockey": int(changement_jockey_flag),
         "asso_jockey_entraineur_taux": float(asso_taux),
@@ -723,12 +724,12 @@ async def compute_features_for_participation(
         combo_rate = float(combo_r.scalar() or 0.0)
 
     feat_entraineur = {
-        "entraineur_taux_global": float(es[0]) if es else 0.12,
-        "entraineur_taux_place": float(es[1]) if es else 0.30,
-        "entraineur_roi": float(es[2]) if es else 0.0,
-        "entraineur_victoires_saison": int(es[3]) if es else 0,
+        "entraineur_taux_global": float(es[0]) if (es and es[0] is not None) else 0.12,
+        "entraineur_taux_place": float(es[1]) if (es and es[1] is not None) else 0.30,
+        "entraineur_roi": float(es[2]) if (es and es[2] is not None) else 0.0,
+        "entraineur_victoires_saison": int(es[3]) if (es and es[3] is not None) else 0,
         "combo_jockey_entraineur": combo_rate,
-        "entraineur_forme_30j": float(es[0]) if es else 0.12,
+        "entraineur_forme_30j": float(es[0]) if (es and es[0] is not None) else 0.12,
     }
 
     # ── K. Identité cheval ────────────────────────────────────────────────
