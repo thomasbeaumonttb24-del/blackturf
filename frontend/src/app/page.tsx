@@ -328,6 +328,49 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* ═══════════ CALCULATEUR ═══════════ */}
+      <section className="py-24 bg-brand-warm">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <ScrollReveal direction="right" className="order-2 lg:order-1">
+              <div className="glass-card rounded-3xl p-2">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
+                  <Calculator className="h-4 w-4 text-brand-gold-deep" />
+                  <span className="text-xs font-semibold text-gray-700">Calculateur de mise</span>
+                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
+                </div>
+                <CalculatorDemo />
+              </div>
+            </ScrollReveal>
+            <ScrollReveal direction="left" className="order-1 lg:order-2">
+              <div>
+                <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                  <Calculator className="h-3.5 w-3.5" /> Essayez maintenant
+                </span>
+                <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+                  Votre mise, répartie au{" "}
+                  <span className="text-gradient">centime près</span>
+                </h2>
+                <p className="text-gray-600 leading-relaxed mb-6">
+                  Entrez un montant. BlackTurf construit un plan sur mesure selon votre profil de risque —
+                  sécurité, rendement, coup — et calcule le gain net potentiel de chaque ligne.
+                </p>
+                <ul className="space-y-2.5 mb-7">
+                  {["Répartition automatique par palier de risque", "Gain net potentiel calculé en direct", "Adapté à votre capital et à votre profil"].map((f) => (
+                    <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
+                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-600" /> {f}
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/programme" className="press inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold-deep hover:gap-2.5 transition-all">
+                  Lancer le calculateur <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </ScrollReveal>
+          </div>
+        </div>
+      </section>
+
       {/* ═══════════ BANDEAU CINÉMATIQUE ═══════════ */}
       <section className="relative overflow-hidden bg-gray-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -695,51 +738,6 @@ export default async function HomePage() {
                 </div>
               </ScrollReveal>
             ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="section-divider" />
-
-      {/* ═══════════ CALCULATEUR ═══════════ */}
-      <section className="py-24 bg-white">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <ScrollReveal direction="right" className="order-2 lg:order-1">
-              <div className="glass-card rounded-3xl p-2">
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
-                  <Calculator className="h-4 w-4 text-brand-gold-deep" />
-                  <span className="text-xs font-semibold text-gray-700">Calculateur de mise</span>
-                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
-                </div>
-                <CalculatorDemo />
-              </div>
-            </ScrollReveal>
-            <ScrollReveal direction="left" className="order-1 lg:order-2">
-              <div>
-                <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
-                  <Calculator className="h-3.5 w-3.5" /> Essayez maintenant
-                </span>
-                <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-                  Votre mise, répartie au{" "}
-                  <span className="text-gradient">centime près</span>
-                </h2>
-                <p className="text-gray-600 leading-relaxed mb-6">
-                  Entrez un montant. BlackTurf construit un plan sur mesure selon votre profil de risque —
-                  sécurité, rendement, coup — et calcule le gain net potentiel de chaque ligne.
-                </p>
-                <ul className="space-y-2.5 mb-7">
-                  {["Répartition automatique par palier de risque", "Gain net potentiel calculé en direct", "Adapté à votre capital et à votre profil"].map((f) => (
-                    <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
-                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-600" /> {f}
-                    </li>
-                  ))}
-                </ul>
-                <Link href="/programme" className="press inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold-deep hover:gap-2.5 transition-all">
-                  Lancer le calculateur <ArrowRight className="h-4 w-4" />
-                </Link>
-              </div>
-            </ScrollReveal>
           </div>
         </div>
       </section>

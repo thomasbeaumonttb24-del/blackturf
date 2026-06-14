@@ -52,12 +52,12 @@ const PROFILS: Profil[] = [
   },
 ];
 
-const CHIPS = [20, 50, 100, 200];
+const CHIPS = [5, 10, 20, 30];
 const eur = (n: number) => n.toLocaleString("fr-FR", { maximumFractionDigits: 0 });
 const NIV_CLASS: Record<string, string> = { securite: "plan-securite", rendement: "plan-rendement", coup: "plan-coup" };
 
 export function CalculatorDemo() {
-  const [mise, setMise] = useState(50);
+  const [mise, setMise] = useState(10);
   const [profilKey, setProfilKey] = useState("modere");
   const m = Number.isFinite(mise) && mise > 0 ? mise : 0;
   const profil = PROFILS.find((p) => p.key === profilKey) ?? PROFILS[1];
