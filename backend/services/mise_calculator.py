@@ -170,11 +170,19 @@ PROFIL_CONFIG = {
         # GAIN (un duo/trio de favoris paie ×3–×10 mais reste -EV à cause du prélèvement
         # PMU) — l'utilisateur préfère un vrai gain si ça passe à des micro-tickets +EV.
         "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 3.0, "rapport_max": 12.0,
-        "min_proba": 0.04, "ev_min": -0.45, "max_coup": 1,
+        # max_coup 3 : les combos/SG de favoris sont -EV (prélèvement PMU) donc classés
+        # « spéculatifs » ; on en autorise jusqu'à 3 pour pouvoir COUVRIR le risque avec
+        # 2 paris (ex. 2 SG cote ≥5). Bornés par la cible de gain + le nb de paris.
+        "min_proba": 0.04, "ev_min": -0.45, "max_coup": 3,
+        # spec_coup : un duo/SG de favoris est -EV (prélèvement PMU) mais c'est un pari
+        # de COUVERTURE légitime (gain réel si ça passe), pas un don au PMU comme un
+        # longshot mort. On les autorise (bornés par ev_min -0.45 + max_coup + la cible
+        # de gain) → le modéré peut jouer 2 SG cote ≥5 pour couvrir, au lieu d'1 ticket.
+        "spec_coup": True,
         # CONCENTRÉ mais FLEXIBLE : 1 à 3 paris à mise FRANCHE (plus de saupoudrage de
         # SG à 2€). Le moteur peut COUVRIR le risque avec 2 paris différents (ex. 2
         # Simple Gagnant 5€ à cote ≥5, ou 1 couplé + 1 SG) plutôt qu'un seul ticket.
-        "bets_factor": 1.2, "min_stake_factor": 1.0, "max_per_type": 2,
+        "bets_factor": 1.2, "min_stake_factor": 1.0, "max_per_type": 3,
         # GAIN VISÉ : un pari gagnant ≥ ×2.5 du TOTAL misé (10€ → ≥25€). Assez bas pour
         # autoriser 2 paris de couverture (2×5€ cote 5 = ×2.5 chacun), assez haut pour
         # rester un VRAI gain (plus de micro-tickets dilués). Le moteur garde autant de
