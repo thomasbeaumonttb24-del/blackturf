@@ -100,8 +100,8 @@ services:
       - FRONTEND_URL=https://blackturf.fr
       - ALLOWED_ORIGINS=["https://blackturf.fr","https://www.blackturf.fr"]
       # ── Flags algo (audit edge 2026-06-14) — cf. backend/ml/algo_flags.py + ALGO_FIXES_2026-06-14.md.
-      # Activés : anti-leakage + dé-vig + calibration honnête + dashboards vrais + combos EV honnête.
-      # STAKING inchangé (BT_STAKING_SAFE=0) — respecte « garder mises actuelles ».
+      # TOUT activé (2026-06-14, "active tout") : anti-leakage + dé-vig + calibration honnête
+      # + dashboards vrais + combos EV honnête + STAKING-SAFE (cap bankroll + no gain-target dump).
       - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
       - BT_TRAIN_PRERACE_ONLY=${BT_TRAIN_PRERACE_ONLY:-1}
       - BT_CALIB_GUARD=${BT_CALIB_GUARD:-1}
@@ -112,7 +112,7 @@ services:
       - BT_COLLAPSE_LONGSHOT=${BT_COLLAPSE_LONGSHOT:-1}
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
-      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-0}
+      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
     expose:
       - "8000"
     depends_on:
@@ -163,7 +163,7 @@ services:
       - BT_COLLAPSE_LONGSHOT=${BT_COLLAPSE_LONGSHOT:-1}
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
-      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-0}
+      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
     depends_on:
       db:
         condition: service_healthy
@@ -205,7 +205,7 @@ services:
       - BT_COLLAPSE_LONGSHOT=${BT_COLLAPSE_LONGSHOT:-1}
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
-      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-0}
+      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
     depends_on:
       db:
         condition: service_healthy
