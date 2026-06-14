@@ -487,13 +487,14 @@ export default async function HomePage() {
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {[
-              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Précision Top-3", sub: "un de nos 3 favoris finit dans les 3", accent: true },
-              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers" },
-              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course" },
-              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels" },
+              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Précision Top-3", sub: "un de nos 3 favoris finit dans les 3", accent: true, icon: Target },
+              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers", icon: Shield },
+              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course", icon: Trophy },
+              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels", icon: Database },
             ].map((m, i) => (
               <ScrollReveal key={m.label} delay={i * 70}>
-                <div className="tilt-card rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
+                <div className="tilt-card relative overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
+                  <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300/60" />
                   <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
                   <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
@@ -513,43 +514,71 @@ export default async function HomePage() {
                   <div className="space-y-4">
                     {tr.by_discipline.map((d) => (
                       <div key={d.discipline}>
-                        <div className="flex items-center justify-between text-xs mb-1">
+                        <div className="flex items-center justify-between text-xs mb-1.5">
                           <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
                           <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
                             <span className="text-gray-400 font-normal ml-1.5">· {d.nb_courses} courses</span>
                           </span>
                         </div>
-                        <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${Math.min(d.accuracy_top3, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }} />
+                        <div className="relative h-3 rounded-full bg-gray-100 overflow-hidden">
+                          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(d.accuracy_top3, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }} />
+                          {/* repère 33% (hasard) */}
+                          <div className="absolute top-0 bottom-0 w-px bg-gray-500/40" style={{ left: "33%" }} />
                         </div>
                       </div>
                     ))}
                   </div>
-                  <p className="mt-5 text-[11px] text-gray-400">Repère : un choix au hasard place ~33 % de chances dans le Top-3.</p>
+                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-400">
+                    <span className="inline-block w-px h-3 bg-gray-400/60" /> Repère « hasard » à 33 % · au-delà = l&apos;analyse fait mieux.
+                  </div>
                 </div>
               </ScrollReveal>
             )}
 
-            {tr && tr.by_day.length > 0 && (
+            {tr && tr.by_day.length > 0 && (() => {
+              const avg = tr.by_day.reduce((s, d) => s + d.accuracy_top3, 0) / tr.by_day.length;
+              return (
               <ScrollReveal delay={80}>
                 <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
-                  <div className="flex items-center gap-2 mb-5">
-                    <TrendingUp className="h-4 w-4 text-emerald-600" />
-                    <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
+                  <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-emerald-600" />
+                      <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
+                    </div>
+                    <span className="text-[11px] text-gray-400">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
                   </div>
-                  <div className="flex-1 flex items-end justify-between gap-2 min-h-[140px]">
+
+                  {/* Aire de chart à hauteur FIXE → barres % fiables */}
+                  <div className="relative h-44">
+                    {/* lignes repères */}
+                    {[25, 50, 75].map((g) => (
+                      <div key={g} className="absolute left-0 right-0 border-t border-dashed border-gray-100" style={{ bottom: `${g}%` }} />
+                    ))}
+                    {/* ligne moyenne */}
+                    <div className="absolute left-0 right-0 border-t border-dashed border-emerald-300" style={{ bottom: `${Math.min(avg, 100)}%` }}>
+                      <span className="absolute right-0 -top-3.5 text-[9px] font-semibold text-emerald-500 bg-white px-1">moyenne</span>
+                    </div>
+                    <div className="absolute inset-0 flex items-end justify-between gap-2.5">
+                      {tr.by_day.map((d) => (
+                        <div key={d.jour} className="group relative flex h-full flex-1 flex-col items-center justify-end">
+                          <span className="num-display text-[10px] font-bold text-gray-700 mb-1">{Math.round(d.accuracy_top3)}%</span>
+                          <div className="w-full max-w-[40px] rounded-t-lg bg-gradient-to-t from-amber-300 to-amber-500 shadow-sm transition-all duration-300 group-hover:from-amber-400 group-hover:to-amber-600"
+                            style={{ height: `${Math.max(4, Math.min(d.accuracy_top3, 100))}%` }}
+                            title={`${d.jour} · ${d.accuracy_top3.toFixed(1)}% · ${d.nb_predictions} pronostics`} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex justify-between gap-2.5">
                     {tr.by_day.map((d) => (
-                      <div key={d.jour} className="flex-1 flex flex-col items-center gap-1.5">
-                        <span className="num-display text-[10px] font-bold text-gray-600">{Math.round(d.accuracy_top3)}%</span>
-                        <div className="w-full rounded-t-md bg-gradient-to-t from-amber-200 to-amber-400" style={{ height: `${Math.max(6, Math.min(d.accuracy_top3, 100))}%` }} />
-                        <span className="text-[9px] text-gray-400">{d.jour}</span>
-                      </div>
+                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-400">{d.jour}</span>
                     ))}
                   </div>
-                  <p className="mt-4 text-[11px] text-gray-400">Jour par jour, sur les pronostics réglés aux arrivées PMU.</p>
+                  <p className="mt-4 text-[11px] text-gray-400">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
                 </div>
               </ScrollReveal>
-            )}
+              );
+            })()}
           </div>
 
           <p className="mt-6 text-center text-[11px] text-gray-400 max-w-2xl mx-auto leading-relaxed">
