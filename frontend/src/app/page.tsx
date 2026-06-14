@@ -716,7 +716,7 @@ export default async function HomePage() {
             </div>
           </ScrollReveal>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 auto-rows-fr">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:auto-rows-fr">
             <ScrollReveal className="lg:col-span-2 lg:row-span-2">
               <div className="glass-card bento-feature rounded-3xl h-full p-8 flex flex-col">
                 <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center mb-5"
