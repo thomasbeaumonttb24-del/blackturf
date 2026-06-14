@@ -2,8 +2,8 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import {
   ArrowRight, TrendingUp, Zap, Shield, Trophy,
-  Bell, Calculator, ChevronRight, Check, Brain,
-  Cpu, Sparkles, Database, AlertTriangle, X,
+  Bell, Calculator, ChevronRight, Check, Target,
+  Sparkles, Database, AlertTriangle, X, BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
@@ -20,58 +20,107 @@ const HERO_PICKS = [
   { rank: 2, nom: "Royal Flush", cote: "5,1", p: 28, win: false },
   { rank: 3, nom: "Vent d'Est", cote: "7,2", p: 19, win: false },
 ];
-// Plan de mise COHÉRENT avec le pronostic ci-dessus (mêmes chevaux/cotes) : on
-// répartit 50€ sur les 3 favoris du modèle. Gain = mise × (cote − 1) si ce cheval gagne.
+// Plan de mise COHÉRENT avec le pronostic ci-dessus (mêmes chevaux/cotes).
 const HERO_PLAN = [
   { key: "securite", label: "Sécurité", cheval: "Paladin Noir", stake: 25, cote: 3.4 },
   { key: "rendement", label: "Rendement", cheval: "Royal Flush", stake: 15, cote: 5.1 },
   { key: "coup", label: "Coup", cheval: "Vent d'Est", stake: 10, cote: 7.2 },
 ].map((p) => ({ ...p, gain: Math.round(p.stake * (p.cote - 1)) }));
 
-// "Sous le capot" — bloc vedette en premier (bento asymétrique).
-const FEATURE_MAIN = {
-  icon: Brain,
-  title: "Un modèle d'ensemble qui se réentraîne tout seul",
-  desc: "Trois algorithmes (XGBoost, LightGBM, CatBoost) votent ensemble sur 80+ variables par partant. Après chaque réunion, le modèle confronte ses prédictions aux arrivées réelles et recalibre ses probabilités. Calibration isotonique, Brier < 0,18.",
-  points: ["3 algorithmes combinés", "80+ variables / partant", "Réentraîné chaque nuit", "Probabilités calibrées"],
-};
-// Palette NEUTRE : un seul accent (or) pour toutes les icônes. Pas d'arc-en-ciel.
+// Atouts orientés BÉNÉFICE (et non jargon technique). Un seul accent : l'or.
 const ICON_GOLD = { color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.16)" };
+const FEATURE_MAIN = {
+  icon: Target,
+  title: "80 critères passés au crible pour chaque cheval",
+  desc: "Forme récente, terrain, distance, jockey et entraîneur, confrontations directes, mouvements de cotes… BlackTurf croise tout ce que le marché regarde — et ce qu'il oublie — puis se recale sur l'arrivée réelle après chaque réunion.",
+  points: ["Forme & régularité", "Terrain & distance", "Confrontations directes", "Mouvements de cotes"],
+};
 const FEATURES = [
-  { icon: Zap, title: "Paris de valeur", desc: "EV = (cote × proba) − 1, détectés sur 4 niveaux. Triangulation PMU / Geny / BZH.", ...ICON_GOLD },
-  { icon: TrendingUp, title: "Critère de Kelly", desc: "Demi-Kelly plafonné à 5 % du capital. Votre rendement comparé en direct à celui du modèle.", ...ICON_GOLD },
-  { icon: Shield, title: "ELO 4 dimensions", desc: "Global / plat / trot / obstacle + ELO de progression. Mis à jour après chaque course.", ...ICON_GOLD },
-  { icon: Bell, title: "Alertes & assistant", desc: "Push, e-mail, in-app. Digest matinal. Questions en langage naturel sur une course.", ...ICON_GOLD },
-  { icon: Database, title: "100 % données réelles", desc: "Programme et résultats PMU officiels. Aucun chiffre fabriqué : inconnu = « — ».", ...ICON_GOLD },
+  { icon: Zap, title: "Seulement la vraie valeur", desc: "Un pari n'est signalé que si la probabilité réelle dépasse ce que paie la cote. Pas de coup de cœur, des chiffres.", ...ICON_GOLD },
+  { icon: Calculator, title: "Plan de mise sur mesure", desc: "Vous donnez votre budget, vous recevez une répartition sécurité / rendement / coup adaptée à votre profil.", ...ICON_GOLD },
+  { icon: TrendingUp, title: "Votre capital, sans enjolivure", desc: "Chaque pari réglé aux vrais rapports PMU. Votre rendement réel, suivi au centime.", ...ICON_GOLD },
+  { icon: Bell, title: "Alertes & assistant", desc: "Push, e-mail, digest matinal. Et vos questions sur une course, en langage naturel.", ...ICON_GOLD },
+  { icon: Database, title: "100 % données réelles", desc: "Programme et résultats PMU officiels. Aucun chiffre inventé : une donnée inconnue reste « — ».", ...ICON_GOLD },
 ];
 
 const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
-    features: ["Programme du jour", "Cotes publiques", "1 prédiction/jour", "Statistiques publiques du modèle"],
+    features: ["Programme du jour", "Cotes publiques", "1 pronostic/jour", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
-  { name: "Standard", price: "19€", period: "/mois", desc: "L'essentiel pour gagner", badge: "Populaire",
-    features: ["5 prédictions/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise standard", "Suivi du capital + statistiques", "Alertes push & e-mail", "Test sur historique 7 jours"],
+  { name: "Standard", price: "19€", period: "/mois", desc: "L'essentiel pour parier mieux", badge: "Populaire",
+    features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Suivi du capital + statistiques", "Alertes push & e-mail", "Historique des résultats"],
     cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: true },
   { name: "Expert", price: "39€", period: "/mois", desc: "Pour les parieurs sérieux",
-    features: ["Prédictions illimitées", "Paris de valeur en temps réel ★★★★", "Calculateur Kelly avancé", "Assistant illimité", "Test sur historique 365 jours", "Créateur de stratégies 30+ filtres", "Export des données + API"],
+    features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres", "Export des données"],
     cta: "Passer Expert", href: "/inscription?plan=expert", popular: false },
 ];
 
-// Placeholders HONNÊTES si l'API stats est indisponible (intégrité : jamais d'invention).
-const STATIC_STATS = { auc_roc: "—", roi_simule_6mois: "—", nb_courses_analysees: "—", nb_utilisateurs: "—", precision_top3: "—" };
+const DISC_LABEL: Record<string, string> = {
+  plat: "Plat", "attelé": "Trot attelé", attele: "Trot attelé",
+  "monté": "Trot monté", monte: "Trot monté", obstacle: "Obstacle", autre: "Autre",
+};
 
-async function fetchStats() {
+const num = (x: unknown): number | null =>
+  typeof x === "number" && !Number.isNaN(x) ? x : null;
+
+interface TrackRecord {
+  accuracy_top1: number | null;
+  accuracy_top3: number | null;
+  favori_place_rate: number | null;
+  favori_win_rate: number | null;
+  nb_courses: number | null;
+  by_discipline: Array<{ discipline: string; nb_courses: number; accuracy_top3: number }>;
+  by_day: Array<{ jour: string; accuracy_top3: number; nb_predictions: number }>;
+}
+
+// Performances RÉELLES — mesurées sur les arrivées PMU officielles (courses
+// réglées). Aucune simulation, aucun chiffre de gain. Défensif : tout absent ⇒ null.
+async function fetchTrackRecord(): Promise<TrackRecord | null> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  try {
+    const res = await fetch(`${base}/api/v1/stats/track-record`, { next: { revalidate: 3600 } });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const g = d?.global ?? {};
+    const byDisc = Array.isArray(d?.by_discipline) ? d.by_discipline : [];
+    const byDay = Array.isArray(d?.by_day) ? d.by_day : [];
+    return {
+      accuracy_top1: num(g.accuracy_top1),
+      accuracy_top3: num(g.accuracy_top3),
+      favori_place_rate: num(g.favori_place_rate),
+      favori_win_rate: num(g.favori_win_rate),
+      nb_courses: num(g.nb_courses_analysees),
+      by_discipline: byDisc
+        .filter((x: Record<string, unknown>) => num(x?.nb_courses) && (x.nb_courses as number) >= 10 && num(x?.accuracy_top3))
+        .map((x: Record<string, unknown>) => ({
+          discipline: String(x.discipline ?? "autre"),
+          nb_courses: x.nb_courses as number,
+          accuracy_top3: x.accuracy_top3 as number,
+        }))
+        .sort((a: { nb_courses: number }, b: { nb_courses: number }) => b.nb_courses - a.nb_courses),
+      by_day: byDay
+        .filter((x: Record<string, unknown>) => num(x?.nb_predictions) && (x.nb_predictions as number) > 0)
+        .map((x: Record<string, unknown>) => ({
+          jour: String(x.jour ?? ""),
+          accuracy_top3: num(x.accuracy_top3) ?? 0,
+          nb_predictions: x.nb_predictions as number,
+        })),
+    };
+  } catch { return null; }
+}
+
+// Nombre total de courses analysées (programme PMU complet, pas seulement réglées).
+async function fetchCoursesAnalysees(): Promise<number | null> {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   try {
     const res = await fetch(`${base}/api/v1/stats/public`, { next: { revalidate: 3600 } });
     if (!res.ok) return null;
-    return res.json();
+    const d = await res.json();
+    return num(d?.nb_courses_analysees);
   } catch { return null; }
 }
 
-// Dernier RÉSULTAT RÉEL vérifié (pronostic réglé) pour la carte hero. Données
-// publiques (courses passées), réactualisées chaque nuit via /stats/track-record.
-// Défensif : toute donnée absente/incohérente ⇒ null ⇒ la carte retombe sur l'exemple.
+// Dernier RÉSULTAT RÉEL vérifié (pronostic réglé) pour la carte hero.
 async function fetchLatestResult() {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   try {
@@ -95,30 +144,21 @@ async function fetchLatestResult() {
     };
   } catch { return null; }
 }
+
 export default async function HomePage() {
-  const [v, latestResult] = await Promise.all([fetchStats(), fetchLatestResult()]);
-  const has = (x: unknown) => x !== null && x !== undefined && !(typeof x === "number" && Number.isNaN(x));
-  const stats = v
-    ? {
-        auc_roc: has(v.auc_roc) ? String(v.auc_roc) : "—",
-        roi_simule_6mois: has(v.roi_simule_6mois) ? `+${String(v.roi_simule_6mois).replace(".", ",")}%` : "—",
-        nb_courses_analysees: has(v.nb_courses_analysees) ? Number(v.nb_courses_analysees).toLocaleString("fr-FR") + "+" : "—",
-        nb_utilisateurs: has(v.nb_utilisateurs) ? String(v.nb_utilisateurs) : "—",
-        precision_top3: has(v.precision_top3) ? `${Math.round(v.precision_top3 * 100)}%` : "—",
-      }
-    : STATIC_STATS;
+  const [tr, coursesAnalysees, latestResult] = await Promise.all([
+    fetchTrackRecord(), fetchCoursesAnalysees(), fetchLatestResult(),
+  ]);
 
-  const parseStatNum = (s: string) => parseFloat(s.replace(",", ".").replace(/[^0-9.]/g, ""));
-  const precisionNum = parseStatNum(stats.precision_top3);
-  const aucNum = parseStatNum(stats.auc_roc);
-  const roiNum = parseStatNum(stats.roi_simule_6mois);
-  const coursesNum = parseStatNum(stats.nb_courses_analysees);
+  const fmtPct = (x: number | null, dec = 1) => (x == null ? "—" : `${x.toFixed(dec).replace(".", ",")}%`);
+  const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString("fr-FR"));
 
+  // KPI hero — uniquement des chiffres RÉELS, jamais de gain.
   const HERO_STATS = [
-    { na: Number.isNaN(precisionNum), big: Number.isNaN(precisionNum) ? "—" : <AnimatedCounter end={precisionNum} duration={1800} decimals={0} suffix="%" />, label: "Précision Top-3", color: "#B45309" },
-    { na: Number.isNaN(coursesNum), big: Number.isNaN(coursesNum) ? "—" : <><AnimatedCounter end={coursesNum} duration={2200} decimals={0} />+</>, label: "Courses analysées", color: "#111827" },
-    { na: Number.isNaN(aucNum), big: Number.isNaN(aucNum) ? "—" : <AnimatedCounter end={aucNum} duration={1800} decimals={2} />, label: "AUC du modèle", color: "#111827" },
-    { na: Number.isNaN(roiNum), big: Number.isNaN(roiNum) ? "—" : <>+<AnimatedCounter end={roiNum} duration={2200} decimals={1} suffix="%" /></>, label: "Rendement 6 mois", color: "#059669" },
+    { na: tr?.accuracy_top3 == null, big: tr?.accuracy_top3 == null ? "—" : <AnimatedCounter end={tr.accuracy_top3} duration={1800} decimals={1} suffix="%" />, label: "Précision Top-3", color: "#B45309" },
+    { na: tr?.favori_place_rate == null, big: tr?.favori_place_rate == null ? "—" : <AnimatedCounter end={tr.favori_place_rate} duration={1800} decimals={1} suffix="%" />, label: "Notre favori placé", color: "#059669" },
+    { na: coursesAnalysees == null, big: coursesAnalysees == null ? "—" : <><AnimatedCounter end={coursesAnalysees} duration={2200} decimals={0} />+</>, label: "Courses analysées", color: "#111827" },
+    { na: tr?.nb_courses == null, big: tr?.nb_courses == null ? "—" : <AnimatedCounter end={tr.nb_courses} duration={2000} decimals={0} />, label: "Courses vérifiées", color: "#111827" },
   ];
 
   return (
@@ -135,26 +175,25 @@ export default async function HomePage() {
         <div className="relative mx-auto max-w-6xl w-full px-4 sm:px-6 lg:px-8 pt-28 pb-12 sm:pt-32 sm:pb-16">
           <div className="grid lg:grid-cols-12 gap-4 lg:gap-5 items-stretch">
 
-            {/* ── Tuile titre (grande) — PAS de ScrollReveal : contenu hero critique,
-                doit s'afficher même sans JS hydraté (sinon hero vide). ── */}
+            {/* ── Tuile titre (grande) ── */}
             <div className="lg:col-span-7">
               <div className="glass-card bento-feature rounded-[1.75rem] h-full p-7 sm:p-10 flex flex-col justify-center">
                 <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-gold-deep mb-6">
                   <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500" />
-                  Pronostics · paris de valeur · PMU
+                  Pronostics PMU · paris de valeur · résultats vérifiés
                 </span>
 
                 <h1 className="font-display text-[2.5rem] sm:text-5xl lg:text-[3.5rem] font-extrabold tracking-tight leading-[1.04] text-gray-900">
-                  Un algorithme qui{" "}
-                  <span className="text-gradient-animated">réapprend</span>
-                  <br className="hidden sm:block" /> à chaque course.
+                  Misez avec{" "}
+                  <span className="text-gradient-animated">méthode</span>,
+                  <br className="hidden sm:block" /> pas à l&apos;instinct.
                 </h1>
 
                 <p className="mt-6 text-base sm:text-lg text-gray-600 max-w-xl leading-relaxed">
-                  <span className="font-bold text-gray-900">Ne pariez plus au hasard.</span> L&apos;IA note
-                  chaque cheval sur 80+ critères, la confronte aux cotes du marché et ne signale que les paris
-                  où la probabilité réelle dépasse la cote. Vous misez quand les chiffres sont pour vous — et
-                  le modèle apprend de chaque arrivée.
+                  <span className="font-bold text-gray-900">Arrêtez de parier au feeling.</span> BlackTurf
+                  passe chaque cheval du programme PMU au crible de 80 critères, le compare aux cotes du
+                  marché et ne met en avant que les paris où la valeur est <span className="font-semibold text-gray-900">réelle</span>.
+                  Des analyses chiffrées, vérifiées sur les vraies arrivées.
                 </p>
 
                 <div className="mt-8 flex flex-col sm:flex-row gap-3">
@@ -164,12 +203,12 @@ export default async function HomePage() {
                   </Button>
                   <Button variant="outline" size="xl" asChild
                     className="press border-gray-300 text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50 transition-all">
-                    <Link href="/programme">Programme du jour</Link>
+                    <Link href="/programme">Voir le programme du jour</Link>
                   </Button>
                 </div>
 
                 <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-500">
-                  {["Sans CB requis", "7 jours gratuit", "Annulation à tout moment"].map((t) => (
+                  {["Sans carte bancaire", "7 jours gratuit", "Annulation à tout moment"].map((t) => (
                     <span key={t} className="flex items-center gap-1.5">
                       <Check className="h-3.5 w-3.5 text-emerald-600" /> {t}
                     </span>
@@ -178,7 +217,7 @@ export default async function HomePage() {
               </div>
             </div>
 
-            {/* ── Colonne droite : 2 tuiles data ── */}
+            {/* ── Colonne droite : pronostic + plan ── */}
             <div className="lg:col-span-5 flex flex-col gap-4 lg:gap-5">
 
               {/* Tuile pronostic */}
@@ -187,7 +226,7 @@ export default async function HomePage() {
                   <div className="flex items-center justify-between">
                     <span className="eyebrow text-amber-700 text-[10px] font-bold">
                       <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      Pronostic du modèle
+                      Pronostic BlackTurf
                     </span>
                     <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                   </div>
@@ -272,7 +311,7 @@ export default async function HomePage() {
               </div>
             </div>
 
-            {/* ── Tuile bandeau de stats (pleine largeur) ── */}
+            {/* ── Bandeau de stats RÉELLES (pleine largeur) ── */}
             <div className="lg:col-span-12">
               <div className="glass-card rounded-[1.75rem] grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-gray-100 overflow-hidden">
                 {HERO_STATS.map((s) => (
@@ -285,7 +324,7 @@ export default async function HomePage() {
             </div>
           </div>
           <p className="mt-3 text-center lg:text-right text-[11px] text-gray-400">
-            Cartes illustratives — pronostics réels, plan de mise et suivi des résultats réservés aux abonnés. Chiffres calculés sur courses passées et vérifiables.
+            Cartes illustratives — pronostics réels, plan de mise et suivi réservés aux abonnés. Chiffres mesurés sur courses passées, vérifiables.
           </p>
         </div>
       </section>
@@ -293,7 +332,7 @@ export default async function HomePage() {
       {/* ══ RESULTS TAPE ══ */}
       <LiveTicker />
 
-      {/* ══════════════ MÉTHODE — flux horizontal ══════════════ */}
+      {/* ══════════════ MÉTHODE ══════════════ */}
       <section className="py-24 bg-white">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
@@ -303,24 +342,24 @@ export default async function HomePage() {
                   <Zap className="h-3.5 w-3.5" /> Comment ça marche
                 </span>
                 <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
-                  3 gestes pour vous,<br className="hidden sm:block" /> un cycle sans fin pour le modèle
+                  3 gestes, et vous pariez<br className="hidden sm:block" /> en connaissance de cause
                 </h2>
               </div>
-              <p className="text-gray-500 text-sm sm:max-w-[200px] sm:text-right">Moins de 10 secondes côté parieur.</p>
+              <p className="text-gray-500 text-sm sm:max-w-[200px] sm:text-right">Moins de 10 secondes par course.</p>
             </div>
           </ScrollReveal>
 
           <div className="grid md:grid-cols-3 gap-6">
             {[
-              { step: "01", title: "Choisissez votre course", desc: "Le programme PMU du jour, déjà analysé. Un score de confiance 0-100 sur chaque course.", color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.18)" },
-              { step: "02", title: "Entrez votre mise", desc: "Indiquez le montant. Le calculateur répartit votre plan : sécurité, rendement, coup.", color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.18)" },
-              { step: "03", title: "Suivez — et le modèle apprend", desc: "BlackTurf enregistre les résultats réels, met à jour votre rendement, puis recalibre le modèle.", color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.18)" },
+              { step: "01", title: "Choisissez votre course", desc: "Le programme PMU du jour, déjà analysé. Un score de confiance 0-100 sur chaque course." },
+              { step: "02", title: "Entrez votre mise", desc: "Indiquez le montant. Le calculateur répartit votre plan : sécurité, rendement, coup." },
+              { step: "03", title: "Pariez, puis suivez", desc: "BlackTurf enregistre les résultats réels et met votre rendement à jour, course après course." },
             ].map((s, i) => (
               <ScrollReveal key={s.step} delay={i * 100}>
                 <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
                   <div className="glass-card rounded-2xl p-7 h-full">
                     <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
-                      style={{ background: s.bg, border: `1px solid ${s.border}`, color: s.color }}>{s.step}</div>
+                      style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
                     <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
                     <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
                   </div>
@@ -333,23 +372,119 @@ export default async function HomePage() {
 
       <div className="section-divider" />
 
-      {/* ══════════════ SOUS LE CAPOT — bento asymétrique ══════════════ */}
+      {/* ══════════════ PREUVES RÉELLES — track record ══════════════ */}
       <section className="py-24 bg-brand-warm">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="mb-12 text-center">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <Shield className="h-3.5 w-3.5" /> Performances vérifiables
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+                Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
+              </h2>
+              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+                Chaque pronostic est confronté à l&apos;arrivée officielle PMU. Voici la précision réelle de
+                BlackTurf, mesurée sur les courses déjà réglées — pas une simulation.
+              </p>
+            </div>
+          </ScrollReveal>
+
+          {/* KPIs réels */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {[
+              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Précision Top-3", sub: "un de nos 3 favoris finit dans les 3", accent: true },
+              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers" },
+              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course" },
+              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels" },
+            ].map((m, i) => (
+              <ScrollReveal key={m.label} delay={i * 70}>
+                <div className="rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
+                  <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
+                  <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
+                </div>
+              </ScrollReveal>
+            ))}
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            {/* Précision par discipline (barres data-driven RÉELLES) */}
+            {tr && tr.by_discipline.length > 0 && (
+              <ScrollReveal>
+                <div className="glass-card rounded-2xl p-6 h-full">
+                  <div className="flex items-center gap-2 mb-5">
+                    <BarChart3 className="h-4 w-4 text-brand-gold-deep" />
+                    <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 par discipline</h3>
+                  </div>
+                  <div className="space-y-4">
+                    {tr.by_discipline.map((d) => (
+                      <div key={d.discipline}>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
+                          <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
+                            <span className="text-gray-400 font-normal ml-1.5">· {d.nb_courses} courses</span>
+                          </span>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${Math.min(d.accuracy_top3, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-5 text-[11px] text-gray-400">Repère : un choix au hasard place ~33 % de chances dans le Top-3.</p>
+                </div>
+              </ScrollReveal>
+            )}
+
+            {/* Tendance 7 jours (data-driven RÉELLE) */}
+            {tr && tr.by_day.length > 0 && (
+              <ScrollReveal delay={80}>
+                <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
+                  <div className="flex items-center gap-2 mb-5">
+                    <TrendingUp className="h-4 w-4 text-emerald-600" />
+                    <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
+                  </div>
+                  <div className="flex-1 flex items-end justify-between gap-2 min-h-[140px]">
+                    {tr.by_day.map((d) => (
+                      <div key={d.jour} className="flex-1 flex flex-col items-center gap-1.5">
+                        <span className="num-display text-[10px] font-bold text-gray-600">{Math.round(d.accuracy_top3)}%</span>
+                        <div className="w-full rounded-t-md bg-gradient-to-t from-amber-200 to-amber-400" style={{ height: `${Math.max(6, Math.min(d.accuracy_top3, 100))}%` }} />
+                        <span className="text-[9px] text-gray-400">{d.jour}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-[11px] text-gray-400">Mesuré jour par jour sur les pronostics réglés aux arrivées PMU.</p>
+                </div>
+              </ScrollReveal>
+            )}
+          </div>
+
+          <p className="mt-6 text-center text-[11px] text-gray-400 max-w-2xl mx-auto leading-relaxed">
+            La précision d&apos;analyse mesure la qualité du classement des chevaux. Ce n&apos;est ni un taux de
+            gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
+          </p>
+        </div>
+      </section>
+
+      <div className="section-divider" />
+
+      {/* ══════════════ CE QUE VOUS OBTENEZ — bento ══════════════ */}
+      <section className="py-24 bg-white">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
               <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
-                <Cpu className="h-3.5 w-3.5" /> Sous le capot
+                <Target className="h-3.5 w-3.5" /> Ce que vous obtenez
               </span>
               <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
-                Ce que l&apos;algorithme calcule{" "}
-                <span className="text-gradient">pour vous</span>
+                Pourquoi nos analyses{" "}
+                <span className="text-gradient">tapent juste</span>
               </h2>
             </div>
           </ScrollReveal>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 auto-rows-fr">
-            {/* Tuile vedette */}
             <ScrollReveal className="lg:col-span-2 lg:row-span-2">
               <div className="glass-card bento-feature rounded-3xl h-full p-8 flex flex-col">
                 <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center mb-5"
@@ -388,7 +523,7 @@ export default async function HomePage() {
       <div className="section-divider" />
 
       {/* ══════════════ CALCULATEUR ══════════════ */}
-      <section className="py-24 bg-white">
+      <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <ScrollReveal direction="right" className="order-2 lg:order-1">
@@ -426,47 +561,6 @@ export default async function HomePage() {
                 </Link>
               </div>
             </ScrollReveal>
-          </div>
-        </div>
-      </section>
-
-      <div className="section-divider" />
-
-      {/* ══════════════ PERFORMANCE — track record (chiffres réels) ══════════════ */}
-      <section className="py-24 bg-brand-warm">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-          <ScrollReveal>
-            <div className="mb-12">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
-                <Shield className="h-3.5 w-3.5" /> Performances vérifiables
-              </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
-                Nos résultats, en chiffres réels
-              </h2>
-              <p className="text-gray-500 text-sm mt-2 max-w-2xl">
-                Simulés à 10€ fixes sur chaque pari de valeur ★★★+ des courses passées.
-                Source de vérité : résultats PMU officiels, mis à jour chaque nuit.
-              </p>
-            </div>
-          </ScrollReveal>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {[
-              { label: "Rendement simulé 6 mois", value: stats.roi_simule_6mois, sub: "10€ fixes sur chaque pari de valeur ★★★+", accent: true },
-              { label: "Précision Top-3", value: stats.precision_top3, sub: "vs 33 % pour un choix au hasard" },
-              { label: "AUC-ROC du modèle", value: stats.auc_roc, sub: "calibration isotonique · Brier < 0,18" },
-              { label: "Courses analysées", value: stats.nb_courses_analysees, sub: "historique PMU officiel, vérifiable" },
-            ].map((m, i) => (
-              <ScrollReveal key={m.label} delay={i * 80}>
-                <div className="metric-row flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-sm h-full">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{m.label}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
-                  </div>
-                  <div className="num-display text-3xl font-extrabold" style={{ color: m.accent ? "#059669" : "#111827" }}>{m.value}</div>
-                </div>
-              </ScrollReveal>
-            ))}
           </div>
         </div>
       </section>
@@ -543,8 +637,8 @@ export default async function HomePage() {
               {" "}— pas avec votre instinct.
             </h2>
             <p className="text-gray-600 text-lg mb-10 max-w-xl mx-auto">
-              Un algorithme entraîné sur les résultats réels du PMU, qui se corrige après chaque course.
-              Essayez-le 7 jours, sans engagement.
+              Des analyses chiffrées et vérifiées sur les vrais résultats du PMU. Essayez BlackTurf
+              7 jours, sans engagement et sans carte bancaire.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="xl" asChild
