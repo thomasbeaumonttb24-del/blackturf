@@ -256,16 +256,6 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
             Plan pour <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
           <p className="text-2xl font-bold tabular-nums text-brand-gold">{plan.montant_total}€</p>
-          {plan.mode_adaptatif && plan.mode_adaptatif !== "normal" && (
-            <span className={cn(
-              "mt-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-              plan.mode_adaptatif === "offensif"
-                ? "bg-brand-emerald/15 text-brand-emerald"
-                : "bg-brand-red/15 text-brand-red"
-            )}>
-              {plan.mode_adaptatif === "offensif" ? "⚡ Mode offensif" : "🛡️ Mode prudent"}
-            </span>
-          )}
         </div>
         <div className="text-right">
           <p className="text-xs text-muted-foreground">Espérance globale estimée</p>
