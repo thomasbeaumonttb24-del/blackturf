@@ -6,7 +6,7 @@ import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
   Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
-  MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target,
+  MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil,
 } from "lucide-react";
 import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
@@ -187,7 +187,21 @@ interface MisePlan {
 // Badges présentationnels (ConfidenceMeter, EVBadge, ELOBadge, RunningStyleBadge,
 // MusiqueDisplay, PenetroBadge, PoolBadge) extraits dans components/courses/badges.
 
-function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: () => void; onSave: () => Promise<number> }) {
+// Profils de mise (source unique : formulaire + switch rapide dans le plan).
+const PROFILS_MISE = [
+  { key: "conservateur", label: "Prudent", emoji: "🛡️", desc: "Priorité au placé : gains plus petits mais plus fréquents." },
+  { key: "equilibre", label: "Modéré", emoji: "⚖️", desc: "Équilibre entre sécurité et rendement." },
+  { key: "agressif", label: "Risqué", emoji: "🔥", desc: "Vise les gros gains : plus rare, plus payant." },
+] as const;
+
+function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onSave }: {
+  plan: MisePlan;
+  profil: string;
+  switching: boolean;
+  onChangeProfil: (profil: string) => void;
+  onClose: () => void;
+  onSave: () => Promise<number>;
+}) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const handleSave = async () => {
     setSaveState("saving");
@@ -198,12 +212,49 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
       setSaveState("idle");
     }
   };
+  const profilDesc = PROFILS_MISE.find((p) => p.key === profil)?.desc;
   return (
     <div className="animate-slide-up">
+      {/* Switch profil rapide — même mise, recalcul instantané (sans repasser par le formulaire) */}
+      <div className="mb-4">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Profil de risque</p>
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-1">
+          {PROFILS_MISE.map((p) => {
+            const active = profil === p.key;
+            return (
+              <button
+                key={p.key}
+                onClick={() => !active && onChangeProfil(p.key)}
+                disabled={switching}
+                className={cn(
+                  "relative flex items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-semibold transition-all disabled:cursor-wait",
+                  active
+                    ? "bg-brand-gold text-brand-dark shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/60"
+                )}
+              >
+                {switching && active
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <span>{p.emoji}</span>}
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+        {profilDesc && (
+          <p className="mt-1 text-[10px] text-muted-foreground/70">{profilDesc} · même mise conservée.</p>
+        )}
+      </div>
+
       {/* Header résumé */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-xs text-muted-foreground">Plan pour</p>
+          <button
+            onClick={onClose}
+            className="group inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-brand-gold transition-colors"
+          >
+            Plan pour <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
           <p className="text-2xl font-bold tabular-nums text-brand-gold">{plan.montant_total}€</p>
           {plan.mode_adaptatif && plan.mode_adaptatif !== "normal" && (
             <span className={cn(
@@ -591,14 +642,15 @@ function MiseCalculatorWidget({
   const [profilChoisi, setProfilChoisi] = useState(profil || "equilibre");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function generate() {
+  async function generate(profilOverride?: string) {
     const m = parseFloat(montant);
     if (!m || m <= 0) return;
+    const prof = profilOverride ?? profilChoisi;
     setLoading(true);
     try {
       const res = await api.post(`/courses/${courseId}/mise-plan`, {
         montant: m,
-        profil_risque: profilChoisi,
+        profil_risque: prof,
       });
       setPlan(res.data);
     } catch {
@@ -606,6 +658,14 @@ function MiseCalculatorWidget({
     } finally {
       setLoading(false);
     }
+  }
+
+  // Switch de profil depuis le plan affiché : garde la même mise, recalcule
+  // instantanément sans repasser par le formulaire (le plan reste visible).
+  async function switchProfil(p: string) {
+    if (p === profilChoisi || loading) return;
+    setProfilChoisi(p);
+    await generate(p);
   }
 
   async function saveBets(): Promise<number> {
@@ -650,7 +710,16 @@ function MiseCalculatorWidget({
     );
   }
 
-  if (plan) return <PlanMiseDisplay plan={plan} onClose={() => setPlan(null)} onSave={saveBets} />;
+  if (plan) return (
+    <PlanMiseDisplay
+      plan={plan}
+      profil={profilChoisi}
+      switching={loading}
+      onChangeProfil={switchProfil}
+      onClose={() => setPlan(null)}
+      onSave={saveBets}
+    />
+  );
 
   return (
     <div>
@@ -662,11 +731,7 @@ function MiseCalculatorWidget({
       <div className="mb-3">
         <p className="text-[10px] text-muted-foreground mb-1.5">Profil de risque</p>
         <div className="grid grid-cols-3 gap-1.5">
-          {[
-            { key: "conservateur", label: "Prudent", emoji: "🛡️" },
-            { key: "equilibre", label: "Modéré", emoji: "⚖️" },
-            { key: "agressif", label: "Risqué", emoji: "🔥" },
-          ].map((p) => (
+          {PROFILS_MISE.map((p) => (
             <button
               key={p.key}
               onClick={() => setProfilChoisi(p.key)}
@@ -700,7 +765,7 @@ function MiseCalculatorWidget({
         </div>
         <Button
           variant="brand"
-          onClick={generate}
+          onClick={() => generate()}
           disabled={!montant || parseFloat(montant) <= 0 || loading}
           className="px-4 bg-brand-gold hover:bg-brand-amber text-brand-dark font-bold"
         >
