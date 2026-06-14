@@ -188,6 +188,10 @@ class PmuScraper(BaseScraper):
                 # de 2sur4) mais aux paris RÉELLEMENT offerts. Pas dans la liste → on ne
                 # génèrera jamais de prono 2sur4 pour cette course.
                 est_2sur4 = any(("DEUX_SUR_QUATRE" in c) or ("2SUR4" in c) for c in pari_codes)
+                # Liste complète des paris offerts (triée, dédoublonnée) → le moteur
+                # propose EXACTEMENT ce que la course accepte et passe à l'ordre quand
+                # le champ réduit l'impose (E_COUPLE_ORDRE / E_TRIO_ORDRE).
+                paris_disponibles = sorted(c for c in pari_codes if c)
 
                 # Terrain — conditionPiste/libellePiste n'existent PLUS dans le payload
                 # programme 2026 : le PMU publie `penetrometre` {valeurMesure, intitule}
@@ -231,6 +235,7 @@ class PmuScraper(BaseScraper):
                     est_quarte=est_quarte,
                     est_tierce=est_tierce,
                     est_2sur4=est_2sur4,
+                    paris_disponibles=paris_disponibles or None,
                     nom=re.sub(r"\s+", " ", c_data.get("libelle") or "").strip() or None,
                     conditions_texte=conditions or None,
                     penetrometre_coef=pen_coef,

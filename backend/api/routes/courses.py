@@ -688,6 +688,7 @@ async def get_paris_disponibles(course_id: str, db: AsyncSession = Depends(get_d
         course.nb_partants or 0,
         bool(course.est_quinte), bool(course.est_quarte),
         bool(course.est_tierce), bool(course.est_2sur4),
+        paris_disponibles=course.paris_disponibles,
     )
     return {
         "course_id": course_id,
@@ -697,6 +698,8 @@ async def get_paris_disponibles(course_id: str, db: AsyncSession = Depends(get_d
             "est_quarte": bool(course.est_quarte),
             "est_quinte": bool(course.est_quinte),
             "est_2sur4": bool(course.est_2sur4),
+            # Paris à l'ORDRE réellement offerts (champ réduit).
+            "codes_pmu": course.paris_disponibles or None,
         },
     }
 
@@ -830,13 +833,9 @@ async def get_mise_plan(
             "value_bet": {"ev_max": vb.ev_max, "niveau": vb.niveau} if vb else None,
         })
 
-    course_info = {
-        "est_quinte": course.est_quinte,
-        "est_quarte": course.est_quarte,
-        "est_2sur4": course.est_2sur4,
-        "est_tierce": course.est_tierce,
-        "nb_partants": course.nb_partants,
-    }
+    # Drapeaux de disponibilité RÉELS (couplé/trio à l'ordre si champ réduit, etc.).
+    from services.bet_catalog import course_info_bets
+    course_info = course_info_bets(course)
 
     # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
@@ -933,7 +932,8 @@ async def enregistrer_paris(
         # soit l'instant d'enregistrement une fois le prono gelé.
         "cote_pmu": _cote_plan(pred, part), "non_partant": part.non_partant,
     } for pred, part, cheval in rows]
-    course_info = {"est_quinte": course.est_quinte, "est_quarte": course.est_quarte, "est_2sur4": course.est_2sur4, "est_tierce": course.est_tierce, "nb_partants": course.nb_partants}
+    from services.bet_catalog import course_info_bets
+    course_info = course_info_bets(course)
 
     # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré) :
     # poids par type APPRIS POUR CE PROFIL + multiplicateurs de signaux par profil.
@@ -1061,13 +1061,8 @@ async def get_bilan_pronostic(
             "rang_predit": pred.rang_predit,
         })
 
-    course_info = {
-        "est_quinte": course.est_quinte,
-        "est_quarte": course.est_quarte,
-        "est_2sur4": course.est_2sur4,
-        "est_tierce": course.est_tierce,
-        "nb_partants": course.nb_partants,
-    }
+    from services.bet_catalog import course_info_bets
+    course_info = course_info_bets(course)
 
     montant = max(2.0, min(float(montant or 20), 10000.0))
     nb_partants = course.nb_partants or len(preds)
@@ -1080,6 +1075,22 @@ async def get_bilan_pronostic(
         heat = await get_model_heat(db)
     except Exception:
         roi_weights, heat = {}, 0.0
+
+    # Features par numéro → signal_mults par profil pour la SIMULATION (mêmes entrées
+    # que le live/le gel : sans ça la simulation rétro diverge des paris affichés).
+    feats_by_num: dict = {}
+    sig_perf = None
+    try:
+        from ml.signal_performance import load_signal_performance
+        from db.models import FeatureML as _FM
+        sig_perf = await load_signal_performance(db)
+        fq = (select(Participation.numero, _FM.features)
+              .join(_FM, _FM.participation_id == Participation.participation_id)
+              .where(Participation.course_id == course_id))
+        for numero, feats in (await db.execute(fq)).all():
+            feats_by_num[int(numero)] = feats or {}
+    except Exception:
+        feats_by_num, sig_perf = {}, None
 
     # ── Bilan PAR PROFIL (prudent / modéré / risqué) ─────────────────────
     # SOURCE DE VÉRITÉ : le PLAN RÉELLEMENT FIGÉ avant le départ (profil_run_log),
@@ -1130,7 +1141,21 @@ async def get_bilan_pronostic(
             regle_le = fr["settled_at"].isoformat() if fr["settled_at"] else None
         else:
             # Aucune trace figée → SIMULATION rétrospective (pas un vrai prono émis).
-            plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None, roi_weights, heat))
+            # Mêmes entrées que le live/le gel : ROI weights + signal_mults PAR PROFIL
+            # → la simulation reflète la VRAIE méthode (réduit l'écart prono↔bilan).
+            try:
+                roi_weights_p = await get_learned_type_weights(db, profil=prof)
+            except Exception:
+                roi_weights_p = roi_weights
+            sig_mults_p = {}
+            if sig_perf and feats_by_num:
+                try:
+                    from ml.signal_performance import signal_multiplier as _sm
+                    sig_mults_p = {n: _sm(f, sig_perf, prof) for n, f in feats_by_num.items()}
+                except Exception:
+                    sig_mults_p = {}
+            plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None,
+                                               roi_weights_p, heat, sig_mults_p))
             bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants)
             source = "simulation"
             fige_le = regle_le = None
@@ -1782,6 +1807,13 @@ async def get_portfolio(
         "est_tierce": course.est_tierce,
         "est_2sur4": course.est_2sur4,
     }
+    # Drapeaux fins de disponibilité (couplé/trio ordre si champ réduit, etc.).
+    from services.bet_catalog import derive_bet_flags as _dbf
+    course_info.update(_dbf(
+        getattr(course, "paris_disponibles", None),
+        est_tierce=bool(course.est_tierce), est_quarte=bool(course.est_quarte),
+        est_quinte=bool(course.est_quinte), est_2sur4=bool(course.est_2sur4),
+    ))
 
     # Récupérer les poids adaptatifs courants
     al = get_adaptive_learning()

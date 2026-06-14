@@ -74,6 +74,8 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
         course_info = {
             "nb_partants": nb_part,
             "est_quinte": c["est_quinte"], "est_quarte": c["est_quarte"], "est_tierce": c["est_tierce"],
+            "est_2sur4": c.get("est_2sur4", False),
+            "paris_disponibles": c.get("paris_disponibles"),
         }
         try:
             cands = enumerate_bet_candidates(preds, course_info, n_sims=n_sims)
@@ -237,6 +239,8 @@ async def backtest_profils(db: AsyncSession, limit: int = 200, n_sims: int = 300
             "est_quinte": bool(c.est_quinte),
             "est_quarte": bool(c.est_quarte),
             "est_tierce": bool(c.est_tierce),
+            "est_2sur4": bool(getattr(c, "est_2sur4", False)),
+            "paris_disponibles": getattr(c, "paris_disponibles", None),
         })
 
     return await asyncio.to_thread(_compute, payload, n_sims)

@@ -213,6 +213,10 @@ class CourseScrape:
     est_quarte: bool = False
     est_tierce: bool = False
     est_2sur4: bool = False   # 2sur4 réellement proposé par le PMU pour cette course
+    # Liste COMPLÈTE des paris offerts (paris[].codePari PMU), ex.
+    # ["E_SIMPLE_GAGNANT","E_COUPLE_ORDRE",...]. Sert à proposer exactement les paris
+    # acceptés (champ réduit → ordre imposé) et jamais un pari impossible.
+    paris_disponibles: Optional[list] = None
     nom: Optional[str] = None
     # ── Enrichissements PMU (course) ─────────────────────────────────────────
     conditions_texte: Optional[str] = None        # conditions complètes (texte long)

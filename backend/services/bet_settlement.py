@@ -41,7 +41,11 @@ _RAPPORT_KEYS = {
     "Simple Placé":   ("simple_place", "e_simple_place", "simple_place_international"),
     "Couplé Gagnant": ("couple_gagnant", "e_couple_gagnant"),
     "Couplé Placé":   ("couple_place", "e_couple_place"),
+    # Paris à l'ORDRE (champ réduit) — combinaison gagnante dans l'ordre exact.
+    "Couplé Ordre":   ("couple_ordre", "e_couple_ordre"),
     "Trio":           ("trio", "e_trio"),
+    "Trio Ordre":     ("trio_ordre", "e_trio_ordre"),
+    "Super 4":        ("super_quatre", "e_super_quatre"),
     "2sur4":          ("deux_sur_quatre", "e_deux_sur_quatre"),
     # Jackpots désordre — vrais rapports PMU (base 1€). Le rapport publié est celui
     # de la combinaison gagnante ; si notre sélection == arrivée exacte, c'est le nôtre.
@@ -154,8 +158,24 @@ def settle_pari(
         gagne = len(sel) == 2 and sel.issubset(placed)
         approx = gagne
         note = _APPROX_NOTE if gagne else None
+    elif type_pari == "Couplé Ordre":
+        # Ordre EXACT : 1er cheval joué = 1er arrivé, 2e = 2e arrivé.
+        gagne = (len(numeros) == 2
+                 and num_by_pos.get(1) == int(numeros[0])
+                 and num_by_pos.get(2) == int(numeros[1]))
     elif type_pari == "Trio":
         gagne = sel == top3 and len(sel) == 3
+    elif type_pari == "Trio Ordre":
+        gagne = (len(numeros) == 3
+                 and num_by_pos.get(1) == int(numeros[0])
+                 and num_by_pos.get(2) == int(numeros[1])
+                 and num_by_pos.get(3) == int(numeros[2]))
+    elif type_pari == "Super 4":
+        gagne = (len(numeros) == 4
+                 and num_by_pos.get(1) == int(numeros[0])
+                 and num_by_pos.get(2) == int(numeros[1])
+                 and num_by_pos.get(3) == int(numeros[2])
+                 and num_by_pos.get(4) == int(numeros[3]))
     elif type_pari == "2sur4":
         # Formule combinée : jouer N chevaux en 2sur4 = C(N,2) combinaisons, la mise
         # se répartit dessus. Le rapport PMU paie PAR combinaison gagnante →

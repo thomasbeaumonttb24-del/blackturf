@@ -99,7 +99,8 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         return 0
 
     course = (await session.execute(text("""
-        SELECT statut, nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4
+        SELECT statut, nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4,
+               paris_disponibles
         FROM courses WHERE course_id = :cid
     """), {"cid": course_id})).first()
     if not course or course[0] not in ("a_venir", "en_cours"):
@@ -115,11 +116,13 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         })
         feats_by_num[int(numero)] = feats or {}
 
-    course_info = {
-        "nb_partants": course[1], "est_quinte": bool(course[2]),
-        "est_quarte": bool(course[3]), "est_tierce": bool(course[4]),
-        "est_2sur4": bool(course[5]),
-    }
+    from services.bet_catalog import derive_bet_flags
+    course_info = derive_bet_flags(
+        course[6],  # paris_disponibles (liste codePari) — vérité PMU si présente
+        est_tierce=bool(course[4]), est_quarte=bool(course[3]),
+        est_quinte=bool(course[2]), est_2sur4=bool(course[5]),
+    )
+    course_info["nb_partants"] = course[1]
 
     # Contexte d'apprentissage réel (mêmes sources que /mise-plan)
     try:

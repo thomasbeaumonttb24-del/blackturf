@@ -245,6 +245,11 @@ class Course(Base):
     est_tierce: Mapped[bool] = mapped_column(Boolean, default=False)
     est_2sur4: Mapped[bool] = mapped_column(Boolean, default=False)   # 2sur4 proposé par le PMU
     est_pick5: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Liste RÉELLE des paris PMU offerts sur la course (paris[].codePari), ex.
+    # ["E_SIMPLE_GAGNANT","E_COUPLE_ORDRE","E_TRIO_ORDRE",...]. Permet de proposer
+    # EXACTEMENT les paris acceptés (champ réduit → couplé/trio à l'ORDRE) et de ne
+    # jamais générer un pari impossible. NULL = pas encore re-scrapé → fallback est_*.
+    paris_disponibles: Mapped[list | None] = mapped_column(JSON)
 
     # Statut
     statut: Mapped[str] = mapped_column(String(20), default="a_venir")  # a_venir/en_cours/termine/annule

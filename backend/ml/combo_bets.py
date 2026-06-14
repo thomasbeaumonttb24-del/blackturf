@@ -21,9 +21,29 @@ N_SIMS = 20000
 # redistribue ~TRJ de la masse → rapport ≈ TRJ / proba_marché.
 TRJ = {
     "Couplé Placé": 0.74, "Couplé Gagnant": 0.74, "2sur4": 0.74,
+    "Couplé Ordre": 0.74, "Trio Ordre": 0.691, "Super 4": 0.65,
     "Trio": 0.691, "Tiercé Désordre": 0.6435, "Tiercé Ordre": 0.6435,
     "Quarté+ Désordre": 0.633, "Quinté+ Désordre": 0.6475,
 }
+
+
+def _bet_flags(course_info: dict) -> dict:
+    """Drapeaux de disponibilité des paris (vérité PMU ou fallback). Robuste : si la
+    route a déjà injecté les drapeaux canoniques (est_couple_ordre…) on les utilise,
+    sinon on les dérive de paris_disponibles / des booléens est_* présents."""
+    if "est_couple_gagnant" in course_info:
+        return course_info
+    from services.bet_catalog import derive_bet_flags
+    flags = derive_bet_flags(
+        course_info.get("paris_disponibles"),
+        est_tierce=bool(course_info.get("est_tierce")),
+        est_quarte=bool(course_info.get("est_quarte")),
+        est_quinte=bool(course_info.get("est_quinte")),
+        est_2sur4=bool(course_info.get("est_2sur4")),
+    )
+    merged = dict(course_info)
+    merged.update(flags)
+    return merged
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -67,9 +87,27 @@ class _Sim:
         self.top1 = order[:, 0]
         self.top2 = order[:, 1] if order.shape[1] > 1 else order[:, 0]
         self.top3 = order[:, 2] if order.shape[1] > 2 else order[:, 0]
+        self.top4 = order[:, 3] if order.shape[1] > 3 else order[:, 0]
+        self.top5p = order[:, 4] if order.shape[1] > 4 else order[:, 0]
 
     def p_simple_place(self, a: int) -> float:
         return float(self.in_top3[:, a].mean())
+
+    def p_couple_ordre(self, sel: list[int]) -> float:
+        """Couplé ORDRE : sel[0] 1er ET sel[1] 2e, dans CET ordre exact."""
+        a, b = sel[0], sel[1]
+        return float(((self.top1 == a) & (self.top2 == b)).mean())
+
+    def p_trio_ordre(self, sel: list[int]) -> float:
+        """Trio ORDRE : les 3 premiers dans l'ordre exact."""
+        a, b, c = sel[0], sel[1], sel[2]
+        return float(((self.top1 == a) & (self.top2 == b) & (self.top3 == c)).mean())
+
+    def p_super4(self, sel: list[int]) -> float:
+        """Super 4 : les 4 premiers dans l'ordre exact."""
+        a, b, c, d = sel[0], sel[1], sel[2], sel[3]
+        return float(((self.top1 == a) & (self.top2 == b)
+                      & (self.top3 == c) & (self.top4 == d)).mean())
 
     def p_couple_gagnant(self, sel: list[int]) -> float:
         # les 2 chevaux exactement 1er+2e (ordre indifférent)
@@ -323,10 +361,18 @@ def enumerate_bet_candidates(
         })
 
     nb_partants = course_info.get("nb_partants", len(parts))
-    est_quinte = bool(course_info.get("est_quinte"))
-    est_quarte = bool(course_info.get("est_quarte"))
-    est_tierce = bool(course_info.get("est_tierce"))
-    est_2sur4 = bool(course_info.get("est_2sur4"))   # 2sur4 réellement offert PMU
+    fl = _bet_flags(course_info)
+    est_quinte = bool(fl.get("est_quinte"))
+    est_quarte = bool(fl.get("est_quarte"))
+    est_tierce = bool(fl.get("est_tierce"))
+    est_2sur4 = bool(fl.get("est_2sur4"))            # 2sur4 réellement offert PMU
+    # Disponibilité fine des paris (un champ réduit n'offre QUE l'ordre).
+    est_cg = bool(fl.get("est_couple_gagnant"))
+    est_cp = bool(fl.get("est_couple_place"))
+    est_co = bool(fl.get("est_couple_ordre"))        # couplé ORDRE (champ réduit)
+    est_trio = bool(fl.get("est_trio"))
+    est_to = bool(fl.get("est_trio_ordre"))          # trio ORDRE (champ réduit)
+    est_s4 = bool(fl.get("est_super4"))              # Super 4 (top-4 ordre exact)
 
     # ── SIMPLE GAGNANT — uniquement sur cote >= 3. Sous 3, le gain est trop
     # faible pour le risque (surtout en petite mise) : un favori court se joue
@@ -437,23 +483,45 @@ def enumerate_bet_candidates(
     for gi in range(len(gros_cote)):
         for gj in range(gi + 1, len(gros_cote)):
             pairs.append((gros_cote[gi], gros_cote[gj]))
-    for a, b in pairs:
-        mx = max(float(cotes[a]), float(cotes[b]))
-        niv = "coup" if mx >= 25 else "surprise" if mx >= 12 else "rendement"
-        add(niv, "Couplé Gagnant", [a, b], sim.p_couple_gagnant([a, b]), sim_m.p_couple_gagnant([a, b]),
-            f"N°{numeros[a]} + N°{numeros[b]} aux 2 premières places.")
+    if est_cg:
+        for a, b in pairs:
+            mx = max(float(cotes[a]), float(cotes[b]))
+            niv = "coup" if mx >= 25 else "surprise" if mx >= 12 else "rendement"
+            add(niv, "Couplé Gagnant", [a, b], sim.p_couple_gagnant([a, b]), sim_m.p_couple_gagnant([a, b]),
+                f"N°{numeros[a]} + N°{numeros[b]} aux 2 premières places.")
+
+    # ── Couplé ORDRE (champ réduit : le PMU n'offre QUE l'ordre) — gros rapport. ──
+    # Le pari ne gagne que si l'ordre exact (a 1er, b 2e) est trouvé → rapport bien
+    # plus élevé qu'en désordre. On émet les 2 sens (a,b) et (b,a) pour les meilleurs
+    # duos (favoris + grosses cotes) : un large spectre pour le profil risqué.
+    if est_co:
+        ord_pairs = []
+        if len(by_p1) >= 2:
+            ord_pairs += [(by_p1[0], by_p1[1]), (by_p1[1], by_p1[0])]
+        if len(by_p1) >= 3:
+            ord_pairs += [(by_p1[0], by_p1[2]), (by_p1[1], by_p1[2])]
+        if out1 is not None and by_p1 and out1 != by_p1[0]:
+            ord_pairs += [(by_p1[0], out1), (out1, by_p1[0])]
+        for g in gros_cote:
+            if by_p1[0] != g:
+                ord_pairs += [(by_p1[0], g), (g, by_p1[0])]
+        for a, b in ord_pairs:
+            mx = max(float(cotes[a]), float(cotes[b]))
+            niv = "coup" if mx >= 15 else "surprise"
+            add(niv, "Couplé Ordre", [a, b], sim.p_couple_ordre([a, b]), sim_m.p_couple_ordre([a, b]),
+                f"N°{numeros[a]} 1er puis N°{numeros[b]} 2e (ordre exact) — gros rapport.")
 
     # ── Couplé Placé (sécurité) ──
-    if len(by_p1) >= 2:
+    if est_cp and len(by_p1) >= 2:
         add("securite", "Couplé Placé", [by_p1[0], by_p1[1]],
             sim.p_couple_place([by_p1[0], by_p1[1]]), sim_m.p_couple_place([by_p1[0], by_p1[1]]),
             f"N°{numeros[by_p1[0]]} + N°{numeros[by_p1[1]]} tous deux dans les 3 premiers.")
-    if len(by_p1) >= 3:
+    if est_cp and len(by_p1) >= 3:
         add("securite", "Couplé Placé", [by_p1[0], by_p1[2]],
             sim.p_couple_place([by_p1[0], by_p1[2]]), sim_m.p_couple_place([by_p1[0], by_p1[2]]),
             f"N°{numeros[by_p1[0]]} + N°{numeros[by_p1[2]]} tous deux dans les 3 premiers.")
     # Couplé Placé favori + OUTSIDER à valeur : placer une grosse cote dans le top-3.
-    if out1 is not None and by_p1 and out1 != by_p1[0]:
+    if est_cp and out1 is not None and by_p1 and out1 != by_p1[0]:
         add("surprise", "Couplé Placé", [by_p1[0], out1],
             sim.p_couple_place([by_p1[0], out1]), sim_m.p_couple_place([by_p1[0], out1]),
             f"Favori N°{numeros[by_p1[0]]} + outsider N°{numeros[out1]} (cote {cotes[out1]:.1f}) "
@@ -474,12 +542,20 @@ def enumerate_bet_candidates(
         for gj in range(gi + 1, len(gros_cote)):
             if by_p1 and by_p1[0] not in (gros_cote[gi], gros_cote[gj]):
                 trios.append((by_p1[0], gros_cote[gi], gros_cote[gj]))
-    for t in trios:
-        mx = max(float(cotes[i]) for i in t)
-        has_val_out = any(edge_by_idx[i] > 0 and cotes[i] >= 8 for i in t)
-        niv = "surprise" if has_val_out and mx < 40 else "coup"
-        add(niv, "Trio", list(t), sim.p_trio(list(t)), sim_m.p_trio(list(t)),
-            f"N°{'+N°'.join(str(numeros[i]) for i in t)} aux 3 premières places (sans ordre).")
+    if est_trio:
+        for t in trios:
+            mx = max(float(cotes[i]) for i in t)
+            has_val_out = any(edge_by_idx[i] > 0 and cotes[i] >= 8 for i in t)
+            niv = "surprise" if has_val_out and mx < 40 else "coup"
+            add(niv, "Trio", list(t), sim.p_trio(list(t)), sim_m.p_trio(list(t)),
+                f"N°{'+N°'.join(str(numeros[i]) for i in t)} aux 3 premières places (sans ordre).")
+
+    # ── Trio ORDRE (champ réduit) — les 3 premiers dans l'ordre exact, gros rapport. ──
+    if est_to and len(by_p1) >= 3:
+        for t in trios[:4]:
+            mx = max(float(cotes[i]) for i in t)
+            add("coup", "Trio Ordre", list(t), sim.p_trio_ordre(list(t)), sim_m.p_trio_ordre(list(t)),
+                f"N°{'+N°'.join(str(numeros[i]) for i in t)} dans l'ORDRE exact — très gros rapport.")
 
     # ── 2sur4 ── (uniquement si le PMU propose ce pari pour la course)
     if len(by_p1) >= 4 and est_2sur4:
@@ -493,6 +569,12 @@ def enumerate_bet_candidates(
             add("surprise", "2sur4", sel_o, sim.p_2sur4(sel_o), sim_m.p_2sur4(sel_o),
                 f"3 favoris + outsider N°{numeros[out1]} (cote {cotes[out1]:.1f}) — 2 dans "
                 f"les 4 premiers (placement grosse cote dans le top-4).")
+
+    # ── Super 4 (champ réduit) — les 4 premiers dans l'ordre EXACT, jackpot. ──
+    if est_s4 and len(by_p1) >= 4:
+        sel = list(by_p1[:4])
+        add("coup", "Super 4", sel, sim.p_super4(sel), sim_m.p_super4(sel),
+            f"Super 4 — N°{'+N°'.join(str(numeros[i]) for i in sel)} dans l'ordre exact (gros lot).")
 
     # ── Jackpots désordre (Tiercé/Quarté+/Quinté+) — gros lot, 1 combinaison ──
     # Proba RÉELLE (simulation) du top-k exact des favoris modèle ; rapport ≈ TRJ /

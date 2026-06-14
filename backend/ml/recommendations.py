@@ -40,23 +40,36 @@ TRJ = {
 
 
 def disponibles_selon_course(nb_partants: int, est_quinte: bool, est_quarte: bool,
-                             est_tierce: bool, est_2sur4: bool = False) -> list[str]:
-    """Retourne les types de paris disponibles selon les caractéristiques de la course.
+                             est_tierce: bool, est_2sur4: bool = False,
+                             paris_disponibles: list | None = None) -> list[str]:
+    """Types de paris RÉELLEMENT jouables pour la course.
 
-    `est_2sur4` = 2sur4 réellement proposé par le PMU (déduit de paris[].codePari).
-    On NE se fie PLUS au nb de partants : certaines courses à ≥8 partants n'offrent
-    pas de 2sur4 (ex. R6C7) → un prono 2sur4 y serait impossible à jouer.
+    Source de vérité = `paris_disponibles` (liste des codePari PMU). Le PMU adapte
+    son offre : un champ réduit remplace le Couplé Gagnant/Placé par un Couplé ORDRE
+    et le Trio par un Trio ORDRE — on les expose donc tels quels. Sans la liste
+    (course pas re-scrapée) on retombe sur les booléens est_* + les paris universels.
     """
-    paris = ["Simple Gagnant", "Simple Placé", "Couplé Gagnant", "Couplé Placé", "Couplé Ordre", "Trio"]
-    if est_2sur4:
-        paris.append("2sur4")
-    if est_tierce or est_quarte or est_quinte:
-        paris.append("Tiercé")
-    if est_quarte or est_quinte:
-        paris.append("Quarté+")
-    if est_quinte:
-        paris.append("Quinté+")
-    return paris
+    from services.bet_catalog import derive_bet_flags
+    fl = derive_bet_flags(
+        paris_disponibles, est_tierce=est_tierce, est_quarte=est_quarte,
+        est_quinte=est_quinte, est_2sur4=est_2sur4,
+    )
+    # Ordre d'affichage canonique (du plus simple au jackpot).
+    ordre = [
+        ("est_simple_gagnant", "Simple Gagnant"),
+        ("est_simple_place",   "Simple Placé"),
+        ("est_couple_gagnant", "Couplé Gagnant"),
+        ("est_couple_place",   "Couplé Placé"),
+        ("est_couple_ordre",   "Couplé Ordre"),
+        ("est_trio",           "Trio"),
+        ("est_trio_ordre",     "Trio Ordre"),
+        ("est_2sur4",          "2sur4"),
+        ("est_super4",         "Super 4"),
+        ("est_tierce",         "Tiercé"),
+        ("est_quarte",         "Quarté+"),
+        ("est_quinte",         "Quinté+"),
+    ]
+    return [label for flag, label in ordre if fl.get(flag)]
 
 
 def cout_combo(type_pari: str, nb_chevaux: int, flexi_pct: float = 1.0) -> float:
@@ -113,7 +126,8 @@ def generer_recommandations_course(
     est_tierce = course_info.get("est_tierce", False)
     est_2sur4 = course_info.get("est_2sur4", False)
 
-    paris_dispo = disponibles_selon_course(nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4)
+    paris_dispo = disponibles_selon_course(nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4,
+                                           paris_disponibles=course_info.get("paris_disponibles"))
 
     # Trier par proba_top3 décroissante
     pred_sorted = sorted(predictions, key=lambda x: x.get("proba_top3", 0), reverse=True)

@@ -154,6 +154,9 @@ PROFIL_CONFIG = {
         "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.8, "rapport_max": None,
         "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "bets_factor": 0.9, "min_stake_factor": 1.0,
+        # GAIN VISÉ : un pari gagnant doit rapporter ≥ ×1.5 du TOTAL misé (prudent =
+        # gain modeste mais réel ; on évite le placé sec qui rend à peine la mise).
+        "gain_cible_mult": 1.5,
         "types": {"Simple Placé", "Couplé Placé", "2sur4"},
         "objectif": "proba",
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
@@ -163,9 +166,14 @@ PROFIL_CONFIG = {
     # chevaux capées à 15. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
     "equilibre": {
         "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 2.0, "rapport_max": 10.0,
-        "min_proba": 0.04, "ev_min": -0.08, "max_coup": 2,
-        "bets_factor": 1.6, "min_stake_factor": 0.55,
-        "types": {"Couplé Placé", "Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant"},
+        "min_proba": 0.04, "ev_min": -0.08, "max_coup": 1,
+        # CONCENTRÉ : PEU de paris à mise FRANCHE (plus de saupoudrage de Simple
+        # Gagnant à 2€). bets_factor bas + min_stake_factor=1 + 1 pari par type.
+        "bets_factor": 0.9, "min_stake_factor": 1.0, "max_per_type": 1,
+        # GAIN VISÉ : un pari gagnant doit rapporter ≥ ×3 du TOTAL misé (demande user :
+        # 10€ misés → ≥30€ si un seul pari passe). Le moteur concentre pour l'atteindre.
+        "gain_cible_mult": 3.0,
+        "types": {"Couplé Placé", "Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio", "Simple Gagnant"},
         "objectif": "ev",
         "risk_pref": {"securite": 0.8, "rendement": 1.2, "surprise": 1.0, "coup": 0.7},
     },
@@ -185,8 +193,14 @@ PROFIL_CONFIG = {
         "cote_min": 0.0, "cote_max": 300.0, "rapport_min": 10.0, "rapport_max": None,
         "min_proba": 0.0, "ev_min": -0.25, "max_coup": 5,
         "spec_coup": True,
-        "bets_factor": 2.4, "min_stake_factor": 0.34, "max_per_type": 5,
-        "types": {"Couplé Gagnant", "2sur4", "Trio", "Simple Gagnant",
+        # DIVERSITÉ : max 2 paris d'un même type → fini « que des Trios ». Le moteur
+        # privilégie le DUO GAGNANT (cf bonus dans conviction) puis varie les types.
+        "bets_factor": 2.4, "min_stake_factor": 0.34, "max_per_type": 2,
+        # GAIN VISÉ ≥ ×3 du total (plancher ; le risqué dépasse largement via les gros
+        # rapports — R10C8 : Couplé Gagnant ×644). Petites mises, grosses cotes.
+        "gain_cible_mult": 3.0,
+        "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio", "Trio Ordre",
+                  "Super 4", "Simple Gagnant",
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "objectif": "gain",
         "risk_pref": {"securite": 0.3, "rendement": 0.8, "surprise": 1.5, "coup": 1.9},
@@ -221,6 +235,9 @@ def _effective_config(profil: str, heat: float) -> dict:
         "objectif":  base.get("objectif", "ev"), # critère de classement des candidats
         "max_per_type": base.get("max_per_type"),  # plafond paris d'un même type (None = auto)
         "spec_coup": base.get("spec_coup", False), # autorise les coups gros-lot spéculatifs
+        # Multiple de gain visé sur le TOTAL misé (un pari gagnant ≥ ×N du montant).
+        # Contrat produit → NON modulé par le heat.
+        "gain_cible_mult": base.get("gain_cible_mult", 0.0),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -380,6 +397,10 @@ def _select_conviction(
             # bonus aux outsiders à VALEUR (edge>0 sur grosse cote) détectés par l'IA.
             payout = c["rapport_estime"] * c["proba_gain"]   # espérance de retour (×mise)
             bonus = 1.30 if (c.get("edge", 0.0) > 0 and c["rapport_estime"] >= 8) else 1.0
+            # PRIVILÉGIE LE DUO GAGNANT (demande user) : un couplé gagnant/ordre à gros
+            # rapport est préféré aux Trios à conviction comparable (anti « que des Trios »).
+            if c["type_pari"] in ("Couplé Gagnant", "Couplé Ordre"):
+                bonus *= 1.35
             return payout * bonus * rw
         # ÉQUILIBRE : compromis EV × proba × edge.
         base = (max(c["ev"], 0.0) * 0.6 + c["proba_gain"] * 0.5
@@ -510,6 +531,59 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
         c["mise"] = min_stake + extra[i]
 
     _apply_spec_cap(selected, montant, palier, min_stake)
+    _enforce_gain_target(selected, montant, cfg, min_stake)
+
+
+def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
+                         min_stake: int) -> None:
+    """CONCENTRE la mise pour qu'un pari GAGNANT rapporte ≥ `gain_cible_mult` × le
+    montant TOTAL misé (demande user : 10€ → ≥30€ pour le modéré). Pour chaque pari,
+    la mise nécessaire = ceil(cible / rapport). On finance, par ordre de conviction,
+    autant de paris que possible à ce niveau ; ceux qui ne peuvent PAS atteindre la
+    cible dans le budget restant sont écartés (→ moins de paris, mises plus franches).
+    Le reliquat va aux paris gardés (priorité conviction). Respecte la réserve laissée
+    par le plafond spéculatif (on ne dépense pas plus que ce qui était déjà joué)."""
+    g = float(cfg.get("gain_cible_mult", 0.0) or 0.0)
+    if g <= 0 or not selected:
+        return
+    budget = sum(int(c["mise"]) for c in selected)          # respecte la réserve spec_cap
+    if budget <= 0:
+        return
+    cible = g * montant
+
+    def prio(c):
+        return (max(float(c.get("_kelly_f", 0.0) or 0.0), 1e-3)
+                * float(c.get("_roi_w", 1.0) or 1.0) * float(c.get("_sig", 1.0) or 1.0)
+                * (0.5 + float(c.get("proba_gain", 0.0) or 0.0)))
+
+    def besoin(c):
+        rap = max(float(c.get("rapport_estime", 1.0) or 1.0), 1.01)
+        return max(min_stake, math.ceil(cible / rap))
+
+    ordered = sorted(selected, key=prio, reverse=True)
+    kept: list[dict] = []
+    reste = budget
+    for c in ordered:
+        need = besoin(c)
+        if need <= reste:
+            c["mise"] = need
+            kept.append(c)
+            reste -= need
+    if not kept:
+        # Aucun pari n'atteint la cible dans le budget → concentrer le budget sur le
+        # pari au plus gros rapport (meilleure chance d'approcher la cible).
+        best = max(selected, key=lambda c: float(c.get("rapport_estime", 0.0) or 0.0))
+        best["mise"] = budget
+        selected[:] = [best]
+        return
+    # Reliquat → aux paris gardés par priorité (total dépensé == budget initial).
+    kept_prio = sorted(kept, key=prio, reverse=True)
+    k = 0
+    while reste > 0 and kept_prio:
+        kept_prio[k % len(kept_prio)]["mise"] += 1
+        reste -= 1
+        k += 1
+    selected[:] = kept
 
 
 def _apply_spec_cap(selected: list[dict], montant: int, palier: dict,
@@ -566,9 +640,13 @@ _TYPE_RAISON_PROFIL = {
     ("equilibre", "Couplé Placé"):     "Duo placé sécurisant le ticket — combiné aux paris à rendement (petite mise répartie).",
     ("equilibre", "2sur4"):            "2sur4 : large filet sur le top-4 — une des combinaisons du spectre joué en petite mise.",
     ("equilibre", "Trio"):             "Trio désordre : 3 chevaux dans l'ordre des arrivants — gros rapport pour une petite mise.",
+    ("equilibre", "Couplé Ordre"):     "Duo à l'ordre (champ réduit) : 1er + 2e dans l'ordre exact — rapport rehaussé.",
     # RISQUÉ — grosses cotes gagnant, duo gagnant, trios, jackpots désordre.
     ("agressif", "Simple Gagnant"):    "Gagnant GROSSE cote : gain élevé visé sur un cheval que le modèle place au-dessus du marché.",
     ("agressif", "Couplé Gagnant"):    "Duo gagnant : rapport multiplié, le modèle voit ces 2 chevaux au-dessus du marché.",
+    ("agressif", "Couplé Ordre"):      "Duo à l'ORDRE exact : rapport bien plus gros qu'en désordre — petite mise, gros levier.",
+    ("agressif", "Trio Ordre"):        "Trio à l'ORDRE exact (champ réduit) : très gros rapport pour une mise minime.",
+    ("agressif", "Super 4"):           "Super 4 : les 4 premiers dans l'ordre exact — jackpot, mise minime assumée.",
     ("agressif", "2sur4"):             "2sur4 avec outsider : place une grosse cote dans le top-4 — petite mise, gros levier.",
     ("agressif", "Trio"):              "Trio : 3 chevaux dont une grosse cote — rapport énorme pour une mise minime.",
     ("agressif", "Tiercé Désordre"):   "Tiercé désordre : les 3 premiers sans l'ordre — jackpot visé en petite mise.",

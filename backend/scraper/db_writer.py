@@ -276,6 +276,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         est_quarte=course.est_quarte,
         est_tierce=course.est_tierce,
         est_2sur4=course.est_2sur4,
+        paris_disponibles=course.paris_disponibles,
         # ── Enrichissements PMU course ──
         conditions_texte=course.conditions_texte,
         penetrometre_coef=course.penetrometre_coef,
@@ -296,6 +297,13 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             "categorie_particularite": _t(course.categorie_particularite, 30),
             "montant_offert_1er": course.montant_offert_1er,
             "nombre_declares_partants": course.nombre_declares_partants,
+            # Re-scrape live → met à jour les paris offerts + flags jackpot (un champ
+            # réduit après scratchings peut faire passer un couplé en couplé ordre).
+            "est_quinte": course.est_quinte,
+            "est_quarte": course.est_quarte,
+            "est_tierce": course.est_tierce,
+            "est_2sur4": course.est_2sur4,
+            "paris_disponibles": course.paris_disponibles,
             "updated_at": datetime.now(),
         },
     )
