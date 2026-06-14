@@ -168,6 +168,7 @@ export default async function HomePage() {
       {/* ══════════════ HERO — BENTO ══════════════ */}
       <section className="relative gradient-hero-v2 grid-lines overflow-hidden">
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+          <div className="mesh-anim absolute inset-0" />
           <div className="orb-1 absolute top-[-60px] left-1/3 w-[600px] h-[280px] rounded-full bg-amber-400/10 blur-[90px]" />
           <div className="orb-2 absolute bottom-0 right-[4%] w-72 h-72 rounded-full bg-amber-200/10 blur-[70px]" />
         </div>
@@ -332,6 +333,65 @@ export default async function HomePage() {
       {/* ══ RESULTS TAPE ══ */}
       <LiveTicker />
 
+      {/* ══════════════ BANDEAU CINÉMATIQUE (photo) ══════════════ */}
+      <section className="relative overflow-hidden bg-gray-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/img/showcase.jpg" alt="Peloton de chevaux en pleine course sur l'hippodrome"
+          className="absolute inset-0 h-full w-full object-cover object-center ken-burns cine-fade" />
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-950 via-gray-950/85 to-gray-950/25" />
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-950/90 via-transparent to-gray-950/30" />
+
+        <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-24 sm:py-36">
+          <div className="max-w-xl cine-fade">
+            <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300 mb-5">
+              <span className="live-dot inline-block w-2 h-2 rounded-full bg-amber-400" />
+              En piste, chaque jour
+            </span>
+            <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white leading-[1.08]">
+              Chaque course est une{" "}
+              <span className="text-gradient-animated">opportunité</span>.
+              <br className="hidden sm:block" /> Encore faut-il lire les bons signaux.
+            </h2>
+            <p className="mt-5 text-base sm:text-lg text-gray-200/90 leading-relaxed max-w-lg">
+              Pendant que les autres jouent au feeling, vous misez sur des analyses chiffrées,
+              recoupées avec le marché et vérifiées sur les vraies arrivées. La différence se joue là.
+            </p>
+
+            <div className="mt-7 flex flex-wrap gap-3">
+              <div className="float-chip rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 px-4 py-3">
+                <div className="num-display text-2xl font-extrabold text-amber-300">{fmtPct(tr?.accuracy_top3 ?? null)}</div>
+                <div className="text-[10px] uppercase tracking-wide text-gray-300 mt-0.5">Précision Top-3</div>
+              </div>
+              <div className="float-chip rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 px-4 py-3">
+                <div className="num-display text-2xl font-extrabold text-emerald-300">{fmtPct(tr?.favori_place_rate ?? null)}</div>
+                <div className="text-[10px] uppercase tracking-wide text-gray-300 mt-0.5">Favori placé</div>
+              </div>
+              <div className="float-chip rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 px-4 py-3">
+                <div className="num-display text-2xl font-extrabold text-white">{fmtInt(coursesAnalysees ?? null)}+</div>
+                <div className="text-[10px] uppercase tracking-wide text-gray-300 mt-0.5">Courses analysées</div>
+              </div>
+            </div>
+
+            <div className="mt-8">
+              <Button size="xl" asChild
+                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-900/40">
+                <Link href="/inscription">Démarrer mon essai gratuit <ArrowRight className="h-5 w-5 ml-1" /></Link>
+              </Button>
+            </div>
+          </div>
+
+          {/* Inset photo encadrée (depth) — desktop only */}
+          <div className="hidden lg:block absolute right-8 bottom-10 w-64 cine-fade">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/img/duel.jpg" alt="Duel de chevaux à l'arrivée"
+              className="tilt-card w-full h-40 object-cover rounded-2xl ring-1 ring-white/20 shadow-2xl" />
+            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-300">
+              <Trophy className="h-3.5 w-3.5 text-amber-300" /> Résultats réglés aux rapports PMU officiels
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ══════════════ MÉTHODE ══════════════ */}
       <section className="py-24 bg-white">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
@@ -357,7 +417,7 @@ export default async function HomePage() {
             ].map((s, i) => (
               <ScrollReveal key={s.step} delay={i * 100}>
                 <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
-                  <div className="glass-card rounded-2xl p-7 h-full">
+                  <div className="glass-card tilt-card rounded-2xl p-7 h-full">
                     <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
                       style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
                     <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
@@ -506,7 +566,7 @@ export default async function HomePage() {
 
             {FEATURES.map((f, i) => (
               <ScrollReveal key={f.title} delay={i * 70}>
-                <div className="glass-card rounded-3xl h-full p-6">
+                <div className="glass-card tilt-card rounded-3xl h-full p-6">
                   <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center mb-4"
                     style={{ background: f.bg, border: `1px solid ${f.border}` }}>
                     <f.icon className="h-5 w-5" style={{ color: f.color }} strokeWidth={2} />
@@ -621,32 +681,34 @@ export default async function HomePage() {
 
       <div className="section-divider" />
 
-      {/* ══════════════ CTA FINALE ══════════════ */}
-      <section className="py-24 relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-amber-50/30">
-        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-          <div className="orb-1 absolute top-0 left-1/2 w-[500px] h-[200px] rounded-full bg-amber-300/15 blur-[80px]" />
-        </div>
-        <div className="relative mx-auto max-w-3xl px-4 sm:px-6 text-center">
+      {/* ══════════════ CTA FINALE — photo cinématique ══════════════ */}
+      <section className="relative overflow-hidden bg-gray-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/img/cta.jpg" alt="Arrivée d'une course devant le public"
+          className="absolute inset-0 h-full w-full object-cover object-center ken-burns" />
+        <div className="absolute inset-0 bg-gray-950/75" />
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/40 to-gray-950/70" />
+        <div className="relative mx-auto max-w-3xl px-4 sm:px-6 text-center py-24 sm:py-32">
           <ScrollReveal>
-            <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[11px] font-semibold mb-6">
+            <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full bg-white/10 text-amber-200 border border-white/20 text-[11px] font-semibold mb-6">
               Commencez aujourd&apos;hui
             </span>
-            <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-gray-900 mb-5 leading-tight">
+            <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white mb-5 leading-tight">
               Pariez avec{" "}
               <span className="text-gradient-animated">une méthode</span>
               {" "}— pas avec votre instinct.
             </h2>
-            <p className="text-gray-600 text-lg mb-10 max-w-xl mx-auto">
+            <p className="text-gray-200/90 text-lg mb-10 max-w-xl mx-auto">
               Des analyses chiffrées et vérifiées sur les vrais résultats du PMU. Essayez BlackTurf
               7 jours, sans engagement et sans carte bancaire.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="xl" asChild
-                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-400/25">
+                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-900/40">
                 <Link href="/inscription">Essai gratuit 7 jours — sans CB <ArrowRight className="h-5 w-5 ml-1" /></Link>
               </Button>
               <Button variant="outline" size="xl" asChild
-                className="press border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:bg-amber-50">
+                className="press border-white/30 bg-white/5 text-white hover:bg-white/15 hover:border-white/50">
                 <Link href="#tarifs">Voir les tarifs</Link>
               </Button>
             </div>

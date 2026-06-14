@@ -485,3 +485,53 @@
 @media (prefers-reduced-motion: reduce) {
   .loop-orbit, .loop-flow, .loop-node, .delta-blink { animation: none !important; }
 }
+
+/* ════════ VISUEL / PHOTO — refonte cinématique ════════ */
+
+/* Ken Burns : zoom + pan lents sur les photos de fond (cinématique). */
+@keyframes kenBurns {
+  0%   { transform: scale(1.08) translate(0, 0); }
+  50%  { transform: scale(1.16) translate(-1.5%, -1.5%); }
+  100% { transform: scale(1.08) translate(0, 0); }
+}
+.ken-burns { animation: kenBurns 22s ease-in-out infinite; will-change: transform; }
+
+/* Carte qui se soulève au survol (dynamisme). */
+.tilt-card { transition: transform .35s cubic-bezier(0.16,1,0.3,1), box-shadow .35s ease; }
+.tilt-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 22px 48px -18px rgba(180,83,9,0.35), 0 8px 20px -12px rgba(17,24,39,0.25);
+}
+
+/* Fond mesh-gradient animé (or/ambre premium, sans photo). */
+@keyframes meshShift {
+  0%, 100% { background-position: 0% 50%, 100% 50%, 50% 0%; }
+  50%      { background-position: 100% 50%, 0% 50%, 50% 100%; }
+}
+.mesh-anim {
+  background:
+    radial-gradient(60% 60% at 15% 25%, rgba(245,158,11,0.18), transparent 60%),
+    radial-gradient(55% 55% at 85% 30%, rgba(217,119,6,0.14), transparent 60%),
+    radial-gradient(70% 70% at 50% 100%, rgba(251,191,36,0.12), transparent 60%);
+  background-size: 200% 200%, 200% 200%, 200% 200%;
+  animation: meshShift 16s ease-in-out infinite;
+}
+
+/* Puce flottante (chips de stats sur le bandeau cinématique). */
+@keyframes chipFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+.float-chip { animation: chipFloat 5s ease-in-out infinite; }
+.float-chip:nth-child(2) { animation-delay: .8s; }
+.float-chip:nth-child(3) { animation-delay: 1.6s; }
+
+/* Apparition douce de l'image cinématique. */
+@keyframes cineFade { from { opacity: 0; } to { opacity: 1; } }
+.cine-fade { animation: cineFade 1.2s ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ken-burns, .float-chip, .cine-fade { animation: none !important; }
+  .tilt-card { transition: none !important; }
+  .tilt-card:hover { transform: none !important; }
+}
