@@ -151,89 +151,77 @@ export default async function HomePage() {
     <div className="flex flex-col min-h-screen bg-brand-warm">
       <Navbar />
 
-      {/* ═══════════ HERO (clair, aéré) ═══════════ */}
+      {/* ═══════════ HERO (image plein cadre, dégradé BLANC) ═══════════ */}
       <section className="relative overflow-hidden bg-brand-warm">
-        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-          <div className="mesh-anim absolute inset-0 opacity-60" />
-          <div className="orb-1 absolute top-[-60px] right-[12%] w-[520px] h-[260px] rounded-full bg-amber-300/12 blur-[100px]" />
-        </div>
+        {/* Image plein cadre */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/img/hero.jpg" alt="Départ d'une course de chevaux aux portes numérotées"
+          className="absolute inset-0 h-full w-full object-cover object-[72%_center] ken-burns" />
+        {/* Dégradés BLANCS : l'image se fond dans le fond clair */}
+        <div className="absolute inset-0 bg-gradient-to-r from-brand-warm via-brand-warm/92 to-brand-warm/10" />
+        <div className="absolute inset-0 bg-gradient-to-t from-brand-warm via-transparent to-brand-warm/20" />
+        {/* Voile renforcé sur mobile (lisibilité du texte foncé) */}
+        <div className="absolute inset-0 bg-brand-warm/45 sm:bg-transparent" />
 
-        <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pt-28 pb-16 sm:pt-32 sm:pb-24">
-          <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+        <div className="relative mx-auto max-w-6xl w-full px-4 sm:px-6 lg:px-8 pt-28 pb-16 sm:pt-36 sm:pb-28">
+          <div className="max-w-xl">
+            <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-gold-deep mb-6">
+              <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500" />
+              Pronostics hippiques PMU · paris de valeur
+            </span>
 
-            {/* ── Texte ── */}
-            <div className="text-center lg:text-left">
-              <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-gold-deep mb-6">
-                <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500" />
-                Pronostics hippiques PMU · paris de valeur
-              </span>
+            <h1 className="font-display text-[2.5rem] leading-[1.05] sm:text-6xl font-extrabold tracking-tight text-gray-900">
+              Le PMU,{" "}
+              <span className="text-gradient-animated">version méthode.</span>
+            </h1>
 
-              <h1 className="font-display text-[2.5rem] leading-[1.05] sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-gray-900">
-                Le PMU,{" "}
-                <span className="text-gradient-animated">version méthode.</span>
-              </h1>
+            <p className="mt-6 text-base sm:text-lg text-gray-700 leading-relaxed max-w-lg">
+              BlackTurf analyse chaque course, repère les paris où la cote{" "}
+              <span className="font-semibold text-gray-900">sous-estime</span> les chances, puis vous donne un{" "}
+              <span className="font-semibold text-gray-900">plan de mise adapté à votre profil</span>.
+              Vous pariez avec des chiffres — plus au hasard.
+            </p>
 
-              <p className="mt-6 text-base sm:text-lg text-gray-600 leading-relaxed max-w-lg mx-auto lg:mx-0">
-                BlackTurf analyse chaque course, repère les paris où la cote{" "}
-                <span className="font-semibold text-gray-900">sous-estime</span> les chances, puis vous donne un{" "}
-                <span className="font-semibold text-gray-900">plan de mise adapté à votre profil</span>.
-                Vous pariez avec des chiffres — plus au hasard.
-              </p>
-
-              <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center lg:justify-start">
-                <Button size="xl" asChild
-                  className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30">
-                  <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
-                </Button>
-                <Button variant="outline" size="xl" asChild
-                  className="press border-gray-300 text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50">
-                  <Link href="/programme">Voir le programme du jour</Link>
-                </Button>
-              </div>
-
-              {/* Stats réelles — rangée sobre */}
-              <div className="mt-10 flex items-stretch justify-center lg:justify-start gap-6 sm:gap-8">
-                {[
-                  { v: fmtPct(tr?.accuracy_top3 ?? null), l: "Précision Top-3", c: "#B45309" },
-                  { v: fmtPct(tr?.favori_place_rate ?? null), l: "Favori placé", c: "#059669" },
-                  { v: coursesAnalysees == null ? "—" : `${fmtInt(coursesAnalysees)}+`, l: "Courses analysées", c: "#111827" },
-                ].map((s, i) => (
-                  <div key={s.l} className={`${i > 0 ? "pl-6 sm:pl-8 border-l border-gray-200" : ""}`}>
-                    <div className="num-display text-2xl sm:text-3xl font-extrabold" style={{ color: s.c }}>{s.v}</div>
-                    <div className="text-[10px] sm:text-[11px] uppercase tracking-wide text-gray-400 mt-1">{s.l}</div>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-4 text-[11px] text-gray-400 max-w-lg mx-auto lg:mx-0">Chiffres réels, mesurés sur les arrivées PMU officielles. Sans carte bancaire · annulation à tout moment.</p>
+            <div className="mt-8 flex flex-col sm:flex-row gap-3">
+              <Button size="xl" asChild
+                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30">
+                <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
+              </Button>
+              <Button variant="outline" size="xl" asChild
+                className="press border-gray-300 bg-white/70 backdrop-blur-sm text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50">
+                <Link href="/programme">Voir le programme du jour</Link>
+              </Button>
             </div>
 
-            {/* ── Visuel : photo contenue + piliers ── */}
-            <div className="relative">
-              <div className="relative rounded-[1.75rem] overflow-hidden ring-1 ring-black/5 shadow-xl aspect-[4/3] sm:aspect-[16/10] lg:aspect-[4/3.6]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/img/hero.jpg" alt="Départ d'une course de chevaux aux portes numérotées"
-                  className="absolute inset-0 h-full w-full object-cover object-center ken-burns" />
-                <div className="absolute inset-0 bg-gradient-to-t from-gray-950/55 via-transparent to-transparent" />
-                <div className="absolute bottom-4 left-4 inline-flex items-center gap-1.5 rounded-full bg-white/90 backdrop-blur px-3 py-1.5 text-[11px] font-semibold text-gray-800 shadow-sm">
-                  <Trophy className="h-3.5 w-3.5 text-brand-gold-deep" /> Réglé aux rapports PMU officiels
+            {/* 3 piliers = le but du site */}
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { icon: Search, t: "On analyse", d: "80 critères / cheval" },
+                { icon: Zap, t: "On détecte la valeur", d: "cote vs vraie chance" },
+                { icon: Wallet, t: "Vous misez malin", d: "plan selon le risque" },
+              ].map((p) => (
+                <div key={p.t} className="rounded-2xl bg-white/85 backdrop-blur-sm border border-white/60 shadow-sm px-4 py-3.5">
+                  <p.icon className="h-4 w-4 text-brand-gold-deep mb-2" />
+                  <div className="text-sm font-bold text-gray-900 leading-tight">{p.t}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{p.d}</div>
                 </div>
-              </div>
-
-              {/* 3 piliers = le but du site, compris d'un coup d'œil */}
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {[
-                  { icon: Search, t: "On analyse", d: "80 critères / cheval" },
-                  { icon: Zap, t: "On détecte la valeur", d: "cote vs vraie chance" },
-                  { icon: Wallet, t: "Vous misez malin", d: "plan selon le risque" },
-                ].map((p) => (
-                  <div key={p.t} className="rounded-2xl bg-white border border-gray-200 shadow-sm px-4 py-3.5">
-                    <p.icon className="h-4 w-4 text-brand-gold-deep mb-2" />
-                    <div className="text-sm font-bold text-gray-900 leading-tight">{p.t}</div>
-                    <div className="text-[11px] text-gray-500 mt-0.5">{p.d}</div>
-                  </div>
-                ))}
-              </div>
+              ))}
             </div>
+
+            {/* Stats réelles — rangée sobre */}
+            <div className="mt-9 flex items-stretch gap-6 sm:gap-8">
+              {[
+                { v: fmtPct(tr?.accuracy_top3 ?? null), l: "Précision Top-3", c: "#B45309" },
+                { v: fmtPct(tr?.favori_place_rate ?? null), l: "Favori placé", c: "#059669" },
+                { v: coursesAnalysees == null ? "—" : `${fmtInt(coursesAnalysees)}+`, l: "Courses analysées", c: "#111827" },
+              ].map((s, i) => (
+                <div key={s.l} className={`${i > 0 ? "pl-6 sm:pl-8 border-l border-gray-300/70" : ""}`}>
+                  <div className="num-display text-2xl sm:text-3xl font-extrabold" style={{ color: s.c }}>{s.v}</div>
+                  <div className="text-[10px] sm:text-[11px] uppercase tracking-wide text-gray-500 mt-1">{s.l}</div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-[11px] text-gray-500 max-w-lg">Chiffres réels, mesurés sur les arrivées PMU officielles. Sans carte bancaire · annulation à tout moment.</p>
           </div>
         </div>
       </section>
