@@ -64,9 +64,14 @@ const CAPITAL_WINS = CAPITAL_DEMO.filter((b) => b.won).length;
 const ICON_GOLD = { color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.16)" };
 const FEATURE_MAIN = {
   icon: Target,
-  title: "80 critères passés au crible pour chaque cheval",
-  desc: "Forme récente, terrain, distance, jockey et entraîneur, confrontations directes, mouvements de cotes… BlackTurf croise tout ce que le marché regarde — et ce qu'il oublie — puis se recale sur l'arrivée réelle après chaque réunion.",
-  points: ["Forme & régularité", "Terrain & distance", "Confrontations directes", "Mouvements de cotes"],
+  title: "80+ critères analysés pour chaque cheval",
+  desc: "Là où l'œil humain en retient une poignée, BlackTurf croise tout ce que le marché regarde — et ce qu'il oublie — puis se recale sur l'arrivée réelle après chaque réunion.",
+  categories: [
+    { label: "Forme & niveau", items: ["Forme sur 5 courses", "Régularité au podium", "ELO global + par discipline", "Progression & momentum"] },
+    { label: "Conditions de course", items: ["Affinité terrain & pénétromètre", "Distance de prédilection", "Corde / numéro de départ", "Poids porté & allègement"] },
+    { label: "Hommes & historique", items: ["Forme jockey & écurie", "Association jockey × entraîneur", "Confrontations directes", "Pedigree du père"] },
+    { label: "Marché & signaux", items: ["Mouvements de cote", "SPI — argent professionnel", "Écart PMU / Betfair", "Vitesse (réduction km) & fraîcheur"] },
+  ],
 };
 const FEATURES = [
   { icon: Zap, title: "Seulement la vraie valeur", desc: "Un pari n'est signalé que si la probabilité réelle dépasse ce que paie la cote. Des chiffres, pas un coup de cœur.", ...ICON_GOLD },
@@ -720,11 +725,18 @@ export default async function HomePage() {
                 </div>
                 <h3 className="font-display text-2xl font-bold text-gray-900 mb-3 leading-snug">{FEATURE_MAIN.title}</h3>
                 <p className="text-gray-500 leading-relaxed mb-6 max-w-lg">{FEATURE_MAIN.desc}</p>
-                <div className="mt-auto grid grid-cols-2 gap-3">
-                  {FEATURE_MAIN.points.map((p) => (
-                    <div key={p} className="flex items-center gap-2 rounded-xl bg-white/70 border border-amber-100 px-3 py-2.5">
-                      <Check className="h-4 w-4 flex-shrink-0 text-brand-gold-deep" />
-                      <span className="text-xs font-semibold text-gray-700">{p}</span>
+                <div className="mt-auto grid sm:grid-cols-2 gap-3.5">
+                  {FEATURE_MAIN.categories.map((cat) => (
+                    <div key={cat.label} className="rounded-2xl bg-white/70 border border-amber-100 p-3.5">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-brand-gold-deep mb-2">{cat.label}</div>
+                      <ul className="space-y-1.5">
+                        {cat.items.map((it) => (
+                          <li key={it} className="flex items-start gap-2 text-xs text-gray-700 leading-snug">
+                            <Check className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-emerald-600" />
+                            <span>{it}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   ))}
                 </div>
