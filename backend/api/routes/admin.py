@@ -678,7 +678,8 @@ async def get_learning_signals(
     try:
         r = (await db.execute(text("""
             SELECT (data->>'n_test')::int, (data->>'win_filt')::float, (data->>'win_base')::float,
-                   (data->>'roi_cap')::float, (data->>'edge_ok')::bool, created_at
+                   (data->>'roi_cap')::float, (data->>'edge_ok')::bool, created_at,
+                   (data->>'n_filt')::int, (data->>'enough_filt')::bool
             FROM edge_monitor ORDER BY created_at DESC LIMIT 1
         """))).first()
         if r:
@@ -686,6 +687,8 @@ async def get_learning_signals(
                 "n_test": r[0], "win_filtre": r[1], "win_baseline": r[2],
                 "roi_plafonne": r[3], "edge_ok": r[4],
                 "mesure_le": r[5].isoformat() if r[5] else None,
+                # nb de paris filtrés + si l'échantillon est suffisant pour conclure
+                "n_filt": r[6], "enough_filt": r[7],
             }
     except Exception as e:
         await db.rollback()
@@ -716,9 +719,18 @@ async def get_learning_convergence(
                           / NULLIF(count(*), 0)) * 100, 1) AS prec_top3,
                    round((count(*) FILTER (WHERE gagnant_rang_predit = 1)::numeric
                           / NULLIF(count(*), 0)) * 100, 1) AS prec_top1
-            FROM race_learning_log
+            FROM race_learning_log rll
             WHERE analyzed_at > now() - interval '12 weeks'
               AND gagnant_rang_predit IS NOT NULL
+              -- INTÉGRITÉ : que les courses dont le prono existait AVANT le départ
+              -- (exclut les entrées backfillées qui fausseraient la précision « réelle »).
+              AND EXISTS (
+                  SELECT 1 FROM predictions pr
+                  JOIN courses c ON c.course_id = pr.course_id
+                  WHERE pr.course_id = rll.course_id
+                    AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL
+                    AND pr.created_at < c.date_heure
+              )
             GROUP BY date_trunc('week', analyzed_at)
             ORDER BY date_trunc('week', analyzed_at)
         """))).all()
@@ -762,6 +774,11 @@ async def get_learning_convergence(
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL AND c.date_heure IS NOT NULL
+              -- INTÉGRITÉ (cf. palmarès / oos_weights) : que les pronos émis AVANT
+              -- le départ et non-backfillés → courbe cohérente avec les poids honnêtes
+              -- (sinon la courbe gonfle des runs reconstruits a posteriori).
+              AND r.created_at < c.date_heure
+              AND COALESCE(r.meta->>'backfill', '') <> 'true'
             GROUP BY r.profil, date_trunc('day', c.date_heure)
             ORDER BY r.profil, date_trunc('day', c.date_heure)
         """))).all()
@@ -787,6 +804,9 @@ async def get_learning_convergence(
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
               AND (r.resultat->>'net')::numeric > 0
+              -- Mêmes gardes d'intégrité : victoires réelles émises avant départ only.
+              AND c.date_heure IS NOT NULL AND r.created_at < c.date_heure
+              AND COALESCE(r.meta->>'backfill', '') <> 'true'
             ORDER BY c.date_heure DESC, net DESC
         """))).all()
         LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}

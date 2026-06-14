@@ -216,11 +216,11 @@ export default function AlgorithmeMonitoringPage() {
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded bg-muted/40 p-2">
                   <span className="text-muted-foreground" title="Capacité à classer un gagnant devant un perdant. 0.5 = hasard, 1 = parfait. ~0.70-0.78 = bon pour le turf.">AUC-ROC ⓘ</span>
-                  <div className="font-bold mt-0.5">{model.auc_roc ?? "—"}</div>
+                  <div className="font-bold mt-0.5">{typeof model.auc_roc === "number" ? model.auc_roc.toFixed(3) : "—"}</div>
                 </div>
                 <div className="rounded bg-muted/40 p-2">
                   <span className="text-muted-foreground" title="Écart entre proba annoncée et réalité. Plus BAS = mieux calibré. ~0.17 = bon.">Brier ⓘ</span>
-                  <div className="font-bold mt-0.5">{model.brier_score ?? "—"}</div>
+                  <div className="font-bold mt-0.5">{typeof model.brier_score === "number" ? model.brier_score.toFixed(4) : "—"}</div>
                 </div>
                 <div className="rounded bg-muted/40 p-2">
                   <span className="text-muted-foreground" title="% de fois où le gagnant réel est dans les 3 chevaux prédits en tête.">Top-3 ⓘ</span>
@@ -342,8 +342,8 @@ export default function AlgorithmeMonitoringPage() {
                 <Cpu className="w-4 h-4 text-emerald-600" />
                 <span className="text-sm font-medium">Santé de l&apos;apprentissage — preuve live</span>
                 {learning.edge && (
-                  <Badge className={`ml-auto text-[10px] ${learning.edge.edge_ok ? "bg-emerald-50 text-emerald-700 border-emerald-500/30" : "bg-rose-50 text-rose-700 border-rose-500/30"}`}>
-                    edge {learning.edge.edge_ok ? "OK" : "à surveiller"}
+                  <Badge className={`ml-auto text-[10px] ${learning.edge.edge_ok ? "bg-emerald-50 text-emerald-700 border-emerald-500/30" : learning.edge.enough_filt === false ? "bg-amber-50 text-amber-700 border-amber-500/30" : "bg-rose-50 text-rose-700 border-rose-500/30"}`}>
+                    edge {learning.edge.edge_ok ? "OK" : learning.edge.enough_filt === false ? "échantillon insuffisant" : "à surveiller"}
                   </Badge>
                 )}
               </div>
@@ -361,11 +361,16 @@ export default function AlgorithmeMonitoringPage() {
                   </div>
                   <div className="rounded bg-muted/40 p-2">
                     <span className="text-muted-foreground">ROI plafonné</span>
-                    <div className={`font-bold mt-0.5 ${learning.edge.roi_plafonne >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                    <div className={`font-bold mt-0.5 ${learning.edge.enough_filt === false ? "text-amber-600" : learning.edge.roi_plafonne >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                       {learning.edge.roi_plafonne >= 0 ? "+" : ""}{learning.edge.roi_plafonne}%
                     </div>
                   </div>
                 </div>
+              )}
+              {learning.edge?.enough_filt === false && (
+                <p className="text-[11px] text-amber-600 -mt-2 mb-3">
+                  ⚠ Échantillon filtré trop petit ({learning.edge.n_filt ?? 0} paris) — chiffres dominés par la variance, pas un edge confirmé.
+                </p>
               )}
 
               {/* Poids appris par profil */}

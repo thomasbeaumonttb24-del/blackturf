@@ -21,6 +21,10 @@ log = structlog.get_logger()
 K_SHRINK = 40.0
 CONV_THR = 1.1
 CAP = 10.0  # plafond du gain par pari pour le ROI winsorisé (neutralise la chance longshot)
+# Nb MINIMUM de paris filtrés pour qu'un edge soit déclaré « qui tient ». En-dessous,
+# win_filt/ROI sont dominés par la variance (ex. 10 paris → +233% = bruit, pas un edge).
+# Règle no-fake-data : on ne clame jamais un avantage sur un échantillon ridicule.
+MIN_FILT_FOR_EDGE = 50
 
 
 async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) -> dict:
@@ -73,13 +77,20 @@ async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) ->
     roi_filt = round((fpa - fst) / fst * 100, 1) if fst else None
     roi_cap = round((fpa_cap - fst) / fst * 100, 1) if fst else None
     roi_base = round((bpa - bst) / bst * 100, 1) if bst else None
-    edge_ok = bool(win_filt and win_base and win_filt >= 1.8 * win_base and (roi_cap or -1) > 0)
+    # Échantillon filtré suffisant ? Sinon win_filt/ROI = variance, edge NON déclarable.
+    enough_filt = fn >= MIN_FILT_FOR_EDGE
+    edge_ok = bool(
+        enough_filt and win_filt and win_base
+        and win_filt >= 1.8 * win_base and (roi_cap or -1) > 0
+    )
 
     return {
         "n_total": n, "n_test": bst, "n_filt": fn,
         "win_filt": win_filt, "win_base": win_base,
         "roi_filt": roi_filt, "roi_cap": roi_cap, "roi_base": roi_base,
         "conv_thr": CONV_THR, "edge_ok": edge_ok,
+        # Pour l'affichage honnête : sous ce seuil, ne pas clamer « l'avantage tient ».
+        "enough_filt": enough_filt, "min_filt": MIN_FILT_FOR_EDGE,
     }
 
 
