@@ -332,6 +332,22 @@ def explain_prediction(features: dict, proba_top3: float, proba_top1: float,
                          "detail": "Niveau (ELO) en nette progression sur ses dernières courses.",
                          "score": min(velo / 40, 1.0), "categorie": "elo"})
 
+    # ── CONFRONTATIONS DIRECTES (a-t-il déjà battu ses rivaux du jour ?) ─────
+    conf_nb = features.get("conf_nb_rencontres", 0)
+    conf_taux = features.get("conf_taux_victoire", 0)
+    conf_battus = features.get("conf_nb_rivaux_battus", 0)
+    conf_net = features.get("conf_bilan_net", 0)
+    if conf_nb >= 2 and conf_taux >= 0.60:
+        positifs.append({"feature": "conf_taux_victoire", "label": "Ascendant sur ses rivaux",
+                         "detail": (f"A déjà battu {int(conf_battus)} concurrent(s) présent(s) aujourd'hui "
+                                    f"({conf_taux*100:.0f}% de duels gagnés sur {int(conf_nb)} rencontres)."),
+                         "score": min(conf_taux * (1 + max(conf_net, 0)), 1.0), "categorie": "confrontation"})
+    elif conf_nb >= 2 and conf_taux <= 0.35:
+        negatifs.append({"feature": "conf_taux_victoire", "label": "Dominé en confrontation",
+                         "detail": (f"Souvent battu par des rivaux engagés aujourd'hui "
+                                    f"({conf_taux*100:.0f}% de duels gagnés sur {int(conf_nb)})."),
+                         "score": min((1 - conf_taux) * 0.8, 1.0), "categorie": "confrontation"})
+
     # Trier par score décroissant
     positifs.sort(key=lambda x: x["score"], reverse=True)
     negatifs.sort(key=lambda x: x["score"], reverse=True)
@@ -390,20 +406,24 @@ async def generate_race_narrative(
     course_summary = _build_course_summary(course_info, predictions_with_features, top_recommendation)
 
     prompt = f"""Tu es BlackTurf, un système d'analyse hippique expert.
-Analyse cette course et génère une analyse claire et utile pour un parieur.
+Analyse cette course et produis une synthèse courte mais COMPLÈTE pour un parieur.
 
 **Contexte course :**
 {course_summary}
 
 **Règles :**
-- Maximum 200 mots
-- Langue : français
-- Ton : expert, factuel, concis
-- Structure : 1 phrase intro, top recommandations avec raisons, 1 alerte si pertinent
-- Ne jamais garantir un résultat — utiliser des tournures probabilistes
-- Inclure la mention jeu responsable en fin si niveau VB ≥ 3
+- Maximum 160 mots, français, ton expert factuel.
+- Une ligne par point, dans cet ordre, en t'appuyant UNIQUEMENT sur les données ci-dessus :
+  1. Lecture : course ouverte ou favori détaché (déduis-le des écarts de proba de victoire).
+  2. Favori IA : le rang 1 du modèle + ses 2 atouts les plus concrets.
+  3. Également en vue : les rangs 2-3 (les chances secondaires logiques).
+  4. Outsiders / potentiels : chevaux sous-cotés par le marché (edge positif) ou à valeur, s'il y en a ; sinon l'écris pas.
+  5. Conclusion : le scénario le plus probable + comment le jouer (placé sécurisé, combiné, ou champ large si course ouverte).
+- Exploite les confrontations directes et les signaux marché quand ils sont fournis.
+- Ne jamais garantir un résultat — tournures probabilistes.
+- Mention jeu responsable en fin uniquement si niveau VB ≥ 3.
 
-Génère uniquement l'analyse, pas de titre ni d'en-tête."""
+Génère uniquement l'analyse, pas de titre, pas de markdown, pas de puces numérotées."""
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -465,12 +485,41 @@ def _build_course_summary(course_info: dict, predictions: list[dict],
         ev = vb.get("ev_max", 0) if vb else 0
         cote = p.get("cote_pmu", 0)
 
-        top_signal = positifs[0]["label"] if positifs else ""
+        top_signals = " / ".join(_strip_emoji(f["label"]) for f in positifs[:2]) if positifs else ""
+        edge = _market_edge(p)
+        edge_str = f"· edge modèle {edge*100:+.0f}pt" if abs(edge) >= 0.02 else ""
         vb_str = f"· VB EV+{ev*100:.0f}%" if ev > 0.05 else ""
         lines.append(
-            f"#{i} N°{num} {nom} : victoire {p1*100:.0f}% · placé {p3*100:.0f}% · cote {cote:.1f} {vb_str} · {verdict}"
-            + (f" — Signal principal : {top_signal}" if top_signal else "")
+            f"#{i} N°{num} {nom} : victoire {p1*100:.0f}% · placé {p3*100:.0f}% · cote {cote:.1f} {edge_str} {vb_str} · {verdict}"
+            + (f" — Atouts : {top_signals}" if top_signals else "")
         )
+
+    # Outsiders à valeur : hors top1, cote longue, modèle au-dessus du marché ou value bet
+    fav_num = top3[0].get("numero") if top3 else None
+    outsiders = []
+    for p in predictions:
+        if p.get("numero") == fav_num:
+            continue
+        cote = float(p.get("cote_pmu") or 0)
+        edge = _market_edge(p)
+        vb_niv = (p.get("vb") or {}).get("niveau", 0)
+        if cote >= 6 and (edge > 0.03 or vb_niv >= 2):
+            outsiders.append((p, cote, edge))
+    outsiders.sort(key=lambda t: t[2], reverse=True)
+    if outsiders:
+        lines.append("Outsiders à valeur (sous-cotés par le marché) : " + " | ".join(
+            f"N°{p.get('numero')} {p.get('nom')} (cote {cote:.0f}, edge {edge*100:+.0f}pt)"
+            for p, cote, edge in outsiders[:3]
+        ))
+
+    # Confrontations directes : ascendant/dominé déjà résolu en facteurs (categorie confrontation)
+    confront = []
+    for p in predictions:
+        for f in p.get("explanation", {}).get("facteurs_positifs", []):
+            if f.get("categorie") == "confrontation":
+                confront.append(f"N°{p.get('numero')} {p.get('nom')} : {_strip_emoji(f['detail'])}")
+    if confront:
+        lines.append("Confrontations directes : " + " | ".join(confront[:3]))
 
     # Signaux marché
     market_signals = []
@@ -478,7 +527,7 @@ def _build_course_summary(course_info: dict, predictions: list[dict],
         exp = p.get("explanation", {})
         for f in exp.get("facteurs_positifs", []):
             if f.get("categorie") == "marche":
-                market_signals.append(f"{p.get('nom')} : {f['label']}")
+                market_signals.append(f"{p.get('nom')} : {_strip_emoji(f['label'])}")
     if market_signals:
         lines.append("Signaux marché : " + " | ".join(market_signals[:3]))
 
@@ -498,7 +547,7 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
         predictions,
         key=lambda x: (x.get("proba_top1", 0), x.get("proba_top3", 0)),
         reverse=True,
-    )[:3]
+    )
     if not model_order:
         return "Analyse non disponible — données insuffisantes."
 
@@ -512,41 +561,73 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
 
     lines = []
 
-    # Intro
+    # En-tête course
     hippodrome = course_info.get("hippodrome_nom", "")
     discipline = course_info.get("discipline", "")
-    if hippodrome:
-        lines.append(f"**Course {hippodrome}** — {discipline}")
+    distance = course_info.get("distance", 0)
+    nb = course_info.get("nb_partants", len(model_order))
+    entete = " · ".join(x for x in [
+        hippodrome, discipline, f"{distance}m" if distance else "",
+        f"{nb} partants" if nb else "",
+    ] if x)
+    if entete:
+        lines.append(entete)
 
-    # Favori IA = rang 1 du modèle (cohérent avec le classement algo).
-    lines.append(f"**Favori IA : N°{num} {nom}** (victoire {p1*100:.0f}%, placé {p3*100:.0f}%)")
+    # 1. Lecture de course — favori détaché ou course ouverte (selon les écarts).
+    p1_2 = model_order[1].get("proba_top1", 0) if len(model_order) > 1 else 0
+    ecart = p1 - p1_2
+    if p1 >= 0.40 and ecart >= 0.12:
+        lecture = "favori IA détaché, il domine le classement du modèle."
+    elif p1 < 0.28:
+        lecture = "course ouverte — pas de favori marqué, le placé et les outsiders prennent de la valeur."
+    else:
+        lecture = "course resserrée — un favori léger devant un groupe d'outsiders crédibles."
+    lines.append(f"Lecture : {lecture}")
 
-    # Coup à tenter : meilleur value bet du champ s'il diffère du favori. On
-    # surface l'outsider à valeur SANS le faire passer pour le favori.
-    vbs = [p for p in predictions if (p.get("vb") or {}).get("niveau", 0) >= 2]
-    best_vb = max(vbs, key=lambda x: (x.get("vb") or {}).get("ev_max", 0), default=None)
-    if best_vb and best_vb.get("numero") != num:
-        ev = (best_vb.get("vb") or {}).get("ev_max", 0)
-        lines.append(
-            f"**Coup à tenter : N°{best_vb.get('numero')} {best_vb.get('nom')}** "
-            f"(value, EV +{ev*100:.0f}%, placé {best_vb.get('proba_top3', 0)*100:.0f}%)"
-        )
-
-    # Facteurs positifs du favori
+    # 2. Favori IA = rang 1 du modèle + ses atouts concrets.
+    lines.append(f"Favori IA : N°{num} {nom} — victoire {p1*100:.0f}%, placé {p3*100:.0f}%.")
     if positifs:
         raisons = " · ".join(_strip_emoji(f["label"]) for f in positifs[:3])
-        lines.append(f"Pourquoi : {raisons}")
+        lines.append(f"Atouts : {raisons}.")
 
-    # Autres chevaux (suite du classement modèle)
+    # 3. Également en vue : rangs 2-3 (chances secondaires logiques).
     if len(model_order) > 1:
-        autres = [f"N°{p['numero']} {p['nom']} (victoire {p.get('proba_top1', 0)*100:.0f}%)"
-                  for p in model_order[1:3]]
-        lines.append(f"Également en vue : {' · '.join(autres)}")
+        autres = [
+            f"N°{p['numero']} {p['nom']} (victoire {p.get('proba_top1', 0)*100:.0f}% / placé {p.get('proba_top3', 0)*100:.0f}%)"
+            for p in model_order[1:3]
+        ]
+        lines.append("Également en vue : " + " · ".join(autres) + ".")
 
-    # Alertes
-    alertes = explanation.get("alertes", [])
-    for a in alertes[:1]:
-        lines.append(f"{_strip_emoji(a['label'])}: {_strip_emoji(a.get('detail', ''))}")
+    # 4. Outsiders / potentiels : cote longue + modèle au-dessus du marché (edge) ou value bet.
+    outs = []
+    for p in model_order:
+        if p.get("numero") == num:
+            continue
+        cote = float(p.get("cote_pmu") or 0)
+        edge = _market_edge(p)
+        vb_niv = (p.get("vb") or {}).get("niveau", 0)
+        if cote >= 6 and (edge > 0.03 or vb_niv >= 2):
+            outs.append((p, cote, edge))
+    outs.sort(key=lambda t: t[2], reverse=True)
+    if outs:
+        labels = [f"N°{p['numero']} {p['nom']} (cote {cote:.0f}, jugé sous-coté)" for p, cote, _ in outs[:2]]
+        lines.append("Outsiders à valeur : " + " · ".join(labels) + ".")
+
+    # 5. Conclusion / scénario le plus probable + comment le jouer.
+    if p1 >= 0.40 and ecart >= 0.12:
+        scenario = (f"Conclusion : N°{num} doit confirmer sa supériorité — base solide pour le placé "
+                    f"et tête des combinés.")
+    elif p1 < 0.28:
+        scenario = ("Conclusion : arrivée indécise — privilégier le placé et glisser un outsider à valeur "
+                    "dans les jeux à champ large.")
+    else:
+        scenario = (f"Conclusion : N°{num} en patron logique mais le placé reste à portée des suivants — "
+                    f"sécuriser via un combiné placé avec les chances secondaires.")
+    lines.append(scenario)
+
+    # Alerte (point de vigilance sur le favori)
+    for a in explanation.get("alertes", [])[:1]:
+        lines.append(f"À surveiller — {_strip_emoji(a['label'])} : {_strip_emoji(a.get('detail', ''))}.")
 
     # Retire les marqueurs markdown gras (non rendus côté fiche → afficher propre).
     return "\n".join(lines).replace("**", "")
