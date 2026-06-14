@@ -1668,11 +1668,27 @@ export default function CoursePage() {
     course?.statut === "en_cours"
   );
 
+  // Chargement + rafraîchissement auto du statut. Sans poll, une fiche ouverte
+  // en "À venir"/"En cours" ne passait JAMAIS à "Terminée" sans recharger (fetch
+  // unique) → l'arrivée ne s'affichait pas pour un onglet resté ouvert.
+  const courseLoadedRef = useRef(false);
   useEffect(() => {
-    coursesApi.course(id)
-      .then((res) => setCourse(res.data))
-      .catch(() => toast.error("Course introuvable"))
-      .finally(() => setLoadingCourse(false));
+    courseLoadedRef.current = false;
+    let cancelled = false;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const load = () =>
+      coursesApi.course(id)
+        .then((res) => {
+          if (cancelled) return;
+          courseLoadedRef.current = true;
+          setCourse(res.data);
+          if (res.data.statut === "termine" && iv) { clearInterval(iv); iv = null; }
+        })
+        .catch(() => { if (!cancelled && !courseLoadedRef.current) toast.error("Course introuvable"); })
+        .finally(() => { if (!cancelled) setLoadingCourse(false); });
+    load();
+    iv = setInterval(load, 60000); // s'arrête dès que la course est terminée
+    return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [id]);
 
   useEffect(() => {
@@ -1693,13 +1709,26 @@ export default function CoursePage() {
       .catch(() => {}); // fail silently
   }, [id, user, course, predictions]); // refresh après prédictions
 
-  // Load results once course is finished (arrivée + rapports + commentaire)
+  // Résultats (arrivée + rapports + commentaire). La course passe "Terminée"
+  // AVANT que le PMU ne publie l'arrivée (5–10 min de décalage de scrape) : un
+  // fetch unique tombait en 404 → l'arrivée n'apparaissait JAMAIS sans recharger.
+  // On réessaie donc tant que la course est terminée et l'arrivée absente.
   useEffect(() => {
-    if (!course || course.statut !== "termine") return;
-    coursesApi.resultats(id)
-      .then((res) => setResultats(res.data))
-      .catch(() => setResultats(null));
-  }, [id, course]);
+    if (!course || course.statut !== "termine" || resultats) return;
+    let cancelled = false;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const load = () =>
+      coursesApi.resultats(id)
+        .then((res) => {
+          if (cancelled) return;
+          setResultats(res.data);
+          if (iv) { clearInterval(iv); iv = null; }
+        })
+        .catch(() => {}); // arrivée pas encore publiée → on retentera
+    load();
+    iv = setInterval(load, 30000); // stoppé dès que l'arrivée est récupérée
+    return () => { cancelled = true; if (iv) clearInterval(iv); };
+  }, [id, course, resultats]);
 
 
   async function handleTriggerPred() {

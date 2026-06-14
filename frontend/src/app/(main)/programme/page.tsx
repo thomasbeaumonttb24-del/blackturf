@@ -500,16 +500,24 @@ export default function ProgrammePage() {
     }, {} as Record<string, number>);
   }, [valueBets]);
 
-  /* Fetch programme */
+  /* Fetch programme — rafraîchi périodiquement pour le jour courant afin que les
+     statuts (À venir → En direct → Terminée) se mettent à jour sans recharger. */
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     const dateStr = format(selectedDate, "yyyy-MM-dd");
-    coursesApi
-      .programme(dateStr)
-      .then((res) => setProgramme(res.data))
-      .catch(() => setProgramme({ reunions: [], nb_courses: 0 }))
-      .finally(() => setLoading(false));
-  }, [selectedDate]);
+    const load = (initial: boolean) => {
+      if (initial) setLoading(true);
+      coursesApi
+        .programme(dateStr)
+        .then((res) => { if (!cancelled) setProgramme(res.data); })
+        .catch(() => { if (!cancelled && initial) setProgramme({ reunions: [], nb_courses: 0 }); })
+        .finally(() => { if (!cancelled && initial) setLoading(false); });
+    };
+    load(true);
+    // Seul le jour courant évolue en direct → on ne poll que lui.
+    const iv = isToday ? setInterval(() => load(false), 60000) : null;
+    return () => { cancelled = true; if (iv) clearInterval(iv); };
+  }, [selectedDate, isToday]);
 
   /* Navigate date */
   const goDate = useCallback(
