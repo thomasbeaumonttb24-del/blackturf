@@ -4,9 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart,
-} from "recharts";
-import {
   TrendingUp, TrendingDown, Zap, Calendar, Activity, Star,
   ArrowRight, ChevronRight, AlertTriangle, CheckCircle, Clock,
   BarChart3, Wallet, Trophy, Cpu,
@@ -40,14 +37,6 @@ function StarRating({ n }: { n: number }) {
   );
 }
 
-function DriftBadge({ severity }: { severity: string }) {
-  if (severity === "critical")
-    return <Badge className="bg-red-50 text-red-700 border-red-500/30 gap-1"><AlertTriangle className="w-3 h-3" />Dérive critique</Badge>;
-  if (severity === "warning")
-    return <Badge className="bg-amber-50 text-amber-700 border-amber-500/30 gap-1"><AlertTriangle className="w-3 h-3" />Avertissement</Badge>;
-  return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-500/30 gap-1"><CheckCircle className="w-3 h-3" />Stable</Badge>;
-}
-
 interface Reunion {
   hippodrome_nom?: string;
   discipline?: string;
@@ -63,11 +52,8 @@ interface Reunion {
 // ─── main component ─────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useRequireAuth();
-  const [equityHover, setEquityHover] = useState<number | null>(null);
-  const [eqProfil, setEqProfil] = useState<"conservateur" | "equilibre" | "agressif">("equilibre");
 
   const isPaid = user && !["free", "decouverte"].includes(user.plan ?? "free");
-  const isExpert = user?.plan === "expert";
 
   // Parallel data fetches
   const { data: bankrollStats } = useSWR(
@@ -84,10 +70,6 @@ export default function DashboardPage() {
     "programme-today",
     () => coursesApi.programme().then((r) => r.data),
     { refreshInterval: 180_000 }
-  );
-  const { data: equity } = useSWR(
-    "equity-curve",
-    () => statsApi.equityCurve().then((r) => r.data)
   );
   const { data: pariDuJour } = useSWR(
     "pari-du-jour",
@@ -114,17 +96,6 @@ export default function DashboardPage() {
   const aDesProchaines = upcoming.length > 0;
 
   const topVbs = summary?.top_vbs ?? [];
-  // Source = nos plans de mise 10€ PAR PROFIL (equity.profils) ; repli sur points.
-  const eqProfilsSeries: Record<string, Array<{ date: string; bankroll: number }>> | undefined = equity?.profils;
-  const planBased = !!(eqProfilsSeries && Object.keys(eqProfilsSeries).length);
-  const eqResume: Record<string, { mise_totale: number; gain_total: number; gain_net: number; roi: number | null; roi_typique: number | null; nb_courses: number }> | undefined = equity?.profils_resume;
-  const curResume = planBased ? eqResume?.[eqProfil] : undefined;
-  const equityPoints: Array<{ date: string; bankroll: number }> =
-    (planBased ? eqProfilsSeries[eqProfil] : equity?.points) ?? equity?.points ?? [];
-  const lastEquity = equityPoints.at(-1)?.bankroll ?? 0;
-  const firstEquity = equityPoints[0]?.bankroll ?? 0;
-  // P&L cumulé réel : la courbe part de 0 → dernier point = net réel.
-  const equityGain = curResume ? curResume.gain_net : (equityPoints.length > 1 ? lastEquity - firstEquity : 0);
 
   const roi = bankrollStats?.roi_global ?? 0;
   const roiPositive = roi >= 0;
@@ -476,144 +447,6 @@ export default function DashboardPage() {
 
           {/* Right col (2/5) */}
           <div className="lg:col-span-2 space-y-6">
-
-            {/* Equity curve */}
-            <Card className="border-border/60">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-emerald-600" />
-                    Performance algorithme — backtest
-                  </CardTitle>
-                  {equity?.is_real ? (
-                    <Badge className="bg-emerald-50 text-emerald-700 border-emerald-500/30 text-xs">Réel</Badge>
-                  ) : (
-                    <Badge variant="secondary" className="text-xs">En construction</Badge>
-                  )}
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {planBased
-                    ? "P&L RÉEL — plan de mise 10€/course par profil, réglé aux vrais rapports PMU"
-                    : "Simulation 10€/pari de valeur ★★★+ sur l’historique — distinct de votre capital"}
-                </p>
-                {/* Sélecteur de profil (chaque profil = sa propre courbe) */}
-                {planBased && (
-                  <div className="mt-2 inline-flex gap-1">
-                    {([
-                      ["conservateur", "🛡️ Prudent"],
-                      ["equilibre", "⚖️ Modéré"],
-                      ["agressif", "🔥 Risqué"],
-                    ] as const).map(([k, lbl]) => (
-                      <button key={k} onClick={() => setEqProfil(k)}
-                        className={`rounded-md px-2 py-0.5 text-[10px] font-semibold border transition-colors ${
-                          eqProfil === k ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
-                          : "border-border text-muted-foreground hover:border-emerald-500/40"}`}>
-                        {lbl}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {equityPoints.length > 1 && (
-                  <div className="mt-1">
-                    <span className={`text-lg font-bold tabular-nums ${equityGain >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                      {equityGain >= 0 ? "+" : ""}€{equityGain.toFixed(0)}
-                    </span>
-                    <span className="text-xs font-normal text-muted-foreground ml-2">net réel · forte variance</span>
-                    {curResume && (
-                      <div className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
-                        Misé <span className="font-semibold text-foreground">{curResume.mise_totale}€</span>
-                        {" · "}Gagné <span className="font-semibold text-foreground">{curResume.gain_total}€</span>
-                        {" · "}ROI <span className={`font-semibold ${(curResume.roi ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                          {(curResume.roi ?? 0) >= 0 ? "+" : ""}{curResume.roi}%</span>
-                        {curResume.roi_typique != null && (
-                          <span className="text-muted-foreground/70"> (typique {curResume.roi_typique >= 0 ? "+" : ""}{curResume.roi_typique}%)</span>
-                        )}
-                        {curResume.nb_courses != null && <span className="text-muted-foreground/60"> · {curResume.nb_courses} courses</span>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardHeader>
-              <CardContent className="pt-0">
-                {equityPoints.length < 2 ? (
-                  <div className="h-32 flex items-center justify-center text-sm text-muted-foreground">
-                    Aucune donnée pour le moment
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={130}>
-                    <AreaChart data={equityPoints} onMouseLeave={() => setEquityHover(null)}>
-                      <defs>
-                        <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
-                          <stop offset="95%" stopColor="#059669" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="date" hide />
-                      <YAxis hide domain={["auto", "auto"]} />
-                      <Tooltip
-                        cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
-                        contentStyle={{ background: "#ffffff", border: "1px solid #E5E7EB", borderRadius: 12, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}
-                        formatter={(v: number) => [`${v >= 0 ? "+" : ""}€${v.toFixed(0)}`, planBased ? "P&L cumulé" : "Capital simulé"]}
-                        labelFormatter={(l) => l}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="bankroll"
-                        stroke="#059669"
-                        strokeWidth={2.5}
-                        fill="url(#equityGrad)"
-                        dot={false}
-                        activeDot={{ r: 4, fill: "#059669", stroke: "#fff", strokeWidth: 2 }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Model health */}
-            <Card className="border-border/60">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Cpu className="w-4 h-4 text-blue-600" />
-                  Santé du modèle
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {/* Drift status */}
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Dérive statistique</span>
-                  <DriftBadge severity={summary?.drift_severity ?? "none"} />
-                </div>
-
-                {/* Quick stats */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg bg-muted/40 p-3">
-                    <div className="text-xs text-muted-foreground mb-1">AUC-ROC</div>
-                    <div className="text-base font-bold text-foreground tabular-nums">
-                      {summary?.model_auc != null ? summary.model_auc.toFixed(3) : "—"}
-                    </div>
-                  </div>
-                  <div className="rounded-lg bg-muted/40 p-3">
-                    <div className="text-xs text-muted-foreground mb-1">
-                      Précision Top-3{summary?.nb_courses_evaluees ? ` (${summary.nb_courses_evaluees} courses)` : ""}
-                    </div>
-                    <div className="text-base font-bold text-foreground tabular-nums">
-                      {summary?.precision_top3 != null ? `${Math.round(summary.precision_top3 * 100)}%` : "—"}
-                    </div>
-                  </div>
-                </div>
-
-                {isExpert && (
-                  <Button asChild variant="outline" size="sm" className="w-full text-xs">
-                    <Link href="/admin/algorithme">
-                      <Activity className="w-3 h-3 mr-2" />
-                      Monitoring détaillé
-                    </Link>
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
 
             {/* Quick links */}
             <Card className="border-border/60">
