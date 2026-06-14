@@ -892,8 +892,10 @@ async def get_mise_plan(
         signal_mults = {}
         facteurs_chevaux = {}
 
+    # respect_montant : le montant SAISI par l'utilisateur est sa décision explicite →
+    # on ne le rabote pas par le cap bankroll (sinon bankroll défaut 1.0 → plan 2€).
     plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
-                        signal_mults, facteurs_chevaux=facteurs_chevaux)
+                        signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True)
     out = plan_to_dict(plan)
     # Indique si le pronostic est figé (T-10 min) → le plan ne changera plus.
     out["prono_fige"] = fige
@@ -986,7 +988,7 @@ async def enregistrer_paris(
         signal_mults = {}
 
     plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None,
-                                     roi_weights, heat, signal_mults))
+                                     roi_weights, heat, signal_mults, respect_montant=True))
 
     # Bankroll principale
     main = (await db.execute(

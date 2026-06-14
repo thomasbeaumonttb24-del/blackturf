@@ -294,6 +294,7 @@ def generer_plan(
     heat: float = 0.0,
     signal_mults: Optional[dict] = None,
     facteurs_chevaux: Optional[dict] = None,
+    respect_montant: bool = False,
 ) -> MisePlan:
     """Plan de mise INTELLIGENT & ADAPTATIF — relie analyse, apprentissage, résultats.
 
@@ -314,17 +315,22 @@ def generer_plan(
 
     profil = profil if profil in PROFIL_CONFIG else "equilibre"
     montant = max(2, int(round(float(montant))))            # euro, min 2
-    kelly_warn = bankroll is not None and bankroll > 0 and montant > bankroll * 0.05
-    # FLAG staking_safe : cap DUR de l'exposition par course à une fraction du bankroll
-    # (Kelly ne protège de la ruine que si l'exposition scale avec le bankroll ; ici le
-    # montant saisi était misé en entier à chaque course = ruine quasi-certaine sur un
-    # système -EV, cf. audit edge). Flag off → comportement inchangé.
-    try:
-        from ml.algo_flags import FLAGS as _AF
-        if _AF.staking_safe and bankroll and bankroll > 0:
-            montant = max(2, min(montant, int(bankroll * _AF.bankroll_cap_frac)))
-    except Exception:
-        pass
+    # Avertissement Kelly seulement si un bankroll RÉEL est renseigné (≥10€) — le défaut
+    # bankroll_initiale=1.0 n'est PAS un vrai bankroll, ne pas crier dessus.
+    kelly_warn = bankroll is not None and bankroll >= 10 and montant > bankroll * 0.05
+    # FLAG staking_safe : cap DUR de l'exposition à une fraction du bankroll (protège la
+    # ruine sur un système -EV en staking AUTO). MAIS sur le calculateur manuel le
+    # MONTANT SAISI est la décision explicite de l'utilisateur → on NE le rabote PAS
+    # (respect_montant=True). Sinon, avec un bankroll par défaut (1.0), tout plan
+    # tombait à 2€ quel que soit le montant entré. Le cap ne reste utile que pour un
+    # futur staking automatique (respect_montant=False + bankroll réel).
+    if not respect_montant:
+        try:
+            from ml.algo_flags import FLAGS as _AF
+            if _AF.staking_safe and bankroll and bankroll >= 10:
+                montant = max(2, min(montant, int(bankroll * _AF.bankroll_cap_frac)))
+        except Exception:
+            pass
     palier = _palier(montant)
     roi_weights = roi_weights or {}
     heat = max(-1.0, min(1.0, float(heat or 0.0)))
