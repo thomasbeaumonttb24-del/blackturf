@@ -50,12 +50,16 @@ const PROFILS = [
 ];
 
 // Suivi de capital — exemple de paris RÉGLÉS (mix gagné/perdu : transparence, pas de promesse).
+const CAPITAL_DEPART = 100;
 const CAPITAL_DEMO = [
-  { type: "Couplé Placé", chevaux: "2 · 4", won: true, pnl: "+14€" },
-  { type: "Placé", chevaux: "N°6", won: false, pnl: "−2€" },
-  { type: "2 sur 4", chevaux: "1 · 3 · 5 · 8", won: true, pnl: "+24€" },
-  { type: "Couplé Gagnant", chevaux: "4 · 7", won: false, pnl: "−2€" },
+  { type: "Couplé Placé", chevaux: "2 · 4", mise: 6, won: true, net: 12 },
+  { type: "Simple Placé", chevaux: "N°6", mise: 4, won: false, net: -4 },
+  { type: "2 sur 4", chevaux: "1 · 3 · 5 · 8", mise: 4, won: true, net: 24 },
+  { type: "Couplé Gagnant", chevaux: "4 · 7", mise: 4, won: false, net: -4 },
+  { type: "Simple Placé", chevaux: "N°3", mise: 4, won: true, net: 6 },
 ];
+const CAPITAL_NET = CAPITAL_DEMO.reduce((s, b) => s + b.net, 0);
+const CAPITAL_WINS = CAPITAL_DEMO.filter((b) => b.won).length;
 
 const ICON_GOLD = { color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.16)" };
 const FEATURE_MAIN = {
@@ -465,18 +469,30 @@ export default async function HomePage() {
                   <span className="text-xs font-semibold text-gray-700">Suivi du capital</span>
                   <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
+
+                {/* Capital départ → actuel (comme le vrai suivi) */}
+                <div className="flex items-end justify-between rounded-xl bg-gradient-to-r from-emerald-50 to-white border border-emerald-100 px-4 py-3 mb-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-gray-400">Capital</div>
+                    <div className="num-display text-lg font-extrabold text-gray-900">{CAPITAL_DEPART}€ <span className="text-gray-300 font-normal">→</span> {CAPITAL_DEPART + CAPITAL_NET}€</div>
+                  </div>
+                  <div className="num-display text-lg font-extrabold text-emerald-600">{CAPITAL_NET >= 0 ? "+" : ""}{CAPITAL_NET}€</div>
+                </div>
+
                 <div className="space-y-1.5">
                   {CAPITAL_DEMO.map((b, i) => (
                     <div key={i} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
                       <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${b.won ? "bg-emerald-500" : "bg-gray-300"}`} />
                       <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-400">{b.chevaux}</span></span>
-                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-600" : "text-gray-400"}`}>{b.pnl}</span>
+                      <span className="text-gray-400 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
+                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-600" : "text-gray-400"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
                     </div>
                   ))}
                 </div>
+
                 <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                  <span className="text-gray-500">Chaque pari réglé aux <span className="font-semibold text-gray-700">vrais rapports PMU</span></span>
-                  <span className="text-emerald-600 font-semibold">temps réel</span>
+                  <span className="text-gray-500"><span className="font-semibold text-gray-700">{CAPITAL_WINS}/{CAPITAL_DEMO.length}</span> gagnés · réglé aux vrais rapports PMU</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold"><span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> temps réel</span>
                 </div>
               </div>
             </ScrollReveal>
