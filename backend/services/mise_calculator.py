@@ -356,7 +356,12 @@ def generer_plan(
     if not selected:
         return _plan_vide(montant, profil)
 
-    _allocate_kelly(selected, montant, palier, cfg, respect_montant=respect_montant)  # remplit "mise"
+    # Couverture : si on a (volontairement) ≥2 paris car le top n'est pas une
+    # quasi-certitude, on GARDE au moins 2 paris à l'allocation (la concentration ne doit
+    # pas les ré-effondrer en 1). Sinon 1 pari concentré autorisé.
+    min_keep = 2 if (len(selected) >= 2 and not _solo_confident(selected[0])) else 1
+    _allocate_kelly(selected, montant, palier, cfg, respect_montant=respect_montant,
+                    min_keep=min_keep)  # remplit "mise"
     ecartes = _paris_ecartes(cands, selected, cfg)
     return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
                           facteurs_chevaux=facteurs_chevaux, ecartes=ecartes)
@@ -372,6 +377,20 @@ def _is_speculative(c: dict) -> bool:
     """Pari spéculatif = joué pour le gros lot sans value avérée (EV ≤ 0 et pas
     de coup crédible). Soumis au plafond cap_spec + quota PROFIL_MAX_COUP."""
     return c["ev"] <= 0 and not _is_credible_coup(c)
+
+
+def _solo_confident(c: dict) -> bool:
+    """Le modèle est-il assez SÛR de ce pari pour y mettre toute la mise (1 seul pari) ?
+    Sinon on diversifie sur ≥2 paris pour couvrir le risque. Quasi-certitude =
+    forte probabilité de gain, OU proba correcte + VRAIE valeur (edge>0) + signal validé.
+    Un Simple Gagnant à ~20% (relativement le meilleur mais absolument incertain) ne
+    passe PAS → couverture par un 2e pari."""
+    p = float(c.get("proba_gain", 0.0) or 0.0)
+    edge = float(c.get("edge", 0.0) or 0.0)
+    sig = float(c.get("_sig", 1.0) or 1.0)
+    return (p >= 0.42
+            or (p >= 0.32 and edge > 0.0)
+            or (p >= 0.26 and edge > 0.02 and sig >= 1.10))
 
 
 def _bet_cote_max(c: dict) -> float:
@@ -540,6 +559,30 @@ def _select_conviction(
             if spec:
                 n_coup += 1
 
+    # COUVERTURE DU RISQUE — « si tu es SÛR d'1 seul pari go, sinon varie » : si la bande
+    # n'a retenu qu'1 pari ET que ce pari n'est PAS une quasi-certitude, on ajoute un 2e
+    # pari PMU DIFFÉRENT (autre cheval/type) pour ne pas tout risquer sur un seul. Pris
+    # parmi les candidats qui passent déjà les gates du profil (ranked).
+    if len(selected) == 1 and not _solo_confident(selected[0]) and max_feasible >= 2:
+        sel_hs = frozenset(int(h["numero"]) for h in selected[0].get("chevaux", []))
+        sel_type = selected[0]["type_pari"]
+        for c in ranked:
+            if c is selected[0]:
+                continue
+            hs2 = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+            if hs2 == sel_hs:
+                continue
+            # éviter un quasi-doublon du 1er (combos ne différant que d'1 cheval)
+            if (c["type_pari"] == sel_type and len(hs2) >= 3
+                    and len(hs2 & sel_hs) >= max(len(hs2), len(sel_hs)) - 1):
+                continue
+            if _is_speculative(c) and n_coup >= max_coup:
+                continue
+            c["_roi_w"] = roi_w(c)
+            c["_sig"] = sig_factor(c)
+            selected.append(c)
+            break
+
     # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba),
     # en restant si possible dans la méthode du profil. Sans plan vide. Aucune invention.
     if not selected:
@@ -568,7 +611,7 @@ def _select_conviction(
 
 
 def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
-                    respect_montant: bool = False) -> None:
+                    respect_montant: bool = False, min_keep: int = 1) -> None:
     """Dispatch `montant` (€ entiers) par fraction de KELLY réelle (ev/(cote-1))
     tiltée par le profil EFFECTIF (risk_pref) et le ROI passé. min_stake plancher ;
     plafond sur les paris spéculatifs (cap_spec). Total == montant exactement."""
@@ -630,11 +673,11 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
     except Exception:
         _skip_gain_target = False
     if not _skip_gain_target:
-        _enforce_gain_target(selected, montant, cfg, min_stake)
+        _enforce_gain_target(selected, montant, cfg, min_stake, min_keep=min_keep)
 
 
 def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
-                         min_stake: int) -> None:
+                         min_stake: int, min_keep: int = 1) -> None:
     """CONCENTRE la mise pour qu'un pari GAGNANT rapporte ≥ `gain_cible_mult` × le
     montant TOTAL misé (demande user : 10€ → ≥30€ pour le modéré). Pour chaque pari,
     la mise nécessaire = ceil(cible / rapport). On finance, par ordre de conviction,
@@ -675,13 +718,30 @@ def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
             c["mise"] = need
             kept.append(c)
             reste -= need
-    if not kept:
-        # Aucun pari n'atteint la cible dans le budget → concentrer le budget sur le
-        # pari au plus gros rapport (meilleure chance d'approcher la cible).
-        best = max(selected, key=lambda c: float(c.get("rapport_estime", 0.0) or 0.0))
-        best["mise"] = budget
-        selected[:] = [best]
+
+    want = max(1, int(min_keep))
+    if len(kept) < want:
+        # Pas assez de paris atteignent la cible dans le budget → on FORCE la couverture :
+        # le budget est réparti entre les `want` MEILLEURS paris (mises franches), quitte
+        # à viser un multiple un peu plus bas. Couvrir le risque prime sur concentrer à
+        # fond quand le modèle n'est pas sûr d'un seul pari. (want=1 ⇒ 1 pari plein pot.)
+        want = min(want, len(selected))
+        chosen = sorted(selected, key=prio, reverse=True)[:want]
+        base = max(min_stake, budget // want)
+        for c in chosen:
+            c["mise"] = base
+        diff = budget - base * want
+        j = 0
+        while diff != 0 and chosen and j < 100000:
+            idx = j % len(chosen)
+            step = 1 if diff > 0 else -1
+            if chosen[idx]["mise"] + step >= min_stake:
+                chosen[idx]["mise"] += step
+                diff -= step
+            j += 1
+        selected[:] = chosen
         return
+
     # Reliquat → aux paris gardés par priorité (total dépensé == budget initial).
     kept_prio = sorted(kept, key=prio, reverse=True)
     k = 0
