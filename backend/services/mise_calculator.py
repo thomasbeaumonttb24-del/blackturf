@@ -165,8 +165,12 @@ PROFIL_CONFIG = {
     # de favoris. PAS de Simple Placé (le placé sec rapporte trop peu, < ×2). Cotes
     # chevaux capées à 15. PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
     "equilibre": {
-        "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 2.0, "rapport_max": 10.0,
-        "min_proba": 0.04, "ev_min": -0.08, "max_coup": 1,
+        # Bande de RAPPORT 3–12 : un pari à mise franche (10€) doit pouvoir rendre
+        # ≥ ×3 du total → rapport ≥ 3. EV plus tolérante (-0.45) : le modéré vise le
+        # GAIN (un duo/trio de favoris paie ×3–×10 mais reste -EV à cause du prélèvement
+        # PMU) — l'utilisateur préfère un vrai gain si ça passe à des micro-tickets +EV.
+        "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 3.0, "rapport_max": 12.0,
+        "min_proba": 0.04, "ev_min": -0.45, "max_coup": 1,
         # CONCENTRÉ : PEU de paris à mise FRANCHE (plus de saupoudrage de Simple
         # Gagnant à 2€). bets_factor bas + min_stake_factor=1 + 1 pari par type.
         "bets_factor": 0.9, "min_stake_factor": 1.0, "max_per_type": 1,
@@ -546,7 +550,10 @@ def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
     g = float(cfg.get("gain_cible_mult", 0.0) or 0.0)
     if g <= 0 or not selected:
         return
-    budget = sum(int(c["mise"]) for c in selected)          # respecte la réserve spec_cap
+    # Le contrat de GAIN (un pari gagnant ≥ ×g du total) prime sur la réserve
+    # spéculative : on concentre TOUT le montant vers la cible (sinon une réserve de
+    # 40% au palier "petit" tuerait la concentration et le ×3 ne serait jamais atteint).
+    budget = int(montant)
     if budget <= 0:
         return
     cible = g * montant
