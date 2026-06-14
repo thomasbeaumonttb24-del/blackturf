@@ -10,6 +10,7 @@ import { Footer } from "@/components/layout/Footer";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
+import { LivePalmares } from "@/components/home/LivePalmares";
 
 // ─── Exemple de course (illustratif, tagué « Exemple » partout) ──────────────
 const EXAMPLE = { hippo: "Deauville", code: "R4 · C5", disc: "Plat · 1600m" };
@@ -587,6 +588,9 @@ export default async function HomePage() {
           </p>
         </div>
       </section>
+
+      {/* ═══════════ PALMARÈS EN DIRECT (paris gagnés réels) ═══════════ */}
+      <LivePalmares />
 
       <div className="section-divider" />
 
