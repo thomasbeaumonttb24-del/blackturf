@@ -154,6 +154,9 @@ PROFIL_CONFIG = {
         "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.8, "rapport_max": None,
         "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "bets_factor": 0.9, "min_stake_factor": 1.0,
+        # keep_frac : on garde les paris dont la conviction ≥ 65% du meilleur → le NB de
+        # paris VARIE selon la course (1 si un placé domine, 2-3 si plusieurs comparables).
+        "keep_frac": 0.65,
         # GAIN VISÉ : un pari gagnant doit rapporter ≥ ×1.5 du TOTAL misé (prudent =
         # gain modeste mais réel ; on évite le placé sec qui rend à peine la mise).
         "gain_cible_mult": 1.5,
@@ -179,10 +182,10 @@ PROFIL_CONFIG = {
         # longshot mort. On les autorise (bornés par ev_min -0.45 + max_coup + la cible
         # de gain) → le modéré peut jouer 2 SG cote ≥5 pour couvrir, au lieu d'1 ticket.
         "spec_coup": True,
-        # CONCENTRÉ mais FLEXIBLE : 1 à 3 paris à mise FRANCHE (plus de saupoudrage de
-        # SG à 2€). Le moteur peut COUVRIR le risque avec 2 paris différents (ex. 2
-        # Simple Gagnant 5€ à cote ≥5, ou 1 couplé + 1 SG) plutôt qu'un seul ticket.
-        "bets_factor": 1.2, "min_stake_factor": 1.0, "max_per_type": 3,
+        # keep_frac 0.50 : le NB de paris VARIE (1 ticket fort, ou 2-3 de couverture si
+        # leur conviction reste proche du meilleur). Plus de blocage à un nombre fixe.
+        "keep_frac": 0.50,
+        "bets_factor": 1.2, "min_stake_factor": 1.0,
         # GAIN VISÉ : un pari gagnant ≥ ×2.5 du TOTAL misé (10€ → ≥25€). Assez bas pour
         # autoriser 2 paris de couverture (2×5€ cote 5 = ×2.5 chacun), assez haut pour
         # rester un VRAI gain (plus de micro-tickets dilués). Le moteur garde autant de
@@ -206,11 +209,15 @@ PROFIL_CONFIG = {
     # budget (cap_spec) + un plancher d'EV (SPEC_EV_FLOOR) qui exclut la loterie pure.
     "agressif": {
         "cote_min": 0.0, "cote_max": 300.0, "rapport_min": 10.0, "rapport_max": None,
-        "min_proba": 0.0, "ev_min": -0.25, "max_coup": 5,
-        "spec_coup": True,
-        # DIVERSITÉ : max 2 paris d'un même type → fini « que des Trios ». Le moteur
-        # privilégie le DUO GAGNANT (cf bonus dans conviction) puis varie les types.
-        "bets_factor": 2.4, "min_stake_factor": 0.34, "max_per_type": 2,
+        "min_proba": 0.0, "ev_min": -0.25,
+        # RENTA LONG TERME : on limite les paris PUREMENT spéculatifs (sans edge) à 2 ;
+        # la mise se concentre sur les gros rapports À VALEUR (edge>0 / conviction signal
+        # validée). max_coup borne le nb de tickets « loterie » sans avantage mesuré.
+        "max_coup": 2, "spec_coup": True,
+        # keep_frac 0.38 : risqué peut étaler PLUS de paris à gros rapport SI leur
+        # conviction reste dans la bande ; sinon il en garde moins. Nombre DYNAMIQUE.
+        "keep_frac": 0.38,
+        "bets_factor": 2.4, "min_stake_factor": 0.34,
         # GAIN VISÉ ≥ ×3 du total (plancher ; le risqué dépasse largement via les gros
         # rapports — R10C8 : Couplé Gagnant ×644). Petites mises, grosses cotes.
         "gain_cible_mult": 3.0,
@@ -250,6 +257,10 @@ def _effective_config(profil: str, heat: float) -> dict:
         "objectif":  base.get("objectif", "ev"), # critère de classement des candidats
         "max_per_type": base.get("max_per_type"),  # plafond paris d'un même type (None = auto)
         "spec_coup": base.get("spec_coup", False), # autorise les coups gros-lot spéculatifs
+        # Fraction de conviction min (vs meilleur pari) pour garder un pari → pilote le
+        # NOMBRE DYNAMIQUE de paris. Heat chaud → on élargit un peu la bande (plus de
+        # paris quand le modèle est fiable), froid → on resserre (concentre sur le top).
+        "keep_frac": max(0.30, min(0.85, base.get("keep_frac", 0.5) * (1.0 - 0.15 * h))),
         # Multiple de gain visé sur le TOTAL misé (un pari gagnant ≥ ×N du montant).
         # Contrat produit → NON modulé par le heat.
         "gain_cible_mult": base.get("gain_cible_mult", 0.0),
@@ -408,15 +419,18 @@ def _select_conviction(
             # PRUDENT : gagner souvent. Proba d'abord, EV en bonus léger.
             return (c["proba_gain"] + max(c["ev"], 0.0) * 0.2) * rw
         if objectif == "gain":
-            # RISQUÉ : gros gain pour petite mise. Retour attendu (rapport×proba),
-            # bonus aux outsiders à VALEUR (edge>0 sur grosse cote) détectés par l'IA.
+            # RISQUÉ : gros gain pour petite mise, MAIS orienté RENTA → on pondère
+            # fortement l'EDGE (modèle > marché) : un gros rapport À VALEUR rapporte sur
+            # le long terme, un gros rapport sans edge = loterie. Retour attendu × valeur.
             payout = c["rapport_estime"] * c["proba_gain"]   # espérance de retour (×mise)
-            bonus = 1.30 if (c.get("edge", 0.0) > 0 and c["rapport_estime"] >= 8) else 1.0
+            edge = max(c.get("edge", 0.0), 0.0)
+            value = 1.0 + 3.0 * edge                          # +edge → conviction ↑↑ (ROI long terme)
+            bonus = 1.30 if (edge > 0 and c["rapport_estime"] >= 8) else 1.0
             # PRIVILÉGIE LE DUO GAGNANT (demande user) : un couplé gagnant/ordre à gros
             # rapport est préféré aux Trios à conviction comparable (anti « que des Trios »).
             if c["type_pari"] in ("Couplé Gagnant", "Couplé Ordre"):
                 bonus *= 1.35
-            return payout * bonus * rw
+            return payout * value * bonus * rw
         # ÉQUILIBRE : compromis EV × proba × edge.
         base = (max(c["ev"], 0.0) * 0.6 + c["proba_gain"] * 0.5
                 + max(c.get("edge", 0.0), 0.0) * 0.8)
@@ -457,27 +471,44 @@ def _select_conviction(
                 return False
         return True
 
-    ranked = sorted(cands, key=conviction, reverse=True)
+    # NOMBRE DE PARIS DYNAMIQUE — piloté par la course, pas un cap fixe :
+    # on garde les paris dont la CONVICTION reste ≥ keep_frac × le meilleur. Une course
+    # avec un pari qui domine (forte certitude) → 1-2 paris ; une course ouverte où
+    # plusieurs paris se valent → davantage. Bornes : budget (max_feasible) + plafond de
+    # sécurité (dyn_ceil) + dédoublonnage (pas de quasi-doublons) + quota de tickets
+    # purement spéculatifs (max_coup) pour la renta long terme.
+    ranked = [c for c in sorted(cands, key=conviction, reverse=True) if passes_gates(c)]
+    keep_frac = float(cfg.get("keep_frac", 0.5))
+    dyn_ceil = int(cfg.get("dyn_ceil", 8))
     selected: list[dict] = []
-    type_count: dict[str, int] = {}
+    seen_sets: list[tuple[frozenset, str]] = []
     n_coup = 0
 
-    for c in ranked:
-        if len(selected) >= max_bets:
-            break
-        if not passes_gates(c):
-            continue
-        spec = _is_speculative(c)
-        if spec and n_coup >= max_coup:
-            continue
-        if type_count.get(c["type_pari"], 0) >= max_per_type:
-            continue
-        c["_roi_w"] = roi_w(c)
-        c["_sig"] = sig_factor(c)
-        selected.append(c)
-        type_count[c["type_pari"]] = type_count.get(c["type_pari"], 0) + 1
-        if spec:
-            n_coup += 1
+    if ranked:
+        best_conv = max(conviction(ranked[0]), 1e-9)
+        for c in ranked:
+            if len(selected) >= max_feasible or len(selected) >= dyn_ceil:
+                break
+            # BANDE de conviction : dès qu'un pari décroche trop du meilleur, on s'arrête
+            # → le nombre s'ADAPTE à la dispersion des convictions de la course.
+            if conviction(c) < keep_frac * best_conv:
+                break
+            hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+            # Dédup : même combinaison déjà prise, ou fort recouvrement avec un pari de
+            # MÊME type (quasi-doublon qui n'apporte pas de couverture réelle).
+            dup = any(hs == s or (t == c["type_pari"] and len(hs & s) / max(len(hs | s), 1) >= 0.67)
+                      for s, t in seen_sets)
+            if dup:
+                continue
+            spec = _is_speculative(c)
+            if spec and n_coup >= max_coup:          # quota de tickets sans edge (renta)
+                continue
+            c["_roi_w"] = roi_w(c)
+            c["_sig"] = sig_factor(c)
+            selected.append(c)
+            seen_sets.append((hs, c["type_pari"]))
+            if spec:
+                n_coup += 1
 
     # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba),
     # en restant si possible dans la méthode du profil. Sans plan vide. Aucune invention.
@@ -514,13 +545,24 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
     # Même plancher effectif que la sélection — jamais sous MISE_PLANCHER=2€ par pari.
     min_stake = max(MISE_PLANCHER, round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
 
+    # Demi-Kelly : croissance du capital quasi-optimale à long terme, variance bien
+    # moindre que le Kelly plein (qui sur-mise et ruine sur une série de pertes).
+    KELLY_FRACTION = 0.5
+
     def weight(c):
         b = max(c["rapport_estime"] - 1.0, 0.1)
-        f = max(c["ev"] / b, 0.0)                # fraction de Kelly pleine
-        c["_kelly_f"] = round(f, 4)              # trace pour la justification du pari
-        if f <= 0:                              # coup à upside : poids plancher
-            f = 0.02
-        return max(f * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0), 1e-3)
+        f_full = max(c["ev"] / b, 0.0)          # fraction de Kelly PLEINE sur l'edge réel
+        c["_kelly_f"] = round(f_full, 4)        # trace pour la justification du pari
+        f = f_full * KELLY_FRACTION
+        if f <= 0:                              # pas d'edge mesuré → mise minimale
+            f = 0.012
+        edge = max(c.get("edge", 0.0), 0.0)
+        sig = float(c.get("_sig", 1.0) or 1.0)
+        # CERTITUDE × CONVICTION : plus l'edge (modèle > marché) et le signal HISTORIQUE
+        # validé sont forts, plus on engage → la mise se concentre sur l'avantage MESURÉ
+        # (le moteur « réfléchit » combien risquer selon sa confiance). Renta long terme.
+        certitude = (1.0 + 3.0 * edge) * (0.7 + 0.3 * min(sig, 2.0))
+        return max(f * certitude * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0), 1e-3)
 
     weights = [weight(c) for c in selected]
     n = len(selected)
