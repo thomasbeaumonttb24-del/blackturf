@@ -151,8 +151,11 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             except Exception:
                 sig_mults = {}
         try:
+            # respect_montant=True : MÊME méthode que le calculateur live (mise du
+            # montant complet + concentration gain_target) → le plan FIGÉ est identique
+            # à ce que l'utilisateur voit, donc identique au bilan affiché après course.
             plan = generer_plan(MISE_REF, profil, preds, course_info,
-                                None, roi_weights, heat, sig_mults)
+                                None, roi_weights, heat, sig_mults, respect_montant=True)
             plan_d = plan_to_dict(plan)
         except Exception as e:
             log.warning("profil_learning.plan_failed", course_id=course_id,

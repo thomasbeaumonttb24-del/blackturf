@@ -798,6 +798,34 @@ async def get_mise_plan(
     if not course:
         raise HTTPException(status_code=404, detail="Course introuvable")
 
+    # ── PRONO FIGÉ (T-10) → on sert le PLAN FIGÉ tel quel ─────────────────────
+    # Une fois gelé (10 min avant le départ), le calculateur affiche EXACTEMENT le plan
+    # journalisé dans profil_run_log = celui qui apparaîtra dans le bilan/palmarès après
+    # la course (gagné/perdu + montants). Garantit prono AVANT = résultat APRÈS.
+    # Avant le gel : on (re)calcule en live (cotes en direct) plus bas.
+    fige_now, fige_a_now = _prono_lock_state(course.date_heure)
+    if fige_now:
+        try:
+            from sqlalchemy import text as _text
+            from ml.profil_learning import ensure_tables
+            import json as _json
+            await ensure_tables(db)
+            _row = (await db.execute(_text("""
+                SELECT plan FROM profil_run_log
+                WHERE course_id = :cid AND profil = :prof
+                  AND COALESCE(meta->>'backfill','') <> 'true'
+                ORDER BY created_at DESC LIMIT 1
+            """), {"cid": course_id, "prof": profil})).first()
+            if _row and _row[0]:
+                frozen = _row[0] if isinstance(_row[0], dict) else _json.loads(_row[0])
+                frozen["prono_fige"] = True
+                frozen["prono_fige_a"] = fige_a_now.isoformat() if fige_a_now else None
+                frozen["cotes_live_utilisees"] = False
+                frozen["plan_fige_servi"] = True       # plan figé = bilan (cohérence)
+                return frozen
+        except Exception:
+            pass  # pas de plan figé (legacy/échec) → on recalcule en live ci-dessous
+
     # Charger prédictions + value bets
     from sqlalchemy import select as _s
     from db.models import Prediction as Pred
@@ -1182,7 +1210,8 @@ async def get_bilan_pronostic(
                 except Exception:
                     sig_mults_p = {}
             plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None,
-                                               roi_weights_p, heat, sig_mults_p))
+                                               roi_weights_p, heat, sig_mults_p,
+                                               respect_montant=True))
             bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants)
             source = "simulation"
             fige_le = regle_le = None
