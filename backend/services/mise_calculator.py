@@ -172,7 +172,7 @@ PROFIL_CONFIG = {
         # ≥ ×3 du total → rapport ≥ 3. EV plus tolérante (-0.45) : le modéré vise le
         # GAIN (un duo/trio de favoris paie ×3–×10 mais reste -EV à cause du prélèvement
         # PMU) — l'utilisateur préfère un vrai gain si ça passe à des micro-tickets +EV.
-        "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 3.0, "rapport_max": 12.0,
+        "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 3.0, "rapport_max": 10.0,
         # max_coup 3 : les combos/SG de favoris sont -EV (prélèvement PMU) donc classés
         # « spéculatifs » ; on en autorise jusqu'à 3 pour pouvoir COUVRIR le risque avec
         # 2 paris (ex. 2 SG cote ≥5). Bornés par la cible de gain + le nb de paris.
@@ -431,11 +431,17 @@ def _select_conviction(
             if c["type_pari"] in ("Couplé Gagnant", "Couplé Ordre"):
                 bonus *= 1.35
             return payout * value * bonus * rw
-        # ÉQUILIBRE : compromis EV × proba × edge.
-        base = (max(c["ev"], 0.0) * 0.6 + c["proba_gain"] * 0.5
-                + max(c.get("edge", 0.0), 0.0) * 0.8)
+        # ÉQUILIBRE = MESURÉ : la PROBA prime (gagner assez souvent), l'EV/edge en
+        # appui. On PÉNALISE la haute variance (Trio/2sur4/jackpots) → le modéré
+        # privilégie duo gagnant / simple gagnant cote moyenne / couplé, et ne tombe
+        # PAS sur 2 Trios à ~10% (ça, c'est le profil risqué). Bonus valeur réduit pour
+        # ne plus faire remonter les « surprises » à gros rapport au-dessus du mesuré.
+        base = (c["proba_gain"] * 1.0 + max(c["ev"], 0.0) * 0.5
+                + max(c.get("edge", 0.0), 0.0) * 0.6)
+        if c["type_pari"] in ("Trio", "Trio Ordre", "2sur4", "Tiercé Désordre"):
+            base *= 0.72                                  # haute variance → après duo/SG/couplé
         if palier["favor_value"] and c.get("edge", 0.0) > 0:
-            base += min(c["rapport_estime"], 30.0) / 100.0
+            base += min(c["rapport_estime"], 10.0) / 400.0
         return base * rw
 
     def passes_gates(c):
@@ -494,11 +500,19 @@ def _select_conviction(
             if conviction(c) < keep_frac * best_conv:
                 break
             hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
-            # Dédup : même combinaison déjà prise, ou fort recouvrement avec un pari de
-            # MÊME type (quasi-doublon qui n'apporte pas de couverture réelle).
-            dup = any(hs == s or (t == c["type_pari"] and len(hs & s) / max(len(hs | s), 1) >= 0.67)
-                      for s, t in seen_sets)
-            if dup:
+            # Dédup : même combinaison déjà prise, OU combo de MÊME type qui ne diffère
+            # que d'1 cheval (ex. Trio 6-4-8 vs 6-4-3 : corrélés, pas une vraie
+            # couverture → un seul), OU fort recouvrement (≥67%).
+            def _dup(s, t):
+                if hs == s:
+                    return True
+                if t != c["type_pari"]:
+                    return False
+                inter = len(hs & s)
+                if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
+                    return True                          # combos qui ne diffèrent que d'1 cheval
+                return inter / max(len(hs | s), 1) >= 0.67
+            if any(_dup(s, t) for s, t in seen_sets):
                 continue
             spec = _is_speculative(c)
             if spec and n_coup >= max_coup:          # quota de tickets sans edge (renta)
