@@ -41,9 +41,9 @@ interface Reunion {
   courses: CourseSummary[];
 }
 
-/* ─── Discipline chips config ───────────────────────────── */
-const DISCIPLINES = ["Tous", "Plat", "Attelé", "Monté", "Haies", "Steeple", "Cross"] as const;
-type DisciplineFilter = (typeof DISCIPLINES)[number];
+/* ─── Helpers ───────────────────────────────────────────── */
+// Normalise la casse des disciplines venant de la base ("OBSTACLE" → "Obstacle").
+const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
 
 /* ─── Countdown hook ────────────────────────────────────── */
 function useCountdown(targetDate: string, statut: string) {
@@ -152,7 +152,7 @@ function CourseRow({ course, reunionNum, vbCount }: { course: CourseSummary; reu
               variant={course.est_quinte ? "quinte" : isLive ? "live" : "default"} />
             <span
               className={cn(
-                "text-sm font-semibold truncate max-w-[180px] group-hover:text-gray-900",
+                "text-sm font-semibold truncate max-w-[200px] sm:max-w-[340px] group-hover:text-gray-900",
                 isDone ? "text-gray-400" : "text-gray-800",
               )}
             >
@@ -175,28 +175,15 @@ function CourseRow({ course, reunionNum, vbCount }: { course: CourseSummary; reu
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5 flex-wrap">
-            <span className="font-medium" style={{ color: disciplineMeta(course.discipline).color }}>{course.discipline}</span>
+            <span className="font-medium text-gray-500">{titleCase(course.discipline)}</span>
             <span className="text-gray-200">·</span>
             <span>{course.distance}m</span>
             <span className="text-gray-200">·</span>
             <span>{course.nb_partants} partants</span>
-            {course.penetrometre_coef != null && course.penetrometre_desc && (
-              <>
-                <span className="text-gray-200">·</span>
-                <span className={cn(
-                  "font-medium",
-                  course.penetrometre_coef < 3.0 ? "text-amber-600" :
-                  course.penetrometre_coef < 5.0 ? "text-green-600" :
-                  course.penetrometre_coef < 7.0 ? "text-blue-600" : "text-indigo-600"
-                )}>
-                  🌿 {course.penetrometre_desc} {course.penetrometre_coef.toFixed(1)}
-                </span>
-              </>
-            )}
             {course.pool_total_eur != null && course.pool_total_eur > 0 && (
               <>
                 <span className="text-gray-200">·</span>
-                <span className="text-violet-600 font-medium tabular-nums" title="Masse des enjeux PMU misés sur cette course (pas la dotation)">
+                <span className="text-gray-500 font-medium tabular-nums" title="Masse des enjeux PMU misés sur cette course (pas la dotation)">
                   Enjeux {course.pool_total_eur >= 1_000_000
                     ? `${(course.pool_total_eur / 1_000_000).toFixed(1)}M€`
                     : `${Math.round(course.pool_total_eur / 1_000)}k€`}
@@ -234,7 +221,7 @@ function ReunionCard({
   reunion: Reunion;
   vbByCourse: Record<string, number>;
   isPaid: boolean;
-  disciplineFilter: DisciplineFilter;
+  disciplineFilter: string;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -332,14 +319,7 @@ function ReunionCard({
             ))}
             {/* Pénétromètre de la réunion */}
             {penetroCoef != null && penetroDesc && (
-              <span className={cn(
-                "font-semibold",
-                penetroCoef < 3.0 ? "text-amber-600" :
-                penetroCoef < 5.0 ? "text-green-600" :
-                penetroCoef < 7.0 ? "text-blue-600" : "text-indigo-600"
-              )}>
-                · 🌿 {penetroDesc} ({penetroCoef.toFixed(1)})
-              </span>
+              <span className="text-gray-400">· Terrain {penetroDesc} ({penetroCoef.toFixed(1)})</span>
             )}
           </div>
         </div>
@@ -383,7 +363,7 @@ function ChronoView({
   reunions: Reunion[];
   vbByCourse: Record<string, number>;
   isPaid: boolean;
-  disciplineFilter: DisciplineFilter;
+  disciplineFilter: string;
 }) {
   // Aplatir toutes les courses + contexte réunion, filtrer, trier par heure
   const flat = useMemo(() => {
@@ -447,7 +427,7 @@ function ChronoView({
                         {course.nom || `Course ${course.numero}`}
                       </p>
                       <p className="text-xs text-gray-400 truncate">
-                        <span className="font-medium" style={{ color: disciplineMeta(course.discipline).color }}>{course.discipline}</span> · {course.distance}m · {course.nb_partants} partants
+                        <span className="font-medium text-gray-500">{titleCase(course.discipline)}</span> · {course.distance}m · {course.nb_partants} partants
                       </p>
                     </div>
                     {course.est_quinte && (
@@ -476,7 +456,7 @@ export default function ProgrammePage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [programme, setProgramme] = useState<{ reunions: Reunion[]; nb_courses: number } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [discFilter, setDiscFilter] = useState<DisciplineFilter>("Tous");
+  const [discFilter, setDiscFilter] = useState<string>("Tous");
   const [hippoSearch, setHippoSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [vbOnly, setVbOnly] = useState(false);
@@ -614,8 +594,9 @@ export default function ProgrammePage() {
           )}
 
           {Object.entries(discCounts).map(([disc, n]) => (
-            <span key={disc} className="inline-flex items-center gap-1 text-xs" style={{ color: disciplineMeta(disc).color }}>
-              <DisciplineGlyph discipline={disc} className="h-3.5 w-4" /> {n} {disc}
+            <span key={disc} className="inline-flex items-center gap-1 text-xs text-gray-500">
+              <span style={{ color: disciplineMeta(disc).color }}><DisciplineGlyph discipline={disc} className="h-3.5 w-4" /></span>
+              <span className="font-semibold text-gray-700 tabular-nums">{n}</span> {titleCase(disc)}
             </span>
           ))}
 
@@ -658,28 +639,29 @@ export default function ProgrammePage() {
       {programme && programme.nb_courses > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
           {/* Discipline chips */}
-          <div className="flex items-center gap-1 flex-wrap flex-1">
-            {DISCIPLINES.map((d) => {
+          <div className="flex items-center gap-1.5 flex-wrap flex-1">
+            {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
               const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
               if (d !== "Tous" && count === 0) return null;
+              const active = discFilter === d;
               return (
                 <button
                   key={d}
                   onClick={() => setDiscFilter(d)}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-all",
-                    discFilter === d
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all",
+                    active
                       ? "bg-gray-900 text-white shadow-sm"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                      : "bg-white text-gray-600 border border-gray-200 hover:border-gray-300 hover:text-gray-900",
                   )}
                 >
                   {d !== "Tous" && <DisciplineGlyph discipline={d} className="h-3.5 w-4" />}
-                  {d}
+                  {titleCase(d)}
                   {count > 0 && (
                     <span
                       className={cn(
-                        "rounded-full px-1 text-[10px] font-bold",
-                        discFilter === d ? "bg-white/20 text-white" : "bg-gray-200 text-gray-500",
+                        "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                        active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
                       )}
                     >
                       {count}
