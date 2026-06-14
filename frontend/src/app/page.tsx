@@ -165,19 +165,15 @@ export default async function HomePage() {
 
         <div className="relative mx-auto max-w-6xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16">
           <div className="max-w-xl">
-            <span className="inline-flex items-center gap-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.16em] text-brand-gold-deep mb-5">
-              <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500" />
-              Pronostics hippiques PMU
-            </span>
-
-            <h1 className="font-display text-[2.25rem] leading-[1.06] sm:text-6xl font-extrabold tracking-tight text-gray-900">
-              Le PMU,{" "}
-              <span className="text-gradient-animated">version méthode.</span>
+            <h1 className="font-display text-[2.4rem] leading-[1.04] sm:text-[4rem] sm:leading-[1.02] font-extrabold tracking-tight text-gray-900">
+              Pariez sur le PMU{" "}
+              <span className="text-gradient-animated">avec méthode</span>, plus au hasard.
             </h1>
 
-            <p className="mt-5 text-base sm:text-lg text-gray-700 leading-relaxed max-w-md">
-              On repère les paris où la cote <span className="font-semibold text-gray-900">sous-estime</span> les
-              chances, et on vous donne un <span className="font-semibold text-gray-900">plan de mise</span> selon votre profil.
+            <p className="mt-5 text-base sm:text-lg text-gray-700 leading-relaxed max-w-lg">
+              <span className="font-semibold text-gray-900">BlackTurf analyse chaque course du PMU</span>, détecte les
+              paris où la cote sous-estime les vraies chances, puis calcule votre{" "}
+              <span className="font-semibold text-gray-900">plan de mise</span> selon votre budget et votre profil de risque.
             </p>
 
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
@@ -187,10 +183,10 @@ export default async function HomePage() {
               </Button>
               <Button variant="outline" size="xl" asChild
                 className="press border-gray-300 bg-white/70 backdrop-blur-sm text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50">
-                <Link href="/programme">Programme du jour</Link>
+                <Link href="/programme">Voir le programme du jour</Link>
               </Button>
             </div>
-            <p className="mt-5 text-[11px] text-gray-500">Sans carte bancaire · annulation à tout moment</p>
+            <p className="mt-5 text-[11px] text-gray-500">7 jours gratuits · sans carte bancaire · annulation à tout moment</p>
           </div>
         </div>
       </section>
