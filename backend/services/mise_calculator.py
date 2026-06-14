@@ -570,7 +570,11 @@ def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
         rap = max(float(c.get("rapport_estime", 1.0) or 1.0), 1.01)
         return max(min_stake, math.ceil(cible / rap))
 
-    ordered = sorted(selected, key=prio, reverse=True)
+    # COUVERTURE DU RISQUE : on finance d'abord les paris les MOINS chers à amener à la
+    # cible (rapport le plus élevé) → on en case PLUSIEURS quand c'est possible (ex. 2
+    # Simple Gagnant cote ≥5 à 5€ plutôt qu'un seul gros ticket), à conviction égale on
+    # garde le mieux classé. Sinon un seul pari fort qui atteint la cible.
+    ordered = sorted(selected, key=lambda c: (besoin(c), -prio(c)))
     kept: list[dict] = []
     reste = budget
     for c in ordered:
