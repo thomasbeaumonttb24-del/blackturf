@@ -334,6 +334,19 @@ class AdaptiveLearning:
         """
         old_T = self.temperature
 
+        # FLAG temp_fit : on GÈLE le ratchet asymétrique par course. Il ne montait T
+        # que sur les surprises (fréquentes en courses) et ne la baissait que rarement
+        # → dérive vers T>1 (la 1.2567 observée) = aplatissement du champ qui REMONTE
+        # les outsiders (alimente le biais longshot), sans rapport avec la vraie
+        # calibration (cf. audit edge). À remplacer par un fit 1-D nightly sur NLL
+        # held-out (fit_temperature_holdout). Flag off → ratchet historique.
+        try:
+            from ml.algo_flags import FLAGS as _AF
+            if _AF.temp_fit:
+                return 0.0
+        except Exception:
+            pass
+
         if was_surprise and gagnant_proba < 0.15:
             # Très forte surprise → modèle trop confiant → +T
             delta = T_LEARNING_RATE * (1.0 - gagnant_proba)

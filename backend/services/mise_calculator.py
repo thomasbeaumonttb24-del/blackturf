@@ -315,6 +315,16 @@ def generer_plan(
     profil = profil if profil in PROFIL_CONFIG else "equilibre"
     montant = max(2, int(round(float(montant))))            # euro, min 2
     kelly_warn = bankroll is not None and bankroll > 0 and montant > bankroll * 0.05
+    # FLAG staking_safe : cap DUR de l'exposition par course à une fraction du bankroll
+    # (Kelly ne protège de la ruine que si l'exposition scale avec le bankroll ; ici le
+    # montant saisi était misé en entier à chaque course = ruine quasi-certaine sur un
+    # système -EV, cf. audit edge). Flag off → comportement inchangé.
+    try:
+        from ml.algo_flags import FLAGS as _AF
+        if _AF.staking_safe and bankroll and bankroll > 0:
+            montant = max(2, min(montant, int(bankroll * _AF.bankroll_cap_frac)))
+    except Exception:
+        pass
     palier = _palier(montant)
     roi_weights = roi_weights or {}
     heat = max(-1.0, min(1.0, float(heat or 0.0)))
@@ -602,7 +612,17 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict)
         c["mise"] = min_stake + extra[i]
 
     _apply_spec_cap(selected, montant, palier, min_stake)
-    _enforce_gain_target(selected, montant, cfg, min_stake)
+    # FLAG staking_safe : on NE force PAS le "gain target" qui jette le demi-Kelly et
+    # concentre tout le budget sur le longshot au plus gros rapport (maximisation de
+    # variance = accélère la ruine sur un système -EV, cf. audit edge). On garde la
+    # répartition demi-Kelly diversifiée. Flag off → comportement historique.
+    try:
+        from ml.algo_flags import FLAGS as _AF
+        _skip_gain_target = _AF.staking_safe
+    except Exception:
+        _skip_gain_target = False
+    if not _skip_gain_target:
+        _enforce_gain_target(selected, montant, cfg, min_stake)
 
 
 def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,

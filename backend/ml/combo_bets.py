@@ -349,13 +349,24 @@ def enumerate_bet_candidates(
         seen.add(key)
         trj = TRJ.get(type_pari, 0.80 if "Simple" in type_pari else 0.70)
         rapport = float(min(max(trj / max(p_market, 1e-3), 1.1), 5000.0))
+        # FLAG combo_ev_none : l'EV d'un combo = _ev(p_model, trj/p_market) est
+        # MÉCANIQUEMENT positive dès que modèle>marché (rapport calculé sur p_market,
+        # EV sur p_model) — un faux +EV qui faisait passer tout combo par les gates EV.
+        # Le rapport parimutuel réel dépend du pool, inconnu avant la course. On neutralise
+        # donc l'EV des combos (0.0) → ils n'entrent plus comme "value" mais seulement
+        # comme coup/spéculatif plafonné. Simple Gagnant/Placé gardent leur EV (cote réelle).
+        try:
+            from ml.algo_flags import FLAGS as _AF
+            _ev_val = _ev(proba, rapport) if (not _AF.combo_ev_none or "Simple" in type_pari) else 0.0
+        except Exception:
+            _ev_val = _ev(proba, rapport)
         cands.append({
             "niveau": niveau,
             "type_pari": type_pari,
             "chevaux": [H(i) for i in sel],
             "proba_gain": round(float(proba), 4),
             "rapport_estime": round(rapport, 1),
-            "ev": round(_ev(proba, rapport), 3),
+            "ev": round(_ev_val, 3),
             "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
             "texte_explication": texte,
         })

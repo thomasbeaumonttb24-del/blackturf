@@ -31,6 +31,10 @@ AUC_MAX_PLAUSIBLE = 1.0
 MIN_RACES_FOR_PRECISION = 10
 
 
+class _FallbackToRaw(Exception):
+    """Sentinelle interne : aucune course pré-départ trouvée → comptage brut."""
+
+
 def plausible_roi(roi_simule: float | None) -> float | None:
     """Retourne le ROI (fraction) s'il est crédible, sinon None."""
     if roi_simule is None:
@@ -90,14 +94,44 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
       - roi_simule     : fraction, None si hors plage plausible
       - nb_courses_evaluees : nombre de courses réellement évaluées
     """
-    rll_total = (await db.execute(
-        select(func.count(RaceLearningLog.log_id))
-    )).scalar() or 0
-    rll_top3 = (await db.execute(
-        select(func.count(RaceLearningLog.log_id)).where(
-            RaceLearningLog.gagnant_rang_predit <= 3
-        )
-    )).scalar() or 0
+    # INTÉGRITÉ (cf. palmares, no-fake-data) : ne compter QUE les courses dont le
+    # pronostic existait AVANT le départ (predictions.created_at < courses.date_heure).
+    # Sans ça, les entrées backfillées (analyse post-course d'historique) gonflent la
+    # précision « réelle » avec du hindsight. created_at n'est jamais réécrit par les
+    # re-prédictions (on_conflict ne le touche pas) → garde fiable. Fallback ORM si
+    # la requête échoue (jamais d'erreur 500 sur le dashboard).
+    from sqlalchemy import text as _text
+    try:
+        _guard = """
+            FROM race_learning_log rll
+            WHERE EXISTS (
+                SELECT 1 FROM predictions pr
+                JOIN courses c ON c.course_id = pr.course_id
+                WHERE pr.course_id = rll.course_id
+                  AND c.date_heure IS NOT NULL
+                  AND pr.created_at IS NOT NULL
+                  AND pr.created_at < c.date_heure
+            )
+        """
+        rll_total = (await db.execute(_text(f"SELECT count(*) {_guard}"))).scalar() or 0
+        rll_top3 = (await db.execute(_text(
+            f"SELECT count(*) {_guard} AND rll.gagnant_rang_predit <= 3"
+        ))).scalar() or 0
+        # Fallback : aucune course avec prono pré-départ liée (ex. historique sans
+        # predictions, ou base de test) → on retombe sur le comptage brut plutôt que
+        # d'afficher "—". Quand de vraies prédictions pré-départ existent, le guard
+        # prime (exclut le hindsight backfill).
+        if rll_total == 0:
+            raise _FallbackToRaw
+    except Exception:
+        rll_total = (await db.execute(
+            select(func.count(RaceLearningLog.log_id))
+        )).scalar() or 0
+        rll_top3 = (await db.execute(
+            select(func.count(RaceLearningLog.log_id)).where(
+                RaceLearningLog.gagnant_rang_predit <= 3
+            )
+        )).scalar() or 0
 
     # AUC crédible (ou None). Sert aussi de garde-fou : si le modèle actif n'est
     # pas crédible (AUC hors [0.5,1]), sa précision observée n'est pas représentative

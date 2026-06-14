@@ -259,11 +259,27 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
     purgeable à chaque fin de course (peu coûteux)."""
     await ensure_tables(session)
 
-    rows = (await session.execute(text("""
-        SELECT profil, resultat, roi_reel
-        FROM profil_run_log
-        WHERE statut = 'settled' AND resultat IS NOT NULL
-    """))).all()
+    # FLAG oos_weights : n'agrège que les runs RÉELLEMENT émis avant le départ et non
+    # backfillés (mêmes gardes que le palmarès). Sans ça, les runs backfillés (plan
+    # régénéré après résultat connu) gonflent le ROI affiché (+150% illusion vs -52%
+    # honnête de edge_monitor). Flag off → comportement historique (tous les settled).
+    from ml.algo_flags import FLAGS as _AF
+    if _AF.oos_weights:
+        rows = (await session.execute(text("""
+            SELECT r.profil, r.resultat, r.roi_reel
+            FROM profil_run_log r
+            JOIN courses c ON c.course_id = r.course_id
+            WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
+              AND c.date_heure IS NOT NULL
+              AND r.created_at < c.date_heure
+              AND COALESCE(r.meta->>'backfill', '') <> 'true'
+        """))).all()
+    else:
+        rows = (await session.execute(text("""
+            SELECT profil, resultat, roi_reel
+            FROM profil_run_log
+            WHERE statut = 'settled' AND resultat IS NOT NULL
+        """))).all()
 
     by_profil: dict[str, dict] = {
         p: {"types": {}, "n_runs": 0, "mise": 0.0, "gain": 0.0, "runs_benef": 0}

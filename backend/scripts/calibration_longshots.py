@@ -47,14 +47,23 @@ async def fetch_rows(session, cote_col: str):
     Récupère (proba_top1, cote, numero, course_id) pour toutes les prédictions
     dont la course a un résultat. cote_col ∈ {cote_pmu, cote_betfair, ...}.
     """
+    # FLAG calib_on_raw : facteurs longshot appris sur la proba BRUTE (proba_top1_raw)
+    # + garde pré-départ. COALESCE rétro-compat. Flag off → comportement historique.
+    from ml.algo_flags import FLAGS as _AF
+    _col = "COALESCE(pr.proba_top1_raw, pr.proba_top1)" if _AF.calib_on_raw else "pr.proba_top1"
+    _guard = ("AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL "
+              "AND pr.created_at < c.date_heure") if _AF.calib_on_raw else ""
+    _join_c = "JOIN courses c ON c.course_id = pr.course_id" if _AF.calib_on_raw else ""
     rows = await session.execute(text(f"""
-        SELECT pr.proba_top1, pa.{cote_col} AS cote, pa.numero, pr.course_id
+        SELECT {_col}, pa.{cote_col} AS cote, pa.numero, pr.course_id
         FROM predictions pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN resultats r       ON r.course_id        = pr.course_id
-        WHERE pr.proba_top1 IS NOT NULL
+        {_join_c}
+        WHERE {_col} IS NOT NULL
           AND pa.{cote_col}  IS NOT NULL
           AND pa.{cote_col}  > 1.0
+          {_guard}
     """))
     return rows.fetchall()
 

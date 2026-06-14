@@ -445,12 +445,19 @@ def _build_course_summary(course_info: dict, predictions: list[dict],
         f"Terrain : {terrain}{f' ({pen:.1f})' if pen else ''}",
     ]
 
-    # Top 3 prédictions
-    top3 = sorted(predictions, key=lambda x: x.get("proba_top3", 0), reverse=True)[:3]
+    # Top 3 prédictions — classement modèle par proba de VICTOIRE (= rang_predit,
+    # cohérent avec le classement « Analyse algorithme »). Le rang 1 est le favori IA.
+    top3 = sorted(
+        predictions,
+        key=lambda x: (x.get("proba_top1", 0), x.get("proba_top3", 0)),
+        reverse=True,
+    )[:3]
+    lines.append("Classement modèle (rang 1 = favori IA, par proba de victoire) :")
     for i, p in enumerate(top3, 1):
         nom = p.get("nom", "")
         num = p.get("numero", "")
-        proba = p.get("proba_top3", 0)
+        p1 = p.get("proba_top1", 0)
+        p3 = p.get("proba_top3", 0)
         explanation = p.get("explanation", {})
         verdict = explanation.get("verdict", "")
         positifs = explanation.get("facteurs_positifs", [])
@@ -461,7 +468,7 @@ def _build_course_summary(course_info: dict, predictions: list[dict],
         top_signal = positifs[0]["label"] if positifs else ""
         vb_str = f"· VB EV+{ev*100:.0f}%" if ev > 0.05 else ""
         lines.append(
-            f"N°{num} {nom} : top-3 {proba*100:.0f}% · cote {cote:.1f} {vb_str} · {verdict}"
+            f"#{i} N°{num} {nom} : victoire {p1*100:.0f}% · placé {p3*100:.0f}% · cote {cote:.1f} {vb_str} · {verdict}"
             + (f" — Signal principal : {top_signal}" if top_signal else "")
         )
 
@@ -484,17 +491,24 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     Narrative basée sur des règles (fallback sans Claude API).
     Produit un texte structuré depuis les explications ML.
     """
-    top3 = sorted(predictions, key=lambda x: x.get("proba_top3", 0), reverse=True)[:3]
-    if not top3:
+    # Classement modèle = par proba de VICTOIRE (proba_top1), tiebreak placé —
+    # base identique à rang_predit et au classement « Analyse algorithme ». Le
+    # favori IA est le rang 1 du modèle, PAS le meilleur placé / value bet.
+    model_order = sorted(
+        predictions,
+        key=lambda x: (x.get("proba_top1", 0), x.get("proba_top3", 0)),
+        reverse=True,
+    )[:3]
+    if not model_order:
         return "Analyse non disponible — données insuffisantes."
 
-    top = top3[0]
+    top = model_order[0]
     nom = top.get("nom", "")
     num = top.get("numero", "")
-    proba = top.get("proba_top3", 0)
+    p1 = top.get("proba_top1", 0)
+    p3 = top.get("proba_top3", 0)
     explanation = top.get("explanation", {})
     positifs = explanation.get("facteurs_positifs", [])
-    vb = top.get("vb")
 
     lines = []
 
@@ -504,22 +518,29 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     if hippodrome:
         lines.append(f"**Course {hippodrome}** — {discipline}")
 
-    # Recommandation principale
-    if vb and vb.get("niveau", 0) >= 2:
-        ev = vb.get("ev_max", 0)
-        lines.append(f"**Value bet : N°{num} {nom}** (EV +{ev*100:.0f}%, proba top-3 {proba*100:.0f}%)")
-    else:
-        lines.append(f"**Favori IA : N°{num} {nom}** (proba top-3 {proba*100:.0f}%)")
+    # Favori IA = rang 1 du modèle (cohérent avec le classement algo).
+    lines.append(f"**Favori IA : N°{num} {nom}** (victoire {p1*100:.0f}%, placé {p3*100:.0f}%)")
 
-    # Facteurs positifs top-3
+    # Coup à tenter : meilleur value bet du champ s'il diffère du favori. On
+    # surface l'outsider à valeur SANS le faire passer pour le favori.
+    vbs = [p for p in predictions if (p.get("vb") or {}).get("niveau", 0) >= 2]
+    best_vb = max(vbs, key=lambda x: (x.get("vb") or {}).get("ev_max", 0), default=None)
+    if best_vb and best_vb.get("numero") != num:
+        ev = (best_vb.get("vb") or {}).get("ev_max", 0)
+        lines.append(
+            f"**Coup à tenter : N°{best_vb.get('numero')} {best_vb.get('nom')}** "
+            f"(value, EV +{ev*100:.0f}%, placé {best_vb.get('proba_top3', 0)*100:.0f}%)"
+        )
+
+    # Facteurs positifs du favori
     if positifs:
         raisons = " · ".join(_strip_emoji(f["label"]) for f in positifs[:3])
         lines.append(f"Pourquoi : {raisons}")
 
-    # Autres chevaux
-    if len(top3) > 1:
-        autres = [f"N°{p['numero']} {p['nom']} ({p.get('proba_top3', 0)*100:.0f}%)"
-                  for p in top3[1:3]]
+    # Autres chevaux (suite du classement modèle)
+    if len(model_order) > 1:
+        autres = [f"N°{p['numero']} {p['nom']} (victoire {p.get('proba_top1', 0)*100:.0f}%)"
+                  for p in model_order[1:3]]
         lines.append(f"Également en vue : {' · '.join(autres)}")
 
     # Alertes

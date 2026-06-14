@@ -511,6 +511,11 @@ class Prediction(Base):
 
     proba_top1: Mapped[float] = mapped_column(Float)
     proba_top3: Mapped[float] = mapped_column(Float)
+    # Proba MODÈLE BRUTE (avant temperature/blend marché/longshot/isotonic). Sert à
+    # fitter les calibrations sur brut→réel (FLAG BT_CALIB_ON_RAW, migration 0024).
+    # NULL si le flag n'écrit pas les raw → calibrateurs retombent sur proba_top1/3.
+    proba_top1_raw: Mapped[float | None] = mapped_column(Float)
+    proba_top3_raw: Mapped[float | None] = mapped_column(Float)
     # Intervalle de confiance sur proba_top1 (désaccord des 3 modèles de base)
     proba_top1_low: Mapped[float | None] = mapped_column(Float)
     proba_top1_high: Mapped[float | None] = mapped_column(Float)

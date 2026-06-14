@@ -251,9 +251,13 @@ class TestJustificatifsPlan:
         assert "hors méthode" in _motif_rejet(c, cfg)
 
     def test_motif_rejet_ev_negative_sans_edge(self):
-        cfg = _effective_config("equilibre", 0.0)
-        c = {"type_pari": "Simple Gagnant", "chevaux": [{"numero": 2, "nom": "X", "cote": 4.0}],
-             "proba_gain": 0.15, "rapport_estime": 4.0, "ev": -0.4, "edge": -0.02}
+        # Le PRUDENT (spec_coup=False) refuse un pari -EV SANS valeur → "donne sa mise
+        # au PMU". (Le MODÉRÉ/RISQUÉ assument désormais des coups de couverture -EV via
+        # spec_coup=True, cf. PROFIL_CONFIG — donc le message PMU ne s'applique qu'au
+        # prudent, sur un type qu'il joue : Simple Placé.)
+        cfg = _effective_config("conservateur", 0.0)
+        c = {"type_pari": "Simple Placé", "chevaux": [{"numero": 2, "nom": "X", "cote": 4.0}],
+             "proba_gain": 0.20, "rapport_estime": 2.0, "ev": -0.6, "edge": -0.02}
         assert "PMU" in _motif_rejet(c, cfg)
 
     def test_facteurs_chevaux_integres(self):

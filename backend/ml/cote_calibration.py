@@ -46,9 +46,23 @@ def _shrunk_factor(real_sum: float, model_sum: float) -> float:
 async def compute_cote_calibration(session: AsyncSession) -> dict:
     """Calcule les facteurs win/top3 par tranche de cote depuis les résultats réels.
     Retourne {buckets: [{lo,hi,n,win_factor,top3_factor}], updated_at}."""
-    rows = (await session.execute(text("""
+    # FLAG calib_guard : n'apprend que sur prédictions FIGÉES AVANT le départ
+    # (pr.created_at < c.date_heure). apply_factor multiplie directement la
+    # P(victoire) servant à sélectionner les value bets → si le facteur est appris
+    # sur des prédictions backfillées (régénérées après résultat connu), il encode
+    # du hindsight et mis-shrink en prod. Mêmes guards que signal_performance /
+    # edge_monitor. Flag off → comportement historique.
+    from ml.algo_flags import FLAGS as _AF
+    _guard = (
+        "AND pr.created_at IS NOT NULL AND c.date_heure IS NOT NULL AND pr.created_at < c.date_heure"
+        if _AF.calib_guard else ""
+    )
+    # FLAG calib_on_raw : facteurs appris sur la proba BRUTE (COALESCE raw → calibrée).
+    _p1c = "COALESCE(pr.proba_top1_raw, pr.proba_top1)" if _AF.calib_on_raw else "pr.proba_top1"
+    _p3c = "COALESCE(pr.proba_top3_raw, pr.proba_top3)" if _AF.calib_on_raw else "pr.proba_top3"
+    rows = (await session.execute(text(f"""
         SELECT pa.cote_pmu AS cote,
-               pr.proba_top1 AS p1, pr.proba_top3 AS p3,
+               {_p1c} AS p1, {_p3c} AS p3,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
                CASE WHEN pa.numero IN (
                     SELECT (e->>'numero')::int
@@ -60,6 +74,7 @@ async def compute_cote_calibration(session: AsyncSession) -> dict:
         JOIN courses c ON c.course_id = pr.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pr.course_id
         WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
+          {_guard}
     """))).fetchall()
 
     nb = len(COTE_EDGES) - 1

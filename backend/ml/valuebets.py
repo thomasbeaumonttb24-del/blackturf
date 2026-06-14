@@ -195,6 +195,7 @@ def detect_value_bet(
     non_partant: bool = False,
     cote_calib: Optional[dict] = None,
     signal_mult: Optional[float] = None,
+    field_overround: Optional[float] = None,
 ) -> Optional[dict]:
     """
     Détecte si un partant est un value bet — version multi-sources.
@@ -260,6 +261,14 @@ def detect_value_bet(
     # pas un vrai edge. C'est la source des EV absurdes (+296% sur des 37/1).
     if cote_marche and cote_marche >= LONGSHOT_COTE_MIN:
         implied_marche = 1.0 / cote_marche
+        # FLAG devig_gates : la proba implicite brute 1/cote contient la marge
+        # bookmaker (~12-20% overround) → biaisée HAUTE. On la dé-vigge en la
+        # divisant par l'overround du champ pour comparer la proba modèle à la
+        # VRAIE proba juste (cf. audit edge : gate qui se déclenchait au mauvais
+        # seuil = set EV>0 contaminé = -52% live). Flag off → comportement d'avant.
+        from ml.algo_flags import FLAGS as _FLAGS
+        if _FLAGS.devig_gates and field_overround and field_overround > 0:
+            implied_marche = implied_marche / field_overround
         if proba_top1 > MAX_MODEL_MARKET_RATIO * implied_marche:
             log.info("valuebets.longshot_rejected",
                      proba=round(proba_top1, 4), cote_marche=round(cote_marche, 2),
@@ -272,7 +281,13 @@ def detect_value_bet(
     # On CAPE la P(victoire) au marché × SHORT_MAX_RATIO → EV honnête, plus de faux
     # value bet court (don au PMU). Mesuré sur predictions ⋈ résultats par bucket.
     elif cote_marche and 1.0 < cote_marche < LONGSHOT_COTE_MIN:
-        proba_top1 = min(proba_top1, SHORT_MAX_RATIO / cote_marche)
+        from ml.algo_flags import FLAGS as _FLAGS
+        if _FLAGS.devig_gates and field_overround and field_overround > 0:
+            # Cap court-cote sur la proba juste dé-viggée (cohérent avec le gate longshot).
+            cap_ref = (1.0 / cote_marche) / field_overround
+            proba_top1 = min(proba_top1, SHORT_MAX_RATIO * cap_ref)
+        else:
+            proba_top1 = min(proba_top1, SHORT_MAX_RATIO / cote_marche)
 
     # ── EV anti winner's curse ───────────────────────────────────────────────
     # ev_max calculé sur une cote PLAFONNÉE à la médiane marché × facteur, pas sur

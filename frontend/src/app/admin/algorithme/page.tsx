@@ -412,9 +412,9 @@ export default function AlgorithmeMonitoringPage() {
                       <div key={s.signal} className="flex items-center gap-2 text-[11px]">
                         <span className="w-40 shrink-0 truncate font-medium">{s.signal}</span>
                         <span className={`w-16 text-right font-mono font-bold ${s.roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                          {s.roi >= 0 ? "+" : ""}{Math.round(s.roi)}%
+                          {s.roi >= 0 ? "+" : ""}{Math.round(s.roi * 100)}%
                         </span>
-                        <span className="text-muted-foreground tabular-nums">win {Math.round(s.win_rate)}% · {s.n}</span>
+                        <span className="text-muted-foreground tabular-nums">win {Math.round(s.win_rate * 100)}% · {s.n}</span>
                       </div>
                     ))}
                   </div>

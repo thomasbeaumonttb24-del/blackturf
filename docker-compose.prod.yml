@@ -99,6 +99,20 @@ services:
       - ENVIRONMENT=production
       - FRONTEND_URL=https://blackturf.fr
       - ALLOWED_ORIGINS=["https://blackturf.fr","https://www.blackturf.fr"]
+      # ── Flags algo (audit edge 2026-06-14) — cf. backend/ml/algo_flags.py + ALGO_FIXES_2026-06-14.md.
+      # Activés : anti-leakage + dé-vig + calibration honnête + dashboards vrais + combos EV honnête.
+      # STAKING inchangé (BT_STAKING_SAFE=0) — respecte « garder mises actuelles ».
+      - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
+      - BT_TRAIN_PRERACE_ONLY=${BT_TRAIN_PRERACE_ONLY:-1}
+      - BT_CALIB_GUARD=${BT_CALIB_GUARD:-1}
+      - BT_DEVIG_GATES=${BT_DEVIG_GATES:-1}
+      - BT_ROI_DEPLOY_GATE=${BT_ROI_DEPLOY_GATE:-1}
+      - BT_CALIB_ON_RAW=${BT_CALIB_ON_RAW:-1}
+      - BT_OOS_WEIGHTS=${BT_OOS_WEIGHTS:-1}
+      - BT_COLLAPSE_LONGSHOT=${BT_COLLAPSE_LONGSHOT:-1}
+      - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
+      - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
+      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-0}
     expose:
       - "8000"
     depends_on:
@@ -138,6 +152,18 @@ services:
       - SCRAPER_INTERVAL=${SCRAPER_INTERVAL:-5}
       - SCRAPER_INTERVAL_MULTIPLIER=${SCRAPER_INTERVAL_MULTIPLIER:-1.0}
       - SCRAPER_DISABLED_SOURCES=${SCRAPER_DISABLED_SOURCES:-}
+      # ── Flags algo (cf. api) — le cycle de prédiction tourne ici (run_predictions_cycle).
+      - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
+      - BT_TRAIN_PRERACE_ONLY=${BT_TRAIN_PRERACE_ONLY:-1}
+      - BT_CALIB_GUARD=${BT_CALIB_GUARD:-1}
+      - BT_DEVIG_GATES=${BT_DEVIG_GATES:-1}
+      - BT_ROI_DEPLOY_GATE=${BT_ROI_DEPLOY_GATE:-1}
+      - BT_CALIB_ON_RAW=${BT_CALIB_ON_RAW:-1}
+      - BT_OOS_WEIGHTS=${BT_OOS_WEIGHTS:-1}
+      - BT_COLLAPSE_LONGSHOT=${BT_COLLAPSE_LONGSHOT:-1}
+      - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
+      - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
+      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-0}
     depends_on:
       db:
         condition: service_healthy
@@ -168,6 +194,18 @@ services:
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       - RESEND_API_KEY=${RESEND_API_KEY}
       - ENVIRONMENT=production
+      # ── Flags algo (cf. api) — le retrain nightly + calibrations + gate ROI tournent ici (rq).
+      - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
+      - BT_TRAIN_PRERACE_ONLY=${BT_TRAIN_PRERACE_ONLY:-1}
+      - BT_CALIB_GUARD=${BT_CALIB_GUARD:-1}
+      - BT_DEVIG_GATES=${BT_DEVIG_GATES:-1}
+      - BT_ROI_DEPLOY_GATE=${BT_ROI_DEPLOY_GATE:-1}
+      - BT_CALIB_ON_RAW=${BT_CALIB_ON_RAW:-1}
+      - BT_OOS_WEIGHTS=${BT_OOS_WEIGHTS:-1}
+      - BT_COLLAPSE_LONGSHOT=${BT_COLLAPSE_LONGSHOT:-1}
+      - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
+      - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
+      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-0}
     depends_on:
       db:
         condition: service_healthy

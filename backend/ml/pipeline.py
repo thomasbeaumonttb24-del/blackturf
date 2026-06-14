@@ -57,6 +57,8 @@ def _should_deploy(
     data_jump: bool,
     seuil_regression: float = 0.005,
     min_auc: float = MIN_DEPLOYABLE_AUC,
+    roi_gate_enabled: bool = False,
+    betting_edge_ok: bool = True,
 ) -> bool:
     """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
 
@@ -64,10 +66,17 @@ def _should_deploy(
     que soit la situation de l'actif. C'est ce plancher qui manquait et qui a laissé un
     modèle à AUC 0.06 passer en prod (l'actif "non fiable" déployait n'importe quoi).
 
+    FLAG roi_deploy_gate : si `roi_gate_enabled`, on refuse AUSSI de promouvoir tant que la
+    couche PARIS ne prouve pas un edge hors-échantillon (`betting_edge_ok`, ex. edge_monitor
+    edge_ok). Un AUC > 0.52 peut générer un ROI négatif après prélèvement PMU — c'est la
+    couche staking, jamais gatée, qui perd l'argent (cf. audit edge -52%).
+
     Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
     saut de données massif, OU walk-forward au moins aussi bon (tolérance régression).
     """
     if new_wf < min_auc:
+        return False
+    if roi_gate_enabled and not betting_edge_ok:
         return False
     return (
         current_is_synth
@@ -543,6 +552,21 @@ async def _do_retraining(mois: int, label: str) -> None:
         data_jump = (new_train_n >= 1.5 * max(current_train_n, 1)
                      and new_wf >= current_wf - 0.08 and new_wf >= 0.6)
 
+        # FLAG roi_deploy_gate : edge hors-échantillon de la couche PARIS (edge_monitor).
+        # Calculé seulement si le flag est actif (sinon edge_ok=True = no-op).
+        from ml.algo_flags import FLAGS as _AF
+        _betting_edge_ok = True
+        if _AF.roi_deploy_gate:
+            try:
+                from ml.edge_monitor import compute_edge_monitor
+                _em = await compute_edge_monitor(session)
+                # edge_ok absent (échantillon insuffisant) → on ne bloque pas un premier
+                # déploiement, mais un edge explicitement mauvais (edge_ok=False) bloque.
+                _betting_edge_ok = bool(_em.get("edge_ok", True)) if not _em.get("insufficient") else True
+            except Exception as _e:
+                log.warning("pipeline.retrain.edge_gate_skip", err=str(_e)[:120])
+                _betting_edge_ok = True
+
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
         if _should_deploy(
             new_wf, current_wf,
@@ -550,6 +574,8 @@ async def _do_retraining(mois: int, label: str) -> None:
             no_current=(current is None or current_mv is None),
             current_unreliable=current_unreliable,
             data_jump=data_jump,
+            roi_gate_enabled=_AF.roi_deploy_gate,
+            betting_edge_ok=_betting_edge_ok,
         ):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
@@ -644,6 +670,10 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # relative (désaccord L0) pour l'intervalle de confiance sur la proba.
         X = pd.DataFrame(features_list)
         probas_top3_raw, confidence_scores, rel_uncertainty = model.predict_with_uncertainty(X)
+        # FLAG calib_on_raw : snapshot de la proba MODÈLE BRUTE top3 (avant toute
+        # correction post-hoc) → persistée pour fitter les calibrations sur brut→réel
+        # et casser la boucle fermée (cf. audit edge). Aligné à features_list.
+        _raw_p3_snap = np.clip(np.asarray(probas_top3_raw, dtype=float), 1e-6, 0.999)
 
         # ── Calibration adaptative (temperature scaling + biais contextuel) ──
         al = get_adaptive_learning()
@@ -758,6 +788,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             raw_p1 = p3_arr ** 1.6
         s1 = float(raw_p1.sum())
         probas_top1 = (raw_p1 / s1) if s1 > 0 else np.full(n, 1.0 / n)
+        # FLAG calib_on_raw : snapshot proba victoire BRUTE (normalisée Σ=1) AVANT
+        # blend marché / longshot / isotonic. Base honnête de calibration brut→réel.
+        _raw_p1_snap = np.asarray(probas_top1, dtype=float).copy()
 
         # P(top3) renormalisé pour sommer à min(3, nb_partants), borné à 0.99
         target_sum3 = float(min(3.0, nb_partants))
@@ -813,13 +846,23 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # ── Calibration longshots : corrige le sur-fit sur grosses cotes en
         # ramenant la proba vers la fréquence RÉELLE observée par bucket de cote,
         # puis renormalise. Facteurs appris sur données réelles (recalc nightly).
+        # FLAG collapse_longshot : on saute cette étape pour ne PAS empiler une 3e
+        # correction favori-longshot (le blend marché ci-dessus + l'isotonic résiduel
+        # ci-dessous suffisent). L'empilement écrasait l'edge quand le modèle a raison
+        # (cf. audit edge : triple-comptage du biais). Flag off → comportement d'avant.
         try:
-            from ml.longshot_calibration import load_factors, apply_calibration
-            _cal_factors = await load_factors(session)
-            if _cal_factors:
-                probas_top1 = apply_calibration(probas_top1, cotes_pmu, _cal_factors)
-        except Exception as e:
-            log.warning("pipeline.longshot_calibration_skip", err=str(e)[:140])
+            from ml.algo_flags import FLAGS as _AF3
+            _skip_longshot = _AF3.collapse_longshot
+        except Exception:
+            _skip_longshot = False
+        if not _skip_longshot:
+            try:
+                from ml.longshot_calibration import load_factors, apply_calibration
+                _cal_factors = await load_factors(session)
+                if _cal_factors:
+                    probas_top1 = apply_calibration(probas_top1, cotes_pmu, _cal_factors)
+            except Exception as e:
+                log.warning("pipeline.longshot_calibration_skip", err=str(e)[:140])
 
         # ── Calibration isotonique RÉSIDUELLE : ajuste la proba_top1 finale pour
         # qu'elle colle à la fréquence de victoire réelle (régression monotone apprise
@@ -886,6 +929,29 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception:
             _signal_perf = None
 
+        # FLAG devig_gates : overround du champ = Σ probas implicites marché pondéré.
+        # Sert à dé-vigger les gates value bet (la proba implicite brute 1/cote
+        # contient la marge bookmaker ~12-20% → comparaison biaisée). Calculé une
+        # fois par course. None si flag off → detect_value_bet inchangé.
+        _field_overround = None
+        try:
+            from ml.algo_flags import FLAGS as _AF
+            if _AF.devig_gates:
+                from ml.valuebets import cote_marche_ponderee as _cmp
+                _imp = 0.0
+                for _f in features_list:
+                    _cm = _cmp({
+                        "pmu": _f.get("cote_pmu"), "geny": _f.get("cote_geny"),
+                        "bzh": _f.get("cote_bzh"), "winamax": _f.get("cote_winamax"),
+                        "betclic": _f.get("cote_betclic"), "unibet": _f.get("cote_unibet"),
+                        "betfair": _f.get("cote_betfair_exchange"),
+                    })
+                    if _cm and _cm > 1.0:
+                        _imp += 1.0 / _cm
+                _field_overround = _imp if _imp > 0 else None
+        except Exception:
+            _field_overround = None
+
         predictions = []
         for i, feat in enumerate(features_list):
             pid = feat.get("participation_id")
@@ -900,6 +966,18 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             ci_low = float(_ci_low[i])
             ci_high = float(_ci_high[i])
             pred_id = str(uuid.uuid4())
+            # FLAG calib_on_raw : écrit aussi la proba modèle BRUTE (nécessite migration
+            # 0024). Vide sinon → colonnes NULL, calibrateurs retombent sur proba_top1/3.
+            _raw_vals = {}
+            try:
+                from ml.algo_flags import FLAGS as _AF2
+                if _AF2.calib_on_raw:
+                    _raw_vals = {
+                        "proba_top1_raw": float(_raw_p1_snap[i]),
+                        "proba_top3_raw": float(_raw_p3_snap[i]),
+                    }
+            except Exception:
+                _raw_vals = {}
             stmt = pg_insert(PredictionModel).values(
                 prediction_id=pred_id,
                 participation_id=pid,
@@ -916,6 +994,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 # que le cycle s'arrête (T-10 min) → plan stable, cotes affichées libres.
                 cote_figee=feat.get("cote_pmu"),
                 created_at=datetime.now(),
+                **_raw_vals,
             ).on_conflict_do_update(
                 index_elements=["participation_id"],
                 set_={
@@ -926,6 +1005,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                     "rang_predit": rang,
                     "confidence_score": round(confidence * 100, 2),
                     "cote_figee": feat.get("cote_pmu"),
+                    **_raw_vals,
                 },
             ).returning(PredictionModel.prediction_id)
             result = await session.execute(stmt)
@@ -994,6 +1074,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 entraineur_suspendu=entraineur_susp,
                 cote_calib=_cote_calib,
                 signal_mult=(_sig_mult(feat, _signal_perf) if (_sig_mult and _signal_perf) else None),
+                field_overround=_field_overround,
             )
             niveau_vb = 0
             ev_max = 0.0
@@ -1336,8 +1417,19 @@ async def _build_training_dataset_from_db(
     """Construit le dataset d'entraînement depuis PostgreSQL."""
     date_limite = datetime.now() - timedelta(days=mois * 30)
 
+    # FLAG train_prerace_only : n'entraîne que sur features FIGÉES AVANT le départ
+    # (fm.computed_at < c.date_heure), comme meta_learner.py. Sans ça, les features
+    # recomputées/backfillées APRÈS la course (cotes de clôture, stats J/E incluant
+    # cette course, ELO backfillé) fuient avec hindsight → gros lift in-sample qui
+    # s'évapore en live (cf. audit edge -52%). Flag off → comportement historique.
+    from ml.algo_flags import FLAGS as _AF
+    _prerace_clause = (
+        "AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure"
+        if _AF.train_prerace_only else ""
+    )
+
     # Récupérer les features sauvegardées avec leurs labels
-    result = await session.execute(text("""
+    result = await session.execute(text(f"""
         SELECT
             fm.features,
             h.position_arrivee,
@@ -1351,6 +1443,7 @@ async def _build_training_dataset_from_db(
           AND c.statut = 'termine'
           AND h.position_arrivee IS NOT NULL
           AND h.position_arrivee < 99
+          {_prerace_clause}
         ORDER BY c.date_heure
     """), {"date_limite": date_limite})
 

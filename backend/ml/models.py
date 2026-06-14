@@ -103,9 +103,23 @@ class BlackTurfEnsemble:
         X_feat = X[self.feature_names].fillna(0)
 
         n = len(X_feat)
-        split = int(n * 0.8)
-        X_train, X_test = X_feat.iloc[:split], X_feat.iloc[split:]
-        y_train, y_test = y.iloc[:split], y.iloc[split:]
+        # FLAG group_split : split PAR COURSE (course_id), pas par cheval. Sans ça,
+        # des chevaux de la MÊME course tombent à cheval sur train/test → le modèle
+        # mémorise la course via les features de champ (field_hhi, elo_vs_moyenne…)
+        # → AUC/Brier gonflés, modèle overfit promu, -52% live (cf. audit edge).
+        # Flag off → split positionnel historique inchangé.
+        from ml.algo_flags import FLAGS as _AF
+        if _AF.group_split and "course_id" in X.columns:
+            courses_ordered = list(dict.fromkeys(X["course_id"].tolist()))  # chrono (ORDER BY date_heure)
+            cut = int(len(courses_ordered) * 0.8)
+            train_courses = set(courses_ordered[:cut])
+            train_mask = X["course_id"].isin(train_courses).to_numpy()
+            X_train, X_test = X_feat[train_mask], X_feat[~train_mask]
+            y_train, y_test = y[train_mask], y[~train_mask]
+        else:
+            split = int(n * 0.8)
+            X_train, X_test = X_feat.iloc[:split], X_feat.iloc[split:]
+            y_train, y_test = y.iloc[:split], y.iloc[split:]
 
         log.info("model.training", n_train=len(X_train), n_test=len(X_test), pos_rate=float(y_train.mean()))
 
@@ -178,12 +192,21 @@ class BlackTurfEnsemble:
         # This prevents data leakage from L0 → L1
         log.info("model.stacking.start")
         try:
-            skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            # FLAG group_split : OOF par groupe de course → aucun frère de course ne
+            # fuit dans le fold d'entraînement de ses voisins (sinon le méta-learner
+            # apprend sur des probas OOF malhonnêtes = sur-confiant en prod).
+            if _AF.group_split and "course_id" in X.columns:
+                from sklearn.model_selection import StratifiedGroupKFold
+                _groups_tr = X.loc[X_train.index, "course_id"].to_numpy()
+                _fold_iter = StratifiedGroupKFold(n_splits=5).split(X_train, y_train, groups=_groups_tr)
+            else:
+                skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+                _fold_iter = skf.split(X_train, y_train)
             oof_xgb = np.zeros(len(X_train))
             oof_lgbm = np.zeros(len(X_train))
             oof_cb = np.zeros(len(X_train))
 
-            for fold_train_idx, fold_val_idx in skf.split(X_train, y_train):
+            for fold_train_idx, fold_val_idx in _fold_iter:
                 Xf_tr, Xf_val = X_train.iloc[fold_train_idx], X_train.iloc[fold_val_idx]
                 yf_tr = y_train.iloc[fold_train_idx]
 
@@ -243,7 +266,8 @@ class BlackTurfEnsemble:
             self._stacking_trained = False
 
         # ── Walk-forward validation (6 fenêtres) ──────────
-        wf_scores = self._walk_forward_validation(X_feat, y)
+        _wf_groups = X["course_id"] if (_AF.group_split and "course_id" in X.columns) else None
+        wf_scores = self._walk_forward_validation(X_feat, y, groups=_wf_groups)
         log.info("model.walk_forward", scores=[round(s, 4) for s in wf_scores], mean=round(float(np.mean(wf_scores)), 4))
 
         # ── Métriques finales ──────────────────────────────
@@ -445,23 +469,23 @@ class BlackTurfEnsemble:
             log.warning("model.predict_win_failed", err=str(e)[:140])
             return None
 
-    def _walk_forward_validation(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 6) -> list[float]:
-        """Walk-forward validation pour détecter l'instabilité du modèle."""
-        n = len(X)
-        min_train = max(100, int(n * 0.5))
-        scores = []
-        fold_size = (n - min_train) // n_splits
+    def _walk_forward_validation(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 6,
+                                 groups: Optional[pd.Series] = None) -> list[float]:
+        """Walk-forward validation pour détecter l'instabilité du modèle.
 
-        for i in range(n_splits):
-            train_end = min_train + i * fold_size
-            test_end = train_end + fold_size
-            if test_end > n:
-                break
-            X_tr, y_tr = X.iloc[:train_end], y.iloc[:train_end]
-            X_te, y_te = X.iloc[train_end:test_end], y.iloc[train_end:test_end]
+        Si `groups` (course_id) fourni (FLAG group_split), les fenêtres expandantes
+        sont découpées sur des COURSES entières — aucun cheval d'une course ne tombe
+        à cheval sur train/test (sinon AUC walk-forward gonflé = gate de déploiement
+        trop laxiste, cf. audit edge). Sans groups → découpage positionnel historique.
+        """
+        n = len(X)
+        scores = []
+
+        def _eval(tr_mask, te_mask) -> None:
+            X_tr, y_tr = X[tr_mask], y[tr_mask]
+            X_te, y_te = X[te_mask], y[te_mask]
             if y_te.nunique() < 2:
-                continue
-            # Quick XGB only for walk-forward
+                return
             try:
                 quick_xgb = XGBClassifier(
                     n_estimators=100, max_depth=4, learning_rate=0.1,
@@ -472,6 +496,36 @@ class BlackTurfEnsemble:
                 scores.append(float(roc_auc_score(y_te, p)))
             except Exception:
                 pass
+
+        if groups is not None:
+            g = groups.to_numpy() if hasattr(groups, "to_numpy") else np.asarray(groups)
+            courses_ordered = list(dict.fromkeys(g.tolist()))  # chrono
+            nc = len(courses_ordered)
+            if nc < 4:
+                return [0.5]
+            min_train_c = max(2, int(nc * 0.5))
+            fold_c = max(1, (nc - min_train_c) // n_splits)
+            for i in range(n_splits):
+                tr_end = min_train_c + i * fold_c
+                te_end = tr_end + fold_c
+                if te_end > nc:
+                    break
+                tr_mask = np.isin(g, courses_ordered[:tr_end])
+                te_mask = np.isin(g, courses_ordered[tr_end:te_end])
+                _eval(tr_mask, te_mask)
+            return scores if scores else [0.5]
+
+        # Découpage positionnel historique (flag off)
+        min_train = max(100, int(n * 0.5))
+        fold_size = (n - min_train) // n_splits
+        for i in range(n_splits):
+            train_end = min_train + i * fold_size
+            test_end = train_end + fold_size
+            if test_end > n:
+                break
+            tr_mask = np.zeros(n, dtype=bool); tr_mask[:train_end] = True
+            te_mask = np.zeros(n, dtype=bool); te_mask[train_end:test_end] = True
+            _eval(tr_mask, te_mask)
 
         return scores if scores else [0.5]
 

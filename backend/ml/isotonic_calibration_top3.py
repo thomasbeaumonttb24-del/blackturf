@@ -31,13 +31,23 @@ _cached_curve: dict | None = None
 
 
 async def _fetch_proba_top3_outcomes(session: AsyncSession) -> list[tuple[float, int]]:
-    """Retourne [(proba_top3, arrivé top-3 0/1)] sur les courses avec résultat."""
-    rows = await session.execute(text("""
-        SELECT pr.proba_top3, pa.numero, pr.course_id, r.classement
+    """Retourne [(proba_top3, arrivé top-3 0/1)] sur les courses avec résultat.
+
+    FLAG calib_on_raw : fitte sur proba_top3_raw (brute) + garde pré-départ. COALESCE
+    rétro-compat. Flag off → comportement historique (cf. ml/isotonic_calibration)."""
+    from ml.algo_flags import FLAGS as _AF
+    _col = "COALESCE(pr.proba_top3_raw, pr.proba_top3)" if _AF.calib_on_raw else "pr.proba_top3"
+    _guard = ("AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL "
+              "AND pr.created_at < c.date_heure") if _AF.calib_on_raw else ""
+    _join_c = "JOIN courses c ON c.course_id = pr.course_id" if _AF.calib_on_raw else ""
+    rows = await session.execute(text(f"""
+        SELECT {_col}, pa.numero, pr.course_id, r.classement
         FROM predictions pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN resultats r       ON r.course_id        = pr.course_id
-        WHERE pr.proba_top3 IS NOT NULL AND r.classement IS NOT NULL
+        {_join_c}
+        WHERE {_col} IS NOT NULL AND r.classement IS NOT NULL
+          {_guard}
     """))
     out: list[tuple[float, int]] = []
     for proba, numero, course_id, classement in rows.fetchall():

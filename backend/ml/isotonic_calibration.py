@@ -34,13 +34,26 @@ _cached_curve: dict | None = None
 
 
 async def _fetch_proba_outcomes(session: AsyncSession) -> list[tuple[float, int]]:
-    """Retourne [(proba_top1, gagné 0/1)] sur toutes les courses avec résultat."""
-    rows = await session.execute(text("""
-        SELECT pr.proba_top1, pa.numero, pr.course_id
+    """Retourne [(proba_top1, gagné 0/1)] sur toutes les courses avec résultat.
+
+    FLAG calib_on_raw : fitte sur la proba MODÈLE BRUTE (proba_top1_raw) au lieu de
+    la proba déjà calibrée → casse la boucle fermée (la calibration ne chasse plus
+    son propre résidu). + garde anti-leakage (pronos pré-départ only). COALESCE pour
+    rétro-compat sur les lignes historiques sans raw. Flag off → comportement d'avant.
+    """
+    from ml.algo_flags import FLAGS as _AF
+    _col = "COALESCE(pr.proba_top1_raw, pr.proba_top1)" if _AF.calib_on_raw else "pr.proba_top1"
+    _guard = ("AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL "
+              "AND pr.created_at < c.date_heure") if _AF.calib_on_raw else ""
+    _join_c = "JOIN courses c ON c.course_id = pr.course_id" if _AF.calib_on_raw else ""
+    rows = await session.execute(text(f"""
+        SELECT {_col}, pa.numero, pr.course_id
         FROM predictions pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN resultats r       ON r.course_id        = pr.course_id
-        WHERE pr.proba_top1 IS NOT NULL
+        {_join_c}
+        WHERE {_col} IS NOT NULL
+          {_guard}
     """))
     winners = await fetch_winners(session)
     out: list[tuple[float, int]] = []
