@@ -38,7 +38,10 @@ MODELS_DIR.mkdir(parents=True, exist_ok=True)
 # Poids fallback si stacking non disponible
 ENSEMBLE_WEIGHTS_FALLBACK = {"xgb": 0.50, "lgbm": 0.30, "catboost": 0.20}
 
-META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "label"}
+META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "label",
+             # champs TEXTE d'affichage/narratif (ajoutés au batch features) — jamais
+             # des features ML : exclure sinon XGBoost rejette les dtypes object.
+             "jockey_nom", "entraineur_nom", "cheval_nom"}
 
 # Brier score minimum requis avant déploiement
 BRIER_THRESHOLD = 0.18
@@ -319,7 +322,10 @@ class BlackTurfEnsemble:
         # (~1 gagnant / nb_partants) → scale_pos_weight + calibration isotonique.
         if y_win is not None and len(y_win) == n:
             try:
-                yw_train, yw_test = y_win.iloc[:split], y_win.iloc[split:]
+                # Aligner sur l'index de X_train/X_test → cohérent ET robuste aux DEUX
+                # modes de split (group_split par course = masque, sinon positionnel).
+                # Avant : iloc[:split] plantait sous group_split (`split` non défini).
+                yw_train, yw_test = y_win.loc[X_train.index], y_win.loc[X_test.index]
                 if yw_train.nunique() > 1:
                     pos_w_win = float((yw_train == 0).sum()) / max(float((yw_train == 1).sum()), 1)
                     win_base = XGBClassifier(
