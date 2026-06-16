@@ -512,9 +512,20 @@ async def _do_retraining(mois: int, label: str) -> None:
         log.info("pipeline.retrain.dataset_ready", n=len(X),
                  pos_rate=float(y.mean()), win_rate=float(y_win.mean()) if len(y_win) else 0.0)
 
+        # Libérer la liste brute (144k dicts × 173 clés ≈ 2-3 Go) : inutile une fois X
+        # construit. Réduit le pic RAM (serveur 8 Go → OOM à la phase promotion sinon).
+        import gc
+        del features_rows, resultats_dict
+        gc.collect()
+
         # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
         model = BlackTurfEnsemble()
         metrics = model.train(X, y, y_win)
+        # X/y/y_win ne servent plus à la décision de promotion (métriques déjà calculées)
+        # → on libère avant la phase métriques/edge_monitor pour ne pas cumuler le pic RAM.
+        n_train_rows = len(X)
+        del X, y, y_win
+        gc.collect()
 
         # Récupérer le modèle actif EN BASE pour une comparaison HONNÊTE.
         current_mv = (await session.execute(
@@ -545,7 +556,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         # inférieur. Seuil : MIN_RELIABLE_TRAIN courses réelles.
         MIN_RELIABLE_TRAIN = 800
         current_unreliable = (not current_is_synth) and current_train_n < MIN_RELIABLE_TRAIN
-        new_train_n = len(X)
+        new_train_n = n_train_rows
 
         # ── Saut de DONNÉES : le walk-forward n'est comparable qu'à taille d'entraînement
         # comparable. Sur peu de données il est OPTIMISTE (folds petits/faciles → ex. v7 :
@@ -594,7 +605,7 @@ async def _do_retraining(mois: int, label: str) -> None:
                 roi_simule=metrics["roi_simule"],
                 walk_forward_auc=metrics.get("walk_forward_auc"),
                 walk_forward_variance=metrics.get("walk_forward_variance"),
-                nb_courses_train=len(X),
+                nb_courses_train=n_train_rows,
                 est_actif=True,
                 est_synthetique=False,  # entraîné sur de vraies courses
                 feature_importance=model.feature_importance,
