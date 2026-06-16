@@ -200,6 +200,7 @@ class BlackTurfOrchestrator:
             self._courses_today = courses
 
             nb_partants_total = 0
+            scratched_courses: set[str] = set()   # courses où un cheval vient d'être déclaré non-partant
             for course in courses:
                 r_id = course.reunion_id
                 c_num = int(course.course_id.split("C")[-1])
@@ -219,7 +220,9 @@ class BlackTurfOrchestrator:
                 # commit toutes les bonnes (sinon 1 erreur avorte tout le cycle).
                 try:
                     async with AsyncSessionLocal() as session:
-                        await save_course_to_db(session, course)
+                        scratched_cid = await save_course_to_db(session, course)
+                        if scratched_cid:
+                            scratched_courses.add(scratched_cid)
                         if course.date_heure:
                             # préfixe date du course_id (ddmmyyyy) → garantit que le
                             # course_id du résultat == celui de la course stockée
@@ -244,6 +247,23 @@ class BlackTurfOrchestrator:
                 except Exception as e:
                     log.error("orchestrator.course_save_failed",
                               course_id=course.course_id, err=str(e)[:200])
+
+            # ── NON-PARTANTS : régénérer le prono des courses touchées ──
+            # Quand un cheval est déclaré non-partant, on recalcule immédiatement le
+            # pronostic sur le champ restant (compute_all_features_for_course exclut
+            # déjà non_partant=false → probas renormalisées). On appelle predict_course
+            # DIRECTEMENT : le gel T-10 n'est imposé que par la requête du cycle
+            # prédictions, pas ici → le prono est refait MÊME dans les 10 dernières
+            # minutes, uniquement dans ce cas (exception au gel demandée).
+            if scratched_courses:
+                from ml.pipeline import predict_course
+                for cid in scratched_courses:
+                    try:
+                        await predict_course(cid)
+                        log.info("orchestrator.repredict_after_scratch", course_id=cid)
+                    except Exception as e:
+                        log.error("orchestrator.repredict_scratch_failed",
+                                  course_id=cid, err=str(e)[:200])
 
             duree = int((time.time() - t0) * 1000)
             async with AsyncSessionLocal() as session:

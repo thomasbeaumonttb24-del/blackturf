@@ -238,7 +238,7 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
     return cheval.cheval_id
 
 
-async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None:
+async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Optional[str]:
     """
     Sauvegarde une course et ses partants en DB.
     Upsert complet : hippodrome → réunion → course → chevaux → participations → équipements.
@@ -309,6 +309,20 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
     )
     await session.execute(stmt)
 
+    # ── Statut non-partant AVANT ce scrape (pour détecter les NOUVEAUX forfaits) ──
+    # On compare l'état stocké à l'état scrapé : un cheval qui passe partant→non-partant
+    # doit être retiré du pronostic et le prono régénéré sur le champ restant.
+    prev_np: dict[int, bool] = {}
+    _np_rows = await session.execute(text(
+        "SELECT numero, non_partant FROM participations WHERE course_id = :cid"),
+        {"cid": course.course_id})
+    for _num, _np in _np_rows.fetchall():
+        try:
+            prev_np[int(_num)] = bool(_np)
+        except (TypeError, ValueError):
+            continue
+    newly_scratched_pids: list[str] = []
+
     # Partants
     for partant in course.partants:
         cheval_id = await upsert_cheval(session, partant)
@@ -351,7 +365,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             handicap_distance=partant.handicap_distance,
             indicateur_inedit=partant.indicateur_inedit,
             jument_pleine=partant.jument_pleine,
-            non_partant=False,
+            non_partant=bool(partant.non_partant),
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
             set_={
@@ -370,12 +384,18 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
                 "handicap_distance": partant.handicap_distance,
                 "indicateur_inedit": partant.indicateur_inedit,
                 "jument_pleine": partant.jument_pleine,
+                # Statut non-partant réactualisé à chaque scrape (forfait de dernière minute).
+                "non_partant": bool(partant.non_partant),
                 "updated_at": datetime.now(),
             },
         ).returning(Participation.participation_id)
 
         result = await session.execute(stmt)
         pid = result.scalar_one_or_none() or participation_id
+
+        # Transition partant → non-partant détectée sur CE scrape.
+        if bool(partant.non_partant) and not prev_np.get(partant.numero, False):
+            newly_scratched_pids.append(pid)
 
         # Équipement
         if any([partant.deferre, partant.oeilleres, partant.plaques]):
@@ -392,6 +412,23 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             )
             session.add(cote_entry)
 
+    # ── NON-PARTANTS : nettoyage des pronos périmés ──
+    # Un cheval qui vient d'être déclaré non-partant ne doit plus apparaître dans le
+    # pronostic : on supprime sa prédiction et on désactive son value bet. Le prono
+    # du champ restant sera RÉGÉNÉRÉ par l'appelant (predict_course), même dans les
+    # 10 dernières minutes (exception au gel T-10 — uniquement sur forfait).
+    scratch_course: Optional[str] = None
+    if newly_scratched_pids:
+        await session.execute(text(
+            "DELETE FROM predictions WHERE participation_id = ANY(:pids)"),
+            {"pids": newly_scratched_pids})
+        await session.execute(text(
+            "UPDATE value_bets SET actif = false WHERE participation_id = ANY(:pids)"),
+            {"pids": newly_scratched_pids})
+        scratch_course = course.course_id
+        log.info("db_writer.non_partant_detected",
+                 course_id=course.course_id, n=len(newly_scratched_pids))
+
     await session.flush()
     log.info("db_writer.course_saved", course_id=course.course_id)
 
@@ -400,9 +437,12 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         from db.redis_client import get_redis
         redis = await get_redis()
         await redis.delete(f"course_detail:{course.course_id}")
+        await redis.delete(f"analyse:{course.course_id}")
         await redis.delete(f"programme:{course.date_heure.date().isoformat() if hasattr(course.date_heure, 'date') else str(course.date_heure)[:10]}")
     except Exception:
         pass
+
+    return scratch_course
 
 
 async def _save_equipement(

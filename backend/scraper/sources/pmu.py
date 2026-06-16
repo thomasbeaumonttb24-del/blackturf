@@ -549,6 +549,13 @@ class PmuScraper(BaseScraper):
             robe_val = _libelle(p.get("robe"))
             race_val = _libelle(p.get("race"))
 
+            # ── Non-partant (cheval retiré avant la course) ──
+            # Le PMU expose le statut du partant : "PARTANT" tant qu'il court,
+            # "NON_PARTANT" dès qu'il est déclaré forfait. On le capte pour le
+            # retirer du tableau + du pronostic (et régénérer le prono restant).
+            statut_pmu = str(p.get("statut") or "").upper()
+            non_partant = statut_pmu in ("NON_PARTANT", "NONPARTANT", "ABSENT")
+
             partant = PartantScrape(
                 numero=p.get("numPmu", i + 1),
                 nom=p.get("nom", ""),
@@ -591,6 +598,7 @@ class PmuScraper(BaseScraper):
                 jument_pleine=p.get("jumentPleine"),
                 race=race_val,
                 robe=robe_val,
+                non_partant=non_partant,
                 source="pmu",
             )
             partants.append(partant)

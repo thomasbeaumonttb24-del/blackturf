@@ -1981,8 +1981,9 @@ export default function CoursePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {course.partants
-                      .filter((p) => !p.non_partant)
+                    {[...course.partants]
+                      // Non-partants conservés mais relégués en bas (indiqués, hors prono).
+                      .sort((a, b) => Number(!!a.non_partant) - Number(!!b.non_partant))
                       .map((partant) => {
                         const pred = predictions?.find(
                           (p) => p.participation_id === partant.participation_id
@@ -2003,6 +2004,7 @@ export default function CoursePage() {
                               rang === 2 && "row-top2",
                               rang === 3 && "row-top3",
                               isExp && "bg-accent/20",
+                              partant.non_partant && "opacity-50 bg-muted/30",
                             )}
                           >
                             <td className="px-2 py-2.5 font-bold text-foreground/70 text-center tabular-nums">
@@ -2011,8 +2013,13 @@ export default function CoursePage() {
                             <td className="px-2 sm:px-3 py-3 align-top">
                               {/* Ligne 1 — nom + style + alertes */}
                               <div className="flex items-center gap-x-2 gap-y-1 flex-wrap leading-tight">
-                                <span className="font-bold text-[15px] text-foreground break-words">{partant.nom_cheval}</span>
-                                {partant.running_style && (
+                                <span className={cn("font-bold text-[15px] text-foreground break-words", partant.non_partant && "line-through text-muted-foreground")}>{partant.nom_cheval}</span>
+                                {partant.non_partant && (
+                                  <span title="Cheval déclaré non-partant — retiré du pronostic" className="inline-flex items-center gap-0.5 rounded px-1.5 py-0 text-[9px] font-bold bg-zinc-200 ring-1 ring-zinc-400 text-zinc-700 uppercase">
+                                    Non partant
+                                  </span>
+                                )}
+                                {partant.running_style && !partant.non_partant && (
                                   <RunningStyleBadge style={partant.running_style} />
                                 )}
                                 {partant.changement_jockey && (
@@ -2084,10 +2091,16 @@ export default function CoursePage() {
                               <ELOBadge elo={partant.elo_global} />
                             </td>
                             <td className="px-2 sm:px-3 py-2.5 text-right">
-                              <span className={cn("font-mono font-semibold", coteMoved && "text-brand-emerald")}>
-                                {formatCote(cote)}
-                              </span>
-                              {liveCote && <span className="text-brand-emerald text-[10px] ml-1">↓</span>}
+                              {partant.non_partant ? (
+                                <span className="font-mono text-xs text-muted-foreground">NP</span>
+                              ) : (
+                                <>
+                                  <span className={cn("font-mono font-semibold", coteMoved && "text-brand-emerald")}>
+                                    {formatCote(cote)}
+                                  </span>
+                                  {liveCote && <span className="text-brand-emerald text-[10px] ml-1">↓</span>}
+                                </>
+                              )}
                             </td>
                             {predictions && (
                               <td className="px-3 py-2.5 text-right text-muted-foreground font-mono text-xs hidden sm:table-cell">

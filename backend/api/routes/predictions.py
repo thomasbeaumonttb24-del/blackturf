@@ -22,6 +22,19 @@ from db.models import (
 log = structlog.get_logger()
 router = APIRouter()
 
+# Gel du pronostic à T-10 min (cf. courses.PRONO_LOCK_MIN). Avant le gel, l'EV et le
+# value bet affichés sont recalculés EN DIRECT sur la cote live (l'estimation de gain
+# suit le marché → impacte la sélection) ; après le gel, on sert la cote figée.
+PRONO_LOCK_MIN = 10
+
+
+def _is_prono_fige(date_heure) -> bool:
+    """True dès qu'on est à ≤ T-10 min du départ (prono gelé)."""
+    if not date_heure:
+        return False
+    now = datetime.now(timezone.utc) if date_heure.tzinfo else datetime.now()
+    return now >= date_heure - timedelta(minutes=PRONO_LOCK_MIN)
+
 
 # ─────────────────────────────────────────────
 # Schemas
@@ -106,9 +119,80 @@ async def get_predictions(
     )
     vbs_by_pid = {vb.participation_id: vb for vb in vb_res.scalars().all()}
 
+    # ── EV LIVE (avant gel) ──────────────────────────────────────────────────
+    # Le value bet stocké est recalculé toutes les ~8 min par le cycle. Tant que le
+    # prono n'est PAS figé (> T-10 min), on RECALCULE l'EV/le niveau en direct sur la
+    # cote du marché → l'estimation de gain bouge avec les cotes (et change donc la
+    # sélection : un cheval dont la cote monte peut redevenir un value bet). Après le
+    # gel, on garde le value bet figé (cohérence avec le plan/bilan).
+    fige = _is_prono_fige(course.date_heure)
+    live_cotes: dict[int, float] = {}
+    cote_calib = None
+    if not fige and course.statut in ("a_venir", "en_cours"):
+        try:
+            from services.pmu_cotes import fetch_live_cotes
+            live_cotes = {int(c["numero"]): float(c["cote"])
+                          for c in await fetch_live_cotes(course_id) if c.get("cote")}
+        except Exception:
+            live_cotes = {}
+        try:
+            from ml.cote_calibration import load_cote_calibration
+            cote_calib = await load_cote_calibration(db)
+        except Exception:
+            cote_calib = None
+
+    def _live_vb(pred, part):
+        """Recalcule le value bet à la cote LIVE (mêmes garde-fous que le cycle :
+        triangulation multi-sources + calibration par tranche de cote). None si le
+        cheval n'est plus un value bet à la cote actuelle."""
+        cote_live = live_cotes.get(part.numero)
+        if not cote_live or not pred.proba_top1:
+            return None
+        try:
+            from ml.valuebets import detect_value_bet
+            return detect_value_bet(
+                pred.proba_top1,
+                cote_pmu=cote_live,
+                cote_geny=part.cote_geny,
+                cote_bzh=part.cote_bzh,
+                cote_winamax=part.cote_winamax,
+                cote_betclic=part.cote_betclic,
+                cote_unibet=part.cote_unibet,
+                cote_betfair=part.cote_betfair_exchange,
+                non_partant=bool(part.non_partant),
+                cote_calib=cote_calib,
+            )
+        except Exception:
+            return None
+
     predictions = []
     for pred, part, cheval in rows:
         vb = vbs_by_pid.get(part.participation_id)
+        # Cote affichée : live avant gel, figée (stockée) après.
+        cote_aff = (live_cotes.get(part.numero) if not fige else None) or part.cote_pmu
+        # Value bet : recalcul live avant gel, sinon stocké.
+        vb_live = _live_vb(pred, part) if not fige else None
+        if vb_live:
+            value_bet = {
+                "ev_max": round(vb_live["ev_max"], 4),
+                "niveau": vb_live["niveau"],
+                "meilleure_source": vb_live["meilleure_source"],
+                "spi_detected": vb.spi_detected if vb else vb_live.get("spi_detected", False),
+                "spi_score": round(vb.spi_score, 3) if vb and vb.spi_score else None,
+                "live": True,
+            }
+        elif vb and fige:
+            value_bet = {
+                "ev_max": round(vb.ev_max, 4),
+                "niveau": vb.niveau,
+                "meilleure_source": vb.meilleure_source,
+                "spi_detected": vb.spi_detected,
+                "spi_score": round(vb.spi_score, 3) if vb.spi_score else None,
+            }
+        else:
+            # Avant gel sans value bet live = plus de valeur à la cote actuelle (ne pas
+            # servir l'ancien VB stocké, qui contredirait la cote affichée).
+            value_bet = None
         predictions.append(PredictionOut(
             prediction_id=pred.prediction_id,
             participation_id=part.participation_id,
@@ -122,14 +206,8 @@ async def get_predictions(
             cote_juste=round(1.0 / pred.proba_top1, 1) if pred.proba_top1 and pred.proba_top1 > 0.001 else None,
             rang_predit=pred.rang_predit,
             confidence_score=pred.confidence_score,
-            cote_pmu=part.cote_pmu,
-            value_bet={
-                "ev_max": round(vb.ev_max, 4),
-                "niveau": vb.niveau,
-                "meilleure_source": vb.meilleure_source,
-                "spi_detected": vb.spi_detected,
-                "spi_score": round(vb.spi_score, 3) if vb.spi_score else None,
-            } if vb else None,
+            cote_pmu=cote_aff,
+            value_bet=value_bet,
         ))
 
     # Recommandations
@@ -502,10 +580,43 @@ async def get_course_analysis(
     vb_map = {r[0]: {"ev_max": r[1], "niveau": r[2], "spi_detected": r[3], "spi_score": r[4]}
               for r in vbs_r.fetchall()}
 
+    # ── Cotes LIVE + recalcul EV avant le gel (T-10) ──
+    # Comme la fiche prédictions, l'analyse (coverage jackpot, coup à tenter, dutch)
+    # suit le marché en direct tant que le prono n'est pas figé → les estimations de
+    # gain bougent avec les cotes. Après le gel, on sert les cotes/VB figés.
+    fige = _is_prono_fige(course.date_heure)
+    live_cotes: dict[int, float] = {}
+    cote_calib = None
+    if not fige and course.statut in ("a_venir", "en_cours"):
+        try:
+            from services.pmu_cotes import fetch_live_cotes
+            live_cotes = {int(c["numero"]): float(c["cote"])
+                          for c in await fetch_live_cotes(course_id) if c.get("cote")}
+        except Exception:
+            live_cotes = {}
+        try:
+            from ml.cote_calibration import load_cote_calibration
+            cote_calib = await load_cote_calibration(db)
+        except Exception:
+            cote_calib = None
+
     predictions = []
     features_by_pid = {}
     for pid, feat, p3, p1, rang, num, nom, cote_pmu, cote_min in rows:
         features_by_pid[pid] = feat or {}
+        cote_live = live_cotes.get(int(num)) if not fige else None
+        cote_aff = cote_live or cote_pmu
+        vb_aff = vb_map.get(pid)
+        if cote_live and p1:
+            # Recalcul EV/value-bet à la cote live (calibration par tranche de cote).
+            try:
+                from ml.valuebets import detect_value_bet
+                _vbl = detect_value_bet(float(p1), cote_pmu=cote_live, cote_calib=cote_calib)
+                vb_aff = ({"ev_max": _vbl["ev_max"], "niveau": _vbl["niveau"],
+                           "spi_detected": _vbl.get("spi_detected", False),
+                           "spi_score": _vbl.get("spi_score")} if _vbl else None)
+            except Exception:
+                pass
         predictions.append({
             "participation_id": pid,
             "numero": num,
@@ -513,12 +624,13 @@ async def get_course_analysis(
             "proba_top3": float(p3 or 0),
             "proba_top1": float(p1 or 0),
             "rang_predit": rang or 99,
-            "cote_pmu": cote_pmu,
-            "cote_min": cote_min,
-            "vb": vb_map.get(pid),
+            "cote_pmu": cote_aff,
+            "cote_min": min(cote_aff, cote_min) if (cote_aff and cote_min) else (cote_aff or cote_min),
+            "vb": vb_aff,
         })
 
-    # Cache Redis 2 min
+    # Cache Redis : court avant le gel (cotes live), 2 min après (prono figé).
+    cache_ttl = 20 if not fige else 120
     try:
         from db.redis_client import get_redis
         import json
@@ -597,9 +709,9 @@ async def get_course_analysis(
     except Exception as e:
         log.warning("analyse.outsider_detect_failed", course_id=course_id, err=str(e)[:160])
 
-    # Cache 2 min
+    # Cache : court avant le gel (cotes live), 2 min après.
     try:
-        await redis.setex(cache_key, 120, json.dumps(result, default=str))
+        await redis.setex(cache_key, cache_ttl, json.dumps(result, default=str))
     except Exception:
         pass
 
