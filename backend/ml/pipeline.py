@@ -521,7 +521,10 @@ async def _do_retraining(mois: int, label: str) -> None:
             select(ModelVersion).where(ModelVersion.est_actif == True)
             .order_by(ModelVersion.version_num.desc())
         )).scalars().first()
-        current = BlackTurfEnsemble.load_current()
+        # NE PAS recharger l'ensemble actif en mémoire ici : il ne sert qu'à tester
+        # "existe-t-il un modèle actif" → current_mv (ligne DB) suffit. Le charger
+        # (~1-2 Go) PAR-DESSUS le modèle fraîchement entraîné + le dataset 144k faisait
+        # exploser la RAM (OOM à ~5 Go pendant la promotion). Économie directe.
 
         current_is_synth = bool(current_mv.est_synthetique) if current_mv else False
         current_train_n = int(current_mv.nb_courses_train or 0) if current_mv else 0
@@ -571,7 +574,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         if _should_deploy(
             new_wf, current_wf,
             current_is_synth=current_is_synth,
-            no_current=(current is None or current_mv is None),
+            no_current=(current_mv is None),
             current_unreliable=current_unreliable,
             data_jump=data_jump,
             roi_gate_enabled=_AF.roi_deploy_gate,
