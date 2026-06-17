@@ -275,8 +275,10 @@ function ReunionCard({
         {/* Badge réunion R{n} */}
         <div
           className={cn(
-            "h-9 w-11 rounded-xl flex items-center justify-center flex-shrink-0 font-mono text-sm font-bold tracking-tight ring-1",
-            hasQuinte ? "bg-amber-100 text-amber-700 ring-amber-200" : "bg-gray-100 text-gray-600 ring-gray-200",
+            "h-10 w-12 rounded-xl flex items-center justify-center flex-shrink-0 font-mono text-sm font-bold tracking-tight ring-1 shadow-sm",
+            hasQuinte
+              ? "bg-gradient-to-br from-amber-100 to-amber-200/70 text-amber-700 ring-amber-200"
+              : "bg-gradient-to-br from-gray-100 to-gray-200/60 text-gray-600 ring-gray-200",
           )}
         >
           R{reunion.numero}
@@ -455,32 +457,39 @@ const HIDE_SCROLLBAR = "[scrollbar-width:none] [-ms-overflow-style:none] [&::-we
 
 function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) => void }) {
   const today = new Date();
-  const days = Array.from({ length: 8 }, (_, i) => addDays(today, i - 1)); // J-1 → J+6
+  // Uniquement les jours passés + aujourd'hui (le futur n'a pas de données fiables).
+  // Plus récent à gauche : Auj. · Hier · …
+  const days = Array.from({ length: 10 }, (_, i) => addDays(today, -i));
   const selKey = format(selected, "yyyy-MM-dd");
   const todayKey = format(today, "yyyy-MM-dd");
+  const yesterdayKey = format(addDays(today, -1), "yyyy-MM-dd");
   return (
-    <div className={cn("flex gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0", HIDE_SCROLLBAR)}>
+    <div className={cn("flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-0.5", HIDE_SCROLLBAR)}>
       {days.map((d) => {
         const key = format(d, "yyyy-MM-dd");
         const isSel = key === selKey;
         const isToday = key === todayKey;
+        const topLabel = isToday ? "Auj." : key === yesterdayKey ? "Hier" : format(d, "EEE", { locale: fr });
         return (
           <button
             key={key}
             onClick={() => onSelect(d)}
             className={cn(
-              "flex flex-col items-center justify-center rounded-xl px-3 py-2 min-w-[54px] shrink-0 border transition-all",
+              "group flex flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 min-w-[58px] shrink-0 border transition-all",
               isSel
-                ? "bg-gray-900 text-white border-gray-900 shadow-sm"
-                : "bg-white text-gray-700 border-gray-200 hover:border-gray-300",
+                ? "bg-gray-900 text-white border-gray-900 shadow-md shadow-gray-900/10"
+                : isToday
+                ? "bg-white text-gray-800 border-amber-300 ring-1 ring-amber-200 hover:border-amber-400"
+                : "bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
             )}
           >
-            <span className={cn("text-[10px] font-semibold uppercase tracking-wide leading-none",
+            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none",
               isSel ? "text-white/70" : isToday ? "text-amber-600" : "text-gray-400")}>
-              {isToday ? "Auj." : format(d, "EEE", { locale: fr })}
+              {topLabel}
             </span>
-            <span className="text-lg font-bold tabular-nums leading-none mt-1">{format(d, "d")}</span>
-            <span className={cn("text-[9px] uppercase leading-none mt-0.5", isSel ? "text-white/50" : "text-gray-400")}>
+            <span className="text-xl font-extrabold tabular-nums leading-none mt-1.5">{format(d, "d")}</span>
+            <span className={cn("text-[9px] uppercase tracking-wide leading-none mt-1",
+              isSel ? "text-white/50" : "text-gray-400")}>
               {format(d, "MMM", { locale: fr })}
             </span>
           </button>
