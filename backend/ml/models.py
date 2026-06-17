@@ -41,7 +41,23 @@ ENSEMBLE_WEIGHTS_FALLBACK = {"xgb": 0.50, "lgbm": 0.30, "catboost": 0.20}
 META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "label",
              # champs TEXTE d'affichage/narratif (ajoutés au batch features) — jamais
              # des features ML : exclure sinon XGBoost rejette les dtypes object.
-             "jockey_nom", "entraineur_nom", "cheval_nom"}
+             "jockey_nom", "entraineur_nom", "cheval_nom",
+             # ── Exclus du MODÈLE (audit edge 2026-06-17) — restent dans le dict pour
+             #    narrative/valuebets, mais pas appris : ────────────────────────────
+             # (a) COTES DUPLIQUÉES : en live geny/bzh/unibet/winamax/betclic/betfair
+             #     valent cote_pmu (sources mortes, geny 403) → phantom + train/serve
+             #     skew. Ablation prouvée NEUTRE sur l'AUC (A_FULL≈B_DEDUP). On garde
+             #     cote_pmu + les dérivées pmu (prob_implicite, rang_cote, est_favori).
+             "cote_geny", "cote_bzh", "cote_unibet", "cote_winamax", "cote_betclic",
+             "cote_betfair_exchange", "cote_marche_min", "ratio_pmu_geny",
+             "gap_pmu_betfair", "spread_bookmakers", "decote_detectee", "valeur_latente",
+             "steam_move_betclic",
+             # (b) STATS SAISON BRUTES (compteurs/ROI cumulés saison) = FUITE au recompute
+             #     d'une course passée (la saison entière inclut le futur). Les TAUX
+             #     jockey/entraîneur/asso sont, eux, recalculés point-in-time (trailing
+             #     365j, date<départ) dans features.py et CONSERVÉS.
+             "jockey_victoires_saison", "entraineur_victoires_saison",
+             "jockey_montes_30j", "jockey_roi", "entraineur_roi"}
 
 # Brier score minimum requis avant déploiement
 BRIER_THRESHOLD = 0.18

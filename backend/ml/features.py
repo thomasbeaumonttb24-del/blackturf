@@ -1568,6 +1568,7 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     except Exception as e:  # noqa: BLE001
         log.warning("features.sire_dist_failed", err=str(e)[:120])
 
+
     # 11. Référence de vitesse (médiane indice_vitesse à même discipline + distance
     #     ±200m sur tout l'historique) — pour situer le NIVEAU des courses récentes
     #     du cheval. indice_vitesse = vitesse du vainqueur (proxy qualité d'opposition).
@@ -1678,6 +1679,74 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     except Exception as e:  # noqa: BLE001
         log.warning("features.forme_recente_failed", err=str(e)[:120])
 
+    # 16. STATS J / E / ASSO POINT-IN-TIME (trailing 365j, date < départ) — ANTI-FUITE.
+    #     Les colonnes stats_jockeys/entraineurs/associations sont des agrégats SAISON
+    #     (taux calculé sur la saison ENTIÈRE) : recomputer une course passée tire alors
+    #     le FUTUR (reste de la saison) → fuite prouvée (audit 2026-06-17 : retirer ces
+    #     features fait chuter win-AUC 0.863→0.811 + ROI +79→+29%). On recalcule donc
+    #     les TAUX victoire/place du jockey, de l'entraîneur et du DUO sur participations
+    #     ⋈ resultats.classement avec date_heure < départ. Min 20 partances sinon fallback
+    #     (= valeur table, neutre). Point-in-time → honnête même en recompute historique.
+    jockey_pit: dict = {}
+    entr_pit: dict = {}
+    asso_pit: dict = {}
+    try:
+        from datetime import timedelta
+        dref2 = date_heure
+        d365 = dref2 - timedelta(days=365)
+        _pos1 = ("EXISTS (SELECT 1 FROM json_array_elements(r2.classement::json) e "
+                 "WHERE (e->>'numero')::int = p2.numero AND COALESCE((e->>'position')::int,99) = 1)")
+        _pos3 = ("EXISTS (SELECT 1 FROM json_array_elements(r2.classement::json) e "
+                 "WHERE (e->>'numero')::int = p2.numero AND COALESCE((e->>'position')::int,99) <= 3)")
+        if jockey_ids:
+            jr = await session.execute(text(f"""
+                SELECT p2.jockey_id, COUNT(*) n,
+                       COUNT(*) FILTER (WHERE {_pos1}) w,
+                       COUNT(*) FILTER (WHERE {_pos3}) pl
+                FROM participations p2
+                JOIN courses c2 ON c2.course_id = p2.course_id
+                JOIN resultats r2 ON r2.course_id = c2.course_id
+                WHERE p2.jockey_id = ANY(:jids) AND c2.date_heure >= :d365 AND c2.date_heure < :dref
+                GROUP BY p2.jockey_id
+            """), {"jids": jockey_ids, "d365": d365, "dref": dref2})
+            for jid, n, w, pl in jr.fetchall():
+                if n and int(n) >= 20:
+                    jockey_pit[jid] = (float(int(w) / int(n)), float(int(pl) / int(n)))
+        if entraineur_ids:
+            er = await session.execute(text(f"""
+                SELECT p2.entraineur_id, COUNT(*) n,
+                       COUNT(*) FILTER (WHERE {_pos1}) w,
+                       COUNT(*) FILTER (WHERE {_pos3}) pl
+                FROM participations p2
+                JOIN courses c2 ON c2.course_id = p2.course_id
+                JOIN resultats r2 ON r2.course_id = c2.course_id
+                WHERE p2.entraineur_id = ANY(:eids) AND c2.date_heure >= :d365 AND c2.date_heure < :dref
+                GROUP BY p2.entraineur_id
+            """), {"eids": entraineur_ids, "d365": d365, "dref": dref2})
+            for eid, n, w, pl in er.fetchall():
+                if n and int(n) >= 20:
+                    entr_pit[eid] = (float(int(w) / int(n)), float(int(pl) / int(n)))
+        # Duo jockey×entraîneur (trailing 24 mois, plus rare → fenêtre plus large)
+        pairs2 = [(r[3], r[4]) for r in partants_raw if r[3] and r[4]]
+        if pairs2:
+            d730 = dref2 - timedelta(days=730)
+            ar = await session.execute(text(f"""
+                SELECT p2.jockey_id, p2.entraineur_id, COUNT(*) n,
+                       COUNT(*) FILTER (WHERE {_pos1}) w
+                FROM participations p2
+                JOIN courses c2 ON c2.course_id = p2.course_id
+                JOIN resultats r2 ON r2.course_id = c2.course_id
+                WHERE p2.jockey_id = ANY(:jids) AND p2.entraineur_id = ANY(:eids)
+                  AND c2.date_heure >= :d730 AND c2.date_heure < :dref
+                GROUP BY p2.jockey_id, p2.entraineur_id
+            """), {"jids": list({p[0] for p in pairs2}), "eids": list({p[1] for p in pairs2}),
+                   "d730": d730, "dref": dref2})
+            for jid, eid, n, w in ar.fetchall():
+                n = int(n or 0)
+                asso_pit[(jid, eid)] = (float(int(w) / n) if n else 0.0, n)
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.pit_stats_failed", err=str(e)[:120])
+
     # 14. SYNERGIE jockey × cheval — top3-rate du DUO sur leurs courses communes
     #     ANTÉRIEURES (point-in-time, pas de fuite même en recompute). Réveille
     #     jockey_cheval_synergy_nb/score (était stub 0). Min 1 monte commune sinon absent.
@@ -1740,6 +1809,9 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         "entraineur_forme_14j": entr_forme_14j_map,
         "synergy_by_pair": synergy_by_pair,
         "nb_courses_reunion": nb_courses_reunion,
+        "jockey_pit": jockey_pit,
+        "entr_pit": entr_pit,
+        "asso_pit": asso_pit,
     }
 
 
@@ -1792,6 +1864,20 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         indicateur_inedit_raw, nb_places_2_raw, nb_places_3_raw,
         cheval_nom, jockey_nom, entraineur_nom,
     ) = row
+
+    # ── ANTI-FUITE : taux J/E/asso POINT-IN-TIME (trailing, date<départ) ──────
+    # Remplacent les agrégats saison-complète (stats_jockeys/entraineurs/associations)
+    # qui fuitent le futur au recompute d'une course passée. Fallback = valeur table
+    # (variables j_win/e_win/asso_win issues du SELECT) si <20 (jockey/entr) partances.
+    _jp = batch.get("jockey_pit", {}).get(jockey_id)
+    if _jp is not None:
+        j_win, j_place = _jp
+    _ep = batch.get("entr_pit", {}).get(entraineur_id)
+    if _ep is not None:
+        e_win, e_place = _ep
+    _ap = batch.get("asso_pit", {}).get((jockey_id, entraineur_id))
+    if _ap is not None:
+        asso_win, asso_nb = _ap
 
     # ── Données PMU nouvellement exploitées ──────────────────────────────────
     # Débutant (n'a jamais couru) : pas d'historique → le modèle doit le savoir.
@@ -2024,6 +2110,18 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # ── K. Cheval ─────────────────────────────────────────────────────────────
     RUNNING_STYLE_CODE = {"mene": 0, "suit_tete": 1, "placier": 2, "ferme": 3, "irregulier": 4}
     rs_code = RUNNING_STYLE_CODE.get(running_style_raw or "", 4)
+    # Poids porté RELATIF au champ du jour (toutes disciplines) : porter plus que la
+    # moyenne = handicap, moins = avantage. delta_poids (plat) compare à SA propre
+    # histoire ; ici on compare aux ADVERSAIRES d'aujourd'hui. col 17 = poids_porte.
+    weight_relative_field = 0.0
+    try:
+        _fpoids = [float(r[17]) for r in batch["partants"] if r[17] and float(r[17]) > 0]
+        if _fpoids and poids and float(poids) > 0:
+            _mp = float(np.mean(_fpoids))
+            if _mp > 0:
+                weight_relative_field = float(np.clip((float(poids) - _mp) / _mp, -0.5, 0.5))
+    except Exception:
+        weight_relative_field = 0.0
     feat_cheval = {
         "age": age_int, "age_squared": age_int ** 2,
         "sexe_code": SEXE_CODE.get(str(sexe or "H"), 0),
@@ -2038,6 +2136,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "running_style_code": rs_code, "taux_en_tete": float(taux_en_tete_raw or 0.0),
         "prix_vente_log": float(math.log1p(prix_vente_yl or 0)),
         "jours_depuis_derniere_db": int(jours_repos),
+        "weight_relative_field": weight_relative_field,
     }
 
     # ── L. Contexte course ────────────────────────────────────────────────────
