@@ -11,6 +11,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
 import { LivePalmares } from "@/components/home/LivePalmares";
+import { HeroStats } from "@/components/home/HeroStats";
 
 // ─── Exemple de course (illustratif, tagué « Exemple » partout) ──────────────
 const EXAMPLE = { hippo: "Deauville", code: "R4 · C5", disc: "Plat · 1600m" };
@@ -156,43 +157,48 @@ export default async function HomePage() {
     <div className="flex flex-col min-h-screen bg-brand-warm">
       <Navbar />
 
-      {/* ═══════════ HERO (épuré, image plein cadre dégradé blanc) ═══════════ */}
-      <section className="relative overflow-hidden bg-brand-warm min-h-[82vh] flex items-center">
-        {/* Image plein cadre */}
+      {/* ═══════════ HERO (image plein cadre + dynamisme, style palmarès) ═══════════ */}
+      <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">
+        {/* Image plein cadre + Ken Burns */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/img/hero.jpg" alt="Départ d'une course de chevaux aux portes numérotées"
           className="absolute inset-0 h-full w-full object-cover object-[68%_center] ken-burns" />
-        {/* Dégradés vers le blanc */}
-        <div className="absolute inset-0 bg-gradient-to-r from-brand-warm via-brand-warm/90 to-brand-warm/20" />
-        <div className="absolute inset-0 bg-gradient-to-t from-brand-warm via-transparent to-brand-warm/10" />
-        {/* Voile renforcé sur mobile (texte foncé bien lisible) */}
-        <div className="absolute inset-0 bg-brand-warm/55 sm:bg-transparent" />
+        {/* Dégradés sombres (lisibilité texte blanc) */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/35" />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-transparent" />
 
-        <div className="relative mx-auto max-w-6xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16">
-          <div className="max-w-xl">
-            <h1 className="font-display text-[2.4rem] leading-[1.04] sm:text-[4rem] sm:leading-[1.02] font-extrabold tracking-tight text-gray-900">
-              Pariez sur le PMU{" "}
-              <span className="text-gradient-animated">avec méthode</span>, plus au hasard.
-            </h1>
+        <div className="relative mx-auto max-w-5xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16 text-center">
+          <h1 className="font-display text-[2.4rem] leading-[1.04] sm:text-[4.25rem] sm:leading-[1.02] font-extrabold tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)]">
+            Pariez sur le PMU{" "}
+            <span className="text-gradient-animated">avec méthode</span>, plus au hasard.
+          </h1>
 
-            <p className="mt-5 text-base sm:text-lg text-gray-700 leading-relaxed max-w-lg">
-              <span className="font-semibold text-gray-900">BlackTurf analyse chaque course du PMU</span>, détecte les
-              paris où la cote sous-estime les vraies chances, puis calcule votre{" "}
-              <span className="font-semibold text-gray-900">plan de mise</span> selon votre budget et votre profil de risque.
-            </p>
+          <p className="mt-6 text-base sm:text-lg text-white/85 leading-relaxed max-w-2xl mx-auto">
+            <span className="font-semibold text-white">BlackTurf analyse chaque course du PMU</span>, détecte les
+            paris où la cote sous-estime les vraies chances, puis calcule votre{" "}
+            <span className="font-semibold text-white">plan de mise</span> selon votre budget et votre profil de risque.
+          </p>
 
-            <div className="mt-8 flex flex-col sm:flex-row gap-3">
-              <Button size="xl" asChild
-                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30">
-                <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
-              </Button>
-              <Button variant="outline" size="xl" asChild
-                className="press border-gray-300 bg-white/70 backdrop-blur-sm text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50">
-                <Link href="/programme">Voir le programme du jour</Link>
-              </Button>
-            </div>
-            <p className="mt-5 text-[11px] text-gray-500">7 jours gratuits · sans carte bancaire · annulation à tout moment</p>
+          <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
+            <Button size="xl" asChild
+              className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-500/30">
+              <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
+            </Button>
+            <Button variant="outline" size="xl" asChild
+              className="press bg-white/10 backdrop-blur-sm border-white/25 text-white hover:bg-white/20 hover:text-white">
+              <Link href="/programme">Voir le programme du jour</Link>
+            </Button>
           </div>
+          <p className="mt-5 text-[11px] text-white/55">7 jours gratuits · sans carte bancaire · annulation à tout moment</p>
+
+          {/* Stats clés — cartes verre + count-up */}
+          <HeroStats
+            items={[
+              { value: tr?.accuracy_top3 ?? null, suffix: "%", decimals: 1, label: "Précision Top-3", cls: "text-amber-300" },
+              { value: coursesAnalysees ?? null, suffix: "+", label: "Courses analysées", cls: "text-white" },
+              { value: tr?.favori_place_rate ?? null, suffix: "%", decimals: 1, label: "Favori placé", cls: "text-emerald-300" },
+            ]}
+          />
         </div>
       </section>
 
@@ -218,21 +224,9 @@ export default async function HomePage() {
             ))}
           </div>
 
-          <div className="mt-8 pt-7 border-t border-gray-100 flex flex-wrap items-end justify-center sm:justify-start gap-8 sm:gap-12">
-            {[
-              { v: fmtPct(tr?.accuracy_top3 ?? null), l: "Précision Top-3", c: "#B45309" },
-              { v: fmtPct(tr?.favori_place_rate ?? null), l: "Favori placé", c: "#059669" },
-              { v: coursesAnalysees == null ? "—" : `${fmtInt(coursesAnalysees)}+`, l: "Courses analysées", c: "#111827" },
-            ].map((s) => (
-              <div key={s.l} className="text-center sm:text-left">
-                <div className="num-display text-2xl sm:text-3xl font-extrabold" style={{ color: s.c }}>{s.v}</div>
-                <div className="text-[10px] sm:text-[11px] uppercase tracking-wide text-gray-400 mt-1">{s.l}</div>
-              </div>
-            ))}
-            <span className="hidden lg:inline text-[11px] text-gray-400 ml-auto self-center max-w-[220px] text-right">
-              Chiffres réels, mesurés sur les arrivées PMU officielles.
-            </span>
-          </div>
+          <p className="mt-7 pt-6 border-t border-gray-100 text-[11px] text-gray-400 text-center sm:text-left">
+            Chiffres réels, mesurés sur les arrivées PMU officielles.
+          </p>
         </div>
       </section>
 
