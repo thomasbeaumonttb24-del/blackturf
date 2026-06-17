@@ -1797,19 +1797,19 @@ export default function CoursePage() {
               <span className="inline-flex items-center gap-1.5"><Ruler className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.distance} m</span>
               <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.nb_partants} partants</span>
               <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground/60" /> {formatDateTime(course.date_heure)}</span>
-              {course.terrain_officiel && <span className="inline-flex items-center gap-1.5"><Activity className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.terrain_officiel}</span>}
-              {/* allocation stockée en centimes → euros */}
+              {course.terrain_officiel && <span className="hidden sm:inline-flex items-center gap-1.5"><Activity className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.terrain_officiel}</span>}
+              {/* allocation stockée en centimes → euros — secondaire, masqué sur mobile */}
               {course.allocation ? (
-                <span className="inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-muted-foreground/60" /> {Math.round(course.allocation / 100).toLocaleString("fr-FR")} € d&apos;allocation</span>
+                <span className="hidden sm:inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-muted-foreground/60" /> {Math.round(course.allocation / 100).toLocaleString("fr-FR")} € d&apos;allocation</span>
               ) : null}
               {course.montant_offert_1er != null && course.montant_offert_1er > 0 && (
-                <span className="inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-brand-gold" /> {course.montant_offert_1er.toLocaleString("fr-FR")} € au gagnant</span>
+                <span className="hidden sm:inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-brand-gold" /> {course.montant_offert_1er.toLocaleString("fr-FR")} € au gagnant</span>
               )}
               {course.categorie_particularite && (
-                <span className="inline-flex items-center gap-1.5 capitalize"><Tag className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
+                <span className="hidden sm:inline-flex items-center gap-1.5 capitalize"><Tag className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
               )}
               {course.meteo?.temperature && (
-                <span className="inline-flex items-center gap-1.5"><Cloud className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.meteo.temperature}°C</span>
+                <span className="hidden sm:inline-flex items-center gap-1.5"><Cloud className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.meteo.temperature}°C</span>
               )}
             </div>
             {/* Conditions de course (texte officiel PMU) */}
@@ -1936,8 +1936,8 @@ export default function CoursePage() {
       </div>
 
       <div className="grid lg:grid-cols-3 gap-5 sm:gap-6">
-        {/* ── LEFT: Partants + Chart ── */}
-        <div className="lg:col-span-2 space-y-4 sm:space-y-5">
+        {/* ── LEFT: Partants + Chart ── (sur mobile : après le plan/analyse) */}
+        <div className="order-2 lg:order-1 lg:col-span-2 space-y-4 sm:space-y-5">
 
           {/* Tableau partants */}
           <Card>
@@ -1961,7 +1961,7 @@ export default function CoursePage() {
                       <th className="text-right px-2 sm:px-3 py-2 w-14">Cote</th>
                       {predictions && <th className="text-right px-3 py-2 hidden sm:table-cell w-14">Algo</th>}
                       {predictions && <th className="text-right px-2 sm:px-3 py-2 w-14">Proba</th>}
-                      {predictions && <th className="text-right px-2 sm:px-3 py-2 w-14">Valeur</th>}
+                      {predictions && <th className="text-right px-2 sm:px-3 py-2 w-14 hidden sm:table-cell">Valeur</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -2109,7 +2109,7 @@ export default function CoursePage() {
                               </td>
                             )}
                             {predictions && (
-                              <td className="px-2 sm:px-3 py-2.5 text-right">
+                              <td className="px-2 sm:px-3 py-2.5 text-right hidden sm:table-cell">
                                 {(() => {
                                   if (!pred) return <span className="text-muted-foreground">—</span>;
                                   if (pred.value_bet) return (
@@ -2522,8 +2522,8 @@ export default function CoursePage() {
 
         </div>
 
-        {/* ── RIGHT SIDEBAR ── */}
-        <div className="space-y-4">
+        {/* ── RIGHT SIDEBAR ── (sur mobile : remonté en premier = action prioritaire) */}
+        <div className="order-1 lg:order-2 space-y-4">
           {/* Analyse algorithme */}
           <Card className="border-border/70">
             <CardHeader className="pb-2">
