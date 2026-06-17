@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
   Download, TrendingUp, TrendingDown, Loader2,
-  Wallet, Brain, Trophy, X,
+  Wallet, Trophy, X,
   Search, Filter, ArrowUpDown, CheckCircle2, XCircle,
   Minus, BarChart2, Flame, Layers, ArrowDownRight,
 } from "lucide-react";
@@ -64,10 +64,10 @@ export default function BankrollPage() {
 
   const [period, setPeriod] = useState<Period>("tout");
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
-  const [iaOnly, setIaOnly] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [sortCol, setSortCol] = useState<"date" | "mise" | "cote" | "gain">("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [showAllEntries, setShowAllEntries] = useState(false);
 
   const { data: entries, isLoading } = useSWR<Entry[]>(
     "/bankroll/entries",
@@ -131,17 +131,6 @@ export default function BankrollPage() {
       .map((m) => ({ ...m, roi: m.mise > 0 ? (m.net / m.mise) * 100 : 0, winRate: m.settled > 0 ? (m.wins / m.settled) * 100 : 0 }))
       .sort((a, b) => b.net - a.net);
 
-    // IA vs misé manuellement
-    const mk = () => ({ nb: 0, mise: 0, net: 0, wins: 0, settled: 0 });
-    const iaAgg = mk(), manAgg = mk();
-    for (const e of entries) {
-      const b = e.suivi_reco_ia ? iaAgg : manAgg;
-      b.nb++; b.mise += e.mise; b.net += e.gain_perte ?? 0;
-      if (e.resultat === "gagne") { b.wins++; b.settled++; }
-      else if (e.resultat === "perd") b.settled++;
-    }
-    const withRates = (a: ReturnType<typeof mk>) => ({ ...a, roi: a.mise > 0 ? (a.net / a.mise) * 100 : 0, winRate: a.settled > 0 ? (a.wins / a.settled) * 100 : 0 });
-
     // Répartition des résultats
     const resultCounts = { gagne: 0, perd: 0, attente: 0, annule: 0 };
     for (const e of entries) {
@@ -163,8 +152,6 @@ export default function BankrollPage() {
       bestWin: Math.max(0, ...entries.map((e) => e.gain_perte ?? 0)),
       worstLoss: Math.min(0, ...entries.map((e) => e.gain_perte ?? 0)),
       byType,
-      ia: withRates(iaAgg),
-      manual: withRates(manAgg),
       resultCounts,
     };
   }, [entries, stats, period]);
@@ -176,7 +163,6 @@ export default function BankrollPage() {
         if (resultFilter === "gagne" && e.resultat !== "gagne") return false;
         if (resultFilter === "perd" && e.resultat !== "perd") return false;
         if (resultFilter === "attente" && e.resultat != null) return false;
-        if (iaOnly && !e.suivi_reco_ia) return false;
         if (searchQ) {
           const q = searchQ.toLowerCase();
           return (e.chevaux ?? "").toLowerCase().includes(q) || e.type_pari.toLowerCase().includes(q);
@@ -192,7 +178,7 @@ export default function BankrollPage() {
         }[sortCol];
         return sortDir === "desc" ? -diff : diff;
       });
-  }, [entries, resultFilter, iaOnly, searchQ, sortCol, sortDir]);
+  }, [entries, resultFilter, searchQ, sortCol, sortDir]);
 
   async function handleExport() {
     try {
@@ -211,6 +197,9 @@ export default function BankrollPage() {
   if (isLoading && !entries) return <div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-gray-200" /></div>;
 
   const netBalance = stats ? stats.gains_totaux - stats.pertes_totales : 0;
+  // Par défaut : 20 derniers paris ; bouton « voir tout » pour le reste.
+  const visibleEntries = showAllEntries ? filteredEntries : filteredEntries.slice(0, 20);
+  const hiddenCount = filteredEntries.length - visibleEntries.length;
   const chartData = analytics?.periodPoints ?? [];
   const isPositive = chartData.length < 2 || chartData.at(-1)!.bankroll >= chartData[0]!.bankroll;
   const chartMin = chartData.length ? Math.min(...chartData.map((p) => p.bankroll)) * 0.995 : 0;
@@ -248,10 +237,7 @@ export default function BankrollPage() {
                 <div className="mt-4 flex flex-wrap gap-2">
                   <span className={cn("rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset",
                     stats.roi_global >= 0 ? "bg-emerald-500/15 text-emerald-300 ring-emerald-400/30" : "bg-red-500/15 text-red-300 ring-red-400/30")}>
-                    ROI global {stats.roi_global >= 0 ? "+" : ""}{stats.roi_global}%
-                  </span>
-                  <span className="rounded-full px-3 py-1 text-xs font-semibold bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-400/30">
-                    ROI suivi IA {stats.roi_ia_only >= 0 ? "+" : ""}{stats.roi_ia_only}%
+                    ROI {stats.roi_global >= 0 ? "+" : ""}{stats.roi_global}%
                   </span>
                   <span className="rounded-full px-3 py-1 text-xs font-semibold bg-white/10 text-white/80 ring-1 ring-inset ring-white/15">
                     {stats.taux_reussite}% réussite
@@ -292,11 +278,6 @@ export default function BankrollPage() {
                   {label}
                 </button>
               ))}
-              <button onClick={() => setIaOnly((v) => !v)}
-                className={cn("text-xs px-3 py-1.5 rounded-lg border font-medium transition-all flex items-center gap-1",
-                  iaOnly ? "bg-blue-50 border-blue-200 text-blue-700" : "border-gray-200 text-gray-500 bg-white hover:text-gray-700")}>
-                <Brain className="w-3 h-3" />IA
-              </button>
             </div>
           </div>
           {filteredEntries.length !== (entries?.length ?? 0) && (
@@ -325,7 +306,6 @@ export default function BankrollPage() {
                       { key: "cote", label: "Cote", right: true, hidden: "sm" },
                       { key: null, label: "Résultat", center: true },
                       { key: "gain", label: "+/−", right: true },
-                      { key: null, label: "IA", center: true, hidden: "lg" },
                     ].map(({ key, label, right, center, hidden }) => (
                       <th key={label} className={cn("px-4 py-3 font-medium",
                         right ? "text-right" : center ? "text-center" : "text-left",
@@ -341,7 +321,7 @@ export default function BankrollPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredEntries.map((e) => (
+                  {visibleEntries.map((e) => (
                     <tr key={e.entry_id} className={cn(
                       "border-b border-gray-50 hover:bg-gray-50/50 transition-colors",
                       e.resultat === "gagne" && "bg-emerald-50/20",
@@ -369,13 +349,24 @@ export default function BankrollPage() {
                         (e.gain_perte ?? 0) > 0 ? "text-emerald-600" : (e.gain_perte ?? 0) < 0 ? "text-red-500" : "text-gray-400")}>
                         {e.gain_perte !== null ? formatEuro(e.gain_perte) : "—"}
                       </td>
-                      <td className="px-4 py-3 text-center hidden lg:table-cell">
-                        {e.suivi_reco_ia && <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-50"><Brain className="w-3 h-3 text-blue-500" /></span>}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Voir plus / réduire */}
+          {filteredEntries.length > 20 && (
+            <div className="border-t border-gray-50 p-3 text-center">
+              <button
+                onClick={() => setShowAllEntries((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-amber-600 hover:bg-amber-50 transition-colors"
+              >
+                {showAllEntries
+                  ? "Réduire"
+                  : `Afficher tous les paris (${hiddenCount} de plus)`}
+              </button>
             </div>
           )}
         </CardContent>
@@ -494,28 +485,8 @@ export default function BankrollPage() {
             </Card>
           )}
 
-          {/* IA vs manuel + Répartition */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Card className="border-gray-100 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <Brain className="w-4 h-4 text-blue-500" />Suivi IA vs manuel
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-1 grid grid-cols-2 gap-3">
-                {([["Suivi IA", analytics.ia, "blue"], ["Manuel", analytics.manual, "gray"]] as const).map(([label, a, c]) => (
-                  <div key={label} className={cn("rounded-xl p-3 border", c === "blue" ? "border-blue-100 bg-blue-50/50" : "border-gray-100 bg-gray-50/50")}>
-                    <div className={cn("text-[10px] font-semibold uppercase tracking-wide", c === "blue" ? "text-blue-600" : "text-gray-500")}>{label}</div>
-                    <div className={cn("mt-1 text-xl font-black tabular-nums leading-none", a.net >= 0 ? "text-emerald-600" : "text-red-500")}>
-                      {a.net >= 0 ? "+" : ""}{Math.round(a.roi)}%
-                    </div>
-                    <div className="text-[10px] text-gray-400 mt-0.5">ROI · {a.nb} paris</div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-100 shadow-sm">
+          {/* Répartition des paris */}
+          <Card className="border-gray-100 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                   <BarChart2 className="w-4 h-4 text-purple-500" />Répartition des paris
@@ -549,7 +520,6 @@ export default function BankrollPage() {
                 })()}
               </CardContent>
             </Card>
-          </div>
         </div>
       )}
     </div>
