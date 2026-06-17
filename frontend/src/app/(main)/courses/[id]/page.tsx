@@ -544,12 +544,14 @@ function PronosticsPresse({ pronostics }: {
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-      <div className="flex items-center gap-2">
+    <details className="group rounded-xl border border-border bg-card">
+      <summary className="cursor-pointer list-none flex items-center gap-2 px-4 py-3 select-none">
         <Newspaper className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-sm font-semibold">Pronostics presse</h3>
         <span className="text-xs text-muted-foreground">{pronostics.length} source{pronostics.length > 1 ? "s" : ""}</span>
-      </div>
+        <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="px-4 pb-4 space-y-3">
 
       {consensus.length > 0 && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
@@ -594,7 +596,8 @@ function PronosticsPresse({ pronostics }: {
           </div>
         ))}
       </div>
-    </div>
+      </div>
+    </details>
   );
 }
 
@@ -2215,9 +2218,19 @@ export default function CoursePage() {
                             )}
                             {pred && (
                               <div className={cn("text-[13px] font-bold tabular-nums leading-none mt-1", rang === 1 ? "text-brand-gold" : "text-foreground")}>
-                                {(pred.proba_top1 * 100).toFixed(0)}%
+                                {(pred.proba_top1 * 100).toFixed(0)}<span className="text-[9px] font-medium text-muted-foreground"> vict.</span>
                               </div>
                             )}
+                            {/* Valeur (espérance) — signal de décision, visible sur mobile */}
+                            {pred?.value_bet ? (
+                              <div className="mt-1 inline-flex items-center gap-0.5 rounded-full bg-brand-emerald/10 px-1.5 py-0.5 text-[9px] font-bold text-brand-emerald ring-1 ring-brand-emerald/25 tabular-nums">
+                                ★ +{Math.round(pred.value_bet.ev_max * 100)}%
+                              </div>
+                            ) : pred && cote && cote > 1 && pred.proba_top1 > 0 && (cote * pred.proba_top1 - 1) >= 0.05 ? (
+                              <div className="mt-1 text-[10px] font-bold text-brand-emerald tabular-nums">
+                                +{Math.round((cote * pred.proba_top1 - 1) * 100)}%
+                              </div>
+                            ) : null}
                             <div className="inline-flex items-center gap-0.5 text-[10px] font-medium text-brand-gold mt-1">
                               <ChevronDown className={cn("h-3 w-3 transition-transform", isExp && "rotate-180")} />
                               {isExp ? "Masquer" : "Détails"}
