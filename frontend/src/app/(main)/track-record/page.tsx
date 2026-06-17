@@ -4,10 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import {
-  TrendingUp, Trophy, Star, Receipt, Coins, Sparkles, ArrowRight, ShieldCheck,
+  Trophy, Star, Receipt, Coins, Sparkles, ArrowRight, ShieldCheck,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { statsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -269,13 +268,6 @@ export default function TrackRecordPage() {
 
         <div className="relative max-w-7xl mx-auto w-full px-4 py-20 sm:py-28">
           <div className="text-center max-w-2xl mx-auto">
-            <Badge className="mb-5 inline-flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 border-emerald-400/40 px-3 py-1 backdrop-blur-sm">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              </span>
-              Données réelles — mises à jour à chaque fin de course
-            </Badge>
             <h1 className="text-3xl sm:text-5xl font-extrabold text-white mb-4 leading-[1.05] [text-shadow:0_2px_24px_rgba(0,0,0,0.5)]">
               L&apos;algorithme BlackTurf{" "}
               <span className="text-gradient-animated">prouve ses gains</span>
@@ -319,40 +311,6 @@ export default function TrackRecordPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-10 space-y-10">
-
-        {/* ── CLV : l'IA bat-elle la ligne de clôture ? ─────────────── */}
-        {data.clv && data.clv.n >= 10 && (
-          <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-50/60 to-transparent">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-emerald-500" />
-                Closing Line Value — l&apos;algorithme anticipe le marché
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                <div className="text-center">
-                  <div className="text-3xl font-black tabular-nums text-emerald-600">{data.clv.pct_beat_line}%</div>
-                  <div className="mt-1 text-xs text-muted-foreground">Picks battant la ligne de clôture</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-black tabular-nums text-emerald-600">+{data.clv.clv_median}%</div>
-                  <div className="mt-1 text-xs text-muted-foreground">CLV médian (cote prise vs clôture)</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-black tabular-nums text-blue-500">+{data.clv.clv_implied}%</div>
-                  <div className="mt-1 text-xs text-muted-foreground">Gain de proba implicite moyen</div>
-                </div>
-              </div>
-              <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground/80">
-                Sur {data.clv.n} courses, la cote du favori <strong>baisse {data.clv.pct_beat_line}% du temps</strong> entre
-                l&apos;ouverture et le départ : le marché bouge <strong>vers</strong> le pronostic de l&apos;algorithme. C&apos;est la
-                métrique de référence des pros — battre la ligne de clôture prouve un avantage réel, indépendamment de la chance
-                sur un résultat isolé. Calculé sur les cotes PMU réelles (ouverture vs clôture).
-              </p>
-            </CardContent>
-          </Card>
-        )}
 
         {/* ── TOTAL DES GAINS générés par l'algorithme, par profil ───────────── */}
         <Card className="relative overflow-hidden border-emerald-500/30 bg-gradient-to-br from-emerald-50/70 via-background to-amber-50/40">
