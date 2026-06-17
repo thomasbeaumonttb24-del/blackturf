@@ -156,21 +156,24 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
         {bets.map((b, i) => {
           const pm = PROFIL_LABELS[b.profil] ?? { label: b.profil, cls: "bg-muted text-muted-foreground ring-border" };
           return (
-            <div key={i} className={cn("py-3 flex items-start gap-3", ranked && i < 3 && "bg-brand-gold/[0.04] -mx-3 px-3 rounded-lg")}>
-              {ranked && <span className="font-black text-muted-foreground tabular-nums text-sm pt-0.5 w-5 shrink-0">{i + 1}</span>}
+            <div key={i} className={cn("py-3 flex items-start gap-2.5", ranked && i < 3 && "bg-brand-gold/[0.04] -mx-3 px-3 rounded-lg")}>
+              {ranked && <span className="font-black text-muted-foreground tabular-nums text-sm pt-0.5 w-4 shrink-0">{i + 1}</span>}
+              {/* Badge profil — largeur fixe, centré (alignement identique sur toutes les lignes) */}
+              <span className={cn("inline-flex justify-center items-center w-[58px] rounded-full py-0.5 text-[9px] font-semibold ring-1 shrink-0 mt-0.5", pm.cls)}>{pm.label}</span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <Link href={`/courses/${b.course_id}`} className="font-semibold text-sm hover:text-brand-gold transition-colors">{b.code ?? "—"}</Link>
                   <span className="text-[11px] text-muted-foreground tabular-nums">
                     {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
                   </span>
-                  <span className={cn("ml-auto inline-flex rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 shrink-0", pm.cls)}>{pm.label}</span>
                 </div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">{b.type_pari}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  {b.type_pari} · mise {b.mise.toFixed(0)}€{b.rapport ? ` · ×${b.rapport.toFixed(1)}` : ""}
+                </div>
               </div>
               <div className="text-right shrink-0">
-                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">Gagné</span>
-                <div className="text-sm font-bold text-emerald-600 tabular-nums mt-0.5">+{b.benefice.toFixed(2)}€</div>
+                <div className="text-sm font-bold text-emerald-600 tabular-nums">+{b.benefice.toFixed(2)}€</div>
+                <div className="text-[10px] text-muted-foreground">gain {b.gain.toFixed(0)}€</div>
               </div>
             </div>
           );
@@ -210,7 +213,7 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
                 <td className="py-2.5 text-right font-mono tabular-nums text-muted-foreground">{b.mise.toFixed(0)}€</td>
                 <td className="py-2.5 text-right font-mono tabular-nums font-semibold">{b.gain.toFixed(2)}€</td>
                 <td className="py-2.5 pl-3">
-                  <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
+                  <span className={cn("inline-flex justify-center items-center w-[68px] rounded-full py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
                 </td>
                 <td className="py-2.5">
                   <span className="font-medium">{b.type_pari}</span>

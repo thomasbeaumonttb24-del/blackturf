@@ -109,7 +109,7 @@ export function LivePalmares() {
                           </div>
                           <div className="text-[10px] text-gray-400 truncate">{hippoCourt(g.hippodrome)}{g.code ? ` · ${g.code}` : ""}</div>
                         </div>
-                        <span className={`hidden sm:inline text-[9px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5 ring-1 ${pr.cls}`}>{pr.label}</span>
+                        <span className={`inline-flex justify-center items-center w-[54px] shrink-0 text-[9px] font-bold uppercase tracking-wide rounded-full py-0.5 ring-1 ${pr.cls}`}>{pr.label}</span>
                         <div className="text-right flex-shrink-0">
                           <div className="num-display text-sm font-extrabold text-emerald-600">+{g.gain.toFixed(0)}€</div>
                           <div className="text-[10px] text-gray-400">mise {g.mise.toFixed(0)}€{g.rapport ? ` · ×${g.rapport}` : ""}</div>
@@ -140,10 +140,10 @@ export function LivePalmares() {
                           </div>
                           <div className="text-[10px] text-gray-400 truncate">{hippoCourt(g.hippodrome)}{g.code ? ` · ${g.code}` : ""} · {quand(g.date)}</div>
                         </div>
-                        <span className={`hidden sm:inline text-[9px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5 ring-1 ${pr.cls}`}>{pr.label}</span>
+                        <span className={`inline-flex justify-center items-center w-[54px] shrink-0 text-[9px] font-bold uppercase tracking-wide rounded-full py-0.5 ring-1 ${pr.cls}`}>{pr.label}</span>
                         <div className="text-right flex-shrink-0">
                           <div className="num-display text-sm font-extrabold text-emerald-600">+{g.gain.toFixed(0)}€</div>
-                          <div className="text-[10px] text-gray-400">mise {g.mise.toFixed(0)}€</div>
+                          <div className="text-[10px] text-gray-400">mise {g.mise.toFixed(0)}€{g.rapport ? ` · ×${g.rapport}` : ""}</div>
                         </div>
                       </div>
                     );
