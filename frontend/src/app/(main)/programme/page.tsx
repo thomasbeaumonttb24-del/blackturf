@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { format, addDays, subDays, differenceInMinutes, differenceInSeconds } from "date-fns";
+import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
-  ChevronLeft, ChevronRight, Clock, MapPin, Trophy, Loader2, Zap,
+  ChevronRight, Clock, MapPin, Trophy, Loader2, Zap,
   Search, X, Radio, ChevronDown, ChevronUp, Filter,
 } from "lucide-react";
 import Link from "next/link";
@@ -263,7 +263,7 @@ function ReunionCard({
       <button
         onClick={() => setCollapsed((v) => !v)}
         className={cn(
-          "w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 sm:py-4 text-left transition-colors",
+          "relative w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 sm:py-4 text-left transition-colors",
           hasQuinte ? "bg-gradient-to-r from-amber-50/80 to-white hover:from-amber-100/60" : "hover:bg-gray-50/70",
         )}
       >
@@ -450,6 +450,46 @@ function ChronoView({
   );
 }
 
+/* ─── Sélecteur de jour (bande horizontale, pensée mobile) ─── */
+const HIDE_SCROLLBAR = "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden";
+
+function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) => void }) {
+  const today = new Date();
+  const days = Array.from({ length: 8 }, (_, i) => addDays(today, i - 1)); // J-1 → J+6
+  const selKey = format(selected, "yyyy-MM-dd");
+  const todayKey = format(today, "yyyy-MM-dd");
+  return (
+    <div className={cn("flex gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0", HIDE_SCROLLBAR)}>
+      {days.map((d) => {
+        const key = format(d, "yyyy-MM-dd");
+        const isSel = key === selKey;
+        const isToday = key === todayKey;
+        return (
+          <button
+            key={key}
+            onClick={() => onSelect(d)}
+            className={cn(
+              "flex flex-col items-center justify-center rounded-xl px-3 py-2 min-w-[54px] shrink-0 border transition-all",
+              isSel
+                ? "bg-gray-900 text-white border-gray-900 shadow-sm"
+                : "bg-white text-gray-700 border-gray-200 hover:border-gray-300",
+            )}
+          >
+            <span className={cn("text-[10px] font-semibold uppercase tracking-wide leading-none",
+              isSel ? "text-white/70" : isToday ? "text-amber-600" : "text-gray-400")}>
+              {isToday ? "Auj." : format(d, "EEE", { locale: fr })}
+            </span>
+            <span className="text-lg font-bold tabular-nums leading-none mt-1">{format(d, "d")}</span>
+            <span className={cn("text-[9px] uppercase leading-none mt-0.5", isSel ? "text-white/50" : "text-gray-400")}>
+              {format(d, "MMM", { locale: fr })}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── Page ──────────────────────────────────────────────── */
 export default function ProgrammePage() {
   const { user } = useAuth();
@@ -499,16 +539,13 @@ export default function ProgrammePage() {
     return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [selectedDate, isToday]);
 
-  /* Navigate date */
-  const goDate = useCallback(
-    (d: number) => {
-      setDiscFilter("Tous");
-      setHippoSearch("");
-      setVbOnly(false);
-      setSelectedDate(d > 0 ? addDays(selectedDate, d) : subDays(selectedDate, -d));
-    },
-    [selectedDate],
-  );
+  /* Sélection directe d'un jour (bande de jours) */
+  const selectDate = useCallback((d: Date) => {
+    setDiscFilter("Tous");
+    setHippoSearch("");
+    setVbOnly(false);
+    setSelectedDate(d);
+  }, []);
 
   /* Derived stats */
   const allCourses = useMemo(() => programme?.reunions.flatMap((r) => r.courses) ?? [], [programme]);
@@ -541,105 +578,101 @@ export default function ProgrammePage() {
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 sm:space-y-6">
 
-      {/* ── Header ── */}
-      <div className="flex flex-row items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Programme</h1>
-          <p className="text-sm text-gray-500 capitalize mt-0.5 truncate">{dateLabel}</p>
+      {/* ── Header + sélecteur de jour ── */}
+      <div className="space-y-3">
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Programme</h1>
+            <p className="text-sm text-gray-500 capitalize mt-0.5 truncate">{dateLabel}</p>
+          </div>
+          {!isToday && (
+            <button
+              onClick={() => selectDate(new Date())}
+              className="shrink-0 h-9 px-4 rounded-xl text-sm font-semibold bg-amber-500 text-white shadow-sm shadow-amber-200 hover:bg-amber-600 transition-colors"
+            >
+              Aujourd&apos;hui
+            </button>
+          )}
         </div>
-
-        {/* Date nav */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => goDate(-1)}
-            className="h-9 w-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:border-gray-300 transition-all"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => { setSelectedDate(new Date()); setDiscFilter("Tous"); setHippoSearch(""); }}
-            className={cn(
-              "h-9 px-4 rounded-xl text-sm font-semibold transition-all",
-              isToday
-                ? "bg-amber-500 text-white shadow-sm shadow-amber-200"
-                : "border border-gray-200 text-gray-600 hover:bg-gray-50",
-            )}
-          >
-            Aujourd&apos;hui
-          </button>
-          <button
-            onClick={() => goDate(1)}
-            className="h-9 w-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:border-gray-300 transition-all"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+        <DayStrip selected={selectedDate} onSelect={selectDate} />
       </div>
 
-      {/* ── Stats bar ── */}
+      {/* ── Résumé (chips sobres) ── */}
       {programme && programme.nb_courses > 0 && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-200 text-sm">
-          <span className="font-semibold text-gray-700">{programme.nb_courses} courses</span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-500">{programme.reunions.length} réunions</span>
-
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-700 tabular-nums">
+            {programme.nb_courses} courses
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 font-medium text-gray-500 tabular-nums">
+            {programme.reunions.length} réunions
+          </span>
           {liveCount > 0 && (
-            <>
-              <span className="text-gray-300">|</span>
-              <span className="flex items-center gap-1 font-semibold text-emerald-600">
-                <Radio className="h-3 w-3 animate-pulse" />
-                {liveCount} en cours
-              </span>
-            </>
-          )}
-
-          {Object.entries(discCounts).map(([disc, n]) => (
-            <span key={disc} className="inline-flex items-center gap-1 text-xs text-gray-500">
-              <span style={{ color: disciplineMeta(disc).color }}><DisciplineGlyph discipline={disc} className="h-3.5 w-4" /></span>
-              <span className="font-semibold text-gray-700 tabular-nums">{n}</span> {titleCase(disc)}
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-600 ring-1 ring-emerald-200">
+              <Radio className="h-3 w-3 animate-pulse" /> {liveCount} en direct
             </span>
-          ))}
-
+          )}
           {isPaid && totalVbs > 0 ? (
-            <span className="ml-auto flex items-center gap-1 text-xs font-bold text-amber-600 tabular-nums">
-              <Zap className="h-3 w-3" />
-              {totalVbs} pari{totalVbs > 1 ? "s" : ""} de valeur
+            <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-bold text-amber-600 ring-1 ring-amber-200 tabular-nums">
+              <Zap className="h-3 w-3" /> {totalVbs} de valeur
             </span>
           ) : !isPaid && isToday ? (
-            <Link
-              href="/tarifs"
-              className="ml-auto flex items-center gap-1 text-xs font-semibold text-amber-600 hover:underline"
-            >
-              <Zap className="h-3 w-3" /> Débloquer les paris de valeur
+            <Link href="/tarifs" className="ml-auto inline-flex items-center gap-1 font-semibold text-amber-600 hover:underline">
+              <Zap className="h-3 w-3" /> Débloquer la valeur
             </Link>
           ) : null}
         </div>
       )}
 
-      {/* ── Bascule de vue : Par réunion / Par heure ── */}
+      {/* ── Contrôles : vue + recherche/VB, puis disciplines ── */}
       {programme && programme.nb_courses > 0 && (
-        <div className="inline-flex items-center rounded-xl bg-gray-100 p-1 gap-1">
-          {([["reunion", "Par réunion", MapPin], ["heure", "Par heure", Clock]] as const).map(([mode, label, Icon]) => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
-                viewMode === mode ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            {/* Bascule de vue */}
+            <div className="inline-flex items-center rounded-xl bg-gray-100 p-1 gap-1">
+              {([["reunion", "Réunion", MapPin], ["heure", "Heure", Clock]] as const).map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                    viewMode === mode ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
 
-      {/* ── Filters ── */}
-      {programme && programme.nb_courses > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Discipline chips */}
-          <div className="flex items-center gap-1.5 flex-wrap flex-1">
+            <div className="flex items-center gap-2 shrink-0">
+              {isPaid && isToday && totalVbs > 0 && (
+                <button
+                  onClick={() => setVbOnly((v) => !v)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all",
+                    vbOnly
+                      ? "bg-amber-500 text-white shadow-sm shadow-amber-200"
+                      : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100",
+                  )}
+                >
+                  <Zap className="h-3 w-3" />
+                  <span className="hidden sm:inline">Valeur</span>
+                </button>
+              )}
+              <button
+                onClick={() => { setShowSearch((v) => !v); if (showSearch) setHippoSearch(""); }}
+                className={cn(
+                  "h-8 w-8 rounded-full flex items-center justify-center transition-all shrink-0",
+                  showSearch || hippoSearch ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200",
+                )}
+              >
+                {hippoSearch ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Disciplines — 1 ligne scrollable sur mobile, wrap sur desktop */}
+          <div className={cn("flex gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap", HIDE_SCROLLBAR)}>
             {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
               const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
               if (d !== "Tous" && count === 0) return null;
@@ -649,7 +682,7 @@ export default function ProgrammePage() {
                   key={d}
                   onClick={() => setDiscFilter(d)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all",
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all shrink-0",
                     active
                       ? "bg-gray-900 text-white shadow-sm"
                       : "bg-white text-gray-600 border border-gray-200 hover:border-gray-300 hover:text-gray-900",
@@ -658,12 +691,8 @@ export default function ProgrammePage() {
                   {d !== "Tous" && <DisciplineGlyph discipline={d} className="h-3.5 w-4" />}
                   {titleCase(d)}
                   {count > 0 && (
-                    <span
-                      className={cn(
-                        "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
-                        active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
-                      )}
-                    >
+                    <span className={cn("rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                      active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>
                       {count}
                     </span>
                   )}
@@ -672,52 +701,23 @@ export default function ProgrammePage() {
             })}
           </div>
 
-          {/* VB only toggle — paid users + today only */}
-          {isPaid && isToday && totalVbs > 0 && (
-            <button
-              onClick={() => setVbOnly((v) => !v)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-all",
-                vbOnly
-                  ? "bg-amber-500 text-white shadow-sm shadow-amber-200"
-                  : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100",
+          {/* Recherche hippodrome */}
+          {showSearch && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                autoFocus
+                value={hippoSearch}
+                onChange={(e) => setHippoSearch(e.target.value)}
+                placeholder="Rechercher un hippodrome…"
+                className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-4 py-2.5 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
+              />
+              {hippoSearch && (
+                <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <X className="h-3.5 w-3.5 text-gray-400" />
+                </button>
               )}
-            >
-              <Zap className="h-3 w-3" />
-              Paris de valeur
-            </button>
-          )}
-
-          {/* Search toggle */}
-          <button
-            onClick={() => { setShowSearch((v) => !v); if (showSearch) setHippoSearch(""); }}
-            className={cn(
-              "h-8 w-8 rounded-full flex items-center justify-center transition-all",
-              showSearch || hippoSearch
-                ? "bg-gray-900 text-white"
-                : "bg-gray-100 text-gray-500 hover:bg-gray-200",
-            )}
-          >
-            {hippoSearch ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-      )}
-
-      {/* Search input */}
-      {showSearch && (
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input
-            autoFocus
-            value={hippoSearch}
-            onChange={(e) => setHippoSearch(e.target.value)}
-            placeholder="Rechercher un hippodrome..."
-            className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-4 py-2.5 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
-          />
-          {hippoSearch && (
-            <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-              <X className="h-3.5 w-3.5 text-gray-400" />
-            </button>
+            </div>
           )}
         </div>
       )}
