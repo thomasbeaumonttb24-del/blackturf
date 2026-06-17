@@ -200,7 +200,7 @@ export default function ChevalPage() {
   }));
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* Back */}
       <Link href="/programme" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
         <ArrowLeft className="h-4 w-4" />
@@ -210,9 +210,9 @@ export default function ChevalPage() {
       {/* ── Header card ─────────────────────────────────────────────── */}
       <Card className="bg-card/80 border-border/50">
         <CardHeader className="pb-3">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="space-y-1">
-              <h1 className="text-2xl font-extrabold tracking-tight">{data.nom}</h1>
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">{data.nom}</h1>
               <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 {data.age && <span>{data.age} ans</span>}
                 {data.sexe && <span className="capitalize">{data.sexe}</span>}
@@ -272,7 +272,7 @@ export default function ChevalPage() {
             key={t}
             onClick={() => setActiveTab(t)}
             className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors",
+              "shrink-0 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors",
               activeTab === t
                 ? "bg-brand-gold/15 text-brand-gold border border-brand-gold/30"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -557,7 +557,7 @@ export default function ChevalPage() {
               </ResponsiveContainer>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-8">
-                Pas assez de données pour afficher l&apos;évolution ELO.
+                Pas assez de données ELO.
               </p>
             )}
 
@@ -589,7 +589,43 @@ export default function ChevalPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            {/* Mobile: liste de cartes compactes */}
+            <div className="sm:hidden space-y-2 p-3">
+              {data.historique.map((h, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "rounded-lg border border-border/30 bg-muted/20 p-2.5",
+                    h.position === 1 && "border-amber-500/40 bg-amber-500/5"
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{h.hippodrome || "—"}</p>
+                      <p className="text-[11px] text-muted-foreground font-mono">
+                        {h.date ? String(h.date).slice(0, 10) : "—"}
+                        {h.distance ? ` · ${h.distance}m` : ""}
+                      </p>
+                    </div>
+                    <div className="shrink-0">{positionBadge(h.position, h.incident)}</div>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground">
+                    <span className="font-mono">Cote {h.cote ? h.cote.toFixed(1) : "—"}</span>
+                    {h.gains ? (
+                      <span className="font-mono text-emerald-600">{formatGains(h.gains)}</span>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+              {data.historique.length === 0 && (
+                <p className="py-8 text-center text-muted-foreground text-sm">
+                  Aucun historique disponible.
+                </p>
+              )}
+            </div>
+
+            {/* Desktop: tableau complet */}
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/30">

@@ -242,12 +242,12 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           })}
         </div>
         {profilDesc && (
-          <p className="mt-1 text-[10px] text-muted-foreground/70">{profilDesc} · même mise conservée.</p>
+          <p className="mt-1 text-[10px] text-muted-foreground/70 hidden sm:block">{profilDesc}</p>
         )}
       </div>
 
       {/* Header résumé */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <div>
           <button
             onClick={onClose}
@@ -258,7 +258,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           <p className="text-2xl font-bold tabular-nums text-brand-gold">{plan.montant_total}€</p>
         </div>
         <div className="text-right">
-          <p className="text-xs text-muted-foreground">Espérance globale estimée</p>
+          <p className="text-[11px] text-muted-foreground">Espérance</p>
           <p className={cn(
             "text-xl font-bold tabular-nums",
             plan.ev_global > 0 ? "text-brand-emerald" : "text-brand-red"
@@ -268,36 +268,21 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         </div>
       </div>
 
-      {/* Explication espérance */}
-      <details className="mb-4 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs group">
-        <summary className="cursor-pointer font-semibold text-muted-foreground flex items-center gap-1.5 list-none">
+      {/* Explication espérance — repliée, légère */}
+      <details className="mb-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs group">
+        <summary className="cursor-pointer font-semibold text-muted-foreground list-none">
           <span className="text-brand-gold">ⓘ</span> C&apos;est quoi l&apos;espérance ?
         </summary>
-        <div className="mt-2 space-y-1.5 text-muted-foreground leading-relaxed">
-          <p>
-            L&apos;<strong>espérance</strong> = le gain (ou la perte) moyen attendu pour 1€ misé,
-            si tu rejouais ce type de plan un très grand nombre de fois.
-          </p>
-          <p>
-            <strong className="text-brand-emerald">Positif</strong> = avantage : en moyenne le plan
-            rapporte. <strong className="text-brand-red">Négatif</strong> = perte moyenne.
-          </p>
-          <p>
-            Au PMU, le pari mutuel prélève ~15 à 25% des mises : une espérance légèrement négative
-            est <strong>normale</strong>. Plus elle est proche de 0% (ou positive), meilleure est la sélection.
-            L&apos;analyse BlackTurf vise à la maximiser, sans jamais garantir un gain.
-          </p>
-        </div>
+        <p className="mt-2 text-muted-foreground leading-relaxed">
+          Gain (ou perte) moyen pour 1€ misé sur le long terme. <strong className="text-brand-emerald">+</strong> = avantage,
+          <strong className="text-brand-red"> −</strong> = perte. Le PMU prélève ~15–25%, donc une espérance un peu négative est normale.
+        </p>
       </details>
 
       {/* Résumé IA */}
-      <div className="rounded-lg border border-brand-gold/20 bg-brand-gold/5 p-3 mb-4 text-sm leading-relaxed">
-        <p className="text-muted-foreground text-xs font-semibold mb-1">💬 Analyse BlackTurf</p>
+      <div className="rounded-lg border border-brand-gold/20 bg-brand-gold/5 p-3 mb-3 text-sm leading-relaxed">
+        <p className="text-muted-foreground text-xs font-semibold mb-1">💬 Analyse</p>
         {plan.resume_ia}
-        <p className="mt-2 text-[11px] text-muted-foreground/70">
-          Mises réparties par simulation (Plackett-Luce) sur les probabilités du modèle : forme,
-          cotes, ELO, terrain, distance, jockey/entraîneur et historique de chaque cheval.
-        </p>
       </div>
 
       {/* Niveaux */}
@@ -408,14 +393,14 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         )}
       </div>
 
-      {plan.kelly_warning && (
+      {plan.kelly_warning ? (
         <div className="mt-3 rounded-lg border border-brand-red/30 bg-brand-red/5 p-2 text-xs text-brand-red flex gap-2">
           <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
           {plan.avertissement}
         </div>
+      ) : (
+        <p className="mt-3 text-[10px] text-muted-foreground/60">{plan.avertissement}</p>
       )}
-
-      <p className="mt-3 text-[10px] text-muted-foreground/60">{plan.avertissement}</p>
 
       {saveState === "saved" ? (
         <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-brand-emerald/30 bg-brand-emerald/5 py-2.5 text-sm font-semibold text-brand-emerald">
@@ -434,7 +419,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         </Button>
       )}
       <p className="mt-1.5 text-center text-[10px] text-muted-foreground/60">
-        Les gains/pertes seront calculés automatiquement à la fin de la course (vrais rapports PMU).
+        Gains/pertes calculés en fin de course (rapports PMU réels).
       </p>
 
       <Button variant="ghost" size="sm" className="mt-1 w-full text-xs" onClick={onClose}>
@@ -465,17 +450,17 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
 
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full text-xs min-w-[500px]">
+      <table className="w-full text-xs">
         <thead>
           <tr className="border-b border-border/60 bg-muted/30">
-            <th className="text-left px-3 py-2 font-medium text-muted-foreground">N° Cheval</th>
-            {activeSources.map((s) => (
-              <th key={s.key} className={cn("text-right px-3 py-2 font-bold", s.accent)}>
+            <th className="text-left px-2 sm:px-3 py-2 font-medium text-muted-foreground">N° Cheval</th>
+            {activeSources.map((s, i) => (
+              <th key={s.key} className={cn("text-right px-2 sm:px-3 py-2 font-bold", s.accent, i > 0 && "hidden sm:table-cell")}>
                 {s.label}
               </th>
             ))}
-            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Min</th>
-            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Mouvement</th>
+            <th className="text-right px-2 sm:px-3 py-2 font-medium text-muted-foreground">Min</th>
+            <th className="text-right px-2 sm:px-3 py-2 font-medium text-muted-foreground">Mvt</th>
           </tr>
         </thead>
         <tbody>
@@ -483,15 +468,15 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
             const coteMin = p.cote_min;
             return (
               <tr key={p.participation_id} className="border-b border-border/30 hover:bg-accent/10">
-                <td className="px-3 py-2 font-medium">
+                <td className="px-2 sm:px-3 py-2 font-medium">
                   <span className="text-muted-foreground mr-1.5">{p.numero}</span>
                   {p.nom_cheval}
                 </td>
-                {activeSources.map((s) => {
+                {activeSources.map((s, i) => {
                   const val = (p as unknown as Record<string, unknown>)[s.key] as number | null;
                   const isBest = val != null && coteMin != null && val === coteMin;
                   return (
-                    <td key={s.key} className="px-3 py-2 text-right">
+                    <td key={s.key} className={cn("px-2 sm:px-3 py-2 text-right", i > 0 && "hidden sm:table-cell")}>
                       <span className={cn(
                         "font-mono font-semibold tabular-nums",
                         isBest ? "text-emerald-600" : "text-foreground",
@@ -502,12 +487,12 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
                     </td>
                   );
                 })}
-                <td className="px-3 py-2 text-right">
+                <td className="px-2 sm:px-3 py-2 text-right">
                   <span className="font-mono font-bold text-emerald-600 tabular-nums">
                     {coteMin ? coteMin.toFixed(1) : "—"}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right">
+                <td className="px-2 sm:px-3 py-2 text-right">
                   {p.mouvement_cote_pct != null ? (
                     <span className={cn(
                       "inline-flex items-center gap-0.5 font-mono font-semibold tabular-nums",
@@ -714,8 +699,7 @@ function MiseCalculatorWidget({
   return (
     <div>
       <p className="text-xs text-muted-foreground mb-3">
-        Combien souhaitez-vous miser sur cette course ? BlackTurf répartit votre
-        mise sur plusieurs paris selon son analyse.
+        Votre mise, répartie sur plusieurs paris selon l&apos;analyse.
       </p>
       {/* Profil de risque — change quels paris ET la répartition */}
       <div className="mb-3">
@@ -879,9 +863,9 @@ function ResultatsSection({ resultats, partants }: {
               <th className="px-2 py-1.5 font-medium">Pos.</th>
               <th className="px-2 py-1.5 font-medium">N°</th>
               <th className="px-2 py-1.5 font-medium">Cheval</th>
-              {hasTemps && <th className="px-2 py-1.5 text-right font-medium">Écart</th>}
-              <th className="px-2 py-1.5 text-right font-medium">Cote finale</th>
-              <th className="px-2 py-1.5 text-right font-medium">{hasRedKm ? "Réd. km" : "Temps"}</th>
+              {hasTemps && <th className="px-2 py-1.5 text-right font-medium hidden sm:table-cell">Écart</th>}
+              <th className="px-2 py-1.5 text-right font-medium">Cote</th>
+              <th className="px-2 py-1.5 text-right font-medium hidden sm:table-cell">{hasRedKm ? "Réd. km" : "Temps"}</th>
             </tr>
           </thead>
           <tbody>
@@ -899,14 +883,14 @@ function ResultatsSection({ resultats, partants }: {
                   <td className="px-2 py-2 tabular-nums">{c.numero}</td>
                   <td className="px-2 py-2">{c.nom}</td>
                   {hasTemps && (
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                    <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
                       {fmtEcart(c)}
                     </td>
                   )}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
                     {cote != null ? cote.toFixed(1) : "—"}
                   </td>
-                  <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                  <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
                     {temps}
                   </td>
                 </tr>
@@ -1084,11 +1068,11 @@ function PronosticVerdictSection({ predictions, classement }: {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted-foreground border-b">
-              <th className="py-1 pr-2">Pronostic</th>
+              <th className="py-1 pr-2">Prono</th>
               <th className="py-1 pr-2">N°</th>
               <th className="py-1 pr-2">Cheval</th>
-              <th className="py-1 pr-2 text-right">Proba top-3</th>
-              <th className="py-1 pr-2 text-right">Arrivée réelle</th>
+              <th className="py-1 pr-2 text-right hidden sm:table-cell">Proba top-3</th>
+              <th className="py-1 pr-2 text-right">Arrivée</th>
             </tr>
           </thead>
           <tbody>
@@ -1100,7 +1084,7 @@ function PronosticVerdictSection({ predictions, classement }: {
                   <td className="py-1 pr-2 font-bold tabular-nums">#{p.rang_predit}</td>
                   <td className="py-1 pr-2 tabular-nums">{p.numero}</td>
                   <td className="py-1 pr-2">{p.nom_cheval}</td>
-                  <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground">
+                  <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground hidden sm:table-cell">
                     {(p.proba_top3 * 100).toFixed(0)}%
                   </td>
                   <td className={cn("py-1 pr-2 text-right tabular-nums", pv.cls)}>
@@ -1228,8 +1212,8 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
   return (
     <div className="mt-4 rounded-xl border border-brand-gold/30 bg-brand-gold/5 p-4">
       <h2 className="mb-1 flex flex-wrap items-center gap-2 text-base font-bold">
-        Bilan du plan de mise — {data.montant}€
-        <span className="text-xs font-normal text-muted-foreground">
+        Bilan du plan — {data.montant}€
+        <span className="text-xs font-normal text-muted-foreground hidden sm:inline">
           {cur.source === "fige"
             ? "· plan figé AVANT le départ, réglé sur l'arrivée réelle (par profil)"
             : "· simulation rétrospective sur l'arrivée réelle, par profil"}
@@ -1352,8 +1336,8 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
 
       <p className="mt-2 text-[10px] text-muted-foreground/70">
         {cur.source === "fige"
-          ? "Ce plan a été RÉELLEMENT figé avant le départ (un par profil : Prudent = placé fréquent · Modéré = équilibré · Risqué = gros gains), puis réglé aux rapports PMU définitifs réels — c'est le même prono que celui compté au palmarès. Jouez responsable."
-          : "Aucun plan figé pour ce profil sur cette course (antérieure au gel automatique) : simulation rétrospective de la méthode, réglée aux rapports PMU réels. Jouez responsable."}
+          ? "Plan figé avant le départ, réglé aux rapports PMU réels. Jouez responsable."
+          : "Simulation rétrospective réglée aux rapports PMU réels. Jouez responsable."}
       </p>
     </div>
   );
@@ -1768,14 +1752,14 @@ export default function CoursePage() {
   const topVB = predictions?.find((p) => p.value_bet && p.value_bet.niveau >= 3);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+    <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
       {/* Back */}
-      <Link href="/programme" className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm mb-5 transition-colors">
+      <Link href="/programme" className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm mb-4 transition-colors">
         <ArrowLeft className="h-4 w-4" /> Programme
       </Link>
 
       {/* ── HEADER ── */}
-      <div className="rounded-xl border border-border bg-card/60 p-5 mb-6">
+      <div className="rounded-xl border border-border bg-card/60 p-4 sm:p-5 mb-5 sm:mb-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -1789,7 +1773,7 @@ export default function CoursePage() {
                   </span>
                 ) : null;
               })()}
-              <h1 className="text-xl font-bold">{course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}</h1>
+              <h1 className="text-lg sm:text-xl font-bold">{course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}</h1>
               {course.est_quinte && <Badge variant="gold" className="animate-pulse-slow">Quinté+</Badge>}
               {course.est_quarte && <Badge variant="gold">Quarté+</Badge>}
               {course.est_tierce && <Badge variant="secondary">Tiercé</Badge>}
@@ -1951,17 +1935,17 @@ export default function CoursePage() {
         )}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="grid lg:grid-cols-3 gap-5 sm:gap-6">
         {/* ── LEFT: Partants + Chart ── */}
-        <div className="lg:col-span-2 space-y-5">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-5">
 
           {/* Tableau partants */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 Partants
-                <span className="text-xs font-normal text-muted-foreground/70 ml-1">
-                  — cliquez une ligne pour le détail
+                <span className="text-xs font-normal text-muted-foreground/70 ml-1 hidden sm:inline">
+                  — touchez une ligne pour le détail
                 </span>
               </CardTitle>
             </CardHeader>
@@ -2359,7 +2343,7 @@ export default function CoursePage() {
           {/* Graphique cotes historique */}
           {/* ── Narrative IA ── */}
           {analysis?.narrative && (
-            <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/60 to-white p-5 space-y-3">
+            <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/60 to-white p-4 sm:p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Brain className="h-4 w-4 text-violet-600" />
                 <h3 className="text-sm font-semibold text-gray-900">Analyse BlackTurf</h3>
@@ -2389,7 +2373,7 @@ export default function CoursePage() {
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground/70 pt-1">
-                Synthèse de l&apos;analyse. Les paris à jouer (selon ton montant et ton profil) sont dans le plan de mise ci-contre.
+                Les paris à jouer sont dans le plan de mise.
               </p>
             </div>
           )}
@@ -2460,8 +2444,7 @@ export default function CoursePage() {
                 ))}
               </div>
               <p className="text-[10px] text-violet-900/60">
-                Détection : ouverture du marché + écart modèle/marché + taux de surprises réel sur ce type de course.
-                Grosse cote = risque élevé ; réservé aux profils offensifs.
+                Grosse cote = risque élevé, réservé aux profils offensifs.
               </p>
             </div>
           )}
@@ -2505,7 +2488,7 @@ export default function CoursePage() {
                 ))}
               </div>
               <p className="text-[10px] text-red-900/50">
-                Basé sur l&apos;écart modèle/marché et les facteurs réels — pas une garantie de défaite, un avertissement de valeur.
+                Avertissement de valeur, pas une garantie de défaite.
               </p>
             </div>
           )}
@@ -2650,10 +2633,10 @@ export default function CoursePage() {
                   <div className="pt-2 border-t border-border/50 space-y-1">
                     <p className="text-[10px] text-muted-foreground flex gap-1.5">
                       <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
-                      <span><strong className="text-foreground">Gagnant</strong> = probabilité de victoire · <strong className="text-foreground">Top-3</strong> = probabilité d&apos;être dans les 3 premiers. Probabilités calibrées sur résultats réels.</span>
+                      <span><strong className="text-foreground">Gagnant</strong> = proba de victoire · <strong className="text-foreground">Top-3</strong> = proba d&apos;être dans les 3 premiers.</span>
                     </p>
                     <p className="text-[10px] text-muted-foreground/70 pl-[18px]">
-                      Le modèle combine <strong className="text-foreground">80+ critères</strong> (forme, ELO, jockey/entraîneur, distance, terrain, descente de catégorie…) — la cote n&apos;est qu&apos;un facteur parmi d&apos;autres (~19% du poids). Aide à la décision — aucune garantie de gain.
+                      Modèle à <strong className="text-foreground">80+ critères</strong> (forme, ELO, J/E, distance, terrain…). Aide à la décision, aucune garantie de gain.
                     </p>
                   </div>
                 </div>

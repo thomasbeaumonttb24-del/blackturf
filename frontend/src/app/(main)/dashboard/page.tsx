@@ -102,19 +102,19 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+      <div className="max-w-7xl mx-auto px-4 py-6 sm:py-8 space-y-6 sm:space-y-8">
 
         {/* ── Header ─────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">
+        <div className="flex flex-row items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">
               Bonjour{user?.prenom ? `, ${user.prenom}` : ""} 👋
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {format(new Date(), "EEEE d MMMM yyyy", { locale: fr })}
+              {format(new Date(), "EEEE d MMMM", { locale: fr })}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 shrink-0">
             <Badge variant={user?.plan === "expert" ? "expert" : user?.plan === "pro" ? "pro" : "secondary"} className="text-xs px-3 py-1">
               {(user?.plan ?? "free").toUpperCase()}
             </Badge>
@@ -131,8 +131,8 @@ export default function DashboardPage() {
         {pariDuJour && (
           <Link href={`/courses/${pariDuJour.course_id}`} className="block group">
             <Card className="border-brand-gold/40 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent hover:border-brand-gold/70 transition-colors">
-              <CardContent className="p-5">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <CardContent className="p-4 sm:p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                   <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-0.5 shrink-0">
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold">🎯 Pari du jour</span>
                     <span className="text-[11px] text-muted-foreground">{pariDuJour.code} · {pariDuJour.hippodrome}</span>
@@ -173,7 +173,6 @@ export default function DashboardPage() {
           <div>
             <div className="flex items-center gap-2 mb-2 px-0.5">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold">Le pari du jour, par profil</span>
-              <span className="text-[11px] text-muted-foreground">— issu de l&apos;analyse + apprentissage de chaque profil</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {parisProfils.profils.map((p: {
@@ -207,10 +206,10 @@ export default function DashboardPage() {
         )}
 
         {/* ── KPI cards ──────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {/* Bankroll */}
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-5">
+            <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-amber-50">
                   <Wallet className="w-4 h-4 text-amber-600" />
@@ -220,7 +219,7 @@ export default function DashboardPage() {
                   {roi > 0 ? "+" : ""}{roi}%
                 </span>
               </div>
-              <div className="text-2xl font-bold text-foreground tabular-nums">
+              <div className="text-xl sm:text-2xl font-bold text-foreground tabular-nums">
                 {bankrollStats
                   ? `€${((bankrollStats.bankroll_initiale ?? 0) + (bankrollStats.gains_totaux ?? 0) - (bankrollStats.pertes_totales ?? 0)).toFixed(0)}`
                   : "—"}
@@ -231,23 +230,23 @@ export default function DashboardPage() {
 
           {/* ROI */}
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-5">
+            <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-blue-50">
                   <BarChart3 className="w-4 h-4 text-blue-600" />
                 </div>
                 <span className="text-xs text-muted-foreground">{bankrollStats?.nb_paris ?? 0} paris</span>
               </div>
-              <div className={`text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <div className={`text-xl sm:text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                 {bankrollStats ? `${bankrollStats.roi_ia_only > 0 ? "+" : ""}${bankrollStats.roi_ia_only}%` : "—"}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Rendement paris algorithme</div>
+              <div className="text-xs text-muted-foreground mt-1">Rendement algo</div>
             </CardContent>
           </Card>
 
           {/* Value Bets */}
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-5">
+            <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-emerald-50">
                   <Zap className="w-4 h-4 text-emerald-600" />
@@ -258,16 +257,16 @@ export default function DashboardPage() {
                   </Badge>
                 )}
               </div>
-              <div className="text-2xl font-bold text-foreground tabular-nums">
+              <div className="text-xl sm:text-2xl font-bold text-foreground tabular-nums">
                 {summary?.nb_vbs_actifs ?? "—"}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Paris de valeur actifs</div>
+              <div className="text-xs text-muted-foreground mt-1">Paris de valeur</div>
             </CardContent>
           </Card>
 
           {/* Courses du jour */}
           <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-5">
+            <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-purple-50">
                   <Trophy className="w-4 h-4 text-purple-600" />
@@ -279,7 +278,7 @@ export default function DashboardPage() {
                   </span>
                 )}
               </div>
-              <div className="text-2xl font-bold text-foreground tabular-nums">
+              <div className="text-xl sm:text-2xl font-bold text-foreground tabular-nums">
                 {summary?.nb_courses_jour ?? "—"}
               </div>
               <div className="text-xs text-muted-foreground mt-1">Courses aujourd&apos;hui</div>
@@ -288,10 +287,10 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Main grid ──────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6">
 
           {/* Left col (3/5) */}
-          <div className="lg:col-span-3 space-y-6">
+          <div className="lg:col-span-3 space-y-4 sm:space-y-6">
 
             {/* Top Value Bets */}
             <Card className="border-border/60">
@@ -299,9 +298,9 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Zap className="w-4 h-4 text-amber-600" />
-                    Meilleurs paris de valeur du moment
+                    Meilleurs paris de valeur
                   </CardTitle>
-                  <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
+                  <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground shrink-0">
                     <Link href="/value-bets">
                       Voir tous <ArrowRight className="w-3 h-3 ml-1" />
                     </Link>
@@ -332,18 +331,18 @@ export default function DashboardPage() {
                     <Link
                       key={i}
                       href={`/courses/${vb.course_id}`}
-                      className="flex items-center justify-between p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
+                      className="flex items-center justify-between gap-2 p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="text-lg font-bold text-muted-foreground w-6 text-center">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="text-lg font-bold text-muted-foreground w-6 text-center shrink-0">
                           #{i + 1}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-foreground text-sm">{vb.nom_cheval}</span>
+                            <span className="font-semibold text-foreground text-sm truncate">{vb.nom_cheval}</span>
                             <StarRating n={vb.niveau} />
                           </div>
-                          <div className="flex items-center gap-2 mt-0.5">
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <span className="text-xs text-muted-foreground">{vb.hippodrome}</span>
                             {vb.heure && (
                               <span className="text-xs text-muted-foreground flex items-center gap-0.5">
@@ -356,10 +355,10 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 shrink-0">
                         <div className="text-right">
                           <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-600" : "text-red-600"}`}>
-                            Espérance {vb.ev > 0 ? "+" : ""}{(vb.ev * 100).toFixed(0)}%
+                            {vb.ev > 0 ? "+" : ""}{(vb.ev * 100).toFixed(0)}%
                           </div>
                           {vb.cote && (
                             <div className="text-xs text-muted-foreground">Cote {vb.cote}</div>
@@ -446,7 +445,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Right col (2/5) */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-4 sm:space-y-6">
 
             {/* Quick links */}
             <Card className="border-border/60">

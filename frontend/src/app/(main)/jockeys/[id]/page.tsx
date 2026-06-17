@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import Link from "next/link";
-import { ArrowLeft, Activity, Trophy, TrendingUp, Users } from "lucide-react";
+import { ArrowLeft, Activity, Trophy, Users } from "lucide-react";
 import { coursesApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -177,7 +177,7 @@ export default function JockeyPage() {
   const s = data.stats_saison;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* Back */}
       <Link
         href="/programme"
@@ -193,7 +193,7 @@ export default function JockeyPage() {
           <div className="flex items-start justify-between flex-wrap gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-extrabold tracking-tight">{data.nom}</h1>
+                <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">{data.nom}</h1>
                 {data.nationalite && (
                   <Badge variant="outline" className="text-xs font-semibold">
                     {data.nationalite}
@@ -324,7 +324,34 @@ export default function JockeyPage() {
               </CardTitle>
             </div>
           </CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
+          <CardContent className="p-0">
+            {/* Mobile: liste de cartes compactes */}
+            <div className="sm:hidden space-y-2 p-3">
+              {data.associations_entraineurs.map((a) => {
+                const p = Math.round(a.taux_victoire * 100);
+                return (
+                  <div
+                    key={a.entraineur_id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border/30 bg-muted/20 p-2.5"
+                  >
+                    <p className="text-sm font-semibold truncate">{a.entraineur}</p>
+                    <div className="flex items-center gap-3 text-xs shrink-0">
+                      <span className="text-muted-foreground font-mono">{a.nb_courses}c</span>
+                      <span className="font-mono text-amber-600">{a.nb_victoires}v</span>
+                      <span
+                        className="font-bold font-mono"
+                        style={{ color: p >= 25 ? "#F59E0B" : p >= 15 ? "#3B82F6" : "#6B7280" }}
+                      >
+                        {p}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop: tableau complet */}
+            <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm min-w-[420px]">
               <thead>
                 <tr className="border-b border-border/30">
@@ -365,6 +392,7 @@ export default function JockeyPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -377,7 +405,45 @@ export default function JockeyPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          {/* Mobile: liste de cartes compactes */}
+          <div className="sm:hidden space-y-2 p-3">
+            {data.derniere_participations.map((p, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "flex items-center justify-between gap-2 rounded-lg border border-border/30 bg-muted/20 p-2.5",
+                  p.position === 1 && "border-amber-500/40 bg-amber-500/5"
+                )}
+              >
+                <div className="min-w-0">
+                  <Link
+                    href={`/chevaux/${p.cheval_id}`}
+                    className="text-sm font-semibold truncate block hover:text-brand-gold transition-colors"
+                  >
+                    {p.nom_cheval}
+                  </Link>
+                  <p className="text-[11px] text-muted-foreground font-mono">
+                    {p.date ? String(p.date).slice(0, 10) : "—"}
+                    {p.hippodrome ? ` · ${p.hippodrome}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    {p.cote ? p.cote.toFixed(1) : "—"}
+                  </span>
+                  {positionBadge(p.position)}
+                </div>
+              </div>
+            ))}
+            {data.derniere_participations.length === 0 && (
+              <p className="py-8 text-center text-muted-foreground text-sm">
+                Aucune participation disponible.
+              </p>
+            )}
+          </div>
+
+          {/* Desktop: tableau complet */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border/30">

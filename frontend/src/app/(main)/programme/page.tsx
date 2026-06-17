@@ -263,7 +263,7 @@ function ReunionCard({
       <button
         onClick={() => setCollapsed((v) => !v)}
         className={cn(
-          "w-full flex items-center gap-3 px-5 py-4 text-left transition-colors",
+          "w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 sm:py-4 text-left transition-colors",
           hasQuinte ? "bg-gradient-to-r from-amber-50/80 to-white hover:from-amber-100/60" : "hover:bg-gray-50/70",
         )}
       >
@@ -539,17 +539,17 @@ export default function ProgrammePage() {
   const dateLabel = format(selectedDate, "EEEE d MMMM yyyy", { locale: fr });
 
   return (
-    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 sm:space-y-6">
 
       {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Programme</h1>
-          <p className="text-sm text-gray-500 capitalize mt-0.5">{dateLabel}</p>
+      <div className="flex flex-row items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Programme</h1>
+          <p className="text-sm text-gray-500 capitalize mt-0.5 truncate">{dateLabel}</p>
         </div>
 
         {/* Date nav */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => goDate(-1)}
             className="h-9 w-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:border-gray-300 transition-all"
@@ -776,11 +776,11 @@ export default function ProgrammePage() {
 
       {/* ── Upsell strip for free users ── */}
       {!isPaid && isToday && programme && programme.nb_courses > 0 && (
-        <div className="flex items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 px-5 py-4">
-          <div>
-            <p className="text-sm font-semibold text-amber-800">🔐 Paris de valeur non accessibles</p>
+        <div className="flex items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 px-4 sm:px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-amber-800">🔐 Paris de valeur verrouillés</p>
             <p className="text-xs text-amber-600 mt-0.5">
-              Passez Standard pour voir les opportunités détectées par l&apos;IA sur chaque course.
+              Passez Standard pour les voir sur chaque course.
             </p>
           </div>
           <Link

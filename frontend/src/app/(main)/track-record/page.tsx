@@ -150,7 +150,35 @@ function CountUpEuro({ value, className, decimals = 0, prefix = "" }: { value: n
 // ─── Table de paris gagnés (réutilisée : 50 derniers + 30 meilleurs) ───
 function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: boolean }) {
   return (
-    <div className="overflow-x-auto">
+    <>
+      {/* Mobile : liste de cartes empilées (pas de scroll horizontal) */}
+      <div className="sm:hidden divide-y divide-border/30">
+        {bets.map((b, i) => {
+          const pm = PROFIL_LABELS[b.profil] ?? { label: b.profil, cls: "bg-muted text-muted-foreground ring-border" };
+          return (
+            <div key={i} className={cn("py-3 flex items-start gap-3", ranked && i < 3 && "bg-brand-gold/[0.04] -mx-3 px-3 rounded-lg")}>
+              {ranked && <span className="font-black text-muted-foreground tabular-nums text-sm pt-0.5 w-5 shrink-0">{i + 1}</span>}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Link href={`/courses/${b.course_id}`} className="font-semibold text-sm hover:text-brand-gold transition-colors">{b.code ?? "—"}</Link>
+                  <span className="text-[11px] text-muted-foreground tabular-nums">
+                    {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                  </span>
+                  <span className={cn("ml-auto inline-flex rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 shrink-0", pm.cls)}>{pm.label}</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">{b.type_pari}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">Gagné</span>
+                <div className="text-sm font-bold text-emerald-600 tabular-nums mt-0.5">+{b.benefice.toFixed(2)}€</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop : tableau complet */}
+      <div className="hidden sm:block overflow-x-auto">
       <table className="w-full text-sm min-w-[760px]">
         <thead>
           <tr className="border-b border-border/40 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -197,7 +225,8 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -246,7 +275,7 @@ export default function TrackRecordPage() {
     <div className="min-h-screen bg-background">
 
       {/* ── Hero — image plein cadre + dynamisme ──────────────────────── */}
-      <div className="relative overflow-hidden border-b border-border/40 min-h-[70vh] flex items-center">
+      <div className="relative overflow-hidden border-b border-border/40 min-h-[60vh] sm:min-h-[70vh] flex items-center">
         {/* Image de course plein cadre + Ken Burns */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -258,15 +287,14 @@ export default function TrackRecordPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/35" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent" />
 
-        <div className="relative max-w-7xl mx-auto w-full px-4 py-20 sm:py-28">
+        <div className="relative max-w-7xl mx-auto w-full px-4 py-16 sm:py-28">
           <div className="text-center max-w-2xl mx-auto">
-            <h1 className="text-3xl sm:text-5xl font-extrabold text-white mb-4 leading-[1.05] [text-shadow:0_2px_24px_rgba(0,0,0,0.5)]">
+            <h1 className="text-2xl sm:text-5xl font-extrabold text-white mb-3 sm:mb-4 leading-[1.1] [text-shadow:0_2px_24px_rgba(0,0,0,0.5)]">
               L&apos;algorithme BlackTurf{" "}
               <span className="text-gradient-animated">prouve ses gains</span>
             </h1>
-            <p className="text-base sm:text-lg text-white/80 mb-9 max-w-xl mx-auto">
-              Chaque pronostic est archivé et vérifiable — résultats réels, réglés aux rapports
-              PMU officiels, par profil de jeu.
+            <p className="text-sm sm:text-lg text-white/80 mb-6 sm:mb-9 max-w-xl mx-auto">
+              Chaque pronostic archivé, réglé aux rapports PMU officiels.
             </p>
 
             {/* Hero stats — cartes verre + count-up (live, mêmes chiffres que l'accueil) */}
@@ -278,7 +306,7 @@ export default function TrackRecordPage() {
               }}
             />
 
-            <div className="mt-9 flex flex-col sm:flex-row justify-center gap-3">
+            <div className="mt-6 sm:mt-9 flex flex-col sm:flex-row justify-center gap-3">
               <Button asChild variant="brand" size="lg" className="press btn-shimmer shadow-lg shadow-amber-500/30">
                 <Link href="/inscription">Essayer gratuitement <ArrowRight className="h-4 w-4 ml-1" /></Link>
               </Button>
@@ -295,7 +323,7 @@ export default function TrackRecordPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-10 space-y-10">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-10 space-y-6 sm:space-y-10">
 
         {/* ── TOTAL DES GAINS générés par l'algorithme, par profil ───────────── */}
         <Card className="relative overflow-hidden border-emerald-500/30 bg-gradient-to-br from-emerald-50/70 via-background to-amber-50/40">
@@ -307,18 +335,16 @@ export default function TrackRecordPage() {
             aria-hidden
             className="pointer-events-none absolute -right-10 -top-10 w-72 h-72 object-cover rounded-full opacity-[0.07] blur-[1px] ken-burns"
           />
-          <CardHeader className="pb-3 relative">
-            <CardTitle className="text-base flex items-center gap-2">
+          <CardHeader className="p-4 sm:p-6 pb-3 sm:pb-3 relative">
+            <CardTitle className="text-sm sm:text-base flex items-center gap-2">
               <Coins className="w-4 h-4 text-emerald-500" />
               Total des gains générés par l&apos;algorithme
             </CardTitle>
             <p className="text-[11px] text-muted-foreground mt-1 max-w-2xl">
-              Cumul des <strong>gains réels encaissés</strong> par les pronostics figés avant le départ,
-              réglés aux <strong>vrais rapports PMU</strong> à l&apos;arrivée — réparti par profil de jeu.
-              Mis à jour automatiquement à chaque fin de course.
+              Gains réels encaissés, réglés aux rapports PMU, par profil.
             </p>
           </CardHeader>
-          <CardContent className="relative">
+          <CardContent className="p-4 sm:p-6 pt-0 relative">
             {gagnantsError ? (
               <div className="py-8 text-center text-sm text-muted-foreground">Indisponible pour le moment.</div>
             ) : !gagnantsData ? (
@@ -326,7 +352,7 @@ export default function TrackRecordPage() {
             ) : (
               <>
                 {/* Grand total encaissé (count-up) */}
-                <div className="rounded-2xl border border-emerald-500/30 bg-white/70 backdrop-blur-sm p-6 mb-6 text-center sm:text-left">
+                <div className="rounded-2xl border border-emerald-500/30 bg-white/70 backdrop-blur-sm p-4 sm:p-6 mb-5 sm:mb-6 text-center sm:text-left">
                   <div className="flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
                     <div>
                       <div className="text-[11px] uppercase tracking-wider text-emerald-700/80 flex items-center gap-1.5 justify-center sm:justify-start">
@@ -335,7 +361,7 @@ export default function TrackRecordPage() {
                       <CountUpEuro
                         value={gagnantsData.total_gain ?? 0}
                         prefix="+"
-                        className="block text-5xl sm:text-6xl font-black tabular-nums leading-none mt-2 text-emerald-600 [text-shadow:0_2px_18px_rgba(16,185,129,0.18)]"
+                        className="block text-4xl sm:text-6xl font-black tabular-nums leading-none mt-2 text-emerald-600 [text-shadow:0_2px_18px_rgba(16,185,129,0.18)]"
                       />
                     </div>
                     <div className="text-center">
@@ -384,11 +410,11 @@ export default function TrackRecordPage() {
                       </div>
 
                       {/* Cartes récap par profil */}
-                      <div className="mt-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="mt-6 sm:mt-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
                         {gagnantsData.profils!.map((p) => {
                           const pm = PROFIL_LABELS[p.profil] ?? { label: p.label, cls: "bg-muted text-muted-foreground ring-border" };
                           return (
-                            <div key={p.profil} className="rounded-xl border border-border/60 bg-white/80 backdrop-blur-sm p-4 tilt-card">
+                            <div key={p.profil} className="rounded-xl border border-border/60 bg-white/80 backdrop-blur-sm p-3 sm:p-4 tilt-card">
                               <div className="flex items-center justify-between">
                                 <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
                                 <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{p.nb_courses} courses</span>
@@ -422,17 +448,16 @@ export default function TrackRecordPage() {
 
         {/* ── 50 derniers paris gagnés (tous profils) ───────────────────────── */}
         <Card className="border-border/60">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
+          <CardHeader className="p-4 sm:p-6 pb-3 sm:pb-3">
+            <CardTitle className="text-sm sm:text-base flex items-center gap-2">
               <Receipt className="w-4 h-4 text-emerald-500" />
               Les 50 derniers paris gagnés
             </CardTitle>
             <p className="text-[11px] text-muted-foreground mt-1">
-              Tous profils confondus, les plus récents. Chaque pari a été <strong>figé avant le départ</strong> et réglé
-              au <strong>rapport PMU réel</strong> à l&apos;arrivée.
+              Tous profils, les plus récents — figés avant le départ, réglés au rapport PMU réel.
             </p>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-4 sm:p-6 pt-0">
             {!gagnantsData ? (
               <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
             ) : gagnantsData.gagnants.length === 0 ? (
@@ -454,16 +479,16 @@ export default function TrackRecordPage() {
         {/* ── 30 meilleurs gains ────────────────────────────────────────────── */}
         {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
           <Card className="border-brand-gold/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+            <CardHeader className="p-4 sm:p-6 pb-3 sm:pb-3">
+              <CardTitle className="text-sm sm:text-base flex items-center gap-2">
                 <Star className="w-4 h-4 text-brand-gold fill-brand-gold" />
                 Les 30 plus gros gains
               </CardTitle>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Les 30 paris au plus gros bénéfice net — réels, figés avant le départ, réglés aux rapports PMU.
+                Les 30 plus gros bénéfices nets — réglés aux rapports PMU.
               </p>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 sm:p-6 pt-0">
               <BetsTable bets={gagnantsData.top_gains} ranked />
             </CardContent>
           </Card>
@@ -474,13 +499,13 @@ export default function TrackRecordPage() {
 
           {/* By discipline */}
           <Card className="border-border/60">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+            <CardHeader className="p-4 sm:p-6 pb-3 sm:pb-3">
+              <CardTitle className="text-sm sm:text-base flex items-center gap-2">
                 <Trophy className="w-4 h-4 text-purple-600" />
                 Précision par discipline
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 sm:p-6 pt-0">
               {data.by_discipline.length === 0 ? (
                 <div className="py-6 text-center text-sm text-muted-foreground">
                   Aucune donnée pour le moment

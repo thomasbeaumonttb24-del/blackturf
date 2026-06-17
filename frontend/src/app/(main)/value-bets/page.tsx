@@ -100,13 +100,13 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
     return (
       <Link href={`/courses/${vb.course_id}`}>
         <div className={cn(
-          "flex items-center gap-4 p-3 rounded-xl border hover:bg-accent/30 transition-all group cursor-pointer",
+          "flex items-center gap-3 sm:gap-4 p-3 rounded-xl border hover:bg-accent/30 transition-all group cursor-pointer",
           NIVEAU_BORDERS[vb.niveau]
         )}>
           {/* Stars */}
-          <div className="shrink-0 w-16 text-center">
+          <div className="shrink-0 w-12 sm:w-16 text-center">
             <StarRating n={vb.niveau} />
-            <div className={`text-[10px] mt-0.5 ${NIVEAU_COLORS[vb.niveau]}`}>
+            <div className={`hidden sm:block text-[10px] mt-0.5 ${NIVEAU_COLORS[vb.niveau]}`}>
               {NIVEAU_LABELS[vb.niveau]}
             </div>
           </div>
@@ -131,7 +131,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           </div>
 
           {/* Metrics */}
-          <div className="shrink-0 flex items-center gap-5">
+          <div className="shrink-0 flex items-center gap-3 sm:gap-5">
             {/* Meilleure cote disponible */}
             <div className="text-right">
               <div className="text-[10px] text-muted-foreground">
@@ -152,7 +152,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             </div>
             {/* Mouvement de cote */}
             {vb.mouvement_cote_pct != null && Math.abs(vb.mouvement_cote_pct) >= 5 && (
-              <div className="text-right">
+              <div className="hidden sm:block text-right">
                 <div className="text-[10px] text-muted-foreground">Mouv.</div>
                 <div className={cn(
                   "font-bold text-xs font-mono tabular-nums",
@@ -163,7 +163,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
               </div>
             )}
             {vb.confiance != null && (
-              <div className="w-20">
+              <div className="hidden sm:block w-20">
                 <div className="text-[10px] text-muted-foreground mb-0.5">Confiance</div>
                 <ConfidenceBar v={vb.confiance} />
               </div>
@@ -359,21 +359,22 @@ export default function ValueBetsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
 
       {/* ── Header ────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Zap className="h-6 w-6 text-brand-gold" />
+      <div className="flex flex-row items-center justify-between gap-3 mb-5 sm:mb-6">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+            <Zap className="h-5 w-5 sm:h-6 sm:w-6 text-brand-gold shrink-0" />
             Paris de valeur
             {connected && (
-              <span className="flex items-center gap-1 text-sm font-normal text-emerald-600 ml-2">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />En direct
+              <span className="flex items-center gap-1 text-sm font-normal text-emerald-600 ml-1 sm:ml-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="hidden sm:inline">En direct</span>
               </span>
             )}
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">
+          <p className="text-muted-foreground text-sm mt-1 hidden sm:block">
             Opportunités à espérance positive détectées par l&apos;IA
           </p>
         </div>
@@ -412,7 +413,7 @@ export default function ValueBetsPage() {
       </div>
 
       {/* ── Stats bar ─────────────────────────── */}
-      <div className="flex items-center gap-6 text-sm mb-4 pb-4 border-b border-border/40">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mb-4 pb-4 border-b border-border/40">
         <span className="text-muted-foreground">
           <span className="font-semibold text-foreground">{rawBets.length}</span> pari{rawBets.length !== 1 ? "s" : ""} de valeur actif{rawBets.length !== 1 ? "s" : ""}
         </span>

@@ -10,8 +10,6 @@ import {
   TrendingUp, Zap, Brain, Star, ChevronRight, Lock,
 } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { authApi, api } from "@/lib/api";
 import { planLabel, formatDate, cn } from "@/lib/utils";
@@ -219,10 +217,10 @@ export default function ProfilPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 sm:space-y-6">
 
       {/* ── User header card ── */}
-      <div className="rounded-2xl border border-gray-200 bg-white px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 sm:px-6 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
         <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center text-white text-xl font-bold shadow-sm flex-shrink-0">
           {initials}
         </div>
@@ -255,7 +253,7 @@ export default function ProfilPage() {
         {isFree && (
           <Link
             href="/tarifs"
-            className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
+            className="flex-shrink-0 self-start inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
           >
             <Zap className="h-4 w-4" /> Passer Standard
           </Link>
@@ -290,11 +288,11 @@ export default function ProfilPage() {
           {/* ── Profile ── */}
           {activeSection === "profile" && (
             <form onSubmit={handleSubmit(onSave)}>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Informations personnelles</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Vos données de compte et préférences IA</p>
               </div>
-              <div className="px-6 py-5 space-y-5">
+              <div className="px-4 sm:px-6 py-5 space-y-5">
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Prénom" error={errors.prenom?.message}>
                     <input {...register("prenom")} className={inputCls} placeholder="Jean" />
@@ -324,14 +322,14 @@ export default function ProfilPage() {
                   <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide">
                     Profil de risque
                   </label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     {RISK_OPTIONS.map((opt) => (
                       <button
                         key={opt.value}
                         type="button"
                         onClick={() => setValue("profil_risque", opt.value)}
                         className={cn(
-                          "relative rounded-xl border-2 p-3 text-left transition-all",
+                          "relative rounded-xl border-2 p-2.5 sm:p-3 text-left transition-all",
                           profilRisque === opt.value
                             ? opt.activeBorder
                             : "border-gray-200 hover:border-gray-300 bg-white",
@@ -358,7 +356,7 @@ export default function ProfilPage() {
                   </div>
                 </div>
               </div>
-              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+              <div className="px-4 sm:px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
                 <button
                   type="submit"
                   disabled={savingProfile}
@@ -374,16 +372,16 @@ export default function ProfilPage() {
           {/* ── Plan ── */}
           {activeSection === "plan" && (
             <div>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Abonnement</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Gérez votre plan et votre facturation</p>
               </div>
-              <div className="px-6 py-5 space-y-5">
+              <div className="px-4 sm:px-6 py-5 space-y-5">
 
                 {/* Current plan badge */}
                 <div
                   className={cn(
-                    "rounded-2xl p-5 border-2",
+                    "rounded-2xl p-4 sm:p-5 border-2",
                     ["pro", "expert"].includes(planKey)
                       ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-white"
                       : ["starter", "standard"].includes(planKey)
@@ -429,13 +427,13 @@ export default function ProfilPage() {
 
                 {/* CTA */}
                 {isFree ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 space-y-3">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 space-y-3">
                     <div className="flex items-center gap-2">
                       <Zap className="h-5 w-5 text-amber-500" />
-                      <p className="font-semibold text-amber-800">Débloquez toutes les fonctionnalités</p>
+                      <p className="font-semibold text-amber-800">Débloquez tout</p>
                     </div>
                     <p className="text-sm text-amber-700">
-                      Passez Standard pour accéder aux paris de valeur illimités, à l&apos;assistant IA et aux notifications en temps réel.
+                      Paris de valeur illimités, assistant IA et notifications en temps réel.
                     </p>
                     <Link
                       href="/tarifs"
@@ -462,12 +460,12 @@ export default function ProfilPage() {
           {/* ── Notifications ── */}
           {activeSection === "notifs" && (
             <div>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Notifications</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Recevez les alertes paris de valeur en temps réel</p>
+                <p className="text-xs text-gray-500 mt-0.5">Alertes paris de valeur en temps réel</p>
               </div>
-              <div className="px-6 py-5 space-y-4">
-                <div className="flex items-center justify-between rounded-2xl border border-gray-200 p-4">
+              <div className="px-4 sm:px-6 py-5 space-y-4">
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 p-4">
                   <div>
                     <p className="text-sm font-semibold text-gray-800">Notifications</p>
                     <p className="text-xs text-gray-400 mt-0.5">Alertes de valeur instantanées sur votre appareil</p>
@@ -506,17 +504,17 @@ export default function ProfilPage() {
           {/* ── Security ── */}
           {activeSection === "security" && (
             <div>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Sécurité</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Statut de votre compte</p>
               </div>
-              <div className="px-6 py-5 space-y-3">
+              <div className="px-4 sm:px-6 py-5 space-y-3">
 
                 {/* Email verified row */}
-                <div className="flex items-center justify-between rounded-2xl border border-gray-200 p-4">
-                  <div>
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 p-4">
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-800">E-mail vérifié</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{user.email}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{user.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {user.email_verified ? (
@@ -558,7 +556,7 @@ export default function ProfilPage() {
       </div>
 
       {/* ── Responsible gambling ── */}
-      <div className="rounded-2xl border border-orange-100 bg-orange-50/50 px-5 py-4 text-xs text-orange-700">
+      <div className="rounded-2xl border border-orange-100 bg-orange-50/50 px-4 sm:px-5 py-4 text-xs text-orange-700">
         <p className="font-semibold mb-1">⚠️ Jeu responsable</p>
         <p>
           Si vous avez des difficultés à contrôler votre jeu, appelez le{" "}

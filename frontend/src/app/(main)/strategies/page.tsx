@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Play, Trash2, Share2, Loader2, TrendingUp, Lock } from "lucide-react";
+import { Plus, Play, Trash2, Loader2, TrendingUp } from "lucide-react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -50,8 +50,8 @@ function StrategieCard({
 }) {
   return (
     <Card className="card-hover">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between mb-3">
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-2 mb-3">
           <h3 className="font-semibold">{strat.nom}</h3>
           <div className="flex gap-1">
             {strat.alerte_email && <Badge variant="warning" className="text-[10px]">📧 Alerte</Badge>}
@@ -178,11 +178,11 @@ export default function StrategiesPage() {
 
   if (!user || !["pro", "expert"].includes(user.plan)) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-20 text-center">
-        <TrendingUp className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-        <h1 className="text-3xl font-bold mb-3">Créateur de stratégies</h1>
-        <p className="text-muted-foreground mb-8">
-          Créez des filtres multi-critères, simulez sur 18 mois de données, configurez des alertes automatiques.
+      <div className="max-w-2xl mx-auto px-4 py-16 sm:py-20 text-center">
+        <TrendingUp className="h-14 w-14 sm:h-16 sm:w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+        <h1 className="text-2xl sm:text-3xl font-bold mb-3">Créateur de stratégies</h1>
+        <p className="text-muted-foreground text-sm sm:text-base mb-8">
+          Filtres multi-critères, simulation sur 18 mois, alertes automatiques.
           Réservé au plan <strong className="text-brand-gold">Expert</strong>.
         </p>
         <Button variant="brand" size="lg" asChild>
@@ -193,15 +193,15 @@ export default function StrategiesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8">
+    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Stratégies</h1>
-          <p className="text-muted-foreground text-sm mt-1">Filtres automatiques + simulation sur données historiques</p>
+      <div className="flex items-start justify-between gap-3 mb-6 sm:mb-8">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold">Stratégies</h1>
+          <p className="text-muted-foreground text-sm mt-1">Filtres + simulation historique</p>
         </div>
-        <Button variant="brand" onClick={() => setShowForm(!showForm)}>
-          <Plus className="h-4 w-4" /> Nouvelle stratégie
+        <Button variant="brand" className="flex-shrink-0" onClick={() => setShowForm(!showForm)}>
+          <Plus className="h-4 w-4" /> <span className="hidden sm:inline">Nouvelle stratégie</span><span className="sm:hidden">Créer</span>
         </Button>
       </div>
 
