@@ -12,7 +12,7 @@ import useSWR from "swr";
 import { toast } from "sonner";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer,
+  Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { format, subDays, isAfter, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -397,35 +397,49 @@ export default function BankrollPage() {
                     ))}
                   </div>
                 </div>
-                {chartData.length > 1 && (
-                  <div className={cn("text-xl font-bold mt-1 tabular-nums", isPositive ? "text-emerald-600" : "text-red-500")}>
+                {chartData.length > 1 ? (
+                  <div className={cn("text-2xl font-black mt-1 tabular-nums leading-none", isPositive ? "text-emerald-600" : "text-red-500")}>
                     {formatEuro(chartData.at(-1)!.bankroll)}
-                    <span className="text-xs font-normal text-gray-400 ml-2">
-                      {isPositive ? "▲" : "▼"} {formatEuro(Math.abs(chartData.at(-1)!.bankroll - chartData[0]!.bankroll))} sur la période
+                    <span className="text-xs font-medium text-gray-400 ml-2">
+                      {isPositive ? "▲" : "▼"} {formatEuro(Math.abs(chartData.at(-1)!.bankroll - chartData[0]!.bankroll))}
+                      <span className="text-gray-300"> · </span>{chartData.length} points
                     </span>
                   </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-1">Pas assez de paris réglés sur cette période.</p>
                 )}
               </CardHeader>
               <CardContent className="pt-2">
-                <ResponsiveContainer width="100%" height={180}>
-                  <AreaChart data={chartData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={isPositive ? "#10b981" : "#ef4444"} stopOpacity={0.12} />
-                        <stop offset="95%" stopColor={isPositive ? "#10b981" : "#ef4444"} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F6" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9ca3af" }} tickLine={false} axisLine={false}
-                      interval={Math.max(0, Math.floor(chartData.length / 6))} />
-                    <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} tickLine={false} axisLine={false}
-                      domain={[chartMin, chartMax]} tickFormatter={(v) => `€${v.toFixed(0)}`} width={52} />
-                    <Tooltip contentStyle={{ background: "#fff", border: "1px solid #f1f5f9", borderRadius: 12, fontSize: 12, boxShadow: "0 4px 14px rgba(0,0,0,0.06)" }}
-                      formatter={(v: number) => [formatEuro(v), "Capital"]} />
-                    <Area type="monotone" dataKey="bankroll" stroke={isPositive ? "#10b981" : "#ef4444"} strokeWidth={2}
-                      fill="url(#bg)" dot={false} activeDot={{ r: 4, fill: isPositive ? "#10b981" : "#ef4444", stroke: "#fff", strokeWidth: 2 }} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                {chartData.length > 1 ? (
+                  <ResponsiveContainer width="100%" height={190}>
+                    <AreaChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="capitalGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={isPositive ? "#10b981" : "#ef4444"} stopOpacity={0.24} />
+                          <stop offset="100%" stopColor={isPositive ? "#10b981" : "#ef4444"} stopOpacity={0.01} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F1F3F7" vertical={false} />
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9ca3af" }} tickLine={false} axisLine={false}
+                        interval={Math.max(0, Math.floor(chartData.length / 6))} minTickGap={16} />
+                      <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} tickLine={false} axisLine={false}
+                        domain={[chartMin, chartMax]} tickFormatter={(v) => `${v.toFixed(0)}€`} width={44} />
+                      <Tooltip contentStyle={{ background: "#fff", border: "1px solid #f1f5f9", borderRadius: 12, fontSize: 12, boxShadow: "0 4px 14px rgba(0,0,0,0.06)" }}
+                        formatter={(v: number) => [formatEuro(v), "Capital"]} />
+                      {stats?.bankroll_initiale != null && (
+                        <ReferenceLine y={stats.bankroll_initiale} stroke="#cbd5e1" strokeDasharray="4 4" strokeWidth={1}
+                          label={{ value: "capital initial", position: "insideTopLeft", fontSize: 9, fill: "#94a3b8" }} />
+                      )}
+                      <Area type="monotone" dataKey="bankroll" stroke={isPositive ? "#10b981" : "#ef4444"} strokeWidth={2.5}
+                        fill="url(#capitalGrad)" dot={false} activeDot={{ r: 4, fill: isPositive ? "#10b981" : "#ef4444", stroke: "#fff", strokeWidth: 2 }} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[190px] flex flex-col items-center justify-center text-center gap-1.5">
+                    <TrendingUp className="w-7 h-7 text-gray-200" />
+                    <p className="text-xs text-gray-400">La courbe apparaîtra dès quelques paris réglés sur cette période.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
@@ -453,29 +467,30 @@ export default function BankrollPage() {
                 <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                   <Layers className="w-4 h-4 text-amber-500" />Performance par type de pari
                 </CardTitle>
-                <p className="text-[11px] text-gray-400">Bénéfice net réel par type — vert = profit, rouge = perte.</p>
+                <p className="text-[11px] text-gray-400">Bénéfice net réel par type — barre verte = profit, rouge = perte.</p>
               </CardHeader>
-              <CardContent className="pt-3 space-y-4">
+              <CardContent className="pt-3 space-y-2.5">
                 {(() => {
                   const maxAbs = Math.max(1, ...analytics.byType.map((t) => Math.abs(t.net)));
                   return analytics.byType.map((t) => {
                     const pos = t.net >= 0;
-                    const w = (Math.abs(t.net) / maxAbs) * 50; // % d'une demi-largeur (barre divergente)
+                    const w = Math.max(8, Math.round((Math.abs(t.net) / maxAbs) * 100));
                     return (
-                      <div key={t.type}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-sm font-medium text-gray-700">{t.type}</span>
-                          <span className={cn("text-sm font-bold tabular-nums", pos ? "text-emerald-600" : "text-red-500")}>
-                            {pos ? "+" : ""}{formatEuro(t.net)}
-                          </span>
+                      <div key={t.type} className="flex items-center gap-2.5">
+                        <div className="w-[88px] sm:w-28 shrink-0">
+                          <div className="text-[13px] font-medium text-gray-700 truncate leading-tight">{t.type}</div>
+                          <div className="text-[10px] text-gray-400 tabular-nums">{t.nb} pari{t.nb > 1 ? "s" : ""}{t.settled > 0 ? ` · ${Math.round(t.winRate)}%` : ""}</div>
                         </div>
-                        <div className="relative h-2.5 rounded-full bg-gray-100">
-                          <div className="absolute inset-y-0 left-1/2 w-px bg-gray-300/70" />
-                          {pos ? (
-                            <div className="absolute inset-y-0 left-1/2 rounded-r-full bg-emerald-500" style={{ width: `${w}%` }} />
-                          ) : (
-                            <div className="absolute inset-y-0 right-1/2 rounded-l-full bg-red-400" style={{ width: `${w}%` }} />
-                          )}
+                        <div className="flex-1 h-7 rounded-lg bg-gray-100/80 overflow-hidden">
+                          <div
+                            className={cn("h-full rounded-lg flex items-center justify-end px-2 transition-all",
+                              pos ? "bg-gradient-to-r from-emerald-400 to-emerald-500" : "bg-gradient-to-r from-red-300 to-red-400")}
+                            style={{ width: `${w}%` }}
+                          >
+                            <span className="text-[11px] font-bold text-white tabular-nums whitespace-nowrap drop-shadow-sm">
+                              {pos ? "+" : ""}{formatEuro(t.net)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );

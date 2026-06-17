@@ -515,7 +515,7 @@ export default function ProgrammePage() {
   const [hippoSearch, setHippoSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [vbOnly, setVbOnly] = useState(false);
-  const [viewMode, setViewMode] = useState<"reunion" | "heure">("reunion");
+  const [viewMode, setViewMode] = useState<"reunion" | "heure">("heure");
 
   const isToday = format(selectedDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
   const isPaid = user && !["free", "decouverte"].includes(user.plan);

@@ -145,13 +145,13 @@ export function Navbar() {
         <div className="flex h-16 items-center justify-between">
 
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 flex-shrink-0" aria-label="BlackTurf — Accueil">
+          <Link href="/" className="flex items-center gap-2 flex-shrink-0" aria-label="BlackTurf — Accueil">
             <Image
               src="/logo.png"
               alt="BlackTurf"
-              width={36}
-              height={36}
-              className="rounded-lg object-contain"
+              width={52}
+              height={52}
+              className="h-12 w-12 sm:h-[52px] sm:w-[52px] object-contain"
               priority
             />
             <span className="text-xl font-bold tracking-tight text-gray-900">
