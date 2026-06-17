@@ -46,15 +46,15 @@ interface ScraperStatus {
 function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string | number; sub?: string }) {
   return (
     <Card>
-      <CardContent className="p-5">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="h-9 w-9 rounded-lg bg-brand-gold/10 flex items-center justify-center">
+      <CardContent className="p-3 sm:p-5">
+        <div className="flex items-center gap-2 sm:gap-3 mb-2">
+          <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-brand-gold/10 flex items-center justify-center shrink-0">
             <Icon className="h-4 w-4 text-brand-gold" />
           </div>
-          <span className="text-sm text-muted-foreground">{label}</span>
+          <span className="text-xs sm:text-sm text-muted-foreground leading-tight">{label}</span>
         </div>
-        <div className="text-2xl font-bold">{value}</div>
-        {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
+        <div className="text-xl sm:text-2xl font-bold">{value}</div>
+        {sub && <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">{sub}</div>}
       </CardContent>
     </Card>
   );
@@ -97,8 +97,8 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="relative my-8 w-full max-w-4xl rounded-2xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-2 sm:p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="relative my-4 sm:my-8 w-full max-w-4xl rounded-2xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} className="absolute right-4 top-4 rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
           <X className="h-5 w-5" />
         </button>
@@ -106,7 +106,7 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
         {isLoading || !data ? (
           <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
         ) : (
-          <div className="p-6 space-y-6">
+          <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
             {/* Identité */}
             <div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -196,44 +196,71 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
               {data.bets.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Aucun pari enregistré.</p>
               ) : (
-                <div className="max-h-96 overflow-y-auto rounded-lg border border-border">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-muted/80 backdrop-blur">
-                      <tr className="text-muted-foreground">
-                        <th className="text-left p-2">Date</th>
-                        <th className="text-left p-2">Course</th>
-                        <th className="text-left p-2">Type</th>
-                        <th className="text-left p-2">Chevaux</th>
-                        <th className="text-right p-2">Mise</th>
-                        <th className="text-right p-2">Cote</th>
-                        <th className="text-center p-2">Résultat</th>
-                        <th className="text-right p-2">Gain/Perte</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.bets.map((b) => (
-                        <tr key={b.entry_id} className="border-t border-border/50 hover:bg-muted/20">
-                          <td className="p-2 whitespace-nowrap text-muted-foreground">{formatDateTime(b.date)}</td>
-                          <td className="p-2 whitespace-nowrap">
-                            {b.course_code && <span className="font-mono font-semibold">{b.course_code}</span>}
-                            {b.hippodrome && <span className="text-muted-foreground"> {b.hippodrome}</span>}
-                          </td>
-                          <td className="p-2 capitalize whitespace-nowrap">
+                <>
+                  {/* Mobile : liste de cartes */}
+                  <div className="sm:hidden max-h-96 overflow-y-auto space-y-2">
+                    {data.bets.map((b) => (
+                      <div key={b.entry_id} className="rounded-lg border border-border p-2.5 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium capitalize">
                             {b.type_pari}
-                            {b.suivi_reco_ia && <span className="ml-1 text-[9px] text-brand-gold" title="Suivi reco IA">IA</span>}
-                          </td>
-                          <td className="p-2 max-w-[120px] truncate" title={b.chevaux || ""}>{b.chevaux || "—"}</td>
-                          <td className="p-2 text-right tabular-nums">{formatEuro(b.mise)}</td>
-                          <td className="p-2 text-right tabular-nums text-muted-foreground">{b.cote ? b.cote.toFixed(2) : "—"}</td>
-                          <td className="p-2 text-center">{resultBadge(b.resultat)}</td>
-                          <td className={cn("p-2 text-right tabular-nums font-semibold", (b.gain_perte ?? 0) > 0 ? "text-green-600" : (b.gain_perte ?? 0) < 0 ? "text-destructive" : "text-muted-foreground")}>
+                            {b.suivi_reco_ia && <span className="ml-1 text-[9px] text-brand-gold">IA</span>}
+                          </span>
+                          {resultBadge(b.resultat)}
+                        </div>
+                        <div className="mt-1 text-[11px] text-muted-foreground truncate" title={b.chevaux || ""}>{b.chevaux || "—"}</div>
+                        <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                          <span className="text-muted-foreground">
+                            {b.course_code && <span className="font-mono font-semibold text-foreground">{b.course_code} </span>}
+                            {formatEuro(b.mise)}{b.cote ? ` · @${b.cote.toFixed(2)}` : ""}
+                          </span>
+                          <span className={cn("tabular-nums font-semibold", (b.gain_perte ?? 0) > 0 ? "text-green-600" : (b.gain_perte ?? 0) < 0 ? "text-destructive" : "text-muted-foreground")}>
                             {b.gain_perte == null ? "—" : `${b.gain_perte >= 0 ? "+" : ""}${formatEuro(b.gain_perte)}`}
-                          </td>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Desktop : tableau complet */}
+                  <div className="hidden sm:block max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-muted/80 backdrop-blur">
+                        <tr className="text-muted-foreground">
+                          <th className="text-left p-2">Date</th>
+                          <th className="text-left p-2">Course</th>
+                          <th className="text-left p-2">Type</th>
+                          <th className="text-left p-2">Chevaux</th>
+                          <th className="text-right p-2">Mise</th>
+                          <th className="text-right p-2">Cote</th>
+                          <th className="text-center p-2">Résultat</th>
+                          <th className="text-right p-2">Gain/Perte</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {data.bets.map((b) => (
+                          <tr key={b.entry_id} className="border-t border-border/50 hover:bg-muted/20">
+                            <td className="p-2 whitespace-nowrap text-muted-foreground">{formatDateTime(b.date)}</td>
+                            <td className="p-2 whitespace-nowrap">
+                              {b.course_code && <span className="font-mono font-semibold">{b.course_code}</span>}
+                              {b.hippodrome && <span className="text-muted-foreground"> {b.hippodrome}</span>}
+                            </td>
+                            <td className="p-2 capitalize whitespace-nowrap">
+                              {b.type_pari}
+                              {b.suivi_reco_ia && <span className="ml-1 text-[9px] text-brand-gold" title="Suivi reco IA">IA</span>}
+                            </td>
+                            <td className="p-2 max-w-[120px] truncate" title={b.chevaux || ""}>{b.chevaux || "—"}</td>
+                            <td className="p-2 text-right tabular-nums">{formatEuro(b.mise)}</td>
+                            <td className="p-2 text-right tabular-nums text-muted-foreground">{b.cote ? b.cote.toFixed(2) : "—"}</td>
+                            <td className="p-2 text-center">{resultBadge(b.resultat)}</td>
+                            <td className={cn("p-2 text-right tabular-nums font-semibold", (b.gain_perte ?? 0) > 0 ? "text-green-600" : (b.gain_perte ?? 0) < 0 ? "text-destructive" : "text-muted-foreground")}>
+                              {b.gain_perte == null ? "—" : `${b.gain_perte >= 0 ? "+" : ""}${formatEuro(b.gain_perte)}`}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -349,12 +376,13 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Back-office</h1>
+    <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-5 sm:space-y-8">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-xl sm:text-2xl font-bold">Back-office</h1>
         <Button variant="brand" size="sm" onClick={handleRetrain} disabled={retraining}>
           {retraining ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Retraining manuel
+          <span className="hidden sm:inline">Retraining manuel</span>
+          <span className="sm:hidden">Retrain</span>
         </Button>
       </div>
 
@@ -376,8 +404,7 @@ export default function AdminPage() {
             <Wallet className="h-4 w-4 text-brand-gold" /> Rentabilité réelle par profil (net)
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Bilan 10€/profil sur chaque course, réglé aux rapports PMU. Bénéfice net réel (peut être négatif) —
-            réservé au suivi admin, non affiché au public.
+            10€/profil/course, rapports PMU réels. Net réel (peut être négatif), suivi admin.
           </p>
         </CardHeader>
         <CardContent>
@@ -406,40 +433,65 @@ export default function AdminPage() {
                 </div>
               </div>
               {palmares.profils && palmares.profils.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[560px]">
-                    <thead>
-                      <tr className="border-b border-border text-xs text-muted-foreground">
-                        <th className="text-left p-2 font-medium">Profil</th>
-                        <th className="text-right p-2 font-medium">Courses</th>
-                        <th className="text-right p-2 font-medium">Misé</th>
-                        <th className="text-right p-2 font-medium">Gagné</th>
-                        <th className="text-right p-2 font-medium">Net</th>
-                        <th className="text-right p-2 font-medium">ROI</th>
-                        <th className="text-right p-2 font-medium">% courses +</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {palmares.profils.map((p) => (
-                        <tr key={p.profil} className="border-b border-border/40">
-                          <td className="p-2 font-medium">{PROFIL_NET_LABELS[p.profil] ?? p.label}</td>
-                          <td className="p-2 text-right tabular-nums text-muted-foreground">{p.nb_courses}</td>
-                          <td className="p-2 text-right tabular-nums text-muted-foreground">{(p.mise_totale ?? 0).toFixed(0)}€</td>
-                          <td className="p-2 text-right tabular-nums text-green-600">{(p.gain_total ?? 0).toFixed(0)}€</td>
-                          <td className={cn("p-2 text-right tabular-nums font-semibold", p.gain_net >= 0 ? "text-green-600" : "text-destructive")}>
+                <>
+                  {/* Mobile : cartes par profil */}
+                  <div className="sm:hidden space-y-2">
+                    {palmares.profils.map((p) => (
+                      <div key={p.profil} className="rounded-lg border border-border p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-sm">{PROFIL_NET_LABELS[p.profil] ?? p.label}</span>
+                          <span className={cn("text-sm font-bold tabular-nums", p.gain_net >= 0 ? "text-green-600" : "text-destructive")}>
                             {p.gain_net >= 0 ? "+" : ""}{p.gain_net.toFixed(0)}€
-                          </td>
-                          <td className={cn("p-2 text-right tabular-nums font-semibold", (p.roi ?? 0) >= 0 ? "text-green-600" : "text-destructive")}>
-                            {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}
-                          </td>
-                          <td className="p-2 text-right tabular-nums text-muted-foreground">
-                            {p.taux_courses_beneficiaires != null ? `${p.taux_courses_beneficiaires}%` : "—"}
-                          </td>
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground tabular-nums">
+                          <span>{p.nb_courses} courses</span>
+                          <span>misé {(p.mise_totale ?? 0).toFixed(0)}€</span>
+                          <span className="text-green-600">gagné {(p.gain_total ?? 0).toFixed(0)}€</span>
+                          <span className={cn((p.roi ?? 0) >= 0 ? "text-green-600" : "text-destructive")}>
+                            ROI {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}
+                          </span>
+                          {p.taux_courses_beneficiaires != null && <span>{p.taux_courses_beneficiaires}% courses +</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Desktop : tableau */}
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full text-sm min-w-[560px]">
+                      <thead>
+                        <tr className="border-b border-border text-xs text-muted-foreground">
+                          <th className="text-left p-2 font-medium">Profil</th>
+                          <th className="text-right p-2 font-medium">Courses</th>
+                          <th className="text-right p-2 font-medium">Misé</th>
+                          <th className="text-right p-2 font-medium">Gagné</th>
+                          <th className="text-right p-2 font-medium">Net</th>
+                          <th className="text-right p-2 font-medium">ROI</th>
+                          <th className="text-right p-2 font-medium">% courses +</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {palmares.profils.map((p) => (
+                          <tr key={p.profil} className="border-b border-border/40">
+                            <td className="p-2 font-medium">{PROFIL_NET_LABELS[p.profil] ?? p.label}</td>
+                            <td className="p-2 text-right tabular-nums text-muted-foreground">{p.nb_courses}</td>
+                            <td className="p-2 text-right tabular-nums text-muted-foreground">{(p.mise_totale ?? 0).toFixed(0)}€</td>
+                            <td className="p-2 text-right tabular-nums text-green-600">{(p.gain_total ?? 0).toFixed(0)}€</td>
+                            <td className={cn("p-2 text-right tabular-nums font-semibold", p.gain_net >= 0 ? "text-green-600" : "text-destructive")}>
+                              {p.gain_net >= 0 ? "+" : ""}{p.gain_net.toFixed(0)}€
+                            </td>
+                            <td className={cn("p-2 text-right tabular-nums font-semibold", (p.roi ?? 0) >= 0 ? "text-green-600" : "text-destructive")}>
+                              {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}
+                            </td>
+                            <td className="p-2 text-right tabular-nums text-muted-foreground">
+                              {p.taux_courses_beneficiaires != null ? `${p.taux_courses_beneficiaires}%` : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
               {palmares.updated_at && (
                 <p className="mt-3 text-[11px] text-muted-foreground/70 flex items-center gap-1">
@@ -464,16 +516,16 @@ export default function AdminPage() {
           </CardHeader>
           <CardContent>
             {dashboard.modele.version ? (
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
                 <div className="text-center p-3 rounded-lg bg-muted/30">
                   <div className="text-xs text-muted-foreground">AUC-ROC</div>
-                  <div className="text-xl font-bold">{dashboard.modele.auc_roc?.toFixed(4)}</div>
+                  <div className="text-lg sm:text-xl font-bold">{dashboard.modele.auc_roc?.toFixed(4)}</div>
                 </div>
                 <div className="text-center p-3 rounded-lg bg-muted/30">
                   <div className="text-xs text-muted-foreground">Précision Top-3</div>
-                  <div className="text-xl font-bold">{((dashboard.modele.precision_top3 || 0) * 100).toFixed(1)}%</div>
+                  <div className="text-lg sm:text-xl font-bold">{((dashboard.modele.precision_top3 || 0) * 100).toFixed(1)}%</div>
                 </div>
-                <div className="text-center p-3 rounded-lg bg-muted/30">
+                <div className="text-center p-3 rounded-lg bg-muted/30 col-span-2 sm:col-span-1">
                   <div className="text-xs text-muted-foreground">Entraîné le</div>
                   <div className="text-sm font-bold">{formatDateTime(dashboard.modele.trained_at)}</div>
                 </div>
@@ -491,38 +543,14 @@ export default function AdminPage() {
           <CardHeader>
             <CardTitle className="text-base">Historique des modèles</CardTitle>
           </CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full text-sm min-w-[480px]">
-              <thead>
-                <tr className="border-b border-border text-xs text-muted-foreground">
-                  <th className="text-left p-3">Version</th>
-                  <th className="text-right p-3">AUC-ROC</th>
-                  <th className="text-right p-3">Brier</th>
-                  <th className="text-right p-3">WF-AUC</th>
-                  <th className="text-right p-3">Top-3</th>
-                  <th className="text-right p-3">ROI sim.</th>
-                  <th className="text-right p-3">Courses</th>
-                  <th className="text-center p-3">Statut</th>
-                  <th className="text-right p-3">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.map((m) => (
-                  <tr key={m.version_num} className={cn("border-b border-border/50", m.est_actif && "bg-brand-gold/5")}>
-                    <td className="p-3 font-mono font-bold">v{m.version_num}</td>
-                    <td className="p-3 text-right">{m.auc_roc.toFixed(4)}</td>
-                    <td className={cn("p-3 text-right text-xs", m.brier_score < 0.18 ? "text-brand-emerald" : "text-brand-red")}>
-                      {m.brier_score.toFixed(4)}
-                    </td>
-                    <td className="p-3 text-right text-xs text-muted-foreground">
-                      {m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}
-                    </td>
-                    <td className="p-3 text-right">{(m.precision_top3 * 100).toFixed(1)}%</td>
-                    <td className={cn("p-3 text-right", m.roi_simule >= 0 ? "text-brand-emerald" : "text-destructive")}>
-                      {m.roi_simule >= 0 ? "+" : ""}{(m.roi_simule * 100).toFixed(1)}%
-                    </td>
-                    <td className="p-3 text-right text-muted-foreground">{m.nb_courses_train}</td>
-                    <td className="p-3 text-center">
+          <CardContent className="p-0">
+            {/* Mobile : cartes par version */}
+            <div className="sm:hidden space-y-2 p-3">
+              {models.map((m) => (
+                <div key={m.version_num} className={cn("rounded-lg border border-border p-3", m.est_actif && "bg-brand-gold/5 border-brand-gold/30")}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold">v{m.version_num}</span>
+                    <div className="flex items-center gap-2">
                       {m.est_actif ? (
                         <Badge variant="success">Actif</Badge>
                       ) : m.est_rollback ? (
@@ -530,8 +558,6 @@ export default function AdminPage() {
                       ) : (
                         <Badge variant="secondary">Archivé</Badge>
                       )}
-                    </td>
-                    <td className="p-3 text-right">
                       {!m.est_actif && (
                         <Button
                           size="sm"
@@ -542,11 +568,77 @@ export default function AdminPage() {
                           {deployingVersion === m.version_num ? <Loader2 className="h-3 w-3 animate-spin" /> : "Déployer"}
                         </Button>
                       )}
-                    </td>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] tabular-nums">
+                    <span className="text-muted-foreground">AUC <span className="text-foreground font-semibold">{m.auc_roc.toFixed(4)}</span></span>
+                    <span className="text-muted-foreground">Brier <span className={cn("font-semibold", m.brier_score < 0.18 ? "text-brand-emerald" : "text-brand-red")}>{m.brier_score.toFixed(4)}</span></span>
+                    <span className="text-muted-foreground">WF-AUC <span className="text-foreground font-semibold">{m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}</span></span>
+                    <span className="text-muted-foreground">Top-3 <span className="text-foreground font-semibold">{(m.precision_top3 * 100).toFixed(1)}%</span></span>
+                    <span className="text-muted-foreground">ROI <span className={cn("font-semibold", m.roi_simule >= 0 ? "text-brand-emerald" : "text-destructive")}>{m.roi_simule >= 0 ? "+" : ""}{(m.roi_simule * 100).toFixed(1)}%</span></span>
+                    <span className="text-muted-foreground">{m.nb_courses_train} courses</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Desktop : tableau */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-sm min-w-[480px]">
+                <thead>
+                  <tr className="border-b border-border text-xs text-muted-foreground">
+                    <th className="text-left p-3">Version</th>
+                    <th className="text-right p-3">AUC-ROC</th>
+                    <th className="text-right p-3">Brier</th>
+                    <th className="text-right p-3">WF-AUC</th>
+                    <th className="text-right p-3">Top-3</th>
+                    <th className="text-right p-3">ROI sim.</th>
+                    <th className="text-right p-3">Courses</th>
+                    <th className="text-center p-3">Statut</th>
+                    <th className="text-right p-3">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {models.map((m) => (
+                    <tr key={m.version_num} className={cn("border-b border-border/50", m.est_actif && "bg-brand-gold/5")}>
+                      <td className="p-3 font-mono font-bold">v{m.version_num}</td>
+                      <td className="p-3 text-right">{m.auc_roc.toFixed(4)}</td>
+                      <td className={cn("p-3 text-right text-xs", m.brier_score < 0.18 ? "text-brand-emerald" : "text-brand-red")}>
+                        {m.brier_score.toFixed(4)}
+                      </td>
+                      <td className="p-3 text-right text-xs text-muted-foreground">
+                        {m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}
+                      </td>
+                      <td className="p-3 text-right">{(m.precision_top3 * 100).toFixed(1)}%</td>
+                      <td className={cn("p-3 text-right", m.roi_simule >= 0 ? "text-brand-emerald" : "text-destructive")}>
+                        {m.roi_simule >= 0 ? "+" : ""}{(m.roi_simule * 100).toFixed(1)}%
+                      </td>
+                      <td className="p-3 text-right text-muted-foreground">{m.nb_courses_train}</td>
+                      <td className="p-3 text-center">
+                        {m.est_actif ? (
+                          <Badge variant="success">Actif</Badge>
+                        ) : m.est_rollback ? (
+                          <Badge variant="warning">Rollback</Badge>
+                        ) : (
+                          <Badge variant="secondary">Archivé</Badge>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        {!m.est_actif && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeploy(m.version_num)}
+                            disabled={deployingVersion === m.version_num}
+                          >
+                            {deployingVersion === m.version_num ? <Loader2 className="h-3 w-3 animate-spin" /> : "Déployer"}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -590,22 +682,76 @@ export default function AdminPage() {
       {users && (
         <Card>
           <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle className="text-base">Gestion des comptes ({(users as unknown[]).length})</CardTitle>
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+              <CardTitle className="text-base">Comptes ({(users as unknown[]).length})</CardTitle>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <input
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Rechercher (email, nom)…"
-                  className="rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
+                  placeholder="Rechercher…"
+                  className="rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm flex-1 sm:w-56 sm:flex-none focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
                 />
                 <button onClick={exportUsers} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:border-brand-gold/50 hover:text-brand-gold transition-colors whitespace-nowrap">
-                  ⬇ Export CSV
+                  ⬇ CSV
                 </button>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
+          <CardContent className="p-0">
+            {/* Mobile : cartes par compte */}
+            <div className="sm:hidden space-y-2 p-3">
+              {(users as Array<{
+                user_id: string; email: string; nom: string | null; prenom: string | null;
+                plan: string; profil_risque: string; is_active: boolean; is_admin: boolean;
+                email_verified: boolean; auth_method: string; stripe_client: boolean;
+                created_at: string; solde_actuel: number; mise_totale: number; gain_net: number;
+                roi: number | null; nb_paris: number; nb_gagnes: number;
+              }>).map((u) => {
+                const nom = [u.prenom, u.nom].filter(Boolean).join(" ") || "—";
+                return (
+                  <div key={u.user_id} className="rounded-lg border border-border p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        onClick={() => setSelectedUser(u.user_id)}
+                        className="text-left min-w-0 flex-1"
+                        title="Voir l'historique complet">
+                        <div className="font-medium flex items-center gap-1.5 truncate">
+                          {nom}
+                          {u.is_admin && <Badge variant="secondary" className="text-[9px]">ADMIN</Badge>}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground truncate">{u.email}</div>
+                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Badge variant={["pro", "expert"].includes(u.plan) ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
+                        {u.is_active ? <CheckCircle className="h-4 w-4 text-green-600" /> : <XCircle className="h-4 w-4 text-destructive" />}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
+                      <span className="font-mono">{u.solde_actuel?.toFixed(0)}€</span>
+                      <span className={cn("font-mono font-semibold", u.gain_net >= 0 ? "text-green-600" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</span>
+                      <span className={cn("font-mono", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-600" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</span>
+                      <span className="text-muted-foreground">{u.nb_gagnes}/{u.nb_paris} paris</span>
+                      <span className="text-muted-foreground capitalize">{u.profil_risque}</span>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => toggleActive(u.user_id, u.is_active)}
+                        className={cn("rounded px-2 py-1 text-[10px] font-semibold border transition-colors",
+                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-600 hover:bg-green-500/10")}>
+                        {u.is_active ? "Suspendre" : "Réactiver"}
+                      </button>
+                      <button
+                        onClick={() => adjustBankroll(u.user_id, u.email)}
+                        className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold transition-colors">
+                        💰 Ajuster
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          {/* Desktop : tableau complet */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm min-w-[920px]">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
@@ -679,6 +825,7 @@ export default function AdminPage() {
                 })}
               </tbody>
             </table>
+          </div>
           </CardContent>
         </Card>
       )}

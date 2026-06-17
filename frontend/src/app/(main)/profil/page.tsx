@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -86,26 +86,29 @@ const RISK_OPTIONS = [
   {
     value: "conservateur" as const,
     icon: "🛡️",
-    label: "Conservateur",
-    desc: "Mises faibles, protection du capital",
+    label: "Prudent",
+    desc: "Mises faibles, capital protégé",
     color: "text-blue-600",
     activeBorder: "border-blue-400 bg-blue-50",
+    dot: "bg-blue-500",
   },
   {
     value: "equilibre" as const,
     icon: "⚖️",
-    label: "Équilibré",
-    desc: "Rapport risque / rendement optimal",
+    label: "Modéré",
+    desc: "Risque / rendement équilibré",
     color: "text-amber-600",
     activeBorder: "border-amber-400 bg-amber-50",
+    dot: "bg-amber-500",
   },
   {
     value: "agressif" as const,
     icon: "🚀",
-    label: "Agressif",
-    desc: "Mises maximisées, rendement prioritaire",
+    label: "Risqué",
+    desc: "Mises max, rendement visé",
     color: "text-red-600",
     activeBorder: "border-red-400 bg-red-50",
+    dot: "bg-red-500",
   },
 ];
 
@@ -139,15 +142,25 @@ export default function ProfilPage() {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [activeSection, setActiveSection] = useState<"profile" | "plan" | "notifs" | "security">("profile");
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<ProfileForm>({
+  const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      prenom: user?.prenom || "",
-      nom: user?.nom || "",
-      bankroll_initiale: user?.bankroll_initiale || undefined,
-      profil_risque: (user?.profil_risque as "conservateur" | "equilibre" | "agressif") || "equilibre",
+      prenom: "", nom: "", bankroll_initiale: undefined, profil_risque: "equilibre",
     },
   });
+
+  // useRequireAuth charge `user` de façon asynchrone : sans ce reset, le formulaire
+  // resterait sur les valeurs vides du 1er rendu (bug d'affichage : champs vides).
+  useEffect(() => {
+    if (user) {
+      reset({
+        prenom: user.prenom || "",
+        nom: user.nom || "",
+        bankroll_initiale: user.bankroll_initiale ?? undefined,
+        profil_risque: (user.profil_risque as "conservateur" | "equilibre" | "agressif") || "equilibre",
+      });
+    }
+  }, [user, reset]);
 
   const profilRisque = watch("profil_risque");
   const isFree = user && ["free", "decouverte"].includes(user.plan);
@@ -220,7 +233,7 @@ export default function ProfilPage() {
     <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 sm:space-y-6">
 
       {/* ── User header card ── */}
-      <div className="rounded-2xl border border-gray-200 bg-white px-4 sm:px-6 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
+      <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-white to-amber-50/40 px-4 sm:px-6 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
         <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center text-white text-xl font-bold shadow-sm flex-shrink-0">
           {initials}
         </div>
@@ -263,17 +276,17 @@ export default function ProfilPage() {
       {/* ── Sidebar nav + content ── */}
       <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-4">
 
-        {/* Sidebar */}
-        <div className="flex sm:flex-col gap-1 overflow-x-auto sm:overflow-visible">
+        {/* Sidebar — 2×2 sur mobile (pas de scroll), colonne sur desktop */}
+        <div className="grid grid-cols-2 sm:flex sm:flex-col gap-1.5 sm:gap-1">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveSection(id)}
               className={cn(
-                "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-all text-left whitespace-nowrap",
+                "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
                 activeSection === id
                   ? "bg-gray-900 text-white shadow-sm"
-                  : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+                  : "text-gray-600 bg-gray-50 sm:bg-transparent hover:bg-gray-100 hover:text-gray-900",
               )}
             >
               <Icon className="h-4 w-4 flex-shrink-0" />
@@ -347,7 +360,7 @@ export default function ProfilPage() {
                         </div>
                         <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">{opt.desc}</div>
                         {profilRisque === opt.value && (
-                          <span className="absolute top-2 right-2 h-4 w-4 rounded-full bg-current flex items-center justify-center">
+                          <span className={cn("absolute top-2 right-2 h-4 w-4 rounded-full flex items-center justify-center", opt.dot)}>
                             <Check className="h-2.5 w-2.5 text-white" />
                           </span>
                         )}
