@@ -6,7 +6,7 @@ import {
   Plus, Download, TrendingUp, TrendingDown, Loader2,
   Wallet, Target, Brain, Trophy, X,
   Search, Filter, ArrowUpDown, CheckCircle2, XCircle,
-  Minus, BarChart2, Flame,
+  Minus, BarChart2, Flame, Layers, Activity, ArrowDownRight, Coins,
 } from "lucide-react";
 import useSWR from "swr";
 import { toast } from "sonner";
@@ -169,18 +169,78 @@ export default function BankrollPage() {
       return { date: format(parseISO(e.date), "dd/MM", { locale: fr }), bankroll: Math.round(bal * 100) / 100 };
     });
 
-    let maxStreak = 0, streak = 0;
+    let maxStreak = 0, streak = 0, worstStreak = 0, lossStreak = 0;
     for (const e of sorted) {
-      if (e.resultat === "gagne") { streak++; maxStreak = Math.max(maxStreak, streak); }
-      else if (e.resultat === "perd") streak = 0;
+      if (e.resultat === "gagne") { streak++; maxStreak = Math.max(maxStreak, streak); lossStreak = 0; }
+      else if (e.resultat === "perd") { lossStreak++; worstStreak = Math.max(worstStreak, lossStreak); streak = 0; }
+    }
+
+    // Série en cours (depuis le dernier pari réglé)
+    let currentStreak = 0; let currentStreakType: "gagne" | "perd" | null = null;
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const r = sorted[i].resultat;
+      if (r !== "gagne" && r !== "perd") continue;
+      if (currentStreakType === null) { currentStreakType = r; currentStreak = 1; }
+      else if (r === currentStreakType) currentStreak++;
+      else break;
+    }
+
+    // Drawdown max (plus forte baisse depuis un pic de capital)
+    let cum = initBal, peak = initBal, maxDrawdown = 0;
+    for (const e of sorted) {
+      cum += e.gain_perte ?? 0;
+      peak = Math.max(peak, cum);
+      maxDrawdown = Math.max(maxDrawdown, peak - cum);
+    }
+
+    // Performance par type de pari
+    const typeMap = new Map<string, { type: string; nb: number; mise: number; net: number; wins: number; settled: number }>();
+    for (const e of entries) {
+      const m = typeMap.get(e.type_pari) ?? { type: e.type_pari, nb: 0, mise: 0, net: 0, wins: 0, settled: 0 };
+      m.nb++; m.mise += e.mise; m.net += e.gain_perte ?? 0;
+      if (e.resultat === "gagne") { m.wins++; m.settled++; }
+      else if (e.resultat === "perd") m.settled++;
+      typeMap.set(e.type_pari, m);
+    }
+    const byType = Array.from(typeMap.values())
+      .map((m) => ({ ...m, roi: m.mise > 0 ? (m.net / m.mise) * 100 : 0, winRate: m.settled > 0 ? (m.wins / m.settled) * 100 : 0 }))
+      .sort((a, b) => b.net - a.net);
+
+    // IA vs misé manuellement
+    const mk = () => ({ nb: 0, mise: 0, net: 0, wins: 0, settled: 0 });
+    const iaAgg = mk(), manAgg = mk();
+    for (const e of entries) {
+      const b = e.suivi_reco_ia ? iaAgg : manAgg;
+      b.nb++; b.mise += e.mise; b.net += e.gain_perte ?? 0;
+      if (e.resultat === "gagne") { b.wins++; b.settled++; }
+      else if (e.resultat === "perd") b.settled++;
+    }
+    const withRates = (a: ReturnType<typeof mk>) => ({ ...a, roi: a.mise > 0 ? (a.net / a.mise) * 100 : 0, winRate: a.settled > 0 ? (a.wins / a.settled) * 100 : 0 });
+
+    // Répartition des résultats
+    const resultCounts = { gagne: 0, perd: 0, attente: 0, annule: 0 };
+    for (const e of entries) {
+      if (e.resultat === "gagne") resultCounts.gagne++;
+      else if (e.resultat === "perd") resultCounts.perd++;
+      else if (e.resultat === "annule") resultCounts.annule++;
+      else resultCounts.attente++;
     }
 
     return {
       periodPoints,
       currentBalance: initBal + stats.gains_totaux - stats.pertes_totales,
       maxStreak,
+      worstStreak,
+      currentStreak,
+      currentStreakType,
+      maxDrawdown,
       avgStake: stats.nb_paris > 0 ? stats.mise_totale / stats.nb_paris : 0,
       bestWin: Math.max(0, ...entries.map((e) => e.gain_perte ?? 0)),
+      worstLoss: Math.min(0, ...entries.map((e) => e.gain_perte ?? 0)),
+      byType,
+      ia: withRates(iaAgg),
+      manual: withRates(manAgg),
+      resultCounts,
     };
   }, [entries, stats, period]);
 
@@ -252,22 +312,56 @@ export default function BankrollPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Wallet className="w-6 h-6 text-amber-500" />Suivi du capital
-          </h1>
-          {entries && <p className="text-sm text-gray-400 mt-0.5">{stats?.nb_paris ?? 0} paris enregistrés</p>}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleExport} className="text-gray-600 border-gray-200">
-            <Download className="w-4 h-4 mr-1.5" />Exporter
-          </Button>
-          <Button size="sm" onClick={() => setShowForm((v) => !v)}
-            className={cn("gap-1.5 font-semibold transition-all", showForm ? "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200" : "bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-200")}>
-            {showForm ? <><X className="w-4 h-4" />Annuler</> : <><Plus className="w-4 h-4" />Nouveau pari</>}
-          </Button>
+      {/* Hero capital — bannière dégradée */}
+      <div className="relative overflow-hidden rounded-3xl border border-gray-800/10 bg-gradient-to-br from-gray-900 via-gray-900 to-amber-950 text-white shadow-xl">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-amber-500/20 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-10 h-56 w-56 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="relative p-6 sm:p-8">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-6">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-amber-300/90 text-xs font-semibold uppercase tracking-wider">
+                <Wallet className="w-4 h-4" /> Suivi du capital
+              </div>
+              <div className="mt-2 flex items-end gap-3 flex-wrap">
+                <span className="text-4xl sm:text-5xl font-black tabular-nums leading-none">
+                  {formatEuro(analytics?.currentBalance ?? (stats?.bankroll_initiale ?? 0))}
+                </span>
+                {stats && (
+                  <span className={cn("flex items-center gap-1 text-sm font-bold pb-1",
+                    netBalance >= 0 ? "text-emerald-400" : "text-red-400")}>
+                    {netBalance >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                    {netBalance >= 0 ? "+" : ""}{formatEuro(netBalance)}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-white/55">
+                Capital initial {formatEuro(stats?.bankroll_initiale ?? 0)} · {stats?.nb_paris ?? 0} paris · mis à jour aux rapports PMU réels
+              </p>
+              {stats && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className={cn("rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset",
+                    stats.roi_global >= 0 ? "bg-emerald-500/15 text-emerald-300 ring-emerald-400/30" : "bg-red-500/15 text-red-300 ring-red-400/30")}>
+                    ROI global {stats.roi_global >= 0 ? "+" : ""}{stats.roi_global}%
+                  </span>
+                  <span className="rounded-full px-3 py-1 text-xs font-semibold bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-400/30">
+                    ROI suivi IA {stats.roi_ia_only >= 0 ? "+" : ""}{stats.roi_ia_only}%
+                  </span>
+                  <span className="rounded-full px-3 py-1 text-xs font-semibold bg-white/10 text-white/80 ring-1 ring-inset ring-white/15">
+                    {stats.taux_reussite}% réussite
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="flex sm:flex-col gap-2 shrink-0">
+              <Button size="sm" onClick={() => setShowForm((v) => !v)}
+                className={cn("gap-1.5 font-semibold transition-all", showForm ? "bg-white/15 text-white hover:bg-white/25" : "bg-amber-500 hover:bg-amber-400 text-gray-900 shadow-lg shadow-amber-500/30")}>
+                {showForm ? <><X className="w-4 h-4" />Annuler</> : <><Plus className="w-4 h-4" />Nouveau pari</>}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleExport} className="bg-white/5 text-white/85 border-white/20 hover:bg-white/15 hover:text-white">
+                <Download className="w-4 h-4 mr-1.5" />Exporter
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -346,8 +440,8 @@ export default function BankrollPage() {
       {/* KPIs */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KPICard label="Capital actuel" value={formatEuro(analytics?.currentBalance ?? (stats.bankroll_initiale ?? 0))}
-            sub={`Initial : ${formatEuro(stats.bankroll_initiale ?? 0)}`} trend={netBalance >= 0 ? "up" : "down"} icon={Wallet} color="gold" />
+          <KPICard label="Total misé" value={formatEuro(stats.mise_totale)}
+            sub={`Mise moyenne : ${formatEuro(analytics?.avgStake ?? 0)}`} icon={Coins} color="gold" />
           <KPICard label="Rendement global" value={`${stats.roi_global >= 0 ? "+" : ""}${stats.roi_global}%`}
             sub={`Solde net : ${formatEuro(netBalance)}`} trend={stats.roi_global >= 0 ? "up" : "down"} icon={BarChart2} color={stats.roi_global >= 0 ? "green" : "gold"} />
           <KPICard label="Rendement suivi IA" value={`${stats.roi_ia_only >= 0 ? "+" : ""}${stats.roi_ia_only}%`}
@@ -359,11 +453,20 @@ export default function BankrollPage() {
 
       {/* Mini analytics */}
       {analytics && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {[
+            {
+              icon: Activity,
+              label: "Série en cours",
+              value: analytics.currentStreak > 0
+                ? `${analytics.currentStreak} ${analytics.currentStreakType === "gagne" ? "gagné" : "perdu"}${analytics.currentStreak > 1 ? "s" : ""}`
+                : "—",
+              color: analytics.currentStreakType === "perd" ? "text-red-500" : "text-emerald-600",
+            },
             { icon: Flame, label: "Meilleure série", value: `${analytics.maxStreak} gagnant${analytics.maxStreak > 1 ? "s" : ""}`, color: "text-orange-500" },
             { icon: Trophy, label: "Meilleur gain", value: formatEuro(analytics.bestWin), color: "text-emerald-600" },
-            { icon: ArrowUpDown, label: "Mise moyenne", value: formatEuro(analytics.avgStake), color: "text-blue-500" },
+            { icon: TrendingDown, label: "Pire série", value: `${analytics.worstStreak} perdu${analytics.worstStreak > 1 ? "s" : ""}`, color: "text-red-500" },
+            { icon: ArrowDownRight, label: "Drawdown max", value: formatEuro(analytics.maxDrawdown), color: "text-purple-500" },
           ].map(({ icon: Icon, label, value, color }) => (
             <div key={label} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 bg-white hover:border-gray-200 transition-colors">
               <Icon className={`w-4 h-4 ${color} shrink-0`} />
@@ -422,6 +525,109 @@ export default function BankrollPage() {
             </ResponsiveContainer>
           </CardContent>
         </Card>
+      )}
+
+      {/* ── ANALYSE ─────────────────────────────────────────────── */}
+      {analytics && analytics.byType.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+          {/* Performance par type de pari */}
+          <Card className="border-gray-100 shadow-sm lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-amber-500" />Performance par type de pari
+              </CardTitle>
+              <p className="text-[11px] text-gray-400">Bénéfice net réel par famille de pari — repère ce qui rapporte.</p>
+            </CardHeader>
+            <CardContent className="pt-1 space-y-2.5">
+              {(() => {
+                const maxAbs = Math.max(1, ...analytics.byType.map((t) => Math.abs(t.net)));
+                return analytics.byType.map((t) => {
+                  const pct = Math.round((Math.abs(t.net) / maxAbs) * 100);
+                  const pos = t.net >= 0;
+                  return (
+                    <div key={t.type} className="grid grid-cols-[1fr_auto] items-center gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-xs font-semibold text-gray-700 truncate">{t.type}</span>
+                          <span className="text-[10px] text-gray-400 shrink-0">{t.nb} paris · {t.settled > 0 ? `${Math.round(t.winRate)}% réussite` : "en attente"}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                          <div className={cn("h-full rounded-full transition-all", pos ? "bg-emerald-500" : "bg-red-400")} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                      <div className="text-right tabular-nums w-20">
+                        <div className={cn("text-sm font-bold", pos ? "text-emerald-600" : "text-red-500")}>{pos ? "+" : ""}{formatEuro(t.net)}</div>
+                        <div className={cn("text-[10px] font-medium", pos ? "text-emerald-500/80" : "text-red-400")}>ROI {pos ? "+" : ""}{Math.round(t.roi)}%</div>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* IA vs Manuel + Répartition */}
+          <div className="space-y-4">
+            <Card className="border-gray-100 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Brain className="w-4 h-4 text-blue-500" />Suivi IA vs manuel
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-1 grid grid-cols-2 gap-3">
+                {([["Suivi IA", analytics.ia, "blue"], ["Manuel", analytics.manual, "gray"]] as const).map(([label, a, c]) => (
+                  <div key={label} className={cn("rounded-xl p-3 border", c === "blue" ? "border-blue-100 bg-blue-50/50" : "border-gray-100 bg-gray-50/50")}>
+                    <div className={cn("text-[10px] font-semibold uppercase tracking-wide", c === "blue" ? "text-blue-600" : "text-gray-500")}>{label}</div>
+                    <div className={cn("mt-1 text-xl font-black tabular-nums leading-none", a.net >= 0 ? "text-emerald-600" : "text-red-500")}>
+                      {a.net >= 0 ? "+" : ""}{Math.round(a.roi)}%
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">ROI · {a.nb} paris</div>
+                    <div className="mt-2 grid grid-cols-2 gap-x-2 text-[10px]">
+                      <span className="text-gray-400">Net</span><span className={cn("text-right font-semibold tabular-nums", a.net >= 0 ? "text-emerald-600" : "text-red-500")}>{a.net >= 0 ? "+" : ""}{formatEuro(a.net)}</span>
+                      <span className="text-gray-400">Réussite</span><span className="text-right font-semibold tabular-nums text-gray-700">{a.settled > 0 ? `${Math.round(a.winRate)}%` : "—"}</span>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="border-gray-100 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <BarChart2 className="w-4 h-4 text-purple-500" />Répartition des paris
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-1">
+                {(() => {
+                  const rc = analytics.resultCounts;
+                  const total = Math.max(1, rc.gagne + rc.perd + rc.attente + rc.annule);
+                  const segs = [
+                    { k: "Gagnés", n: rc.gagne, cls: "bg-emerald-500", txt: "text-emerald-600" },
+                    { k: "Perdus", n: rc.perd, cls: "bg-red-400", txt: "text-red-500" },
+                    { k: "En attente", n: rc.attente, cls: "bg-amber-400", txt: "text-amber-600" },
+                    { k: "Annulés", n: rc.annule, cls: "bg-gray-300", txt: "text-gray-500" },
+                  ].filter((s) => s.n > 0);
+                  return (
+                    <>
+                      <div className="flex h-3 w-full overflow-hidden rounded-full">
+                        {segs.map((s) => <div key={s.k} className={s.cls} style={{ width: `${(s.n / total) * 100}%` }} title={`${s.k}: ${s.n}`} />)}
+                      </div>
+                      <div className="mt-3 space-y-1.5">
+                        {segs.map((s) => (
+                          <div key={s.k} className="flex items-center justify-between text-xs">
+                            <span className="flex items-center gap-1.5 text-gray-500"><span className={cn("h-2 w-2 rounded-full", s.cls)} />{s.k}</span>
+                            <span className={cn("font-semibold tabular-nums", s.txt)}>{s.n} · {Math.round((s.n / total) * 100)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       )}
 
       {/* Table */}
