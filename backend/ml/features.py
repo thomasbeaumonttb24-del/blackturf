@@ -1678,6 +1678,49 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     except Exception as e:  # noqa: BLE001
         log.warning("features.forme_recente_failed", err=str(e)[:120])
 
+    # 14. SYNERGIE jockey × cheval — top3-rate du DUO sur leurs courses communes
+    #     ANTÉRIEURES (point-in-time, pas de fuite même en recompute). Réveille
+    #     jockey_cheval_synergy_nb/score (était stub 0). Min 1 monte commune sinon absent.
+    synergy_by_pair: dict = {}
+    try:
+        pairs = [(r[3], r[2]) for r in partants_raw if r[3] and r[2]]
+        if pairs:
+            jids_s = list({p[0] for p in pairs})
+            cids_s = list({p[1] for p in pairs})
+            syn_r = await session.execute(text("""
+                SELECT p2.jockey_id, p2.cheval_id, COUNT(*) AS n,
+                       COUNT(*) FILTER (WHERE EXISTS (
+                           SELECT 1 FROM json_array_elements(r2.classement::json) e
+                           WHERE (e->>'numero')::int = p2.numero
+                             AND COALESCE((e->>'position')::int, 99) <= 3
+                       )) AS top3
+                FROM participations p2
+                JOIN courses c2 ON c2.course_id = p2.course_id
+                JOIN resultats r2 ON r2.course_id = c2.course_id
+                WHERE p2.jockey_id = ANY(:jids) AND p2.cheval_id = ANY(:cids)
+                  AND c2.date_heure < :dref
+                GROUP BY p2.jockey_id, p2.cheval_id
+            """), {"jids": jids_s, "cids": cids_s, "dref": date_heure})
+            for jid, cid_, n, top3 in syn_r.fetchall():
+                n = int(n or 0)
+                synergy_by_pair[(jid, cid_)] = (n, float(int(top3 or 0) / n) if n else 0.0)
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.synergy_failed", err=str(e)[:120])
+
+    # 15. NB COURSES DE LA RÉUNION (contexte début/fin de réunion). Réveille
+    #     nb_courses_reunion (était stub 0). Préfixe course_id PMU = {ddmmyyyy}R{r}.
+    nb_courses_reunion = 0
+    try:
+        if "C" in course_id:
+            pfx = course_id.rsplit("C", 1)[0]  # "17062026R8C9" -> "17062026R8"
+            nbr_r = await session.execute(
+                text("SELECT COUNT(*) FROM courses WHERE course_id LIKE :p"),
+                {"p": pfx + "C%"},
+            )
+            nb_courses_reunion = int(nbr_r.scalar() or 0)
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.nb_courses_reunion_failed", err=str(e)[:120])
+
     return {
         "partants": partants_raw,
         "hist_by_cheval": hist_by_cheval,
@@ -1695,6 +1738,8 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         "vitesse_ref_median": vitesse_ref_median,
         "jockey_forme_7j": jockey_forme_7j_map,
         "entraineur_forme_14j": entr_forme_14j_map,
+        "synergy_by_pair": synergy_by_pair,
+        "nb_courses_reunion": nb_courses_reunion,
     }
 
 
@@ -2003,7 +2048,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "niveau_course_code": _encode_niveau(niveau_course),
         "dotation_log": float(math.log1p(allocation or 0)),
         "course_designee": int(est_quinte or False), "heure_course": int(heure_course),
-        "nb_courses_reunion": 0,
+        "nb_courses_reunion": int(batch.get("nb_courses_reunion", 0)),
     }
 
     # ── M. Popularité + presse ────────────────────────────────────────────────
@@ -2051,7 +2096,22 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     mois_course = date_heure.month if hasattr(date_heure, "month") else 6
     saison_code_map = {12:0,1:0,2:0,3:1,4:1,5:1,6:2,7:2,8:2,9:3,10:3,11:3}
     saison = saison_code_map.get(mois_course, 2)
-    feat_temporal = {"mois_course": mois_course, "saison_code": saison, "saison_form": 0.5, "market_timing_score": mouvement_30min}
+    # saison_form RECÂBLÉ 2026-06-17 : forme moyenne (score de position) sur les
+    # courses de l'ANNÉE en cours. Avant = constante 0.5 (feature fantôme). Calculé
+    # depuis l'historique déjà chargé en batch (idx 0=position, idx 4=date_course).
+    # Gardé : tout aléa → fallback 0.5 (= comportement actuel, zéro régression).
+    saison_form = 0.5
+    try:
+        annee = date_heure.year if hasattr(date_heure, "year") else None
+        if annee and historique:
+            sc_saison = [score_position(h[0], nb_partants_int) for h in historique
+                         if h[0] is not None and getattr(h[4], "year", None) == annee]
+            if sc_saison:
+                saison_form = float(np.mean(sc_saison))
+    except Exception:
+        saison_form = 0.5
+    feat_temporal = {"mois_course": mois_course, "saison_code": saison,
+                     "saison_form": float(saison_form), "market_timing_score": mouvement_30min}
 
     # ── Pace conflict (running style × terrain × adversaires) ──────────────────
     nb_meneurs = sum(1 for r in batch["partants"] if r[39] == "mene")  # col 39 = running_style
@@ -2079,7 +2139,13 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     }
 
     # ── Synergy jockey × cheval ───────────────────────────────────────────────
-    feat_synergy = {"jockey_cheval_synergy_nb": 0, "jockey_cheval_synergy_score": 0.0}
+    # RÉVEILLÉ : top3-rate du duo (j_id, ch_id) sur leurs courses communes passées,
+    # batché dans _load_course_batch_data. Avant = stub 0. Neutre si jamais couru ensemble.
+    _syn = batch.get("synergy_by_pair", {}).get((jockey_id, cheval_id))
+    feat_synergy = {
+        "jockey_cheval_synergy_nb": int(_syn[0]) if _syn else 0,
+        "jockey_cheval_synergy_score": float(_syn[1]) if _syn else 0.0,
+    }
 
     # ── Fingerprint ───────────────────────────────────────────────────────────
     fp_hist = [h for h in historique if h[7] and discipline and str(h[7]).lower() == discipline.lower()
@@ -2098,7 +2164,20 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
             w = weights[:len(positions)]
             sc = [score_position(p, nb_partants_int) for p in positions]
             decay_score = float(np.average(sc, weights=w[:len(sc)]))
-    feat_advanced = {"time_decay_form": float(decay_score), "opposition_quality": 0.5}
+    # opposition_quality RECÂBLÉ 2026-06-17 : force du champ affronté aujourd'hui =
+    # ELO moyen des AUTRES partants (col 42=elo_g, col 2=cheval_id), normalisé comme
+    # la version legacy (avg/1500 - 1, clip [-0.5, 1.0]). Avant = constante 0.5
+    # (fantôme). N'impacte PAS le modèle v493 (entraîné constant → aucun split) ;
+    # signal réel dès le prochain retrain. Gardé : tout aléa → fallback 0.5.
+    opp_quality = 0.5
+    try:
+        opp_elos = [r[42] for r in batch["partants"]
+                    if r[2] != cheval_id and r[42] is not None and r[42] > 0]
+        if opp_elos:
+            opp_quality = float(np.clip(float(np.mean(opp_elos)) / ELO_INITIAL - 1.0, -0.5, 1.0))
+    except Exception:
+        opp_quality = 0.5
+    feat_advanced = {"time_decay_form": float(decay_score), "opposition_quality": float(opp_quality)}
 
     # ── Pace (vitesse théorique) ───────────────────────────────────────────────
     VITESSE_REF = {"plat": {1000:16.5,1400:15.8,1600:15.5,2000:15.0,2400:14.5,3000:14.0},
