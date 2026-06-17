@@ -629,6 +629,23 @@ async def _do_retraining(mois: int, label: str) -> None:
                         else "data_jump" if data_jump else "better_wf"),
                 train_n=new_train_n,
             )
+
+            # AUTO-PURGE : garder seulement les N derniers .pkl archivés (model_v*.pkl
+            # ~18 Mo chacun) pour que models/ ne grossisse pas indéfiniment (était 7,1 Go
+            # / 493 fichiers). current_model.pkl / meta_learner.pkl ne matchent pas le
+            # motif → jamais touchés. Les lignes DB model_versions sont conservées (FK
+            # recommandations + taille négligeable), seules les archives disque sont purgées.
+            try:
+                from ml.models import MODELS_DIR
+                _KEEP = 5
+                archives = sorted(MODELS_DIR.glob("model_v*.pkl"))
+                for _old in archives[:-_KEEP]:
+                    _old.unlink(missing_ok=True)
+                log.info("pipeline.retrain.pruned_archives",
+                         kept=min(_KEEP, len(archives)),
+                         removed=max(0, len(archives) - _KEEP))
+            except Exception as _e:  # purge best-effort : ne jamais faire échouer un deploy
+                log.warning("pipeline.retrain.prune_failed", err=str(_e)[:120])
         else:
             log.warning(
                 "pipeline.retrain.rollback",
