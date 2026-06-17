@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
@@ -458,13 +458,19 @@ const HIDE_SCROLLBAR = "[scrollbar-width:none] [-ms-overflow-style:none] [&::-we
 function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) => void }) {
   const today = new Date();
   // Uniquement les jours passés + aujourd'hui (le futur n'a pas de données fiables).
-  // Plus récent à gauche : Auj. · Hier · …
-  const days = Array.from({ length: 10 }, (_, i) => addDays(today, -i));
+  // Ordre chronologique : passé à gauche, aujourd'hui tout à droite.
+  const days = Array.from({ length: 10 }, (_, i) => addDays(today, i - 9));
   const selKey = format(selected, "yyyy-MM-dd");
   const todayKey = format(today, "yyyy-MM-dd");
   const yesterdayKey = format(addDays(today, -1), "yyyy-MM-dd");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Aujourd'hui est à droite → on défile au bout pour l'afficher par défaut.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, []);
   return (
-    <div className={cn("flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-0.5", HIDE_SCROLLBAR)}>
+    <div ref={scrollRef} className={cn("flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-0.5", HIDE_SCROLLBAR)}>
       {days.map((d) => {
         const key = format(d, "yyyy-MM-dd");
         const isSel = key === selKey;
