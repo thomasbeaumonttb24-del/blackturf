@@ -191,13 +191,13 @@ export default async function HomePage() {
           </div>
           <p className="mt-5 text-[11px] text-white/55">7 jours gratuits · sans carte bancaire · annulation à tout moment</p>
 
-          {/* Stats clés — cartes verre + count-up */}
+          {/* Stats clés — cartes verre + count-up (live, mêmes chiffres que le palmarès) */}
           <HeroStats
-            items={[
-              { value: tr?.accuracy_top3 ?? null, suffix: "%", decimals: 1, label: "Précision Top-3", cls: "text-amber-300" },
-              { value: coursesAnalysees ?? null, suffix: "+", label: "Courses analysées", cls: "text-white" },
-              { value: tr?.favori_place_rate ?? null, suffix: "%", decimals: 1, label: "Favori placé", cls: "text-emerald-300" },
-            ]}
+            fallback={{
+              accuracy_top3: tr?.accuracy_top3 ?? null,
+              favori_place_rate: tr?.favori_place_rate ?? null,
+              courses_analysees: coursesAnalysees ?? null,
+            }}
           />
         </div>
       </section>

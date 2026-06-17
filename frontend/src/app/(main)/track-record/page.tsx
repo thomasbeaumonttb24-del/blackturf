@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { HeroStats } from "@/components/home/HeroStats";
 import { statsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -146,15 +147,6 @@ function CountUpEuro({ value, className, decimals = 0, prefix = "" }: { value: n
   );
 }
 
-function HeroStat({ value, suffix = "" }: { value: number; suffix?: string }) {
-  const { val, ref } = useCountUp(value);
-  return (
-    <span ref={ref}>
-      {Math.round(val).toLocaleString("fr-FR")}{suffix}
-    </span>
-  );
-}
-
 // ─── Table de paris gagnés (réutilisée : 50 derniers + 30 meilleurs) ───
 function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: boolean }) {
   return (
@@ -277,21 +269,14 @@ export default function TrackRecordPage() {
               PMU officiels, par profil de jeu.
             </p>
 
-            {/* Hero stats — cartes verre + count-up */}
-            <div className="grid grid-cols-3 gap-2 sm:gap-4 max-w-xl mx-auto">
-              {[
-                { value: g.accuracy_top3, suffix: "%", label: "Fiabilité Top-3", cls: "text-amber-300" },
-                { value: g.nb_courses_analysees, suffix: "", label: "Courses analysées", cls: "text-white" },
-                { value: g.favori_place_rate, suffix: "%", label: "Favori placé", cls: "text-emerald-300" },
-              ].map((s) => (
-                <div key={s.label} className="rounded-2xl bg-white/10 backdrop-blur-md ring-1 ring-white/15 px-2 py-4 sm:px-4 sm:py-5">
-                  <div className={cn("text-2xl sm:text-4xl font-black tabular-nums", s.cls)}>
-                    <HeroStat value={s.value} suffix={s.suffix} />
-                  </div>
-                  <div className="text-[10px] sm:text-xs text-white/65 mt-1.5 leading-tight">{s.label}</div>
-                </div>
-              ))}
-            </div>
+            {/* Hero stats — cartes verre + count-up (live, mêmes chiffres que l'accueil) */}
+            <HeroStats
+              fallback={{
+                accuracy_top3: g.accuracy_top3,
+                favori_place_rate: g.favori_place_rate,
+                courses_analysees: g.nb_courses_analysees,
+              }}
+            />
 
             <div className="mt-9 flex flex-col sm:flex-row justify-center gap-3">
               <Button asChild variant="brand" size="lg" className="press btn-shimmer shadow-lg shadow-amber-500/30">
@@ -353,15 +338,9 @@ export default function TrackRecordPage() {
                         className="block text-5xl sm:text-6xl font-black tabular-nums leading-none mt-2 text-emerald-600 [text-shadow:0_2px_18px_rgba(16,185,129,0.18)]"
                       />
                     </div>
-                    <div className="flex gap-6 text-center">
-                      <div>
-                        <div className="text-2xl font-black tabular-nums text-foreground">{gagnantsData.n.toLocaleString("fr-FR")}</div>
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">Paris gagnés</div>
-                      </div>
-                      <div>
-                        <div className="text-2xl font-black tabular-nums text-foreground">{(gagnantsData.n_courses ?? 0).toLocaleString("fr-FR")}</div>
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">Courses jouées</div>
-                      </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-black tabular-nums text-foreground">{gagnantsData.n.toLocaleString("fr-FR")}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">Paris gagnés</div>
                     </div>
                   </div>
                 </div>
