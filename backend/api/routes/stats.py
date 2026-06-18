@@ -6,7 +6,7 @@ Cache Redis pour éviter requêtes lourdes répétées.
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -44,6 +44,26 @@ async def _cache_set(redis: aioredis.Redis, key: str, data: Any, ttl: int) -> No
     except Exception:
         pass
 
+def _winner_entry(classement) -> Optional[dict]:
+    """Entrée du VAINQUEUR (position == 1), robuste à l'ordre du tableau JSON.
+    ⚠️ `classement[0]` n'est PAS garanti être le 1er : le tableau peut être trié
+    par numéro ou non ordonné → régler au gagnant via classement[0] fausse le ROI.
+    On prend l'entrée de position minimale (== 1)."""
+    if not classement or not isinstance(classement, list):
+        return None
+    best = None
+    best_pos = None
+    for e in classement:
+        if not isinstance(e, dict):
+            continue
+        p = e.get("position")
+        if not isinstance(p, (int, float)):
+            continue
+        if best_pos is None or p < best_pos:
+            best_pos, best = int(p), e
+    return best
+
+
 async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float = 10.0, start: float = 1000.0) -> dict:
     """Backtest HONNÊTE : 10€ flat en Simple Gagnant sur chaque value bet ★★★+
     (niveau ≥ 3) des `since_days` derniers jours, réglé sur l'arrivée RÉELLE à la
@@ -66,11 +86,8 @@ async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float
     bankroll = start
     points = []
     for vb, part, course, resultat in rows:
-        gagne = (
-            resultat and isinstance(resultat.classement, list) and resultat.classement
-            and isinstance(resultat.classement[0], dict)
-            and resultat.classement[0].get("numero") == part.numero
-        )
+        _w = _winner_entry(resultat.classement) if resultat else None
+        gagne = bool(_w and _w.get("numero") == part.numero)
         if gagne and part.cote_pmu and part.cote_pmu > 1:
             bankroll += (part.cote_pmu - 1) * mise
         else:
@@ -596,22 +613,25 @@ async def track_record(
         return cached
 
     # ── 1. Précision globale depuis race_learning_log ─────────
-    all_rll = (await db.execute(
-        select(RaceLearningLog).order_by(RaceLearningLog.analyzed_at)
-    )).scalars().all()
-
-    nb_total = len(all_rll)
-    brier_scores = [r.brier_score for r in all_rll if r.brier_score is not None]
-    brier_moyen = round(sum(brier_scores) / len(brier_scores), 4) if brier_scores else 0.0
-    top1_hits = [r for r in all_rll if r.gagnant_rang_predit == 1]
-    top3_hits = [r for r in all_rll if r.gagnant_rang_predit is not None and r.gagnant_rang_predit <= 3]
-    accuracy_top1 = round(len(top1_hits) / nb_total * 100, 1) if nb_total else 0.0
-    accuracy_top3 = round(len(top3_hits) / nb_total * 100, 1) if nb_total else 0.0
-    nb_surprises = len([r for r in all_rll if r.was_surprise])
+    # Agrégats en SQL (PAS de chargement de toute la table en mémoire : elle grossit
+    # d'une ligne par course analysée → des dizaines de milliers de lignes = page lente).
+    _glob = (await db.execute(text("""
+        SELECT COUNT(*)                                                       AS nb,
+               AVG(brier_score)                                               AS brier,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit = 1)                AS top1,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
+                                  AND gagnant_rang_predit <= 3)               AS top3,
+               COUNT(*) FILTER (WHERE was_surprise)                           AS surprises
+        FROM race_learning_log
+    """))).first()
+    nb_total = int(_glob.nb or 0)
+    brier_moyen = round(float(_glob.brier), 4) if _glob.brier is not None else 0.0
+    accuracy_top1 = round(int(_glob.top1 or 0) / nb_total * 100, 1) if nb_total else 0.0
+    accuracy_top3 = round(int(_glob.top3 or 0) / nb_total * 100, 1) if nb_total else 0.0
+    nb_surprises = int(_glob.surprises or 0)
 
     # ── 2. Par jour (7 derniers jours, fuseau Europe/Paris) ──
-    # Coupure de journée à minuit heure française (pas UTC) pour que
-    # le point du jour reflète bien "la journée" côté utilisateur.
+    # Coupure de journée à minuit heure française (pas UTC) → group by date FR en SQL.
     paris_tz = ZoneInfo("Europe/Paris")
     today = datetime.now(paris_tz).date()
     daily_acc: dict[str, dict] = {}
@@ -624,54 +644,48 @@ async def track_record(
             "brier_moyen": None,
             "nb_predictions": 0,
             "nb_surprises": 0,
-            "_top3": 0,
-            "_brier": [],
         }
-    for r in all_rll:
-        if not r.analyzed_at:
+    _since = datetime.now(timezone.utc) - timedelta(days=8)   # marge tz
+    _drows = (await db.execute(text("""
+        SELECT (analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Paris')::date AS jour,
+               COUNT(*)                                                       AS nb,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
+                                  AND gagnant_rang_predit <= 3)               AS top3,
+               AVG(brier_score)                                               AS brier,
+               COUNT(*) FILTER (WHERE was_surprise)                           AS surprises
+        FROM race_learning_log
+        WHERE analyzed_at IS NOT NULL AND analyzed_at >= :since
+        GROUP BY 1
+    """), {"since": _since.replace(tzinfo=None)})).all()
+    for r in _drows:
+        key = r.jour.strftime("%Y-%m-%d")
+        v = daily_acc.get(key)
+        if not v:
             continue
-        # analyzed_at est en UTC (naïf ou aware) → on le ramène en heure FR
-        dt = r.analyzed_at
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        key = dt.astimezone(paris_tz).strftime("%Y-%m-%d")
-        if key not in daily_acc:
-            continue
-        daily_acc[key]["nb_predictions"] += 1
-        if r.was_surprise:
-            daily_acc[key]["nb_surprises"] += 1
-        if r.gagnant_rang_predit is not None and r.gagnant_rang_predit <= 3:
-            daily_acc[key]["_top3"] += 1
-        if r.brier_score is not None:
-            daily_acc[key]["_brier"].append(float(r.brier_score))
-
-    for v in daily_acc.values():
-        nb = v["nb_predictions"]
-        briers = v.pop("_brier", [])
-        if nb:
-            v["accuracy_top3"] = round(v.pop("_top3") / nb * 100, 1)
-        else:
-            v.pop("_top3")
-        v["brier_moyen"] = round(sum(briers) / len(briers), 4) if briers else None
+        nb = int(r.nb or 0)
+        v["nb_predictions"] = nb
+        v["nb_surprises"] = int(r.surprises or 0)
+        v["accuracy_top3"] = round(int(r.top3 or 0) / nb * 100, 1) if nb else 0.0
+        v["brier_moyen"] = round(float(r.brier), 4) if r.brier is not None else None
 
     daily_list = list(daily_acc.values())
 
     # ── 3. Par discipline ─────────────────────────────────────
-    disc_acc: dict[str, dict] = {}
-    for r in all_rll:
-        d = r.discipline or "Autre"
-        if d not in disc_acc:
-            disc_acc[d] = {"nb": 0, "top3": 0}
-        disc_acc[d]["nb"] += 1
-        if r.gagnant_rang_predit is not None and r.gagnant_rang_predit <= 3:
-            disc_acc[d]["top3"] += 1
+    _disc = (await db.execute(text("""
+        SELECT COALESCE(NULLIF(discipline, ''), 'Autre')                      AS d,
+               COUNT(*)                                                       AS nb,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
+                                  AND gagnant_rang_predit <= 3)               AS top3
+        FROM race_learning_log
+        GROUP BY 1
+    """))).all()
     by_discipline = [
         {
-            "discipline": d,
-            "nb_courses": v["nb"],
-            "accuracy_top3": round(v["top3"] / v["nb"] * 100, 1) if v["nb"] else 0.0,
+            "discipline": r.d,
+            "nb_courses": int(r.nb or 0),
+            "accuracy_top3": round(int(r.top3 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
         }
-        for d, v in disc_acc.items()
+        for r in _disc
     ]
 
     # ── 4. Meilleurs pronostics (gagnant prédit rang 1, cote > 5) ─
@@ -693,11 +707,9 @@ async def track_record(
     best_pronostics = []
     for pred, part, cheval, course, resultat in best_rows:
         gagnant_reel = None
-        if resultat and resultat.classement and isinstance(resultat.classement, list):
-            if resultat.classement:
-                premier = resultat.classement[0]
-                if isinstance(premier, dict):
-                    gagnant_reel = premier.get("cheval") or premier.get("nom")
+        _w = _winner_entry(resultat.classement) if resultat else None
+        if _w:
+            gagnant_reel = _w.get("cheval") or _w.get("nom")
         best_pronostics.append({
             "course_id": course.course_id,
             "hippodrome": course.hippodrome_nom,
@@ -731,8 +743,8 @@ async def track_record(
         mise = 10.0
         vb_stats[n]["nb"] += 1
         vb_stats[n]["mise"] += mise
-        premier = resultat.classement[0]
-        gagne = isinstance(premier, dict) and premier.get("numero") == part.numero
+        _w = _winner_entry(resultat.classement)
+        gagne = bool(_w and _w.get("numero") == part.numero)
         if gagne and part.cote_pmu and part.cote_pmu > 1:
             vb_stats[n]["wins"] += 1
             vb_stats[n]["gains"] += (part.cote_pmu - 1) * mise
@@ -917,7 +929,7 @@ async def track_record(
         "clv": clv,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await _cache_set(redis, CACHE_KEY, result, ttl=120)  # 2 min — quasi temps réel
+    await _cache_set(redis, CACHE_KEY, result, ttl=3600)  # 1h — pre-chauffe par job warm_caches /30min (CLV froid ~2s)
     return result
 
 
