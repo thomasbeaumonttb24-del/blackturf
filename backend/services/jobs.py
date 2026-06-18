@@ -189,6 +189,7 @@ async def job_warm_caches() -> None:
     urls = [
         "http://api:8000/api/v1/stats/track-record",
         "http://api:8000/api/v1/stats/palmares-gagnants",
+        "http://api:8000/api/v1/stats/profils",
     ]
     async with httpx.AsyncClient(timeout=30.0) as client:
         for u in urls:
