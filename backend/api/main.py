@@ -47,12 +47,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("adaptive_learning.init_failed", err=str(e))
 
+    import os as _os
     from services.jobs import start_scheduler, stop_scheduler
-    start_scheduler()
+    _run_sched = _os.getenv("RUN_SCHEDULER", "1") == "1"
+    if _run_sched:
+        start_scheduler()
 
     yield
 
-    stop_scheduler()
+    if _run_sched:
+        stop_scheduler()
     await close_redis()
     log.info("blackturf.shutdown")
 

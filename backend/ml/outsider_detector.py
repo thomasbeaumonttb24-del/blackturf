@@ -183,7 +183,7 @@ async def get_surprise_rate(session: AsyncSession, discipline: str | None,
         r = (await session.execute(text("""
             SELECT COUNT(*) FILTER (WHERE was_surprise)::float / NULLIF(COUNT(*), 0), COUNT(*)
             FROM race_learning_log
-            WHERE (:disc IS NULL OR lower(discipline) = lower(:disc))
+            WHERE (CAST(:disc AS text) IS NULL OR lower(discipline) = lower(CAST(:disc AS text)))
               AND nb_partants IS NOT NULL
               AND (CASE WHEN nb_partants >= 14 THEN 'grand'
                         WHEN nb_partants >= 10 THEN 'moyen' ELSE 'petit' END) = :bucket
