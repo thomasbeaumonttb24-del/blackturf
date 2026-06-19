@@ -40,6 +40,11 @@ CONFIANCE_SEUILS = {
     4: 0.22,   # favori net
 }
 
+# Plafond d'EX-CÉDENT d'EV (ev_max = cote×proba − 1) au-delà duquel on REJETTE le
+# value bet : zone toxique mesurée (ROI réalisé EV>1.4 = −42% sur n=2133, EV 1.15-1.4
+# = −22%). Au-dessus, le "value" est de la sur-confiance longshot, pas un edge.
+EV_MAX_EXCESS_VB = 0.25
+
 # ── Garde-fous calibration longshot ──────────────────────────────────────────
 # Au-delà de ce ratio proba_modèle / proba_marché_implicite, le "value" est
 # presque toujours une erreur de calibration sur outsider (le modèle sur-évalue
@@ -297,6 +302,19 @@ def detect_value_bet(
     cote_mediane = statistics.median(cotes_valides) if cotes_valides else cote_meilleure
     cote_ev = min(cote_meilleure, cote_mediane * COTE_CEIL_FACTOR)
     ev_max = calculer_ev(cote_ev, proba_top1)
+
+    # ── Garde-fou EV HAUT (zone toxique, mesuré 2026-06-19) ──────────────────
+    # ROI réalisé par bande d'EV (predictions ⋈ résultats, simple gagnant flat) :
+    # EV 1.0-1.15 = +7%, EV 1.15-1.4 = -22% (n=833), EV >1.4 = -42% (n=2133).
+    # Le "value" qui claironne un gros edge = sur-confiance longshot, PAS un edge.
+    # determine_niveau récompensait justement le haut EV (niveau 4 = EV≥0.30) = la
+    # pire zone. On REJETTE au-delà du seuil pour couper le saignement grand-n.
+    # Conservateur : 0.25 enlève tout le -42% + l'essentiel du -22%, garde marge
+    # au-dessus du bord de la bande positive (1.15). À affiner via backtest 15k.
+    if ev_max > EV_MAX_EXCESS_VB:
+        log.info("valuebets.ev_too_high_rejected",
+                 ev=round(ev_max, 3), cote=round(cote_ev, 2), proba=round(proba_top1, 4))
+        return None
 
     niveau = determine_niveau(ev_max, proba_top1)
     if niveau is None:
