@@ -1043,6 +1043,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             ).on_conflict_do_update(
                 index_elements=["participation_id"],
                 set_={
+                    # Attribution : la ligne re-prédite doit porter le modèle QUI a
+                    # produit les probas courantes (sinon stamp figé au 1er cycle du
+                    # jour → fausse la traçabilité / le monitoring / la CLV par modèle).
+                    # created_at NON touché : reste l'heure du 1er prono (intégrité
+                    # palmarès : prono émis avant départ).
+                    "model_version_id": mv_id,
                     "proba_top1": proba_t1,
                     "proba_top3": proba_t3,
                     "proba_top1_low": ci_low,
