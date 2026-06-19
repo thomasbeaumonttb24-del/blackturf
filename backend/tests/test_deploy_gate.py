@@ -92,3 +92,38 @@ def test_tolerance_regression_0_5pct():
         current_is_synth=False, no_current=False,
         current_unreliable=False, data_jump=False,
     ) is True
+
+
+# ── Gate ROI : ne fige pas une amélioration de ranking (régression 2026-06-19) ──
+
+def test_roi_gate_bloque_si_edge_mauvais_et_pas_d_amelioration():
+    """Edge paris KO + nouveau modèle PAS meilleur en ranking → on garde l'actif."""
+    assert _should_deploy(
+        0.80, current_wf=0.805,
+        current_is_synth=False, no_current=False,
+        current_unreliable=False, data_jump=False,
+        roi_gate_enabled=True, betting_edge_ok=False,
+    ) is False
+
+
+def test_roi_gate_ne_fige_pas_une_amelioration_de_ranking():
+    """Régression réelle du 2026-06-19 : wf 0.8165 > 0.8141 mais edge KO → DOIT déployer.
+
+    La gate ROI (couche paris) ne doit pas geler un meilleur classeur (couche modèle).
+    """
+    assert _should_deploy(
+        0.8165, current_wf=0.8141,
+        current_is_synth=False, no_current=False,
+        current_unreliable=False, data_jump=False,
+        roi_gate_enabled=True, betting_edge_ok=False,
+    ) is True
+
+
+def test_roi_gate_inactif_n_a_aucun_effet():
+    """roi_gate_enabled=False (défaut) : edge ignoré, logique wf normale."""
+    assert _should_deploy(
+        0.80, current_wf=0.805,
+        current_is_synth=False, no_current=False,
+        current_unreliable=False, data_jump=False,
+        roi_gate_enabled=False, betting_edge_ok=False,
+    ) is True

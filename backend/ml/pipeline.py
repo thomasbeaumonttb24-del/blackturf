@@ -66,17 +66,24 @@ def _should_deploy(
     que soit la situation de l'actif. C'est ce plancher qui manquait et qui a laissé un
     modèle à AUC 0.06 passer en prod (l'actif "non fiable" déployait n'importe quoi).
 
-    FLAG roi_deploy_gate : si `roi_gate_enabled`, on refuse AUSSI de promouvoir tant que la
-    couche PARIS ne prouve pas un edge hors-échantillon (`betting_edge_ok`, ex. edge_monitor
-    edge_ok). Un AUC > 0.52 peut générer un ROI négatif après prélèvement PMU — c'est la
-    couche staking, jamais gatée, qui perd l'argent (cf. audit edge -52%).
+    FLAG roi_deploy_gate : si `roi_gate_enabled`, la couche PARIS doit prouver un edge
+    hors-échantillon (`betting_edge_ok`, ex. edge_monitor edge_ok). MAIS cette gate ne
+    bloque QUE la promotion d'un modèle SANS mérite de ranking (wf qui ne progresse pas).
+    Un modèle qui AMÉLIORE le walk-forward AUC (`new_wf >= current_wf`) est un meilleur
+    CLASSEUR → toujours promu : il améliore les pronostics affichés, sans placer d'argent.
+    Le ROI/edge est une couche distincte (staking, BT_STAKING_SAFE) gérée à part. Sans ce
+    dégel, un edge durablement négatif (audit -52%) figerait le modèle À VIE et empêcherait
+    toute amélioration du ranking — exactement le blocage du 2026-06-19 (wf 0.8165>0.8141
+    rejeté à tort en `worse_wf`).
 
     Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
     saut de données massif, OU walk-forward au moins aussi bon (tolérance régression).
     """
     if new_wf < min_auc:
         return False
-    if roi_gate_enabled and not betting_edge_ok:
+    # Gate ROI : ne fige PAS une amélioration de ranking (wf au moins aussi bon que l'actif).
+    ranking_improvement = new_wf >= current_wf
+    if roi_gate_enabled and not betting_edge_ok and not ranking_improvement:
         return False
     return (
         current_is_synth
@@ -653,7 +660,12 @@ async def _do_retraining(mois: int, label: str) -> None:
                 "pipeline.retrain.rollback",
                 new_wf_auc=round(new_wf, 4),
                 current_wf_auc=round(current_wf, 4),
-                reason=("below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC else "worse_wf"),
+                reason=(
+                    "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
+                    else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
+                                        and new_wf < current_wf)
+                    else "worse_wf"
+                ),
             )
 
         await session.commit()
