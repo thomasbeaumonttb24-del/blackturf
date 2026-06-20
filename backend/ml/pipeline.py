@@ -110,7 +110,7 @@ async def _capture_closing_cotes(course_id: str) -> None:
         async with AsyncSessionLocal() as s:
             await s.execute(text("""
                 CREATE TABLE IF NOT EXISTS cote_cloture_log (
-                    participation_id BIGINT PRIMARY KEY,
+                    participation_id TEXT PRIMARY KEY,
                     course_id TEXT NOT NULL,
                     numero INT,
                     cote_cloture DOUBLE PRECISION,
