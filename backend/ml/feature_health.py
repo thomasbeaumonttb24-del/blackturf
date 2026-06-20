@@ -48,10 +48,10 @@ async def compute_feature_health(session: AsyncSession, jours: int = 45) -> dict
         JOIN courses c ON c.course_id = pa.course_id
         WHERE c.date_heure IS NOT NULL
           AND fm.computed_at < c.date_heure
-          AND c.date_heure >= now() - (:j || ' days')::interval
+          AND c.date_heure >= now() - make_interval(days => :j)
         ORDER BY c.date_heure DESC
         LIMIT :lim
-    """), {"j": jours, "lim": SAMPLE_LIMIT})).fetchall()
+    """), {"j": int(jours), "lim": SAMPLE_LIMIT})).fetchall()
 
     data = [(f if isinstance(f, dict) else json.loads(f)) for (f,) in rows]
     n = len(data)
