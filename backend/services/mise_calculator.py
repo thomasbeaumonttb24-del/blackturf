@@ -26,6 +26,8 @@ MISE_MIN = {
     "Tiercé Ordre":     1.0,
     "Quarté+":          1.5,
     "Quinté+ Flexi":    2.0,
+    "Multi":            3.0,   # mise PLATE 3€ (4→7 chevaux), Flexi dès 1.5€
+    "Pick5":            1.0,
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -160,8 +162,12 @@ PROFIL_CONFIG = {
         # GAIN VISÉ : un pari gagnant doit rapporter ≥ ×1.5 du TOTAL misé (prudent =
         # gain modeste mais réel ; on évite le placé sec qui rend à peine la mise).
         "gain_cible_mult": 1.5,
-        "types": {"Simple Placé", "Couplé Placé", "2sur4"},
+        # Multi en 6/7 = large filet qui TOMBE SOUVENT (4 premiers dans 6-7 chevaux) →
+        # parfait pour le prudent. Pas de Multi 4/5 (gros lot = trop rare). var_cap 1.0 :
+        # le prudent n'a aucun pari haute-variance, le plafond est donc inerte.
+        "types": {"Simple Placé", "Couplé Placé", "2sur4", "Multi en 6", "Multi en 7"},
         "objectif": "proba",
+        "var_cap": 1.0,
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
     # MODÉRÉ — viser un rapport ENTRE ×2 et ×10 : duo gagnant, couplé placé, 2/4, trio
@@ -191,8 +197,13 @@ PROFIL_CONFIG = {
         # rester un VRAI gain (plus de micro-tickets dilués). Le moteur garde autant de
         # paris que possible atteignant la cible, par conviction (couverture + profit).
         "gain_cible_mult": 2.5,
-        "types": {"Couplé Placé", "Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio", "Simple Gagnant"},
+        # Multi en 5/6/7 = rapport ×2-×10 qui tombe assez souvent (cœur du modéré).
+        "types": {"Couplé Placé", "Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio",
+                  "Simple Gagnant", "Multi en 5", "Multi en 6", "Multi en 7"},
         "objectif": "ev",
+        # var_cap 0.50 : jamais plus de la moitié du budget sur un seul pari haute-variance
+        # (Trio/2sur4-jackpot) → force au moins 2 tickets décorrélés. Anti « tout sur un Trio ».
+        "var_cap": 0.50,
         "risk_pref": {"securite": 0.8, "rendement": 1.2, "surprise": 1.0, "coup": 0.7},
     },
     # RISQUÉ — vise les GROS RAPPORTS (PLANCHER ×10) : gagnant grosse cote, duo gagnant
@@ -221,10 +232,16 @@ PROFIL_CONFIG = {
         # GAIN VISÉ ≥ ×3 du total (plancher ; le risqué dépasse largement via les gros
         # rapports — R10C8 : Couplé Gagnant ×644). Petites mises, grosses cotes.
         "gain_cible_mult": 3.0,
+        # Multi en 4/5 (gros lot) + Pick5 = gros rapports assumés du profil risqué.
         "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio", "Trio Ordre",
                   "Super 4", "Simple Gagnant",
-                  "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
+                  "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre",
+                  "Multi en 4", "Multi en 5", "Pick5"},
         "objectif": "gain",
+        # var_cap 0.45 : le risqué reste 100% gros rapport, MAIS jamais plus de 45% du
+        # budget sur un seul ticket → la mise s'étale sur ≥2 gros-rapports DÉCORRÉLÉS
+        # au lieu de tout risquer sur un seul Trio (demande explicite de l'utilisateur).
+        "var_cap": 0.45,
         "risk_pref": {"securite": 0.3, "rendement": 0.8, "surprise": 1.5, "coup": 1.9},
     },
 }
@@ -264,6 +281,9 @@ def _effective_config(profil: str, heat: float) -> dict:
         # Multiple de gain visé sur le TOTAL misé (un pari gagnant ≥ ×N du montant).
         # Contrat produit → NON modulé par le heat.
         "gain_cible_mult": base.get("gain_cible_mult", 0.0),
+        # Plafond de mise sur UN pari haute-variance (fraction du montant) — garde-fou
+        # anti « tout sur un Trio ». Contrat produit → NON modulé par le heat.
+        "var_cap": base.get("var_cap", 1.0),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -352,7 +372,8 @@ def generer_plan(
     if not cands:
         return _plan_vide(montant, profil)
 
-    selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults)
+    selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
+                                  respect_montant=respect_montant)
     if not selected:
         return _plan_vide(montant, profil)
 
@@ -379,6 +400,35 @@ def _is_speculative(c: dict) -> bool:
     return c["ev"] <= 0 and not _is_credible_coup(c)
 
 
+# Paris à HAUTE VARIANCE : proba de gain faible, gros rapport, tout-ou-rien. Y mettre
+# tout le budget = jouer à la loterie. Le var_cap du profil plafonne leur mise UNITAIRE.
+_HIGH_VAR_TYPES = {
+    "Trio", "Trio Ordre", "Tiercé Désordre", "Tiercé Ordre",
+    "Quarté+ Désordre", "Quinté+ Désordre", "Super 4", "Pick5",
+}
+
+
+def _fam(type_pari: str) -> str:
+    """Famille normalisée d'un type de pari : « Mini Multi en 7 » → « Multi en 7 »
+    (même méthode de jeu, label différent selon le nb de partants). Sert aux gates de
+    profil (qui listent « Multi en N ») et à la classification variance."""
+    return type_pari.replace("Mini Multi", "Multi") if type_pari else type_pari
+
+
+def _is_high_variance(c: dict) -> bool:
+    """Le pari est-il tout-ou-rien à faible proba ? Trio/jackpots/Pick5 toujours ;
+    Multi en 4/5 = gros lot (haute variance) ; Multi en 6/7 = filet large (NON)."""
+    t = _fam(c.get("type_pari", ""))
+    if t in _HIGH_VAR_TYPES:
+        return True
+    if t.startswith("Multi en "):
+        try:
+            return int(t.rsplit(" ", 1)[-1]) <= 5
+        except (ValueError, IndexError):
+            return False
+    return False
+
+
 def _solo_confident(c: dict) -> bool:
     """Le modèle est-il assez SÛR de ce pari pour y mettre toute la mise (1 seul pari) ?
     Sinon on diversifie sur ≥2 paris pour couvrir le risque. Quasi-certitude =
@@ -401,7 +451,7 @@ def _bet_cote_max(c: dict) -> float:
 
 def _select_conviction(
     cands: list[dict], montant: int, palier: dict, cfg: dict, roi_weights: dict,
-    signal_mults: Optional[dict] = None,
+    signal_mults: Optional[dict] = None, respect_montant: bool = False,
 ) -> list[dict]:
     """Sélectionne PEU de paris à FORTE conviction (EV × proba × edge × ROI passé),
     filtrés par les GATES du profil EFFECTIF (cote_max, min_proba, ev_min, max_coup).
@@ -480,7 +530,7 @@ def _select_conviction(
         return base * rw
 
     def passes_gates(c):
-        if allowed_types is not None and c["type_pari"] not in allowed_types:
+        if allowed_types is not None and _fam(c["type_pari"]) not in allowed_types:
             return False                                     # hors méthode du profil
         # GATE DUR appris : un type au poids ~0 = bucket (type×contexte) PROUVÉ perdant
         # (ROI réel ≤ seuil sur n suffisant, cf. profil_learning.suppressed) → on ne le
@@ -588,11 +638,53 @@ def _select_conviction(
             selected.append(c)
             break
 
+    # ── DÉPLOIEMENT INTÉGRAL (calculateur MANUEL, respect_montant) ──────────────
+    # L'utilisateur a SAISI un montant : il veut qu'il soit JOUÉ EN ENTIER, réparti sur
+    # PLUSIEURS paris décorrélés (pas une réserve fantôme). Le var_cap plafonne chaque
+    # pari haute-variance à var_cap×montant ; absorber TOUT le budget exige donc au moins
+    # ceil(montant / plafond) paris distincts. La bande de conviction (keep_frac) peut
+    # n'en avoir retenu qu'1 (ex. risqué 10€ → 1 Multi capé à 4€ → 6€ en réserve). On
+    # complète ici avec les MEILLEURS candidats suivants qui passent déjà les gates, sans
+    # quasi-doublon. Le quota de coups spéculatifs (max_coup) est RELÂCHÉ : déployer la
+    # mise choisie sur un éventail de gros rapports EST la méthode du profil risqué. Le
+    # staking AUTO (respect_montant=False) garde au contraire sa réserve protectrice.
+    if respect_montant and selected:
+        var_cap = float(cfg.get("var_cap", 1.0) or 1.0)
+        plafond = max(min_stake, int(montant * var_cap)) if var_cap < 1.0 else montant
+        need_bets = min(max_feasible, len(ranked),
+                        max(1, -(-montant // max(plafond, 1))))   # division plafond (ceil)
+        for c in ranked:
+            if len(selected) >= need_bets:
+                break
+            if any(c is s for s in selected):
+                continue
+            hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+            dup = False
+            for s, t in seen_sets:
+                if hs == s:
+                    dup = True
+                    break
+                if t != c["type_pari"]:
+                    continue
+                inter = len(hs & s)
+                if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
+                    dup = True
+                    break
+                if inter / max(len(hs | s), 1) >= 0.67:
+                    dup = True
+                    break
+            if dup:
+                continue
+            c["_roi_w"] = roi_w(c)
+            c["_sig"] = sig_factor(c)
+            selected.append(c)
+            seen_sets.append((hs, c["type_pari"]))
+
     # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba),
     # en restant si possible dans la méthode du profil. Sans plan vide. Aucune invention.
     if not selected:
         def _in_type(c):
-            return allowed_types is None or c["type_pari"] in allowed_types
+            return allowed_types is None or _fam(c["type_pari"]) in allowed_types
 
         def _in_rapport(c):
             r = float(c.get("rapport_estime", 0.0) or 0.0)
@@ -679,6 +771,11 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
         _skip_gain_target = False
     if not _skip_gain_target:
         _enforce_gain_target(selected, montant, cfg, min_stake, min_keep=min_keep)
+    # GARDE-FOU FINAL anti « tout sur un Trio » : plafonne la mise de chaque pari
+    # haute-variance à var_cap × montant, transfère l'excédent vers les paris plus
+    # sûrs (ou d'autres gros-rapports décorrélés), sinon le laisse en réserve. Dernier
+    # passage → ne peut pas être défait par la concentration du gain target.
+    _apply_variance_cap(selected, montant, cfg, min_stake, respect_montant=respect_montant)
 
 
 def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
@@ -799,6 +896,69 @@ def _apply_spec_cap(selected: list[dict], montant: int, palier: dict,
         k += 1
 
 
+def _apply_variance_cap(selected: list[dict], montant: int, cfg: dict,
+                        min_stake: int, respect_montant: bool = False) -> None:
+    """Plafonne la mise de CHAQUE pari haute-variance (Trio/jackpot/Pick5/Multi 4-5) à
+    `var_cap` × montant. L'excédent est transféré EN PRIORITÉ vers les paris plus sûrs
+    (baisse réelle de la variance), à défaut vers les autres gros-rapports DÉCORRÉLÉS
+    sous leur plafond, et en dernier recours laissé en RÉSERVE (non joué).
+
+    C'est le correctif direct du bug « profil risqué = toute la mise sur un Trio » :
+    même si le moteur de gain concentre tout sur un seul ticket tout-ou-rien, ce passage
+    final le ramène à ≤ var_cap et étale le reste."""
+    cap = float(cfg.get("var_cap", 1.0) or 1.0)
+    if cap >= 1.0 or not selected:
+        return
+    ceil_amt = max(int(min_stake), int(montant * cap))
+    hv = [c for c in selected if _is_high_variance(c)]
+    if not hv:
+        return
+    moved = 0
+    for c in hv:
+        if c["mise"] > ceil_amt:
+            moved += c["mise"] - ceil_amt
+            c["mise"] = ceil_amt
+    if moved <= 0:
+        return
+    # 1) Vers les paris NON haute-variance (réduit vraiment le risque global).
+    safe = sorted((c for c in selected if not _is_high_variance(c)),
+                  key=lambda c: c["mise"])
+    k = 0
+    while moved > 0 and safe:
+        safe[k % len(safe)]["mise"] += 1
+        moved -= 1
+        k += 1
+    # 2) Sinon, répartir sur les autres gros-rapports encore sous leur plafond.
+    if moved > 0:
+        k = 0
+        guard = 0
+        slack = [c for c in hv if c["mise"] < ceil_amt]
+        while moved > 0 and slack and guard < 10 ** 7:
+            c = slack[k % len(slack)]
+            if c["mise"] < ceil_amt:
+                c["mise"] += 1
+                moved -= 1
+            k += 1
+            guard += 1
+            if all(c["mise"] >= ceil_amt for c in slack):
+                break
+    # 3) Reliquat éventuel.
+    #    - Staking AUTO : → réserve (montant_joue < montant), assumé : mieux qu'un ticket
+    #      loterie surdimensionné. _assemble_plan recalcule montant_joue depuis les mises.
+    #    - Calculateur MANUEL (respect_montant) : PAS de réserve fantôme — l'utilisateur a
+    #      saisi un montant et veut qu'il soit joué EN ENTIER. Quand il n'existe pas assez
+    #      de paris décorrélés pour étaler sous le plafond, on déploie le reliquat sur les
+    #      paris (priorité aux MOINS variants, puis mise la plus faible), quitte à dépasser
+    #      le var_cap : mieux vaut une légère sur-mise répartie qu'un montant non joué.
+    if moved > 0 and respect_montant and selected:
+        order = sorted(selected, key=lambda c: (_is_high_variance(c), c["mise"]))
+        k = 0
+        while moved > 0:
+            order[k % len(order)]["mise"] += 1
+            moved -= 1
+            k += 1
+
+
 # Pourquoi ce TYPE de pari sert ce PROFIL — pédagogie de la méthode de jeu.
 _TYPE_RAISON_PROFIL = {
     # PRUDENT — placé / duo placé / 2sur4.
@@ -845,6 +1005,21 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict]) -> lis
         raisons.append(_obj)
     # 1. Pourquoi ce type pour ce profil
     r_type = _TYPE_RAISON_PROFIL.get((profil, c["type_pari"]))
+    if not r_type:
+        fam = _fam(c["type_pari"])
+        if fam.startswith("Multi en "):
+            try:
+                _n = int(fam.rsplit(" ", 1)[-1])
+            except (ValueError, IndexError):
+                _n = 0
+            r_type = (
+                f"Multi en {_n} : trouver les 4 premiers (désordre) parmi {_n} chevaux, "
+                + ("large filet qui tombe SOUVENT — gagner régulièrement." if _n >= 6
+                   else "champ serré à GROS rapport — gros lot pour une mise plate.")
+            )
+        elif fam == "Pick5":
+            r_type = ("Pick5 : les 5 premiers dans le désordre (mise 1€, sans bonus) — "
+                      "gros lot accessible, deux fois moins cher que le Quinté+.")
     if r_type:
         raisons.append(r_type)
     # 2. Valeur modèle vs marché (edge)
