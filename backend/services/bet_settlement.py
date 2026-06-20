@@ -56,6 +56,15 @@ _RAPPORT_KEYS = {
     "Quinté+ Désordre": ("quinte_plus", "e_quinte_plus"),
     "Quinté+ Flexi":    ("quinte_plus", "e_quinte_plus"),
     "Quinté+":          ("quinte_plus", "e_quinte_plus"),
+    # Multi / Mini Multi : le PMU publie UN SEUL rapport (`e_multi` / `e_mini_multi`),
+    # pas un par nombre de chevaux joués (clés réelles vérifiées en base 2026-06-17).
+    # Mise PLATE → gain = mise × rapport. Les clés par-N (multi_en_4…) n'existent PAS
+    # côté PMU → ne pas s'y fier. La sélection de clé Multi se fait dans settle_pari
+    # (selon Multi vs Mini Multi), ces entrées servent de repli générique.
+    "Multi":       ("e_multi", "multi"),
+    "Mini Multi":  ("e_mini_multi", "mini_multi", "e_multi", "multi"),
+    # Pick5 (top-5 désordre, base 1€) — clé réelle `e_pick5`.
+    "Pick5":       ("e_pick5", "pick5", "pick_5"),
 }
 
 _APPROX_NOTE = "Rapport placé approximatif (le PMU publie un rapport par cheval placé)."
@@ -70,23 +79,65 @@ def _nb_places(nb_partants: int) -> int:
     return 1
 
 
-def _place_rapport_exact(rapports_detail: Optional[dict], key: str,
+def _place_rapport_exact(rapports_detail: Optional[dict], keys: tuple[str, ...],
                          numeros: list[int]) -> Optional[float]:
     """Rapport placé EXACT du cheval/de la combinaison depuis rapports_detail
     (le PMU publie un rapport par cheval placé). Match par numéro(s) dans la
-    `combinaison`. None si introuvable → l'appelant retombe sur l'agrégat."""
+    `combinaison`. None si introuvable.
+
+    ⚠️ Comparaison par ENTIERS (pas par chaînes) : le PMU peut renvoyer des
+    numéros zéro-paddés ("08") → "08" != "8" en chaîne ferait échouer le match
+    et l'appelant créditerait alors le rapport du 1er cheval placé (le gagnant),
+    PAS celui du cheval réellement joué. C'était la cause du Simple Placé réglé
+    au rapport du vainqueur. On essaie aussi toutes les clés candidates."""
     if not rapports_detail:
         return None
-    entries = rapports_detail.get(key) or []
-    want = sorted(str(int(n)) for n in numeros)
-    for e in entries:
-        combi = str(e.get("combinaison") or "")
-        nums = sorted(re.findall(r"\d+", combi))
-        if nums == want and e.get("rapport"):
+    want = sorted(int(n) for n in numeros)
+    for key in keys:
+        for e in (rapports_detail.get(key) or []):
+            combi = str(e.get("combinaison") or "")
+            nums = sorted(int(x) for x in re.findall(r"\d+", combi))
+            if nums == want and e.get("rapport"):
+                try:
+                    return float(e["rapport"])
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
+def _multi_rapport_by_n(rapports_detail: Optional[dict], keys: tuple[str, ...],
+                        n: int) -> Optional[float]:
+    """Rapport Multi/Mini Multi pour la formule « en N » RÉELLEMENT jouée.
+
+    Le PMU publie une entrée PAR formule (libellé « … en 4/5/6/7 »), même
+    combinaison gagnante, rapports décroissants (en 4 = le plus élevé). On matche
+    par le N du libellé ; à défaut (vieux scrapes sans libellé) par position, les
+    entrées étant ordonnées en 4, 5, 6, 7. None si rien d'exploitable.
+
+    ⚠️ Ne PAS retomber sur l'agrégat `rapports[clé]` = detail[0] = « en 4 » : un
+    « Multi en 6 » gagnant serait payé au rapport « en 4 » (surpaie massive — bug
+    R3C1 du 18/06 : en 6 réglé à 120 € au lieu de 8 €)."""
+    if not rapports_detail:
+        return None
+    for key in keys:
+        arr = rapports_detail.get(key) or []
+        if not arr:
+            continue
+        # 1) match par libellé « en N »
+        for e in arr:
+            m = re.search(r"en\s+(\d+)", str(e.get("libelle") or ""), re.I)
+            if m and int(m.group(1)) == n and e.get("rapport"):
+                try:
+                    return float(e["rapport"])
+                except (TypeError, ValueError):
+                    pass
+        # 2) repli positionnel : index 0 = en 4, 1 = en 5, …
+        idx = n - 4
+        if 0 <= idx < len(arr) and arr[idx].get("rapport"):
             try:
-                return float(e["rapport"])
+                return float(arr[idx]["rapport"])
             except (TypeError, ValueError):
-                return None
+                pass
     return None
 
 
@@ -97,6 +148,7 @@ def settle_pari(
     rapports: Optional[dict],
     nb_partants: int,
     rapports_detail: Optional[dict] = None,
+    non_partants: Optional[set[int]] = None,
 ) -> dict:
     """
     Règle un pari unique.
@@ -114,6 +166,8 @@ def settle_pari(
     permet le rapport placé EXACT du cheval précis (sinon agrégat approximatif).
     """
     rapports = rapports or {}
+    # « Mini Multi en N » (10-13 partants) = même pari/règlement que « Multi en N ».
+    tp_norm = type_pari.replace("Mini Multi", "Multi") if type_pari else type_pari
 
     # Construire les positions depuis le classement officiel
     num_by_pos: dict[int, int] = {}
@@ -134,13 +188,43 @@ def settle_pari(
         return {"gagne": False, "rapport_reel": None, "gain_mult": 1.0,
                 "rapport_approximatif": False, "note": "Résultat indisponible"}
 
-    nb_pl = _nb_places(nb_partants or len(pos_by_num))
+    # Non-partants : un cheval déclaré NP après la prise du pari → mise remboursée
+    # (rapport 1.0, statut neutre). On ne le compte JAMAIS perdant : ça fausserait
+    # le ROI à la baisse et polluerait l'apprentissage avec de fausses pertes.
+    np_set = set(int(n) for n in (non_partants or []))
+    sel_nums = set(int(n) for n in numeros)
+    if np_set and (sel_nums & np_set):
+        return {"gagne": False, "rapport_reel": 1.0, "gain_mult": 1.0,
+                "rapport_approximatif": False, "rembourse": True,
+                "note": "Cheval non-partant — mise remboursée (rapport 1.0)."}
+
+    # Places payées = sur le nombre de PARTANTS RÉELS (déclarés − non-partants).
+    eff_partants = nb_partants or len(pos_by_num)
+    if np_set:
+        eff_partants = max(0, eff_partants - len(np_set))
+    nb_pl = _nb_places(eff_partants)
     gain_mult = 1.0   # part de la mise payée au rapport (formules combinées : <1 possible)
-    placed = {num_by_pos[p] for p in range(1, nb_pl + 1) if p in num_by_pos}
-    top2 = {num_by_pos[p] for p in (1, 2) if p in num_by_pos}
-    top3 = {num_by_pos[p] for p in (1, 2, 3) if p in num_by_pos}
-    top4 = {num_by_pos[p] for p in (1, 2, 3, 4) if p in num_by_pos}
-    top5 = {num_by_pos[p] for p in (1, 2, 3, 4, 5) if p in num_by_pos}
+
+    # Ensembles top-N « dead-heat aware » : un ex-aequo (photo-finish) peut placer
+    # PLUSIEURS numéros à la même position. `num_by_pos` n'en garde qu'un (setdefault)
+    # → un Couplé/Trio légitime serait réglé perdant. On construit donc les top-N
+    # depuis TOUS les numéros dont la position ≤ N (le PMU paie alors toutes les
+    # combinaisons concernées par le rabattement).
+    def _topset(k: int) -> set:
+        s = set()
+        for e in classement or []:
+            try:
+                p = int(e.get("position")); nn = int(e.get("numero"))
+            except (TypeError, ValueError):
+                continue
+            if 1 <= p <= k:
+                s.add(nn)
+        return s
+    placed = _topset(nb_pl)
+    top2 = _topset(2)
+    top3 = _topset(3)
+    top4 = _topset(4)
+    top5 = _topset(5)
     sel = set(int(n) for n in numeros)
 
     approx = False
@@ -153,7 +237,8 @@ def settle_pari(
         approx = gagne
         note = _APPROX_NOTE if gagne else None
     elif type_pari == "Couplé Gagnant":
-        gagne = sel == top2 and len(sel) == 2
+        # issubset (pas ==) → gère le dead-heat (top2 peut contenir 3 ex-aequo).
+        gagne = len(sel) == 2 and sel.issubset(top2)
     elif type_pari == "Couplé Placé":
         gagne = len(sel) == 2 and sel.issubset(placed)
         approx = gagne
@@ -164,7 +249,7 @@ def settle_pari(
                  and num_by_pos.get(1) == int(numeros[0])
                  and num_by_pos.get(2) == int(numeros[1]))
     elif type_pari == "Trio":
-        gagne = sel == top3 and len(sel) == 3
+        gagne = len(sel) == 3 and sel.issubset(top3)
     elif type_pari == "Trio Ordre":
         gagne = (len(numeros) == 3
                  and num_by_pos.get(1) == int(numeros[0])
@@ -189,12 +274,32 @@ def settle_pari(
             n_win = math.comb(n_in, 2)
             gain_mult = n_win / n_combis
             note = f"Formule {len(sel)} chevaux : {n_win}/{n_combis} combinaison(s) gagnante(s)."
-    elif type_pari in ("Tiercé Désordre", "Tiercé Ordre"):
-        gagne = sel == top3 and len(sel) == 3        # désordre : 3 premiers, ordre indifférent
+    elif type_pari == "Tiercé Ordre":
+        # ORDRE EXACT 1-2-3 (rapport tierce_ordre, ~3-5× le désordre). Régler un
+        # Tiercé Ordre en désordre = surpaie massive au rapport ordre. Cf. Trio Ordre.
+        gagne = (len(numeros) == 3
+                 and num_by_pos.get(1) == int(numeros[0])
+                 and num_by_pos.get(2) == int(numeros[1])
+                 and num_by_pos.get(3) == int(numeros[2]))
+    elif type_pari == "Tiercé Désordre":
+        gagne = len(sel) == 3 and sel.issubset(top3)  # 3 premiers, ordre indifférent
     elif type_pari in ("Quarté+ Désordre", "Quarté+"):
-        gagne = sel == top4 and len(sel) == 4
+        gagne = len(sel) == 4 and sel.issubset(top4)
     elif type_pari in ("Quinté+ Désordre", "Quinté+ Flexi", "Quinté+"):
-        gagne = sel == top5 and len(sel) == 5
+        gagne = len(sel) == 5 and sel.issubset(top5)
+    elif tp_norm.startswith("Multi en "):
+        # Multi : les 4 PREMIERS (désordre) doivent TOUS être dans la sélection (4→7
+        # chevaux). Mise plate → pas de division par combinaisons (gain_mult reste 1).
+        gagne = len(top4) >= 4 and top4.issubset(sel)
+    elif tp_norm == "Pick5":
+        # Pick5 : les 5 premiers (désordre) tous dans la sélection. Champ > 5 = formule
+        # combinée C(N,5) → la mise se répartit, 1 seule combinaison gagne.
+        n_in = len(sel & top5)
+        gagne = len(top5) >= 5 and n_in >= 5
+        if gagne and len(sel) > 5:
+            n_combis = math.comb(len(sel), 5)
+            gain_mult = 1.0 / n_combis
+            note = f"Pick5 champ {len(sel)} : 1/{n_combis} combinaison gagnante."
     else:
         # Type vraiment non géré → gagné déterminé sur top3, rapport indispo.
         gagne = sel == top3 and len(sel) == 3
@@ -203,15 +308,46 @@ def settle_pari(
     rapport_reel: Optional[float] = None
     if gagne:
         val = None
-        keys = _RAPPORT_KEYS.get(type_pari, ())
-        # Placé : tenter le rapport EXACT du cheval/combi via rapports_detail.
-        if type_pari in ("Simple Placé", "Couplé Placé") and keys:
-            exact = _place_rapport_exact(rapports_detail, keys[0], list(sel))
+        # Multi/Mini Multi : clé unique PMU (e_multi / e_mini_multi) quel que soit le N
+        # joué — pas de rapport par-N en base. On choisit selon le label d'origine.
+        if type_pari.startswith("Mini Multi en "):
+            keys = _RAPPORT_KEYS["Mini Multi"]
+        elif tp_norm.startswith("Multi en "):
+            keys = _RAPPORT_KEYS["Multi"]
+        else:
+            keys = _RAPPORT_KEYS.get(type_pari) or _RAPPORT_KEYS.get(tp_norm, ())
+        is_place = type_pari in ("Simple Placé", "Couplé Placé")
+        if is_place:
+            # Placé : le PMU publie UN rapport PAR cheval/combi placé. On prend
+            # EXACTEMENT celui du cheval réellement joué. On ne retombe JAMAIS sur
+            # l'agrégat `rapports[...]` (= 1er placé = le gagnant) : ce serait le
+            # rapport d'un AUTRE cheval (bug Simple Placé réglé au rapport du
+            # vainqueur). Si le rapport exact n'est pas publié → gain en attente.
+            exact = _place_rapport_exact(rapports_detail, keys, list(sel))
             if exact and exact > 0:
                 val = exact
                 approx = False
                 note = None
-        if val is None:
+            else:
+                # Pas d'agrégat de secours pour un placé → on clarifie l'attente.
+                approx = False
+                note = None
+        elif tp_norm.startswith("Multi en "):
+            # Multi/Mini Multi : rapport de la formule « en N » jouée (PAS detail[0]
+            # = en 4). N = nombre de chevaux du ticket (== le N du libellé du pari).
+            m = re.search(r"en\s+(\d+)", type_pari or "")
+            n = int(m.group(1)) if m else (len(sel) or 4)
+            val = _multi_rapport_by_n(rapports_detail, keys, n)
+            if val is None and n == 4:
+                # agrégat = 1er = « en 4 » → exact UNIQUEMENT pour en 4.
+                for k in keys:
+                    if rapports.get(k) is not None:
+                        val = rapports.get(k)
+                        break
+            if val is None:
+                # en 5/6/7 sans détail re-scrapé → gain en attente plutôt que surpaie.
+                note = f"Rapport « Multi en {n} » non publié — gain en attente."
+        else:
             for k in keys:
                 if rapports.get(k) is not None:
                     val = rapports.get(k)
@@ -233,36 +369,48 @@ def settle_pari(
 
 
 def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
-                nb_partants: int, rapports_detail: Optional[dict] = None) -> dict:
+                nb_partants: int, rapports_detail: Optional[dict] = None,
+                non_partants: Optional[set[int]] = None) -> dict:
     """
     Règle un plan de mise complet (dict issu de plan_to_dict) contre le résultat.
 
     Retourne le bilan agrégé + le détail par pari (avec gagné/gain).
     `rapports_detail` → rapport placé EXACT (sinon agrégat).
+    `non_partants` → numéros déclarés non-partants → paris remboursés (neutres).
     """
     paris_bilan: list[dict] = []
     total_mise = 0.0
     total_gain = 0.0
     nb_en_attente = 0
+    nb_rembourse = 0
 
     for niveau in plan.get("niveaux", []):
         for pari in niveau.get("paris", []):
             numeros = [c["numero"] for c in pari.get("chevaux", [])]
             mise = float(pari.get("mise", 0) or 0)
-            res = settle_pari(pari["type"], numeros, classement, rapports, nb_partants, rapports_detail)
+            res = settle_pari(pari["type"], numeros, classement, rapports, nb_partants,
+                              rapports_detail, non_partants)
             gain = None
-            # statut : "gagne" | "perdu" | "en_attente" (gagné mais rapport pas publié)
-            if res["gagne"]:
+            # statut : "gagne" | "perdu" | "en_attente" (rapport pas publié) | "rembourse" (NP)
+            if res.get("rembourse"):
+                # Pari remboursé : neutre pour le ROI (ni mise, ni gain comptés) et
+                # exclu du win-rate. Comme si le pari n'avait jamais été pris.
+                statut = "rembourse"
+                gain = mise
+                nb_rembourse += 1
+            elif res["gagne"]:
                 if res["rapport_reel"] is not None:
                     gain = round(mise * res["rapport_reel"] * res.get("gain_mult", 1.0), 2)
                     total_gain += gain
+                    total_mise += mise
                     statut = "gagne"
                 else:
                     statut = "en_attente"
                     nb_en_attente += 1
+                    total_mise += mise
             else:
                 statut = "perdu"
-            total_mise += mise
+                total_mise += mise
             paris_bilan.append({
                 "type": pari["type"],
                 "niveau": niveau.get("niveau"),
@@ -287,6 +435,7 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
         "nb_paris": len(paris_bilan),
         "nb_gagnes": nb_gagnes,
         "nb_en_attente": nb_en_attente,
+        "nb_rembourse": nb_rembourse,
         "en_attente": nb_en_attente > 0,
         "total_mise": total_mise,
         "total_gain": total_gain,

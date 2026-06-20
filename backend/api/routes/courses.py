@@ -840,6 +840,14 @@ async def get_mise_plan(
     )
     rows = (await db.execute(q)).all()
 
+    # Pas (encore) de pronostic figé pour cette course → on ne peut PAS générer de plan
+    # (generer_plan suppose au moins un cheval classé). On renvoie un message clair plutôt
+    # qu'un 500 opaque (« Erreur lors du calcul du plan » côté front).
+    if not rows:
+        raise HTTPException(
+            status_code=409,
+            detail="Pronostic pas encore disponible pour cette course — réessayez une fois l'analyse IA publiée.")
+
     # Value bets
     vb_q = (
         _s(ValueBet)
@@ -926,9 +934,20 @@ async def get_mise_plan(
 
     # respect_montant : le montant SAISI par l'utilisateur est sa décision explicite →
     # on ne le rabote pas par le cap bankroll (sinon bankroll défaut 1.0 → plan 2€).
-    plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
-                        signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True)
-    out = plan_to_dict(plan)
+    try:
+        plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
+                            signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True)
+        out = plan_to_dict(plan)
+    except HTTPException:
+        raise
+    except Exception:
+        # Trace complète côté serveur pour diagnostic, message propre côté client
+        # (au lieu d'un 500 « Erreur lors du calcul du plan » sans contexte).
+        log.exception("mise_plan.generation_failed", course_id=course_id,
+                      profil=profil, montant=montant, nb_preds=len(preds))
+        raise HTTPException(
+            status_code=422,
+            detail="Impossible de générer un plan pour cette course (données de pronostic incomplètes).")
     # Indique si le pronostic est figé (T-10 min) → le plan ne changera plus.
     out["prono_fige"] = fige
     out["prono_fige_a"] = fige_a.isoformat() if fige_a else None
@@ -1131,33 +1150,43 @@ async def get_bilan_pronostic(
 
     montant = max(2.0, min(float(montant or 20), 10000.0))
     nb_partants = course.nb_partants or len(preds)
+    non_partants = {int(p["numero"]) for p in preds if p.get("non_partant") and p.get("numero") is not None}
 
-    # Mêmes signaux adaptatifs que le live (le bilan reflète la VRAIE méthode de
-    # chaque profil : sélection + mise + ROI passé + thermostat).
-    try:
-        from ml.bet_performance import get_learned_type_weights, get_model_heat
-        roi_weights = await get_learned_type_weights(
-            db, discipline=getattr(course, "discipline", None),
-            nb_partants=getattr(course, "nb_partants", None))
-        heat = await get_model_heat(db)
-    except Exception:
+    # Entrées LOURDES de la SIMULATION fallback (ROI weights, heat, features ML,
+    # signal performance) — INUTILES quand les résultats sont FIGÉS (profil_run_log).
+    # Le chemin figé (cas normal des courses jouées en live) lit le plan+resultat déjà
+    # réglés et n'y touche pas → on les charge PARESSEUSEMENT, une seule fois, et
+    # seulement si une simulation est réellement nécessaire (course legacy non figée).
+    _sim_cache: dict = {}
+
+    async def _sim_inputs():
+        if _sim_cache:
+            return _sim_cache
         roi_weights, heat = {}, 0.0
-
-    # Features par numéro → signal_mults par profil pour la SIMULATION (mêmes entrées
-    # que le live/le gel : sans ça la simulation rétro diverge des paris affichés).
-    feats_by_num: dict = {}
-    sig_perf = None
-    try:
-        from ml.signal_performance import load_signal_performance
-        from db.models import FeatureML as _FM
-        sig_perf = await load_signal_performance(db)
-        fq = (select(Participation.numero, _FM.features)
-              .join(_FM, _FM.participation_id == Participation.participation_id)
-              .where(Participation.course_id == course_id))
-        for numero, feats in (await db.execute(fq)).all():
-            feats_by_num[int(numero)] = feats or {}
-    except Exception:
-        feats_by_num, sig_perf = {}, None
+        try:
+            from ml.bet_performance import get_learned_type_weights, get_model_heat
+            roi_weights = await get_learned_type_weights(
+                db, discipline=getattr(course, "discipline", None),
+                nb_partants=getattr(course, "nb_partants", None))
+            heat = await get_model_heat(db)
+        except Exception:
+            roi_weights, heat = {}, 0.0
+        feats_by_num: dict = {}
+        sig_perf = None
+        try:
+            from ml.signal_performance import load_signal_performance
+            from db.models import FeatureML as _FM
+            sig_perf = await load_signal_performance(db)
+            fq = (select(Participation.numero, _FM.features)
+                  .join(_FM, _FM.participation_id == Participation.participation_id)
+                  .where(Participation.course_id == course_id))
+            for numero, feats in (await db.execute(fq)).all():
+                feats_by_num[int(numero)] = feats or {}
+        except Exception:
+            feats_by_num, sig_perf = {}, None
+        _sim_cache.update(roi_weights=roi_weights, heat=heat,
+                          feats_by_num=feats_by_num, sig_perf=sig_perf)
+        return _sim_cache
 
     # ── Bilan PAR PROFIL (prudent / modéré / risqué) ─────────────────────
     # SOURCE DE VÉRITÉ : le PLAN RÉELLEMENT FIGÉ avant le départ (profil_run_log),
@@ -1207,10 +1236,43 @@ async def get_bilan_pronostic(
             source = "fige"
             fige_le = fr["created_at"].isoformat() if fr["created_at"] else None
             regle_le = fr["settled_at"].isoformat() if fr["settled_at"] else None
+            # RE-RÈGLEMENT IMMÉDIAT à la vue : le résultat figé est STOCKÉ une seule fois
+            # (à la fin de course) ; or les rapports Multi/Mini Multi sont publiés en
+            # DIFFÉRÉ (+5-10 min) et `poll_resultats` ne re-traite plus une course passée
+            # en 'termine' → un pari gagnant restait « en attente » indéfiniment malgré le
+            # rapport désormais publié. Ici, si le bilan stocké a encore des paris en
+            # attente ET que les rapports PMU sont MAINTENANT disponibles, on re-règle le
+            # plan figé à la volée et on PERSISTE (palmarès + prochaines vues cohérents).
+            if (bilan_p.get("en_attente") or fr.get("statut") == "partial") and resultat.rapports:
+                try:
+                    fresh = settle_plan(plan_p, resultat.classement, resultat.rapports,
+                                        nb_partants, getattr(resultat, "rapports_detail", None),
+                                        non_partants)
+                    # N'écraser que si on a PROGRESSÉ (moins d'attente / plus réglé).
+                    if (not fresh.get("en_attente")
+                            or fresh.get("nb_en_attente", 99) < bilan_p.get("nb_en_attente", 99)):
+                        bilan_p = fresh
+                        _roi_f = fresh.get("roi")
+                        await db.execute(_text("""
+                            UPDATE profil_run_log SET resultat = CAST(:r AS jsonb),
+                                roi_reel = :roi, statut = :st, settled_at = now()
+                            WHERE course_id = :cid AND profil = :p
+                              AND COALESCE(meta->>'backfill', '') <> 'true'
+                        """), {"r": _json.dumps(fresh),
+                               "roi": (_roi_f / 100.0) if _roi_f is not None else None,
+                               "st": "partial" if fresh.get("en_attente") else "settled",
+                               "cid": course_id, "p": prof})
+                        await db.commit()
+                except Exception:
+                    await db.rollback()
         else:
             # Aucune trace figée → SIMULATION rétrospective (pas un vrai prono émis).
             # Mêmes entrées que le live/le gel : ROI weights + signal_mults PAR PROFIL
             # → la simulation reflète la VRAIE méthode (réduit l'écart prono↔bilan).
+            sim = await _sim_inputs()
+            roi_weights, heat = sim["roi_weights"], sim["heat"]
+            feats_by_num, sig_perf = sim["feats_by_num"], sim["sig_perf"]
+            from ml.bet_performance import get_learned_type_weights
             try:
                 roi_weights_p = await get_learned_type_weights(
                     db, profil=prof,
@@ -1228,7 +1290,8 @@ async def get_bilan_pronostic(
             plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None,
                                                roi_weights_p, heat, sig_mults_p,
                                                respect_montant=True))
-            bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants)
+            bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants,
+                                  getattr(resultat, "rapports_detail", None), non_partants)
             source = "simulation"
             fige_le = regle_le = None
         if bilan_p.get("en_attente"):

@@ -1293,9 +1293,18 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
       api.get(`/courses/${courseId}/bilan-pronostic?montant=10`)
         .then((r) => {
           if (!alive) return;
-          setData(r.data);
+          const d = r.data as BilanResp;
+          setData(d);
           setState("ok");
-          if (iv) { clearInterval(iv); iv = null; } // succes → stoppe le retry
+          // On NE stoppe le polling QUE lorsque TOUT est réglé. Tant qu'un pari attend
+          // son rapport PMU (Multi/Mini Multi publiés en différé après l'arrivée), on
+          // continue de re-fetch → le bilan se met à jour DÈS que le rapport arrive,
+          // sans rechargement manuel (avant : on s'arrêtait au 1er succès et le
+          // « en attente » restait figé même une fois le rapport publié).
+          const pending = (d.bilans_profils ?? []).some(
+            (b) => b?.verdict === "en_attente" || b?.bilan?.en_attente,
+          ) || (!d.bilans_profils && (d.verdict === "en_attente" || d.bilan?.en_attente));
+          if (!pending && iv) { clearInterval(iv); iv = null; } // tout réglé → stop
         })
         .catch(() => {
           // 404 = arrivee PMU pas encore publiee (course juste terminee) → on
@@ -1304,7 +1313,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
           if (alive) setState((prev) => (prev === "ok" ? prev : "loading"));
         });
     load();
-    iv = setInterval(load, 30000); // stoppe des le premier succes
+    iv = setInterval(load, 15000); // re-fetch jusqu'à ce que tous les rapports soient publiés
     return () => { alive = false; if (iv) clearInterval(iv); };
   }, [courseId]);
 
