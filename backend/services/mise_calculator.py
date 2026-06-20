@@ -153,15 +153,16 @@ PROFIL_CONFIG = {
     # rapport ≥ ~1.8 (viser ×2) : on écarte le placé sec à 1.1× (argent mort).
     # Mises prudentes : peu de paris, plancher franc.
     "conservateur": {
-        "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.8, "rapport_max": None,
+        "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.8, "rapport_max": 10.0,
         "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "bets_factor": 0.9, "min_stake_factor": 1.0,
         # keep_frac : on garde les paris dont la conviction ≥ 65% du meilleur → le NB de
         # paris VARIE selon la course (1 si un placé domine, 2-3 si plusieurs comparables).
         "keep_frac": 0.65,
-        # GAIN VISÉ : un pari gagnant doit rapporter ≥ ×1.5 du TOTAL misé (prudent =
-        # gain modeste mais réel ; on évite le placé sec qui rend à peine la mise).
-        "gain_cible_mult": 1.5,
+        # GAIN VISÉ (contrat produit) : un pari gagnant rapporte ≥ ×1.8 du TOTAL misé,
+        # jusqu'à ×10 (rapport_max) quand l'analyse est sûre. On évite le placé sec qui
+        # rend à peine la mise. Garanti par _enforce_gain_target (taille la mise).
+        "gain_cible_mult": 1.8,
         # Multi en 6/7 = large filet qui TOMBE SOUVENT (4 premiers dans 6-7 chevaux) →
         # parfait pour le prudent. Pas de Multi 4/5 (gros lot = trop rare). var_cap 1.0 :
         # le prudent n'a aucun pari haute-variance, le plafond est donc inerte.
@@ -178,7 +179,7 @@ PROFIL_CONFIG = {
         # ≥ ×3 du total → rapport ≥ 3. EV plus tolérante (-0.45) : le modéré vise le
         # GAIN (un duo/trio de favoris paie ×3–×10 mais reste -EV à cause du prélèvement
         # PMU) — l'utilisateur préfère un vrai gain si ça passe à des micro-tickets +EV.
-        "cote_min": 0.0, "cote_max": 15.0, "rapport_min": 3.0, "rapport_max": 10.0,
+        "cote_min": 0.0, "cote_max": 20.0, "rapport_min": 4.0, "rapport_max": 25.0,
         # max_coup 3 : les combos/SG de favoris sont -EV (prélèvement PMU) donc classés
         # « spéculatifs » ; on en autorise jusqu'à 3 pour pouvoir COUVRIR le risque avec
         # 2 paris (ex. 2 SG cote ≥5). Bornés par la cible de gain + le nb de paris.
@@ -192,11 +193,11 @@ PROFIL_CONFIG = {
         # leur conviction reste proche du meilleur). Plus de blocage à un nombre fixe.
         "keep_frac": 0.50,
         "bets_factor": 1.2, "min_stake_factor": 1.0,
-        # GAIN VISÉ : un pari gagnant ≥ ×2.5 du TOTAL misé (10€ → ≥25€). Assez bas pour
-        # autoriser 2 paris de couverture (2×5€ cote 5 = ×2.5 chacun), assez haut pour
-        # rester un VRAI gain (plus de micro-tickets dilués). Le moteur garde autant de
-        # paris que possible atteignant la cible, par conviction (couverture + profit).
-        "gain_cible_mult": 2.5,
+        # GAIN VISÉ (contrat produit) : un pari gagnant ≥ ×4 du TOTAL misé (10€ → ≥40€),
+        # jusqu'à ×25 (rapport_max). _enforce_gain_target taille la mise pour garantir ce
+        # minimum sur CHAQUE pari proposé ; les paris dont le rapport ne peut pas atteindre
+        # ×4 même à pleine mise sont écartés (→ moins de paris, mises plus franches).
+        "gain_cible_mult": 4.0,
         # Multi en 5/6/7 = rapport ×2-×10 qui tombe assez souvent (cœur du modéré).
         "types": {"Couplé Placé", "Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio",
                   "Simple Gagnant", "Multi en 5", "Multi en 6", "Multi en 7"},
@@ -219,7 +220,7 @@ PROFIL_CONFIG = {
     # règle de profitabilité ; le garde-fou est le NOMBRE (max_coup) + la PART du
     # budget (cap_spec) + un plancher d'EV (SPEC_EV_FLOOR) qui exclut la loterie pure.
     "agressif": {
-        "cote_min": 0.0, "cote_max": 300.0, "rapport_min": 10.0, "rapport_max": None,
+        "cote_min": 0.0, "cote_max": 300.0, "rapport_min": 8.0, "rapport_max": None,
         "min_proba": 0.0, "ev_min": -0.25,
         # RENTA LONG TERME : on limite les paris PUREMENT spéculatifs (sans edge) à 2 ;
         # la mise se concentre sur les gros rapports À VALEUR (edge>0 / conviction signal
@@ -229,9 +230,11 @@ PROFIL_CONFIG = {
         # conviction reste dans la bande ; sinon il en garde moins. Nombre DYNAMIQUE.
         "keep_frac": 0.38,
         "bets_factor": 2.4, "min_stake_factor": 0.34,
-        # GAIN VISÉ ≥ ×3 du total (plancher ; le risqué dépasse largement via les gros
-        # rapports — R10C8 : Couplé Gagnant ×644). Petites mises, grosses cotes.
-        "gain_cible_mult": 3.0,
+        # GAIN VISÉ (contrat produit) : un pari gagnant ≥ ×8 du TOTAL misé (10€ → ≥80€),
+        # SANS plafond (rapport_max None → vise l'infini sur les gros coups). C'est LE
+        # cœur du risqué : _enforce_gain_target CONCENTRE la mise (ou cherche un rapport
+        # plus élevé) jusqu'à garantir ×8 ; un pari qui ne peut pas l'atteindre est écarté.
+        "gain_cible_mult": 8.0,
         # Multi en 4/5 (gros lot) + Pick5 = gros rapports assumés du profil risqué.
         "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio", "Trio Ordre",
                   "Super 4", "Simple Gagnant",
@@ -841,30 +844,26 @@ def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
             kept.append(c)
             reste -= need
 
-    want = max(1, int(min_keep))
-    if len(kept) < want:
-        # Pas assez de paris atteignent la cible dans le budget → on FORCE la couverture :
-        # le budget est réparti entre les `want` MEILLEURS paris (mises franches), quitte
-        # à viser un multiple un peu plus bas. Couvrir le risque prime sur concentrer à
-        # fond quand le modèle n'est pas sûr d'un seul pari. (want=1 ⇒ 1 pari plein pot.)
-        want = min(want, len(selected))
-        chosen = sorted(selected, key=prio, reverse=True)[:want]
-        base = max(min_stake, budget // want)
-        for c in chosen:
-            c["mise"] = base
-        diff = budget - base * want
-        j = 0
-        while diff != 0 and chosen and j < 100000:
-            idx = j % len(chosen)
-            step = 1 if diff > 0 else -1
-            if chosen[idx]["mise"] + step >= min_stake:
-                chosen[idx]["mise"] += step
-                diff -= step
-            j += 1
-        selected[:] = chosen
+    # CONTRAT DE GAIN PRIORITAIRE : chaque pari gardé atteint déjà la cible (besoin ≤ budget).
+    # Si AUCUN pari ne peut l'atteindre même à plein budget (rapport trop faible pour le
+    # profil), on NE DILUE PAS sur plusieurs petits paris (ça casserait le minimum garanti)
+    # → on CONCENTRE tout le budget sur le plus GROS RAPPORT disponible : c'est exactement
+    # le levier demandé « augmente la mise OU vise une cote plus élevée » pour relever le
+    # gain minimum. (min_keep coverage n'est PLUS imposé : il primait sur le contrat.)
+    if not kept:
+        best = max(selected, key=lambda c: float(c.get("rapport_estime", 1.0) or 1.0))
+        best["mise"] = budget
+        best["_besoin"] = budget
+        selected[:] = [best]
         return
 
-    # Reliquat → aux paris gardés par priorité (total dépensé == budget initial).
+    # Mémorise la mise PLANCHER de chaque pari gardé (celle qui garantit la cible ×g) → le
+    # garde-fou variance final ne descendra JAMAIS en dessous (sinon le contrat serait rompu).
+    for c in kept:
+        c["_besoin"] = besoin(c)
+
+    # Reliquat → aux paris gardés par priorité (total dépensé == budget initial). Ne déplace
+    # PAS un pari sous son besoin ; le reliquat ne fait qu'AUGMENTER les mises (gain ↑).
     kept_prio = sorted(kept, key=prio, reverse=True)
     k = 0
     while reste > 0 and kept_prio:
@@ -935,9 +934,13 @@ def _apply_variance_cap(selected: list[dict], montant: int, cfg: dict,
         return
     moved = 0
     for c in hv:
-        if c["mise"] > ceil_amt:
-            moved += c["mise"] - ceil_amt
-            c["mise"] = ceil_amt
+        # Le plafond ne peut PAS descendre sous la mise PLANCHER du contrat de gain
+        # (_besoin) : sinon un pari sizé pour garantir ×g serait raboté et le gain minimum
+        # promis ne tiendrait plus. On ne rabote donc que l'excédent AU-DESSUS du besoin.
+        floor_c = max(ceil_amt, int(c.get("_besoin", 0) or 0))
+        if c["mise"] > floor_c:
+            moved += c["mise"] - floor_c
+            c["mise"] = floor_c
     if moved <= 0:
         return
     # 1) Vers les paris NON haute-variance (réduit vraiment le risque global).
