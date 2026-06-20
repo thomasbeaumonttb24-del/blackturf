@@ -1187,10 +1187,12 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         "offensif": " · mode adaptatif OFFENSIF (modèle calibré + en réussite → plus audacieux)",
         "normal": "",
     }[mode]
-    # HONNÊTETÉ (#3) : un pari à « value réelle » = edge>0 ET espérance nette positive.
-    # Le prono reste affiché sur TOUTES les courses, mais quand le marché est efficace
-    # (aucun edge, espérance ≤ 0), on le DIT au lieu de vendre du rêve → confiance/rétention.
-    sans_value = (nb_val == 0) or (esp <= 0)
+    # HONNÊTETÉ (#3) : « sans value » = le modèle ne voit AUCUN edge (proba modèle > marché)
+    # sur la course → nb_val == 0. On se base sur l'EDGE, pas sur l'espérance € : l'EV des
+    # combinés est neutralisée à 0 (flag combo_ev_none, pool combiné non observable) donc un
+    # plan risqué combo-only a toujours esp≈0 — l'inclure sur-flaggerait à tort le risqué.
+    # Le prono reste affiché sur TOUTES les courses ; quand le marché est efficace, on le DIT.
+    sans_value = (nb_val == 0)
     if sans_value:
         resume = (
             f"⚠️ Pas de value réelle détectée sur cette course "
