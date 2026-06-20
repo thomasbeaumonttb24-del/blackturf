@@ -568,6 +568,18 @@ async def run_nightly_retraining() -> None:
                      dead=(_fh.get("dead") or [])[:15])
     except Exception as e:
         log.warning("pipeline.nightly_feature_health_skip", err=str(e)[:140])
+    # CLV (Closing Line Value) : nos choix battent-ils la ligne de clôture PMU ? Proxy
+    # d'edge le plus robuste à la variance. On suit la CLV des top picks modèle vs marché
+    # → si > 0 et > moyenne, le modèle anticipe le marché (signal d'edge non-circulaire).
+    try:
+        from ml.clv_monitor import compute_clv_monitor, persist_clv_monitor
+        async with AsyncSessionLocal() as clv_session:
+            _clv = await compute_clv_monitor(clv_session)
+            await persist_clv_monitor(clv_session, _clv)
+            log.info("pipeline.clv_monitor_done", n_top1=_clv.get("n_top1"),
+                     clv_top1=_clv.get("clv_top1"), edge_signal=_clv.get("edge_signal"))
+    except Exception as e:
+        log.warning("pipeline.nightly_clv_monitor_skip", err=str(e)[:140])
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
     try:
