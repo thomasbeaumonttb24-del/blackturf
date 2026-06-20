@@ -77,6 +77,7 @@ class MisePlan:
     avertissement: str
     kelly_warning: bool = False
     esperance_gain: float = 0.0      # espérance de PROFIT NET en € (Σ mise×EV)
+    sans_value: bool = False         # aucun pari à value réelle (espérance ≤ 0) → plan « plaisir », honnêteté affichée
     palier: str = ""                 # micro | petit | moyen | gros
     profil: str = ""                 # conservateur | equilibre | agressif
     mode_adaptatif: str = "normal"   # prudent | normal | offensif (selon heat)
@@ -1186,12 +1187,24 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         "offensif": " · mode adaptatif OFFENSIF (modèle calibré + en réussite → plus audacieux)",
         "normal": "",
     }[mode]
-    resume = (
-        f"Profil {profil_label} — {nb_paris} pari{'s' if nb_paris > 1 else ''} ciblé"
-        f"{'s' if nb_paris > 1 else ''} (palier {palier['nom']}), mise concentrée de {montant_joue}€"
-        + (f", dont {nb_val} à valeur réelle (cote probable)" if nb_val else "")
-        + f". Espérance de gain {'+' if esp >= 0 else ''}{esp:.2f}€" + mode_txt + "."
-    )
+    # HONNÊTETÉ (#3) : un pari à « value réelle » = edge>0 ET espérance nette positive.
+    # Le prono reste affiché sur TOUTES les courses, mais quand le marché est efficace
+    # (aucun edge, espérance ≤ 0), on le DIT au lieu de vendre du rêve → confiance/rétention.
+    sans_value = (nb_val == 0) or (esp <= 0)
+    if sans_value:
+        resume = (
+            f"⚠️ Pas de value réelle détectée sur cette course "
+            f"(espérance {'+' if esp >= 0 else ''}{esp:.2f}€) — le marché est efficace ici. "
+            f"Plan {profil_label} pour le jeu plaisir : {nb_paris} pari{'s' if nb_paris > 1 else ''} "
+            f"de {montant_joue}€, joue petit et avec modération" + mode_txt + "."
+        )
+    else:
+        resume = (
+            f"Profil {profil_label} — {nb_paris} pari{'s' if nb_paris > 1 else ''} ciblé"
+            f"{'s' if nb_paris > 1 else ''} (palier {palier['nom']}), mise concentrée de {montant_joue}€"
+            + (f", dont {nb_val} à valeur réelle (cote probable)" if nb_val else "")
+            + f". Espérance de gain {'+' if esp >= 0 else ''}{esp:.2f}€" + mode_txt + "."
+        )
     return MisePlan(
         montant_total=montant,
         montant_joue=montant_joue,
@@ -1202,6 +1215,7 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         avertissement="Probabilités estimées par simulation (Plackett-Luce). Mises arrondies à l'euro. Jouez avec modération.",
         kelly_warning=kelly_warn,
         esperance_gain=esp,
+        sans_value=sans_value,
         palier=palier["nom"],
         profil=profil,
         mode_adaptatif=mode,
@@ -1266,6 +1280,7 @@ def plan_to_dict(plan: MisePlan) -> dict:
         "profil": plan.profil,
         "mode_adaptatif": plan.mode_adaptatif,
         "kelly_warning": plan.kelly_warning,
+        "sans_value": plan.sans_value,
         "resume_ia": plan.resume_ia,
         "avertissement": plan.avertissement,
         "niveaux": [
