@@ -52,6 +52,28 @@ async def compute_clv_monitor(session: AsyncSession) -> dict:
         FROM d
     """))).first()
 
+    # SEGMENT VALUE CONTRARIAN (hypothèse à forward-valider, NE PAS encore miser) :
+    # top-3 modèle dont la cote a DÉRIVÉ (montée) ouverture→T-10 (le marché les pousse
+    # dehors, le modèle les aime) → ils reviennent + gagnent plus. In-sample ~13j : ROI
+    # +19% (n~394). On le SUIT nightly pour confirmer (ou infirmer) hors échantillon avant
+    # de toucher la sélection de paris. ROI flat-stake à la cote figée (T-10, où on parierait).
+    seg = (await session.execute(text("""
+        WITH d AS (
+          SELECT l.cote_figee,
+                 CASE WHEN (r.classement->0->>'numero')::int = l.numero THEN 1 ELSE 0 END AS win
+          FROM cote_cloture_log l
+          JOIN participations pa ON pa.participation_id = l.participation_id
+          JOIN predictions pr ON pr.participation_id = l.participation_id
+          JOIN resultats r ON r.course_id = l.course_id
+          WHERE l.cote_figee > 1 AND l.cote_cloture > 1 AND pa.cote_reference > 1
+            AND jsonb_typeof(r.classement) = 'array' AND pr.rang_predit <= 3
+            AND pa.cote_reference / NULLIF(l.cote_figee, 0) - 1 < -0.05   -- cote a monté avant T-10
+        )
+        SELECT count(*) AS n, avg(win) AS winrate,
+               avg(CASE WHEN win = 1 THEN cote_figee ELSE 0 END) - 1 AS roi
+        FROM d
+    """))).first()
+
     if not rows or (rows[0] or 0) < MIN_OBS:
         return {"n_top1": int(rows[0] or 0) if rows else 0, "insufficient": True, "min_obs": MIN_OBS}
 
@@ -64,6 +86,10 @@ async def compute_clv_monitor(session: AsyncSession) -> dict:
         "n_all": int(rows[6] or 0), "clv_all": _r(rows[7]),
         # edge directionnel = CLV des top picks nettement > CLV moyenne (marché)
         "edge_signal": bool((rows[1] or 0) > 0.01 and (rows[1] or 0) > (rows[7] or 0) + 0.01),
+        # segment value contrarian (drift-out) — à forward-valider avant de miser
+        "seg_driftout_n": int(seg[0] or 0) if seg else 0,
+        "seg_driftout_winrate": _r(seg[1], 3) if seg else None,
+        "seg_driftout_roi": _r(seg[2], 4) if seg else None,
         "min_obs": MIN_OBS,
     }
     return snap
