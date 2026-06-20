@@ -95,6 +95,44 @@ def _should_deploy(
 
 
 # ─────────────────────────────────────────────
+# Capture cote de clôture (fondation CLV)
+# ─────────────────────────────────────────────
+async def _capture_closing_cotes(course_id: str) -> None:
+    """Fige la cote PMU de CLÔTURE (dernière scrapée ~départ) + la cote_figee (T-10) de
+    chaque partant dans cote_cloture_log. Base de la métrique CLV (bat-on la ligne de
+    clôture ?). Idempotent (ON CONFLICT DO NOTHING : la 1re capture après l'off gagne).
+    Best-effort : tout échec est avalé, n'interrompt jamais l'apprentissage post-course.
+
+    NB : tant que le scraper ne rafraîchit pas les cotes dans les dernières minutes,
+    cote_cloture ≈ cote_figee (la cote PMU se fige ~T-10). L'étape suivante = scrape
+    haute fréquence near-off pour capturer le vrai mouvement de clôture."""
+    try:
+        async with AsyncSessionLocal() as s:
+            await s.execute(text("""
+                CREATE TABLE IF NOT EXISTS cote_cloture_log (
+                    participation_id BIGINT PRIMARY KEY,
+                    course_id TEXT NOT NULL,
+                    numero INT,
+                    cote_cloture DOUBLE PRECISION,
+                    cote_figee DOUBLE PRECISION,
+                    captured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """))
+            await s.execute(text("""
+                INSERT INTO cote_cloture_log (participation_id, course_id, numero, cote_cloture, cote_figee)
+                SELECT pa.participation_id, pa.course_id, pa.numero, pa.cote_pmu, pr.cote_figee
+                FROM participations pa
+                LEFT JOIN predictions pr ON pr.participation_id = pa.participation_id
+                WHERE pa.course_id = :cid AND pa.non_partant = false AND pa.cote_pmu > 1
+                ON CONFLICT (participation_id) DO NOTHING
+            """), {"cid": course_id})
+            await s.commit()
+        log.info("pipeline.closing_cotes_captured", course_id=course_id)
+    except Exception as e:
+        log.warning("pipeline.closing_cotes_skip", course_id=course_id, err=str(e)[:140])
+
+
+# ─────────────────────────────────────────────
 # Post-course pipeline
 # ─────────────────────────────────────────────
 async def run_post_course(course_id: str) -> None:
@@ -117,6 +155,11 @@ async def run_post_course(course_id: str) -> None:
         if not resultat:
             log.warning("pipeline.post_course.no_result", course_id=course_id)
             return
+
+        # 0. Snapshot cote de CLÔTURE (fondation CLV). La course vient de finir → la cote
+        # PMU a cessé d'évoluer ; pa.cote_pmu = dernière scrapée ≈ ligne de clôture. On la
+        # fige (+ cote_figee T-10) une fois pour mesurer plus tard si on bat la clôture.
+        await _capture_closing_cotes(course_id)
 
         # 1. Mise à jour ELO
         classement = [
