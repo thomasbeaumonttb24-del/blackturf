@@ -181,6 +181,7 @@ interface MisePlan {
   avertissement: string;
   niveaux: NiveauPlan[];
   paris_ecartes?: PariEcarte[];   // candidats rejetés + motif (transparence)
+  prono_fige?: boolean;           // figé (T-10) → gains ne bougent plus, on stoppe le refresh
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -392,6 +393,17 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           </div>
         )}
       </div>
+
+      {plan.prono_fige ? (
+        <p className="mt-2 text-[10px] text-brand-gold/80">
+          🔒 Pronostic figé — gains calculés sur les cotes au gel (ne bougent plus).
+        </p>
+      ) : (
+        <p className="mt-2 text-[10px] text-brand-emerald/80 flex items-center gap-1">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-emerald animate-pulse" />
+          Gains réévalués sur les cotes du marché EN DIRECT (mise à jour automatique).
+        </p>
+      )}
 
       {plan.kelly_warning ? (
         <div className="mt-3 rounded-lg border border-brand-red/30 bg-brand-red/5 p-2 text-xs text-brand-red flex gap-2">
@@ -631,8 +643,10 @@ function MiseCalculatorWidget({
         profil_risque: prof,
       });
       setPlan(res.data);
-    } catch {
-      toast.error("Erreur lors du calcul du plan");
+    } catch (e: unknown) {
+      // Message précis du backend (ex. « Pronostic pas encore disponible ») si présent.
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || "Erreur lors du calcul du plan");
     } finally {
       setLoading(false);
     }
@@ -661,6 +675,30 @@ function MiseCalculatorWidget({
     }
   }
 
+  // RAFRAÎCHISSEMENT LIVE des gains estimés : tant qu'un plan est affiché et que le
+  // pronostic n'est PAS figé (avant T-10) ni la course terminée, on recalcule le plan en
+  // silence toutes les 45 s → les gains potentiels suivent les cotes EN DIRECT du marché
+  // (sinon l'utilisateur voit un gain figé au moment du clic, trompeur quand la cote bouge).
+  // Une fois figé (prono_fige) ou la course finie, on stoppe : le plan ne bouge plus.
+  useEffect(() => {
+    if (!plan || plan.prono_fige || statut === "termine") return;
+    const m = parseFloat(montant);
+    if (!m || m <= 0) return;
+    let cancelled = false;
+    const id = setInterval(async () => {
+      try {
+        const res = await api.post(`/courses/${courseId}/mise-plan`, {
+          montant: m,
+          profil_risque: profilChoisi,
+        });
+        if (!cancelled) setPlan(res.data);
+      } catch {
+        /* refresh silencieux : on garde le dernier plan en cas d'échec transitoire */
+      }
+    }, 45000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [plan, montant, profilChoisi, statut, courseId]);
+
   if (!userPlan || userPlan === "free") {
     return (
       <div className="text-center py-6">
@@ -671,7 +709,7 @@ function MiseCalculatorWidget({
           Disponible dès le plan Standard.
         </p>
         <Button variant="brand" size="sm" asChild>
-          <Link href="/tarifs">Passer Standard — 19€/mois</Link>
+          <Link href="/tarifs">Passer Standard — 12€/mois</Link>
         </Button>
       </div>
     );
@@ -798,16 +836,40 @@ function _rapportAbbr(key: string): string {
 
 function ResultatsSection({ resultats, partants }: {
   resultats: {
-    classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
+    classement: Array<{ numero: number; nom: string; position: number | null; temps: number | null; reduction_km: number | null; incident?: string | null; disqualifie?: boolean }>;
     rapports: Record<string, number> | null;
-    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number }>> | null;
+    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number; libelle?: string | null }>> | null;
     temps_gagnant: string | null;
     commentaire: string | null;
     duree_course: number | null;
   };
   partants: Partant[];
 }) {
-  const podium = [...(resultats.classement || [])].sort((a, b) => a.position - b.position);
+  // Classés (position réelle) triés ; disqualifiés/distancés (position absente +
+  // incident PMU) listés à part, EN FIN d'arrivée comme sur la feuille officielle.
+  const classement = resultats.classement || [];
+  const podium = classement
+    .filter((c) => c.position != null)
+    .sort((a, b) => (a.position as number) - (b.position as number));
+  const disqualifies = classement.filter((c) => c.position == null && (c.disqualifie || c.incident));
+  // Libellé FR de l'incident (varie selon le type de course : trot = allure/poteau,
+  // galop/obstacle = tombé/distancé/arrêté…). Repli générique pour codes inconnus.
+  const fmtIncident = (code: string | null | undefined): string => {
+    if (!code) return "Disqualifié";
+    const map: Record<string, string> = {
+      DISQUALIFIE_POUR_ALLURE_IRREGULIERE: "Disqualifié — allure irrégulière",
+      DISQUALIFIE_POUR_PARCOURS_IRREGULIER: "Disqualifié — parcours irrégulier",
+      DISQUALIFIE_POTEAU_GALOP: "Disqualifié — galop au poteau",
+      ARRETE: "Arrêté",
+      TOMBE: "Tombé",
+      DISTANCE: "Distancé",
+      DEROBE: "Dérobé",
+      RESTE_AU_POTEAU: "Resté au poteau",
+    };
+    if (map[code]) return map[code];
+    const txt = code.replace(/_/g, " ").toLowerCase();
+    return txt.charAt(0).toUpperCase() + txt.slice(1);
+  };
   const coteByNum: Record<number, number | null> = {};
   for (const p of partants) coteByNum[p.numero] = p.cote_pmu ?? null;
 
@@ -873,21 +935,22 @@ function ResultatsSection({ resultats, partants }: {
           </thead>
           <tbody>
             {podium.map((c) => {
+              const pos = c.position as number;
               const cote = coteByNum[c.numero];
               const temps = c.reduction_km != null ? fmtRedKm(c.reduction_km)
                 : c.temps != null ? fmtChrono(c.temps) : "—";
               return (
-                <tr key={c.numero} className={cn("rounded-lg", rowTint(c.position), c.position <= 3 && "font-semibold")}>
+                <tr key={c.numero} className={cn("rounded-lg", rowTint(pos), pos <= 3 && "font-semibold")}>
                   <td className="px-2 py-2">
-                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold tabular-nums", medalBox(c.position))}>
-                      {c.position}
+                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold tabular-nums", medalBox(pos))}>
+                      {pos}
                     </span>
                   </td>
                   <td className="px-2 py-2 tabular-nums">{c.numero}</td>
                   <td className="px-2 py-2">{c.nom}</td>
                   {hasTemps && (
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
-                      {fmtEcart(c)}
+                      {fmtEcart({ position: pos, temps: c.temps })}
                     </td>
                   )}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
@@ -896,6 +959,29 @@ function ResultatsSection({ resultats, partants }: {
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
                     {temps}
                   </td>
+                </tr>
+              );
+            })}
+            {/* Disqualifiés / distancés — en fin d'arrivée, avec le motif PMU. */}
+            {disqualifies.map((c) => {
+              const cote = coteByNum[c.numero];
+              return (
+                <tr key={`dsq-${c.numero}`} className="text-muted-foreground">
+                  <td className="px-2 py-2">
+                    <span className="inline-flex h-6 min-w-[1.6rem] items-center justify-center rounded px-1 text-[10px] font-bold text-white" style={{ background: "#DC2626" }} title={fmtIncident(c.incident)}>
+                      DSQ
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 tabular-nums">{c.numero}</td>
+                  <td className="px-2 py-2">
+                    <span className="line-through decoration-rose-400/60">{c.nom}</span>
+                    <span className="ml-2 align-middle text-[11px] font-medium text-rose-600">{fmtIncident(c.incident)}</span>
+                  </td>
+                  {hasTemps && <td className="px-2 py-2 hidden sm:table-cell" />}
+                  <td className="px-2 py-2 text-right font-mono tabular-nums">
+                    {cote != null ? cote.toFixed(1) : "—"}
+                  </td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums hidden sm:table-cell">—</td>
                 </tr>
               );
             })}
@@ -943,7 +1029,15 @@ function ResultatsSection({ resultats, partants }: {
                   const label = meta?.label ?? k.replace(/^e_/, "").replace(/_/g, " ");
                   // Placé / Gagnant : 1 ligne par cheval. Combos : on limite l'affichage.
                   const isPlaceOrWin = k.includes("simple");
+                  // Multi/Mini Multi : 1 entrée par formule « en 4/5/6/7 » (même combinaison),
+                  // on affiche le libellé « en N » à côté de chaque rapport.
+                  const isMulti = k === "e_multi" || k === "e_mini_multi";
                   const rows = isPlaceOrWin ? arr : arr.slice(0, 6);
+                  // « e-Mini Multi en 4 » → « en 4 » (juste la formule, le type est déjà en titre).
+                  const fmtMulti = (lib: string | null | undefined): string => {
+                    const m = (lib || "").match(/en\s+\d+/i);
+                    return m ? m[0].toLowerCase() : "";
+                  };
                   return (
                     <div key={k} className="rounded-lg border border-border bg-white p-2.5">
                       <div className="mb-1.5 flex items-center gap-2">
@@ -953,7 +1047,11 @@ function ResultatsSection({ resultats, partants }: {
                       <div className="space-y-0.5">
                         {rows.map((r, i) => (
                           <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-                            <span className="truncate text-muted-foreground">{fmtCombo(r.combinaison) || "—"}</span>
+                            <span className="truncate text-muted-foreground">
+                              {isMulti
+                                ? <>{fmtMulti(r.libelle) && <span className="font-semibold text-foreground">{fmtMulti(r.libelle)}</span>}{fmtMulti(r.libelle) ? " · " : ""}{fmtCombo(r.combinaison)}</>
+                                : (fmtCombo(r.combinaison) || "—")}
+                            </span>
                             <span className="font-bold tabular-nums text-brand-emerald whitespace-nowrap">{r.rapport.toFixed(2)} €</span>
                           </div>
                         ))}
@@ -1010,9 +1108,9 @@ function ResultatsSection({ resultats, partants }: {
 // recalculée : on lit les Prediction stockées (immuables) + le classement officiel.
 function PronosticVerdictSection({ predictions, classement }: {
   predictions: Prediction[];
-  classement: Array<{ numero: number; nom: string; position: number }>;
+  classement: Array<{ numero: number; nom: string; position: number | null }>;
 }) {
-  const posByNum = new Map<number, number>();
+  const posByNum = new Map<number, number | null>();
   for (const c of classement) posByNum.set(c.numero, c.position);
 
   const iaRanked = [...predictions].sort((a, b) => a.rang_predit - b.rang_predit);
@@ -1190,10 +1288,24 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
 
   useEffect(() => {
     let alive = true;
-    api.get(`/courses/${courseId}/bilan-pronostic?montant=10`)
-      .then((r) => { if (alive) { setData(r.data); setState("ok"); } })
-      .catch(() => { if (alive) setState("error"); });
-    return () => { alive = false; };
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const load = () =>
+      api.get(`/courses/${courseId}/bilan-pronostic?montant=10`)
+        .then((r) => {
+          if (!alive) return;
+          setData(r.data);
+          setState("ok");
+          if (iv) { clearInterval(iv); iv = null; } // succes → stoppe le retry
+        })
+        .catch(() => {
+          // 404 = arrivee PMU pas encore publiee (course juste terminee) → on
+          // retentera. On ne fige pas en "error" pour laisser le retry afficher
+          // le bilan des qu'il est disponible.
+          if (alive) setState((prev) => (prev === "ok" ? prev : "loading"));
+        });
+    load();
+    iv = setInterval(load, 30000); // stoppe des le premier succes
+    return () => { alive = false; if (iv) clearInterval(iv); };
   }, [courseId]);
 
   if (state !== "ok" || !data) return null;
@@ -1801,9 +1913,9 @@ export default function CoursePage() {
   } | null>(null);
 
   const [resultats, setResultats] = useState<{
-    classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
+    classement: Array<{ numero: number; nom: string; position: number | null; temps: number | null; reduction_km: number | null; incident?: string | null; disqualifie?: boolean }>;
     rapports: Record<string, number> | null;
-    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number }>> | null;
+    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number; libelle?: string | null }>> | null;
     temps_gagnant: string | null;
     commentaire: string | null;
     duree_course: number | null;
@@ -2115,8 +2227,11 @@ export default function CoursePage() {
           <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
         )}
 
-        {/* Bilan du plan de mise 20€ rejoué sur l'arrivée réelle (course terminée) */}
-        {course.statut === "termine" && resultats && predictions && predictions.length > 0 && (
+        {/* Bilan du plan de mise rejoué sur l'arrivée réelle (course terminée).
+            Monté en PARALLELE du fetch `resultats` (pas gaté dessus) : l'endpoint
+            charge le résultat côté serveur + retry interne sur 404 → un aller-retour
+            de moins dans le chemin critique, le bilan s'affiche plus tôt. */}
+        {course.statut === "termine" && predictions && predictions.length > 0 && (
           <BilanMiseSection courseId={id} />
         )}
 
@@ -2649,7 +2764,7 @@ export default function CoursePage() {
                   <TrendingUp className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
                   <p className="text-sm text-muted-foreground mb-3">Disponible dès le plan Standard</p>
                   <Button variant="brand" size="sm" asChild>
-                    <Link href="/tarifs">Passer Standard — 19€/mois</Link>
+                    <Link href="/tarifs">Passer Standard — 12€/mois</Link>
                   </Button>
                 </div>
               ) : loadingPred ? (
