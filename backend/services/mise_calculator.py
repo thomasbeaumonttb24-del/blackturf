@@ -478,7 +478,7 @@ def _select_conviction(
     allowed_types = cfg.get("types")                         # None = toutes
     objectif = cfg.get("objectif", "ev")
     spec_ok = cfg.get("spec_coup", False)                     # profil loterie : coups -EV assumés
-    SPEC_EV_FLOOR = -0.80                                     # plancher d'EV même pour un coup assumé
+    SPEC_EV_FLOOR = -0.40                                     # plancher d'EV même pour un coup assumé (relevé de -0.80 : -80% = loterie pure, ruine garantie ; -40% laisse passer les vrais gros rapports à edge>0 via _is_credible_coup)
     # Spectre large de combinaisons : on tolère plusieurs paris du même type (ex. 5
     # trios différents) quand le profil saupoudre, pour couvrir plus de combinaisons PMU.
     # Le profil peut fixer son propre plafond (`max_per_type`) ; sinon auto selon palier.
@@ -756,7 +756,12 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
         # validé sont forts, plus on engage → la mise se concentre sur l'avantage MESURÉ
         # (le moteur « réfléchit » combien risquer selon sa confiance). Renta long terme.
         certitude = (1.0 + 3.0 * edge) * (0.7 + 0.3 * min(sig, 2.0))
-        return max(f * certitude * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0), 1e-3)
+        # CAP anti sur-staking : le tilt de conviction (certitude×risk_pref×roi_w) est borné
+        # à 2.0 → la demi-Kelly tiltée ne dépasse JAMAIS le Kelly PLEIN (0.5×2.0). Sans ce cap
+        # le produit montait ~8× = bien au-dessus de Kelly plein = ruine sur série de pertes,
+        # surtout edge surestimé (cf. audit edge : edge réel non prouvé).
+        mult = min(certitude * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0), 2.0)
+        return max(f * mult, 1e-3)
 
     weights = [weight(c) for c in selected]
     n = len(selected)
@@ -830,11 +835,12 @@ def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
         rap = max(float(c.get("rapport_estime", 1.0) or 1.0), 1.01)
         return max(min_stake, math.ceil(cible / rap))
 
-    # COUVERTURE DU RISQUE : on finance d'abord les paris les MOINS chers à amener à la
-    # cible (rapport le plus élevé) → on en case PLUSIEURS quand c'est possible (ex. 2
-    # Simple Gagnant cote ≥5 à 5€ plutôt qu'un seul gros ticket), à conviction égale on
-    # garde le mieux classé. Sinon un seul pari fort qui atteint la cible.
-    ordered = sorted(selected, key=lambda c: (besoin(c), -prio(c)))
+    # PRIORITÉ CONVICTION (corrigé) : on finance d'abord les paris à la PLUS FORTE conviction
+    # (prio = kelly_f×roi_w×sig×proba), puis à conviction égale les moins chers à amener à la
+    # cible. L'ancien tri (besoin d'abord) finançait les plus GROS rapports = les moins
+    # probables = biais longshot destructeur d'EV. On garde le contrat (chaque pari gardé
+    # atteint la cible) mais on engage le budget sur les paris les plus crédibles d'abord.
+    ordered = sorted(selected, key=lambda c: (-prio(c), besoin(c)))
     kept: list[dict] = []
     reste = budget
     for c in ordered:
@@ -845,13 +851,13 @@ def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
             reste -= need
 
     # CONTRAT DE GAIN PRIORITAIRE : chaque pari gardé atteint déjà la cible (besoin ≤ budget).
-    # Si AUCUN pari ne peut l'atteindre même à plein budget (rapport trop faible pour le
-    # profil), on NE DILUE PAS sur plusieurs petits paris (ça casserait le minimum garanti)
-    # → on CONCENTRE tout le budget sur le plus GROS RAPPORT disponible : c'est exactement
-    # le levier demandé « augmente la mise OU vise une cote plus élevée » pour relever le
-    # gain minimum. (min_keep coverage n'est PLUS imposé : il primait sur le contrat.)
+    # Si AUCUN pari ne peut l'atteindre même à plein budget, on concentre le budget sur UN
+    # seul pari (mise franche) — mais sur le MEILLEUR pari par CONVICTION (prio), PAS sur le
+    # plus gros rapport. L'ancien max(rapport) choisissait par construction le pari le moins
+    # probable / le plus -EV du lot (biais longshot destructeur d'espérance, cf. audit edge).
+    # On vise le gain via le pari le plus crédible, quitte à un multiple cible non atteint.
     if not kept:
-        best = max(selected, key=lambda c: float(c.get("rapport_estime", 1.0) or 1.0))
+        best = max(selected, key=prio)
         best["mise"] = budget
         best["_besoin"] = budget
         selected[:] = [best]

@@ -52,7 +52,7 @@ K_SHRINK = 40.0   # pseudo-paris (mise) shrinkant le ROI vers 0
 
 async def compute_signal_performance(session: AsyncSession) -> dict:
     rows = (await session.execute(text("""
-        SELECT fm.features, pa.cote_pmu,
+        SELECT fm.features, COALESCE((fm.features->>'cote_pmu')::float, pa.cote_pmu) AS cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
         FROM features_ml fm
         JOIN participations pa ON pa.participation_id = fm.participation_id
@@ -125,7 +125,7 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
     avec l'objectif propre à chaque profil → les multiplicateurs diffèrent par profil.
     → permet un pronostic adapté au profil sélectionné."""
     rows = (await session.execute(text("""
-        SELECT fm.features, pa.cote_pmu,
+        SELECT fm.features, COALESCE((fm.features->>'cote_pmu')::float, pa.cote_pmu) AS cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
                CASE WHEN pa.numero IN (
                     SELECT (e->>'numero')::int FROM jsonb_array_elements(r.classement)

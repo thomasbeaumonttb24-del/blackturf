@@ -476,6 +476,19 @@ async def run_nightly_retraining() -> None:
                      win_filt=_em.get("win_filt"), roi_cap=_em.get("roi_cap"))
     except Exception as e:
         log.warning("pipeline.nightly_edge_monitor_skip", err=str(e)[:140])
+    # Santé des FEATURES : détecte les features mortes/constantes (scraper cassé →
+    # valeur défaut figée). Le drift_detector ne surveille que la perf, pas la
+    # distribution des features. On LOGGE + persiste (pas d'exclusion auto = pas de
+    # surprise silencieuse sur le modèle ; la liste sert d'alerte/diagnostic).
+    try:
+        from ml.feature_health import compute_feature_health, persist_feature_health
+        async with AsyncSessionLocal() as fh_session:
+            _fh = await compute_feature_health(fh_session)
+            await persist_feature_health(fh_session, _fh)
+            log.info("pipeline.feature_health_done", n_dead=_fh.get("n_dead"),
+                     dead=(_fh.get("dead") or [])[:15])
+    except Exception as e:
+        log.warning("pipeline.nightly_feature_health_skip", err=str(e)[:140])
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
     try:
@@ -915,10 +928,13 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # ferme la boucle après temperature/blend marché/longshots. Identité si peu
         # de données. Renormalise Σ=1.
         try:
-            from ml.isotonic_calibration import load_curve, apply_calibration as _iso_apply
+            from ml.isotonic_calibration import load_curve, apply_calibration as _iso_apply, seg_key as _iso_seg
             _iso_curve = await load_curve(session)
             if _iso_curve:
-                probas_top1 = _iso_apply(probas_top1, _iso_curve)
+                # Calibration PAR SEGMENT (discipline × tranche de partants) si dispo,
+                # sinon courbe globale (fallback). nb_partants = nb de lignes scorées.
+                _seg = _iso_seg(course.discipline, len(features_list))
+                probas_top1 = _iso_apply(probas_top1, _iso_curve, seg=_seg)
         except Exception as e:
             log.warning("pipeline.isotonic_calibration_skip", err=str(e)[:140])
 

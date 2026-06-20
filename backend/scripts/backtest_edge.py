@@ -78,7 +78,7 @@ async def main():
 
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(text("""
-            SELECT c.course_id, c.date_heure, pa.cote_pmu, fm.features,
+            SELECT c.course_id, c.date_heure, COALESCE((fm.features->>'cote_pmu')::float, pa.cote_pmu) AS cote_pmu, fm.features,
                    CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
             FROM features_ml fm
             JOIN participations pa ON pa.participation_id = fm.participation_id
