@@ -638,48 +638,6 @@ def _select_conviction(
             selected.append(c)
             break
 
-    # ── DÉPLOIEMENT INTÉGRAL (calculateur MANUEL, respect_montant) ──────────────
-    # L'utilisateur a SAISI un montant : il veut qu'il soit JOUÉ EN ENTIER, réparti sur
-    # PLUSIEURS paris décorrélés (pas une réserve fantôme). Le var_cap plafonne chaque
-    # pari haute-variance à var_cap×montant ; absorber TOUT le budget exige donc au moins
-    # ceil(montant / plafond) paris distincts. La bande de conviction (keep_frac) peut
-    # n'en avoir retenu qu'1 (ex. risqué 10€ → 1 Multi capé à 4€ → 6€ en réserve). On
-    # complète ici avec les MEILLEURS candidats suivants qui passent déjà les gates, sans
-    # quasi-doublon. Le quota de coups spéculatifs (max_coup) est RELÂCHÉ : déployer la
-    # mise choisie sur un éventail de gros rapports EST la méthode du profil risqué. Le
-    # staking AUTO (respect_montant=False) garde au contraire sa réserve protectrice.
-    if respect_montant and selected:
-        var_cap = float(cfg.get("var_cap", 1.0) or 1.0)
-        plafond = max(min_stake, int(montant * var_cap)) if var_cap < 1.0 else montant
-        need_bets = min(max_feasible, len(ranked),
-                        max(1, -(-montant // max(plafond, 1))))   # division plafond (ceil)
-        for c in ranked:
-            if len(selected) >= need_bets:
-                break
-            if any(c is s for s in selected):
-                continue
-            hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
-            dup = False
-            for s, t in seen_sets:
-                if hs == s:
-                    dup = True
-                    break
-                if t != c["type_pari"]:
-                    continue
-                inter = len(hs & s)
-                if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
-                    dup = True
-                    break
-                if inter / max(len(hs | s), 1) >= 0.67:
-                    dup = True
-                    break
-            if dup:
-                continue
-            c["_roi_w"] = roi_w(c)
-            c["_sig"] = sig_factor(c)
-            selected.append(c)
-            seen_sets.append((hs, c["type_pari"]))
-
     # Filet : aucune value qui passe les gates → 1 pari le plus SÛR (meilleure proba),
     # en restant si possible dans la méthode du profil. Sans plan vide. Aucune invention.
     if not selected:
@@ -704,6 +662,68 @@ def _select_conviction(
         safe["_roi_w"] = roi_w(safe)
         safe["_sig"] = sig_factor(safe)
         selected = [safe]
+
+    # ── DÉPLOIEMENT INTÉGRAL (calculateur MANUEL, respect_montant) ──────────────
+    # L'utilisateur a SAISI un montant et choisi un profil : il veut qu'il soit JOUÉ EN
+    # ENTIER, réparti sur PLUSIEURS paris (pas tout sur un seul ticket, pas de réserve
+    # fantôme). Le var_cap plafonne chaque pari haute-variance à var_cap×montant ;
+    # absorber tout le budget exige donc ≥ ceil(montant/plafond) paris distincts. Or la
+    # sélection peut se réduire à 1 SEUL pari quand les gates de RENTA (poids ROI appris
+    # « gate-dur », ev_min) répriment presque tous les candidats → on tombe sur le filet.
+    # Ici (flux MANUEL uniquement) on complète depuis un pool ÉLARGI : on garde l'identité
+    # PRODUIT du profil (type autorisé + bande de rapport + cote + proba + plancher EV de
+    # loterie) mais on n'exige plus le ROI passé ni le seuil EV de renta — déployer la mise
+    # CHOISIE sur l'éventail de paris éligibles du profil EST le comportement attendu (un
+    # agressif veut plusieurs gros rapports, pas un Simple Placé unique). Le staking AUTO
+    # (respect_montant=False) conserve au contraire toute sa discipline de renta + réserve.
+    if respect_montant and selected and len(cands) > len(selected):
+        var_cap = float(cfg.get("var_cap", 1.0) or 1.0)
+        plafond = max(min_stake, int(montant * var_cap)) if var_cap < 1.0 else montant
+        need_bets = min(max_feasible, len(cands), max(1, -(-montant // max(plafond, 1))))
+        if len(selected) < need_bets:
+            def _relaxed_ok(c):
+                if allowed_types is not None and _fam(c["type_pari"]) not in allowed_types:
+                    return False
+                bc = _bet_cote_max(c)
+                if bc > cote_max:
+                    return False
+                if bc < cote_min and "Désordre" not in c["type_pari"]:
+                    return False
+                rap = float(c.get("rapport_estime", 0.0) or 0.0)
+                if rap < rapport_min or (rapport_max is not None and rap > rapport_max):
+                    return False
+                if c["proba_gain"] < min_proba:
+                    return False
+                return c["ev"] >= SPEC_EV_FLOOR        # exclut la loterie pure (EV planchée)
+
+            seen = [(frozenset(int(h["numero"]) for h in c.get("chevaux", [])), c["type_pari"])
+                    for c in selected]
+            for c in sorted(cands, key=conviction, reverse=True):
+                if len(selected) >= need_bets:
+                    break
+                if any(c is s for s in selected) or not _relaxed_ok(c):
+                    continue
+                hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+                dup = False
+                for s, t in seen:
+                    if hs == s:
+                        dup = True
+                        break
+                    if t != c["type_pari"]:
+                        continue
+                    inter = len(hs & s)
+                    if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
+                        dup = True
+                        break
+                    if inter / max(len(hs | s), 1) >= 0.67:
+                        dup = True
+                        break
+                if dup:
+                    continue
+                c["_roi_w"] = roi_w(c)
+                c["_sig"] = sig_factor(c)
+                selected.append(c)
+                seen.append((hs, c["type_pari"]))
     return selected
 
 
