@@ -365,10 +365,20 @@ async def run_post_course(course_id: str) -> None:
         log.warning("pipeline.profil_learning_settle_skip", course_id=course_id, err=str(e)[:140])
 
     # 7. Mini-retraining si nb_resultats_depuis_dernier_retrain % 20 == 0
+    # COOLDOWN (anti-flood) : _count_recent_results() reste à un multiple du seuil sur une
+    # fenêtre → SANS cooldown, CHAQUE post-course re-déclenchait un retrain complet (47k
+    # lignes, ~2 min, lourd) toutes les 2-4 min, surtout au reboot quand le backlog de
+    # résultats se règle → pic mémoire/CPU permanent (cause d'OOM sur 8 Go). Le cooldown
+    # Redis (clé auto-expirante) borne à 1 retrain incrémental / RETRAIN_COOLDOWN_S. Le
+    # nightly complet (scheduler 02:00) reste indépendant.
     nb_new = await _count_recent_results()
     if nb_new % settings.retrain_every_n_results == 0:
-        log.info("pipeline.mini_retrain.triggered", nb_resultats=nb_new)
-        await run_incremental_retraining()
+        if await _incr_retrain_cooldown_active():
+            log.info("pipeline.mini_retrain.cooldown_skip", nb_resultats=nb_new)
+        else:
+            await _set_incr_retrain_cooldown(RETRAIN_COOLDOWN_S)
+            log.info("pipeline.mini_retrain.triggered", nb_resultats=nb_new)
+            await run_incremental_retraining()
 
     elapsed = (datetime.now() - t0).total_seconds()
     log.info("pipeline.post_course.done", course_id=course_id, elapsed_s=round(elapsed, 2))
@@ -392,6 +402,32 @@ async def _invalidate_stats_caches(course_id: str) -> None:
         log.info("pipeline.stats_cache_invalidated", course_id=course_id, n_keys=len(keys))
     except Exception as e:
         log.warning("pipeline.stats_cache_invalidate_skip", err=str(e)[:140])
+
+
+# Délai minimal entre deux retrains INCRÉMENTAUX (post-course). 6 h → au plus 4/jour,
+# au lieu d'un toutes les 2-4 min. Les nouveaux résultats restent appris (au prochain
+# créneau), mais on supprime le pic mémoire/CPU permanent qui saturait le VPS 8 Go.
+RETRAIN_COOLDOWN_S = 6 * 3600
+_INCR_RETRAIN_COOLDOWN_KEY = "ml:incr_retrain_cooldown"
+
+
+async def _incr_retrain_cooldown_active() -> bool:
+    """True si un retrain incrémental a tourné récemment (clé Redis non expirée)."""
+    try:
+        from db.redis_client import get_redis
+        r = await get_redis()
+        return bool(await r.exists(_INCR_RETRAIN_COOLDOWN_KEY))
+    except Exception:
+        return False        # Redis indispo → ne pas bloquer le retrain
+
+
+async def _set_incr_retrain_cooldown(seconds: int) -> None:
+    try:
+        from db.redis_client import get_redis
+        r = await get_redis()
+        await r.set(_INCR_RETRAIN_COOLDOWN_KEY, "1", ex=int(seconds))
+    except Exception:
+        pass
 
 
 async def run_incremental_retraining() -> None:
