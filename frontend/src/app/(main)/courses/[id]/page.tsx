@@ -1108,10 +1108,15 @@ function ResultatsSection({ resultats, partants }: {
 // recalculée : on lit les Prediction stockées (immuables) + le classement officiel.
 function PronosticVerdictSection({ predictions, classement }: {
   predictions: Prediction[];
-  classement: Array<{ numero: number; nom: string; position: number | null }>;
+  classement: Array<{ numero: number; nom: string; position: number | null; incident?: string | null; disqualifie?: boolean }>;
 }) {
   const posByNum = new Map<number, number | null>();
   for (const c of classement) posByNum.set(c.numero, c.position);
+  // DSQ = présent au classement mais sans position + incident/disqualifié (a couru puis
+  // disqualifié). NP = ABSENT du classement (non-partant, n'a pas couru). À distinguer.
+  const dsqNums = new Set(
+    classement.filter((c) => c.position == null && (c.disqualifie || c.incident)).map((c) => c.numero),
+  );
 
   const iaRanked = [...predictions].sort((a, b) => a.rang_predit - b.rang_predit);
   const picks = iaRanked.slice(0, 5);
@@ -1136,11 +1141,15 @@ function PronosticVerdictSection({ predictions, classement }: {
     ? { emoji: "➕", label: `Vainqueur dans le top 3 IA (classé #${rangIAduGagnant})`, cls: "border-blue-300 bg-blue-50 text-blue-800" }
     : { emoji: "❌", label: "Pronostic manqué", cls: "border-rose-300 bg-rose-50 text-rose-800" };
 
-  const pickVerdict = (pos: number | null | undefined) => {
-    if (pos == null) return { icon: "⚪", txt: "NP", cls: "text-muted-foreground" };
-    if (pos === 1) return { icon: "🥇", txt: "1er", cls: "text-emerald-600 font-semibold" };
-    if (pos <= 3) return { icon: "✅", txt: `${pos}e`, cls: "text-amber-600 font-semibold" };
-    return { icon: "❌", txt: `${pos}e`, cls: "text-muted-foreground" };
+  const pickVerdict = (num: number) => {
+    const pos = posByNum.get(num);
+    if (pos != null) {
+      if (pos === 1) return { icon: "🥇", txt: "1er", cls: "text-emerald-600 font-semibold" };
+      if (pos <= 3) return { icon: "✅", txt: `${pos}e`, cls: "text-amber-600 font-semibold" };
+      return { icon: "❌", txt: `${pos}e`, cls: "text-muted-foreground" };
+    }
+    if (dsqNums.has(num)) return { icon: "🚫", txt: "DSQ", cls: "text-rose-600 font-semibold" };
+    return { icon: "⚪", txt: "NP", cls: "text-muted-foreground" };
   };
 
   return (
@@ -1178,8 +1187,7 @@ function PronosticVerdictSection({ predictions, classement }: {
           </thead>
           <tbody>
             {picks.map((p) => {
-              const pos = posByNum.get(p.numero);
-              const pv = pickVerdict(pos);
+              const pv = pickVerdict(p.numero);
               return (
                 <tr key={p.participation_id} className="border-b border-border/40">
                   <td className="py-1 pr-2 font-bold tabular-nums">#{p.rang_predit}</td>
