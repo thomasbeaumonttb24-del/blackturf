@@ -91,6 +91,89 @@ def score_position(pos: int, nb_partants: int = 10) -> float:
     return max(0.0, 1.0 - (pos - 1) / max(nb_partants - 1, 1))
 
 
+def compute_allure_regularite(musique_str: Optional[str], max_courses: int = 10) -> tuple[float, float, int]:
+    """Régularité d'allure depuis la musique — CRITIQUE en trot (un trotteur qui se
+    met au galop est disqualifié). Compte les sorties terminées sur une faute
+    disqualifiante (D=disqualifié pour allure, T=tombé, A=arrêté, R=rétif/dérobé)
+    vs le nombre de sorties lues.
+
+    Retourne (taux_faute, faute_derniere_course, nb_sorties_lues).
+    Les tokens chiffres = course terminée et classée (0 = non-placé, PAS une faute).
+    Lettres discipline minuscules (a/p/h/s/m) après un chiffre → ignorées.
+    Même logique de parsing que parse_musique (casse préservée : incidents en
+    MAJUSCULE, discipline en minuscule)."""
+    if not musique_str:
+        return 0.0, 0.0, 0
+    s = str(musique_str)
+    incidents: list[bool] = []  # True = sortie terminée sur faute disqualifiante
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch.isdigit():
+            j = i + 1
+            while j < len(s) and s[j].isdigit():
+                j += 1
+            incidents.append(False)  # course classée (0 inclus = non-placé ≠ faute)
+            if j < len(s) and s[j].isalpha():
+                j += 1  # saute la lettre de discipline
+            i = j
+        elif ch in ("T", "A", "R", "D"):
+            incidents.append(True)   # incident disqualifiant standalone
+            i += 1
+        else:
+            i += 1
+    incidents = incidents[:max_courses]
+    if not incidents:
+        return 0.0, 0.0, 0
+    taux = sum(1 for x in incidents if x) / len(incidents)
+    return float(taux), (1.0 if incidents[0] else 0.0), len(incidents)
+
+
+# Lexique de déroulé de course (trip notes) — termes hippiques FR.
+_COMMENT_POS = (  # a gagné/fini en ayant de la marge → valeur réelle ≥ résultat
+    "facilement", "aisément", "aisement", "nettement", "détaché", "detache",
+    "sans forcer", "autorité", "autorite", "impressionnant",
+    "brillant", "souqué", "souque", "contenu", "à l'aise", "a l'aise",
+    "se promène", "se promene", "domine", "facile", "impose")
+_COMMENT_UNLUCKY = (  # malchanceux → forme cachée, souvent sous-coté au coup suivant
+    "gêné", "gene", "gêne", "enfermé", "enferme", "malchance", "pas de chance",
+    "fermé", "ferme la route", "mal parti", "manqué le départ", "manque le depart",
+    "victime", "bousculé", "boucle", "boxé", "boxe", "cafouillage", "trafic",
+    "perd toute chance", "sans pouvoir s'exprimer", "à refaire", "a refaire")
+_COMMENT_NEG = (  # faiblesse réelle → sur-évalué
+    "fatigue", "fatigué", "distancé", "distance dans", "lâche", "lache pied",
+    "rétrograde", "retrograde", "à la peine", "a la peine", "sans réaction",
+    "sans reaction", "décevant", "decevant", "faiblit", "n'a jamais", "se met au galop",
+    "dérobé", "derobe", "fautif", "loin du compte")
+
+
+def compute_commentaire_signal(textes: list[str]) -> tuple[float, float, float, int]:
+    """Score les déroulés de course récents (#9). Retourne
+    (signal_moyen[-1..1], a_ete_malchanceux[0/1], a_gagne_facile[0/1], nb_lus).
+    Positif/malchanceux = potentiel sous-évalué ; négatif = faiblesse réelle.
+    Liste vide (commentaires non scrapés) → neutre 0, pas de bruit."""
+    scores = []
+    malchance = 0.0
+    facile = 0.0
+    for t in textes:
+        if not t:
+            continue
+        s = t.lower()
+        pos = sum(1 for k in _COMMENT_POS if k in s)
+        unl = sum(1 for k in _COMMENT_UNLUCKY if k in s)
+        neg = sum(1 for k in _COMMENT_NEG if k in s)
+        if pos or unl:
+            if pos:
+                facile = 1.0
+            if unl:
+                malchance = 1.0
+        raw = (pos + unl) - neg
+        scores.append(float(max(-1.0, min(1.0, raw / 2.0))))
+    if not scores:
+        return 0.0, 0.0, 0.0, 0
+    return float(sum(scores) / len(scores)), malchance, facile, len(scores)
+
+
 def get_terrain_cat(terrain: Optional[str]) -> str:
     terrain_lower = (terrain or "bon").lower()
     for cat, values in TERRAIN_CATEGORIES.items():
@@ -522,10 +605,11 @@ async def compute_features_for_participation(
             WHERE p.cheval_id = :cid
               AND h.position_arrivee <= 3
               AND c.corde IS NOT NULL
+              AND h.date_course < (:as_of)::date
             GROUP BY c.corde
             ORDER BY nb DESC
             LIMIT 1
-        """), {"cid": cheval_id})
+        """), {"cid": cheval_id, "as_of": date_heure})
         best_corde_row = corde_r.fetchone()
         if best_corde_row and best_corde_row[0]:
             corde_match = 1.0 if best_corde_row[0].lower() == corde.lower() else 0.2
@@ -720,7 +804,8 @@ async def compute_features_for_participation(
             FROM historique_courses h
             JOIN participations p ON h.course_id = p.course_id AND h.cheval_id = p.cheval_id
             WHERE p.jockey_id = :jid AND p.entraineur_id = :eid
-        """), {"jid": jockey_id, "eid": entraineur_id})
+              AND h.date_course < (:as_of)::date
+        """), {"jid": jockey_id, "eid": entraineur_id, "as_of": date_heure})
         combo_rate = float(combo_r.scalar() or 0.0)
 
     feat_entraineur = {
@@ -889,9 +974,11 @@ async def compute_features_for_participation(
           AND h.discipline = :disc
           AND ABS(h.distance - :dist) <= 200
           AND h.hippodrome ILIKE :hippo
+          AND h.date_course < (:as_of)::date
     """), {
         "cid": cheval_id, "disc": discipline or "plat",
-        "dist": dist_int, "hippo": f"%{(hippodrome or '')}%"
+        "dist": dist_int, "hippo": f"%{(hippodrome or '')}%",
+        "as_of": date_heure,
     })
     fp = fingerprint_r.fetchone()
     fp_nb = int(fp[0] or 0) if fp else 0
@@ -915,7 +1002,8 @@ async def compute_features_for_participation(
             FROM historique_courses h
             JOIN participations p ON h.course_id = p.course_id AND h.cheval_id = p.cheval_id
             WHERE h.cheval_id = :cid AND p.jockey_id = :jid
-        """), {"cid": cheval_id, "jid": jockey_id})
+              AND h.date_course < (:as_of)::date
+        """), {"cid": cheval_id, "jid": jockey_id, "as_of": date_heure})
         syn = syn_r.fetchone()
         if syn and syn[0] and syn[0] >= 2:
             synergy_nb = int(syn[0])
@@ -1031,7 +1119,8 @@ async def compute_features_for_participation(
                 JOIN chevaux c_sire ON c_sire.nom = c_child.pere
                 WHERE c_sire.cheval_id = :sid
                   AND ABS(h.distance - :dist) <= 300
-            """), {"sid": sire_id, "dist": dist_int})
+                  AND h.date_course < (:as_of)::date
+            """), {"sid": sire_id, "dist": dist_int, "as_of": date_heure})
             sire_dist_row = sire_dist_r.fetchone()
             sire_dist_winrate = float(sire_dist_row[0] or 0.0) if sire_dist_row else 0.0
 
@@ -1045,7 +1134,8 @@ async def compute_features_for_participation(
                 JOIN chevaux c_sire ON c_sire.nom = c_child.pere
                 WHERE c_sire.cheval_id = :sid
                   AND h.terrain ILIKE :terr
-            """), {"sid": sire_id, "terr": f"%{terrain_cat}%"})
+                  AND h.date_course < (:as_of)::date
+            """), {"sid": sire_id, "terr": f"%{terrain_cat}%", "as_of": date_heure})
             sire_terrain_row = sire_terrain_r.fetchone()
             sire_terrain_winrate = float(sire_terrain_row[0] or 0.0) if sire_terrain_row else 0.0
     except Exception:
@@ -1395,7 +1485,15 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             -- Données PMU dispo mais non exploitées : débutant + profil de places
             p.indicateur_inedit, p.nb_places_second, p.nb_places_troisieme,
             -- Identité (en FIN pour ne pas décaler les index positionnels existants)
-            ch.nom AS cheval_nom, j.nom AS jockey_nom, ent.nom AS entraineur_nom
+            ch.nom AS cheval_nom, j.nom AS jockey_nom, ent.nom AS entraineur_nom,
+            -- Recul / distance de handicap trot (mètres) — scrapé+stocké (migration 0015)
+            -- mais jamais exploité. AJOUTÉ EN DERNIER → aucun index positionnel décalé.
+            p.handicap_distance,
+            -- Ferrure détaillée (Aucun/Avant/Arrière/Complet) — scrapée PMU, stockée
+            -- equipements.deferre, jamais exploitée (seuls les flags _change l'étaient).
+            eq.deferre AS deferre_detail,
+            -- Valeur de handicap (#10) — note du handicapeur (courses à handicap).
+            p.valeur_handicap
         FROM participations p
         JOIN courses c ON c.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
@@ -1431,7 +1529,12 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
                h.acceleration_label, h.reduction_km,
                -- Données dormantes réveillées (backfill API PMU) — en FIN pour ne
                -- pas décaler les index positionnels existants :
-               h.corde, h.poids_porte_course, h.indice_vitesse
+               h.corde, h.poids_porte_course, h.indice_vitesse,
+               -- Écart à l'arrivée (longueurs derrière le vainqueur) — scrapé PMU
+               -- (distanceAvecPrecedent). EN FIN → index 14. 0 = vainqueur.
+               h.ecart_longueurs,
+               -- Déroulé / trip note de la course passée (#9). EN FIN → index 15.
+               h.commentaire_course
         FROM historique_courses h
         WHERE h.cheval_id = ANY(:cids)
           AND h.date_course < :today
@@ -1446,7 +1549,8 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         if len(hist_by_cheval[cid]) < 20:
             # (0 position, 1 distance, 2 terrain, 3 hippodrome, 4 date, 5 nb_partants,
             #  6 cote, 7 discipline, 8 allocation, 9 acceleration_label, 10 reduction_km,
-            #  11 corde, 12 poids_porte_course, 13 indice_vitesse)
+            #  11 corde, 12 poids_porte_course, 13 indice_vitesse, 14 ecart_longueurs,
+            #  15 commentaire_course)
             hist_by_cheval[cid].append(row[1:])
 
     # 3. ELO history (max 10 par cheval) — POINT-IN-TIME : uniquement les deltas ELO
@@ -1790,8 +1894,70 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     except Exception as e:  # noqa: BLE001
         log.warning("features.nb_courses_reunion_failed", err=str(e)[:120])
 
+    # 17. DRAW BIAS data-driven — avantage réel d'une ZONE DE CORDE sur CET hippodrome
+    #     à cette distance (±400m), mesuré sur tout l'historique. Remplace l'heuristique
+    #     en dur (numero<=4 → +0.15…). On agrège le top3-rate par zone (int 1-4 /
+    #     milieu 5-8 / ext 9+) et on le centre sur le top3-rate global de l'échantillon :
+    #     biais = rate_zone − rate_global (positif = zone avantagée ici). Plat/obstacle
+    #     seulement (le trot n'a pas de corde). Min 30 sorties/zone et 100 au total
+    #     sinon zone absente → fallback 0.0 neutre (no-fake).
+    draw_bias_by_zone: dict = {}
+    try:
+        _disc_l = (course_disc or "").lower()
+        _is_trot = "trot" in _disc_l or "attelé" in _disc_l or "monté" in _disc_l
+        course_hippo = partants_raw[0][27]
+        if not _is_trot and course_hippo and course_dist:
+            draw_r = await session.execute(text("""
+                SELECT h.corde,
+                       COUNT(*) AS n,
+                       COUNT(*) FILTER (WHERE h.position_arrivee <= 3) AS top3
+                FROM historique_courses h
+                WHERE h.hippodrome ILIKE :hippo
+                  AND h.corde IS NOT NULL
+                  AND h.position_arrivee IS NOT NULL
+                  AND h.distance IS NOT NULL AND ABS(h.distance - :dist) <= 400
+                GROUP BY h.corde
+            """), {"hippo": f"%{course_hippo}%", "dist": int(course_dist or 2000)})
+            zone_acc: dict = {}  # zone -> [top3, n]
+            tot_top3 = tot_n = 0
+            for corde_val, n, top3 in draw_r.fetchall():
+                try:
+                    z = corde_zone(int(corde_val))
+                except (TypeError, ValueError):
+                    continue
+                if z == "inconnu":
+                    continue
+                a = zone_acc.setdefault(z, [0, 0])
+                a[0] += int(top3 or 0)
+                a[1] += int(n or 0)
+                tot_top3 += int(top3 or 0)
+                tot_n += int(n or 0)
+            if tot_n >= 100:
+                base_rate = tot_top3 / tot_n
+                for z, (t3, n) in zone_acc.items():
+                    if n >= 30:
+                        draw_bias_by_zone[z] = float(np.clip((t3 / n) - base_rate, -0.3, 0.3))
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.draw_bias_failed", err=str(e)[:120])
+
+    # 18. STATS DU CHAMP sur les colonnes ajoutées EN FIN du SELECT. Ordre final des
+    #     dernières colonnes : …, handicap_distance (r[-3]), deferre_detail (r[-2]),
+    #     valeur_handicap (r[-1]). (Référencées par index négatif → si on en rajoute,
+    #     mettre à jour ces offsets.)
+    field_recul = [int(r[-3]) for r in partants_raw if r[-3] is not None and int(r[-3]) > 0]
+    recul_mean = float(np.mean(field_recul)) if field_recul else 0.0
+    recul_max = float(max(field_recul)) if field_recul else 0.0
+    field_valeur = [int(r[-1]) for r in partants_raw if r[-1] is not None and int(r[-1]) > 0]
+    valeur_mean = float(np.mean(field_valeur)) if field_valeur else 0.0
+    valeur_max = float(max(field_valeur)) if field_valeur else 0.0
+
     return {
         "partants": partants_raw,
+        "draw_bias_by_zone": draw_bias_by_zone,
+        "recul_mean": recul_mean,
+        "recul_max": recul_max,
+        "valeur_mean": valeur_mean,
+        "valeur_max": valeur_max,
         "hist_by_cheval": hist_by_cheval,
         "confrontations": compute_confrontation_features(hist_by_cheval, cheval_ids),
         "elo_by_cheval": elo_by_cheval,
@@ -1834,6 +2000,23 @@ async def compute_all_features_for_course(
         if feat:
             features_list.append(feat)
 
+    # ── FIX FEATURES MORTES : rang par COTE réelle (course-level) ──────────────
+    # rang_cote/est_favori/rang_popularite étaient dérivés de rang_pronostic_pmu (NULL à
+    # 100% → constants, variance nulle, inexploitables par le modèle). Ici on a TOUT le
+    # peloton → on classe par cote_pmu croissante (favori = rang 1). Signal FORT (la
+    # favori-itude prédit), enfin vivant. indice_valeur = proba implicite déviggée − uniforme.
+    valides = [f for f in features_list if (f.get("cote_pmu") or 0) > 1]
+    n_cl = len(valides)
+    if n_cl >= 2:
+        inv_sum = sum(1.0 / float(f["cote_pmu"]) for f in valides)
+        for rang, f in enumerate(sorted(valides, key=lambda x: float(x["cote_pmu"])), 1):
+            f["rang_cote"] = rang
+            f["est_favori"] = 1 if rang == 1 else 0
+            f["rang_popularite"] = rang
+            f["rang_cote_relatif"] = round(rang / n_cl, 4)
+            imp = (1.0 / float(f["cote_pmu"])) / inv_sum if inv_sum > 0 else 1.0 / n_cl
+            f["indice_valeur"] = round(imp - 1.0 / n_cl, 4)
+
     return features_list
 
 
@@ -1863,6 +2046,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         avis_entraineur_raw, tendance_force_raw, pool_gagnant_evol_raw,
         indicateur_inedit_raw, nb_places_2_raw, nb_places_3_raw,
         cheval_nom, jockey_nom, entraineur_nom,
+        handicap_distance_raw, deferre_detail_raw, valeur_handicap_raw,
     ) = row
 
     # ── ANTI-FUITE : taux J/E/asso POINT-IN-TIME (trailing, date<départ) ──────
@@ -1957,6 +2141,65 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_forme = {"forme_1_course": f1, "forme_3_courses": f3, "forme_5_courses": f5,
                   "forme_10_courses": f10, "forme_tendance": tendance, "regularite": regularite,
                   "taux_top3": taux_top3, "taux_victoire_5c": taux_vict}
+
+    # ── FF. Régularité d'allure — taux de fautes/disqualifications (trot ++) ────
+    # Trotteur qui se met au galop = disqualifié. Signal de risque que le modèle
+    # ignorait totalement. Dérivé de la musique (zéro data nouvelle). Hors trot les
+    # incidents (T/A/R/D) restent rares → taux ~0 = neutre, pas de bruit.
+    _is_trot_allure = "trot" in disc_lower or "attelé" in disc_lower or "monté" in disc_lower
+    taux_faute, faute_derniere, nb_musique_lues = compute_allure_regularite(musique)
+    feat_allure = {
+        "taux_disqualification": float(taux_faute),
+        "faute_derniere_course": float(faute_derniere),
+        # Régularité = complément du taux de faute, pondéré trot (en plat ~toujours 1).
+        "regularite_allure": float(1.0 - taux_faute),
+        # Interaction explicite trot × faute : faute en trot = bien plus pénalisante.
+        "risque_galop_trot": float(taux_faute) if _is_trot_allure else 0.0,
+        "nb_courses_lues_musique": int(nb_musique_lues),
+    }
+
+    # ── GG. Écart à l'arrivée (beaten lengths) — qualité réelle vs musique ──────
+    # La musique donne la POSITION, pas la MARGE : battu d'une tête ≠ battu de 15
+    # longueurs. Une défaite courte = cheval compétitif/malchanceux (souvent sous-coté).
+    # h[14]=ecart_longueurs (0 = vainqueur). On lit les sorties TERMINÉES récentes
+    # (position 1..19). Vide (résultats pas encore scrapés) → neutre, pas de bruit.
+    ecarts_recents = [float(h[14]) for h in historique[:6]
+                      if len(h) > 14 and h[14] is not None and h[0] and 0 < h[0] < 20]
+    if ecarts_recents:
+        ecart_moyen = float(np.mean(ecarts_recents))
+        # Proximité moyenne : 1.0 = colle au vainqueur, →0 quand battu loin (échelle 8 long.)
+        proximite_vainqueur = float(np.clip(1.0 - ecart_moyen / 8.0, 0.0, 1.0))
+        # Combien de sorties récentes finies à ≤2 longueurs (compétitif).
+        nb_defaites_courtes = sum(1 for e in ecarts_recents if e <= 2.0)
+        # Dernière sortie perdue mais de peu (≤1.5 long.) = malchance/forme cachée.
+        _last = next(((float(h[14]), h[0]) for h in historique
+                      if len(h) > 14 and h[14] is not None and h[0] and 0 < h[0] < 20), None)
+        defaite_courte_derniere = 1.0 if (_last and _last[1] > 1 and _last[0] <= 1.5) else 0.0
+    else:
+        ecart_moyen = 0.0
+        proximite_vainqueur = 0.5  # neutre si pas de data marge
+        nb_defaites_courtes = 0
+        defaite_courte_derniere = 0.0
+    feat_ecart = {
+        "ecart_moyen_recent": float(np.clip(ecart_moyen, 0.0, 30.0)),
+        "proximite_vainqueur": float(proximite_vainqueur),
+        "nb_defaites_courtes": int(nb_defaites_courtes),
+        "defaite_courte_derniere": float(defaite_courte_derniere),
+    }
+
+    # ── GG-bis. Commentaires / trip notes (#9) — déroulé des courses passées ────
+    # Lexique hippique FR : "facilement/souqué" = marge cachée (valeur ≥ résultat),
+    # "gêné/enfermé/malchance" = forme cachée (souvent sous-coté ensuite), "fatigue/
+    # distancé" = faiblesse réelle. h[15]=commentaire_course (rempli au fil du scrape
+    # PMU ; vide au début → neutre, zéro bruit).
+    _comments = [h[15] for h in historique[:6] if len(h) > 15 and h[15]]
+    comm_signal, comm_malchance, comm_facile, nb_comments = compute_commentaire_signal(_comments)
+    feat_commentaire = {
+        "commentaire_signal": float(comm_signal),
+        "commentaire_malchance_recente": float(comm_malchance),
+        "commentaire_gagne_facile": float(comm_facile),
+        "nb_commentaires_lus": int(nb_comments),
+    }
 
     # Dynamique de course — h[9]=acceleration_label, h[10]=reduction_km
     feat_dynamics = aggregate_dynamics([
@@ -2085,6 +2328,31 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_equip = {
         "changement_equipement": float(deferre_change or 0), "premier_deferre": float(premier_deferre or 0),
         "nouvelles_oeilleres": float(oeilleres_change or 0), "equipement_score": float(equipement_nouveau or 0),
+    }
+
+    # ── H-bis. Ferrure détaillée (déferrage) — signal de vitesse trot ──────────
+    # Déferrer = pied nu = moins de poids = plus de vitesse. En trot, le « déferré
+    # des 4 » (complet) est une intention forte de performance ; les antérieurs
+    # comptent surtout pour l'action. Libellés PMU variés (DEFERRE_ANTERIEURS,
+    # _POSTERIEURS, _ANTERIEURS_POSTERIEURS, REFERRE_*, PROTEGE_*, Aucun…) → on teste
+    # par mots-clés ant/post. Vide/aucun → 0 neutre.
+    _def = (deferre_detail_raw or "").lower()
+    _has_ant = "anter" in _def or "avant" in _def
+    _has_post = "poster" in _def or "arrier" in _def or "arrière" in _def
+    # On ignore les états « protégé / referré » (pas un déferrage) pour le code de niveau.
+    _is_deferre = "deferr" in _def or "déferr" in _def or _def in ("avant", "arriere", "arrière", "complet")
+    if _is_deferre and _has_ant and _has_post:
+        deferre_code = 2
+    elif _is_deferre and (_has_ant or _has_post) or _def == "complet":
+        deferre_code = 2 if _def == "complet" else 1
+    else:
+        deferre_code = 0
+    feat_ferrure = {
+        "deferre_code": int(deferre_code),
+        "deferre_complet": 1.0 if deferre_code >= 2 else 0.0,
+        "deferre_anterieurs": 1.0 if (_is_deferre and _has_ant) else 0.0,
+        # Premier déferrage complet en trot = signal d'intention maximal.
+        "premier_deferre_trot": 1.0 if (premier_deferre and deferre_code >= 1 and _is_trot_allure) else 0.0,
     }
 
     # ── I. Jockey ─────────────────────────────────────────────────────────────
@@ -2305,6 +2573,54 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_pace = {"vitesse_theorique": vitesse_theorique, "stamina_index": float(np.clip(stamina_index,-1,1)),
                  "discipline_coherence": float(disc_coherence)}
 
+    # ── HH. Speed figures — vitesse PROPRE du cheval (chrono réel) ─────────────
+    # Avant : seul indice_vitesse (= vitesse du VAINQUEUR de ses courses passées =
+    # proxy du NIVEAU d'opposition) était utilisé. Ici on calcule la vitesse PROPRE
+    # du cheval dans chaque sortie :
+    #   - Trot : reduction_km (sec/km) → m/s = 1000/rk  (chrono direct du cheval)
+    #   - Plat/obstacle : vitesse_vainqueur × distance/(distance + écart_mètres),
+    #     l'écart en longueurs (~2.5 m) reconstituant le temps perdu sur le 1er.
+    # Puis normalisé par la vitesse de référence (get_vitesse_ref) → figure de vitesse
+    # (>1 = plus rapide que la normale distance/discipline). Données absentes (résultats
+    # pas scrapés, ni chrono ni écart) → 1.0 neutre, pas de bruit.
+    # h: 0 pos, 1 dist, 7 disc, 10 reduction_km, 13 indice_vitesse(vainqueur), 14 ecart.
+    LONGUEUR_M = 2.5
+    speed_figs = []
+    for h in historique[:6]:
+        if not (h[0] and 0 < h[0] < 20 and h[1]):
+            continue
+        h_dist = int(h[1])
+        h_disc = str(h[7] or discipline or "plat")
+        h_disc_l = h_disc.lower()
+        own_ms = None
+        rk = h[10] if len(h) > 10 else None
+        if rk and rk > 0 and ("trot" in h_disc_l or "attel" in h_disc_l or "mont" in h_disc_l):
+            own_ms = 1000.0 / float(rk)            # reduction_km = sec/km → m/s
+        else:
+            winner_ms = h[13] if len(h) > 13 else None
+            if winner_ms and winner_ms > 0 and h_dist > 0:
+                ecart_m = (float(h[14]) * LONGUEUR_M) if (len(h) > 14 and h[14] is not None) else 0.0
+                own_ms = float(winner_ms) * h_dist / (h_dist + ecart_m)
+        if own_ms and h_dist > 0:
+            ref = get_vitesse_ref(h_disc, h_dist)
+            if ref and ref > 0:
+                speed_figs.append(own_ms / ref)
+    if speed_figs:
+        sf_best = float(max(speed_figs))
+        sf_recent = float(speed_figs[0])
+        sf_mean = float(np.mean(speed_figs))
+        sf_consistency = float(1.0 - min(float(np.std(speed_figs)), 0.2) / 0.2)  # 1=régulier
+    else:
+        sf_best = sf_recent = sf_mean = 1.0
+        sf_consistency = 0.5
+    feat_speed = {
+        "speed_figure_best": float(np.clip(sf_best, 0.7, 1.3)),
+        "speed_figure_recent": float(np.clip(sf_recent, 0.7, 1.3)),
+        "speed_figure_mean": float(np.clip(sf_mean, 0.7, 1.3)),
+        "speed_consistency": float(np.clip(sf_consistency, 0.0, 1.0)),
+        "nb_speed_figures": int(len(speed_figs)),
+    }
+
     # ── Y. Class drop / raise — descente ou montée en catégorie ──────────────
     # Dotation cette course vs moyenne des 5 dernières courses
     # class_drop_ratio < 1.0 = descend = AVANTAGE (cheval surclassé)
@@ -2330,6 +2646,50 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "class_rise_flag": int(class_drop_ratio > 1.40),   # montée significative
     }
 
+    # ── GG. Recul trot (distance de handicap) ─────────────────────────────────
+    # En trot à handicap de DISTANCE, les meilleurs chevaux sont reculés (+25m/+50m…) :
+    # ils couvrent plus de terrain (désavantage physique) MAIS le recul = label de
+    # qualité (handicapé pour sa valeur). Signal à deux faces que le modèle apprendra.
+    # handicap_distance scrapé (PMU) + stocké (migration 0015), jamais exploité jusqu'ici.
+    # 0/None = ligne de base (autostart, non-reculé, ou plat/obstacle). Toujours fourni
+    # mais ~0 hors trot → neutre, pas de bruit.
+    recul_m = float(handicap_distance_raw) if handicap_distance_raw else 0.0
+    _recul_mean = float(batch.get("recul_mean", 0.0))
+    _recul_max = float(batch.get("recul_max", 0.0))
+    # Recul relatif au champ : >0 = plus reculé que la moyenne (meilleur cheval mais
+    # plus de terrain). Normalisé sur ±50m. Centré sur 0 si champ non reculé.
+    recul_vs_champ = float(np.clip((recul_m - _recul_mean) / 50.0, -1.0, 2.0)) if _recul_mean > 0 else 0.0
+    # Est-il sur la première ligne (0) alors que d'autres sont reculés ? = avantage tactique.
+    en_premiere_ligne = 1.0 if (recul_m == 0.0 and _recul_max > 0.0) else 0.0
+    # Ratio de terrain réel à couvrir vs la distance nominale de la course.
+    distance_reelle_ratio = float((dist_int + recul_m) / dist_int) if dist_int > 0 else 1.0
+    feat_recul = {
+        "recul_metres": recul_m,
+        "recul_vs_champ": recul_vs_champ,
+        "est_recule": 1.0 if recul_m > 0.0 else 0.0,
+        "recul_premiere_ligne": en_premiere_ligne,
+        "distance_reelle_ratio": float(np.clip(distance_reelle_ratio, 1.0, 1.5)),
+    }
+
+    # ── GG-ter. Valeur de handicap (#10) — note officielle du handicapeur ──────
+    # En course à handicap, le handicapeur attribue une « valeur » (note de qualité) ;
+    # le poids porté en découle. C'est un classement d'expert directement comparable
+    # entre partants. Champ PMU valeurHandicap (scrapé, migration 0025). Le SIGNAL clé
+    # est RELATIF au champ (être mieux noté que les rivaux). Absent hors handicap / si
+    # le PMU ne publie pas → 0 neutre (le poids relatif weight_relative_field couvre déjà
+    # le handicap par le poids).
+    valeur_h = float(valeur_handicap_raw) if valeur_handicap_raw else 0.0
+    _val_mean = float(batch.get("valeur_mean", 0.0))
+    _val_max = float(batch.get("valeur_max", 0.0))
+    valeur_vs_champ = float(np.clip((valeur_h - _val_mean) / 15.0, -2.0, 2.0)) if (valeur_h > 0 and _val_mean > 0) else 0.0
+    valeur_rang_relatif = float(valeur_h / _val_max) if (valeur_h > 0 and _val_max > 0) else 0.0
+    feat_valeur = {
+        "valeur_handicap": float(np.clip(valeur_h, 0.0, 120.0)),
+        "valeur_vs_champ": valeur_vs_champ,
+        "valeur_rang_relatif": valeur_rang_relatif,
+        "est_mieux_note": 1.0 if (valeur_h > 0 and _val_max > 0 and valeur_h >= _val_max) else 0.0,
+    }
+
     # ── Z. Bounce factor — rebond après course exceptionnelle ─────────────────
     # Un cheval qui vient de faire sa meilleure course peut "rebondir" (fatigue/pic)
     # Signal fort quand ELO a fait un grand bond la dernière course
@@ -2352,32 +2712,17 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "career_trajectory": float(np.clip(tendance, -1, 1)),  # alias avec label plus clair
     }
 
-    # ── AA. Draw bias — avantage numéro de départ sur cet hippodrome ─────────
-    # Calculé depuis l'historique de la course sur cet hippodrome
+    # ── AA. Draw bias DATA-DRIVEN — avantage réel de la zone de corde du jour ──
+    # Remplace l'ancienne heuristique (numero<=4 → +0.15 + record perso, qui mêlait
+    # biais de piste et forme du cheval). On lit le biais PRÉ-CALCULÉ par zone pour
+    # cet hippodrome+distance (cf. _load_course_batch_data #17), indexé par la zone
+    # de corde du numéro du jour. Plat/obstacle seulement ; trot/zone inconnue/échantillon
+    # insuffisant → 0.0 neutre. Le sens du rail (courses.corde "int"/"ext") sert juste
+    # de flag de cohérence, plus de barème en dur.
     draw_bias = 0.0
-    if numero and hippodrome and historique:
-        # Taux de top-3 des courses gagnées depuis ce numéro sur cet hippodrome
-        # approximation: performances à distance similaire sur hippodrome
-        dist_hippo_hist = [h for h in historique
-                           if h[3] and hippodrome and h[3].upper() == hippodrome.upper()
-                           and h[1] and abs(int(h[1]) - dist_int) <= 300]
-        if dist_hippo_hist:
-            # Biais de position de corde: les petits numéros avantagés sur certains hippos
-            # Sur hippodrome avec corde intérieure, numéros bas (1-4) = avantage
-            if corde and "int" in str(corde).lower():
-                if numero <= 4:
-                    draw_bias = 0.15
-                elif numero <= 8:
-                    draw_bias = 0.05
-                else:
-                    draw_bias = -0.05
-            elif corde and "ext" in str(corde).lower():
-                # Corde extérieure: numéros hauts peuvent être avantagés
-                if numero >= 8:
-                    draw_bias = 0.08
-            # Normaliser
-            win_rate_hippo = sum(1 for h in dist_hippo_hist if h[0] and h[0] == 1) / len(dist_hippo_hist)
-            draw_bias = float(np.clip(draw_bias + (win_rate_hippo - 0.1) * 2, -0.3, 0.3))
+    if not _is_trot_allure and numero:
+        _zone_jour = corde_zone(int(numero))
+        draw_bias = float(batch.get("draw_bias_by_zone", {}).get(_zone_jour, 0.0))
 
     feat_draw = {"draw_bias_score": float(np.clip(draw_bias, -1, 1))}
 
@@ -2494,12 +2839,12 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         "nom": cheval_nom or "",
         "jockey_nom": jockey_nom or "",
         "entraineur_nom": entraineur_nom or "",
-        **feat_elo, **feat_forme, **feat_dynamics, **feat_confrontation, **feat_repos, **feat_distance, **feat_terrain,
-        **feat_hippodrome, **feat_cotes, **feat_equip, **feat_jockey, **feat_entraineur,
+        **feat_elo, **feat_forme, **feat_allure, **feat_ecart, **feat_commentaire, **feat_dynamics, **feat_confrontation, **feat_repos, **feat_distance, **feat_terrain,
+        **feat_hippodrome, **feat_cotes, **feat_equip, **feat_ferrure, **feat_jockey, **feat_entraineur,
         **feat_cheval, **feat_course, **feat_populaire, **feat_signal,
         **feat_field, **feat_temporal, **feat_pace_conflict, **feat_pedigree,
-        **feat_synergy, **feat_fingerprint, **feat_advanced, **feat_pace,
-        **feat_class, **feat_bounce, **feat_draw, **feat_trainer,
+        **feat_synergy, **feat_fingerprint, **feat_advanced, **feat_pace, **feat_speed,
+        **feat_class, **feat_recul, **feat_valeur, **feat_bounce, **feat_draw, **feat_trainer,
         **feat_career, **feat_confidence, **feat_pmu, **feat_dormant,
     }
 
