@@ -122,12 +122,23 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
 
     course = (await session.execute(text("""
         SELECT statut, nb_partants, est_quinte, est_quarte, est_tierce, est_2sur4,
-               paris_disponibles, discipline
+               paris_disponibles, discipline, date_heure
         FROM courses WHERE course_id = :cid
     """), {"cid": course_id})).first()
     if not course or course[0] not in ("a_venir", "en_cours"):
         return 0
     _discipline = course[7]   # contexte d'apprentissage (discipline × peloton)
+    # Ne (re)figer QUE strictement AVANT le départ. Une re-prédiction post-départ
+    # (régénération EV-live / non-partant, course encore 'en_cours') ne doit PAS
+    # réécrire le prono figé ni repousser created_at après le départ → sinon le bilan
+    # afficherait un plan différent de celui vu avant la course. Le DERNIER prono
+    # émis avant le départ fait foi.
+    _date_heure = course[8]
+    if _date_heure is not None:
+        from datetime import datetime as _dt, timezone as _tz
+        _now = _dt.now(_tz.utc) if _date_heure.tzinfo else _dt.now()
+        if _now >= _date_heure:
+            return 0
 
     preds = []
     feats_by_num: dict[int, dict] = {}
@@ -241,6 +252,13 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
     nb_partants = res[2] or len(classement)
     rapports_detail = res[3] or None
 
+    # Non-partants déclarés → paris remboursés (pas comptés perdants).
+    np_rows = (await session.execute(text("""
+        SELECT numero FROM participations
+        WHERE course_id = :cid AND non_partant = true
+    """), {"cid": course_id})).all()
+    non_partants = {int(r[0]) for r in np_rows if r[0] is not None}
+
     runs = (await session.execute(text("""
         SELECT log_id, plan FROM profil_run_log
         WHERE course_id = :cid AND statut IN ('pending', 'partial')
@@ -249,7 +267,7 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
     n_settled = 0
     for log_id, plan in runs:
         plan_d = plan if isinstance(plan, dict) else json.loads(plan)
-        bilan = settle_plan(plan_d, classement, rapports, nb_partants, rapports_detail)
+        bilan = settle_plan(plan_d, classement, rapports, nb_partants, rapports_detail, non_partants)
         statut = "partial" if bilan.get("en_attente") else "settled"
         roi = bilan.get("roi")
         await session.execute(text("""

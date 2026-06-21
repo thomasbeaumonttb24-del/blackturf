@@ -35,7 +35,7 @@ router = APIRouter()
 # figée (predictions.cote_figee) et non sur la cote live → il ne change plus, que
 # l'utilisateur l'ouvre 9 min ou 2 min avant le départ. Les cotes affichées
 # continuent d'évoluer (scraper cotes-live).
-PRONO_LOCK_MIN = 5
+PRONO_LOCK_MIN = 10
 
 
 def _prono_lock_state(date_heure: Optional[datetime]) -> tuple[bool, Optional[datetime]]:
@@ -1203,12 +1203,20 @@ async def get_bilan_pronostic(
 
     try:
         await ensure_tables(db)
+        # Un run figé est le VRAI prono émis avant le départ dès qu'il est marqué
+        # pre_course (record_profil_runs ne fige QUE strictement avant le départ).
+        # On l'accepte même 'pending' (settle post-course manqué) → on le règlera ici.
+        # `created_at < depart` reste un fallback pour les vieux runs sans marqueur.
+        # On NE filtre PAS sur created_at quand pre_course='true' : une re-prédiction
+        # tardive pouvait pousser created_at après le départ et faire rejeter à tort le
+        # prono réel → le bilan régénérait alors un plan DIFFÉRENT (incohérence vue user).
         frozen_rows = (await db.execute(_text("""
             SELECT profil, plan, resultat, created_at, settled_at, statut
             FROM profil_run_log
-            WHERE course_id = :cid AND statut IN ('settled', 'partial')
+            WHERE course_id = :cid
+              AND statut IN ('settled', 'partial', 'pending')
               AND COALESCE(meta->>'backfill', '') <> 'true'
-              AND created_at < :depart
+              AND (COALESCE(meta->>'pre_course', '') = 'true' OR created_at < :depart)
         """), {"cid": course_id, "depart": course.date_heure})).all()
     except Exception:
         frozen_rows = []
@@ -1216,11 +1224,12 @@ async def get_bilan_pronostic(
     for prof, plan_j, res_j, c_at, s_at, st in frozen_rows:
         frozen[prof] = {
             "plan": plan_j if isinstance(plan_j, dict) else _json.loads(plan_j or "{}"),
-            "resultat": res_j if isinstance(res_j, dict) else _json.loads(res_j or "{}"),
+            "resultat": (res_j if isinstance(res_j, dict) else _json.loads(res_j)) if res_j else None,
             "created_at": c_at, "settled_at": s_at, "statut": st,
         }
 
-    has_fige = any(fr.get("resultat") for fr in frozen.values())
+    # Présence d'un plan figé pré-course (réglé OU non) = on tient le vrai prono émis.
+    has_fige = bool(frozen)
     # Le BILAN (résultats) est TOUJOURS à la mise de référence 10€ par profil — figé
     # comme simulation. C'est une vue comparable « 10€ par type de risque » (demande
     # user), indépendante de la mise que l'utilisateur a pu saisir au calculateur.
@@ -1229,27 +1238,31 @@ async def get_bilan_pronostic(
     bilans_profils = []
     for prof in PROFILS:
         fr = frozen.get(prof)
-        if fr and fr.get("resultat"):
-            # VRAI prono figé avant course + réglé (identique au palmarès).
+        if fr:
+            # SOURCE DE VÉRITÉ : le plan EXACT figé avant le départ = ce que l'utilisateur
+            # a vu au calculateur et ce que règle le palmarès. On NE régénère JAMAIS (un
+            # plan recalculé diverge : cotes/heat/ROI weights ont bougé → paris différents
+            # = exactement l'incohérence « prono figé pas le même » signalée).
             plan_p = fr["plan"]
-            bilan_p = fr["resultat"]
+            bilan_p = fr.get("resultat")
             source = "fige"
             fige_le = fr["created_at"].isoformat() if fr["created_at"] else None
             regle_le = fr["settled_at"].isoformat() if fr["settled_at"] else None
-            # RE-RÈGLEMENT IMMÉDIAT à la vue : le résultat figé est STOCKÉ une seule fois
-            # (à la fin de course) ; or les rapports Multi/Mini Multi sont publiés en
-            # DIFFÉRÉ (+5-10 min) et `poll_resultats` ne re-traite plus une course passée
-            # en 'termine' → un pari gagnant restait « en attente » indéfiniment malgré le
-            # rapport désormais publié. Ici, si le bilan stocké a encore des paris en
-            # attente ET que les rapports PMU sont MAINTENANT disponibles, on re-règle le
-            # plan figé à la volée et on PERSISTE (palmarès + prochaines vues cohérents).
-            if (bilan_p.get("en_attente") or fr.get("statut") == "partial") and resultat.rapports:
+            # Règlement / re-règlement IMMÉDIAT du plan figé :
+            #  • run 'pending' (settle post-course manqué) → jamais réglé → on règle ici ;
+            #  • résultat figé encore « en attente » : rapports Multi/Mini Multi publiés en
+            #    DIFFÉRÉ (+5-10 min) et poll_resultats ne re-traite plus une course passée
+            #    en 'termine' → un pari gagnant restait en attente indéfiniment.
+            # Dans les deux cas on règle le PLAN FIGÉ (pas un plan régénéré) et on PERSISTE.
+            need_settle = (bilan_p is None or bilan_p.get("en_attente")
+                           or fr.get("statut") in ("pending", "partial"))
+            if need_settle and resultat.classement:
                 try:
                     fresh = settle_plan(plan_p, resultat.classement, resultat.rapports,
                                         nb_partants, getattr(resultat, "rapports_detail", None),
                                         non_partants)
-                    # N'écraser que si on a PROGRESSÉ (moins d'attente / plus réglé).
-                    if (not fresh.get("en_attente")
+                    # N'écraser que si on a PROGRESSÉ (premier règlement, ou moins d'attente).
+                    if (bilan_p is None or not fresh.get("en_attente")
                             or fresh.get("nb_en_attente", 99) < bilan_p.get("nb_en_attente", 99)):
                         bilan_p = fresh
                         _roi_f = fresh.get("roi")
@@ -1265,6 +1278,11 @@ async def get_bilan_pronostic(
                         await db.commit()
                 except Exception:
                     await db.rollback()
+            if bilan_p is None:
+                # Résultat indisponible (pas de classement) → neutre, mais on GARDE le plan
+                # figé tel quel (jamais de simulation divergente).
+                bilan_p = {"net": 0.0, "total_mise": 0.0, "total_gain": 0.0,
+                           "roi": None, "paris": [], "en_attente": True}
         else:
             # Aucune trace figée → SIMULATION rétrospective (pas un vrai prono émis).
             # Mêmes entrées que le live/le gel : ROI weights + signal_mults PAR PROFIL
