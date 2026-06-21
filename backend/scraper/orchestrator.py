@@ -56,6 +56,8 @@ from scraper.db_writer import (
     detect_jockey_change,
     compute_jours_depuis_derniere,
     resolve_bookmaker_course_id,
+    resolve_presse_course_id,
+    compute_and_save_acteur_stats,
 )
 
 log = structlog.get_logger()
@@ -300,14 +302,21 @@ class BlackTurfOrchestrator:
                     for cheval_data in course_data.get("chevaux", []):
                         nom = cheval_data.get("nom", "").strip()
                         cote_str = cheval_data.get("cote_geny", "")
+                        rang_geny = cheval_data.get("rang_pronostic_geny")
                         if not nom or not cote_str:
                             continue
                         try:
                             cote = float(str(cote_str).replace(",", "."))
-                        except ValueError:
+                        except (ValueError, TypeError):
                             continue
 
-                        # Mise à jour cote_geny dans participations
+                        # Mise à jour cote_geny (+ rang pronostic Geny) dans participations.
+                        # Wiring 2026-06-17 : rang_pronostic_geny est une feature ML qui
+                        # n'était JAMAIS alimentée (donnée extraite puis jetée). Le scraper
+                        # httpx+bs4 la fournit désormais → on la persiste ici.
+                        vals = {"cote_geny": cote}
+                        if isinstance(rang_geny, int) and rang_geny > 0:
+                            vals["rang_pronostic_geny"] = rang_geny
                         stmt = (
                             update(Participation)
                             .where(
@@ -315,7 +324,7 @@ class BlackTurfOrchestrator:
                                     select(Cheval.cheval_id).where(Cheval.nom == nom)
                                 )
                             )
-                            .values(cote_geny=cote)
+                            .values(**vals)
                         )
                         await session.execute(stmt)
 
@@ -747,21 +756,34 @@ class BlackTurfOrchestrator:
             ct_pronos = await scraper.get_pronostics_canalturf()
             all_pronos = pt_pronos + ct_pronos
 
+            import re as _re
             async with AsyncSessionLocal() as session:
+                nb_saved = 0
                 for prono in all_pronos:
-                    # Résoudre le pseudo_id en course_id PMU réel
-                    parts = prono.course_id.split("_")
-                    hippodrome_hint = parts[1] if len(parts) > 1 else ""
-                    real_course_id = await resolve_bookmaker_course_id(
-                        session, hippodrome_hint, ""
-                    )
+                    # Résolution course_id : priorité au suffixe R{r}C{c} (EXACT,
+                    # encodé par les scrapers presse 2026-06-17), repli sur
+                    # l'hippodrome. Avant, l'heure vide → 0 match → presse perdue.
+                    real_course_id = None
+                    m = _re.search(r"_R(\d+)C(\d+)$", prono.course_id)
+                    if m:
+                        real_course_id = await resolve_presse_course_id(
+                            session, int(m.group(1)), int(m.group(2))
+                        )
+                    if not real_course_id:
+                        parts = prono.course_id.split("_")
+                        hippodrome_hint = parts[1] if len(parts) > 1 else ""
+                        real_course_id = await resolve_bookmaker_course_id(
+                            session, hippodrome_hint, ""
+                        )
                     if real_course_id:
                         await save_pronostic_presse(session, prono, real_course_id)
+                        nb_saved += 1
 
                 await session.commit()
+                log.info("orchestrator.presse_saved", scraped=len(all_pronos), saved=nb_saved)
                 await log_scrape_result(
                     session, "paris_turf", "ok",
-                    nb_courses=len(all_pronos),
+                    nb_courses=nb_saved,
                     duree_ms=int((time.time() - t0) * 1000),
                 )
                 await session.commit()
@@ -835,6 +857,10 @@ class BlackTurfOrchestrator:
         try:
             async with AsyncSessionLocal() as session:
                 await compute_and_save_jockey_entraineur_assoc(session, saison)
+                await session.commit()
+                # Stats globales jockey/entraîneur calculées depuis nos résultats
+                # (Turfoo 403 → tables à 0 sinon → features qualité acteur mortes).
+                await compute_and_save_acteur_stats(session)
                 await session.commit()
                 await log_scrape_result(session, "associations", "ok")
                 await session.commit()
@@ -1006,7 +1032,7 @@ class BlackTurfOrchestrator:
                       WHERE p.course_id = c.course_id AND p.non_partant = false
                   )
                   AND (
-                      c.date_heure > now() + interval '10 minutes'
+                      c.date_heure > now() + interval '5 minutes'
                       OR NOT EXISTS (
                           SELECT 1 FROM predictions pr
                           JOIN participations pp
@@ -1060,18 +1086,36 @@ class BlackTurfOrchestrator:
                 from datetime import datetime, timedelta
 
                 now = datetime.now()
-                # Courses qui auraient dû finir (fenêtre 36h pour rattraper hier)
-                result = await session.execute(
-                    select(DBCourse)
-                    .where(
-                        and_(
-                            DBCourse.statut == "a_venir",
-                            DBCourse.date_heure < now,
-                            DBCourse.date_heure > now - timedelta(hours=36),
-                        )
-                    )
-                )
-                courses = result.scalars().all()
+                win = now - timedelta(hours=36)
+                # Courses à (re)poller dans une fenêtre 36h :
+                #  - 'a_venir' déjà passées → récupérer l'arrivée ;
+                #  - 'termine' MAIS rapports PMU encore absents, OU runs profil non
+                #    réglés ('pending'/'partial'). Le PMU publie l'arrivée PUIS les
+                #    RAPPORTS 5-10 min plus tard ; une course passée 'termine' sur la
+                #    seule arrivée ne re-fetchait JAMAIS ses rapports (ancien filtre
+                #    statut='a_venir' uniquement) → gains figés "en attente". On
+                #    re-poll jusqu'à rapports publiés + tous les runs réglés, puis la
+                #    course sort d'elle-même du périmètre (set borné par la fenêtre).
+                from sqlalchemy import text as _text
+                courses = (await session.execute(_text("""
+                    SELECT c.course_id AS course_id, c.reunion_id AS reunion_id,
+                           c.date_heure AS date_heure
+                    FROM courses c
+                    LEFT JOIN resultats r ON r.course_id = c.course_id
+                    WHERE c.date_heure < :now AND c.date_heure > :win
+                      AND (
+                        c.statut = 'a_venir'
+                        OR (c.statut = 'termine' AND (
+                              r.course_id IS NULL
+                              OR r.rapports IS NULL
+                              OR r.rapports::text IN ('{}', 'null')
+                              OR EXISTS (SELECT 1 FROM profil_run_log p
+                                         WHERE p.course_id = c.course_id
+                                           AND p.statut IN ('pending', 'partial'))
+                        ))
+                      )
+                    ORDER BY c.date_heure
+                """), {"now": now, "win": win})).all()
 
                 for course in courses:
                     r_id = course.reunion_id

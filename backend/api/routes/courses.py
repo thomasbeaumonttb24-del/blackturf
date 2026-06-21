@@ -35,7 +35,7 @@ router = APIRouter()
 # figée (predictions.cote_figee) et non sur la cote live → il ne change plus, que
 # l'utilisateur l'ouvre 9 min ou 2 min avant le départ. Les cotes affichées
 # continuent d'évoluer (scraper cotes-live).
-PRONO_LOCK_MIN = 10
+PRONO_LOCK_MIN = 5
 
 
 def _prono_lock_state(date_heure: Optional[datetime]) -> tuple[bool, Optional[datetime]]:

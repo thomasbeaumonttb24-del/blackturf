@@ -396,12 +396,12 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
 
       {plan.prono_fige ? (
         <p className="mt-2 text-[10px] text-brand-gold/80">
-          🔒 Pronostic figé — gains calculés sur les cotes au gel (ne bougent plus).
+          🔒 Pronostic figé à 5 min du départ — c'est le plan DÉFINITIF (identique au bilan après course, ne change plus).
         </p>
       ) : (
         <p className="mt-2 text-[10px] text-brand-emerald/80 flex items-center gap-1">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-emerald animate-pulse" />
-          Gains réévalués sur les cotes du marché EN DIRECT (mise à jour automatique).
+          Cotes EN DIRECT — le plan peut encore évoluer. Il sera FIGÉ 5 min avant le départ (plan définitif).
         </p>
       )}
 
