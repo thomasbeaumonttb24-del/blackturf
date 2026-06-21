@@ -802,7 +802,11 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
     for i, c in enumerate(selected):
         c["mise"] = min_stake + extra[i]
 
-    _apply_spec_cap(selected, montant, palier, min_stake)
+    # MONTANT SAISI = TOUT JOUÉ (respect_montant) : l'user a choisi sa mise, il veut qu'elle
+    # soit JOUÉE EN ENTIER (pas de réserve). Le cap spéculatif (réserve sur paris -EV) ne vaut
+    # QUE pour l'auto-staking (protège la bankroll). En manuel, on le SAUTE → 10€ saisi = 10€ joués.
+    if not respect_montant:
+        _apply_spec_cap(selected, montant, palier, min_stake)
     # FLAG staking_safe : en staking AUTO on NE force PAS le "gain target" (qui concentre
     # le budget vers la cible = plus de variance ; à éviter sur un système -EV, cf. audit
     # edge). MAIS sur le calculateur MANUEL (respect_montant) l'utilisateur a saisi un
