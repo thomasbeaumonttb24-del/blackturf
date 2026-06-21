@@ -160,10 +160,12 @@ PROFIL_CONFIG = {
         # keep_frac : on garde les paris dont la conviction ≥ 65% du meilleur → le NB de
         # paris VARIE selon la course (1 si un placé domine, 2-3 si plusieurs comparables).
         "keep_frac": 0.65,
-        # GAIN VISÉ (contrat produit) : un pari gagnant rapporte ≥ ×1.8 du TOTAL misé,
-        # jusqu'à ×10 (rapport_max) quand l'analyse est sûre. On évite le placé sec qui
-        # rend à peine la mise. Garanti par _enforce_gain_target (taille la mise).
-        "gain_cible_mult": 1.8,
+        # MULTIPLICATEUR ≥1.8 garanti par rapport_min 1.8 AU NIVEAU CANDIDAT (tout pari proposé
+        # paie déjà ≥1.8). gain_cible_mult=0 : on N'active PAS _enforce_gain_target — son tri par
+        # `prio` (kelly_f=0 pour un -EV) déprioritisait l'ANCRE placé « gagne souvent » et la
+        # jetait. Sans lui, la conviction (proba) sélectionne l'ancre = le placé ≥1.8 le PLUS
+        # probable → 44% de réussite (vs 28%), gain ≥1.8× toujours respecté.
+        "gain_cible_mult": 0.0,
         # Multi en 6/7 = large filet qui TOMBE SOUVENT (4 premiers dans 6-7 chevaux) →
         # parfait pour le prudent. Pas de Multi 4/5 (gros lot = trop rare). var_cap 1.0 :
         # le prudent n'a aucun pari haute-variance, le plafond est donc inerte.
@@ -505,8 +507,12 @@ def _select_conviction(
         """Classement selon l'OBJECTIF du profil (× ROI réel passé du type × signal)."""
         rw = roi_w(c) * sig_factor(c)
         if objectif == "proba":
-            # PRUDENT : gagner souvent. Proba d'abord, EV en bonus léger.
-            return (c["proba_gain"] + max(c["ev"], 0.0) * 0.2) * rw
+            # PRUDENT : MAX de victoires DANS la contrainte ≥1.8× (le rapport_min 1.8 garantit
+            # déjà le multiplicateur ; on ne touche PAS aux gains). On classe par PROBA de placé
+            # quasi-PURE → parmi les placés qui paient ≥1.8, on prend le PLUS susceptible de
+            # tomber (le mieux placé par le modèle). Backtest : 44% de réussite vs 28% (l'ancien
+            # rw distordait vers un placé moins probable). rw module à peine (0.85..1.15).
+            return (c["proba_gain"] + max(c["ev"], 0.0) * 0.15) * (0.85 + 0.15 * min(rw, 2.0)) * (1.5 if c.get("_anchor") else 1.0)
         if objectif == "gain":
             # RISQUÉ : gros gain pour petite mise, MAIS orienté RENTA → on pondère
             # fortement l'EDGE (modèle > marché) : un gros rapport À VALEUR rapporte sur
@@ -557,6 +563,12 @@ def _select_conviction(
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
+        # ANCRE PLACÉ PRUDENT (≥1.8×) : le placé le plus sûr qui paie ≥1.8 est -EV (marge PMU)
+        # mais c'est le pari « gagne souvent DANS le multiplicateur » voulu. Le multiplicateur
+        # est DÉJÀ respecté (rapport_min 1.8 vérifié ci-dessus) → on exempte juste des gates de
+        # profitabilité (le but assumé = fréquence de victoire à multiplicateur garanti).
+        if c.get("_anchor"):
+            return True
         # RÈGLE DE PROFITABILITÉ : jamais un pari à la fois -EV ET sans edge (= don au
         # PMU) — SAUF profil "coup" (risqué) qui assume des paris gros-lot spéculatifs,
         # bornés ensuite par max_coup + cap_spec. On exclut quand même la loterie pure

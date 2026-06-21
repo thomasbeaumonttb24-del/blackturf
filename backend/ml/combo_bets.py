@@ -24,7 +24,20 @@ TRJ = {
     "Couplé Ordre": 0.74, "Trio Ordre": 0.691, "Super 4": 0.65,
     "Trio": 0.691, "Tiercé Désordre": 0.6435, "Tiercé Ordre": 0.6435,
     "Quarté+ Désordre": 0.633, "Quinté+ Désordre": 0.6475,
+    # Multi (top-4 désordre, mise plate 3€, sélection 4→7 chevaux) et Pick5 (top-5
+    # désordre, mise 1€, SANS bonus). TRJ PMU officiels 2026.
+    "Multi": 0.75, "Pick5": 0.6475,
 }
+
+# Multi PMU : on sélectionne 4 à 7 chevaux pour trouver les 4 PREMIERS (désordre),
+# mise PLATE quel que soit le nombre (le PMU couvre TOUTES les combis de la sélection
+# pour le même prix — pas de C(n,4) à payer). Plus on prend de chevaux, plus on gagne
+# SOUVENT, mais le rapport baisse (on attrape surtout les arrivées « logiques »).
+# Le rapport décroissant avec n est encodé HONNÊTEMENT par p_coverage marché (un champ
+# large ⇒ proba marché plus haute ⇒ rapport ≈ TRJ/p_market plus faible), pas par un
+# facteur arbitraire. Mini Multi (10-13 partants) = même mécanique, label distinct.
+MULTI_UNIT = 3.0
+PICK5_UNIT = 1.0
 
 
 def _bet_flags(course_info: dict) -> dict:
@@ -84,6 +97,11 @@ class _Sim:
         self.in_top3 = _topk_membership(order, n_horses, 3)
         self.in_top4 = _topk_membership(order, n_horses, 4)
         self.in_top5 = _topk_membership(order, n_horses, 5)
+        # Règle PMU du « placé » : top-2 si 4-7 partants, top-3 si ≥8, top-1 si <4.
+        # Le « placé » N'EST PAS toujours top-3 → sur 4-7 partants, P(placé) doit être
+        # P(top-2) sinon les probas/EV des Simple & Couplé Placé sont surestimées.
+        self._place_k = 2 if 4 <= n_horses <= 7 else (3 if n_horses >= 8 else 1)
+        self.in_place = _topk_membership(order, n_horses, self._place_k)
         self.top1 = order[:, 0]
         self.top2 = order[:, 1] if order.shape[1] > 1 else order[:, 0]
         self.top3 = order[:, 2] if order.shape[1] > 2 else order[:, 0]
@@ -91,7 +109,8 @@ class _Sim:
         self.top5p = order[:, 4] if order.shape[1] > 4 else order[:, 0]
 
     def p_simple_place(self, a: int) -> float:
-        return float(self.in_top3[:, a].mean())
+        # Placé selon la règle PMU (top-2 ou top-3 selon le nombre de partants).
+        return float(self.in_place[:, a].mean())
 
     def p_couple_ordre(self, sel: list[int]) -> float:
         """Couplé ORDRE : sel[0] 1er ET sel[1] 2e, dans CET ordre exact."""
@@ -114,7 +133,8 @@ class _Sim:
         return float(self.in_top2[:, sel].all(axis=1).mean())
 
     def p_couple_place(self, sel: list[int]) -> float:
-        return float(self.in_top3[:, sel].all(axis=1).mean())
+        # Couplé Placé : les 2 chevaux dans les places payées (règle PMU top-2/top-3).
+        return float(self.in_place[:, sel].all(axis=1).mean())
 
     def p_trio(self, sel: list[int]) -> float:
         return float(self.in_top3[:, sel].all(axis=1).mean())
@@ -187,10 +207,14 @@ def build_combo_proposals(
                 for i in by_p1[:5]]
 
     nb_partants = course_info.get("nb_partants", len(parts))
-    est_quinte = bool(course_info.get("est_quinte"))
-    est_quarte = bool(course_info.get("est_quarte"))
-    est_tierce = bool(course_info.get("est_tierce"))
-    est_2sur4 = bool(course_info.get("est_2sur4"))   # 2sur4 réellement offert PMU
+    _flp = _bet_flags(course_info)
+    est_quinte = bool(_flp.get("est_quinte"))
+    est_quarte = bool(_flp.get("est_quarte"))
+    est_tierce = bool(_flp.get("est_tierce"))
+    est_2sur4 = bool(_flp.get("est_2sur4"))   # 2sur4 réellement offert PMU
+    est_multi = bool(_flp.get("est_multi"))
+    est_pick5 = bool(_flp.get("est_pick5"))
+    is_mini = est_multi and 10 <= int(nb_partants or 0) <= 13
 
     proposals: list[dict] = []
 
@@ -200,7 +224,7 @@ def build_combo_proposals(
         # Rapport pari-mutuel ≈ TRJ / proba_marché de la combinaison. On plancher la
         # proba marché (1e-3) et on plafonne le rapport : sinon une proba simulée
         # minuscule fait exploser le rapport → EV absurde (+19000%) non crédible.
-        trj = TRJ.get(type_pari, 0.70)
+        trj = 0.75 if "Multi" in type_pari else TRJ.get(type_pari, 0.70)
         rapport = trj / max(p_market, 1e-3)
         rapport = float(min(max(rapport, 1.1), 5000.0))
         ev = _ev(p_model, rapport)
@@ -264,6 +288,24 @@ def build_combo_proposals(
         sel = list(top[:5])
         add("jackpot", "Quinté+ Désordre", sel, sim.p_topk_exact(sel, 5), sim_m.p_topk_exact(sel, 5), 2.0, 1,
             f"N°{','.join(str(numeros[i]) for i in sel)} aux 5 premières places.")
+
+    # ── Multi en 4→7 (top-4 désordre, mise plate 3€) — « gagner souvent » ──
+    if est_multi and len(top) >= 4:
+        _lab = "Mini Multi" if is_mini else "Multi"
+        for nn in range(4, min(7, len(top)) + 1):
+            sel = list(top[:nn])
+            niv = "jackpot" if nn <= 5 else "equilibre"
+            add(niv, f"{_lab} en {nn}", sel, sim.p_coverage(sel, 4), sim_m.p_coverage(sel, 4),
+                3.0, 1,
+                f"{_lab} en {nn} — les 4 premiers (désordre) parmi N°"
+                f"{','.join(str(numeros[i]) for i in sel)}.")
+
+    # ── Pick5 (top-5 désordre, mise 1€) ──
+    if est_pick5 and len(top) >= 5:
+        sel = list(top[:5])
+        add("jackpot", "Pick5", sel, sim.p_topk_exact(sel, 5), sim_m.p_topk_exact(sel, 5),
+            1.0, 1,
+            f"Pick5 — N°{','.join(str(numeros[i]) for i in sel)} : les 5 premiers (désordre).")
 
     # Tri : EV décroissante puis proba décroissante
     proposals.sort(key=lambda x: (x["ev"], x["proba_gain"]), reverse=True)
@@ -347,7 +389,8 @@ def enumerate_bet_candidates(
         if key in seen or proba <= 0:
             return
         seen.add(key)
-        trj = TRJ.get(type_pari, 0.80 if "Simple" in type_pari else 0.70)
+        trj = (0.75 if "Multi" in type_pari
+               else TRJ.get(type_pari, 0.80 if "Simple" in type_pari else 0.70))
         rapport = float(min(max(trj / max(p_market, 1e-3), 1.1), 5000.0))
         # FLAG combo_ev_none : l'EV d'un combo = _ev(p_model, trj/p_market) est
         # MÉCANIQUEMENT positive dès que modèle>marché (rapport calculé sur p_market,
@@ -384,6 +427,11 @@ def enumerate_bet_candidates(
     est_trio = bool(fl.get("est_trio"))
     est_to = bool(fl.get("est_trio_ordre"))          # trio ORDRE (champ réduit)
     est_s4 = bool(fl.get("est_super4"))              # Super 4 (top-4 ordre exact)
+    est_multi = bool(fl.get("est_multi"))            # Multi (top-4 désordre, champ 4→7)
+    est_pick5 = bool(fl.get("est_pick5"))            # Pick5 (top-5 désordre, sans bonus)
+    # Mini Multi = même pari sur une course de 10-13 partants (PMU). Le flag est_multi
+    # vaut pour les deux ; on distingue le LABEL selon le nb de partants pour l'utilisateur.
+    is_mini = est_multi and 10 <= int(nb_partants or 0) <= 13
 
     # ── SIMPLE GAGNANT — uniquement sur cote >= 3. Sous 3, le gain est trop
     # faible pour le risque (surtout en petite mise) : un favori court se joue
@@ -463,20 +511,71 @@ def enumerate_bet_candidates(
             continue
         edge_pl = p_pl - p_pl_m                       # edge PLACÉ (modèle vs marché)
         ev = p_pl * rapport - 1.0
-        if edge_pl <= 0 and ev <= 0:                  # ni valeur ni EV → on ne propose pas
+        # ANCRE FRÉQUENCE (mode engagement) : on émet aussi le placé d'un FAVORI MARCHÉ
+        # (proba placé marché ≥ 0.50 = se place très souvent) MÊME sans edge/EV → ancre
+        # « gagne souvent » du prudent (DONNÉE : favori marché se place ~72% vs ~60% pick
+        # modèle vs ~29% mid-cote). Sans ça le placé favori est jeté (modèle sous-cote le
+        # favori → edge<0, + marge PMU → -EV). Seul le prudent autorise le Simple Placé →
+        # zéro pollution des autres profils. Proba affichée = max(modèle, marché) : le
+        # marché est PLUS JUSTE sur les favoris (mesuré).
+        is_anchor = p_pl_m >= 0.50
+        if edge_pl <= 0 and ev <= 0 and not is_anchor:
             continue
+        p_aff = max(p_pl, p_pl_m) if is_anchor else p_pl
         key = ("Simple Placé", (i,))
         if key in seen:
             continue
         seen.add(key)
         cands.append({
             "niveau": "securite", "type_pari": "Simple Placé", "chevaux": [H(i)],
-            "proba_gain": round(p_pl, 4), "rapport_estime": round(rapport, 1),
-            "ev": round(ev, 3), "edge": round(float(edge_pl), 4),
+            "proba_gain": round(p_aff, 4), "rapport_estime": round(rapport, 1),
+            "ev": round(ev, 3), "edge": round(float(edge_pl), 4), "_anchor": is_anchor,
             "texte_explication": (
-                f"N°{numeros[i]} {noms[i]} placé à VALEUR — {p_pl*100:.0f}% d'être dans "
-                f"les 3 (cote {cotes[i]:.1f}, rapport ~{rapport:.1f}×) : le modèle le place "
-                f"plus haut que le marché."
+                (f"N°{numeros[i]} {noms[i]} FAVORI — {p_aff*100:.0f}% d'être dans les 3 "
+                 f"(cote {cotes[i]:.1f}, rapport ~{rapport:.1f}×) : le placé qui tombe souvent.")
+                if is_anchor else
+                (f"N°{numeros[i]} {noms[i]} placé à VALEUR — {p_aff*100:.0f}% d'être dans "
+                 f"les 3 (cote {cotes[i]:.1f}, rapport ~{rapport:.1f}×) : le modèle le place "
+                 f"plus haut que le marché.")
+            ),
+        })
+
+    # ── ANCRE PLACÉ « GAGNE SOUVENT » DANS LA CONTRAINTE ≥1.8× (prudent) ──────────
+    # Le prudent veut un MAX de victoires MAIS en respectant le multiplicateur ≥1.8 (un placé
+    # à 1.1× = gain dérisoire, inutile à jouer). On ANCRE donc le Simple Placé du cheval le
+    # PLUS susceptible de se placer PARMI ceux dont le placé paie ≥1.8× (typiquement cote ~5).
+    # Backtest : 44% de réussite (vs 28%), chaque gain ≥1.8×. Sans cette ancre, ce placé est
+    # jeté (sans edge/EV). Seul le prudent autorise le Simple Placé → zéro impact modéré/risqué.
+    # On ne se base PAS QUE sur la cote (user) : on classe par proba_top3 du MODÈLE → un cheval
+    # à grosse cote (jusqu'à 20) n'est ancré QUE si le modèle le « sent » vraiment (proba_top3
+    # la plus haute parmi les placés ≥1.8). + bonus VALUE : si proba_top3 > implicite marché,
+    # le modèle voit un placé sous-coté (outsider à valeur) → on le privilégie.
+    best_i, best_p = None, -1.0
+    for i in range(len(cotes)):
+        if float(cotes[i]) > 20.0:                   # garde-fou longshot absurde, pas un cap "favori"
+            continue
+        _ppm = max(float(sim_m.p_simple_place(i)), 1e-3)
+        _rap = float(min(max(TRJ_PLACE / _ppm, 1.1), 50.0))
+        if _rap < 1.9:                               # buffer → multiplicateur réel ≥1.8 garanti
+            continue
+        _p3 = float(parts[i].get("proba_top3") or 0.0)   # proba PLACÉ du MODÈLE (analyse, pas cote)
+        _value = 1.0 + 0.5 * max(0.0, _p3 - _ppm)    # bonus si modèle > marché (placé à valeur)
+        _score = _p3 * _value
+        if _score > best_p:
+            best_p, best_i = _score, i
+    if best_i is not None and ("Simple Placé", (best_i,)) not in seen:
+        _ppm = max(float(sim_m.p_simple_place(best_i)), 1e-3)
+        _rap = float(min(max(TRJ_PLACE / _ppm, 1.1), 50.0))
+        _pp = max(float(parts[best_i].get("proba_top3") or 0.0), float(sim.p_simple_place(best_i)))
+        seen.add(("Simple Placé", (best_i,)))
+        cands.append({
+            "niveau": "securite", "type_pari": "Simple Placé", "chevaux": [H(best_i)],
+            "proba_gain": round(_pp, 4), "rapport_estime": round(_rap, 1),
+            "ev": round(_pp * _rap - 1.0, 3),
+            "edge": round(float(_pp - _ppm), 4), "_anchor": True,
+            "texte_explication": (
+                f"N°{numeros[best_i]} {noms[best_i]} placé — {_pp*100:.0f}% d'être dans les 3 "
+                f"(cote {cotes[best_i]:.1f}, rapport ~{_rap:.1f}×) : le placé le plus SÛR qui paie ≥1.8×."
             ),
         })
 
@@ -569,17 +668,26 @@ def enumerate_bet_candidates(
                 f"N°{'+N°'.join(str(numeros[i]) for i in t)} dans l'ORDRE exact — très gros rapport.")
 
     # ── 2sur4 ── (uniquement si le PMU propose ce pari pour la course)
+    # RÈGLE (user) : un 2sur4 de 4 FAVORIS = dividende quasi nul → inutile. La base inclut
+    # donc TOUJOURS un OUTSIDER à valeur (3 favoris + 1 grosse cote que le modèle aime) pour
+    # un gain qui vaut la peine, en gardant une proba correcte. Repli sur 4 favoris seulement
+    # si aucun outsider à valeur n'est détecté.
     if len(by_p1) >= 4 and est_2sur4:
-        sel = list(by_p1[:4])
-        add("rendement", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel),
-            f"2 des 4 chevaux N°{','.join(str(numeros[i]) for i in sel)} dans les 4 premiers.")
-        # 2sur4 avec OUTSIDER : 3 favoris + une grosse cote à valeur → vise le
-        # placement d'un outsider dans le top-4 (gain rehaussé, proba encore bonne).
         if out1 is not None and out1 not in by_p1[:3]:
-            sel_o = list(by_p1[:3]) + [out1]
-            add("surprise", "2sur4", sel_o, sim.p_2sur4(sel_o), sim_m.p_2sur4(sel_o),
-                f"3 favoris + outsider N°{numeros[out1]} (cote {cotes[out1]:.1f}) — 2 dans "
-                f"les 4 premiers (placement grosse cote dans le top-4).")
+            sel = list(by_p1[:3]) + [out1]
+            add("rendement", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel),
+                f"3 favoris + outsider N°{numeros[out1]} (cote {cotes[out1]:.1f}) — 2 dans les 4 "
+                f"premiers : gain rehaussé par la grosse cote, proba encore bonne.")
+            # 2e outsider pour un gain encore plus gros si le modèle en aime un autre
+            if len(outsiders) >= 2 and outsiders[1] not in by_p1[:2]:
+                sel2 = list(by_p1[:2]) + [out1, outsiders[1]]
+                add("surprise", "2sur4", sel2, sim.p_2sur4(sel2), sim_m.p_2sur4(sel2),
+                    f"2 favoris + 2 outsiders (N°{numeros[out1]}, N°{numeros[outsiders[1]]}) — "
+                    f"gros gain si 2 dans les 4 premiers.")
+        else:
+            sel = list(by_p1[:4])
+            add("rendement", "2sur4", sel, sim.p_2sur4(sel), sim_m.p_2sur4(sel),
+                f"2 des 4 chevaux N°{','.join(str(numeros[i]) for i in sel)} dans les 4 premiers.")
 
     # ── Super 4 (champ réduit) — les 4 premiers dans l'ordre EXACT, jackpot. ──
     if est_s4 and len(by_p1) >= 4:
@@ -602,6 +710,37 @@ def enumerate_bet_candidates(
         sel = list(by_p1[:5])
         add("coup", "Quinté+ Désordre", sel, sim.p_topk_exact(sel, 5), sim_m.p_topk_exact(sel, 5),
             f"Quinté+ désordre N°{'+N°'.join(str(numeros[i]) for i in sel)} — gros lot.")
+
+    # ── MULTI (top-4 DÉSORDRE, champ 4→7 chevaux, mise plate) ────────────────────
+    # On émet le spectre complet : en 4/5 = GROS RAPPORT (peu de chevaux, gros lot,
+    # profil risqué) ; en 6/7 = TOMBE SOUVENT (large filet, profils prudent/modéré).
+    # Le rapport décroît honnêtement avec n via p_coverage marché. C'est LE pari
+    # « gagner souvent » demandé (Multi en 7 ≈ 30-70% de toucher sur un bon champ).
+    if est_multi and len(by_p1) >= 4:
+        _label = "Mini Multi" if is_mini else "Multi"
+        for n in range(4, min(7, len(by_p1)) + 1):
+            sel = list(by_p1[:n])
+            p_mod = sim.p_coverage(sel, 4)
+            p_mkt = sim_m.p_coverage(sel, 4)
+            # en 4/5 → coup (gros rapport) ; en 6/7 → rendement (fréquent, filet large).
+            niv = "coup" if n <= 5 else "rendement"
+            nums = ",".join(str(numeros[i]) for i in sel)
+            add(niv, f"{_label} en {n}", sel, p_mod, p_mkt,
+                f"{_label} en {n} — N°{nums} : les 4 PREMIERS (ordre indifférent) parmi "
+                f"ces {n} chevaux. " + ("Gros rapport (champ serré)." if n <= 5
+                                        else f"Large filet — {p_mod*100:.0f}% de toucher."))
+
+    # ── PICK5 (top-5 DÉSORDRE, sans bonus, mise 1€) ──────────────────────────────
+    # Champ tendu (5) = gros lot ; champ 6/7 = couverture désordre plus probable.
+    if est_pick5 and len(by_p1) >= 5:
+        for n in range(5, min(7, len(by_p1)) + 1):
+            sel = list(by_p1[:n])
+            p_mod = sim.p_coverage(sel, 5)
+            p_mkt = sim_m.p_coverage(sel, 5)
+            nums = ",".join(str(numeros[i]) for i in sel)
+            add("coup", "Pick5", sel, p_mod, p_mkt,
+                f"Pick5 — N°{nums} : les 5 PREMIERS dans le désordre"
+                + (f" (champ {n}, plus de chances de toucher)" if n > 5 else "") + ".")
 
     niv_order = {"securite": 0, "rendement": 1, "surprise": 2, "coup": 3}
     cands.sort(key=lambda c: (niv_order.get(c["niveau"], 9), -c["ev"]))
@@ -668,10 +807,14 @@ def build_coverage_bets(
     edge_by_idx = p1 - implied
 
     nb_partants = course_info.get("nb_partants", len(parts))
-    est_quinte = bool(course_info.get("est_quinte"))
-    est_quarte = bool(course_info.get("est_quarte"))
-    est_tierce = bool(course_info.get("est_tierce"))
-    est_2sur4 = bool(course_info.get("est_2sur4"))   # 2sur4 réellement offert PMU
+    fl_cov = _bet_flags(course_info)
+    est_quinte = bool(fl_cov.get("est_quinte"))
+    est_quarte = bool(fl_cov.get("est_quarte"))
+    est_tierce = bool(fl_cov.get("est_tierce"))
+    est_2sur4 = bool(fl_cov.get("est_2sur4"))   # 2sur4 réellement offert PMU
+    est_multi = bool(fl_cov.get("est_multi"))   # Multi (top-4 désordre, champ 4→7)
+    est_pick5 = bool(fl_cov.get("est_pick5"))   # Pick5 (top-5 désordre)
+    is_mini = est_multi and 10 <= int(nb_partants or 0) <= 13
 
     budget = budget if budget and budget > 0 else max(bankroll * 0.10, 10.0)
 
@@ -762,6 +905,69 @@ def build_coverage_bets(
                 f"premiers · {p_model*100:.0f}% de toucher."
             ),
         })
+
+    # ── MULTI (top-4 désordre, champ 4→7, mise plate) — « gagner souvent » ──
+    if est_multi and len(by_p1) >= 4:
+        _label = "Mini Multi" if is_mini else "Multi"
+        for n in range(4, min(7, len(by_p1)) + 1):
+            sel = list(by_p1[:n])
+            p_model = sim.p_coverage(sel, 4)
+            if p_model <= 0:
+                continue
+            p_market = max(sim_m.p_coverage(sel, 4), 1e-4)
+            rapport = float(min(max(TRJ["Multi"] / p_market, 1.1), 5000.0))
+            niveau = "jackpot" if n == 4 else "couverture"
+            proposals.append({
+                "niveau": niveau,
+                "type_pari": f"{_label} en {n}",
+                "couverture": f"{n} chevaux",
+                "chevaux": [H(i) for i in sel],
+                "proba_gain": round(p_model, 4),
+                "nb_combinaisons": 1,            # mise PLATE : le PMU couvre toutes les combis
+                "flexi_pct": 100,
+                "mise_unitaire": MULTI_UNIT,
+                "cout_total": MULTI_UNIT,
+                "rapport_estime": round(rapport, 1),
+                "gain_potentiel": round(rapport * MULTI_UNIT, 2),
+                "ev": round(float(p_model * rapport - 1.0), 3),
+                "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
+                "texte_explication": (
+                    f"{_label} en {n} — N°{','.join(str(numeros[i]) for i in sel)} : les 4 "
+                    f"premiers (désordre) dans ces {n} chevaux · {p_model*100:.0f}% de toucher "
+                    f"· gain ~{rapport*MULTI_UNIT:.0f}€ pour {MULTI_UNIT:.0f}€."
+                ),
+            })
+
+    # ── PICK5 (top-5 désordre, mise 1€, sans bonus) ──
+    if est_pick5 and len(by_p1) >= 5:
+        for n in range(5, min(7, len(by_p1)) + 1):
+            sel = list(by_p1[:n])
+            p_model = sim.p_coverage(sel, 5)
+            if p_model <= 0:
+                continue
+            p_market = max(sim_m.p_coverage(sel, 5), 1e-5)
+            rapport = float(min(max(TRJ["Pick5"] / p_market, 1.1), _RAPPORT_MAX_JACKPOT))
+            n_combis = math.comb(n, 5)
+            cout = round(n_combis * PICK5_UNIT, 2)
+            proposals.append({
+                "niveau": "jackpot" if n == 5 else "couverture",
+                "type_pari": "Pick5",
+                "couverture": f"{n} chevaux",
+                "chevaux": [H(i) for i in sel],
+                "proba_gain": round(p_model, 4),
+                "nb_combinaisons": int(n_combis),
+                "flexi_pct": 100,
+                "mise_unitaire": PICK5_UNIT,
+                "cout_total": cout,
+                "rapport_estime": round(rapport, 1),
+                "gain_potentiel": round(rapport * PICK5_UNIT, 2),
+                "ev": round(float(p_model * rapport / n_combis - 1.0), 3),
+                "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
+                "texte_explication": (
+                    f"Pick5 (champ {n}) — N°{','.join(str(numeros[i]) for i in sel)} : les 5 "
+                    f"premiers dans le désordre · {p_model*100:.1f}% de toucher."
+                ),
+            })
 
     # Tri : niveau (jackpot tendu d'abord) puis EV décroissante
     niv_order = {"jackpot": 0, "couverture": 1}
