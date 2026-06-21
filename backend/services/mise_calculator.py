@@ -154,20 +154,16 @@ PROFIL_CONFIG = {
     # rapport ≥ ~1.8 (viser ×2) : on écarte le placé sec à 1.1× (argent mort).
     # Mises prudentes : peu de paris, plancher franc.
     "conservateur": {
-        "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.05, "rapport_max": 10.0,
+        "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.8, "rapport_max": 10.0,
         "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "bets_factor": 0.9, "min_stake_factor": 1.0,
         # keep_frac : on garde les paris dont la conviction ≥ 65% du meilleur → le NB de
         # paris VARIE selon la course (1 si un placé domine, 2-3 si plusieurs comparables).
         "keep_frac": 0.65,
-        # MODE ENGAGEMENT — GAGNER SOUVENT (demande user : trop peu de gagnants). Le prudent
-        # joue le PLACÉ DU FAVORI (se place ~72%) → mises gagnantes fréquentes. On abaisse le
-        # plancher (rapport_min 1.2) pour que le placé favori (paie ~1.3-1.4) qualifie au lieu
-        # d'être exclu par l'ancien ×1.8. gain_cible_mult 0 = pas de contrat de gain : il
-        # FORÇAIT la concentration vers le plus gros rapport (mid-cote moins sûr) et écrasait
-        # la sélection conviction. Désactivé → l'ANCRE FAVORI (placé du favori, ~72%) reste le
-        # pari choisi. Gain plus petit mais l'utilisateur gagne souvent = produit vendable.
-        "gain_cible_mult": 0.0,
+        # GAIN VISÉ (contrat produit) : un pari gagnant rapporte ≥ ×1.8 du TOTAL misé,
+        # jusqu'à ×10 (rapport_max) quand l'analyse est sûre. On évite le placé sec qui
+        # rend à peine la mise. Garanti par _enforce_gain_target (taille la mise).
+        "gain_cible_mult": 1.8,
         # Multi en 6/7 = large filet qui TOMBE SOUVENT (4 premiers dans 6-7 chevaux) →
         # parfait pour le prudent. Pas de Multi 4/5 (gros lot = trop rare). var_cap 1.0 :
         # le prudent n'a aucun pari haute-variance, le plafond est donc inerte.
@@ -509,12 +505,8 @@ def _select_conviction(
         """Classement selon l'OBJECTIF du profil (× ROI réel passé du type × signal)."""
         rw = roi_w(c) * sig_factor(c)
         if objectif == "proba":
-            # PRUDENT : gagner SOUVENT. Proba d'abord. L'ANCRE FAVORI (placé du favori marché,
-            # se place ~72%) passe DEVANT (bonus ×1.6) → le prudent joue le placé qui tombe le
-            # plus souvent. rw (ROI passé/signal) ne fait que moduler (0.7..1.3×) : il ne peut
-            # pas détourner vers un mid-cote plus juteux mais moins sûr.
-            base = (c["proba_gain"] + max(c["ev"], 0.0) * 0.2) * (0.7 + 0.3 * min(rw, 2.0))
-            return base * (2.5 if c.get("_anchor") else 1.0)
+            # PRUDENT : gagner souvent. Proba d'abord, EV en bonus léger.
+            return (c["proba_gain"] + max(c["ev"], 0.0) * 0.2) * rw
         if objectif == "gain":
             # RISQUÉ : gros gain pour petite mise, MAIS orienté RENTA → on pondère
             # fortement l'EDGE (modèle > marché) : un gros rapport À VALEUR rapporte sur
@@ -565,12 +557,6 @@ def _select_conviction(
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
-        # ANCRE FAVORI (mode engagement « gagne souvent ») : le placé du FAVORI est
-        # intentionnellement -EV (marge PMU) mais se place ~72% → on l'EXEMPTE des gates de
-        # profitabilité ci-dessous. Le but assumé = la FRÉQUENCE de victoire (rétention),
-        # pas l'EV. Reste borné par type/cote/rapport_min(1.2)/min_proba déjà vérifiés.
-        if c.get("_anchor"):
-            return True
         # RÈGLE DE PROFITABILITÉ : jamais un pari à la fois -EV ET sans edge (= don au
         # PMU) — SAUF profil "coup" (risqué) qui assume des paris gros-lot spéculatifs,
         # bornés ensuite par max_coup + cap_spec. On exclut quand même la loterie pure
