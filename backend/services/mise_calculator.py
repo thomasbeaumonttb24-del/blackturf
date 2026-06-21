@@ -202,8 +202,11 @@ PROFIL_CONFIG = {
         # ×4 même à pleine mise sont écartés (→ moins de paris, mises plus franches).
         "gain_cible_mult": 4.0,
         # Multi en 5/6/7 = rapport ×2-×10 qui tombe assez souvent (cœur du modéré).
+        # PAS de Simple Gagnant pour le MODÉRÉ : c'est le pari du risqué (grosse cote) et il
+        # faisait collapser le modéré sur « 2 Simple Gagnant » = identique au risqué (overlap).
+        # Le modéré = COMBOS de favoris (duo/trio/couplé) → identité ×4 distincte du risqué.
         "types": {"Couplé Placé", "Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio",
-                  "Simple Gagnant", "Multi en 5", "Multi en 6", "Multi en 7"},
+                  "Multi en 5", "Multi en 6", "Multi en 7"},
         "objectif": "ev",
         # var_cap 0.50 : jamais plus de la moitié du budget sur un seul pari haute-variance
         # (Trio/2sur4-jackpot) → force au moins 2 tickets décorrélés. Anti « tout sur un Trio ».
