@@ -67,3 +67,9 @@ catboost_info/
 backend/catboost_info/
 *.log
 nginx/nginx.runtime.conf
+
+# deploy backups / snapshots (never commit)
+*.bak
+*.bak.*
+backups/
+*.sql.gz

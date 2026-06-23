@@ -139,6 +139,7 @@ export default function ProfilPage() {
   const { user, loading, refreshUser } = useRequireAuth();
   const [savingProfile, setSavingProfile] = useState(false);
   const [loadingPortal, setLoadingPortal] = useState(false);
+  const [loadingCancel, setLoadingCancel] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [activeSection, setActiveSection] = useState<"profile" | "plan" | "notifs" | "security">("profile");
 
@@ -188,6 +189,19 @@ export default function ProfilPage() {
     } catch {
       toast.error("Erreur d'accès au portail Stripe");
       setLoadingPortal(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!window.confirm("Résilier votre abonnement ? Vous conservez l'accès jusqu'à la fin de la période en cours.")) return;
+    setLoadingCancel(true);
+    try {
+      const res = await api.post("/stripe/cancel");
+      toast.success(res.data?.message || "Demande de résiliation enregistrée.");
+    } catch {
+      toast.error("Erreur lors de la résiliation. Contactez contact@blackturf.fr");
+    } finally {
+      setLoadingCancel(false);
     }
   }
 
@@ -456,15 +470,25 @@ export default function ProfilPage() {
                     </Link>
                   </div>
                 ) : (
-                  <button
-                    onClick={handlePortal}
-                    disabled={loadingPortal}
-                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors disabled:opacity-50"
-                  >
-                    {loadingPortal ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                    Gérer l&apos;abonnement via Stripe
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={handlePortal}
+                      disabled={loadingPortal}
+                      className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors disabled:opacity-50"
+                    >
+                      {loadingPortal ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                      Gérer l&apos;abonnement via Stripe
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      disabled={loadingCancel}
+                      className="flex items-center gap-2 text-sm text-red-500 hover:text-red-600 font-medium transition-colors disabled:opacity-50"
+                    >
+                      {loadingCancel ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Résilier mon abonnement
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

@@ -16,8 +16,8 @@ const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string
     title: "Plans",
     links: [
       { href: "/tarifs", label: "Gratuit" },
-      { href: "/tarifs", label: "Standard — 19€/mois" },
-      { href: "/tarifs", label: "Expert — 39€/mois" },
+      { href: "/tarifs", label: "Standard — 12€/mois" },
+      { href: "/tarifs", label: "Expert — 19€/mois" },
     ],
   },
   {
@@ -26,6 +26,7 @@ const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string
       { href: "/mentions-legales", label: "Mentions légales" },
       { href: "/confidentialite", label: "Confidentialité" },
       { href: "/cgu", label: "CGU" },
+      { href: "/cgv", label: "CGV" },
     ],
   },
 ];

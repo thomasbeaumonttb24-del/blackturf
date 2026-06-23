@@ -792,8 +792,14 @@ async def generate_full_course_analysis(
     for e in enriched:
         e["fiche"] = _horse_facts(e)
 
-    # Narrative globale
-    top_reco = max(enriched, key=lambda x: x.get("proba_top3", 0)) if enriched else None
+    # Narrative globale. top_recommendation = le « Favori IA » → DOIT être trié sur
+    # proba_top1 (proba de VICTOIRE), comme la narrative et rang_predit. Avant : trié
+    # sur proba_top3 (proba placé) → le N° affiché en reco pouvait différer du « Favori
+    # IA » du texte (contradiction front). Tiebreak proba_top3.
+    top_reco = max(
+        enriched,
+        key=lambda x: (x.get("proba_top1", 0), x.get("proba_top3", 0)),
+    ) if enriched else None
     narrative = await generate_race_narrative(
         course_id=course_id,
         course_info=course_info,

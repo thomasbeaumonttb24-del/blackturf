@@ -29,7 +29,10 @@ log = structlog.get_logger()
 
 BASE = "https://www.france-galop.com/fr"
 SUSPENSIONS_URL = f"{BASE}/suspensions"
-PROGRAMME_URL = f"{BASE}/programme-des-courses"
+# URL corrigée 2026-06-17 : /programme-des-courses renvoyait 404.
+# /fr/courses/aujourdhui (server-rendered léger). Variantes: /demain /hier.
+# NB: France-Galop = galop/plat-obstacle uniquement (pas de trot).
+PROGRAMME_URL = f"{BASE}/courses/aujourdhui"
 
 
 class FranceGalopScraper(BaseScraper):

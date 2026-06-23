@@ -189,32 +189,106 @@ async def get_user_detail(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Détail utilisateur : paris, prédictions, abonnements."""
+    """Détail COMPLET d'un utilisateur pour le back-office : identité, portefeuille,
+    abonnements et HISTORIQUE de jeu intégral (chaque pari joué/enregistré avec
+    course, chevaux, cote, mise, résultat, gain), + agrégats (misé/gagné/net/ROI/
+    win-rate, répartition par type de pari). Données réelles, paris réglés d'abord."""
+    from db.models import Bankroll
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    # Règle les paris en attente de CE user (courses terminées) → gains à jour.
+    try:
+        from api.routes.bankroll import settle_pending_bets
+        await settle_pending_bets(db, user_id)
+    except Exception as e:
+        log.warning("admin.user_detail.settle_skip", err=str(e)[:120])
 
     # Subscriptions
     subs = (await db.execute(
         select(Subscription).where(Subscription.user_id == user_id).order_by(desc(Subscription.created_at))
     )).scalars().all()
 
-    # Bankroll entries (last 100)
-    entries = (await db.execute(
-        select(BankrollEntry).where(BankrollEntry.user_id == user_id)
-        .order_by(desc(BankrollEntry.date)).limit(100)
-    )).scalars().all()
-
-    # Predictions used: count of IA-tracked bankroll entries
-    nb_predictions = (await db.execute(
-        select(func.count(BankrollEntry.entry_id)).where(
-            and_(
-                BankrollEntry.user_id == user_id,
-                BankrollEntry.suivi_reco_ia == True,
-            )
+    # ── Historique complet des paris (join course pour contexte) ──
+    rows = (await db.execute(
+        select(
+            BankrollEntry, Course.hippodrome_nom, Course.numero_reunion,
+            Course.numero, Course.date_heure, Course.statut,
         )
-    )).scalar() or 0
+        .outerjoin(Course, Course.course_id == BankrollEntry.course_id)
+        .where(BankrollEntry.user_id == user_id)
+        .order_by(desc(BankrollEntry.date))
+        .limit(500)
+    )).all()
+
+    bets = []
+    for e, hippo, n_r, n_c, dh, c_statut in rows:
+        code = f"R{n_r}C{n_c}" if n_r and n_c else None
+        bets.append({
+            "entry_id": e.entry_id,
+            "date": e.date,
+            "type_pari": e.type_pari,
+            "chevaux": e.chevaux,
+            "mise": e.mise,
+            "cote": e.cote,
+            "resultat": e.resultat,
+            "gain_perte": e.gain_perte,
+            "suivi_reco_ia": e.suivi_reco_ia,
+            "notes": e.notes,
+            "course_id": e.course_id,
+            "course_code": code,
+            "hippodrome": hippo,
+            "course_date": dh,
+            "course_statut": c_statut,
+        })
+
+    # ── Agrégats portefeuille (toutes les entrées, pas seulement les 500) ──
+    agg = (await db.execute(
+        select(
+            func.count(BankrollEntry.entry_id),
+            func.coalesce(func.sum(BankrollEntry.mise), 0.0),
+            func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
+            func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)),
+            func.sum(case((BankrollEntry.resultat == "perd", 1), else_=0)),
+            func.sum(case((BankrollEntry.resultat.is_(None), 1), else_=0)),
+            func.sum(case((BankrollEntry.suivi_reco_ia == True, 1), else_=0)),
+        ).where(BankrollEntry.user_id == user_id)
+    )).one()
+    nb_total, mise_tot, net_tot, nb_gagnes, nb_perdus, nb_attente, nb_ia = agg
+    nb_total = int(nb_total or 0)
+    mise_tot = float(mise_tot or 0.0)
+    net_tot = float(net_tot or 0.0)
+    nb_gagnes = int(nb_gagnes or 0)
+    nb_perdus = int(nb_perdus or 0)
+    nb_attente = int(nb_attente or 0)
+    nb_regles = nb_gagnes + nb_perdus
+
+    # Capital initial = Σ portefeuilles actifs (fallback bankroll_initiale)
+    cap0 = (await db.execute(
+        select(func.coalesce(func.sum(Bankroll.montant_initial), 0.0))
+        .where(Bankroll.user_id == user_id, Bankroll.est_supprime == False)
+    )).scalar() or (user.bankroll_initiale or 0.0)
+    cap0 = float(cap0)
+
+    # ── Répartition par type de pari ──
+    type_rows = (await db.execute(
+        select(
+            BankrollEntry.type_pari,
+            func.count(BankrollEntry.entry_id),
+            func.coalesce(func.sum(BankrollEntry.mise), 0.0),
+            func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
+            func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)),
+        ).where(BankrollEntry.user_id == user_id).group_by(BankrollEntry.type_pari)
+        .order_by(desc(func.count(BankrollEntry.entry_id)))
+    )).all()
+    par_type = [
+        {"type_pari": t or "—", "nb": int(n), "mise": round(float(m), 2),
+         "net": round(float(g), 2), "nb_gagnes": int(win or 0),
+         "roi": round(float(g) / float(m) * 100, 1) if m and m > 0 else None}
+        for t, n, m, g, win in type_rows
+    ]
 
     return {
         "user": {
@@ -228,9 +302,26 @@ async def get_user_detail(
             "profil_risque": user.profil_risque,
             "bankroll_initiale": user.bankroll_initiale,
             "email_verified": user.email_verified,
+            "auth_method": "google" if user.google_id else "email",
+            "stripe_client": bool(user.stripe_customer_id),
             "created_at": user.created_at,
             "updated_at": user.updated_at,
         },
+        "portefeuille": {
+            "capital_initial": round(cap0, 2),
+            "solde_actuel": round(cap0 + net_tot, 2),
+            "mise_totale": round(mise_tot, 2),
+            "gain_net": round(net_tot, 2),
+            "roi": round(net_tot / mise_tot * 100, 1) if mise_tot > 0 else None,
+            "nb_paris": nb_total,
+            "nb_gagnes": nb_gagnes,
+            "nb_perdus": nb_perdus,
+            "nb_attente": nb_attente,
+            "nb_regles": nb_regles,
+            "win_rate": round(nb_gagnes / nb_regles * 100, 1) if nb_regles > 0 else None,
+            "nb_predictions_used": int(nb_ia or 0),
+        },
+        "par_type": par_type,
         "subscriptions": [
             {
                 "sub_id": s.sub_id,
@@ -242,19 +333,8 @@ async def get_user_detail(
             }
             for s in subs
         ],
-        "nb_bets": len(entries),
-        "nb_predictions_used": nb_predictions,
-        "recent_bets": [
-            {
-                "entry_id": e.entry_id,
-                "date": e.date,
-                "type_pari": e.type_pari,
-                "mise": e.mise,
-                "resultat": e.resultat,
-                "gain_perte": e.gain_perte,
-            }
-            for e in entries[:20]
-        ],
+        "nb_bets": nb_total,
+        "bets": bets,
     }
 
 
@@ -287,19 +367,25 @@ async def update_user(
     user_id: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
-    allowed = {"plan", "is_active", "is_admin", "profil_risque"}
+    # is_admin VOLONTAIREMENT EXCLU : pas d'escalade de privilège via l'API (un admin
+    # ne peut pas se/ promouvoir admin). La promotion admin se fait en SQL contrôlé.
+    allowed = {"plan", "is_active", "profil_risque"}
+    # Garde anti auto-verrouillage : un admin ne peut pas se désactiver lui-même.
+    if user_id == admin.user_id and body.get("is_active") is False:
+        raise HTTPException(status_code=400, detail="Auto-désactivation interdite")
     for k, v in body.items():
         if k in allowed:
             setattr(user, k, v)
     await db.commit()
-    log.info("admin.update_user", user_id=user_id, changes={k: body[k] for k in body if k in allowed})
+    log.info("admin.update_user", admin_id=admin.user_id, user_id=user_id,
+             changes={k: body[k] for k in body if k in allowed})
     return {"ok": True}
 
 

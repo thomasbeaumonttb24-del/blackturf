@@ -156,6 +156,8 @@ export const adminApi = {
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
   users: (params?: Record<string, unknown>) =>
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),
+  userDetail: (id: string) =>
+    api.get(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
   updateUser: (id: string, data: Record<string, unknown>) =>
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
   adjustBankroll: (id: string, montant: number, note?: string) =>

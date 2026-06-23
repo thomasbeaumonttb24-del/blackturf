@@ -6,7 +6,7 @@ import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
   Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
-  MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil,
+  MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil, Lock, Tv,
 } from "lucide-react";
 import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
@@ -1865,6 +1865,7 @@ export default function CoursePage() {
   const { user } = useAuth();
   const [course, setCourse] = useState<CourseData | null>(null);
   const [predictions, setPredictions] = useState<Prediction[] | null>(null);
+  const [verrouille, setVerrouille] = useState(false); // quota journalier dépassé → upsell
   const [loadingCourse, setLoadingCourse] = useState(true);
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
@@ -1990,11 +1991,21 @@ export default function CoursePage() {
   }, [id]);
 
   useEffect(() => {
-    if (!user || ["free", "decouverte"].includes(user.plan)) return;
+    // Tous les connectés fetchent : le quota journalier est géré côté API (free 1/j,
+    // standard 5/j, expert ∞). Au-delà du quota → res.data.verrouille = true.
+    if (!user) return;
     setLoadingPred(true);
     predictionsApi.get(id, 100)
-      .then((res) => setPredictions(res.data.predictions))
-      .catch(() => setPredictions(null))
+      .then((res) => {
+        if (res.data.verrouille) {
+          setVerrouille(true);
+          setPredictions(null); // données IA non servies → les blocs IA restent masqués
+        } else {
+          setVerrouille(false);
+          setPredictions(res.data.predictions);
+        }
+      })
+      .catch(() => { setPredictions(null); setVerrouille(false); })
       .finally(() => setLoadingPred(false));
   }, [id, user]);
 
@@ -2165,6 +2176,37 @@ export default function CoursePage() {
             )}
           </div>
 
+          {/* ── BOUTON DIRECT TV (lien sortant Equidia, page course = live/replay vidéo) ── */}
+          {(() => {
+            const m = course.course_id.match(/R(\d+)C(\d+)$/);
+            const r = course.numero_reunion ?? (m ? Number(m[1]) : null);
+            const c = course.numero ?? (m ? Number(m[2]) : null);
+            const d = course.course_id.slice(0, 8); // course_id = DDMMYYYY + RxCx
+            const live = course.statut === "en_cours";
+            // Page course Equidia = player "EN DIRECT" de CETTE course + partants/conditions (meilleur que /direct générique).
+            // course_id est en DDMMYYYY → reformat YYYY-MM-DD. Fallback /direct si données manquantes.
+            const iso = /^\d{8}$/.test(d) ? `${d.slice(4, 8)}-${d.slice(2, 4)}-${d.slice(0, 2)}` : null;
+            const url = r && c && iso
+              ? `https://www.equidia.fr/courses/${iso}/R${r}/C${c}`
+              : "https://www.equidia.fr/direct";
+            return (
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Regarder la course en direct sur Equidia (ouvre un nouvel onglet)"
+                className={`shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                  live
+                    ? "bg-red-600 text-white hover:bg-red-700"
+                    : "bg-foreground text-background hover:opacity-90"
+                }`}
+              >
+                {live && <span className="h-2 w-2 rounded-full bg-white animate-pulse" />}
+                <Tv className="h-4 w-4" />
+                {live ? "Direct" : "Voir la course"}
+              </a>
+            );
+          })()}
         </div>
 
         {/* ── STAT HERO : chiffres clés en avant (look "salle de marché") ── */}
@@ -2614,121 +2656,6 @@ export default function CoursePage() {
             </div>
           )}
 
-          {/* ── Course à outsider (champ ouvert + grosses cotes à valeur détectée) ── */}
-          {analysis?.detection_outsider?.course_a_outsider && (
-            <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-violet-600" />
-                <h3 className="text-sm font-bold text-violet-800">Course à outsider détectée</h3>
-                <span className="ml-auto text-[10px] font-bold rounded-full bg-violet-100 text-violet-700 px-2 py-0.5">
-                  Score {Math.round(analysis.detection_outsider.score * 100)}/100
-                </span>
-              </div>
-              {analysis.detection_outsider.signaux.length > 0 && (
-                <ul className="text-xs text-violet-900/80 space-y-0.5">
-                  {analysis.detection_outsider.signaux.map((s, i) => (
-                    <li key={i} className="flex gap-1.5"><span>·</span><span>{s}</span></li>
-                  ))}
-                </ul>
-              )}
-              <div className="grid gap-2 sm:grid-cols-2">
-                {analysis.detection_outsider.candidats.map((c) => (
-                  <div key={c.numero} className="rounded-lg bg-white/80 border border-violet-200/70 p-2.5 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
-                      <span className="font-mono text-xs font-bold text-violet-700">cote {c.cote}</span>
-                    </div>
-                    {/* Chiffres clés : valeur modèle vs marché */}
-                    <div className="flex flex-wrap gap-1 text-[10px]">
-                      <span className="rounded bg-violet-100 text-violet-800 px-1.5 py-0.5 font-medium">
-                        Modèle {Math.round(c.proba_modele * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
-                      </span>
-                      {c.ratio_valeur != null && (
-                        <span className="rounded bg-emerald-100 text-emerald-800 px-1.5 py-0.5 font-bold">
-                          ×{c.ratio_valeur} valeur
-                        </span>
-                      )}
-                      {c.verdict && (
-                        <span className="rounded bg-gray-100 text-gray-700 px-1.5 py-0.5">{c.verdict}</span>
-                      )}
-                    </div>
-                    {c.justification && (
-                      <p className="text-[11px] text-gray-700 leading-relaxed">{c.justification}</p>
-                    )}
-                    {/* Facteurs qui appuient le choix */}
-                    {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
-                      <ul className="space-y-0.5">
-                        {c.facteurs_positifs.slice(0, 4).map((f, i) => (
-                          <li key={i} className="text-[10px] text-emerald-800 flex gap-1">
-                            <span className="flex-shrink-0">✓</span>
-                            <span><b>{f.label}</b>{f.detail ? ` — ${f.detail}` : ""}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {/* Points de vigilance (honnêteté : un outsider garde des risques) */}
-                    {c.points_vigilance && c.points_vigilance.length > 0 && (
-                      <ul className="space-y-0.5">
-                        {c.points_vigilance.map((v, i) => (
-                          <li key={i} className="text-[10px] text-amber-700 flex gap-1">
-                            <span className="flex-shrink-0">⚠</span><span>{v}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-violet-900/60">
-                Grosse cote = risque élevé, réservé aux profils offensifs.
-              </p>
-            </div>
-          )}
-
-          {/* ── Chevaux à éviter (surcotés par le public / facteurs défavorables) ── */}
-          {analysis?.chevaux_a_eviter && analysis.chevaux_a_eviter.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50/50 p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-red-500" />
-                <h3 className="text-sm font-bold text-red-700">Chevaux à éviter</h3>
-              </div>
-              <div className="space-y-2">
-                {analysis.chevaux_a_eviter.map((c) => (
-                  <div key={c.numero} className="rounded-lg bg-white/80 border border-red-200/70 p-2.5 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
-                      <span className="font-mono text-xs text-gray-500">cote {c.cote}</span>
-                    </div>
-                    {/* Chiffres clés : le modèle sous le marché */}
-                    <div className="flex flex-wrap gap-1 text-[10px]">
-                      {c.proba_victoire != null && c.proba_marche != null && (
-                        <span className="rounded bg-red-100 text-red-800 px-1.5 py-0.5 font-medium">
-                          Modèle {Math.round(c.proba_victoire * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
-                        </span>
-                      )}
-                      {c.verdict && (
-                        <span className="rounded bg-gray-100 text-gray-700 px-1.5 py-0.5">{c.verdict}</span>
-                      )}
-                    </div>
-                    {c.justification && (
-                      <p className="text-[11px] text-gray-700 leading-relaxed font-medium">{c.justification}</p>
-                    )}
-                    <ul className="space-y-0.5">
-                      {c.raisons.map((r, i) => (
-                        <li key={i} className="text-[11px] text-gray-600 leading-relaxed flex gap-1.5">
-                          <span className="text-red-400 flex-shrink-0">·</span><span>{r}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-red-900/50">
-                Avertissement de valeur, pas une garantie de défaite.
-              </p>
-            </div>
-          )}
-
           {/* ── Comparaison multi-bookmakers (repliable — désencombre) ── */}
           {course.partants.some((p) => p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_betfair_exchange) && (
             <details className="group rounded-xl border border-border bg-card/40">
@@ -2776,13 +2703,37 @@ export default function CoursePage() {
                     <Link href={`/login?redirect=/courses/${id}`}>Connexion</Link>
                   </Button>
                 </div>
-              ) : ["free", "decouverte"].includes(user.plan) ? (
-                <div className="text-center py-4">
-                  <TrendingUp className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-                  <p className="text-sm text-muted-foreground mb-3">Disponible dès le plan Standard</p>
-                  <Button variant="brand" size="sm" asChild>
-                    <Link href="/tarifs">Passer Standard — 12€/mois</Link>
-                  </Button>
+              ) : verrouille ? (
+                <div className="relative">
+                  {/* aperçu flouté (leurre, aucune donnée IA réelle servie) */}
+                  <div className="space-y-1.5 blur-sm select-none pointer-events-none" aria-hidden>
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <div key={i} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5">
+                        <div className="h-6 w-6 rounded-md bg-muted/40 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">N°• ••••••••••</p>
+                          <p className="text-[11px] text-muted-foreground">•• % victoire · cote ••.•</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* overlay cadenas + CTA selon plan */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 px-4 text-center">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-gold/15 ring-1 ring-brand-gold/30">
+                      <Lock className="h-5 w-5 text-brand-gold" />
+                    </div>
+                    <p className="text-sm font-semibold">
+                      {user.plan === "standard" ? "5 pronostics du jour atteints" : "Pronostic gratuit du jour utilisé"}
+                    </p>
+                    <p className="text-xs text-muted-foreground max-w-xs">
+                      {user.plan === "standard"
+                        ? "Passe Expert pour des pronostics illimités."
+                        : "Passe Standard (5/jour) ou Expert (illimité) pour débloquer plus de pronostics."}
+                    </p>
+                    <Button variant="brand" size="sm" asChild>
+                      <Link href="/tarifs">{user.plan === "standard" ? "Passer Expert — 19€/mois" : "Passer Standard — 12€/mois"}</Link>
+                    </Button>
+                  </div>
                 </div>
               ) : loadingPred ? (
                 <div className="flex justify-center py-6">
@@ -2801,9 +2752,11 @@ export default function CoursePage() {
                   <div className="text-center py-4">
                     <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
                     <p className="text-sm text-muted-foreground mb-3">Aucune analyse disponible</p>
-                    <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
-                      {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse"}
-                    </Button>
+                    {!["free", "decouverte"].includes(user.plan) && (
+                      <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
+                        {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse"}
+                      </Button>
+                    )}
                   </div>
                 )
               ) : (

@@ -17,7 +17,11 @@ class ZeturfScraper(BaseScraper):
         Récupère les cotes Zeturf pour toutes les courses du jour.
         Retourne {course_id: {numero: cote}}.
         """
-        url = f"{BASE}/pmu/programme"
+        # URL corrigée 2026-06-17 : /pmu/programme renvoyait 404.
+        # Page du jour = /fr/programmes-et-pronostics-du-jour (HTML hydraté, 298Ko).
+        # ⚠ SPA partiellement hydraté : sélecteurs ci-dessous à RE-VALIDER sur DOM
+        #   réel (headless VPS) — réunions = /fr/reunion-du-jour/{date}/R1-xxx.
+        url = f"{BASE}/fr/programmes-et-pronostics-du-jour"
         if not await self.safe_goto(url, timeout=20000):
             return {}
 
@@ -45,7 +49,8 @@ class ZeturfScraper(BaseScraper):
 
     async def get_cotes_course(self, course_id: str) -> dict[int, float]:
         """Cotes Zeturf pour une course spécifique."""
-        url = f"{BASE}/pmu/{course_id}"
+        # Page course = /fr/course-du-jour/{date}/R{r}C{c}-... (corrigé 2026-06-17).
+        url = f"{BASE}/fr/course-du-jour/{course_id}"
         if not await self.safe_goto(url, timeout=15000):
             return {}
 

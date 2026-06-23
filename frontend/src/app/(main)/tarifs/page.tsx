@@ -72,10 +72,10 @@ export default function TarifsPage() {
           <CardContent className="p-6 sm:p-8">
             <h2 className="text-xl font-bold mb-1">Standard</h2>
             <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-4xl font-extrabold">19€</span>
+              <span className="text-4xl font-extrabold">12€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 182€/an (−20%)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 115€/an (−20%)</p>
             <ul className="space-y-3 mb-8">
               {[
                 { label: "Prédictions IA complètes", icon: null },
@@ -106,10 +106,10 @@ export default function TarifsPage() {
           <CardContent className="p-6 sm:p-8">
             <h2 className="text-xl font-bold mb-1">Expert</h2>
             <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-4xl font-extrabold">39€</span>
+              <span className="text-4xl font-extrabold">19€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 374€/an (−20%)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 182€/an (−20%)</p>
             <ul className="space-y-3 mb-8">
               {[
                 "Tout Standard",

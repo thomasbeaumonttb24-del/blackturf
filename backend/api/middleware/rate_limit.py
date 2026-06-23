@@ -78,7 +78,8 @@ async def rate_limit_public(
     redis: aioredis.Redis = Depends(get_redis),
 ) -> None:
     """Rate limit by IP for public endpoints — 60 req/min."""
-    ip = request.client.host if request.client else "unknown"
+    from api.middleware.throttle import _client_ip
+    ip = _client_ip(request)
     key = f"rl:public:min:{ip}"
     pipe = redis.pipeline()
     pipe.incr(key)

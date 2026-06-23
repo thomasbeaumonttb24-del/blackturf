@@ -10,13 +10,15 @@ export default function ConfidentialitePage() {
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 space-y-8">
       <h1 className="text-2xl font-bold">Politique de confidentialité</h1>
-      <p className="text-xs text-muted-foreground">Dernière mise à jour : janvier 2026</p>
+      <p className="text-xs text-muted-foreground">Dernière mise à jour : juin 2026</p>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">1. Responsable du traitement</h2>
         <p className="text-sm text-muted-foreground">
-          BlackTurf SAS — contact@blackturf.fr<br />
-          Hébergement : Union Européenne.
+          Thomas BEAUMONT — entrepreneur individuel exploitant sous le nom commercial « BlackTurf »,
+          10 rue Alix d&apos;Unienville, 33100 Bordeaux (SIREN 907&nbsp;548&nbsp;184).<br />
+          Contact données personnelles : <strong>privacy@blackturf.fr</strong><br />
+          Hébergement : Union Européenne (Hetzner Online GmbH, Allemagne).
         </p>
       </section>
 
@@ -64,22 +66,41 @@ export default function ConfidentialitePage() {
         <h2 className="text-lg font-semibold">6. Partage des données</h2>
         <p className="text-sm text-muted-foreground">
           Vos données ne sont pas vendues. Sous-traitants strictement nécessaires :
-          Stripe (paiements), Resend (emails transactionnels), Anthropic (IA — données non stockées),
-          hébergeur cloud EU.
+          Stripe (paiements), Resend (emails transactionnels), Anthropic (IA), hébergeur Hetzner (EU).
         </p>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">7. Vos droits (RGPD)</h2>
+        <h2 className="text-lg font-semibold">7. Transferts hors Union Européenne</h2>
+        <p className="text-sm text-muted-foreground">
+          Certains sous-traitants (Stripe, Anthropic) sont susceptibles de traiter des données en dehors de
+          l&apos;Union Européenne (notamment aux États-Unis). Ces transferts sont encadrés par les
+          <strong> Clauses Contractuelles Types</strong> de la Commission européenne et/ou le mécanisme
+          <strong> EU-US Data Privacy Framework</strong>, garantissant un niveau de protection adéquat.
+        </p>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">8. Décisions automatisées</h2>
+        <p className="text-sm text-muted-foreground">
+          Les pronostics et plans de mise sont générés par des modèles statistiques à partir de données de
+          courses et, le cas échéant, de votre historique. Ils constituent une <strong>aide à la décision</strong> :
+          aucune décision produisant des effets juridiques n&apos;est prise de façon entièrement automatisée ;
+          vous restez seul décideur de vos paris.
+        </p>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">9. Vos droits (RGPD)</h2>
         <p className="text-sm text-muted-foreground">
           Vous disposez des droits d'accès, de rectification, d'effacement, de portabilité,
-          de limitation et d'opposition. Pour exercer ces droits : <strong>contact@blackturf.fr</strong>.
+          de limitation et d'opposition. Pour exercer ces droits : <strong>privacy@blackturf.fr</strong>.
           Réponse sous 30 jours. Droit de recours auprès de la <strong>CNIL</strong> (cnil.fr).
         </p>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">8. Cookies</h2>
+        <h2 className="text-lg font-semibold">10. Cookies</h2>
         <p className="text-sm text-muted-foreground">
           Cookies strictement nécessaires uniquement (session JWT, préférences interface).
           Pas de cookies publicitaires ni de trackers tiers.

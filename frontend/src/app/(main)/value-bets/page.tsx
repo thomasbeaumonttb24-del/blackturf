@@ -342,7 +342,7 @@ export default function ValueBetsPage() {
           Détection automatique espérance {">"} 0 · 4 niveaux d&apos;étoiles · Triangulation 3 sources.
         </p>
         <p className="text-muted-foreground mb-8">
-          Disponible dès le plan <strong>Standard</strong> (19€/mois).
+          Disponible dès le plan <strong>Standard</strong> (12€/mois).
         </p>
         <div className="grid sm:grid-cols-3 gap-4 mb-8 text-left max-w-xl mx-auto">
           {["Alertes en temps réel", "Espérance > 0 garantie", "4 niveaux de confiance"].map((f) => (
@@ -352,7 +352,7 @@ export default function ValueBetsPage() {
           ))}
         </div>
         <Button variant="brand" size="lg" asChild>
-          <Link href="/tarifs">Débloquer les paris de valeur — 19€/mois</Link>
+          <Link href="/tarifs">Débloquer les paris de valeur — 12€/mois</Link>
         </Button>
       </div>
     );

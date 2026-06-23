@@ -315,6 +315,7 @@ class Participation(Base):
     nb_places_second: Mapped[int | None] = mapped_column(Integer)
     nb_places_troisieme: Mapped[int | None] = mapped_column(Integer)
     handicap_distance: Mapped[int | None] = mapped_column(Integer)
+    valeur_handicap: Mapped[int | None] = mapped_column(Integer)          # note/valeur handicapeur (#10)
     indicateur_inedit: Mapped[bool | None] = mapped_column(Boolean)       # cheval débutant
     jument_pleine: Mapped[bool | None] = mapped_column(Boolean)
     rang_pronostic_pmu: Mapped[int | None] = mapped_column(Integer)

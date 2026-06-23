@@ -14,7 +14,11 @@ from scraper.base import BaseScraper, human_delay, CoteBookmakerScrape
 
 log = structlog.get_logger()
 
-BASE_URL = "https://www.betclic.fr/hippisme-s5"
+# URL corrigée 2026-06-17 : /hippisme-s5 renvoie désormais 403 (durcissement
+# anti-bot). /turf répond 200. ⚠ SPA Angular : les cotes sont chargées en JS →
+# le parsing DOM actuel ne verra rien sans rendu navigateur complet OU sans taper
+# l'API XHR sous-jacente. Source à valider en headless sur le VPS avant de fiabiliser.
+BASE_URL = "https://www.betclic.fr/turf"
 API_EVENTS_URL = "https://www.betclic.fr/api/sport/hippisme"
 
 

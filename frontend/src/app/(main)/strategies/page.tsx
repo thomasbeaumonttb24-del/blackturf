@@ -186,7 +186,7 @@ export default function StrategiesPage() {
           Réservé au plan <strong className="text-brand-gold">Expert</strong>.
         </p>
         <Button variant="brand" size="lg" asChild>
-          <Link href="/tarifs">Passer Expert — 39€/mois</Link>
+          <Link href="/tarifs">Passer Expert — 19€/mois</Link>
         </Button>
       </div>
     );

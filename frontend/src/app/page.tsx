@@ -86,10 +86,10 @@ const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
     features: ["Programme du jour", "Cotes publiques", "1 pronostic/jour", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
-  { name: "Standard", price: "19€", period: "/mois", desc: "L'essentiel pour parier mieux", badge: "Populaire",
+  { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux", badge: "Populaire",
     features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Suivi du capital + statistiques", "Alertes push & e-mail", "Historique des résultats"],
     cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: true },
-  { name: "Expert", price: "39€", period: "/mois", desc: "Pour les parieurs sérieux",
+  { name: "Expert", price: "19€", period: "/mois", desc: "Pour les parieurs sérieux",
     features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres", "Export des données"],
     cta: "Passer Expert", href: "/inscription?plan=expert", popular: false },
 ];

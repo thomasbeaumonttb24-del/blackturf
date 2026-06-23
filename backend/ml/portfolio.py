@@ -43,6 +43,44 @@ def _p1(d: dict) -> float:
     return float(d.get("proba_top3", 0.0)) * _P1_FROM_P3
 
 
+def _build_field_sim(predictions: list[dict]):
+    """Simule l'ordre d'arrivée du CHAMP COMPLET (Plackett-Luce) une seule fois,
+    pour calculer des probabilités JOINTES exactes (couplé gagnant/placé) sans
+    l'hypothèse fausse d'indépendance — avec tirage sans remise, P(A∩B) ≠ P(A)·P(B).
+    Retourne (_Sim | None, {numero: index}). None si champ < 2 ou probas nulles."""
+    try:
+        from ml.combo_bets import simulate_orderings, _Sim
+    except Exception:
+        return None, {}
+    field = [p for p in predictions if not p.get("non_partant") and p.get("numero") is not None]
+    if len(field) < 2:
+        return None, {}
+    strengths = np.array([max(_p1(p), 1e-9) for p in field], dtype=float)
+    if strengths.sum() <= 0:
+        return None, {}
+    order = simulate_orderings(strengths)
+    sim = _Sim(order, len(field))
+    idx_by_num = {int(p["numero"]): i for i, p in enumerate(field)}
+    return sim, idx_by_num
+
+
+def _joint_proba(sim, idx_by_num: dict, a_num, b_num, kind: str):
+    """Probabilité jointe EXACTE via la simulation Plackett-Luce du champ.
+    kind = 'couple_gagnant' (A,B aux 2 premières places) | 'couple_place' (A,B top-3).
+    None si la sim est indisponible ou un numéro absent → l'appelant gère le repli."""
+    if sim is None or a_num is None or b_num is None:
+        return None
+    ia = idx_by_num.get(int(a_num))
+    ib = idx_by_num.get(int(b_num))
+    if ia is None or ib is None or ia == ib:
+        return None
+    if kind == "couple_gagnant":
+        return sim.p_couple_gagnant([ia, ib])
+    if kind == "couple_place":
+        return sim.p_couple_place([ia, ib])
+    return None
+
+
 # TRJ 2026 par type de pari
 TRJ = {
     "Simple Gagnant": 0.8495,
@@ -142,9 +180,12 @@ class BetPortfolioEngine:
 
         paris_dispo = _types_disponibles(nb_partants, course_info)
 
+        # Sim Plackett-Luce du champ → probas jointes EXACTES pour couplé G/P
+        sim, idx_by_num = _build_field_sim(predictions)
+
         # ── Construire les 5 scénarios ────────────────────────────────────
-        alpha = self._scenario_alpha(top1, top2, by_proba, paris_dispo, budget)
-        beta  = self._scenario_beta(by_ev, by_proba, paris_dispo, budget)
+        alpha = self._scenario_alpha(top1, top2, by_proba, paris_dispo, budget, sim, idx_by_num)
+        beta  = self._scenario_beta(by_ev, by_proba, paris_dispo, budget, sim, idx_by_num)
         gamma = self._scenario_gamma(by_ev, paris_dispo, budget)
         delta = self._scenario_delta(outsiders_signal, predictions, paris_dispo, budget)
         omega = self._scenario_omega(top5, outsiders_signal, paris_dispo, budget, course_info)
@@ -184,7 +225,7 @@ class BetPortfolioEngine:
         }
 
     def _scenario_alpha(
-        self, top1, top2, by_proba, paris_dispo, budget
+        self, top1, top2, by_proba, paris_dispo, budget, sim=None, idx_by_num=None
     ) -> Optional[dict]:
         """
         ALPHA — Sécurité absolue.
@@ -214,12 +255,18 @@ class BetPortfolioEngine:
         # Couplé Placé top1+top2 si disponible
         if top2 and "Couplé Placé" in paris_dispo and top2.get("proba_top3", 0) >= 0.40:
             mise_couple = MISE_MIN["Couplé Placé"]
+            # Proba jointe EXACTE P(A∈top3 ∩ B∈top3) via simulation. L'ancienne
+            # sqrt(pA·pB) n'avait aucun sens probabiliste (surestimait). Repli
+            # conservateur min(pA,pB) si la sim est indisponible.
+            pj = _joint_proba(sim, idx_by_num or {}, top1.get("numero"), top2.get("numero"), "couple_place")
+            if pj is None:
+                pj = min(top1.get("proba_top3", 0), top2.get("proba_top3", 0))
             paris.append({
                 "type": "Couplé Placé",
                 "chevaux": [_cheval(top1), _cheval(top2)],
                 "mise": mise_couple,
                 "ev": round((top1.get("ev_max", 0) + top2.get("ev_max", 0)) / 2, 3),
-                "proba": round((top1.get("proba_top3", 0) * top2.get("proba_top3", 0)) ** 0.5, 3),
+                "proba": round(pj, 3),
                 "explication": f"N°{top1['numero']}+N°{top2['numero']} dans le top-3",
             })
             cout_total += mise_couple
@@ -240,7 +287,7 @@ class BetPortfolioEngine:
         }
 
     def _scenario_beta(
-        self, by_ev, by_proba, paris_dispo, budget
+        self, by_ev, by_proba, paris_dispo, budget, sim=None, idx_by_num=None
     ) -> Optional[dict]:
         """
         BETA — Rendement standard.
@@ -277,9 +324,14 @@ class BetPortfolioEngine:
         # Couplé Gagnant top-2 EV
         if len(vbs_qual) >= 2 and "Couplé Gagnant" in paris_dispo:
             sec = vbs_qual[1]
-            p1 = _p1(by_proba[0]) if by_proba else 0.2
-            p2 = _p1(sec)
-            proba_couple = p1 * p2 * 2  # ordre quelconque
+            # Proba jointe EXACTE P(best & sec aux 2 premières places) via simulation.
+            # L'ancienne p1·p2·2 supposait l'indépendance (fausse, tirage sans remise)
+            # ET mélangeait les indices (p1=by_proba[0] ≠ best). Repli Luce closed-form.
+            proba_couple = _joint_proba(sim, idx_by_num or {}, best.get("numero"), sec.get("numero"), "couple_gagnant")
+            if proba_couple is None:
+                pa, pb = _p1(best), _p1(sec)
+                denom = (1.0 - pa) + (1.0 - pb)
+                proba_couple = (2.0 * pa * pb / denom) if denom > 0 else pa * pb
             mise_c = MISE_MIN["Couplé Gagnant"] + 2.0
             paris.append({
                 "type": "Couplé Gagnant",
@@ -854,12 +906,15 @@ class MarkowitzBetOptimizer:
         cotes = np.array([p.get("cote_pmu", 5.0) for p in candidates])
         probas = np.array([p.get("proba_top1", 1/n) for p in candidates])
 
-        # Matrice de covariance : chevaux mutuellement exclusifs
-        # Var(X_i) = proba_i * (1-proba_i) * (cote_i-1)^2
-        # Cov(X_i, X_j) ≈ -proba_i * proba_j * cote_i * cote_j  (exclusion mutuelle approximée)
-        gains = cotes - 1
-        var_diag = probas * (1 - probas) * gains ** 2
-        cov_matrix = np.outer(-probas * gains, probas * gains) + np.diag(var_diag + 1e-8)
+        # Matrice de covariance EXACTE de paris mutuellement exclusifs (au plus un
+        # gagnant par course). Rendement unitaire R_i = cote_i·W_i − 1 où W = vecteur
+        # indicateur du vainqueur. Cov(W) = diag(p) − p·pᵀ (loi catégorielle) est une
+        # vraie matrice de covariance → SEMI-DÉFINIE POSITIVE. Donc Cov(R) = D·Cov(W)·D
+        # = diag(cote²·p) − (cote·p)(cote·p)ᵀ l'est aussi.
+        # ⚠️ L'ancienne formule p·(1−p)·(cote−1)² sur la diagonale donnait
+        # p·g²·(1−2p) < 0 dès p > 0.5 → matrice NON inversible → mises aberrantes.
+        u = cotes * probas
+        cov_matrix = np.diag(cotes ** 2 * probas) - np.outer(u, u) + np.eye(n) * 1e-8
 
         try:
             # Résoudre : max w^T * ev - 0.5 * lambda * w^T * cov * w

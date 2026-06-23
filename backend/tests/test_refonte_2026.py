@@ -194,6 +194,55 @@ class TestSettle2sur4Combine:
         assert r["gain_mult"] == 1.0
 
 
+class TestSettleNonPartant:
+    """Un cheval déclaré non-partant après la prise du pari → mise remboursée
+    (rapport 1.0), JAMAIS compté perdant (sinon ROI faussé + apprentissage pollué)."""
+    CL = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+
+    def test_simple_gagnant_np_rembourse(self):
+        r = settle_pari("Simple Gagnant", [5], self.CL, {"e_simple_gagnant": 4.2}, 8,
+                        non_partants={5})
+        assert r.get("rembourse") is True
+        assert r["gagne"] is False and r["rapport_reel"] == 1.0
+
+    def test_couple_un_np_rembourse(self):
+        r = settle_pari("Couplé Gagnant", [1, 9], self.CL, {"e_couple_gagnant": 12.0}, 8,
+                        non_partants={9})
+        assert r.get("rembourse") is True
+
+    def test_sans_np_inchange(self):
+        r = settle_pari("Simple Gagnant", [1], self.CL, {"e_simple_gagnant": 4.2}, 8)
+        assert r["gagne"] is True and not r.get("rembourse")
+
+    def test_np_non_joue_nimpacte_pas(self):
+        r = settle_pari("Simple Gagnant", [1], self.CL, {"e_simple_gagnant": 4.2}, 8,
+                        non_partants={7})
+        assert r["gagne"] is True and not r.get("rembourse")
+
+
+class TestSettleOrdreEtDeadHeat:
+    def test_tierce_ordre_exact_gagne(self):
+        cl = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+        r = settle_pari("Tiercé Ordre", [1, 2, 3], cl, {"e_tierce_ordre": 50.0}, 8)
+        assert r["gagne"] is True
+
+    def test_tierce_ordre_desordre_perd(self):
+        cl = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+        r = settle_pari("Tiercé Ordre", [2, 1, 3], cl, {"e_tierce_ordre": 50.0}, 8)
+        assert r["gagne"] is False
+
+    def test_tierce_desordre_ordre_indifferent(self):
+        cl = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+        r = settle_pari("Tiercé Désordre", [3, 1, 2], cl, {"e_tierce": 12.0}, 8)
+        assert r["gagne"] is True
+
+    def test_couple_gagnant_dead_heat(self):
+        cl = [{"numero": 1, "position": 1}, {"numero": 2, "position": 1},
+              {"numero": 3, "position": 2}] + [{"numero": n, "position": 3} for n in (4, 5, 6, 7, 8)]
+        r = settle_pari("Couplé Gagnant", [1, 3], cl, {"e_couple_gagnant": 8.0}, 8)
+        assert r["gagne"] is True
+
+
 # ── Apprentissage par profil ─────────────────────────────────────────────────
 class TestShrunkWeight:
     def test_neutre_sans_data(self):

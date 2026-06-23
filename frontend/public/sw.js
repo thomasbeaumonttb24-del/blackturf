@@ -1,44 +1,25 @@
-/* BlackTurf Service Worker — Web Push VAPID */
-const CACHE_NAME = "blackturf-v1";
-const STATIC_ASSETS = ["/", "/programme", "/value-bets"];
+/* BlackTurf Service Worker — Web Push only (NO app-shell caching).
+   Past versions cached HTML + content-hashed Next.js chunks and fell back to
+   stale cache on any network hiccup, pinning users to an OLD build forever.
+   This version intercepts NOTHING (browser handles freshness natively) and
+   wipes ALL legacy caches on activate. */
+const CACHE_NAME = "blackturf-v3-nocache";
 
-// Install — pre-cache static routes
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
-  );
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
-// Activate — clean old caches
+// Activate — nuke EVERY cache left by previous service workers, then take over.
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
-
-// Fetch — network-first for API, cache-first for static
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-
-  // Pass through API calls
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/ws/")) return;
-
-  event.respondWith(
-    fetch(event.request)
-      .then((res) => {
-        if (res.ok && event.request.method === "GET") {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return res;
-      })
-      .catch(() => caches.match(event.request))
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
+
+// NO fetch handler on purpose: requests go straight to network, so a new deploy
+// is picked up immediately (no stale shell, no stale chunks).
 
 // Push notification handler
 self.addEventListener("push", (event) => {
