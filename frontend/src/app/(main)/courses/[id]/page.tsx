@@ -2619,43 +2619,6 @@ export default function CoursePage() {
           </Card>
 
           {/* Graphique cotes historique */}
-          {/* ── Narrative IA ── */}
-          {analysis?.narrative && (
-            <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/60 to-white p-4 sm:p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <Brain className="h-4 w-4 text-violet-600" />
-                <h3 className="text-sm font-semibold text-gray-900">Analyse BlackTurf</h3>
-                {analysis.field_confidence > 0 && (
-                  <span className={cn(
-                    "ml-auto text-[10px] font-semibold rounded-full px-2 py-0.5",
-                    analysis.field_confidence >= 0.7 ? "bg-emerald-100 text-emerald-700" :
-                    analysis.field_confidence >= 0.5 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
-                  )}>
-                    Confiance {Math.round(analysis.field_confidence * 100)}%
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{analysis.narrative}</p>
-
-              {/* Chevaux à surveiller (signaux marché / argent pro) */}
-              {analysis.market_signals?.length > 0 && (
-                <div className="pt-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">👁️ Chevaux à surveiller</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {analysis.market_signals.map((s, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                        N°{s.numero} {s.nom} — {s.signal}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <p className="text-[10px] text-muted-foreground/70 pt-1">
-                Les paris à jouer sont dans le plan de mise.
-              </p>
-            </div>
-          )}
-
           {/* ── Comparaison multi-bookmakers (repliable — désencombre) ── */}
           {course.partants.some((p) => p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_betfair_exchange) && (
             <details className="group rounded-xl border border-border bg-card/40">
