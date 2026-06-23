@@ -397,6 +397,16 @@ def generer_plan(
     # Couverture : si on a (volontairement) ≥2 paris car le top n'est pas une
     # quasi-certitude, on GARDE au moins 2 paris à l'allocation (la concentration ne doit
     # pas les ré-effondrer en 1). Sinon 1 pari concentré autorisé.
+    # Cap Simple Place au nombre de PLACES PAYEES (place paie 2 places si 4-7 partants,
+    # 3 si >=8 ; <4 = pas de place). On ne propose jamais plus de places qu il n y a de
+    # places gagnantes possibles, et on garde les plus PROBABLES.
+    _npart = sum(1 for _p in predictions if not _p.get("non_partant"))
+    _places = 3 if _npart >= 8 else (2 if _npart >= 4 else 1)
+    _sp = [c for c in selected if c.get("type_pari") == "Simple Placé"]
+    if len(_sp) > _places:
+        _keep = {id(c) for c in sorted(_sp, key=lambda c: c.get("proba_gain", 0.0), reverse=True)[:_places]}
+        selected[:] = [c for c in selected if c.get("type_pari") != "Simple Placé" or id(c) in _keep]
+
     min_keep = 2 if (len(selected) >= 2 and not _solo_confident(selected[0])) else 1
     _allocate_kelly(selected, montant, palier, cfg, respect_montant=respect_montant,
                     min_keep=min_keep)  # remplit "mise"
@@ -580,6 +590,13 @@ def _select_conviction(
         # profitabilité (le but assumé = fréquence de victoire à multiplicateur garanti).
         if c.get("_anchor"):
             return True
+        # PRUDENT = FREQUENCE de victoire, PAS l EV : un Simple/Couple Place sur un cheval
+        # SUR est -EV par la marge PMU, mais c est LE pari prudent (gagne souvent dans le
+        # multiplicateur >=1.8 deja verifie ci-dessus). On l exempte des gates de
+        # profitabilite, sinon le moteur ne garde que les places d OUTSIDERS a EV+ (= peu
+        # probables = l inverse du prudent). Classe ensuite par proba (objectif "proba").
+        if objectif == "proba" and "Placé" in c["type_pari"]:
+            return True
         # RÈGLE DE PROFITABILITÉ : jamais un pari à la fois -EV ET sans edge (= don au
         # PMU) — SAUF profil "coup" (risqué) qui assume des paris gros-lot spéculatifs,
         # bornés ensuite par max_coup + cap_spec. On exclut quand même la loterie pure
@@ -631,7 +648,9 @@ def _select_conviction(
                 return inter / max(len(hs | s), 1) >= 0.67
             if any(_dup(s, t) for s, t in seen_sets):
                 continue
-            spec = _is_speculative(c)
+            # Placé prudent = SUR (gagne souvent), -EV par marge PMU mais PAS speculatif :
+            # ne pas le compter dans le quota de coups (sinon max_coup=0 le rejette).
+            spec = _is_speculative(c) and not (objectif == "proba" and "Placé" in c["type_pari"])
             if spec and n_coup >= max_coup:          # quota de tickets sans edge (renta)
                 continue
             c["_roi_w"] = roi_w(c)
@@ -658,7 +677,7 @@ def _select_conviction(
             if (c["type_pari"] == sel_type and len(hs2) >= 3
                     and len(hs2 & sel_hs) >= max(len(hs2), len(sel_hs)) - 1):
                 continue
-            if _is_speculative(c) and n_coup >= max_coup:
+            if (_is_speculative(c) and not (objectif == "proba" and "Placé" in c["type_pari"])) and n_coup >= max_coup:
                 continue
             c["_roi_w"] = roi_w(c)
             c["_sig"] = sig_factor(c)
@@ -1208,6 +1227,11 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
     for c in selected:
         mise = c["mise"]
         gain = round(mise * c["rapport_estime"])
+        # L arrondi ENTIER du gain ne doit jamais faire tomber le multiplicateur AFFICHE
+        # sous la tranche du profil (ex. place x1.8 a 3e = 5.4 -> arrondi 5 -> x1.67 affiche).
+        _rmin = PROFIL_CONFIG.get(profil, PROFIL_CONFIG["equilibre"]).get("rapport_min", 0.0) or 0.0
+        if mise > 0 and _rmin > 0 and gain < math.ceil(mise * _rmin):
+            gain = math.ceil(mise * _rmin)
         pari = PariRec(
             type=c["type_pari"],
             chevaux=[{"numero": h["numero"], "nom": h["nom"]} for h in c["chevaux"]],
