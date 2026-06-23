@@ -898,6 +898,34 @@ def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
     for c in kept:
         c["_besoin"] = besoin(c)
 
+    # DIVERSIFICATION (min_keep) : l'utilisateur veut PLUSIEURS paris en modere/risque
+    # SAUF quasi-certitude (min_keep=1). Le contrat de gain ci-dessus concentre parfois sur
+    # < min_keep paris (la cible x g exige presque tout le budget sur UN seul pari). On
+    # retablit alors la couverture : on ajoute les meilleurs paris restants AU PLANCHER (ils
+    # n'atteignent pas seuls la cible = diversification assumee), finances depuis le reliquat
+    # puis, si epuise, en rognant le plus gros pari garde (jamais sous le plancher).
+    if min_keep > len(kept):
+        kept_ids = {id(c) for c in kept}
+        for c in ordered:
+            if len(kept) >= min_keep:
+                break
+            if id(c) in kept_ids:
+                continue
+            if reste >= min_stake:
+                c["mise"] = min_stake
+                c["_besoin"] = min_stake
+                kept.append(c); kept_ids.add(id(c)); reste -= min_stake
+            else:
+                donor = max(kept, key=lambda x: x["mise"])
+                if donor["mise"] - min_stake >= min_stake:
+                    donor["mise"] -= min_stake
+                    donor["_besoin"] = max(min_stake, int(donor.get("_besoin", min_stake)) - min_stake)
+                    c["mise"] = min_stake
+                    c["_besoin"] = min_stake
+                    kept.append(c); kept_ids.add(id(c))
+                else:
+                    break
+
     # Reliquat → aux paris gardés par priorité (total dépensé == budget initial). Ne déplace
     # PAS un pari sous son besoin ; le reliquat ne fait qu'AUGMENTER les mises (gain ↑).
     kept_prio = sorted(kept, key=prio, reverse=True)
