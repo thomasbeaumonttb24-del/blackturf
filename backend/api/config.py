@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # JWT
     secret_key: str
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 15
+    access_token_expire_minutes: int = 720  # 12h : 15min etait trop court (sessions mobiles mortes en continu)
     refresh_token_expire_days: int = 7
 
     # External APIs

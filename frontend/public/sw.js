@@ -3,7 +3,7 @@
    stale cache on any network hiccup, pinning users to an OLD build forever.
    This version intercepts NOTHING (browser handles freshness natively) and
    wipes ALL legacy caches on activate. */
-const CACHE_NAME = "blackturf-v3-nocache";
+const CACHE_NAME = "blackturf-v4-nocache";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -15,6 +15,11 @@ self.addEventListener("activate", (event) => {
     caches.keys()
       .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+      // FORCE-RELOAD : un ancien SW pouvait servir un bundle perime depuis le cache
+      // (iOS Safari = "aucune analyse / site ne charge pas"). Des que ce SW prend la main,
+      // on recharge les onglets ouverts pour qu ils chargent le bundle FRAIS depuis le reseau.
+      .then(() => self.clients.matchAll({ type: "window" }))
+      .then((clients) => clients.forEach((c) => { try { c.navigate(c.url); } catch (e) {} }))
   );
 });
 
