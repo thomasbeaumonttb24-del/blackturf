@@ -384,7 +384,15 @@ def generer_plan(
     selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
                                   respect_montant=respect_montant)
     if not selected:
-        return _plan_vide(montant, profil)
+        # Predictions existent mais AUCUN pari ne tombe dans la tranche de rapport du
+        # profil (x2 / x2-10 / >=x10) -> plan vide honnete plutot qu un pari hors-regle.
+        return _plan_vide(
+            montant, profil,
+            resume=("Aucun pari ne correspond a ce profil sur cette course - les cotes "
+                    "disponibles sont hors de la tranche visee. Essaie un autre profil ou "
+                    "une autre course."),
+            avert="Probabilites estimees par simulation (Plackett-Luce). Jouez avec moderation.",
+        )
 
     # Couverture : si on a (volontairement) ≥2 paris car le top n'est pas une
     # quasi-certitude, on GARDE au moins 2 paris à l'allocation (la concentration ne doit
@@ -671,16 +679,18 @@ def _select_conviction(
         # la bande de rapport du profil le plus longtemps possible (contrat ×2/×10).
         pool = [c for c in cands if _in_type(c) and _in_rapport(c)
                 and cote_min <= _bet_cote_max(c) <= cote_max]
-        pool = pool or [c for c in cands if _in_type(c) and _in_rapport(c)] \
-            or [c for c in cands if _in_type(c)] or cands
-        # Risqué (objectif gain) : viser le plus gros RAPPORT du repli ; prudent/modéré : le plus sûr.
-        if objectif == "gain":
-            safe = max(pool, key=lambda c: c["rapport_estime"])
-        else:
-            safe = max(pool, key=lambda c: c["proba_gain"])
-        safe["_roi_w"] = roi_w(safe)
-        safe["_sig"] = sig_factor(safe)
-        selected = [safe]
+        pool = pool or [c for c in cands if _in_type(c) and _in_rapport(c)]
+        # Filet : on RESTE dans la bande de rapport du profil (regle produit x2/x2-10/>=x10).
+        # On relache seulement la borne de COTE du cheval, JAMAIS le rapport. Aucun pari en
+        # bande -> plan laisse VIDE (gere en amont) plutot qu un pari hors-tranche.
+        if pool:
+            if objectif == "gain":
+                safe = max(pool, key=lambda c: c["rapport_estime"])
+            else:
+                safe = max(pool, key=lambda c: c["proba_gain"])
+            safe["_roi_w"] = roi_w(safe)
+            safe["_sig"] = sig_factor(safe)
+            selected = [safe]
 
     # ── DÉPLOIEMENT INTÉGRAL (calculateur MANUEL, respect_montant) ──────────────
     # L'utilisateur a SAISI un montant et choisi un profil : il veut qu'il soit JOUÉ EN
@@ -1276,13 +1286,15 @@ def _pari(type_: str, chevs: list[ChevPred], mise: float, gain: float, proba: fl
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
-def _plan_vide(montant: float, profil: str) -> MisePlan:
+def _plan_vide(montant: float, profil: str,
+               resume: str = "Prédictions non disponibles pour cette course.",
+               avert: str = "Lancez l'analyse IA avant de générer un plan.") -> MisePlan:
     return MisePlan(
         montant_total=montant, montant_joue=0, montant_reserve=montant,
         ev_global=0,
         niveaux=[],
-        resume_ia="Prédictions non disponibles pour cette course.",
-        avertissement="Lancez l'analyse IA avant de générer un plan.",
+        resume_ia=resume,
+        avertissement=avert,
         profil=profil,
     )
 
