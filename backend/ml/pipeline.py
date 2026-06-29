@@ -81,15 +81,23 @@ def _should_deploy(
     """
     if new_wf < min_auc:
         return False
-    # Gate ROI : ne fige PAS une amélioration de ranking (wf au moins aussi bon que l'actif).
+    # Remplacement STRUCTUREL de l'actif : actif synthetique / absent / non fiable
+    # (trop peu de courses) / saut de donnees massif (nouveau modele entraine sur
+    # >=1.5x plus de donnees). Ces cas justifient la promotion independamment du
+    # walk-forward (cf data_jump : le wf est optimiste sur peu de donnees).
+    structural_replace = (
+        current_is_synth or no_current or current_unreliable or data_jump
+    )
+    # Gate ROI : ne fige PAS une amelioration de ranking (wf au moins aussi bon
+    # que l'actif) NI un remplacement structurel (ex. modele 18 mois remplacant un
+    # modele a fenetre courte sur-ajuste dont le wf gonfle bloquait tout -- bug
+    # 2026-06-29 : roi_gate court-circuitait avant data_jump).
     ranking_improvement = new_wf >= current_wf
-    if roi_gate_enabled and not betting_edge_ok and not ranking_improvement:
+    if (roi_gate_enabled and not betting_edge_ok
+            and not ranking_improvement and not structural_replace):
         return False
     return (
-        current_is_synth
-        or no_current
-        or current_unreliable
-        or data_jump
+        structural_replace
         or new_wf >= current_wf - seuil_regression
     )
 
