@@ -119,6 +119,7 @@ services:
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
     expose:
       - "8000"
     depends_on:
@@ -173,6 +174,7 @@ services:
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
     depends_on:
       db:
         condition: service_healthy
@@ -220,6 +222,7 @@ services:
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
     depends_on:
       db:
         condition: service_healthy
@@ -327,6 +330,7 @@ services:
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
     depends_on:
       db:
         condition: service_healthy

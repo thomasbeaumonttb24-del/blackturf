@@ -99,6 +99,13 @@ class AlgoFlags:
     combo_ev_none: bool = field(default_factory=lambda: _env_bool("BT_COMBO_EV_NONE"))
     # Temperature ajustée par fit 1-D sur NLL held-out au lieu du ratchet asymétrique.
     temp_fit: bool = field(default_factory=lambda: _env_bool("BT_TEMP_FIT"))
+    # ── Ranking (précision du classement affiché) ────────────────────────────
+    # Mélange un score LGBMRanker (lambdarank, groupé par course) dans l'ORDRE
+    # d'arrivée prédit (rang_predit) UNIQUEMENT — n'affecte PAS les probas/EV
+    # (calibrées). Validé offline : +~0.8pt top1 / 3118 courses holdout (non sig
+    # p~0.11), neutre top3/ndcg. Réversible. Nécessite un modèle entraîné AVEC ranker.
+    ranker_blend: bool = field(default_factory=lambda: _env_bool("BT_RANKER_BLEND"))
+    ranker_blend_weight: float = field(default_factory=lambda: _env_float("BT_RANKER_BLEND_WEIGHT", 1.0))
 
     def as_dict(self) -> dict:
         return {
@@ -115,6 +122,8 @@ class AlgoFlags:
             "collapse_longshot": self.collapse_longshot,
             "combo_ev_none": self.combo_ev_none,
             "temp_fit": self.temp_fit,
+            "ranker_blend": self.ranker_blend,
+            "ranker_blend_weight": self.ranker_blend_weight,
         }
 
 

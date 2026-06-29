@@ -1057,7 +1057,23 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # d'itération des features.
         _p1_arr = np.asarray(probas_top1, dtype=float)
         _p3_arr = np.asarray(probas_top3, dtype=float)
-        _order = np.lexsort((-_p3_arr, -_p1_arr))  # primaire: -proba_top1, secondaire: -proba_top3
+        # FLAG ranker_blend : mélange le score LambdaRank (ordre intra-course) avec
+        # la proba_top1 (z-scores) pour CLASSER — sans toucher proba/EV. Réversible.
+        _ord_key = _p1_arr
+        try:
+            from ml.algo_flags import FLAGS as _AFrk
+            if getattr(_AFrk, "ranker_blend", False):
+                _rs = model.predict_rank_score(X)
+                if _rs is not None and len(_rs) == len(_p1_arr) and float(np.std(_rs)) > 0:
+                    def _z(a):
+                        a = np.asarray(a, dtype=float)
+                        return (a - a.mean()) / (a.std() + 1e-9)
+                    _w = float(getattr(_AFrk, "ranker_blend_weight", 1.0))
+                    _ord_key = _z(_p1_arr) + _w * _z(_rs)
+                    log.info("pipeline.ranker_blend_applied", course_id=course_id)
+        except Exception as _e:
+            log.warning("pipeline.ranker_blend_skip", err=str(_e)[:120])
+        _order = np.lexsort((-_p3_arr, -_ord_key))  # primaire: -ord_key, secondaire: -proba_top3
         _rang_by_index = np.empty(len(_order), dtype=int)
         for _k, _idx in enumerate(_order):
             _rang_by_index[int(_idx)] = _k + 1
@@ -1273,11 +1289,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 "ev_max": ev_max,
                 "niveau_vb": niveau_vb,
                 "prediction_id": pred_id,
+                "_ord": float(_ord_key[int(i)]),
             })
 
         # Trier par proba de VICTOIRE décroissante (tiebreak top-3) et assigner les
         # rangs — même base que le rang_predit sauvegardé en DB (cohérence totale).
-        predictions.sort(key=lambda x: (x["proba_top1"], x["proba_top3"]), reverse=True)
+        predictions.sort(key=lambda x: (x.get("_ord", x["proba_top1"]), x["proba_top3"]), reverse=True)
         for i, p in enumerate(predictions):
             p["rang_predit"] = i + 1
 

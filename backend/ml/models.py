@@ -111,6 +111,10 @@ class BlackTurfEnsemble:
         self.shap_importance: dict = {}
         self.trained_at: Optional[datetime] = None
         self._catboost_available: bool = False
+        # Modèle de RANKING (LGBMRanker lambdarank, groupé par course) — sert
+        # UNIQUEMENT à ordonner le classement affiché (rang_predit), jamais les
+        # probas/EV. None si non entraîné / LightGBM indispo.
+        self.ranker = None
 
     def train(self, X: pd.DataFrame, y: pd.Series, y_win: Optional[pd.Series] = None) -> dict:
         """
@@ -364,6 +368,35 @@ class BlackTurfEnsemble:
                 log.warning("model.win_model_failed", err=str(e)[:160])
                 self.win_model = None
 
+        # ── Modèle de RANKING (LambdaRank, groupé par course) ─────────────────
+        # Optimise directement l'ORDRE d'arrivée intra-course (vs la classif top3
+        # binaire). Score utilisé seulement pour le classement affiché (blend côté
+        # predict, flag BT_RANKER_BLEND) — jamais pour les probas/EV calibrées.
+        self.ranker = None
+        if _AF.group_split and "course_id" in X.columns and y_win is not None and len(y_win) == n:
+            try:
+                import itertools
+                from lightgbm import LGBMRanker
+                _grp_src = X.loc[X_train.index, "course_id"].tolist()
+                _grp = [sum(1 for _ in g) for _, g in itertools.groupby(_grp_src)]
+                _yw = y_win.loc[X_train.index].to_numpy()
+                _y3 = y_train.to_numpy()
+                # relevance : gagnant=2, placé(top3)=1, autre=0 (label_gain associé)
+                _rel = np.where(_yw == 1, 2, np.where(_y3 == 1, 1, 0)).astype(int)
+                if sum(_grp) == len(X_train) and len(_grp) >= 2:
+                    _rk = LGBMRanker(
+                        objective="lambdarank", n_estimators=400, max_depth=6,
+                        learning_rate=0.05, num_leaves=40, subsample=0.8,
+                        colsample_bytree=0.8, random_state=42, verbose=-1, n_jobs=-1,
+                        label_gain=[0, 1, 3],
+                    )
+                    _rk.fit(X_train, _rel, group=_grp)
+                    self.ranker = _rk
+                    log.info("model.ranker_trained", n_groups=len(_grp))
+            except Exception as e:
+                log.warning("model.ranker_failed", err=str(e)[:160])
+                self.ranker = None
+
         # Brier threshold check
         if self.brier_score > BRIER_THRESHOLD:
             log.warning("model.brier_too_high", brier=self.brier_score, threshold=BRIER_THRESHOLD)
@@ -489,6 +522,20 @@ class BlackTurfEnsemble:
             return self.win_model.predict_proba(X_feat)[:, 1]
         except Exception as e:
             log.warning("model.predict_win_failed", err=str(e)[:140])
+            return None
+
+    def predict_rank_score(self, X: pd.DataFrame) -> Optional[np.ndarray]:
+        """Score de ranking LambdaRank (plus haut = mieux classé). None si pas de
+        ranker (vieux modèle / LightGBM indispo). Sert UNIQUEMENT au classement.
+        """
+        rk = getattr(self, "ranker", None)
+        if rk is None:
+            return None
+        try:
+            X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+            return np.asarray(rk.predict(X_feat), dtype=float)
+        except Exception as e:
+            log.warning("model.ranker.predict_failed", err=str(e)[:120])
             return None
 
     def _walk_forward_validation(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 6,
