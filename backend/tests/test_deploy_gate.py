@@ -127,3 +127,41 @@ def test_roi_gate_inactif_n_a_aucun_effet():
         current_unreliable=False, data_jump=False,
         roi_gate_enabled=False, betting_edge_ok=False,
     ) is True
+
+
+# ── Gate ROI : ne fige pas un REMPLACEMENT STRUCTUREL (régression 2026-06-29) ──
+
+def test_roi_gate_ne_fige_pas_un_data_jump():
+    """Régression réelle du 2026-06-29 : modèle 18 mois (data_jump, ~2.5x data, wf
+    0.8104) bloqué par v502 (fenêtre courte, wf gonflé 0.8217) car edge KO + wf non
+    amélioré → la gate ROI court-circuitait `data_jump`. DOIT déployer : un modèle
+    entraîné sur beaucoup plus de données remplace un actif sur-ajusté.
+    """
+    assert _should_deploy(
+        0.8104, current_wf=0.8217,
+        current_is_synth=False, no_current=False,
+        current_unreliable=False, data_jump=True,
+        roi_gate_enabled=True, betting_edge_ok=False,
+    ) is True
+
+
+def test_roi_gate_ne_fige_pas_un_actif_non_fiable():
+    """Actif <800 courses + edge KO + wf non amélioré → remplacement structurel autorisé."""
+    assert _should_deploy(
+        0.75, current_wf=0.90,
+        current_is_synth=False, no_current=False,
+        current_unreliable=True, data_jump=False,
+        roi_gate_enabled=True, betting_edge_ok=False,
+    ) is True
+
+
+def test_roi_gate_bloque_toujours_une_regression_sans_structurel():
+    """Garde-fou préservé : edge KO + pas d'amélioration ranking + AUCUN signal
+    structurel (pas de data_jump / unreliable / synth) → on garde l'actif.
+    """
+    assert _should_deploy(
+        0.80, current_wf=0.82,
+        current_is_synth=False, no_current=False,
+        current_unreliable=False, data_jump=False,
+        roi_gate_enabled=True, betting_edge_ok=False,
+    ) is False

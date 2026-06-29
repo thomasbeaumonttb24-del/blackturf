@@ -1822,16 +1822,20 @@ async def _log_prediction_accuracy(session: AsyncSession, course_id: str, classe
 
 
 async def _notify_result_subscribers(course_id: str) -> None:
-    """Envoie les alertes résultats aux utilisateurs abonnés."""
-    # Délégué au worker via RQ (sync wrapper)
-    try:
-        import redis as redis_sync
-        from rq import Queue
-        r = redis_sync.from_url(settings.redis_url)
-        q = Queue(connection=r)
-        q.enqueue("ml.pipeline.post_course_sync", course_id)
-    except Exception as e:
-        log.warning("pipeline.notify_subscribers.failed", error=str(e))
+    """No-op : le push d'alertes RÉSULTAT n'est pas implémenté.
+
+    BUG CORRIGÉ 2026-06-29 — BOUCLE INFINIE : cette fonction est appelée DEPUIS
+    `run_post_course` (étape 5) et ré-enqueuait `post_course_sync` (= run_post_course),
+    donc chaque course se ré-injectait sans fin dans la file RQ `default`. Résultat :
+    ~5900 jobs en backlog permanent, worker à 100 % 24/7, `skip_already_learned` à
+    chaque tour, et risque d'affamer la file `ml` (retrain).
+
+    Le 1er (et seul) traitement légitime d'une course est déclenché par l'orchestrator
+    (`scraper/orchestrator.py` poll_resultats) quand l'arrivée est publiée. On ne
+    ré-enqueue donc RIEN ici. Si un jour on veut notifier les abonnés du résultat,
+    le faire DIRECTEMENT (services.alerts.send_web_push), JAMAIS via post_course_sync.
+    """
+    return None
 
 
 def _get_cheval_id_from_resultat(entry: dict, resultat: Resultat) -> str:
