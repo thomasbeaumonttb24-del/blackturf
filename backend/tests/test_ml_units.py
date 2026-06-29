@@ -106,8 +106,9 @@ def test_triangulation_ev_calcule_correctement():
 # detect_value_bet intégration
 # ─────────────────────────────────────────────
 def test_detect_value_bet_found():
-    # proba 0.35 à cote 4.5 → ratio modèle/marché 1.58 < 1.7 (gate longshot) ; EV +57%.
-    vb = detect_value_bet(proba_top1=0.35, cote_pmu=4.5)
+    # proba 0.30 à cote 4.0 → ratio modèle/marché 1.2 < 1.7 (gate longshot) ; excédent
+    # d'EV = 4.0×0.30−1 = +20%, sous EV_MAX_EXCESS_VB (0.25 = zone non toxique).
+    vb = detect_value_bet(proba_top1=0.30, cote_pmu=4.0)
     assert vb is not None
     assert vb["niveau"] >= 1
     assert vb["ev_max"] > 0
@@ -124,16 +125,18 @@ def test_detect_value_bet_no_cotes():
 
 
 def test_detect_picks_best_source():
-    vb = detect_value_bet(proba_top1=0.55, cote_pmu=3.0, cote_geny=5.0, cote_bzh=2.5)
+    # proba 0.33 : geny (cote 5.0) reste la meilleure source, mais l'EV affichée est
+    # plafonnée à la médiane (×COTE_CEIL_FACTOR) → excédent ≈ +14%, sous le gate 0.25.
+    vb = detect_value_bet(proba_top1=0.33, cote_pmu=3.0, cote_geny=5.0, cote_bzh=2.5)
     assert vb is not None
     assert vb["meilleure_source"] == "geny"
     assert vb["ev_geny"] > vb["ev_pmu"]
 
 
 def test_detect_value_bet_inclut_spi_fields():
-    # proba 0.40 à cote 4.0 → ratio modèle/marché 1.6 < MAX_MODEL_MARKET_RATIO (1.7) :
-    # passe le gate longshot resserré (le 0.65 historique = ratio 2.6, rejeté by design).
-    vb = detect_value_bet(proba_top1=0.40, cote_pmu=4.0)
+    # proba 0.30 à cote 4.0 → ratio modèle/marché 1.2 < MAX_MODEL_MARKET_RATIO (1.7) et
+    # excédent d'EV +20% < EV_MAX_EXCESS_VB (0.25) : value bet retenu, champs SPI présents.
+    vb = detect_value_bet(proba_top1=0.30, cote_pmu=4.0)
     assert vb is not None
     assert "spi_detected" in vb
     assert "spi_score" in vb
@@ -141,8 +144,10 @@ def test_detect_value_bet_inclut_spi_fields():
 
 def test_detect_value_bet_spi_via_history():
     """Cote qui chute de 5.0 → 3.5 → SPI détecté."""
+    # proba 0.34 (sous le cap court-cote SHORT_MAX_RATIO et sous le gate EV 0.25) :
+    # le SPI dépend de l'historique de cote, pas de la proba — il reste détecté.
     history = [5.0, 4.8, 4.5, 4.2, 3.8, 3.5]
-    vb = detect_value_bet(proba_top1=0.65, cote_pmu=3.5, cotes_history=history)
+    vb = detect_value_bet(proba_top1=0.34, cote_pmu=3.5, cotes_history=history)
     assert vb is not None
     assert vb["spi_detected"] is True
     assert vb["spi_score"] > 0
@@ -173,8 +178,10 @@ def test_longshot_gate_rejette_proba_sur_evaluee():
 
 def test_longshot_gate_ne_sapplique_pas_aux_favoris():
     """Sous LONGSHOT_COTE_MIN (cote basse) un fort écart marché reste un edge valide."""
+    # proba 0.40 vs marché 0.33 = edge réel, excédent d'EV +20% (sous le gate 0.25) :
+    # le gate longshot ne s'applique pas (cote < 4) → value bet retenu.
     vb = detect_value_bet(
-        proba_top1=0.60, cote_pmu=3.0, cote_geny=3.0, cote_bzh=3.0,
+        proba_top1=0.40, cote_pmu=3.0, cote_geny=3.0, cote_bzh=3.0,
     )
     assert vb is not None
     assert vb["niveau"] >= 1
@@ -190,18 +197,18 @@ def test_cote_max_vb_rejette_outsider_extreme():
 def test_winners_curse_ev_plafonnee_a_mediane():
     """EV calculée sur cote plafonnée (médiane × COTE_CEIL_FACTOR), pas sur la cote
     isolée la plus haute des 7 sources (stale → EV gonflée)."""
-    # médiane de [4,4,4,10] = 4 ; cote isolée winamax = 10. proba 0.28 → ratio vs
-    # cote_marché (~5.8 pondérée) ≈ 1.63 < 1.7 : passe le gate longshot resserré.
+    # médiane de [4,4,4,10] = 4 ; cote isolée winamax = 10. proba 0.26 : l'EV est
+    # calculée sur la cote plafonnée (4×COTE_CEIL_FACTOR) → excédent +19.6% < gate 0.25.
     vb = detect_value_bet(
-        proba_top1=0.28, cote_pmu=4.0, cote_geny=4.0, cote_bzh=4.0,
+        proba_top1=0.26, cote_pmu=4.0, cote_geny=4.0, cote_bzh=4.0,
         cote_winamax=10.0,
     )
     assert vb is not None
     assert vb["meilleure_source"] == "winamax"   # on parie quand même la meilleure cote
     cote_plafond = 4.0 * COTE_CEIL_FACTOR
-    ev_attendu = cote_plafond * 0.28 - 1.0
+    ev_attendu = cote_plafond * 0.26 - 1.0
     assert vb["ev_max"] == pytest.approx(ev_attendu, rel=1e-6)
-    # sans plafond l'EV serait 10×0.40−1 = 3.0 ; le plafond la garde crédible
+    # sans plafond l'EV serait 10×0.26−1 = 1.6 ; le plafond la garde crédible
     assert vb["ev_max"] < 1.0
 
 
@@ -489,7 +496,11 @@ def _make_synthetic_dataset(n=200):
     return X, y
 
 
-def test_model_train_and_predict_smoke():
+def test_model_train_and_predict_smoke(tmp_path, monkeypatch):
+    # CatBoost écrit catboost_info/ dans le cwd ; en conteneur jetable monté en
+    # lecture seule (/app) ça lève "Can't create train working dir". On bascule le
+    # cwd vers un tmp inscriptible. (Inutile dans l'image bakée — cwd y est writable.)
+    monkeypatch.chdir(tmp_path)
     from ml.models import BlackTurfEnsemble
     X, y = _make_synthetic_dataset(300)
     model = BlackTurfEnsemble()
@@ -502,7 +513,8 @@ def test_model_train_and_predict_smoke():
     assert metrics["walk_forward_auc"] > 0.0
 
 
-def test_model_predict_proba_range():
+def test_model_predict_proba_range(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # cf. test_model_train_and_predict_smoke (catboost_info)
     from ml.models import BlackTurfEnsemble
     X, y = _make_synthetic_dataset(300)
     model = BlackTurfEnsemble()
@@ -513,7 +525,8 @@ def test_model_predict_proba_range():
     assert all(0.0 <= p <= 1.0 for p in probas)
 
 
-def test_model_feature_importance_populated():
+def test_model_feature_importance_populated(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # cf. test_model_train_and_predict_smoke (catboost_info)
     from ml.models import BlackTurfEnsemble
     X, y = _make_synthetic_dataset(300)
     model = BlackTurfEnsemble()
@@ -521,8 +534,9 @@ def test_model_feature_importance_populated():
     assert len(model.feature_importance) > 0
 
 
-def test_model_brier_threshold():
+def test_model_brier_threshold(tmp_path, monkeypatch):
     """Walk-forward AUC variance should be low on clean data."""
+    monkeypatch.chdir(tmp_path)  # cf. test_model_train_and_predict_smoke (catboost_info)
     from ml.models import BlackTurfEnsemble
     X, y = _make_synthetic_dataset(500)
     model = BlackTurfEnsemble()
@@ -548,8 +562,9 @@ def test_build_training_dataset_structure():
     assert isinstance(y_win, pd.Series)
 
 
-def test_model_stacking_meta_learner():
+def test_model_stacking_meta_learner(tmp_path, monkeypatch):
     """Stacking meta-learner doit s'entraîner et produire des probas valides."""
+    monkeypatch.chdir(tmp_path)  # cf. test_model_train_and_predict_smoke (catboost_info)
     from ml.models import BlackTurfEnsemble
     X, y = _make_synthetic_dataset(400)
     model = BlackTurfEnsemble()
@@ -759,18 +774,30 @@ def test_adaptive_learning_temperature_low_sharpens():
     assert calibrated[0] < probas[0]
 
 
-def test_adaptive_learning_temperature_update_surprise():
-    """Surprise + proba basse → T augmente."""
+def test_adaptive_learning_temperature_update_surprise(monkeypatch):
+    """Surprise + proba basse → T augmente (ratchet historique)."""
+    # Le flag temp_fit (BT_TEMP_FIT=1 en prod) GÈLE le ratchet par course
+    # (_update_temperature retourne 0.0 sans toucher T). Ce test vérifie la
+    # MATH du ratchet → on neutralise le flag pour l'exercer.
+    import dataclasses
     from ml.adaptive_learning import AdaptiveLearning
+    from ml.algo_flags import FLAGS
+    # AlgoFlags est un dataclass frozen → on remplace l'attribut module (relu à
+    # chaque appel de _update_temperature) par une copie temp_fit=False.
+    monkeypatch.setattr("ml.algo_flags.FLAGS", dataclasses.replace(FLAGS, temp_fit=False))
     al = AdaptiveLearning()
     t_before = al.temperature
     al._update_temperature(gagnant_proba=0.05, was_surprise=True, brier=0.30)
     assert al.temperature > t_before
 
 
-def test_adaptive_learning_temperature_update_good_prediction():
+def test_adaptive_learning_temperature_update_good_prediction(monkeypatch):
     """Bonne prédiction (brier bas, pas surprise) → T diminue légèrement."""
+    # Idem : on désactive temp_fit pour tester le ratchet (gelé en prod).
+    import dataclasses
     from ml.adaptive_learning import AdaptiveLearning
+    from ml.algo_flags import FLAGS
+    monkeypatch.setattr("ml.algo_flags.FLAGS", dataclasses.replace(FLAGS, temp_fit=False))
     al = AdaptiveLearning()
     al.temperature = 1.1  # Légèrement trop haut
     for _ in range(10):
