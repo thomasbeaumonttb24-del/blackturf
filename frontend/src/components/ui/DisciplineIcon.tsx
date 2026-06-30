@@ -22,6 +22,16 @@ export function disciplineMeta(d: string) {
   return DISCIPLINE_META[d] ?? { color: "#6B7280", bg: "bg-gray-100", ring: "ring-gray-200", short: d };
 }
 
+/* Logos cheval par discipline (PNG dans /public/img/disciplines). */
+const DISCIPLINE_IMG: Record<string, string> = {
+  Plat:     "/img/disciplines/plat.png",
+  "Attelé": "/img/disciplines/attele.png",
+  Monté:    "/img/disciplines/monte.png",
+  Haies:    "/img/disciplines/obstacle.png",
+  Steeple:  "/img/disciplines/obstacle.png",
+  Cross:    "/img/disciplines/obstacle.png",
+};
+
 /* ── Glyphes SVG (viewBox 0 0 32 24), trait = currentColor ── */
 function Glyph({ discipline }: { discipline: string }) {
   const common = {
@@ -129,15 +139,25 @@ export function DisciplineIcon({
   discipline, size = "md", className,
 }: { discipline: string; size?: "sm" | "md" | "lg"; className?: string }) {
   const m = disciplineMeta(discipline);
+  const img = DISCIPLINE_IMG[discipline];
   const box = size === "sm" ? "h-6 w-6 p-1" : size === "lg" ? "h-10 w-10 p-1.5" : "h-8 w-8 p-1.5";
   return (
     <span
-      className={cn("inline-flex items-center justify-center rounded-lg ring-1 flex-shrink-0", m.bg, m.ring, box, className)}
+      className={cn(
+        "inline-flex items-center justify-center rounded-lg ring-1 flex-shrink-0",
+        img ? "bg-white" : m.bg,
+        m.ring, box, className,
+      )}
       style={{ color: m.color }}
       title={discipline}
       aria-label={discipline}
     >
-      <Glyph discipline={discipline} />
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={img} alt={discipline} className="h-full w-full object-contain" loading="lazy" />
+      ) : (
+        <Glyph discipline={discipline} />
+      )}
     </span>
   );
 }
