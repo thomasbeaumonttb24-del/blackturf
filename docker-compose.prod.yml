@@ -234,7 +234,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 5G
+          # 6G : le retrain 18 mois pointe ~5G ; marge pour éviter le cgroup-OOM.
+          # L'hôte (7,6G RAM + 6G swap) ne peut pas global-OOM tant que ce cap tient.
+          memory: 6G
         reservations:
           memory: 256M
 

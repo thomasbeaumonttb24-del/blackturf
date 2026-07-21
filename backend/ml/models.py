@@ -765,4 +765,10 @@ def build_training_dataset(
         return pd.DataFrame(), empty, empty
 
     X = pd.DataFrame(rows)
+    # Downcast float64 → float32 : ~2× moins de RAM sur le gros dataset (18 mois).
+    # xgb/lgbm/catboost acceptent float32, perte de précision négligeable. Réduit le
+    # pic mémoire du retrain (cause de l'OOM nocturne sur petit VPS).
+    _float_cols = X.select_dtypes(include=["float64"]).columns
+    if len(_float_cols):
+        X[_float_cols] = X[_float_cols].astype("float32")
     return X, pd.Series(labels_top3, name="label"), pd.Series(labels_win, name="win")
