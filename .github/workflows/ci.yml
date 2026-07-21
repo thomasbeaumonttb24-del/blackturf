@@ -33,6 +33,10 @@ jobs:
           REDIS_URL: "redis://localhost:6379/0"
           SECRET_KEY: "ci-secret-key-change-in-production-must-be-64-chars-min-ok"
           ENVIRONMENT: "test"
+          # Le runner CI n'a pas /app en écriture (chemin conteneur). Rediriger la
+          # sauvegarde des modèles vers un tmp accessible — cf. models.py BT_MODELS_DIR.
+          BT_MODELS_DIR: "/tmp/bt_models"
+          BT_TRAIN_NJOBS: "2"
         run: pytest tests/test_ml_units.py -v --tb=short
 
   # ─── API Integration Tests ────────────────────────────────────────────────

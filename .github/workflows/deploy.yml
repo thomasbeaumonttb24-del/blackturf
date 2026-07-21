@@ -102,26 +102,27 @@ jobs:
             set -e
             cd /opt/blackturf
 
-            # Pull latest images
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker pull ${{ env.IMAGE_API }}:latest
-            docker pull ${{ env.IMAGE_FRONTEND }}:latest
+            # La prod est buildée LOCALEMENT sur le VPS (compose en `build:`, pas d'image
+            # GHCR). On synchronise le code puis on rebuild sur place. Cf. HANDOFF SUITE §3.
+            git fetch origin main
+            git reset --hard origin/main
 
-            # Zero-downtime restart
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml pull
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+            # Build + (re)start des images locales
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
-            # Run pending migrations
-            docker-compose exec -T api alembic -c db/migrations/alembic.ini upgrade head
+            # Migrations en attente (idempotentes)
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T api \
+              alembic -c db/migrations/alembic.ini upgrade head
 
             # Health check
-            sleep 10
+            sleep 12
             curl -f http://localhost:8000/api/v1/health || exit 1
 
-            # Clean old images
+            # Nettoyage images orphelines
             docker image prune -f
 
-            echo "✅ Deploy complete $(date)"
+            echo "✅ Deploy complete $(date) — $(git rev-parse --short HEAD)"
 
   # ─── Smoke Test Production ────────────────────────────────────────────────
   smoke-test:
