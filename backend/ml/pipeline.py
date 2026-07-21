@@ -1990,6 +1990,13 @@ def retrain_if_needed() -> None:
     asyncio.run(run_nightly_retraining())
 
 
+def run_incremental_retraining_sync() -> None:
+    """Sync wrapper for RQ — retraining incrémental (drift) dans le worker.
+    RQ ne peut pas exécuter une coroutine ; ce wrapper l'enveloppe dans asyncio.run."""
+    import asyncio
+    asyncio.run(run_incremental_retraining())
+
+
 def post_course_sync(course_id: str) -> None:
     """Sync wrapper for RQ — post-course pipeline (ELO, features, notifications)."""
     import asyncio

@@ -90,10 +90,16 @@ async def job_drift_check() -> None:
 
         if severity == "critical":
             log.warning("jobs.drift_check.critical", report=report)
-            # Déclencher retraining incrémental en tâche de fond
-            import asyncio
-            from ml.pipeline import run_incremental_retraining
-            asyncio.create_task(run_incremental_retraining())
+            # Retraining incrémental HEAVY CPU/RAM → enqueue RQ worker, JAMAIS dans
+            # le process API (asyncio.create_task saturait la mémoire de l'API et
+            # risquait un OOM silencieux). Même pattern que job_retrain_trigger.
+            import redis as sync_redis
+            from rq import Queue
+            from api.config import get_settings
+            r = sync_redis.from_url(get_settings().redis_url)
+            q = Queue("ml", connection=r, default_timeout=3600)
+            job = q.enqueue("ml.pipeline.run_incremental_retraining_sync", result_ttl=86400)
+            log.info("jobs.drift_check.retrain_enqueued", job_id=job.id)
         else:
             log.info("jobs.drift_check.ok", status=severity, brier_mean=report.get("brier_mean"))
     except Exception as e:
