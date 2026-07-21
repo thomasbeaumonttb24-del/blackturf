@@ -88,6 +88,12 @@ async def _detect_smart_money(session, course_id: str) -> None:
                  variation_pct=round((latest - prev) / prev * 100, 1))
 
 
+def _is_deadlock(exc: Exception) -> bool:
+    """Vrai si l'exception est un deadlock PostgreSQL (transitoire, à rejouer)."""
+    s = (str(getattr(exc, "orig", "")) + " " + str(exc)).lower()
+    return "deadlock detected" in s or "deadlockdetected" in s
+
+
 class BlackTurfOrchestrator:
     """Orchestre tous les scrapers avec retry et monitoring."""
 
@@ -190,6 +196,36 @@ class BlackTurfOrchestrator:
                 await session.commit()
         except Exception as log_exc:  # ne jamais laisser le logging casser le cycle
             log.error("orchestrator.log_error_failed", source=source, err=str(log_exc)[:120])
+
+    async def _log_ok(self, source: str, *, nb_courses: int = 0, duree_ms: int = 0) -> None:
+        """Trace une ligne ``ok`` dans scrape_log → la source repasse au vert dans /admin
+        dès qu'un cycle réussit (sinon, sans log de succès, l'UI reste figée sur l'erreur)."""
+        try:
+            async with AsyncSessionLocal() as session:
+                await log_scrape_result(session, source, "ok",
+                                        nb_courses=nb_courses, duree_ms=duree_ms)
+                await session.commit()
+        except Exception as e:  # noqa: BLE001
+            log.warning("orchestrator.log_ok_failed", source=source, err=str(e)[:120])
+
+    async def _commit_unit(self, work, *, retries: int = 4) -> bool:
+        """Exécute ``work(session)`` dans une transaction ISOLÉE puis commit, avec retry
+        sur DEADLOCK (PostgreSQL tue une des 2 transactions concurrentes → on rejoue après
+        un court backoff). De PETITES transactions par unité (course) = fenêtre de lock
+        minimale → on n'a plus le deadlock chronique de resultats/pool_pmu (1 grosse txn sur
+        toutes les courses, en concurrence avec le poller par-course + le cycle PMU)."""
+        for attempt in range(retries):
+            try:
+                async with AsyncSessionLocal() as session:
+                    await work(session)
+                    await session.commit()
+                return True
+            except Exception as e:  # noqa: BLE001
+                if _is_deadlock(e) and attempt < retries - 1:
+                    await asyncio.sleep(0.25 * (2 ** attempt))
+                    continue
+                raise
+        return False
 
     async def run_pmu_cycle(self) -> None:
         """Cycle PMU : récupère programme + cotes live + résultats."""
@@ -659,17 +695,25 @@ class BlackTurfOrchestrator:
         """
         log.info("orchestrator.pool_pmu_start")
         pmu = PmuScraper()
+        t0 = time.time()
         try:
-            async with AsyncSessionLocal() as session:
-                for course in self._courses_today:
+            # Une transaction PAR COURSE + retry deadlock (cf. poll_resultats) : pool_pmu
+            # écrit pool_pmu_historique pendant que d'autres cycles touchent les mêmes
+            # courses → la grosse txn globale deadlockait. Petites txns isolées = robuste.
+            ok_n = 0
+            for course in self._courses_today:
+                try:
                     pool_data = await pmu.get_pool_data(course.reunion_id, course.course_id)
                     if pool_data:
-                        await save_pool_pmu(session, pool_data)
-
-                        # Calculer l'évolution du pool (smart money indicator)
-                        await _detect_smart_money(session, course.course_id)
-
-                await session.commit()
+                        async def _w(session, _pd=pool_data, _cid=course.course_id):
+                            await save_pool_pmu(session, _pd)
+                            await _detect_smart_money(session, _cid)  # smart money indicator
+                        if await self._commit_unit(_w):
+                            ok_n += 1
+                except Exception as e:
+                    log.warning("orchestrator.pool_pmu_course_failed",
+                                course_id=course.course_id, err=str(e)[:160])
+            await self._log_ok("pool_pmu", nb_courses=ok_n, duree_ms=int((time.time() - t0) * 1000))
         except Exception as e:
             log.error("orchestrator.pool_pmu_error", error=str(e))
             await self._log_error("pool_pmu", e)
@@ -754,7 +798,8 @@ class BlackTurfOrchestrator:
 
             pt_pronos = await scraper.get_pronostics_paris_turf()
             ct_pronos = await scraper.get_pronostics_canalturf()
-            all_pronos = pt_pronos + ct_pronos
+            eq_pronos = await scraper.get_pronostics_equidia()
+            all_pronos = pt_pronos + ct_pronos + eq_pronos
 
             import re as _re
             async with AsyncSessionLocal() as session:
@@ -1079,6 +1124,7 @@ class BlackTurfOrchestrator:
     async def poll_resultats(self) -> None:
         """Polling résultats toutes les 3 minutes pour courses en cours."""
         pmu = PmuScraper()
+        t0 = time.time()
         try:
             async with AsyncSessionLocal() as session:
                 from sqlalchemy import select, and_
@@ -1117,22 +1163,33 @@ class BlackTurfOrchestrator:
                     ORDER BY c.date_heure
                 """), {"now": now, "win": win})).all()
 
-                for course in courses:
+            # Sauvegarde PAR COURSE en transaction ISOLÉE + retry deadlock. La fenêtre 36h
+            # repolle des courses que le cycle PMU + le poller live touchent aussi → une
+            # grosse transaction globale deadlockait en boucle (resultats KO depuis des
+            # semaines). Chaque course = sa propre petite txn, indépendante et rejouable.
+            ok_n = 0
+            for course in courses:
+                try:
                     r_id = course.reunion_id
                     c_num = int(course.course_id.split("C")[-1])
                     cid_prefix = course.course_id[:8] if course.course_id[:8].isdigit() else course.date_heure
                     resultat = await pmu.get_rapports_definitifs(r_id, c_num, cid_prefix)
                     if resultat and resultat.ordre_arrivee:
-                        await save_resultat_to_db(session, resultat)
-                        log.info("orchestrator.resultat_polled", course_id=course.course_id)
+                        async def _w(session, _r=resultat):
+                            await save_resultat_to_db(session, _r)
+                        if await self._commit_unit(_w):
+                            ok_n += 1
+                            log.info("orchestrator.resultat_polled", course_id=course.course_id)
+                            # Déclencher le pipeline post-course via RQ
+                            from rq import Queue
+                            import redis
+                            rq = Queue(connection=redis.from_url(settings.redis_url))
+                            rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
+                except Exception as e:  # une course fautive n'arrête pas le poll
+                    log.warning("orchestrator.resultat_course_failed",
+                                course_id=course.course_id, err=str(e)[:160])
 
-                        # Déclencher le pipeline post-course via RQ
-                        from rq import Queue
-                        import redis
-                        rq = Queue(connection=redis.from_url(settings.redis_url))
-                        rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
-
-                await session.commit()
+            await self._log_ok("resultats", nb_courses=ok_n, duree_ms=int((time.time() - t0) * 1000))
         except Exception as e:
             log.error("orchestrator.resultats_error", error=str(e))
             await self._log_error("resultats", e)

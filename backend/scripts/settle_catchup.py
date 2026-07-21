@@ -13,10 +13,15 @@ Cette passe relance settle_profil_runs (IDEMPOTENT : ne touche jamais un run dé
 'settled') sur toute course termine + résultat ayant des runs pending/partial, puis
 recalcule les poids appris une fois à la fin.
 
+2026-07-02 : ajout du TIMEOUT (ml.profil_learning.settle_catchup, branché aussi au
+nightly) — les runs encore pending/partial après --timeout-days (défaut 7) passent
+en statut 'expired' (motif dans meta.expired_reason) : exclus explicitement de
+l'apprentissage au lieu de traîner en faux « en attente ». Aucun gain inventé.
+
 À lancer sur le VPS (où vit la DB) :
-    python scripts/settle_catchup.py            # rattrape tout + recompute poids
+    python scripts/settle_catchup.py            # rattrape tout + expire + recompute poids
     python scripts/settle_catchup.py --dry-run  # liste seulement, n'écrit rien
-    python scripts/settle_catchup.py --no-recompute
+    python scripts/settle_catchup.py --no-recompute --timeout-days 7
 """
 import sys
 import os
@@ -34,7 +39,9 @@ os.environ.setdefault("SECRET_KEY", "dev-secret-key-change-in-production-must-be
 import db.models  # noqa: F401
 from sqlalchemy import text
 from db.database import AsyncSessionLocal as async_session
-from ml.profil_learning import settle_profil_runs, compute_profil_weights
+from ml.profil_learning import (
+    settle_profil_runs, compute_profil_weights, settle_catchup, CATCHUP_TIMEOUT_DAYS,
+)
 
 
 async def _orphan_courses(session) -> list[str]:
@@ -59,34 +66,22 @@ async def _counts(session) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
-async def main(dry_run: bool, recompute: bool) -> int:
+async def main(dry_run: bool, recompute: bool, timeout_days: int) -> int:
     async with async_session() as session:
         before = await _counts(session)
         courses = await _orphan_courses(session)
 
     print(f"État avant : {before}")
     print(f"Courses orphelines à régler : {len(courses)}")
-    if not courses:
-        print("Rien à rattraper.")
-        return 0
     if dry_run:
         print("DRY-RUN — aucune écriture. Exemples :", courses[:10])
         return 0
 
-    total_settled = 0
-    ok = 0
-    fail = 0
-    for cid in courses:
-        try:
-            async with async_session() as session:  # session par course : un échec n'avorte pas le reste
-                n = await settle_profil_runs(session, cid)
-                total_settled += n
-                ok += 1
-        except Exception as e:  # noqa: BLE001
-            fail += 1
-            print(f"  ÉCHEC course {cid}: {str(e)[:120]}")
-
-    print(f"Réglés : {total_settled} runs sur {ok} courses OK ({fail} échecs).")
+    # Re-règle + expire (timeout) en une passe — même code que le nightly.
+    async with async_session() as session:
+        out = await settle_catchup(session, timeout_days=timeout_days)
+    print(f"Re-réglés : {out['resettled']} · expirés (>{timeout_days}j) : {out['expired']} "
+          f"· restants pending/partial : {out['remaining']}")
 
     if recompute:
         async with async_session() as session:
@@ -109,5 +104,7 @@ if __name__ == "__main__":
     p.add_argument("--dry-run", action="store_true", help="Liste seulement, n'écrit rien")
     p.add_argument("--no-recompute", dest="recompute", action="store_false",
                    help="Ne pas recalculer les poids appris après rattrapage")
+    p.add_argument("--timeout-days", type=int, default=CATCHUP_TIMEOUT_DAYS,
+                   help="Ancienneté (jours) au-delà de laquelle un run non réglable expire")
     args = p.parse_args()
-    sys.exit(asyncio.run(main(args.dry_run, args.recompute)))
+    sys.exit(asyncio.run(main(args.dry_run, args.recompute, args.timeout_days)))

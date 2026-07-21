@@ -29,6 +29,8 @@ log = structlog.get_logger()
 # CanalTurf : vieux site PHP (pas de SPA, facile à scraper) — page .php directe.
 PARIS_TURF_URL = "https://www.paris-turf.com/programme-courses/aujourdhui"
 CANAL_TURF_URL = "https://www.canalturf.com/courses_liste_pronostics.php"
+# Equidia (3e source, 2026-07-03) : API JSON publique — pas de HTML à parser.
+EQUIDIA_API = "https://api.equidia.fr/api/public"
 
 
 class ParisTurfScraper(BaseScraper):
@@ -214,6 +216,92 @@ class ParisTurfScraper(BaseScraper):
         self.log.info("canalturf.pronostics", nb=len(results))
         return results
 
+    async def get_pronostics_equidia(self) -> list[PronosticPresseScrape]:
+        """
+        Récupère les pronostics Equidia via l'API JSON publique (httpx, pas de
+        Playwright ni d'anti-bot — même API que le site www.equidia.fr).
+
+          1) GET {EQUIDIA_API}/dailyreunions/{YYYY-MM-DD} → réunions du jour,
+             chacune avec num_reunion (= n° PMU) et courses_by_day[].num_course_pmu.
+          2) GET {EQUIDIA_API}/courses/{date}/R{r}/C{c}/pronostic → pronostic du
+             journaliste : creator (nom), chapeau (commentaire), et sélection
+             ordonnée en 3 listes de numéros : bases → belles_chances → outsiders.
+             pronostic_analyses[] donne le nom du cheval par numéro.
+
+        Pseudo course_id : "EQ_{HIPPO}_R{r}C{c}" (même convention que CanalTurf →
+        résolution EXACTE par suffixe R{r}C{c} dans l'orchestrateur).
+        """
+        results: list[PronosticPresseScrape] = []
+        today = date.today().isoformat()
+        headers = {
+            "User-Agent": random_user_agent(),
+            "Accept": "application/json",
+            "Accept-Language": "fr-FR,fr;q=0.9",
+        }
+        try:
+            async with httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True) as client:
+                resp = await client.get(f"{EQUIDIA_API}/dailyreunions/{today}")
+                if resp.status_code != 200:
+                    self.log.warning("equidia.listing_http_error", status=resp.status_code)
+                    return results
+                reunions = resp.json() or []
+
+                for reunion in reunions:
+                    rn = reunion.get("num_reunion")
+                    hippo = (reunion.get("lib_reunion") or "")[:12].upper().replace(" ", "_")
+                    if not rn:
+                        continue
+                    for c in reunion.get("courses_by_day") or []:
+                        cn = c.get("num_course_pmu")
+                        if not cn:
+                            continue
+                        try:
+                            presp = await client.get(
+                                f"{EQUIDIA_API}/courses/{today}/R{rn}/C{cn}/pronostic"
+                            )
+                            if presp.status_code != 200:
+                                continue
+                            p = presp.json() or {}
+                            if p.get("status") not in (None, "published"):
+                                continue
+                            # Sélection ordonnée : bases → belles chances → outsiders.
+                            nums = list(p.get("bases") or []) + \
+                                   list(p.get("belles_chances") or []) + \
+                                   list(p.get("outsiders") or [])
+                            if not nums:
+                                continue
+                            noms: dict[int, str] = {}
+                            for a in p.get("pronostic_analyses") or []:
+                                num = (a.get("partant") or {}).get("num_partant")
+                                nom = (a.get("cheval") or {}).get("nom_cheval")
+                                if num and nom:
+                                    noms[int(num)] = nom
+                            selection = [
+                                {"rang": i + 1, "numero": int(n), "nom": noms.get(int(n), "")}
+                                for i, n in enumerate(nums[:8])
+                            ]
+                            cr = p.get("creator") or {}
+                            journaliste = " ".join(
+                                x for x in (cr.get("firstname"), cr.get("lastname")) if x
+                            ).strip().title() or None
+                            commentaire = (p.get("chapeau") or "").strip() or None
+                            results.append(PronosticPresseScrape(
+                                course_id=f"EQ_{hippo}_R{rn}C{cn}",
+                                source="equidia",
+                                journaliste=journaliste,
+                                selection=selection,
+                                commentaire=commentaire,
+                            ))
+                        except Exception as e:
+                            self.log.warning("equidia.course_error", r=rn, c=cn, error=str(e))
+                        await human_delay(0.15, 0.4)
+        except Exception as e:
+            self.log.error("equidia.fetch_error", error=str(e))
+            return results
+
+        self.log.info("equidia.pronostics", nb=len(results))
+        return results
+
 
 # ─────────────────────────────────────────────
 # Helpers de parsing CanalTurf (httpx + BeautifulSoup)
@@ -357,12 +445,16 @@ def _pt_decode(raw: bytes) -> str:
     """
     Décode le HTML Paris-Turf.
 
-    Le serveur annonce charset=utf-8 mais émet en réalité des octets cp1252
-    (ex. é = 0xE9). On décode donc en cp1252. Un octet 0x81 (non défini en
-    cp1252) apparaît parfois → errors="replace" pour ne pas tout casser, tout
-    en gardant les accents corrects ("Géma", "réapparition", …).
+    Historiquement le serveur annonçait charset=utf-8 mais émettait du cp1252
+    (é = 0xE9 seul). Depuis 2026-07 des pages sont réellement en utf-8 → le
+    décodage cp1252 forcé produisait du mojibake (« CÃ©dric » en base). Un
+    contenu accentué réellement cp1252 ne passe PAS un décodage utf-8 strict :
+    on tente donc utf-8 strict d'abord, repli cp1252 sinon.
     """
-    return raw.decode("cp1252", errors="replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
 
 
 def _pt_next_data(html: str) -> Optional[dict]:
