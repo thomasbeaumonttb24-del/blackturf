@@ -122,7 +122,9 @@ services:
     depends_on:
       - api
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000"]
+      # 127.0.0.1 (IPv4) et pas localhost : next-server écoute sur 0.0.0.0 (IPv4),
+      # localhost résout en ::1 (IPv6) → "connection refused" = conteneur unhealthy à tort.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
