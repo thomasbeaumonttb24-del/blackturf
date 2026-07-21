@@ -86,7 +86,8 @@ async def create_checkout(
         success_url=f"{settings.frontend_url}/abonnement/succes?session_id={{CHECKOUT_SESSION_ID}}&plan={_normalize_plan(body.plan)}",
         cancel_url=f"{settings.frontend_url}/tarifs",
         subscription_data={
-            "trial_period_days": 7,
+            # Essai gratuit 7 jours : Standard uniquement (Expert/Pro = paiement direct).
+            **({"trial_period_days": 7} if _normalize_plan(body.plan) == "standard" else {}),
             "metadata": {"user_id": user.user_id, "plan": _normalize_plan(body.plan)},
         },
         allow_promotion_codes=True,
