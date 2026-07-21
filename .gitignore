@@ -73,3 +73,14 @@ nginx/nginx.runtime.conf
 *.bak.*
 backups/
 *.sql.gz
+
+# backup snapshots / regressed copies (never commit) — audit 2026-07-21
+*.localbak
+*.bak2*
+*.bak-*
+_backup_*/
+_predeploy_backup/
+_orig_bak/
+cleanup_dups.sql
+# build cache, never version
+frontend/tsconfig.tsbuildinfo
