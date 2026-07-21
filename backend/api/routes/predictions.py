@@ -40,7 +40,7 @@ def _is_prono_fige(date_heure) -> bool:
 # 1 prono = 1 course dont on ouvre les prédictions IA. Free = 1/jour, Standard = 5/jour,
 # Expert/Pro/admin = illimité. Re-consulter une course déjà ouverte aujourd'hui ne
 # reconsomme pas le quota.
-PRONO_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 5, "starter": 5}
+PRONO_DAILY_LIMITS = {"free": 2, "decouverte": 2, "standard": 6, "starter": 6}
 
 
 async def _prono_quota_check(user: User, course_id: str) -> tuple[bool, int]:
@@ -125,12 +125,18 @@ async def get_predictions(
     user: User = Depends(get_current_user),
 ):
     """Prédictions IA pour une course. Quota journalier selon le plan (funnel freemium)."""
-    autorise, quota_restant = await _prono_quota_check(user, course_id)
-
     course_res = await db.execute(select(Course).where(Course.course_id == course_id))
     course = course_res.scalar_one_or_none()
     if not course:
         raise HTTPException(status_code=404, detail="Course introuvable")
+
+    # Quota journalier UNIQUEMENT sur courses bettables (a_venir / en_cours). Ouvrir une
+    # course terminee pour consulter l'arrivee (info publique) ne consomme PAS le prono
+    # du jour -> evite le faux "deja utilise" quand on a juste regarde une course finie.
+    if course.statut in ("a_venir", "en_cours"):
+        autorise, quota_restant = await _prono_quota_check(user, course_id)
+    else:
+        autorise, quota_restant = True, -1
 
     # Charger prédictions + partants
     q = (
@@ -162,6 +168,7 @@ async def get_predictions(
     fige = _is_prono_fige(course.date_heure)
     live_cotes: dict[int, float] = {}
     cote_calib = None
+    ev_band_perf = None
     if not fige and course.statut in ("a_venir", "en_cours"):
         try:
             from services.pmu_cotes import fetch_live_cotes
@@ -174,6 +181,11 @@ async def get_predictions(
             cote_calib = await load_cote_calibration(db)
         except Exception:
             cote_calib = None
+        try:
+            from ml.signal_performance import load_ev_band_performance
+            ev_band_perf = await load_ev_band_performance(db)
+        except Exception:
+            ev_band_perf = None
 
     def _live_vb(pred, part):
         """Recalcule le value bet à la cote LIVE (mêmes garde-fous que le cycle :
@@ -195,6 +207,7 @@ async def get_predictions(
                 cote_betfair=part.cote_betfair_exchange,
                 non_partant=bool(part.non_partant),
                 cote_calib=cote_calib,
+                ev_band_perf=ev_band_perf,
             )
         except Exception:
             return None
@@ -658,6 +671,7 @@ async def get_course_analysis(
     fige = _is_prono_fige(course.date_heure)
     live_cotes: dict[int, float] = {}
     cote_calib = None
+    ev_band_perf = None
     if not fige and course.statut in ("a_venir", "en_cours"):
         try:
             from services.pmu_cotes import fetch_live_cotes
@@ -670,6 +684,11 @@ async def get_course_analysis(
             cote_calib = await load_cote_calibration(db)
         except Exception:
             cote_calib = None
+        try:
+            from ml.signal_performance import load_ev_band_performance
+            ev_band_perf = await load_ev_band_performance(db)
+        except Exception:
+            ev_band_perf = None
 
     predictions = []
     features_by_pid = {}
@@ -682,7 +701,7 @@ async def get_course_analysis(
             # Recalcul EV/value-bet à la cote live (calibration par tranche de cote).
             try:
                 from ml.valuebets import detect_value_bet
-                _vbl = detect_value_bet(float(p1), cote_pmu=cote_live, cote_calib=cote_calib)
+                _vbl = detect_value_bet(float(p1), cote_pmu=cote_live, cote_calib=cote_calib, ev_band_perf=ev_band_perf)
                 vb_aff = ({"ev_max": _vbl["ev_max"], "niveau": _vbl["niveau"],
                            "spi_detected": _vbl.get("spi_detected", False),
                            "spi_score": _vbl.get("spi_score")} if _vbl else None)
@@ -779,17 +798,13 @@ async def get_course_analysis(
     # outsider porte ses facteurs réels + une justification complète.
     try:
         from ml.outsider_detector import detect_for_course
-        from ml.narrative import _chevaux_a_eviter
         enriched_preds = result.get("predictions", predictions)
         det = await detect_for_course(
             db, course_id, enriched_preds, course.discipline, course.nb_partants,
         )
         result["detection_outsider"] = det
-        # COHÉRENCE STRICTE : un cheval listé comme OUTSIDER (à jouer) ne peut JAMAIS
-        # figurer dans « à éviter ». On recalcule la liste à éviter en excluant les
-        # numéros outsiders (en plus de la garde edge>0 déjà appliquée).
-        outs_nums = {c.get("numero") for c in det.get("candidats", [])}
-        result["chevaux_a_eviter"] = _chevaux_a_eviter(enriched_preds, exclude_nums=outs_nums)
+        # « Chevaux à éviter » supprimé définitivement (décision produit) — plus calculé
+        # ni renvoyé.
     except Exception as e:
         log.warning("analyse.outsider_detect_failed", course_id=course_id, err=str(e)[:160])
 

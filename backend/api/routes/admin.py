@@ -65,12 +65,17 @@ async def dashboard(
         select(func.count(Course.course_id)).where(Course.created_at >= since_24h)
     )).scalar() or 0
 
-    # Alertes en erreur
-    alertes_erreur = (await db.execute(
+    # Alertes en erreur = VRAIES erreurs runtime des dernières 24h : exceptions API non
+    # gérées (system_errors) + scrapers échoués + échecs d'envoi d'alertes. Live.
+    from services.error_monitor import error_count
+    alertes_erreur = await error_count(db, hours=24)
+    alertes_envoi_ko = (await db.execute(
         select(func.count(AlerteLog.alerte_id)).where(
-            and_(AlerteLog.envoye == False, AlerteLog.erreur.is_not(None))
+            and_(AlerteLog.envoye == False, AlerteLog.erreur.is_not(None),
+                 AlerteLog.created_at >= since_24h)
         )
     )).scalar() or 0
+    alertes_erreur += int(alertes_envoi_ko)
 
     return {
         "users": {
@@ -88,6 +93,34 @@ async def dashboard(
         "courses_24h": courses_24h,
         "alertes_erreur": alertes_erreur,
     }
+
+
+# ─────────────────────────────────────────────
+# Erreurs runtime (monitoring live du back-office)
+# ─────────────────────────────────────────────
+@router.get("/errors")
+async def list_errors(
+    hours: int = Query(default=72, le=720),
+    limit: int = Query(default=50, le=200),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Erreurs runtime récentes (exceptions API non gérées + scrapers échoués), la plus
+    récente d'abord → identifier EN LIVE ce qui casse sur le site, pour correction."""
+    from services.error_monitor import recent_errors, error_count
+    items = await recent_errors(db, hours=hours, limit=limit)
+    return {"count_24h": await error_count(db, hours=24), "errors": items}
+
+
+@router.post("/errors/{error_id}/resolve")
+async def resolve_error_endpoint(
+    error_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Marque une erreur API comme résolue (la retire du compteur live)."""
+    from services.error_monitor import resolve_error
+    return {"ok": await resolve_error(db, error_id)}
 
 
 # ─────────────────────────────────────────────
@@ -497,9 +530,25 @@ async def list_models(
     )).scalars().all()
 
     def _roi(m: ModelVersion) -> float | None:
-        # ROI masqué si hors plage plausible (métadonnée train non fiable).
+        # Modèle ACTIF → ROI RÉEL observé (pronos réglés) = le seul honnête. Pour les
+        # archivés, la sim de train est masquée si hors plage plausible (in-sample).
+        if m.est_actif and active_real.get("roi_reel") is not None:
+            return round(float(active_real["roi_reel"]), 4)
         roi = plausible_roi(m.roi_simule)
         return round(roi, 4) if roi is not None else None
+
+    # Top-3 RÉEL observé (race_learning_log) pour le modèle ACTIF : les métadonnées de
+    # train stockent souvent 0 (top-3 non calculé sur le holdout avant le fix). L'observé
+    # n'est attribuable qu'au modèle actif (race_learning_log n'a pas de version_id) → pour
+    # les versions archivées on renvoie la valeur stockée si >0, sinon null (affiché « — »,
+    # jamais un « 0.0% » trompeur).
+    active_mv = next((m for m in rows if m.est_actif), None)
+    active_real = await real_model_metrics(db, active_mv) if active_mv else {}
+
+    def _top3(m: ModelVersion) -> float | None:
+        if m.est_actif and active_real.get("precision_top3") is not None:
+            return round(float(active_real["precision_top3"]), 4)
+        return round(m.precision_top3, 4) if (m.precision_top3 or 0) > 0 else None
 
     return [
         {
@@ -507,7 +556,7 @@ async def list_models(
             "version_num": m.version_num,
             "auc_roc": round(m.auc_roc, 4),
             "brier_score": round(m.brier_score, 4),
-            "precision_top3": round(m.precision_top3, 4),
+            "precision_top3": _top3(m),
             "roi_simule": _roi(m),
             "walk_forward_auc": round(m.walk_forward_auc, 4) if m.walk_forward_auc else None,
             "walk_forward_variance": round(m.walk_forward_variance, 6) if m.walk_forward_variance else None,

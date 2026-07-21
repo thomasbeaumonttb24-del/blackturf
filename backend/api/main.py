@@ -1,7 +1,8 @@
 import structlog
 import sentry_sdk
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
@@ -89,6 +90,26 @@ if settings.environment == "production":
             "localhost", "127.0.0.1",
         ],
     )
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """Capture toute exception NON gérée (vrai 500) → la journalise dans `system_errors`
+    (visible EN LIVE au back-office, carte « Alertes en erreur ») puis renvoie une 500
+    propre. Les HTTPException (401/403/404/422…) ont leur propre handler et NE passent
+    PAS ici — on ne capture que les vraies erreurs serveur."""
+    import traceback
+    from services.error_monitor import record_error
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    try:
+        await record_error(
+            "api", f"{type(exc).__name__}: {exc}", detail=tb,
+            endpoint=f"{request.method} {request.url.path}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    log.error("api.unhandled_exception", path=str(request.url.path), err=str(exc)[:300])
+    return JSONResponse(status_code=500, content={"detail": "Erreur interne du serveur"})
+
 
 # Routes
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])

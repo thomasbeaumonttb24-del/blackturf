@@ -28,6 +28,11 @@ async def _check(
     per_day: int,
     redis: aioredis.Redis,
 ) -> None:
+    # Admin exempté : compte d'exploitation (monitoring, audits, onglets ouverts
+    # toute la journée) — le quota journalier le bloquait en 429 silencieux
+    # (analyse/outsiders/signaux absents de la page course, constaté 2026-07-03).
+    if getattr(user, "is_admin", False):
+        return
     uid = str(user.user_id)
     key_min = f"rl:{prefix}:min:{uid}"
     key_day = f"rl:{prefix}:day:{uid}"

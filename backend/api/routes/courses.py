@@ -73,6 +73,8 @@ class PartantOut(BaseModel):
     cote_betclic: Optional[float]
     cote_betclic_ouverture: Optional[float]   # cote J-1 → steam move si écart > 20%
     cote_unibet: Optional[float]
+    cote_bet365: Optional[float]              # via oddschecker (marché fixe UK)
+    cote_ladbrokes: Optional[float]           # via oddschecker (LD, repli Coral)
     cote_betfair_exchange: Optional[float]    # plus efficient du marché
     cote_min: Optional[float]                 # meilleure cote disponible
     cote_max: Optional[float]                 # cote la plus haute
@@ -275,7 +277,8 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     for p, ch, j, en, eq, pc, fm in rows:
         # Cotes disponibles
         cotes = [c for c in [p.cote_pmu, p.cote_geny, p.cote_winamax,
-                              p.cote_betclic, p.cote_unibet, p.cote_betfair_exchange]
+                              p.cote_betclic, p.cote_unibet, p.cote_bet365,
+                              p.cote_ladbrokes, p.cote_betfair_exchange]
                  if c and c > 1.0]
         cote_min = min(cotes) if cotes else None
         cote_max = max(cotes) if cotes else None
@@ -318,6 +321,8 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             cote_betclic=p.cote_betclic,
             cote_betclic_ouverture=p.cote_betclic_ouverture,
             cote_unibet=p.cote_unibet,
+            cote_bet365=p.cote_bet365,
+            cote_ladbrokes=p.cote_ladbrokes,
             cote_betfair_exchange=p.cote_betfair_exchange,
             cote_min=cote_min,
             cote_max=cote_max,
@@ -766,6 +771,65 @@ async def get_cotes_live(
     return payload
 
 
+async def _reprice_gains_live(db: AsyncSession, course, plan: dict) -> dict:
+    """Réévalue les GAINS potentiels d'un plan FIGÉ aux cotes LIVE (sélection inchangée).
+    Best-effort : pas de cotes live (course partie) ou pas de prédictions → plan inchangé.
+    Le bilan/palmarès restent réglés aux vrais rapports PMU."""
+    try:
+        from services.pmu_cotes import fetch_live_cotes
+        live = {int(c["numero"]): float(c["cote"])
+                for c in await fetch_live_cotes(course.course_id) if c.get("cote")}
+    except Exception:
+        live = {}
+    if not live:
+        return plan
+    try:
+        from sqlalchemy import select as _s
+        from db.models import Prediction as _Pred
+        rows = (await db.execute(
+            _s(_Pred, Participation, Cheval)
+            .join(Participation, Participation.participation_id == _Pred.participation_id)
+            .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+            .where(Participation.course_id == course.course_id)
+            .order_by(_Pred.rang_predit))).all()
+        if not rows:
+            return plan
+        preds_live = [{
+            "numero": part.numero, "nom_cheval": cheval.nom,
+            "proba_top3": pred.proba_top3, "proba_top1": pred.proba_top1,
+            "cote_pmu": live.get(part.numero) or _cote_plan(pred, part),
+            "non_partant": part.non_partant,
+        } for pred, part, cheval in rows]
+        from services.bet_catalog import course_info_bets
+        from services.mise_calculator import reprice_plan_live
+        return reprice_plan_live(plan, preds_live, course_info_bets(course))
+    except Exception:
+        return plan
+
+
+async def _profil_roi_observe(db: AsyncSession, profil: str, days: int = 30) -> dict:
+    """ROI RÉEL observé de ce profil sur les plans figés déjà réglés (profil_run_log).
+
+    Transparence produit (2026-07-13) : l'« espérance » du plan est THÉORIQUE (rapports
+    estimés) et ressort ~0/+2% alors que le rendement réel est négatif (prélèvement PMU).
+    On expose donc le ROI moyen RÉEL récent pour ne pas laisser croire à un gain moyen.
+    Reporting pur — n'influence pas la sélection. Renvoie {roi, nb} ou {} si trop peu de
+    données (< 30 plans réglés = pas significatif)."""
+    try:
+        from sqlalchemy import text as _t
+        row = (await db.execute(_t("""
+            SELECT avg(roi_reel), count(*)
+            FROM profil_run_log pr JOIN courses c ON c.course_id = pr.course_id
+            WHERE pr.profil = :prof AND pr.statut = 'settled'
+              AND c.date_heure >= now() - make_interval(days => :d)
+        """), {"prof": profil, "d": days})).first()
+        if row and row[1] and row[1] >= 30:
+            return {"roi": round(float(row[0]), 3), "nb": int(row[1]), "jours": days}
+    except Exception:
+        pass
+    return {}
+
+
 @router.post("/courses/{course_id}/mise-plan")
 async def get_mise_plan(
     course_id: str,
@@ -824,7 +888,11 @@ async def get_mise_plan(
                 frozen["prono_fige_a"] = fige_a_now.isoformat() if fige_a_now else None
                 frozen["cotes_live_utilisees"] = False
                 frozen["plan_fige_servi"] = True       # plan figé = bilan (cohérence)
-                return frozen
+                frozen["roi_observe"] = await _profil_roi_observe(db, profil)
+                # GAINS LIVE après gel : sélection FIGÉE inchangée (= bilan), mais on
+                # ré-évalue l'ORDRE DE GRANDEUR des gains sur les cotes du marché EN DIRECT
+                # jusqu'au départ. Le bilan/palmarès restent réglés aux vrais rapports PMU.
+                return await _reprice_gains_live(db, course, frozen)
         except Exception:
             pass  # pas de plan figé (legacy/échec) → on recalcule en live ci-dessous
 
@@ -903,6 +971,21 @@ async def get_mise_plan(
     except Exception:
         roi_weights, heat = {}, 0.0
 
+    # Calibration estimé→réel du rapport (par profil × type) : recale les rapports sur les
+    # paiements PMU RÉELS appris → fait respecter les tranches de cote dans le bilan réel.
+    try:
+        from ml.signal_performance import load_rapport_calibration
+        rapport_calib = await load_rapport_calibration(db)
+    except Exception:
+        rapport_calib = None
+    # ROI réel appris PAR BANDE D'EV → la mise se déplace vers les bandes rentables et
+    # s'allège sur les zones toxiques (levier ROI direct du moteur de mise).
+    try:
+        from ml.signal_performance import load_ev_band_performance
+        ev_band_perf = await load_ev_band_performance(db)
+    except Exception:
+        ev_band_perf = None
+
     # Multiplicateurs appris PAR SIGNAL × PROFIL → le pronostic/plan s'adapte au profil
     # sélectionné (ex. "premier déferré" boosté en conservateur=placé, ignoré en agressif).
     # Les features chargées servent aussi aux JUSTIFICATIFS par pari (facteurs réels).
@@ -936,7 +1019,8 @@ async def get_mise_plan(
     # on ne le rabote pas par le cap bankroll (sinon bankroll défaut 1.0 → plan 2€).
     try:
         plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
-                            signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True)
+                            signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True,
+                            rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
         out = plan_to_dict(plan)
     except HTTPException:
         raise
@@ -948,11 +1032,17 @@ async def get_mise_plan(
         raise HTTPException(
             status_code=422,
             detail="Impossible de générer un plan pour cette course (données de pronostic incomplètes).")
-    # Indique si le pronostic est figé (T-10 min) → le plan ne changera plus.
+    # Indique si le pronostic est figé (T-10 min) → la SÉLECTION ne changera plus.
     out["prono_fige"] = fige
     out["prono_fige_a"] = fige_a.isoformat() if fige_a else None
     # Transparence : cotes live (avant gel) → corrélé au marché ; figées après gel.
     out["cotes_live_utilisees"] = bool(live_cotes) and not fige
+    # ROI RÉEL observé de ce profil (honnêteté : l'espérance affichée est théorique).
+    out["roi_observe"] = await _profil_roi_observe(db, profil)
+    # GAINS LIVE après gel : la sélection reste figée, mais on ré-évalue l'ordre de
+    # grandeur des gains sur les cotes du marché EN DIRECT jusqu'au départ.
+    if fige:
+        out = await _reprice_gains_live(db, course, out)
     return out
 
 
@@ -1040,9 +1130,20 @@ async def enregistrer_paris(
                 signal_mults[int(numero)] = signal_multiplier(feats or {}, perf, profil)
     except Exception:
         signal_mults = {}
+    try:
+        from ml.signal_performance import load_rapport_calibration
+        rapport_calib = await load_rapport_calibration(db)
+    except Exception:
+        rapport_calib = None
+    try:
+        from ml.signal_performance import load_ev_band_performance
+        ev_band_perf = await load_ev_band_performance(db)
+    except Exception:
+        ev_band_perf = None
 
     plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None,
-                                     roi_weights, heat, signal_mults, respect_montant=True))
+                                     roi_weights, heat, signal_mults, respect_montant=True,
+                                     rapport_calib=rapport_calib, ev_band_perf=ev_band_perf))
 
     # Bankroll principale
     main = (await db.execute(
@@ -1305,9 +1406,21 @@ async def get_bilan_pronostic(
                     sig_mults_p = {n: _sm(f, sig_perf, prof) for n, f in feats_by_num.items()}
                 except Exception:
                     sig_mults_p = {}
+            try:
+                from ml.signal_performance import load_rapport_calibration as _lrc
+                rapport_calib_p = await _lrc(db)
+            except Exception:
+                rapport_calib_p = None
+            try:
+                from ml.signal_performance import load_ev_band_performance as _levb
+                ev_band_perf_p = await _levb(db)
+            except Exception:
+                ev_band_perf_p = None
             plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None,
                                                roi_weights_p, heat, sig_mults_p,
-                                               respect_montant=True))
+                                               respect_montant=True,
+                                               rapport_calib=rapport_calib_p,
+                                               ev_band_perf=ev_band_perf_p))
             bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants,
                                   getattr(resultat, "rapports_detail", None), non_partants)
             source = "simulation"
