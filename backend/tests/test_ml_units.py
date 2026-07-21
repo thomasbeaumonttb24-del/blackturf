@@ -161,6 +161,45 @@ def test_detect_value_bet_no_spi_stable_cote():
 
 
 # ─────────────────────────────────────────────
+# Gate d'émission par BANDE D'EV (audit ROI 2026-07-02)
+# ─────────────────────────────────────────────
+def _bands_all(mult, n=500):
+    from ml.signal_performance import EV_BANDS
+    return {"bands": {f"{lo:.2f}_{hi:.2f}": {"n": n, "multiplier": mult}
+                      for lo, hi in EV_BANDS}}
+
+
+def test_ev_band_gate_rejette_bande_perdante():
+    """Bande d'EV au ROI shrinké négatif (multiplier < 1.0) → émission REFUSÉE."""
+    vb = detect_value_bet(proba_top1=0.30, cote_pmu=4.0, ev_band_perf=_bands_all(0.86))
+    assert vb is None
+
+
+def test_ev_band_gate_laisse_bande_rentable():
+    vb = detect_value_bet(proba_top1=0.30, cote_pmu=4.0, ev_band_perf=_bands_all(1.02))
+    assert vb is not None
+
+
+def test_ev_band_gate_neutre_cold_start():
+    """Pas de données de bande (ou multiplier neutre 1.0) → émission normale."""
+    assert detect_value_bet(proba_top1=0.30, cote_pmu=4.0,
+                            ev_band_perf={"bands": {}}) is not None
+    assert detect_value_bet(proba_top1=0.30, cote_pmu=4.0,
+                            ev_band_perf=_bands_all(1.0)) is not None
+
+
+def test_ev_band_gate_off_retrograde_seulement(monkeypatch):
+    """BT_EV_BAND_GATE=0 → rollback : bande perdante rétrogradée, pas rejetée."""
+    import ml.algo_flags as af
+    monkeypatch.setenv("BT_EV_BAND_GATE", "0")
+    monkeypatch.setattr(af, "FLAGS", af.AlgoFlags())
+    vb = detect_value_bet(proba_top1=0.30, cote_pmu=4.0, ev_band_perf=_bands_all(0.80))
+    assert vb is not None
+    # base 2 (EV 4.0×0.30−1 = 0.1999… < seuil 0.20 en float) − 1 (mult 0.80 ≤ 0.85)
+    assert vb["niveau"] == 1
+
+
+# ─────────────────────────────────────────────
 # Garde-fous anti biais-longshot (gates A+D) — non-régression du bug +296%
 # ─────────────────────────────────────────────
 def test_longshot_gate_rejette_proba_sur_evaluee():

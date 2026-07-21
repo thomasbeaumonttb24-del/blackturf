@@ -100,9 +100,10 @@ class TestVarianceCap:
         plan = generer_plan(montant, "agressif", _field(8), self.COURSE,
                             respect_montant=True)
         d = plan_to_dict(plan)
-        plafond = int(montant * 0.45)
-        for niv in d["niveaux"]:
-            for p in niv["paris"]:
+        plafond = int(montant * 0.35)          # var_cap risqué resserré à 0.35
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        if len(paris) >= 2:                    # à 1 seul ticket le plafond est inerte
+            for p in paris:
                 if _is_high_variance({"type_pari": p["type"]}):
                     assert p["mise"] <= plafond + 1, (
                         f"{p['type']} mise {p['mise']}€ > plafond variance {plafond}€"
@@ -118,6 +119,80 @@ class TestVarianceCap:
         if hv:
             # soit ≥2 paris, soit une réserve laissée (montant_joue < total)
             assert len(paris) >= 2 or d["montant_joue"] < d["montant_total"]
+
+    def test_risque_spread_plusieurs_mises(self):
+        # DEMANDE USER : « plus de mises différentes en risqué » — fini le 10€ sur un
+        # seul Simple Gagnant. Avec 10€ et un champ complet de candidats, le plan
+        # risqué doit répartir sur ≥2 tickets, chacun ≥ 2€ (plancher produit) et
+        # chaque ticket GAGNANT rend ≥ ×10 de la MISE TOTALE du plan (contrat
+        # 2026-07-02 : 10€ joués → tout gagnant rend ≥ 100€, peu importe le type).
+        plan = generer_plan(10, "agressif", _field(8), self.COURSE, respect_montant=True)
+        d = plan_to_dict(plan)
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        assert len(paris) >= 2, f"1 seul ticket risqué : {paris}"
+        assert sum(p["mise"] for p in paris) == 10          # tout le montant joué
+        for p in paris:
+            assert p["mise"] >= 2
+            assert p["gain_potentiel"] >= 10 * 10 * 0.95, (
+                f"{p['type']} gain {p['gain_potentiel']} < ×10 du plan (10€ → ≥100€)"
+            )
+
+    def test_modere_spread_et_gain_vs_total(self):
+        # Modéré : chaque ticket GAGNANT rend ≥ ×4 de la MISE TOTALE du plan
+        # (10€ joués → tout gagnant rend ≥ 40€).
+        plan = generer_plan(10, "equilibre", _field(8), self.COURSE, respect_montant=True)
+        d = plan_to_dict(plan)
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        assert paris, "plan modéré vide"
+        assert sum(p["mise"] for p in paris) == 10
+        for p in paris:
+            assert p["mise"] >= 2
+            assert p["gain_potentiel"] >= 4 * 10 * 0.95, (
+                f"{p['type']} gain {p['gain_potentiel']} < ×4 du plan (10€ → ≥40€)"
+            )
+
+
+# ── Cap modèle/marché des probas chevaux (combos) — audit ROI 2026-07-02 ─────
+class TestCapModeleMarche:
+    def test_cap_outsider_sur_evalue(self):
+        """Cheval cote 12 (marché ~7%) que le modèle voit à 30% → capé à 1.55× le
+        marché puis renormalisé. Les favoris (cote < 4) ne sont pas touchés."""
+        import numpy as np
+        from ml.combo_bets import _cap_model_probas, CAP_RATIO
+        cotes = np.array([2.0, 5.0, 12.0])
+        pm = 1.0 / cotes
+        pm = pm / pm.sum()
+        p1 = np.array([0.50, 0.20, 0.30])
+        out = _cap_model_probas(p1, pm, cotes)
+        assert abs(out.sum() - 1.0) < 1e-9
+        # l'outsider capé : sa proba relative ne dépasse plus 1.55× le marché
+        # (comparaison AVANT renormalisation : part brute capée)
+        assert p1[2] > CAP_RATIO * pm[2]              # était sur-évalué
+        assert out[2] < p1[2]                          # a bien été réduit
+        assert out[0] > p1[0] - 1e-9                   # favori non raboté (renorm ↑)
+
+    def test_cap_neutre_si_modele_sous_marche(self):
+        import numpy as np
+        from ml.combo_bets import _cap_model_probas
+        cotes = np.array([3.0, 6.0, 10.0])
+        pm = 1.0 / cotes
+        pm = pm / pm.sum()
+        p1 = pm.copy()                                 # modèle = marché → rien à caper
+        out = _cap_model_probas(p1, pm, cotes)
+        assert np.allclose(out, p1)
+
+    def test_cap_flag_off(self, monkeypatch):
+        import numpy as np
+        import ml.algo_flags as af
+        from ml.combo_bets import _cap_model_probas
+        monkeypatch.setenv("BT_COMBO_MARKET_CAP", "0")
+        monkeypatch.setattr(af, "FLAGS", af.AlgoFlags())
+        cotes = np.array([2.0, 12.0])
+        pm = 1.0 / cotes
+        pm = pm / pm.sum()
+        p1 = np.array([0.5, 0.5])
+        out = _cap_model_probas(p1, pm, cotes)
+        assert np.allclose(out, p1)                    # rollback : identité
 
 
 # ── Règlement Multi / Mini Multi / Pick5 ─────────────────────────────────────
