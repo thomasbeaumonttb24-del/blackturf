@@ -22,13 +22,13 @@ export function LiveTicker() {
         {items.map((item, i) => (
           <span key={i} className="flex items-center gap-3 px-6 shrink-0">
             <span className="text-amber-700 font-bold text-[10px] tracking-wider font-mono">{item.hippodrome}</span>
-            <span className="text-gray-400 text-[10px] font-mono">{item.course}</span>
+            <span className="text-gray-500 text-[10px] font-mono">{item.course}</span>
             <span className="text-gray-800 text-xs font-semibold">{item.cheval}</span>
             <span className="text-xs text-gray-500">
-              Top-3 : <span className="text-emerald-600 font-bold">{item.top3}%</span>
+              Top-3 : <span className="text-emerald-700 font-bold">{item.top3}%</span>
             </span>
-            <span className="text-xs text-amber-600 font-mono font-medium">{item.niveau}</span>
-            <span className="text-xs font-bold text-emerald-600 font-mono">{item.ev}</span>
+            <span className="text-xs text-amber-700 font-mono font-medium">{item.niveau}</span>
+            <span className="text-xs font-bold text-emerald-700 font-mono">{item.ev}</span>
             {item.spi && (
               <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-bold">
                 SPI

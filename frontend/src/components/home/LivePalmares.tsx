@@ -85,7 +85,7 @@ export function LivePalmares() {
           <div className="rounded-2xl border border-dashed border-gray-200 bg-brand-warm/40 px-6 py-12 text-center">
             <Clock className="h-8 w-8 mx-auto mb-3 text-gray-300" />
             <p className="text-sm font-semibold text-gray-700">Les premiers paris gagnants s&apos;afficheront ici</p>
-            <p className="text-xs text-gray-400 mt-1">Dès la fin des prochaines courses, chaque pari gagné apparaît automatiquement.</p>
+            <p className="text-xs text-gray-500 mt-1">Dès la fin des prochaines courses, chaque pari gagné apparaît automatiquement.</p>
           </div>
         ) : (
           <div className="grid lg:grid-cols-2 gap-5">
@@ -105,14 +105,14 @@ export function LivePalmares() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[13px] font-semibold text-gray-900 truncate">{g.type_pari}</span>
-                            <span className="text-[11px] font-mono text-gray-400">{chevauxStr(g.chevaux)}</span>
+                            <span className="text-[11px] font-mono text-gray-500">{chevauxStr(g.chevaux)}</span>
                           </div>
-                          <div className="text-[10px] text-gray-400 truncate">{hippoCourt(g.hippodrome)}{g.code ? ` · ${g.code}` : ""}</div>
+                          <div className="text-[10px] text-gray-500 truncate">{hippoCourt(g.hippodrome)}{g.code ? ` · ${g.code}` : ""}</div>
                         </div>
                         <span className={`inline-flex justify-center items-center w-[54px] shrink-0 text-[9px] font-bold uppercase tracking-wide rounded-full py-0.5 ring-1 ${pr.cls}`}>{pr.label}</span>
                         <div className="text-right flex-shrink-0">
                           <div className="num-display text-sm font-extrabold text-emerald-600">+{g.gain.toFixed(0)}€</div>
-                          <div className="text-[10px] text-gray-400">mise {g.mise.toFixed(0)}€{g.rapport ? ` · ×${g.rapport}` : ""}</div>
+                          <div className="text-[10px] text-gray-500">mise {g.mise.toFixed(0)}€{g.rapport ? ` · ×${g.rapport}` : ""}</div>
                         </div>
                       </div>
                     );
@@ -136,14 +136,14 @@ export function LivePalmares() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[13px] font-semibold text-gray-900 truncate">{g.type_pari}</span>
-                            <span className="text-[11px] font-mono text-gray-400">{chevauxStr(g.chevaux)}</span>
+                            <span className="text-[11px] font-mono text-gray-500">{chevauxStr(g.chevaux)}</span>
                           </div>
-                          <div className="text-[10px] text-gray-400 truncate">{hippoCourt(g.hippodrome)}{g.code ? ` · ${g.code}` : ""} · {quand(g.date)}</div>
+                          <div className="text-[10px] text-gray-500 truncate">{hippoCourt(g.hippodrome)}{g.code ? ` · ${g.code}` : ""} · {quand(g.date)}</div>
                         </div>
                         <span className={`inline-flex justify-center items-center w-[54px] shrink-0 text-[9px] font-bold uppercase tracking-wide rounded-full py-0.5 ring-1 ${pr.cls}`}>{pr.label}</span>
                         <div className="text-right flex-shrink-0">
                           <div className="num-display text-sm font-extrabold text-emerald-600">+{g.gain.toFixed(0)}€</div>
-                          <div className="text-[10px] text-gray-400">mise {g.mise.toFixed(0)}€{g.rapport ? ` · ×${g.rapport}` : ""}</div>
+                          <div className="text-[10px] text-gray-500">mise {g.mise.toFixed(0)}€{g.rapport ? ` · ×${g.rapport}` : ""}</div>
                         </div>
                       </div>
                     );
@@ -154,8 +154,8 @@ export function LivePalmares() {
           </div>
         )}
 
-        <p className="mt-6 text-center text-[11px] text-gray-400 max-w-2xl mx-auto inline-flex items-center justify-center gap-1.5 w-full">
-          <ShieldCheck className="h-3.5 w-3.5 text-gray-400" />
+        <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto inline-flex items-center justify-center gap-1.5 w-full">
+          <ShieldCheck className="h-3.5 w-3.5 text-gray-500" />
           Paris réellement figés avant le départ puis réglés aux rapports PMU officiels — aucune reconstruction a posteriori. Parier comporte un risque de perte.
         </p>
       </div>

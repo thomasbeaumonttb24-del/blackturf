@@ -84,10 +84,10 @@ const FEATURES = [
 
 const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
-    features: ["Programme du jour", "Cotes publiques", "1 pronostic/jour", "Statistiques publiques vérifiées"],
+    features: ["Programme du jour", "Cotes publiques", "2 pronostics/jour", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
   { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux", badge: "Populaire",
-    features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Suivi du capital + statistiques", "Alertes push & e-mail", "Historique des résultats"],
+    features: ["6 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Suivi du capital + statistiques", "Alertes push & e-mail", "Historique des résultats"],
     cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: true },
   { name: "Expert", price: "19€", period: "/mois", desc: "Pour les parieurs sérieux",
     features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres", "Export des données"],
@@ -161,7 +161,10 @@ export default async function HomePage() {
       <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">
         {/* Image plein cadre + Ken Burns */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/hero.jpg" alt="Départ d'une course de chevaux aux portes numérotées"
+        <img src="/img/hero-1600.webp" alt="Départ d'une course de chevaux aux portes numérotées"
+          srcSet="/img/hero-640.webp 640w, /img/hero-1024.webp 1024w, /img/hero-1600.webp 1600w"
+          sizes="100vw"
+          fetchPriority="high" decoding="async"
           className="absolute inset-0 h-full w-full object-cover object-[68%_center] ken-burns" />
         {/* Dégradés sombres (lisibilité texte blanc) */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/35" />
@@ -224,7 +227,7 @@ export default async function HomePage() {
             ))}
           </div>
 
-          <p className="mt-7 pt-6 border-t border-gray-100 text-[11px] text-gray-400 text-center sm:text-left">
+          <p className="mt-7 pt-6 border-t border-gray-100 text-[11px] text-gray-500 text-center sm:text-left">
             Chiffres réels, mesurés sur les arrivées PMU officielles.
           </p>
         </div>
@@ -259,16 +262,16 @@ export default async function HomePage() {
                   <span className="eyebrow text-amber-700 text-[10px] font-bold">
                     <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> Pronostic BlackTurf
                   </span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
                   <span className="text-[10px] font-black uppercase tracking-wider text-white bg-brand-gold-deep rounded px-1.5 py-0.5">{EXAMPLE.hippo}</span>
-                  <span className="text-xs text-gray-400 font-mono">{EXAMPLE.code} · {EXAMPLE.disc}</span>
+                  <span className="text-xs text-gray-500 font-mono">{EXAMPLE.code} · {EXAMPLE.disc}</span>
                 </div>
                 <div className="mt-3 space-y-1.5">
                   {EXAMPLE_PICKS.map((h) => (
                     <div key={h.rank} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${h.rank === 1 ? "bg-amber-50 ring-1 ring-amber-200" : "bg-gray-50"}`}>
-                      <span className={`num-display text-xs font-black w-7 ${h.rank === 1 ? "text-brand-gold-deep" : "text-gray-400"}`}>N°{h.num}</span>
+                      <span className={`num-display text-xs font-black w-7 ${h.rank === 1 ? "text-brand-gold-deep" : "text-gray-500"}`}>N°{h.num}</span>
                       <span className="text-sm font-medium text-gray-900 flex-1 truncate">{h.nom}</span>
                       <span className="num-display text-xs font-bold text-gray-700 w-9 text-right">{h.p}%</span>
                       <span className="text-[11px] font-mono text-gray-500 w-8 text-right">{h.cote}</span>
@@ -277,7 +280,7 @@ export default async function HomePage() {
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-[11px]">
                   <span className="flex items-center gap-1.5 font-semibold text-emerald-700"><Zap className="h-3 w-3" /> Valeur ★★★ détectée</span>
-                  <span className="text-gray-400">EV <span className="num-display font-bold text-emerald-600">+14,2%</span></span>
+                  <span className="text-gray-500">EV <span className="num-display font-bold text-emerald-600">+14,2%</span></span>
                 </div>
               </div>
             </ScrollReveal>
@@ -286,7 +289,7 @@ export default async function HomePage() {
             <ScrollReveal className="lg:col-span-2" delay={80}>
               <div className="relative rounded-2xl overflow-hidden h-full min-h-[220px]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/img/portrait.jpg" alt="Cheval et jockey en tête de course" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+                <img src="/img/portrait.webp" alt="Cheval et jockey en tête de course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
                 <div className="absolute inset-0 bg-gradient-to-t from-gray-950/85 via-gray-950/20 to-transparent" />
                 <div className="absolute bottom-0 left-0 p-6">
                   <p className="text-white font-display text-xl font-bold leading-snug max-w-xs">Les bons chevaux, au bon prix, selon votre tolérance au risque.</p>
@@ -320,12 +323,12 @@ export default async function HomePage() {
                       </div>
                     ))}
                   </div>
-                  <p className="mt-3 text-[10px] text-gray-400">Gain potentiel si le pari est gagnant.</p>
+                  <p className="mt-3 text-[10px] text-gray-500">Gain potentiel si le pari est gagnant.</p>
                 </div>
               </ScrollReveal>
             ))}
           </div>
-          <p className="mt-6 text-center text-[11px] text-gray-400 max-w-2xl mx-auto">
+          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto">
             Exemple illustratif sur une course type. Les paris et gains varient selon la course, votre mise et les
             rapports PMU réels. Parier comporte un risque de perte.
           </p>
@@ -341,7 +344,7 @@ export default async function HomePage() {
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
                   <Calculator className="h-4 w-4 text-brand-gold-deep" />
                   <span className="text-xs font-semibold text-gray-700">Calculateur de mise</span>
-                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
+                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
                 </div>
                 <CalculatorDemo />
               </div>
@@ -378,7 +381,7 @@ export default async function HomePage() {
       {/* ═══════════ BANDEAU CINÉMATIQUE ═══════════ */}
       <section className="relative overflow-hidden bg-gray-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/showcase.jpg" alt="Peloton de chevaux en pleine course" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+        <img src="/img/showcase.webp" alt="Peloton de chevaux en pleine course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
         <div className="absolute inset-0 bg-gradient-to-r from-gray-950 via-gray-950/85 to-gray-950/25" />
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950/90 via-transparent to-gray-950/30" />
         <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
@@ -398,7 +401,7 @@ export default async function HomePage() {
           {/* Inset photo */}
           <div className="hidden lg:block absolute right-8 bottom-10 w-64">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/img/duel.jpg" alt="Duel de chevaux à l'arrivée" className="tilt-card w-full h-40 object-cover rounded-2xl ring-1 ring-white/20 shadow-2xl" />
+            <img src="/img/duel.webp" alt="Duel de chevaux à l'arrivée" loading="lazy" decoding="async" className="tilt-card w-full h-40 object-cover rounded-2xl ring-1 ring-white/20 shadow-2xl" />
             <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-300">
               <Trophy className="h-3.5 w-3.5 text-amber-300" /> Réglé aux rapports PMU officiels
             </div>
@@ -436,7 +439,7 @@ export default async function HomePage() {
               <div className="glass-card rounded-3xl p-6">
                 <div className="flex items-center justify-between mb-4">
                   <span className="eyebrow text-amber-700 text-[10px] font-bold"><Zap className="h-3 w-3" /> Pari de valeur détecté</span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
                 <div className="flex items-center gap-3 rounded-2xl bg-amber-50 ring-1 ring-amber-200 px-4 py-3">
                   <span className="num-display text-lg font-black text-brand-gold-deep">N°7</span>
@@ -449,11 +452,11 @@ export default async function HomePage() {
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-xl bg-gray-50 p-3">
                     <div className="num-display text-lg font-extrabold text-gray-900">19%</div>
-                    <div className="text-[10px] text-gray-400 mt-0.5">Proba modèle</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">Proba modèle</div>
                   </div>
                   <div className="rounded-xl bg-gray-50 p-3">
-                    <div className="num-display text-lg font-extrabold text-gray-400">12%</div>
-                    <div className="text-[10px] text-gray-400 mt-0.5">Proba marché</div>
+                    <div className="num-display text-lg font-extrabold text-gray-500">12%</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">Proba marché</div>
                   </div>
                   <div className="rounded-xl bg-emerald-50 ring-1 ring-emerald-100 p-3">
                     <div className="num-display text-lg font-extrabold text-emerald-600">+14%</div>
@@ -502,13 +505,13 @@ export default async function HomePage() {
               <div className="rounded-3xl bg-white/95 backdrop-blur p-5 shadow-2xl">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-gray-700">Suivi du capital</span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
 
                 {/* Capital départ → actuel (comme le vrai suivi) */}
                 <div className="flex items-end justify-between rounded-xl bg-gradient-to-r from-emerald-50 to-white border border-emerald-100 px-4 py-3 mb-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400">Capital</div>
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Capital</div>
                     <div className="num-display text-lg font-extrabold text-gray-900">{CAPITAL_DEPART}€ <span className="text-gray-300 font-normal">→</span> {CAPITAL_DEPART + CAPITAL_NET}€</div>
                   </div>
                   <div className="num-display text-lg font-extrabold text-emerald-600">{CAPITAL_NET >= 0 ? "+" : ""}{CAPITAL_NET}€</div>
@@ -518,9 +521,9 @@ export default async function HomePage() {
                   {CAPITAL_DEMO.map((b, i) => (
                     <div key={i} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
                       <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${b.won ? "bg-emerald-500" : "bg-gray-300"}`} />
-                      <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-400">{b.chevaux}</span></span>
-                      <span className="text-gray-400 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
-                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-600" : "text-gray-400"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
+                      <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-500">{b.chevaux}</span></span>
+                      <span className="text-gray-500 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
+                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-600" : "text-gray-500"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
                     </div>
                   ))}
                 </div>
@@ -565,7 +568,7 @@ export default async function HomePage() {
                   <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300/60" />
                   <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
                   <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{m.sub}</p>
                 </div>
               </ScrollReveal>
             ))}
@@ -585,7 +588,7 @@ export default async function HomePage() {
                         <div className="flex items-center justify-between text-xs mb-1.5">
                           <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
                           <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
-                            <span className="text-gray-400 font-normal ml-1.5">· {d.nb_courses} courses</span>
+                            <span className="text-gray-500 font-normal ml-1.5">· {d.nb_courses} courses</span>
                           </span>
                         </div>
                         <div className="relative h-3 rounded-full bg-gray-100 overflow-hidden">
@@ -596,7 +599,7 @@ export default async function HomePage() {
                       </div>
                     ))}
                   </div>
-                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-400">
+                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-500">
                     <span className="inline-block w-px h-3 bg-gray-400/60" /> Repère « hasard » à 33 % · au-delà = l&apos;analyse fait mieux.
                   </div>
                 </div>
@@ -613,7 +616,7 @@ export default async function HomePage() {
                       <TrendingUp className="h-4 w-4 text-emerald-600" />
                       <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
                     </div>
-                    <span className="text-[11px] text-gray-400">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
+                    <span className="text-[11px] text-gray-500">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
                   </div>
 
                   {/* Aire de chart à hauteur FIXE → barres % fiables */}
@@ -639,17 +642,17 @@ export default async function HomePage() {
                   </div>
                   <div className="mt-2 flex justify-between gap-2.5">
                     {tr.by_day.map((d) => (
-                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-400">{d.jour}</span>
+                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-500">{d.jour}</span>
                     ))}
                   </div>
-                  <p className="mt-4 text-[11px] text-gray-400">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
+                  <p className="mt-4 text-[11px] text-gray-500">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
                 </div>
               </ScrollReveal>
               );
             })()}
           </div>
 
-          <p className="mt-6 text-center text-[11px] text-gray-400 max-w-2xl mx-auto leading-relaxed">
+          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto leading-relaxed">
             La précision d'analyse mesure la qualité du classement des chevaux. Ce n'est ni un taux de
             gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
           </p>
@@ -801,7 +804,7 @@ export default async function HomePage() {
               </ScrollReveal>
             ))}
           </div>
-          <p className="text-center text-xs text-gray-400 mt-8">
+          <p className="text-center text-xs text-gray-500 mt-8">
             -20% avec l&apos;abonnement annuel · Paiement sécurisé Stripe · Annulation à tout moment
           </p>
         </div>
@@ -844,8 +847,8 @@ export default async function HomePage() {
       {/* ═══════════ JEU RESPONSABLE ═══════════ */}
       <section className="py-8 border-t border-gray-100 bg-brand-warm">
         <div className="mx-auto max-w-3xl px-4 text-center">
-          <p className="text-xs text-gray-400 leading-relaxed inline-flex flex-wrap items-center justify-center gap-x-1.5">
-            <AlertTriangle className="h-3.5 w-3.5 text-gray-400 inline" />
+          <p className="text-xs text-gray-500 leading-relaxed inline-flex flex-wrap items-center justify-center gap-x-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-gray-500 inline" />
             <span><strong className="text-gray-600">Jeu responsable.</strong> BlackTurf est un outil d&apos;aide à la décision,
             pas une garantie de gain. Les performances passées ne préjugent pas des performances futures.
             Interdit aux mineurs. En cas de difficulté :{" "}

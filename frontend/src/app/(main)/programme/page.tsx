@@ -1,20 +1,32 @@
 "use client";
 
+/**
+ * Programme — refonte visuelle (vue chronologique).
+ *
+ * Drop-in : remplace src/app/(main)/programme/page.tsx
+ * Conserve toute la logique de données existante (coursesApi.programme, value bets SWR,
+ * useAuth, countdown, filtres). Seule la présentation change.
+ *
+ * ⚠ ASSETS À COPIER dans le dossier /public :
+ *   public/img/logo-horse.png
+ *   public/img/disciplines/attele-m.png
+ *   public/img/disciplines/plat-m.png
+ *   public/img/disciplines/monte-m.png
+ *   public/img/disciplines/obstacle-m.png
+ * (fournis dans ce même paquet, sous /public)
+ */
+
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
-  ChevronRight, Clock, MapPin, Trophy, Loader2, Zap,
-  Search, X, Radio, ChevronDown, ChevronUp, Filter,
+  ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter,
 } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import { coursesApi, predictionsApi } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime, cn } from "@/lib/utils";
-import { DisciplineIcon, DisciplineGlyph, disciplineMeta } from "@/components/ui/DisciplineIcon";
 
 /* ─── Types ─────────────────────────────────────────────── */
 interface CourseSummary {
@@ -42,13 +54,57 @@ interface Reunion {
 }
 
 /* ─── Helpers ───────────────────────────────────────────── */
-// Normalise la casse des disciplines venant de la base ("OBSTACLE" → "Obstacle").
 const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
+
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+const enjeux = (v: number | null) => {
+  if (v == null || v <= 0) return null;
+  return v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M€` : `${Math.round(v / 1_000)}k€`;
+};
+
+/* ─── Palette des disciplines (couleur + silhouette détourée) ── */
+type DiscMeta = { color: string; bg: string; ring: string; mask: string };
+const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-m.png" };
+
+function discMeta(discipline: string): DiscMeta {
+  const d = (discipline || "").toLowerCase();
+  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-m.png" };
+  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-m.png" };
+  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-m.png" };
+  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-m.png" };
+  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-m.png" };
+  return DISC_FALLBACK;
+}
+
+/* Icône discipline : silhouette détourée, teintée (fond transparent) */
+function DiscIcon({ discipline, w = 30, h = 24, color }: { discipline: string; w?: number; h?: number; color?: string }) {
+  const m = discMeta(discipline);
+  const url = `/img/disciplines/${m.mask}`;
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-block",
+        width: w,
+        height: h,
+        background: color ?? m.color,
+        WebkitMaskImage: `url(${url})`,
+        maskImage: `url(${url})`,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+      }}
+    />
+  );
+}
 
 /* ─── Countdown hook ────────────────────────────────────── */
 function useCountdown(targetDate: string, statut: string) {
   const [text, setText] = useState<string | null>(null);
-
   useEffect(() => {
     if (statut !== "programme" && statut !== "a_venir") return;
     const tick = () => {
@@ -65,7 +121,6 @@ function useCountdown(targetDate: string, statut: string) {
     const id = setInterval(tick, 10000);
     return () => clearInterval(id);
   }, [targetDate, statut]);
-
   return text;
 }
 
@@ -73,398 +128,27 @@ function useCountdown(targetDate: string, statut: string) {
 function StatutBadge({ statut }: { statut: string }) {
   if (statut === "en_cours")
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600 ring-1 ring-emerald-200">
-        <Radio className="h-2.5 w-2.5 animate-pulse" />
-        En direct
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-600 ring-1 ring-emerald-200 whitespace-nowrap">
+        <Radio className="h-2.5 w-2.5 animate-pulse" /> En direct
       </span>
     );
   if (statut === "termine")
-    return (
-      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500">
-        Terminée
-      </span>
-    );
+    return <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500">Terminée</span>;
   if (statut === "annule")
-    return (
-      <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] text-red-500 ring-1 ring-red-200">
-        Annulée
-      </span>
-    );
+    return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] text-red-500 ring-1 ring-red-200">Annulée</span>;
   return null;
 }
 
-/* ─── Code R{r}C{c} ─────────────────────────────────────── */
-function CourseCode({ reunionNum, courseNum, variant = "default" }: {
-  reunionNum: number; courseNum: number; variant?: "default" | "live" | "quinte";
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[11px] font-bold tabular-nums tracking-tight ring-1 flex-shrink-0",
-        variant === "quinte" ? "bg-amber-50 text-amber-700 ring-amber-200"
-          : variant === "live" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-          : "bg-gray-100 text-gray-700 ring-gray-200",
-      )}
-    >
-      R{reunionNum}C{courseNum}
-    </span>
-  );
-}
-
-/* ─── CourseRow ─────────────────────────────────────────── */
-function CourseRow({ course, reunionNum, vbCount }: { course: CourseSummary; reunionNum: number; vbCount?: number }) {
-  const isLive = course.statut === "en_cours";
-  const isDone = course.statut === "termine" || course.statut === "annule";
-  const countdown = useCountdown(course.date_heure, course.statut);
-
-  return (
-    <Link href={`/courses/${course.course_id}`} className="block group">
-      <div
-        className={cn(
-          "relative flex items-center gap-3 px-4 py-3 transition-all duration-150",
-          "hover:bg-gray-50/80 border-b border-gray-100 last:border-b-0",
-          isLive && "bg-emerald-50/50 hover:bg-emerald-50",
-          isDone && "opacity-60",
-        )}
-      >
-        {/* Live pulse bar */}
-        {isLive && (
-          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-0.5 rounded-full bg-emerald-500" />
-        )}
-
-        {/* Heure de départ (repère principal) */}
-        <div className="flex flex-col items-center w-12 flex-shrink-0">
-          <span className={cn("text-base font-bold tabular-nums leading-none", isLive ? "text-emerald-600" : isDone ? "text-gray-400" : "text-gray-900")}>
-            {formatTime(course.date_heure)}
-          </span>
-          {countdown && (
-            <span className="mt-1 text-[9px] font-semibold text-amber-600 leading-none">{countdown}</span>
-          )}
-        </div>
-
-        {/* Logo cheval selon l'épreuve */}
-        <DisciplineIcon discipline={course.discipline} size="md" />
-
-        {/* Main info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <CourseCode reunionNum={reunionNum} courseNum={course.numero}
-              variant={course.est_quinte ? "quinte" : isLive ? "live" : "default"} />
-            <span
-              className={cn(
-                "text-sm font-semibold truncate max-w-[200px] sm:max-w-[340px] group-hover:text-gray-900",
-                isDone ? "text-gray-400" : "text-gray-800",
-              )}
-            >
-              {course.nom || `Course ${course.numero}`}
-            </span>
-            {course.est_quinte && (
-              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[9px] font-bold text-amber-600 ring-1 ring-amber-200 uppercase tracking-wide">
-                Quinté+
-              </span>
-            )}
-            {course.est_quarte && !course.est_quinte && (
-              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[9px] font-bold text-amber-600 ring-1 ring-amber-200 uppercase tracking-wide">
-                Quarté+
-              </span>
-            )}
-            {course.est_tierce && !course.est_quarte && (
-              <span className="inline-flex items-center rounded-full bg-yellow-50 px-1.5 py-0 text-[9px] font-semibold text-yellow-600 ring-1 ring-yellow-200 uppercase tracking-wide">
-                Tiercé
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5 flex-wrap">
-            <span className="font-medium text-gray-500">{titleCase(course.discipline)}</span>
-            <span className="text-gray-200">·</span>
-            <span>{course.distance}m</span>
-            <span className="text-gray-200">·</span>
-            <span>{course.nb_partants} partants</span>
-            {course.pool_total_eur != null && course.pool_total_eur > 0 && (
-              <>
-                <span className="text-gray-200">·</span>
-                <span className="text-gray-500 font-medium tabular-nums" title="Masse des enjeux PMU misés sur cette course (pas la dotation)">
-                  Enjeux {course.pool_total_eur >= 1_000_000
-                    ? `${(course.pool_total_eur / 1_000_000).toFixed(1)}M€`
-                    : `${Math.round(course.pool_total_eur / 1_000)}k€`}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Right: status + VB */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {vbCount !== undefined && vbCount > 0 && (
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 ring-1 ring-amber-200">
-              <Zap className="h-2.5 w-2.5" />
-              {vbCount} <span className="hidden sm:inline">de valeur</span>
-            </span>
-          )}
-          <StatutBadge statut={course.statut} />
-        </div>
-
-        {/* Hover arrow */}
-        <ChevronRight className="h-3.5 w-3.5 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-      </div>
-    </Link>
-  );
-}
-
-/* ─── ReunionCard ───────────────────────────────────────── */
-function ReunionCard({
-  reunion,
-  vbByCourse,
-  isPaid,
-  disciplineFilter,
-}: {
-  reunion: Reunion;
-  vbByCourse: Record<string, number>;
-  isPaid: boolean;
-  disciplineFilter: string;
-}) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  const filteredCourses = useMemo(
-    () =>
-      disciplineFilter === "Tous"
-        ? reunion.courses
-        : reunion.courses.filter((c) => c.discipline === disciplineFilter),
-    [reunion.courses, disciplineFilter],
-  );
-
-  if (filteredCourses.length === 0) return null;
-
-  const hasQuinte = filteredCourses.some((c) => c.est_quinte);
-  const reunionVbs = filteredCourses.reduce((sum, c) => sum + (vbByCourse[c.course_id] || 0), 0);
-  const liveCount = filteredCourses.filter((c) => c.statut === "en_cours").length;
-  const firstTime = filteredCourses[0]?.date_heure;
-  const lastTime = filteredCourses[filteredCourses.length - 1]?.date_heure;
-
-  // Pénétromètre de la réunion (même valeur pour toutes les courses)
-  const penetro = filteredCourses.find((c) => c.penetrometre_coef != null);
-  const penetroCoef = penetro?.penetrometre_coef ?? null;
-  const penetroDesc = penetro?.penetrometre_desc ?? null;
-
-  // Discipline breakdown for this reunion
-  const discBreakdown = filteredCourses.reduce((acc, c) => {
-    acc[c.discipline] = (acc[c.discipline] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  return (
-    <div
-      className={cn(
-        "rounded-2xl border bg-white shadow-sm overflow-hidden",
-        hasQuinte ? "border-amber-200" : "border-gray-200",
-      )}
-    >
-      {/* Header */}
-      <button
-        onClick={() => setCollapsed((v) => !v)}
-        className={cn(
-          "relative w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 sm:py-4 text-left transition-colors",
-          hasQuinte ? "bg-gradient-to-r from-amber-50/80 to-white hover:from-amber-100/60" : "hover:bg-gray-50/70",
-        )}
-      >
-        {/* Gold accent for Quinté reunion */}
-        {hasQuinte && (
-          <span className="h-full absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl bg-gradient-to-b from-amber-400 to-amber-500" />
-        )}
-
-        {/* Badge réunion R{n} */}
-        <div
-          className={cn(
-            "h-10 w-12 rounded-xl flex items-center justify-center flex-shrink-0 font-mono text-sm font-bold tracking-tight ring-1 shadow-sm",
-            hasQuinte
-              ? "bg-gradient-to-br from-amber-100 to-amber-200/70 text-amber-700 ring-amber-200"
-              : "bg-gradient-to-br from-gray-100 to-gray-200/60 text-gray-600 ring-gray-200",
-          )}
-        >
-          R{reunion.numero}
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="font-bold text-gray-900 text-sm">{reunion.hippodrome}</h2>
-            {hasQuinte && (
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0 text-[9px] font-bold text-amber-700 uppercase tracking-wide">
-                Quinté+
-              </span>
-            )}
-            {liveCount > 0 && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0 text-[9px] font-bold uppercase tracking-wide text-emerald-700">
-                <Radio className="h-2 w-2 animate-pulse" />
-                En direct
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5 flex-wrap">
-            <span className="flex items-center gap-0.5"><MapPin className="h-2.5 w-2.5" /> Réunion {reunion.numero}</span>
-            <span className="text-gray-200">·</span>
-            <span>{filteredCourses.length} courses</span>
-            {firstTime && (
-              <>
-                <span className="text-gray-200">·</span>
-                <span className="flex items-center gap-0.5">
-                  <Clock className="h-2.5 w-2.5" />
-                  {formatTime(firstTime)}
-                  {lastTime !== firstTime && ` → ${formatTime(lastTime)}`}
-                </span>
-              </>
-            )}
-            {Object.entries(discBreakdown).map(([disc, n]) => (
-              <span key={disc} className="hidden sm:inline-flex items-center gap-0.5" style={{ color: disciplineMeta(disc).color }}>
-                · <DisciplineGlyph discipline={disc} className="h-3 w-4" /> {n}
-              </span>
-            ))}
-            {/* Pénétromètre de la réunion */}
-            {penetroCoef != null && penetroDesc && (
-              <span className="text-gray-400">· Terrain {penetroDesc} ({penetroCoef.toFixed(1)})</span>
-            )}
-          </div>
-        </div>
-
-        {/* VB count */}
-        {isPaid && reunionVbs > 0 && (
-          <span className="inline-flex items-center gap-0.5 text-xs font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-1 ring-1 ring-amber-200 flex-shrink-0">
-            <Zap className="h-3 w-3" />
-            {reunionVbs}
-          </span>
-        )}
-
-        {collapsed ? (
-          <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
-        ) : (
-          <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" />
-        )}
-      </button>
-
-      {/* Courses list */}
-      {!collapsed && (
-        <div className="divide-y divide-gray-50">
-          {filteredCourses.map((course) => (
-            <CourseRow
-              key={course.course_id}
-              course={course}
-              reunionNum={reunion.numero}
-              vbCount={isPaid ? vbByCourse[course.course_id] : undefined}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─── Vue chronologique (par heure de départ) ───────────── */
-function ChronoView({
-  reunions, vbByCourse, isPaid, disciplineFilter,
-}: {
-  reunions: Reunion[];
-  vbByCourse: Record<string, number>;
-  isPaid: boolean;
-  disciplineFilter: string;
-}) {
-  // Aplatir toutes les courses + contexte réunion, filtrer, trier par heure
-  const flat = useMemo(() => {
-    const items: Array<{ course: CourseSummary; reunionNum: number; hippodrome: string }> = [];
-    for (const r of reunions) {
-      for (const c of r.courses) {
-        if (disciplineFilter !== "Tous" && c.discipline !== disciplineFilter) continue;
-        items.push({ course: c, reunionNum: r.numero, hippodrome: r.hippodrome });
-      }
-    }
-    items.sort((a, b) => new Date(a.course.date_heure).getTime() - new Date(b.course.date_heure).getTime());
-    return items;
-  }, [reunions, disciplineFilter]);
-
-  // Grouper par tranche horaire (ex: "13h")
-  const groups = useMemo(() => {
-    const map = new Map<string, typeof flat>();
-    for (const it of flat) {
-      const h = new Date(it.course.date_heure).getHours();
-      const key = `${h}h`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(it);
-    }
-    return Array.from(map.entries());
-  }, [flat]);
-
-  if (flat.length === 0) return null;
-
-  return (
-    <div className="space-y-4">
-      {groups.map(([hour, items]) => (
-        <div key={hour} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-2.5 bg-gray-50/80 border-b border-gray-100">
-            <Clock className="h-3.5 w-3.5 text-gray-400" />
-            <span className="text-sm font-bold text-gray-700 tabular-nums">{hour}</span>
-            <span className="text-xs text-gray-400">· {items.length} course{items.length > 1 ? "s" : ""}</span>
-          </div>
-          <div>
-            {items.map(({ course, reunionNum, hippodrome }) => {
-              const isLive = course.statut === "en_cours";
-              const isDone = course.statut === "termine" || course.statut === "annule";
-              return (
-                <Link key={course.course_id} href={`/courses/${course.course_id}`} className="block group">
-                  <div className={cn(
-                    "relative flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-b-0 transition-all",
-                    "hover:bg-gray-50/80",
-                    isLive && "bg-emerald-50/50 hover:bg-emerald-50",
-                    isDone && "opacity-60",
-                  )}>
-                    {isLive && <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-0.5 rounded-full bg-emerald-500" />}
-                    <span className={cn("text-sm font-bold tabular-nums w-11 flex-shrink-0", isLive ? "text-emerald-600" : isDone ? "text-gray-400" : "text-gray-900")}>
-                      {formatTime(course.date_heure)}
-                    </span>
-                    <DisciplineIcon discipline={course.discipline} size="sm" />
-                    <CourseCode reunionNum={reunionNum} courseNum={course.numero}
-                      variant={course.est_quinte ? "quinte" : isLive ? "live" : "default"} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">
-                        <span className="text-gray-500">{hippodrome}</span>
-                        <span className="text-gray-300"> · </span>
-                        {course.nom || `Course ${course.numero}`}
-                      </p>
-                      <p className="text-xs text-gray-400 truncate">
-                        <span className="font-medium text-gray-500">{titleCase(course.discipline)}</span> · {course.distance}m · {course.nb_partants} partants
-                      </p>
-                    </div>
-                    {course.est_quinte && (
-                      <span className="hidden sm:inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[9px] font-bold text-amber-600 ring-1 ring-amber-200 uppercase tracking-wide flex-shrink-0">Quinté+</span>
-                    )}
-                    {isPaid && (vbByCourse[course.course_id] || 0) > 0 && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 ring-1 ring-amber-200 flex-shrink-0">
-                        <Zap className="h-2.5 w-2.5" />{vbByCourse[course.course_id]}
-                      </span>
-                    )}
-                    <StatutBadge statut={course.statut} />
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ─── Sélecteur de jour (bande horizontale, pensée mobile) ─── */
+/* ─── Sélecteur de jour ─────────────────────────────────── */
 const HIDE_SCROLLBAR = "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden";
 
 function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) => void }) {
   const today = new Date();
-  // Uniquement les jours passés + aujourd'hui (le futur n'a pas de données fiables).
-  // Ordre chronologique : passé à gauche, aujourd'hui tout à droite.
   const days = Array.from({ length: 10 }, (_, i) => addDays(today, i - 9));
   const selKey = format(selected, "yyyy-MM-dd");
   const todayKey = format(today, "yyyy-MM-dd");
   const yesterdayKey = format(addDays(today, -1), "yyyy-MM-dd");
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Aujourd'hui est à droite → on défile au bout pour l'afficher par défaut.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollLeft = el.scrollWidth;
@@ -481,7 +165,7 @@ function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) 
             key={key}
             onClick={() => onSelect(d)}
             className={cn(
-              "group flex flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 min-w-[58px] shrink-0 border transition-all",
+              "group flex flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 min-w-[58px] shrink-0 border transition-all hover:-translate-y-0.5",
               isSel
                 ? "bg-gray-900 text-white border-gray-900 shadow-md shadow-gray-900/10"
                 : isToday
@@ -489,19 +173,147 @@ function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) 
                 : "bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
             )}
           >
-            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none",
-              isSel ? "text-white/70" : isToday ? "text-amber-600" : "text-gray-400")}>
+            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-white/70" : isToday ? "text-amber-600" : "text-gray-400")}>
               {topLabel}
             </span>
-            <span className="text-xl font-extrabold tabular-nums leading-none mt-1.5">{format(d, "d")}</span>
-            <span className={cn("text-[9px] uppercase tracking-wide leading-none mt-1",
-              isSel ? "text-white/50" : "text-gray-400")}>
+            <span className="text-xl font-extrabold tabular-nums leading-none mt-1.5" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{format(d, "d")}</span>
+            <span className={cn("text-[9px] uppercase tracking-wide leading-none mt-1", isSel ? "text-white/50" : "text-gray-400")}>
               {format(d, "MMM", { locale: fr })}
             </span>
           </button>
         );
       })}
     </div>
+  );
+}
+
+/* ─── Bandeau "Prochaine course" ────────────────────────── */
+function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: number } }) {
+  const { course, reunionNum } = item;
+  const m = discMeta(course.discipline);
+  const isLive = course.statut === "en_cours";
+  const countdown = useCountdown(course.date_heure, course.statut);
+  const url = `/img/disciplines/${m.mask}`;
+  return (
+    <div
+      className="relative overflow-hidden rounded-[22px] animate-[fadeUp_.5s_cubic-bezier(.16,1,.3,1)_both]"
+      style={{ border: "1px solid rgba(255,255,255,.08)", background: "linear-gradient(135deg,#0F1520 0%,#1A2230 100%)", boxShadow: "0 18px 40px -24px rgba(15,21,32,.7)" }}
+    >
+      <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: "linear-gradient(180deg,#F59E0B,#D97706)" }} />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute"
+        style={{
+          right: 210, bottom: -30, width: 360, height: 210, background: "rgba(255,255,255,.06)",
+          WebkitMaskImage: `url(${url})`, maskImage: `url(${url})`,
+          WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
+          WebkitMaskPosition: "center", maskPosition: "center",
+          WebkitMaskSize: "contain", maskSize: "contain",
+        }}
+      />
+      <div className="relative flex flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-5">
+        <div className="flex-1 min-w-[230px]">
+          <div className="flex items-center gap-2.5 mb-3">
+            <span className="text-[10.5px] font-bold uppercase tracking-[.16em] text-slate-400">Prochaine course</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+              {isLive ? "En piste" : "À venir"}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="rounded-md px-2 py-0.5 text-[12px] font-bold tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#0F1520", background: "#E2E8F0" }}>
+              R{reunionNum}C{course.numero}
+            </span>
+            <span className="text-lg sm:text-[22px] font-bold text-white tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{course.hippodrome_nom}</span>
+          </div>
+          {course.nom && <div className="mt-1.5 text-sm font-medium text-slate-300">{course.nom}</div>}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {[titleCase(course.discipline), `${course.distance} m`, `${course.nb_partants} partants`].map((t) => (
+              <span key={t} className="inline-flex items-center rounded-lg px-3 py-1.5 text-[12px] font-semibold text-slate-200" style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)" }}>{t}</span>
+            ))}
+          </div>
+        </div>
+        <div className="flex w-full flex-row items-end justify-between gap-3.5 border-t border-white/10 pt-4 sm:w-auto sm:flex-col sm:items-end sm:border-t-0 sm:border-l sm:border-white/10 sm:pt-0 sm:pl-6">
+          <div className="text-left sm:text-right">
+            <div className="text-[10px] font-bold uppercase tracking-[.16em] text-slate-500">Départ</div>
+            <div className="mt-1 text-[26px] sm:text-[30px] font-bold leading-none tracking-tight text-white tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{formatTime(course.date_heure)}</div>
+            {countdown && (
+              <div className="mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>{countdown}</div>
+            )}
+          </div>
+          <Link
+            href={`/courses/${course.course_id}`}
+            className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-[13px] font-bold transition-transform hover:-translate-y-0.5"
+            style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)", color: "#0F1520", boxShadow: "0 8px 22px -10px rgba(245,158,11,.6)" }}
+          >
+            Voir la course <ChevronRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Ligne de course (timeline) ────────────────────────── */
+function TimelineRow({ course, reunionNum, vbCount, delay }: { course: CourseSummary; reunionNum: number; vbCount?: number; delay: number }) {
+  const m = discMeta(course.discipline);
+  const isLive = course.statut === "en_cours";
+  const isDone = course.statut === "termine" || course.statut === "annule";
+  const countdown = useCountdown(course.date_heure, course.statut);
+  const codeCls = course.est_quinte
+    ? "text-amber-700 bg-amber-50 ring-amber-200"
+    : isLive ? "text-emerald-700 bg-emerald-50 ring-emerald-200" : "text-gray-700 bg-gray-100 ring-gray-200";
+  return (
+    <Link
+      href={`/courses/${course.course_id}`}
+      className="group relative flex items-center gap-2.5 rounded-2xl border border-[#ECE7DC] px-3 py-2.5 no-underline shadow-[0_1px_2px_rgba(0,0,0,.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-[0_16px_32px_-14px_rgba(180,83,9,.28)] sm:gap-3 sm:px-4 sm:py-3"
+      style={{ background: isLive ? "#F0FDF8" : "#FFFFFF", opacity: isDone ? 0.62 : 1, animation: `fadeUp .5s cubic-bezier(.16,1,.3,1) ${delay}s both` }}
+    >
+      <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : course.est_quinte ? "#F59E0B" : "transparent" }} />
+      <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
+        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-600" : isDone ? "text-gray-400" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+          {formatTime(course.date_heure)}
+        </span>
+        {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-600">{countdown}</span>}
+      </div>
+      <span className="hidden h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: m.bg, border: `1px solid ${m.ring}` }}>
+        <DiscIcon discipline={course.discipline} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            R{reunionNum}C{course.numero}
+          </span>
+          <span className="max-w-full truncate text-sm font-semibold text-gray-800 sm:max-w-[230px]">
+            <span className="text-gray-500">{course.hippodrome_nom}</span>
+            <span className="text-gray-300"> · </span>
+            {course.nom || `Course ${course.numero}`}
+          </span>
+          {course.est_quinte ? (
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Quinté+</span>
+          ) : course.est_quarte ? (
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Quarté+</span>
+          ) : course.est_tierce ? (
+            <span className="rounded-full border border-yellow-200 bg-yellow-50 px-1.5 text-[9px] font-bold uppercase tracking-wide text-yellow-700">Tiercé</span>
+          ) : null}
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-400">
+          <span className="font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
+          <span className="text-gray-300">·</span><span>{course.distance} m</span>
+          <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
+          {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-500 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
+        </div>
+      </div>
+      <div className="flex flex-shrink-0 items-center gap-1.5">
+        {vbCount !== undefined && vbCount > 0 && (
+          <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 tabular-nums">
+            <Zap className="h-2.5 w-2.5" />{vbCount}
+          </span>
+        )}
+        <StatutBadge statut={course.statut} />
+        <ChevronRight className="hidden h-3.5 w-3.5 flex-shrink-0 text-gray-300 sm:block" />
+      </div>
+    </Link>
   );
 }
 
@@ -512,10 +324,10 @@ export default function ProgrammePage() {
   const [programme, setProgramme] = useState<{ reunions: Reunion[]; nb_courses: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [discFilter, setDiscFilter] = useState<string>("Tous");
+  const [reunionFilter, setReunionFilter] = useState<number | "all">("all");
   const [hippoSearch, setHippoSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [vbOnly, setVbOnly] = useState(false);
-  const [viewMode, setViewMode] = useState<"reunion" | "heure">("heure");
 
   const isToday = format(selectedDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
   const isPaid = user && !["free", "decouverte"].includes(user.plan);
@@ -526,7 +338,6 @@ export default function ProgrammePage() {
     () => predictionsApi.valueBets(1).then((r) => r.data),
     { refreshInterval: 120000 },
   );
-
   const vbByCourse = useMemo(() => {
     if (!valueBets) return {} as Record<string, number>;
     return (valueBets as Array<{ course_id: string }>).reduce((acc, vb) => {
@@ -535,8 +346,7 @@ export default function ProgrammePage() {
     }, {} as Record<string, number>);
   }, [valueBets]);
 
-  /* Fetch programme — rafraîchi périodiquement pour le jour courant afin que les
-     statuts (À venir → En direct → Terminée) se mettent à jour sans recharger. */
+  /* Fetch programme */
   useEffect(() => {
     let cancelled = false;
     const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -549,263 +359,294 @@ export default function ProgrammePage() {
         .finally(() => { if (!cancelled && initial) setLoading(false); });
     };
     load(true);
-    // Seul le jour courant évolue en direct → on ne poll que lui.
     const iv = isToday ? setInterval(() => load(false), 60000) : null;
     return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [selectedDate, isToday]);
 
-  /* Sélection directe d'un jour (bande de jours) */
   const selectDate = useCallback((d: Date) => {
     setDiscFilter("Tous");
+    setReunionFilter("all");
     setHippoSearch("");
     setVbOnly(false);
     setSelectedDate(d);
   }, []);
 
-  /* Derived stats */
+  /* Derived */
   const allCourses = useMemo(() => programme?.reunions.flatMap((r) => r.courses) ?? [], [programme]);
-  const totalVbs = Object.values(vbByCourse).reduce((a, b) => a + b, 0);
-  const liveCount = allCourses.filter((c) => c.statut === "en_cours").length;
 
   const discCounts = useMemo(
-    () =>
-      allCourses.reduce((acc, c) => {
-        acc[c.discipline] = (acc[c.discipline] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
+    () => allCourses.reduce((acc, c) => { acc[c.discipline] = (acc[c.discipline] || 0) + 1; return acc; }, {} as Record<string, number>),
     [allCourses],
   );
 
-  /* Filter reunions */
-  const filteredReunions = useMemo(() => {
-    if (!programme) return [];
-    return programme.reunions.filter((r) => {
-      if (hippoSearch && !r.hippodrome.toLowerCase().includes(hippoSearch.toLowerCase())) return false;
-      if (discFilter !== "Tous" && !r.courses.some((c) => c.discipline === discFilter)) return false;
-      // VB-only: garder uniquement les réunions avec au moins 1 value bet
-      if (vbOnly && isPaid && !r.courses.some((c) => (vbByCourse[c.course_id] || 0) > 0)) return false;
-      return true;
-    });
-  }, [programme, hippoSearch, discFilter, vbOnly, isPaid, vbByCourse]);
+  /* Réunions (pour le filtre par réunion) */
+  const reunionOptions = useMemo(
+    () => (programme?.reunions ?? []).map((r) => ({ numero: r.numero, hippodrome: r.hippodrome })).sort((a, b) => a.numero - b.numero),
+    [programme],
+  );
 
-  const dateLabel = format(selectedDate, "EEEE d MMMM yyyy", { locale: fr });
+  /* Prochaine course (toutes réunions, hors terminées/annulées) */
+  const nextRace = useMemo(() => {
+    if (!programme || !isToday) return null;
+    const cands: Array<{ course: CourseSummary; reunionNum: number }> = [];
+    for (const r of programme.reunions) for (const c of r.courses) {
+      if (c.statut !== "termine" && c.statut !== "annule") cands.push({ course: c, reunionNum: r.numero });
+    }
+    cands.sort((a, b) => new Date(a.course.date_heure).getTime() - new Date(b.course.date_heure).getTime());
+    return cands[0] ?? null;
+  }, [programme, isToday]);
+
+  /* Aplatir + filtrer + trier par heure */
+  const flat = useMemo(() => {
+    if (!programme) return [] as Array<{ course: CourseSummary; reunionNum: number }>;
+    const items: Array<{ course: CourseSummary; reunionNum: number }> = [];
+    for (const r of programme.reunions) {
+      if (reunionFilter !== "all" && r.numero !== reunionFilter) continue;
+      if (hippoSearch && !r.hippodrome.toLowerCase().includes(hippoSearch.toLowerCase())) continue;
+      for (const c of r.courses) {
+        if (discFilter !== "Tous" && c.discipline !== discFilter) continue;
+        if (vbOnly && isPaid && (vbByCourse[c.course_id] || 0) <= 0) continue;
+        items.push({ course: c, reunionNum: r.numero });
+      }
+    }
+    items.sort((a, b) => new Date(a.course.date_heure).getTime() - new Date(b.course.date_heure).getTime());
+    return items;
+  }, [programme, reunionFilter, hippoSearch, discFilter, vbOnly, isPaid, vbByCourse]);
+
+  /* Groupes horaires */
+  const groups = useMemo(() => {
+    const map = new Map<string, typeof flat>();
+    for (const it of flat) {
+      const key = `${new Date(it.course.date_heure).getHours()}h`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(it);
+    }
+    return Array.from(map.entries());
+  }, [flat]);
+
+  const dayName = cap(format(selectedDate, "EEEE", { locale: fr }));
+  const restDate = format(selectedDate, "d MMMM yyyy", { locale: fr });
+
+  const resetFilters = () => { setDiscFilter("Tous"); setReunionFilter("all"); setHippoSearch(""); setVbOnly(false); };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 sm:space-y-6">
+    <div
+      className="min-h-screen"
+      style={{
+        background:
+          "radial-gradient(ellipse at 20% 0%,rgba(245,158,11,.06) 0%,transparent 48%),radial-gradient(ellipse at 85% 8%,rgba(217,119,6,.04) 0%,transparent 42%),linear-gradient(180deg,#FFFDF6 0%,#FAFAF8 40%)",
+      }}
+    >
+      {/* @keyframes local (fadeUp) */}
+      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}@media (prefers-reduced-motion:reduce){*{animation:none!important}}`}</style>
 
-      {/* ── Header + sélecteur de jour ── */}
-      <div className="space-y-3">
-        <div className="flex items-end justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Programme</h1>
-            <p className="text-sm text-gray-500 capitalize mt-0.5 truncate">{dateLabel}</p>
-          </div>
-          {!isToday && (
-            <button
-              onClick={() => selectDate(new Date())}
-              className="shrink-0 h-9 px-4 rounded-xl text-sm font-semibold bg-amber-500 text-white shadow-sm shadow-amber-200 hover:bg-amber-600 transition-colors"
-            >
-              Aujourd&apos;hui
-            </button>
-          )}
-        </div>
-        <DayStrip selected={selectedDate} onSelect={selectDate} />
-      </div>
+      <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8 lg:px-8">
 
-      {/* ── Résumé (chips sobres) ── */}
-      {programme && programme.nb_courses > 0 && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-700 tabular-nums">
-            {programme.nb_courses} courses
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 font-medium text-gray-500 tabular-nums">
-            {programme.reunions.length} réunions
-          </span>
-          {liveCount > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-600 ring-1 ring-emerald-200">
-              <Radio className="h-3 w-3 animate-pulse" /> {liveCount} en direct
-            </span>
-          )}
-          {isPaid && totalVbs > 0 ? (
-            <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-bold text-amber-600 ring-1 ring-amber-200 tabular-nums">
-              <Zap className="h-3 w-3" /> {totalVbs} de valeur
-            </span>
-          ) : !isPaid && isToday ? (
-            <Link href="/tarifs" className="ml-auto inline-flex items-center gap-1 font-semibold text-amber-600 hover:underline">
-              <Zap className="h-3 w-3" /> Débloquer la valeur
-            </Link>
-          ) : null}
-        </div>
-      )}
-
-      {/* ── Contrôles : vue + recherche/VB, puis disciplines ── */}
-      {programme && programme.nb_courses > 0 && (
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between gap-2">
-            {/* Bascule de vue */}
-            <div className="inline-flex items-center rounded-xl bg-gray-100 p-1 gap-1">
-              {([["reunion", "Réunion", MapPin], ["heure", "Heure", Clock]] as const).map(([mode, label, Icon]) => (
+        {/* ── HERO ── */}
+        <div
+          className="relative overflow-hidden rounded-[28px] px-5 pb-5 pt-6 sm:px-7 sm:pb-6 sm:pt-7 animate-[fadeUp_.5s_cubic-bezier(.16,1,.3,1)_both]"
+          style={{ border: "1px solid rgba(245,158,11,.18)", background: "linear-gradient(180deg,#FFFBF0 0%,#FFFFFF 100%)", boxShadow: "0 1px 3px rgba(0,0,0,.04),0 16px 44px -20px rgba(180,83,9,.18)" }}
+        >
+          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 60% at 12% 8%,rgba(245,158,11,.10),transparent 62%),radial-gradient(55% 55% at 94% 20%,rgba(217,119,6,.07),transparent 60%)" }} />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute max-[479px]:hidden"
+            style={{
+              right: 30, top: 16, width: 172, height: 104, opacity: 0.11, background: "linear-gradient(120deg,#D97706,#92400E)",
+              WebkitMaskImage: "url(/img/logo-horse.png)", maskImage: "url(/img/logo-horse.png)",
+              WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
+              WebkitMaskPosition: "center", maskPosition: "center",
+              WebkitMaskSize: "contain", maskSize: "contain",
+            }}
+          />
+          <div className="relative">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.16em] text-amber-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Programme du jour
+              </div>
+              {!isToday && (
                 <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
-                    viewMode === mode ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
-                  )}
+                  onClick={() => selectDate(new Date())}
+                  className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors"
+                  style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)" }}
                 >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
+                  Aujourd&apos;hui
                 </button>
-              ))}
+              )}
             </div>
+            <h1 className="text-[27px] sm:text-[38px] font-bold leading-[1.08] sm:leading-[1.04] tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>{dayName}</span>
+              <span className="text-gray-800"> {restDate}</span>
+            </h1>
 
-            <div className="flex items-center gap-2 shrink-0">
-              {isPaid && isToday && totalVbs > 0 && (
+            {programme && programme.nb_courses > 0 && (
+              <div className="mt-5 flex flex-wrap gap-2.5">
+                {[{ n: programme.nb_courses, l: "Courses" }, { n: programme.reunions.length, l: "Réunions" }].map((s) => (
+                  <div key={s.l} className="min-w-[118px] flex-1 rounded-2xl px-4 py-3.5" style={{ background: "rgba(255,255,255,.72)", backdropFilter: "blur(4px)", border: "1px solid rgba(0,0,0,.06)" }}>
+                    <div className="text-[29px] font-bold leading-none text-gray-900 tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{s.n}</div>
+                    <div className="mt-1.5 text-xs font-medium text-gray-500">{s.l}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Sélecteur de jour ── */}
+        <DayStrip selected={selectedDate} onSelect={selectDate} />
+
+        {/* ── Prochaine course ── */}
+        {nextRace && <NextRaceBanner item={nextRace} />}
+
+        {/* ── Contrôles ── */}
+        {programme && programme.nb_courses > 0 && (
+          <div className="space-y-3">
+            {/* Recherche + valeur */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {isPaid && isToday && (
                 <button
                   onClick={() => setVbOnly((v) => !v)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all",
-                    vbOnly
-                      ? "bg-amber-500 text-white shadow-sm shadow-amber-200"
-                      : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100",
+                    "inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] font-semibold transition-all",
+                    vbOnly ? "bg-amber-500 text-white shadow-sm shadow-amber-200" : "border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
                   )}
                 >
-                  <Zap className="h-3 w-3" />
-                  <span className="hidden sm:inline">Valeur</span>
+                  <Zap className="h-3.5 w-3.5" /> Valeur
                 </button>
               )}
-              <button
-                onClick={() => { setShowSearch((v) => !v); if (showSearch) setHippoSearch(""); }}
-                className={cn(
-                  "h-8 w-8 rounded-full flex items-center justify-center transition-all shrink-0",
-                  showSearch || hippoSearch ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200",
+              <div className="relative min-w-[190px] flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={hippoSearch}
+                  onChange={(e) => setHippoSearch(e.target.value)}
+                  placeholder="Rechercher un hippodrome…"
+                  className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-8 text-[13px] outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                />
+                {hippoSearch && (
+                  <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <X className="h-3.5 w-3.5 text-gray-400" />
+                  </button>
                 )}
-              >
-                {hippoSearch ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
-              </button>
+              </div>
             </div>
-          </div>
 
-          {/* Disciplines — 1 ligne scrollable sur mobile, wrap sur desktop */}
-          <div className={cn("flex gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap", HIDE_SCROLLBAR)}>
-            {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
-              const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
-              if (d !== "Tous" && count === 0) return null;
-              const active = discFilter === d;
-              return (
+            {/* Filtre par réunion */}
+            {reunionOptions.length > 1 && (
+              <div className={cn("flex gap-2 overflow-x-auto pb-1.5", HIDE_SCROLLBAR)}>
                 <button
-                  key={d}
-                  onClick={() => setDiscFilter(d)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all shrink-0",
-                    active
-                      ? "bg-gray-900 text-white shadow-sm"
-                      : "bg-white text-gray-600 border border-gray-200 hover:border-gray-300 hover:text-gray-900",
-                  )}
+                  onClick={() => setReunionFilter("all")}
+                  className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
+                    reunionFilter === "all" ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")}
+                  style={{ fontFamily: "'Space Grotesk', sans-serif" }}
                 >
-                  {d !== "Tous" && <DisciplineGlyph discipline={d} className="h-3.5 w-4" />}
-                  {titleCase(d)}
-                  {count > 0 && (
-                    <span className={cn("rounded-full px-1.5 text-[10px] font-bold tabular-nums",
-                      active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>
-                      {count}
-                    </span>
-                  )}
+                  Toutes
                 </button>
-              );
-            })}
-          </div>
+                {reunionOptions.map((r) => {
+                  const active = reunionFilter === r.numero;
+                  return (
+                    <button
+                      key={r.numero}
+                      onClick={() => setReunionFilter(r.numero)}
+                      className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
+                        active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")}
+                    >
+                      <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700 }}>R{r.numero}</span>
+                      <span className="opacity-75 whitespace-nowrap font-medium">{r.hippodrome}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-          {/* Recherche hippodrome */}
-          {showSearch && (
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                autoFocus
-                value={hippoSearch}
-                onChange={(e) => setHippoSearch(e.target.value)}
-                placeholder="Rechercher un hippodrome…"
-                className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-4 py-2.5 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
-              />
-              {hippoSearch && (
-                <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <X className="h-3.5 w-3.5 text-gray-400" />
-                </button>
-              )}
+            {/* Filtre par discipline */}
+            <div className={cn("flex gap-2 overflow-x-auto pb-1.5", HIDE_SCROLLBAR)}>
+              {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
+                const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
+                if (d !== "Tous" && count === 0) return null;
+                const active = discFilter === d;
+                return (
+                  <button
+                    key={d}
+                    onClick={() => setDiscFilter(d)}
+                    className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
+                      active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900")}
+                  >
+                    {d !== "Tous" && <DiscIcon discipline={d} w={26} h={18} color={active ? "#FFFFFF" : discMeta(d).color} />}
+                    {titleCase(d)}
+                    <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>{count}</span>
+                  </button>
+                );
+              })}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Content ── */}
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-300" />
-          <p className="text-sm text-gray-400">Chargement du programme…</p>
-        </div>
-      ) : !programme || programme.nb_courses === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-3">
-          <div className="h-16 w-16 rounded-2xl bg-gray-100 flex items-center justify-center">
-            <Trophy className="h-7 w-7 text-gray-300" />
           </div>
-          <p className="font-semibold text-gray-600">Aucune course programmée</p>
-          <p className="text-sm text-gray-400">Essayez une autre date</p>
-          <button
-            onClick={() => setSelectedDate(new Date())}
-            className="mt-1 text-sm text-amber-600 font-medium hover:underline"
-          >
-            Revenir à aujourd&apos;hui
-          </button>
-        </div>
-      ) : filteredReunions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-2">
-          <Filter className="h-8 w-8 text-gray-300" />
-          <p className="text-sm text-gray-500">Aucune réunion ne correspond aux filtres</p>
-          <button
-            onClick={() => { setDiscFilter("Tous"); setHippoSearch(""); }}
-            className="text-sm text-amber-600 font-medium hover:underline"
-          >
-            Effacer les filtres
-          </button>
-        </div>
-      ) : viewMode === "heure" ? (
-        <ChronoView
-          reunions={filteredReunions}
-          vbByCourse={vbByCourse}
-          isPaid={!!isPaid}
-          disciplineFilter={discFilter}
-        />
-      ) : (
-        <div className="space-y-3">
-          {filteredReunions.map((reunion) => (
-            <ReunionCard
-              key={reunion.reunion_id}
-              reunion={reunion}
-              vbByCourse={vbByCourse}
-              isPaid={!!isPaid}
-              disciplineFilter={discFilter}
-            />
-          ))}
-        </div>
-      )}
+        )}
 
-      {/* ── Upsell strip for free users ── */}
-      {!isPaid && isToday && programme && programme.nb_courses > 0 && (
-        <div className="flex items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 px-4 sm:px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-amber-800">🔐 Paris de valeur verrouillés</p>
-            <p className="text-xs text-amber-600 mt-0.5">
-              Passez Standard pour les voir sur chaque course.
-            </p>
+        {/* ── Contenu ── */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-24">
+            <Loader2 className="h-8 w-8 animate-spin text-gray-300" />
+            <p className="text-sm text-gray-400">Chargement du programme…</p>
           </div>
-          <Link
-            href="/tarifs"
-            className="flex-shrink-0 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
-          >
-            Voir les offres
-          </Link>
-        </div>
-      )}
+        ) : !programme || programme.nb_courses === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-24">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100"><Trophy className="h-7 w-7 text-gray-300" /></div>
+            <p className="font-semibold text-gray-600">Aucune course programmée</p>
+            <p className="text-sm text-gray-400">Essayez une autre date</p>
+            <button onClick={() => setSelectedDate(new Date())} className="mt-1 text-sm font-medium text-amber-600 hover:underline">Revenir à aujourd&apos;hui</button>
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-16">
+            <Filter className="h-8 w-8 text-gray-300" />
+            <p className="text-sm text-gray-500">Aucune course ne correspond aux filtres</p>
+            <button onClick={resetFilters} className="text-sm font-medium text-amber-600 hover:underline">Effacer les filtres</button>
+          </div>
+        ) : (
+          /* ── TIMELINE ── */
+          <div className="relative">
+            <div className="absolute left-[19px] sm:left-[22px] top-4 bottom-4 w-0.5 rounded hidden sm:block" style={{ background: "linear-gradient(180deg,#FCD34D,#F59E0B,#D97706)", opacity: 0.35 }} />
+            <div className="space-y-7">
+              {groups.map(([hour, items]) => (
+                <div key={hour} className="relative">
+                  <div className="mb-3.5 flex items-center gap-3.5">
+                    <div
+                      className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
+                      style={{ fontFamily: "'Space Grotesk', sans-serif", background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 4px 12px -4px rgba(217,119,6,.4)" }}
+                    >
+                      {hour}
+                    </div>
+                    <span className="text-xs font-semibold text-gray-400">{items.length} course{items.length > 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="ml-0 sm:ml-[62px] flex flex-col gap-2.5">
+                    {items.map(({ course, reunionNum }, i) => (
+                      <TimelineRow
+                        key={course.course_id}
+                        course={course}
+                        reunionNum={reunionNum}
+                        vbCount={isPaid ? vbByCourse[course.course_id] : undefined}
+                        delay={Math.min(i, 8) * 0.05}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Upsell (utilisateurs gratuits) ── */}
+        {!isPaid && isToday && programme && programme.nb_courses > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3.5 rounded-[20px] px-5 py-4" style={{ border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)" }}>
+            <div className="min-w-[200px]">
+              <p className="text-sm font-bold text-amber-900">Paris de valeur verrouillés</p>
+              <p className="mt-1 text-xs text-amber-700">Passez Standard pour les voir détectés par l&apos;IA sur chaque course.</p>
+            </div>
+            <Link href="/tarifs" className="flex-shrink-0 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-transform hover:-translate-y-0.5" style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 8px 22px -8px rgba(245,158,11,.55)" }}>
+              Voir les offres
+            </Link>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

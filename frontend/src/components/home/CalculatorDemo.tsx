@@ -79,14 +79,14 @@ export function CalculatorDemo() {
       </div>
 
       {/* Saisie de la mise */}
-      <label htmlFor="demo-mise" className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Votre mise</label>
+      <label htmlFor="demo-mise" className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Votre mise</label>
       <div className="mt-1.5 flex items-center gap-2">
         <div className="relative flex-1">
           <input id="demo-mise" type="number" min={1} inputMode="numeric" value={mise || ""}
             onChange={(e) => setMise(parseInt(e.target.value, 10) || 0)}
             className="num-display w-full rounded-lg border border-gray-200 bg-white pl-3 pr-7 py-2 text-lg font-bold text-gray-900 outline-none transition-colors focus:border-brand-gold focus:ring-2 focus:ring-brand-gold/20"
             aria-label="Montant de votre mise en euros" />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">€</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 font-semibold">€</span>
         </div>
         <div className="flex gap-1">
           {CHIPS.map((c) => (
@@ -101,11 +101,11 @@ export function CalculatorDemo() {
       {/* En-tête plan : montant + EV global */}
       <div className="mt-4 flex items-center justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Plan {profil.emoji} {profil.label}</div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Plan {profil.emoji} {profil.label}</div>
           <div className="num-display text-xl font-extrabold text-brand-gold-deep">{eur(m)}€</div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Espérance estimée</div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Espérance estimée</div>
           <div className="num-display text-lg font-extrabold text-emerald-600">+{profil.ev}%</div>
         </div>
       </div>
@@ -126,8 +126,8 @@ export function CalculatorDemo() {
                   <div key={i} className="flex items-center justify-between text-xs">
                     <div className="min-w-0 flex-1">
                       <span className="font-semibold text-gray-900">{p.type}</span>
-                      <span className="text-gray-400 font-mono ml-1.5">{p.chevaux}</span>
-                      <span className="text-gray-400/70 ml-1.5">~{Math.round(p.proba * 100)}%</span>
+                      <span className="text-gray-500 font-mono ml-1.5">{p.chevaux}</span>
+                      <span className="text-gray-500/70 ml-1.5">~{Math.round(p.proba * 100)}%</span>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <span className="font-mono text-gray-600">{eur(stake)}€</span>
@@ -144,16 +144,16 @@ export function CalculatorDemo() {
       {/* Misé / Réserve (comme le vrai plan) */}
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <div className="rounded-md bg-gray-50 px-3 py-2">
-          <div className="text-gray-400">Misé</div>
+          <div className="text-gray-500">Misé</div>
           <div className="num-display font-bold text-gray-900">{eur(m - reserve)}€</div>
         </div>
         <div className="rounded-md bg-gray-50 px-3 py-2">
-          <div className="text-gray-400">Réserve</div>
+          <div className="text-gray-500">Réserve</div>
           <div className="num-display font-bold text-brand-gold-deep">{eur(reserve)}€</div>
         </div>
       </div>
 
-      <p className="mt-2 text-[10px] text-gray-400">
+      <p className="mt-2 text-[10px] text-gray-500">
         Exemple sur une course type. Le vrai calculateur utilise les rapports PMU réels et règle vos paris à l&apos;arrivée.
       </p>
     </div>

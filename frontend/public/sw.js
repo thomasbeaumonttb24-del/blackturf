@@ -3,7 +3,7 @@
    stale cache on any network hiccup, pinning users to an OLD build forever.
    This version intercepts NOTHING (browser handles freshness natively) and
    wipes ALL legacy caches on activate. */
-const CACHE_NAME = "blackturf-v4-nocache";
+const CACHE_NAME = "blackturf-v5-nocache";
 
 self.addEventListener("install", () => {
   self.skipWaiting();

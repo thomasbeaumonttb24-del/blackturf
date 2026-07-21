@@ -29,14 +29,26 @@ interface ModelVersion {
   version_num: number;
   auc_roc: number;
   brier_score: number;
-  precision_top3: number;
-  roi_simule: number;
+  precision_top3: number | null;
+  roi_simule: number | null;
   walk_forward_auc: number | null;
   walk_forward_variance: number | null;
   nb_courses_train: number;
   est_actif: boolean;
   est_rollback: boolean;
   created_at: string;
+}
+
+interface SystemError {
+  id: number | null;
+  kind: string;
+  created_at: string | null;
+  source: string;
+  level: string;
+  message: string;
+  detail: string | null;
+  endpoint: string | null;
+  resolved: boolean;
 }
 
 interface ScraperStatus {
@@ -293,6 +305,13 @@ export default function AdminPage() {
     { refreshInterval: 60000 }
   );
 
+  // Erreurs runtime LIVE (exceptions API + scrapers échoués) — refresh 20s.
+  const { data: errorsData, mutate: mutateErrors } = useSWR<{ count_24h: number; errors: SystemError[] }>(
+    user?.is_admin ? "/admin-errors" : null,
+    () => adminApi.errors().then((r) => r.data),
+    { refreshInterval: 20000 }
+  );
+
   // Rentabilité RÉELLE par profil (net + ROI) — réservé admin (déplacé du palmarès public).
   const { data: palmares } = useSWR<{
     n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
@@ -394,6 +413,56 @@ export default function AdminPage() {
           <StatCard icon={Activity} label="Courses 24h" value={dashboard.courses_24h} />
           <StatCard icon={AlertTriangle} label="Alertes en erreur" value={dashboard.alertes_erreur} sub={dashboard.alertes_erreur > 0 ? "⚠ À vérifier" : "✓ OK"} />
         </div>
+      )}
+
+      {/* Erreurs runtime LIVE (exceptions API + scrapers échoués) — identifier ce qui casse. */}
+      {errorsData && errorsData.errors.length > 0 && (
+        <Card className="border-brand-red/40">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-brand-red" />
+              Erreurs récentes
+              <span className="text-xs font-normal text-muted-foreground">({errorsData.errors.length} · 72h · live)</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border/50 max-h-[28rem] overflow-auto">
+              {errorsData.errors.map((e, i) => (
+                <details key={e.id ?? `s${i}`} className="px-4 py-2.5 text-xs">
+                  <summary className="cursor-pointer list-none flex items-start justify-between gap-3">
+                    <span className="flex-1 min-w-0">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]",
+                          e.kind === "scraper" ? "bg-amber-500/15 text-amber-700" : "bg-red-500/15 text-red-700")}>
+                          {e.source}
+                        </span>
+                        {e.endpoint && <span className="font-mono text-muted-foreground truncate">{e.endpoint}</span>}
+                        {e.resolved && <span className="text-emerald-600 text-[10px]">✓ résolu</span>}
+                      </span>
+                      <span className="block mt-1 font-medium text-foreground break-words">{e.message}</span>
+                    </span>
+                    <span className="text-muted-foreground font-mono shrink-0 text-[11px]">
+                      {e.created_at ? formatDateTime(e.created_at) : "—"}
+                    </span>
+                  </summary>
+                  {e.detail && (
+                    <pre className="mt-2 max-h-60 overflow-auto rounded bg-muted/40 p-2 text-[11px] whitespace-pre-wrap break-words">{e.detail}</pre>
+                  )}
+                  {e.kind === "api" && e.id != null && !e.resolved && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 h-7 text-[11px]"
+                      onClick={async () => { await adminApi.resolveError(e.id!); mutateErrors(); }}
+                    >
+                      Marquer résolu
+                    </Button>
+                  )}
+                </details>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Rentabilité réelle par profil (NET + ROI) — admin only, déplacé du palmarès public.
@@ -574,8 +643,8 @@ export default function AdminPage() {
                     <span className="text-muted-foreground">AUC <span className="text-foreground font-semibold">{m.auc_roc.toFixed(4)}</span></span>
                     <span className="text-muted-foreground">Brier <span className={cn("font-semibold", m.brier_score < 0.18 ? "text-brand-emerald" : "text-brand-red")}>{m.brier_score.toFixed(4)}</span></span>
                     <span className="text-muted-foreground">WF-AUC <span className="text-foreground font-semibold">{m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}</span></span>
-                    <span className="text-muted-foreground">Top-3 <span className="text-foreground font-semibold">{(m.precision_top3 * 100).toFixed(1)}%</span></span>
-                    <span className="text-muted-foreground">ROI <span className={cn("font-semibold", m.roi_simule >= 0 ? "text-brand-emerald" : "text-destructive")}>{m.roi_simule >= 0 ? "+" : ""}{(m.roi_simule * 100).toFixed(1)}%</span></span>
+                    <span className="text-muted-foreground">Top-3 <span className="text-foreground font-semibold">{m.precision_top3 != null ? `${(m.precision_top3 * 100).toFixed(1)}%` : "—"}</span></span>
+                    <span className="text-muted-foreground">ROI <span className={cn("font-semibold", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald" : "text-destructive")}>{m.roi_simule != null ? `${m.roi_simule >= 0 ? "+" : ""}${(m.roi_simule * 100).toFixed(1)}%` : "—"}</span></span>
                     <span className="text-muted-foreground">{m.nb_courses_train} courses</span>
                   </div>
                 </div>
@@ -608,9 +677,9 @@ export default function AdminPage() {
                       <td className="p-3 text-right text-xs text-muted-foreground">
                         {m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}
                       </td>
-                      <td className="p-3 text-right">{(m.precision_top3 * 100).toFixed(1)}%</td>
-                      <td className={cn("p-3 text-right", m.roi_simule >= 0 ? "text-brand-emerald" : "text-destructive")}>
-                        {m.roi_simule >= 0 ? "+" : ""}{(m.roi_simule * 100).toFixed(1)}%
+                      <td className="p-3 text-right">{m.precision_top3 != null ? `${(m.precision_top3 * 100).toFixed(1)}%` : "—"}</td>
+                      <td className={cn("p-3 text-right", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald" : "text-destructive")}>
+                        {m.roi_simule != null ? `${m.roi_simule >= 0 ? "+" : ""}${(m.roi_simule * 100).toFixed(1)}%` : "—"}
                       </td>
                       <td className="p-3 text-right text-muted-foreground">{m.nb_courses_train}</td>
                       <td className="p-3 text-center">

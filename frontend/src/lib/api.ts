@@ -49,25 +49,8 @@ if (typeof window !== "undefined") {
             original.headers.Authorization = `Bearer ${access_token}`;
             return api(original);
           } catch {
-            // Le refresh a echoue (refresh_token expire/invalide) -> session morte : on
-            // nettoie TOUT (y compris "user", sinon il reste connecte fantome) + login.
             localStorage.removeItem("access_token");
             localStorage.removeItem("refresh_token");
-            localStorage.removeItem("user");
-            if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-              window.location.href = "/login";
-            }
-          }
-        } else if (
-          typeof window !== "undefined" &&
-          (localStorage.getItem("access_token") || localStorage.getItem("user"))
-        ) {
-          // 401 SANS refresh_token alors qu une session etait censee active (token expire,
-          // refresh_token perdu = frequent sur iOS Safari). Session morte : on nettoie l etat
-          // fantome (sinon "aucune analyse disponible" en boucle) et on renvoie au login.
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("user");
-          if (!window.location.pathname.startsWith("/login")) {
             window.location.href = "/login";
           }
         }
@@ -188,6 +171,10 @@ export const adminApi = {
   scraperLogs: (params?: Record<string, unknown>) =>
     api.get("/scraper/logs", { baseURL: `${API_URL}/admin/api`, params }),
   scraperStatus: () => api.get("/scraper/status", { baseURL: `${API_URL}/admin/api` }),
+  errors: (params?: Record<string, unknown>) =>
+    api.get("/errors", { baseURL: `${API_URL}/admin/api`, params }),
+  resolveError: (id: number) =>
+    api.post(`/errors/${id}/resolve`, null, { baseURL: `${API_URL}/admin/api` }),
   // Adaptive learning & ML monitoring
   alState: () => api.get("/adaptive-learning/state", { baseURL: `${API_URL}/admin/api` }),
   alHistory: (limit = 50) =>

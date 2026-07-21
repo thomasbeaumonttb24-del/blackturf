@@ -1,8 +1,35 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Check, X, Zap, ChevronRight, Calculator } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+
+export const metadata: Metadata = {
+  title: "Tarifs — Gratuit, Standard, Expert",
+  description:
+    "Les formules BlackTurf : Gratuit (programme + cotes), Standard 12€/mois (prédictions IA + paris de valeur + calculateur de mise) et Expert 19€/mois. Sans engagement.",
+  alternates: { canonical: "/tarifs" },
+  openGraph: {
+    title: "Tarifs BlackTurf — Gratuit, Standard, Expert",
+    description: "Prédictions IA, paris de valeur et calculateur de mise. Sans engagement.",
+    url: "https://blackturf.fr/tarifs",
+  },
+};
+
+const offersJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  name: "BlackTurf — Conseiller IA paris hippiques PMU",
+  description:
+    "Pronostics et paris de valeur PMU par intelligence artificielle, plan de mise personnalisé.",
+  brand: { "@type": "Brand", name: "BlackTurf" },
+  offers: [
+    { "@type": "Offer", name: "Gratuit", price: "0", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
+    { "@type": "Offer", name: "Standard", price: "12", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
+    { "@type": "Offer", name: "Expert", price: "19", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
+  ],
+};
 
 const FEATURES_COMPARISON = [
   { label: "Programme PMU du jour", free: true, standard: true, expert: true },
@@ -24,6 +51,7 @@ const FEATURES_COMPARISON = [
 export default function TarifsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-10 sm:py-16">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(offersJsonLd) }} />
       {/* Header */}
       <div className="text-center mb-10 sm:mb-16">
         <Badge variant="gold" className="mb-4">Tarifs</Badge>
