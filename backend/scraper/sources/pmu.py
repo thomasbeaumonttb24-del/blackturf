@@ -48,6 +48,31 @@ def _first_poids(p: dict):
         return round(v / 10.0, 1) if v > 120 else round(v, 1)
     return None
 
+
+def _commentaire_texte(v):
+    """Normalise un champ commentaire PMU (dict {texte:…} ou str) → str|None."""
+    if isinstance(v, dict):
+        t = v.get("texte") or v.get("commentaire") or v.get("text")
+        return t.strip() if isinstance(t, str) and t.strip() else None
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+    return None
+
+
+def _extract_commentaire(course_obj: dict, moi: dict | None):
+    """Déroulé / trip note d'une course passée. Cherche d'abord au niveau du partant
+    (commentaire spécifique au cheval, le plus utile), puis au niveau course. None si
+    le PMU ne publie rien (défensif : pas de champ inventé)."""
+    for src, keys in (
+        (moi or {}, ("commentaireApresCourse", "commentaire", "deroulement")),
+        (course_obj or {}, ("commentaireApresCourse", "commentaire")),
+    ):
+        for k in keys:
+            t = _commentaire_texte(src.get(k))
+            if t:
+                return t
+    return None
+
 DISCIPLINE_MAP = {
     "PLAT": "Plat",
     "TROT_ATTELE": "Attelé",
@@ -327,6 +352,10 @@ class PmuScraper(BaseScraper):
                     "jockey": (moi or {}).get("nomJockey"),
                     "adversaires": [pp.get("nomCheval") for pp in pps
                                     if not pp.get("itsHim") and pp.get("nomCheval")],
+                    # Commentaire / déroulé de la course passée (trip notes). Le PMU
+                    # peut le publier au niveau course (commentaireApresCourse) ou du
+                    # partant. Défensif : on prend le 1er disponible, sinon None.
+                    "commentaire": _extract_commentaire(c, moi),
                 })
             if courses:
                 out.append({"cheval_nom": part.get("nomCheval"), "courses": courses})
@@ -379,6 +408,27 @@ class PmuScraper(BaseScraper):
             return None  # course pas encore arrivée
         ordre.sort(key=lambda x: x["position"])
 
+        # Disqualifiés / distancés : partants SANS place à l'arrivée mais avec un
+        # `incident` PMU (DAI au trot, tombé/distancé/arrêté au galop/obstacle…). On les
+        # ajoute EN FIN de classement (position=None → ignorés par le règlement des paris,
+        # cf. settle_pari qui saute les positions nulles) pour les afficher dans le tableau.
+        for p in participants:
+            if (p.get("ordreArrivee") or 0) > 0:
+                continue
+            statut = (p.get("statut") or "").upper()
+            incident = p.get("incident")
+            # NON_PARTANT n'est PAS une disqualification (cheval retiré avant le départ).
+            if statut == "PARTANT" and incident and incident.upper() != "NON_PARTANT":
+                ordre.append({
+                    "numero": p.get("numPmu"),
+                    "nom": p.get("nom"),
+                    "position": None,
+                    "temps": None,
+                    "reduction_km": None,
+                    "incident": incident,
+                    "disqualifie": True,
+                })
+
         # 2) Rapports (dividendes) via /rapports-definitifs (liste de typePari)
         # On capture TOUT le détail PUBLIÉ : chaque type a une liste de rapports avec
         # une `combinaison` (cheval pour le Simple Placé, combo pour 2sur4/Couplé…) et
@@ -404,6 +454,11 @@ class PmuScraper(BaseScraper):
                         detail.append({
                             "combinaison": str(rp.get("combinaison") or "").strip() or None,
                             "rapport": round(div / 100, 2),
+                            # libellé PMU (« e-Multi en 4/5/6/7 ») = discriminateur de la
+                            # formule jouée : Multi/Mini Multi publient UNE entrée par « en N »
+                            # (même combinaison, rapports décroissants). Sans lui on ne sait
+                            # pas distinguer en 4/5/6/7 → on paierait toujours le 1er (en 4).
+                            "libelle": str(rp.get("libelle") or "").strip() or None,
                         })
                     if not detail:
                         continue
@@ -549,6 +604,13 @@ class PmuScraper(BaseScraper):
             robe_val = _libelle(p.get("robe"))
             race_val = _libelle(p.get("race"))
 
+            # ── Non-partant (cheval retiré avant la course) ──
+            # Le PMU expose le statut du partant : "PARTANT" tant qu'il court,
+            # "NON_PARTANT" dès qu'il est déclaré forfait. On le capte pour le
+            # retirer du tableau + du pronostic (et régénérer le prono restant).
+            statut_pmu = str(p.get("statut") or "").upper()
+            non_partant = statut_pmu in ("NON_PARTANT", "NONPARTANT", "ABSENT")
+
             partant = PartantScrape(
                 numero=p.get("numPmu", i + 1),
                 nom=p.get("nom", ""),
@@ -587,10 +649,14 @@ class PmuScraper(BaseScraper):
                 nb_places_second=p.get("nombrePlacesSecond"),
                 nb_places_troisieme=p.get("nombrePlacesTroisieme"),
                 handicap_distance=p.get("handicapDistance"),
+                # Valeur handicap (#10) — champ PMU réel = `handicapValeur` (vérifié live
+                # 2026-06-18 : présent sur les participants, ≠ valeurHandicap).
+                valeur_handicap=p.get("handicapValeur"),
                 indicateur_inedit=p.get("indicateurInedit"),
                 jument_pleine=p.get("jumentPleine"),
                 race=race_val,
                 robe=robe_val,
+                non_partant=non_partant,
                 source="pmu",
             )
             partants.append(partant)

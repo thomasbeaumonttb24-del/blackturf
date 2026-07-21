@@ -29,7 +29,7 @@ MIN_FILT_FOR_EDGE = 50
 
 async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) -> dict:
     rows = (await session.execute(text("""
-        SELECT fm.features, pa.cote_pmu,
+        SELECT fm.features, COALESCE((fm.features->>'cote_pmu')::float, pa.cote_pmu) AS cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
         FROM features_ml fm
         JOIN participations pa ON pa.participation_id = fm.participation_id

@@ -9,7 +9,7 @@ from ml.features import (
     compute_distance_deplacement, HIPPODROME_GEO,
 )
 from ml.outsider_detector import compute_outsider_score
-from ml.profil_learning import shrunk_weight
+from ml.profil_learning import shrunk_weight, zero_win_suppression
 from services.mise_calculator import (
     generer_plan, plan_to_dict, _motif_rejet, _effective_config,
 )
@@ -194,6 +194,62 @@ class TestSettle2sur4Combine:
         assert r["gain_mult"] == 1.0
 
 
+class TestSettleNonPartant:
+    """Un cheval déclaré non-partant après la prise du pari → mise remboursée
+    (rapport 1.0), JAMAIS compté perdant (sinon ROI faussé + apprentissage pollué)."""
+    CL = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+
+    def test_simple_gagnant_np_rembourse(self):
+        # On joue le 5 qui est déclaré non-partant → remboursé, pas perdu.
+        r = settle_pari("Simple Gagnant", [5], self.CL, {"e_simple_gagnant": 4.2}, 8,
+                        non_partants={5})
+        assert r.get("rembourse") is True
+        assert r["gagne"] is False and r["rapport_reel"] == 1.0
+
+    def test_couple_un_np_rembourse(self):
+        # Couplé sur 1 (gagnant) + 9 (non-partant) → remboursé, pas perdu.
+        r = settle_pari("Couplé Gagnant", [1, 9], self.CL, {"e_couple_gagnant": 12.0}, 8,
+                        non_partants={9})
+        assert r.get("rembourse") is True
+
+    def test_sans_np_inchange(self):
+        # Aucun NP fourni → comportement normal préservé.
+        r = settle_pari("Simple Gagnant", [1], self.CL, {"e_simple_gagnant": 4.2}, 8)
+        assert r["gagne"] is True and not r.get("rembourse")
+
+    def test_np_non_joue_nimpacte_pas(self):
+        # Le NP (7) n'est pas dans la sélection → pari réglé normalement.
+        r = settle_pari("Simple Gagnant", [1], self.CL, {"e_simple_gagnant": 4.2}, 8,
+                        non_partants={7})
+        assert r["gagne"] is True and not r.get("rembourse")
+
+
+class TestSettleOrdreEtDeadHeat:
+    def test_tierce_ordre_exact_gagne(self):
+        cl = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+        r = settle_pari("Tiercé Ordre", [1, 2, 3], cl, {"e_tierce_ordre": 50.0}, 8)
+        assert r["gagne"] is True
+
+    def test_tierce_ordre_desordre_perd(self):
+        # bon trio mais MAUVAIS ordre → Tiercé Ordre perd (avant fix : gagnait à tort)
+        cl = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+        r = settle_pari("Tiercé Ordre", [2, 1, 3], cl, {"e_tierce_ordre": 50.0}, 8)
+        assert r["gagne"] is False
+
+    def test_tierce_desordre_ordre_indifferent(self):
+        cl = _classement(1, 2, 3, 4, 5, 6, 7, 8)
+        r = settle_pari("Tiercé Désordre", [3, 1, 2], cl, {"e_tierce": 12.0}, 8)
+        assert r["gagne"] is True
+
+    def test_couple_gagnant_dead_heat(self):
+        # ex-aequo 1re place : 1 ET 2 tous deux position 1, 3 en position 2.
+        cl = [{"numero": 1, "position": 1}, {"numero": 2, "position": 1},
+              {"numero": 3, "position": 2}] + [{"numero": n, "position": 3} for n in (4, 5, 6, 7, 8)]
+        # Couplé 1+3 doit gagner (1er ex-aequo + 2e) — avant fix : faux négatif.
+        r = settle_pari("Couplé Gagnant", [1, 3], cl, {"e_couple_gagnant": 8.0}, 8)
+        assert r["gagne"] is True
+
+
 # ── Apprentissage par profil ─────────────────────────────────────────────────
 class TestShrunkWeight:
     def test_neutre_sans_data(self):
@@ -202,11 +258,57 @@ class TestShrunkWeight:
 
     def test_shrinkage(self):
         # ROI +50% sur n=15, k=15 → effectif +25% → poids 1.25
-        assert shrunk_weight(50.0, 100.0, 15) == pytest.approx(1.25)
+        assert shrunk_weight(50.0, 100.0, 15, k=15) == pytest.approx(1.25)
+
+    def test_shrinkage_defaut_k20(self):
+        # k par défaut relevé à 20 (anti sur-réaction) : même ROI, poids plus prudent.
+        assert shrunk_weight(50.0, 100.0, 15) == pytest.approx(1.0 + 0.5 * 15 / 35)
+
+    def test_shrinkage_accepte_n_flottant(self):
+        # n effectif (decay temporel) est un float → la fonction doit l'accepter.
+        w = shrunk_weight(25.0, 50.0, 7.5)
+        assert 1.0 < w < 1.6
 
     def test_bornes(self):
         assert shrunk_weight(-500.0, 100.0, 1000) == 0.5
         assert shrunk_weight(500.0, 100.0, 1000) == 1.6
+
+
+# ── Suppression globale « 0 gain » (audit ROI 2026-07-02) ────────────────────
+class TestZeroWinSuppression:
+    def test_type_zero_gain_gros_n_coupe(self):
+        agg = {"Super 4": {"n": 31, "win": 0}}
+        assert zero_win_suppression(agg) == {"Super 4"}
+
+    def test_type_zero_gain_petit_n_garde_hors_famille(self):
+        # Un Couplé Gagnant à 0 gain sur 8 tickets = pas assez de preuve → gardé.
+        agg = {"Couplé Gagnant": {"n": 8, "win": 0}}
+        assert zero_win_suppression(agg) == set()
+
+    def test_pool_famille_jackpot_coupe_les_petits_n(self):
+        # Cas prod : famille jackpot 0 gain sur 91 tickets → chaque membre 0-gain
+        # (n≥3) coupé même si son n individuel est petit.
+        agg = {
+            "Super 4": {"n": 31, "win": 0}, "Multi en 4": {"n": 17, "win": 0},
+            "Multi en 5": {"n": 15, "win": 0}, "Mini Multi en 4": {"n": 12, "win": 0},
+            "Tiercé Désordre": {"n": 5, "win": 0}, "Quarté+ Désordre": {"n": 4, "win": 0},
+            "Quinté+ Désordre": {"n": 4, "win": 0}, "Pick5": {"n": 3, "win": 0},
+            "Simple Gagnant": {"n": 898, "win": 56},   # hors famille, gagne → intouché
+        }
+        cut = zero_win_suppression(agg)
+        assert cut == {"Super 4", "Multi en 4", "Multi en 5", "Mini Multi en 4",
+                       "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre", "Pick5"}
+
+    def test_rehabilitation_des_le_premier_gain(self):
+        # Un gain sur le type → sort de la règle. Un gain DANS la famille → le pool
+        # n'est plus « 0 gain » → les petits n de la famille ne sont plus coupés
+        # (seule la règle solo n≥15 reste).
+        agg = {
+            "Super 4": {"n": 31, "win": 0},
+            "Multi en 4": {"n": 17, "win": 1},          # a gagné → jamais coupé
+            "Tiercé Désordre": {"n": 5, "win": 0},      # famille a 1 gain → gardé
+        }
+        assert zero_win_suppression(agg) == {"Super 4"}   # règle solo uniquement
 
 
 # ── Justificatifs du plan de mise ────────────────────────────────────────────
@@ -245,10 +347,26 @@ class TestJustificatifsPlan:
             assert e["type"]
 
     def test_motif_rejet_type_hors_profil(self):
+        # Trio = hors méthode du prudent (le Simple Gagnant y est désormais autorisé
+        # via le gate dominance, cf. sg_min_proba — c'est le Trio qui reste interdit).
         cfg = _effective_config("conservateur", 0.0)
-        c = {"type_pari": "Simple Gagnant", "chevaux": [{"numero": 4, "nom": "X", "cote": 12.0}],
+        c = {"type_pari": "Trio", "chevaux": [{"numero": 4, "nom": "X", "cote": 8.0}],
              "proba_gain": 0.12, "rapport_estime": 12.0, "ev": 0.4, "edge": 0.05}
         assert "hors méthode" in _motif_rejet(c, cfg)
+
+    def test_sg_prudent_dominant_accepte_sinon_rejete(self):
+        # SG prudent : autorisé si le cheval DOMINE (proba ≥ 0.34) et cote dans la
+        # bande ×1.8-4 ; rejeté si le cheval ne domine pas.
+        from services.mise_calculator import PROFIL_CONFIG
+        cfg = _effective_config("conservateur", 0.0)
+        assert "Simple Gagnant" in PROFIL_CONFIG["conservateur"]["types"]
+        assert cfg["sg_min_proba"] == pytest.approx(0.34)
+
+    def test_sg_et_sp_autorises_modere(self):
+        from services.mise_calculator import PROFIL_CONFIG
+        types = PROFIL_CONFIG["equilibre"]["types"]
+        assert "Simple Gagnant" in types
+        assert "Simple Placé" in types
 
     def test_motif_rejet_ev_negative_sans_edge(self):
         # Le PRUDENT (spec_coup=False) refuse un pari -EV SANS valeur → "donne sa mise

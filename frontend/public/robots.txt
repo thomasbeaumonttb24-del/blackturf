@@ -1,6 +1,7 @@
 User-agent: *
 Allow: /
 Allow: /programme
+Allow: /courses
 Allow: /tarifs
 Allow: /mentions-legales
 Allow: /cgu
@@ -12,5 +13,7 @@ Disallow: /profil
 Disallow: /bankroll
 Disallow: /strategies
 Disallow: /assistant
+Disallow: /dashboard
+Disallow: /notifications
 
 Sitemap: https://blackturf.fr/sitemap.xml

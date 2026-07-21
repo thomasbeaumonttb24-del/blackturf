@@ -66,25 +66,78 @@ def _should_deploy(
     que soit la situation de l'actif. C'est ce plancher qui manquait et qui a laissé un
     modèle à AUC 0.06 passer en prod (l'actif "non fiable" déployait n'importe quoi).
 
-    FLAG roi_deploy_gate : si `roi_gate_enabled`, on refuse AUSSI de promouvoir tant que la
-    couche PARIS ne prouve pas un edge hors-échantillon (`betting_edge_ok`, ex. edge_monitor
-    edge_ok). Un AUC > 0.52 peut générer un ROI négatif après prélèvement PMU — c'est la
-    couche staking, jamais gatée, qui perd l'argent (cf. audit edge -52%).
+    FLAG roi_deploy_gate : si `roi_gate_enabled`, la couche PARIS doit prouver un edge
+    hors-échantillon (`betting_edge_ok`, ex. edge_monitor edge_ok). MAIS cette gate ne
+    bloque QUE la promotion d'un modèle SANS mérite de ranking (wf qui ne progresse pas).
+    Un modèle qui AMÉLIORE le walk-forward AUC (`new_wf >= current_wf`) est un meilleur
+    CLASSEUR → toujours promu : il améliore les pronostics affichés, sans placer d'argent.
+    Le ROI/edge est une couche distincte (staking, BT_STAKING_SAFE) gérée à part. Sans ce
+    dégel, un edge durablement négatif (audit -52%) figerait le modèle À VIE et empêcherait
+    toute amélioration du ranking — exactement le blocage du 2026-06-19 (wf 0.8165>0.8141
+    rejeté à tort en `worse_wf`).
 
     Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
     saut de données massif, OU walk-forward au moins aussi bon (tolérance régression).
     """
     if new_wf < min_auc:
         return False
-    if roi_gate_enabled and not betting_edge_ok:
+    # Remplacement STRUCTUREL de l'actif : actif synthetique / absent / non fiable
+    # (trop peu de courses) / saut de donnees massif (nouveau modele entraine sur
+    # >=1.5x plus de donnees). Ces cas justifient la promotion independamment du
+    # walk-forward (cf data_jump : le wf est optimiste sur peu de donnees).
+    structural_replace = (
+        current_is_synth or no_current or current_unreliable or data_jump
+    )
+    # Gate ROI : ne fige PAS une amelioration de ranking (wf au moins aussi bon
+    # que l'actif) NI un remplacement structurel (ex. modele 18 mois remplacant un
+    # modele a fenetre courte sur-ajuste dont le wf gonfle bloquait tout -- bug
+    # 2026-06-29 : roi_gate court-circuitait avant data_jump).
+    ranking_improvement = new_wf >= current_wf
+    if (roi_gate_enabled and not betting_edge_ok
+            and not ranking_improvement and not structural_replace):
         return False
     return (
-        current_is_synth
-        or no_current
-        or current_unreliable
-        or data_jump
+        structural_replace
         or new_wf >= current_wf - seuil_regression
     )
+
+
+# ─────────────────────────────────────────────
+# Capture cote de clôture (fondation CLV)
+# ─────────────────────────────────────────────
+async def _capture_closing_cotes(course_id: str) -> None:
+    """Fige la cote PMU de CLÔTURE (dernière scrapée ~départ) + la cote_figee (T-10) de
+    chaque partant dans cote_cloture_log. Base de la métrique CLV (bat-on la ligne de
+    clôture ?). Idempotent (ON CONFLICT DO NOTHING : la 1re capture après l'off gagne).
+    Best-effort : tout échec est avalé, n'interrompt jamais l'apprentissage post-course.
+
+    NB : tant que le scraper ne rafraîchit pas les cotes dans les dernières minutes,
+    cote_cloture ≈ cote_figee (la cote PMU se fige ~T-10). L'étape suivante = scrape
+    haute fréquence near-off pour capturer le vrai mouvement de clôture."""
+    try:
+        async with AsyncSessionLocal() as s:
+            await s.execute(text("""
+                CREATE TABLE IF NOT EXISTS cote_cloture_log (
+                    participation_id TEXT PRIMARY KEY,
+                    course_id TEXT NOT NULL,
+                    numero INT,
+                    cote_cloture DOUBLE PRECISION,
+                    cote_figee DOUBLE PRECISION,
+                    captured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """))
+            await s.execute(text("""
+                INSERT INTO cote_cloture_log (participation_id, course_id, numero, cote_cloture, cote_figee)
+                SELECT pa.participation_id, pa.course_id, pa.numero, pa.cote_pmu, pr.cote_figee
+                FROM participations pa
+                LEFT JOIN predictions pr ON pr.participation_id = pa.participation_id
+                WHERE pa.course_id = :cid AND pa.non_partant = false AND pa.cote_pmu > 1
+                ON CONFLICT (participation_id) DO NOTHING
+            """), {"cid": course_id})
+            await s.commit()
+        log.info("pipeline.closing_cotes_captured", course_id=course_id)
+    except Exception as e:
+        log.warning("pipeline.closing_cotes_skip", course_id=course_id, err=str(e)[:140])
 
 
 # ─────────────────────────────────────────────
@@ -110,6 +163,11 @@ async def run_post_course(course_id: str) -> None:
         if not resultat:
             log.warning("pipeline.post_course.no_result", course_id=course_id)
             return
+
+        # 0. Snapshot cote de CLÔTURE (fondation CLV). La course vient de finir → la cote
+        # PMU a cessé d'évoluer ; pa.cote_pmu = dernière scrapée ≈ ligne de clôture. On la
+        # fige (+ cote_figee T-10) une fois pour mesurer plus tard si on bat la clôture.
+        await _capture_closing_cotes(course_id)
 
         # 1. Mise à jour ELO
         classement = [
@@ -239,7 +297,7 @@ async def run_post_course(course_id: str) -> None:
                 # Charger les prédictions sauvegardées pour cette course
                 pred_result = await al_session.execute(text("""
                     SELECT p.participation_id, p.proba_top3, p.proba_top1,
-                           p.confidence_score, pa.numero
+                           p.confidence_score, pa.numero, p.rang_predit
                     FROM predictions p
                     JOIN participations pa ON p.participation_id = pa.participation_id
                     WHERE p.course_id = :cid
@@ -254,6 +312,7 @@ async def run_post_course(course_id: str) -> None:
                         "proba_top1": float(r[2] or 0),
                         "confidence_score": float(r[3] or 0),
                         "numero": r[4],
+                        "rang_predit": int(r[5]) if r[5] is not None else None,
                     }
                     for r in pred_rows
                 ]
@@ -354,14 +413,33 @@ async def run_post_course(course_id: str) -> None:
             if n_pl:
                 # Recalcul léger des poids appris → la prochaine sélection en profite.
                 await compute_profil_weights(pl_session)
+                # Recalcul de la calibration estimé→réel du rapport (par profil × type) :
+                # les bandes de cote restent fidèles aux paiements PMU réels les plus récents.
+                try:
+                    from ml.signal_performance import (
+                        compute_rapport_calibration, persist_rapport_calibration)
+                    _rc = await compute_rapport_calibration(pl_session)
+                    await persist_rapport_calibration(pl_session, _rc)
+                except Exception as e:
+                    log.warning("pipeline.rapport_calib_skip", course_id=course_id, err=str(e)[:140])
     except Exception as e:
         log.warning("pipeline.profil_learning_settle_skip", course_id=course_id, err=str(e)[:140])
 
     # 7. Mini-retraining si nb_resultats_depuis_dernier_retrain % 20 == 0
+    # COOLDOWN (anti-flood) : _count_recent_results() reste à un multiple du seuil sur une
+    # fenêtre → SANS cooldown, CHAQUE post-course re-déclenchait un retrain complet (47k
+    # lignes, ~2 min, lourd) toutes les 2-4 min, surtout au reboot quand le backlog de
+    # résultats se règle → pic mémoire/CPU permanent (cause d'OOM sur 8 Go). Le cooldown
+    # Redis (clé auto-expirante) borne à 1 retrain incrémental / RETRAIN_COOLDOWN_S. Le
+    # nightly complet (scheduler 02:00) reste indépendant.
     nb_new = await _count_recent_results()
     if nb_new % settings.retrain_every_n_results == 0:
-        log.info("pipeline.mini_retrain.triggered", nb_resultats=nb_new)
-        await run_incremental_retraining()
+        if await _incr_retrain_cooldown_active():
+            log.info("pipeline.mini_retrain.cooldown_skip", nb_resultats=nb_new)
+        else:
+            await _set_incr_retrain_cooldown(RETRAIN_COOLDOWN_S)
+            log.info("pipeline.mini_retrain.triggered", nb_resultats=nb_new)
+            await run_incremental_retraining()
 
     elapsed = (datetime.now() - t0).total_seconds()
     log.info("pipeline.post_course.done", course_id=course_id, elapsed_s=round(elapsed, 2))
@@ -376,13 +454,41 @@ async def _invalidate_stats_caches(course_id: str) -> None:
         redis = await get_redis()
         keys = [
             "stats:public", "stats:equity-curve", "stats:ml-status",
-            "stats:dashboard-summary", "stats:track-record", "stats:profils",
+            "stats:dashboard-summary",
+            # NB: stats:track-record + stats:profils retires de la purge immediate
+            # (recalcul froid ~2s). Geres par TTL 1h + job warm_caches /30min.
             f"course_detail:{course_id}", f"analyse:{course_id}",
         ]
         await redis.delete(*keys)
         log.info("pipeline.stats_cache_invalidated", course_id=course_id, n_keys=len(keys))
     except Exception as e:
         log.warning("pipeline.stats_cache_invalidate_skip", err=str(e)[:140])
+
+
+# Délai minimal entre deux retrains INCRÉMENTAUX (post-course). 6 h → au plus 4/jour,
+# au lieu d'un toutes les 2-4 min. Les nouveaux résultats restent appris (au prochain
+# créneau), mais on supprime le pic mémoire/CPU permanent qui saturait le VPS 8 Go.
+RETRAIN_COOLDOWN_S = 6 * 3600
+_INCR_RETRAIN_COOLDOWN_KEY = "ml:incr_retrain_cooldown"
+
+
+async def _incr_retrain_cooldown_active() -> bool:
+    """True si un retrain incrémental a tourné récemment (clé Redis non expirée)."""
+    try:
+        from db.redis_client import get_redis
+        r = await get_redis()
+        return bool(await r.exists(_INCR_RETRAIN_COOLDOWN_KEY))
+    except Exception:
+        return False        # Redis indispo → ne pas bloquer le retrain
+
+
+async def _set_incr_retrain_cooldown(seconds: int) -> None:
+    try:
+        from db.redis_client import get_redis
+        r = await get_redis()
+        await r.set(_INCR_RETRAIN_COOLDOWN_KEY, "1", ex=int(seconds))
+    except Exception:
+        pass
 
 
 async def run_incremental_retraining() -> None:
@@ -432,6 +538,16 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.cote_calibration_done", n=_cc.get("n_total"))
     except Exception as e:
         log.warning("pipeline.nightly_cote_calib_skip", err=str(e)[:140])
+    # RATTRAPAGE du règlement des runs profils (audit ROI 2026-07-02 : 287 runs
+    # pending/partial bloqués = apprentissage sur échantillon amputé). AVANT les
+    # apprentissages ci-dessous pour qu'ils agrègent des données complètes.
+    try:
+        from ml.profil_learning import settle_catchup
+        async with AsyncSessionLocal() as sc_session:
+            _sc = await settle_catchup(sc_session)
+            log.info("pipeline.settle_catchup_done", **_sc)
+    except Exception as e:
+        log.warning("pipeline.nightly_settle_catchup_skip", err=str(e)[:140])
     # Ré-apprend le ROI réel PAR SIGNAL (duo J/E, ELO, pedigree, forme-piège…) →
     # module la sélection des value bets vers ce qui rapporte. Auto-amélioration.
     try:
@@ -447,6 +563,18 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.signal_performance_done", n=_sp.get("n_total"))
     except Exception as e:
         log.warning("pipeline.nightly_signal_perf_skip", err=str(e)[:140])
+    # Ré-apprend le ROI réel PAR BANDE D'EV → rétrograde les bandes perdantes (zone
+    # toxique) au lieu d'un couperet dur. La sélection s'adapte au ROI mesuré.
+    try:
+        from ml.signal_performance import (
+            compute_ev_band_performance, persist_ev_band_performance,
+        )
+        async with AsyncSessionLocal() as evb_session:
+            _evb = await compute_ev_band_performance(evb_session)
+            await persist_ev_band_performance(evb_session, _evb)
+            log.info("pipeline.ev_band_performance_done", n=_evb.get("n_total"))
+    except Exception as e:
+        log.warning("pipeline.nightly_ev_band_perf_skip", err=str(e)[:140])
     # Ré-apprend les poids PAR PROFIL depuis les PRONOS ÉMIS réglés (profil_run_log) :
     # l'algo apprend de SES recommandations réelles par profil, pas du top-3.
     try:
@@ -456,6 +584,19 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.profil_weights_done", n_runs=_plw.get("n_total_runs"))
     except Exception as e:
         log.warning("pipeline.nightly_profil_weights_skip", err=str(e)[:140])
+    # Ré-apprend la calibration estimé→réel du RAPPORT par (profil × type) depuis les
+    # pronos figés réglés → le gate de bande s'applique au rapport RÉELLEMENT attendu :
+    # un type qui paie sous la tranche de son profil (ex. Placé favori ×1.3 en prudent)
+    # est écarté. C'est l'apprentissage qui fait respecter les tranches sur le réel.
+    try:
+        from ml.signal_performance import (
+            compute_rapport_calibration, persist_rapport_calibration)
+        async with AsyncSessionLocal() as rc_session:
+            _rc = await compute_rapport_calibration(rc_session)
+            await persist_rapport_calibration(rc_session, _rc)
+            log.info("pipeline.rapport_calibration_done", n_runs=_rc.get("n_runs"))
+    except Exception as e:
+        log.warning("pipeline.nightly_rapport_calib_skip", err=str(e)[:140])
     # Surveillance HONNÊTE de l'edge : test hors-échantillon (le filtre conviction≥1.1
     # bat-il encore le marché ?) journalisé → on détecte une dégradation de l'edge.
     try:
@@ -467,6 +608,31 @@ async def run_nightly_retraining() -> None:
                      win_filt=_em.get("win_filt"), roi_cap=_em.get("roi_cap"))
     except Exception as e:
         log.warning("pipeline.nightly_edge_monitor_skip", err=str(e)[:140])
+    # Santé des FEATURES : détecte les features mortes/constantes (scraper cassé →
+    # valeur défaut figée). Le drift_detector ne surveille que la perf, pas la
+    # distribution des features. On LOGGE + persiste (pas d'exclusion auto = pas de
+    # surprise silencieuse sur le modèle ; la liste sert d'alerte/diagnostic).
+    try:
+        from ml.feature_health import compute_feature_health, persist_feature_health
+        async with AsyncSessionLocal() as fh_session:
+            _fh = await compute_feature_health(fh_session)
+            await persist_feature_health(fh_session, _fh)
+            log.info("pipeline.feature_health_done", n_dead=_fh.get("n_dead"),
+                     dead=(_fh.get("dead") or [])[:15])
+    except Exception as e:
+        log.warning("pipeline.nightly_feature_health_skip", err=str(e)[:140])
+    # CLV (Closing Line Value) : nos choix battent-ils la ligne de clôture PMU ? Proxy
+    # d'edge le plus robuste à la variance. On suit la CLV des top picks modèle vs marché
+    # → si > 0 et > moyenne, le modèle anticipe le marché (signal d'edge non-circulaire).
+    try:
+        from ml.clv_monitor import compute_clv_monitor, persist_clv_monitor
+        async with AsyncSessionLocal() as clv_session:
+            _clv = await compute_clv_monitor(clv_session)
+            await persist_clv_monitor(clv_session, _clv)
+            log.info("pipeline.clv_monitor_done", n_top1=_clv.get("n_top1"),
+                     clv_top1=_clv.get("clv_top1"), edge_signal=_clv.get("edge_signal"))
+    except Exception as e:
+        log.warning("pipeline.nightly_clv_monitor_skip", err=str(e)[:140])
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
     try:
@@ -512,16 +678,30 @@ async def _do_retraining(mois: int, label: str) -> None:
         log.info("pipeline.retrain.dataset_ready", n=len(X),
                  pos_rate=float(y.mean()), win_rate=float(y_win.mean()) if len(y_win) else 0.0)
 
+        # Libérer la liste brute (144k dicts × 173 clés ≈ 2-3 Go) : inutile une fois X
+        # construit. Réduit le pic RAM (serveur 8 Go → OOM à la phase promotion sinon).
+        import gc
+        del features_rows, resultats_dict
+        gc.collect()
+
         # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
         model = BlackTurfEnsemble()
         metrics = model.train(X, y, y_win)
+        # X/y/y_win ne servent plus à la décision de promotion (métriques déjà calculées)
+        # → on libère avant la phase métriques/edge_monitor pour ne pas cumuler le pic RAM.
+        n_train_rows = len(X)
+        del X, y, y_win
+        gc.collect()
 
         # Récupérer le modèle actif EN BASE pour une comparaison HONNÊTE.
         current_mv = (await session.execute(
             select(ModelVersion).where(ModelVersion.est_actif == True)
             .order_by(ModelVersion.version_num.desc())
         )).scalars().first()
-        current = BlackTurfEnsemble.load_current()
+        # NE PAS recharger l'ensemble actif en mémoire ici : il ne sert qu'à tester
+        # "existe-t-il un modèle actif" → current_mv (ligne DB) suffit. Le charger
+        # (~1-2 Go) PAR-DESSUS le modèle fraîchement entraîné + le dataset 144k faisait
+        # exploser la RAM (OOM à ~5 Go pendant la promotion). Économie directe.
 
         current_is_synth = bool(current_mv.est_synthetique) if current_mv else False
         current_train_n = int(current_mv.nb_courses_train or 0) if current_mv else 0
@@ -542,7 +722,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         # inférieur. Seuil : MIN_RELIABLE_TRAIN courses réelles.
         MIN_RELIABLE_TRAIN = 800
         current_unreliable = (not current_is_synth) and current_train_n < MIN_RELIABLE_TRAIN
-        new_train_n = len(X)
+        new_train_n = n_train_rows
 
         # ── Saut de DONNÉES : le walk-forward n'est comparable qu'à taille d'entraînement
         # comparable. Sur peu de données il est OPTIMISTE (folds petits/faciles → ex. v7 :
@@ -571,7 +751,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         if _should_deploy(
             new_wf, current_wf,
             current_is_synth=current_is_synth,
-            no_current=(current is None or current_mv is None),
+            no_current=(current_mv is None),
             current_unreliable=current_unreliable,
             data_jump=data_jump,
             roi_gate_enabled=_AF.roi_deploy_gate,
@@ -591,7 +771,7 @@ async def _do_retraining(mois: int, label: str) -> None:
                 roi_simule=metrics["roi_simule"],
                 walk_forward_auc=metrics.get("walk_forward_auc"),
                 walk_forward_variance=metrics.get("walk_forward_variance"),
-                nb_courses_train=len(X),
+                nb_courses_train=n_train_rows,
                 est_actif=True,
                 est_synthetique=False,  # entraîné sur de vraies courses
                 feature_importance=model.feature_importance,
@@ -615,12 +795,34 @@ async def _do_retraining(mois: int, label: str) -> None:
                         else "data_jump" if data_jump else "better_wf"),
                 train_n=new_train_n,
             )
+
+            # AUTO-PURGE : garder seulement les N derniers .pkl archivés (model_v*.pkl
+            # ~18 Mo chacun) pour que models/ ne grossisse pas indéfiniment (était 7,1 Go
+            # / 493 fichiers). current_model.pkl / meta_learner.pkl ne matchent pas le
+            # motif → jamais touchés. Les lignes DB model_versions sont conservées (FK
+            # recommandations + taille négligeable), seules les archives disque sont purgées.
+            try:
+                from ml.models import MODELS_DIR
+                _KEEP = 5
+                archives = sorted(MODELS_DIR.glob("model_v*.pkl"))
+                for _old in archives[:-_KEEP]:
+                    _old.unlink(missing_ok=True)
+                log.info("pipeline.retrain.pruned_archives",
+                         kept=min(_KEEP, len(archives)),
+                         removed=max(0, len(archives) - _KEEP))
+            except Exception as _e:  # purge best-effort : ne jamais faire échouer un deploy
+                log.warning("pipeline.retrain.prune_failed", err=str(_e)[:120])
         else:
             log.warning(
                 "pipeline.retrain.rollback",
                 new_wf_auc=round(new_wf, 4),
                 current_wf_auc=round(current_wf, 4),
-                reason=("below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC else "worse_wf"),
+                reason=(
+                    "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
+                    else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
+                                        and new_wf < current_wf)
+                    else "worse_wf"
+                ),
             )
 
         await session.commit()
@@ -820,10 +1022,16 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # sur-évalue les outsiders (ratio 1.76 sur cote 20-40) et "plafonne" ~0.043
         # quand le marché continue de décroître. On dégrade donc ALPHA avec la cote :
         # au-delà du seuil, le marché (mieux calibré) domine progressivement.
-        ALPHA_MAX = 0.55          # confiance modèle sur favoris (cote ≤ ALPHA_FULL_COTE)
-        ALPHA_MIN = 0.15          # plancher : sur gros outsiders le marché domine
+        # RECENTRAGE MARCHÉ (2026-07-02, priorité ROI) : le marché PMU agrège l'info de
+        # milliers de parieurs + pros ; un modèle ne le bat que là où il a un signal
+        # PROUVÉ. ALPHA_MAX 0.55→0.42 : même sur les favoris le marché garde la majorité
+        # — l'edge doit venir d'un vrai désaccord persistant, pas d'une sur-confiance.
+        # ALPHA_DECAY 0.022→0.030 : au-delà de cote 12 la confiance modèle tombe plus
+        # vite (ratio proba/réel 1.76 mesuré sur cote 20-40 = sur-évaluation avérée).
+        ALPHA_MAX = 0.42          # confiance modèle sur favoris (cote ≤ ALPHA_FULL_COTE)
+        ALPHA_MIN = 0.12          # plancher : sur gros outsiders le marché domine
         ALPHA_FULL_COTE = 12.0    # en-deçà : modèle de confiance
-        ALPHA_DECAY = 0.022       # pente de décroissance par unité de cote au-delà du seuil
+        ALPHA_DECAY = 0.030       # pente de décroissance par unité de cote au-delà du seuil
         cotes_pmu = np.array([float(f.get("cote_pmu") or 0.0) for f in features_list])
         alpha = np.clip(
             ALPHA_MAX - ALPHA_DECAY * np.maximum(cotes_pmu - ALPHA_FULL_COTE, 0.0),
@@ -870,10 +1078,13 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # ferme la boucle après temperature/blend marché/longshots. Identité si peu
         # de données. Renormalise Σ=1.
         try:
-            from ml.isotonic_calibration import load_curve, apply_calibration as _iso_apply
+            from ml.isotonic_calibration import load_curve, apply_calibration as _iso_apply, seg_key as _iso_seg
             _iso_curve = await load_curve(session)
             if _iso_curve:
-                probas_top1 = _iso_apply(probas_top1, _iso_curve)
+                # Calibration PAR SEGMENT (discipline × tranche de partants) si dispo,
+                # sinon courbe globale (fallback). nb_partants = nb de lignes scorées.
+                _seg = _iso_seg(course.discipline, len(features_list))
+                probas_top1 = _iso_apply(probas_top1, _iso_curve, seg=_seg)
         except Exception as e:
             log.warning("pipeline.isotonic_calibration_skip", err=str(e)[:140])
 
@@ -897,7 +1108,23 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # d'itération des features.
         _p1_arr = np.asarray(probas_top1, dtype=float)
         _p3_arr = np.asarray(probas_top3, dtype=float)
-        _order = np.lexsort((-_p3_arr, -_p1_arr))  # primaire: -proba_top1, secondaire: -proba_top3
+        # FLAG ranker_blend : mélange le score LambdaRank (ordre intra-course) avec
+        # la proba_top1 (z-scores) pour CLASSER — sans toucher proba/EV. Réversible.
+        _ord_key = _p1_arr
+        try:
+            from ml.algo_flags import FLAGS as _AFrk
+            if getattr(_AFrk, "ranker_blend", False):
+                _rs = model.predict_rank_score(X)
+                if _rs is not None and len(_rs) == len(_p1_arr) and float(np.std(_rs)) > 0:
+                    def _z(a):
+                        a = np.asarray(a, dtype=float)
+                        return (a - a.mean()) / (a.std() + 1e-9)
+                    _w = float(getattr(_AFrk, "ranker_blend_weight", 1.0))
+                    _ord_key = _z(_p1_arr) + _w * _z(_rs)
+                    log.info("pipeline.ranker_blend_applied", course_id=course_id)
+        except Exception as _e:
+            log.warning("pipeline.ranker_blend_skip", err=str(_e)[:120])
+        _order = np.lexsort((-_p3_arr, -_ord_key))  # primaire: -ord_key, secondaire: -proba_top3
         _rang_by_index = np.empty(len(_order), dtype=int)
         for _k, _idx in enumerate(_order):
             _rang_by_index[int(_idx)] = _k + 1
@@ -928,6 +1155,15 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             _sig_mult = _sig_mult_fn
         except Exception:
             _signal_perf = None
+        # ROI réel par BANDE D'EV (recalc nightly) — gate d'ÉMISSION des value bets
+        # (bande au ROI shrinké négatif → pas de VB, cf. flag ev_band_gate). Était
+        # calculé nightly mais JAMAIS passé à l'émission live (trou audit 2026-07-02) :
+        # 59% des paris sortaient dans des bandes prouvées perdantes.
+        try:
+            from ml.signal_performance import load_ev_band_performance
+            _ev_band_perf = await load_ev_band_performance(session)
+        except Exception:
+            _ev_band_perf = None
 
         # FLAG devig_gates : overround du champ = Σ probas implicites marché pondéré.
         # Sert à dé-vigger les gates value bet (la proba implicite brute 1/cote
@@ -998,6 +1234,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             ).on_conflict_do_update(
                 index_elements=["participation_id"],
                 set_={
+                    # Attribution : la ligne re-prédite doit porter le modèle QUI a
+                    # produit les probas courantes (sinon stamp figé au 1er cycle du
+                    # jour → fausse la traçabilité / le monitoring / la CLV par modèle).
+                    # created_at NON touché : reste l'heure du 1er prono (intégrité
+                    # palmarès : prono émis avant départ).
+                    "model_version_id": mv_id,
                     "proba_top1": proba_t1,
                     "proba_top3": proba_t3,
                     "proba_top1_low": ci_low,
@@ -1075,6 +1317,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 cote_calib=_cote_calib,
                 signal_mult=(_sig_mult(feat, _signal_perf) if (_sig_mult and _signal_perf) else None),
                 field_overround=_field_overround,
+                ev_band_perf=_ev_band_perf,
             )
             niveau_vb = 0
             ev_max = 0.0
@@ -1107,11 +1350,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 "ev_max": ev_max,
                 "niveau_vb": niveau_vb,
                 "prediction_id": pred_id,
+                "_ord": float(_ord_key[int(i)]),
             })
 
         # Trier par proba de VICTOIRE décroissante (tiebreak top-3) et assigner les
         # rangs — même base que le rang_predit sauvegardé en DB (cohérence totale).
-        predictions.sort(key=lambda x: (x["proba_top1"], x["proba_top3"]), reverse=True)
+        predictions.sort(key=lambda x: (x.get("_ord", x["proba_top1"]), x["proba_top3"]), reverse=True)
         for i, p in enumerate(predictions):
             p["rang_predit"] = i + 1
 
@@ -1656,16 +1900,20 @@ async def _log_prediction_accuracy(session: AsyncSession, course_id: str, classe
 
 
 async def _notify_result_subscribers(course_id: str) -> None:
-    """Envoie les alertes résultats aux utilisateurs abonnés."""
-    # Délégué au worker via RQ (sync wrapper)
-    try:
-        import redis as redis_sync
-        from rq import Queue
-        r = redis_sync.from_url(settings.redis_url)
-        q = Queue(connection=r)
-        q.enqueue("ml.pipeline.post_course_sync", course_id)
-    except Exception as e:
-        log.warning("pipeline.notify_subscribers.failed", error=str(e))
+    """No-op : le push d'alertes RÉSULTAT n'est pas implémenté.
+
+    BUG CORRIGÉ 2026-06-29 — BOUCLE INFINIE : cette fonction est appelée DEPUIS
+    `run_post_course` (étape 5) et ré-enqueuait `post_course_sync` (= run_post_course),
+    donc chaque course se ré-injectait sans fin dans la file RQ `default`. Résultat :
+    ~5900 jobs en backlog permanent, worker à 100 % 24/7, `skip_already_learned` à
+    chaque tour, et risque d'affamer la file `ml` (retrain).
+
+    Le 1er (et seul) traitement légitime d'une course est déclenché par l'orchestrator
+    (`scraper/orchestrator.py` poll_resultats) quand l'arrivée est publiée. On ne
+    ré-enqueue donc RIEN ici. Si un jour on veut notifier les abonnés du résultat,
+    le faire DIRECTEMENT (services.alerts.send_web_push), JAMAIS via post_course_sync.
+    """
+    return None
 
 
 def _get_cheval_id_from_resultat(entry: dict, resultat: Resultat) -> str:

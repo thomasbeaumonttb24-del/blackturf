@@ -24,7 +24,18 @@ class UnibetScraper(BaseScraper):
     async def get_cotes_du_jour(self) -> list[CoteBookmakerScrape]:
         """
         Récupère toutes les cotes Unibet disponibles pour aujourd'hui.
+
+        ⚠ DÉSACTIVÉ 2026-06-17 : Unibet et Zeturf ont FUSIONNÉ. L'activité turf
+        d'Unibet redirige désormais vers zeturf.fr (unibet.fr/hippisme → 301,
+        unibet.fr/turf → zeturf.fr). Toutes les autres URL tombent sur
+        /page-introuvable. La source de cotes est donc déjà couverte par le
+        scraper Zeturf → ce scraper est mis en sommeil pour ne pas marteler un
+        301 et fausser le scrape_log. Recommandation : ajouter "unibet" à
+        SCRAPER_DISABLED_SOURCES, ou retirer Unibet du cycle bookmakers.
         """
+        log.info("unibet.disabled_merged_into_zeturf")
+        return []
+        # --- code historique conservé (mort tant que la fusion Unibet/Zeturf tient) ---
         results: list[CoteBookmakerScrape] = []
         today = date.today().isoformat()
 

@@ -13,23 +13,30 @@ export const DISCIPLINE_META: Record<string, { color: string; bg: string; ring: 
   Plat:    { color: "#B45309", bg: "bg-amber-50",   ring: "ring-amber-200",   short: "Plat" },
   "Attelé":{ color: "#047857", bg: "bg-emerald-50", ring: "ring-emerald-200", short: "Attelé" },
   Monté:   { color: "#1D4ED8", bg: "bg-blue-50",    ring: "ring-blue-200",    short: "Monté" },
+  Obstacle:{ color: "#C2410C", bg: "bg-orange-50",  ring: "ring-orange-200",  short: "Obstacle" },
   Haies:   { color: "#C2410C", bg: "bg-orange-50",  ring: "ring-orange-200",  short: "Haies" },
   Steeple: { color: "#B91C1C", bg: "bg-red-50",     ring: "ring-red-200",     short: "Steeple" },
   Cross:   { color: "#15803D", bg: "bg-green-50",   ring: "ring-green-200",   short: "Cross" },
 };
 
+/** Normalise la casse venant de la base ("OBSTACLE" → "Obstacle") pour matcher les clés. */
+const normDiscipline = (d: string) =>
+  d ? d.charAt(0).toUpperCase() + d.slice(1).toLowerCase() : d;
+
 export function disciplineMeta(d: string) {
-  return DISCIPLINE_META[d] ?? { color: "#6B7280", bg: "bg-gray-100", ring: "ring-gray-200", short: d };
+  const k = normDiscipline(d);
+  return DISCIPLINE_META[k] ?? { color: "#6B7280", bg: "bg-gray-100", ring: "ring-gray-200", short: k };
 }
 
 /* Logos cheval par discipline (PNG dans /public/img/disciplines). */
 const DISCIPLINE_IMG: Record<string, string> = {
-  Plat:     "/img/disciplines/plat.png",
-  "Attelé": "/img/disciplines/attele.png",
-  Monté:    "/img/disciplines/monte.png",
-  Haies:    "/img/disciplines/obstacle.png",
-  Steeple:  "/img/disciplines/obstacle.png",
-  Cross:    "/img/disciplines/obstacle.png",
+  Plat:      "/img/disciplines/plat.png",
+  "Attelé":  "/img/disciplines/attele.png",
+  Monté:     "/img/disciplines/monte.png",
+  Obstacle:  "/img/disciplines/obstacle.png",
+  Haies:     "/img/disciplines/obstacle.png",
+  Steeple:   "/img/disciplines/obstacle.png",
+  Cross:     "/img/disciplines/obstacle.png",
 };
 
 /* ── Glyphes SVG (viewBox 0 0 32 24), trait = currentColor ── */
@@ -138,8 +145,9 @@ function Glyph({ discipline }: { discipline: string }) {
 export function DisciplineIcon({
   discipline, size = "md", className,
 }: { discipline: string; size?: "sm" | "md" | "lg"; className?: string }) {
+  const k = normDiscipline(discipline);
   const m = disciplineMeta(discipline);
-  const img = DISCIPLINE_IMG[discipline];
+  const img = DISCIPLINE_IMG[k];
   const box = size === "sm" ? "h-6 w-6 p-1" : size === "lg" ? "h-10 w-10 p-1.5" : "h-8 w-8 p-1.5";
   return (
     <span
@@ -156,7 +164,7 @@ export function DisciplineIcon({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={img} alt={discipline} className="h-full w-full object-contain" loading="lazy" />
       ) : (
-        <Glyph discipline={discipline} />
+        <Glyph discipline={k} />
       )}
     </span>
   );
@@ -166,7 +174,22 @@ export function DisciplineIcon({
 export function DisciplineGlyph({ discipline, className }: { discipline: string; className?: string }) {
   return (
     <span className={cn("inline-block h-4 w-5 align-middle", className)}>
-      <Glyph discipline={discipline} />
+      <Glyph discipline={normDiscipline(discipline)} />
     </span>
   );
+}
+
+/** Logo PNG nu (sans cadre) pour usage inline — ex. chips de filtre. Fallback glyphe. */
+export function DisciplineImg({ discipline, className }: { discipline: string; className?: string }) {
+  const k = normDiscipline(discipline);
+  const img = DISCIPLINE_IMG[k];
+  if (!img) {
+    return (
+      <span className={cn("inline-block align-middle", className)} style={{ color: disciplineMeta(discipline).color }}>
+        <Glyph discipline={k} />
+      </span>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={img} alt={discipline} className={cn("object-contain align-middle", className)} loading="lazy" />;
 }

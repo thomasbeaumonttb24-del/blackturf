@@ -305,6 +305,8 @@ class Participation(Base):
     cote_betclic: Mapped[float | None] = mapped_column(Float)
     cote_betclic_ouverture: Mapped[float | None] = mapped_column(Float)   # cote J-1
     cote_unibet: Mapped[float | None] = mapped_column(Float)
+    cote_bet365: Mapped[float | None] = mapped_column(Float)              # via oddschecker (2026-07-03)
+    cote_ladbrokes: Mapped[float | None] = mapped_column(Float)           # via oddschecker (LD, repli Coral)
     cote_betfair_exchange: Mapped[float | None] = mapped_column(Float)    # marché d'échange
     mouvement_cote_pct: Mapped[float | None] = mapped_column(Float)       # % mouvement cote (ouverture→actuelle)
     cote_reference: Mapped[float | None] = mapped_column(Float)           # cote d'ouverture (dernierRapportReference)
@@ -315,6 +317,7 @@ class Participation(Base):
     nb_places_second: Mapped[int | None] = mapped_column(Integer)
     nb_places_troisieme: Mapped[int | None] = mapped_column(Integer)
     handicap_distance: Mapped[int | None] = mapped_column(Integer)
+    valeur_handicap: Mapped[int | None] = mapped_column(Integer)          # note/valeur handicapeur (#10)
     indicateur_inedit: Mapped[bool | None] = mapped_column(Boolean)       # cheval débutant
     jument_pleine: Mapped[bool | None] = mapped_column(Boolean)
     rang_pronostic_pmu: Mapped[int | None] = mapped_column(Integer)

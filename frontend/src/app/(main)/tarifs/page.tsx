@@ -1,8 +1,35 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Check, X, Zap, ChevronRight, Calculator } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+
+export const metadata: Metadata = {
+  title: "Tarifs — Gratuit, Standard, Expert",
+  description:
+    "Les formules BlackTurf : Gratuit (programme + cotes), Standard 12€/mois (prédictions IA + paris de valeur + calculateur de mise) et Expert 19€/mois. Sans engagement.",
+  alternates: { canonical: "/tarifs" },
+  openGraph: {
+    title: "Tarifs BlackTurf — Gratuit, Standard, Expert",
+    description: "Prédictions IA, paris de valeur et calculateur de mise. Sans engagement.",
+    url: "https://blackturf.fr/tarifs",
+  },
+};
+
+const offersJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  name: "BlackTurf — Conseiller IA paris hippiques PMU",
+  description:
+    "Pronostics et paris de valeur PMU par intelligence artificielle, plan de mise personnalisé.",
+  brand: { "@type": "Brand", name: "BlackTurf" },
+  offers: [
+    { "@type": "Offer", name: "Gratuit", price: "0", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
+    { "@type": "Offer", name: "Standard", price: "12", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
+    { "@type": "Offer", name: "Expert", price: "19", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
+  ],
+};
 
 const FEATURES_COMPARISON = [
   { label: "Programme PMU du jour", free: true, standard: true, expert: true },
@@ -23,16 +50,16 @@ const FEATURES_COMPARISON = [
 
 export default function TarifsPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16">
+    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-10 sm:py-16">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(offersJsonLd) }} />
       {/* Header */}
-      <div className="text-center mb-16">
+      <div className="text-center mb-10 sm:mb-16">
         <Badge variant="gold" className="mb-4">Tarifs</Badge>
-        <h1 className="text-4xl font-bold mb-4">
+        <h1 className="text-2xl sm:text-4xl font-bold mb-3 sm:mb-4">
           Des tarifs <span className="text-gradient">simples et transparents</span>
         </h1>
-        <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-          Commencez gratuitement. Passez à l&apos;offre supérieure quand vous êtes convaincu.
-          Annulez à tout moment.
+        <p className="text-muted-foreground text-sm sm:text-lg max-w-xl mx-auto">
+          Commencez gratuitement. Annulez à tout moment.
         </p>
         <div className="mt-4 inline-flex items-center gap-2 text-sm text-brand-gold">
           <Zap className="h-4 w-4" />
@@ -41,10 +68,10 @@ export default function TarifsPage() {
       </div>
 
       {/* Plans */}
-      <div className="grid md:grid-cols-3 gap-6 mb-16">
+      <div className="grid md:grid-cols-3 gap-5 sm:gap-6 mb-12 sm:mb-16">
         {/* Découverte */}
         <Card className="card-hover">
-          <CardContent className="p-8">
+          <CardContent className="p-6 sm:p-8">
             <h2 className="text-xl font-bold mb-1">Découverte</h2>
             <p className="text-xs text-muted-foreground mb-3">Gratuit pour toujours</p>
             <div className="flex items-baseline gap-1 mb-6">
@@ -70,13 +97,13 @@ export default function TarifsPage() {
           <div className="absolute -top-4 left-1/2 -translate-x-1/2">
             <Badge variant="gold">Recommandé</Badge>
           </div>
-          <CardContent className="p-8">
+          <CardContent className="p-6 sm:p-8">
             <h2 className="text-xl font-bold mb-1">Standard</h2>
             <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-4xl font-extrabold">19€</span>
+              <span className="text-4xl font-extrabold">12€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 182€/an (−20%)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 115€/an (−20%)</p>
             <ul className="space-y-3 mb-8">
               {[
                 { label: "Prédictions IA complètes", icon: null },
@@ -104,13 +131,13 @@ export default function TarifsPage() {
 
         {/* Expert */}
         <Card className="card-hover">
-          <CardContent className="p-8">
+          <CardContent className="p-6 sm:p-8">
             <h2 className="text-xl font-bold mb-1">Expert</h2>
             <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-4xl font-extrabold">39€</span>
+              <span className="text-4xl font-extrabold">19€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 374€/an (−20%)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 182€/an (−20%)</p>
             <ul className="space-y-3 mb-8">
               {[
                 "Tout Standard",
@@ -136,8 +163,29 @@ export default function TarifsPage() {
         </Card>
       </div>
 
-      {/* Comparison table */}
-      <div className="rounded-2xl border border-border overflow-x-auto mb-12">
+      {/* Comparison — stacked cards on mobile */}
+      <div className="sm:hidden space-y-4 mb-12">
+        {[
+          { name: "Découverte", key: "free" as const, color: "text-muted-foreground" },
+          { name: "Standard", key: "standard" as const, color: "text-brand-gold" },
+          { name: "Expert", key: "expert" as const, color: "text-brand-emerald" },
+        ].map((plan) => (
+          <div key={plan.name} className="rounded-2xl border border-border p-4">
+            <h3 className={`font-semibold mb-3 ${plan.color}`}>{plan.name}</h3>
+            <ul className="space-y-2">
+              {FEATURES_COMPARISON.filter((row) => row[plan.key]).map((row) => (
+                <li key={row.label} className="flex items-center gap-2 text-sm">
+                  <Check className={`h-4 w-4 flex-shrink-0 ${plan.color}`} />
+                  {row.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      {/* Comparison table — sm+ */}
+      <div className="hidden sm:block rounded-2xl border border-border overflow-x-auto mb-12">
         <table className="w-full text-sm min-w-[520px]">
           <thead>
             <tr className="border-b border-border bg-muted/30">
@@ -168,7 +216,7 @@ export default function TarifsPage() {
 
       {/* FAQ */}
       <div className="max-w-2xl mx-auto text-center">
-        <h2 className="text-2xl font-bold mb-8">Questions fréquentes</h2>
+        <h2 className="text-xl sm:text-2xl font-bold mb-6 sm:mb-8">Questions fréquentes</h2>
         <div className="space-y-6 text-left">
           {[
             {
@@ -201,8 +249,8 @@ export default function TarifsPage() {
       </div>
 
       {/* CTA */}
-      <div className="mt-16 text-center p-8 rounded-2xl gradient-hero border border-brand-gold/20">
-        <h2 className="text-2xl font-bold mb-3">Prêt à parier plus intelligemment ?</h2>
+      <div className="mt-12 sm:mt-16 text-center p-6 sm:p-8 rounded-2xl gradient-hero border border-brand-gold/20">
+        <h2 className="text-xl sm:text-2xl font-bold mb-3">Prêt à parier plus intelligemment ?</h2>
         <p className="text-muted-foreground mb-6">7 jours d&apos;essai gratuit. Sans carte bancaire.</p>
         <Button variant="brand" size="xl" asChild>
           <Link href="/inscription?plan=standard">

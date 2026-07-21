@@ -472,7 +472,7 @@ async def run_backtest(
 
         # Partants + cotes + proba prédite
         rows = await session.execute(text("""
-            SELECT p.numero, p.cote_pmu, p.cote_geny, p.cote_bzh,
+            SELECT p.numero, COALESCE(pr.cote_figee, p.cote_pmu) AS cote_pmu, p.cote_geny, p.cote_bzh,
                    p.cote_winamax, p.cote_betclic, p.cote_unibet, p.cote_betfair_exchange,
                    pr.proba_top3, pr.proba_top1
             FROM participations p

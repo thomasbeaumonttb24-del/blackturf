@@ -27,8 +27,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    setUser(getStoredUser());
+    const cached = getStoredUser();
+    setUser(cached);
     setLoading(false);
+    // Revalide la session au chargement : un access_token expire (ex. mobile) ne doit pas
+    // laisser un "user" fantome connecte (-> "aucune analyse disponible"). On appelle
+    // /auth/me ; l intercepteur 401 rafraichit le token, et si le refresh echoue il nettoie
+    // la session et redirige vers /login.
+    if (cached && typeof window !== "undefined" && localStorage.getItem("access_token")) {
+      authApi
+        .me()
+        .then((res) => {
+          storeUser(res.data);
+          setUser(res.data);
+        })
+        .catch(() => {
+          /* gere par l intercepteur api (refresh / redirect) */
+        });
+    }
     // Synchro entre onglets : un login/logout dans un autre onglet met à jour celui-ci.
     const onStorage = (e: StorageEvent) => {
       if (e.key === "access_token" || e.key === "user") {

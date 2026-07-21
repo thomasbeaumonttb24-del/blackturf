@@ -1,6 +1,8 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from functools import lru_cache
+
+_WEAK_SECRETS = {"changeme", "secret", "dev", "test", "password", "secret_key", "votre_secret"}
 
 
 class Settings(BaseSettings):
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
     # JWT
     secret_key: str
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 15
+    access_token_expire_minutes: int = 720  # 12h : 15min etait trop court (sessions mobiles mortes en continu)
     refresh_token_expire_days: int = 7
 
     # External APIs
@@ -70,6 +72,26 @@ class Settings(BaseSettings):
         "case_sensitive": False,
         "protected_namespaces": ("settings_",),
     }
+
+    @field_validator("secret_key")
+    @classmethod
+    def _secret_strength(cls, v: str) -> str:
+        # HS256 : un secret faible est brute-forçable hors-ligne → forge de JWT
+        # arbitraires (n'importe quel sub / is_admin). On exige >= 32 caractères.
+        if len(v) < 32:
+            raise ValueError("SECRET_KEY doit faire au moins 32 caractères")
+        if v.strip().lower() in _WEAK_SECRETS:
+            raise ValueError("SECRET_KEY trivial interdit")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_prod(self):
+        # En production : pas d'origine CORS wildcard avec credentials, et pas de
+        # secret par défaut. Échoue au démarrage plutôt que d'exposer une faille.
+        if self.environment == "production":
+            if "*" in self.allowed_origins:
+                raise ValueError("CORS wildcard '*' interdit en production")
+        return self
 
 
 @lru_cache

@@ -74,7 +74,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: blackturf_api
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 1 --no-access-log
+    user: "1001:1001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -97,6 +102,7 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - SENTRY_DSN=${SENTRY_DSN}
       - ENVIRONMENT=production
+      - RUN_SCHEDULER=0
       - FRONTEND_URL=https://blackturf.fr
       - ALLOWED_ORIGINS=["https://blackturf.fr","https://www.blackturf.fr"]
       # ── Flags algo (audit edge 2026-06-14) — cf. backend/ml/algo_flags.py + ALGO_FIXES_2026-06-14.md.
@@ -113,6 +119,7 @@ services:
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
     expose:
       - "8000"
     depends_on:
@@ -133,7 +140,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 1536M
         reservations:
           memory: 256M
 
@@ -142,6 +149,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile.scraper
     container_name: blackturf_scraper
+    # NOTE sécu : durcissement non-root/cap_drop NON appliqué au scraper — il utilise
+    # Dockerfile.scraper (Playwright/chromium) qui nécessite un user/des perms
+    # spécifiques (sandbox chromium). À durcir séparément (adapter Dockerfile.scraper).
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -164,6 +174,7 @@ services:
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
     depends_on:
       db:
         condition: service_healthy
@@ -185,7 +196,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: blackturf_worker
-    command: rq worker default ml --with-scheduler --url ${REDIS_URL}
+    user: "1001:1001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: rq worker ml default --with-scheduler --url ${REDIS_URL}
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -206,6 +222,7 @@ services:
       - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
     depends_on:
       db:
         condition: service_healthy
@@ -217,7 +234,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 5G
         reservations:
           memory: 256M
 
@@ -261,6 +278,73 @@ services:
     deploy:
       resources:
         limits:
+          memory: 128M
+
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: blackturf_scheduler
+    user: "1001:1001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: python scheduler_main.py
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - BETFAIR_INGEST_TOKEN=${BETFAIR_INGEST_TOKEN}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_PRICE_STARTER_MONTHLY=${STRIPE_PRICE_STARTER_MONTHLY}
+      - STRIPE_PRICE_STARTER_ANNUAL=${STRIPE_PRICE_STARTER_ANNUAL}
+      - STRIPE_PRICE_PRO_MONTHLY=${STRIPE_PRICE_PRO_MONTHLY}
+      - STRIPE_PRICE_PRO_ANNUAL=${STRIPE_PRICE_PRO_ANNUAL}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - ENVIRONMENT=production
+      - RUN_SCHEDULER=1
+      - FRONTEND_URL=https://blackturf.fr
+      - ALLOWED_ORIGINS=["https://blackturf.fr","https://www.blackturf.fr"]
+      # ── Flags algo (audit edge 2026-06-14) — cf. backend/ml/algo_flags.py + ALGO_FIXES_2026-06-14.md.
+      # TOUT activé (2026-06-14, "active tout") : anti-leakage + dé-vig + calibration honnête
+      # + dashboards vrais + combos EV honnête + STAKING-SAFE (cap bankroll + no gain-target dump).
+      - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
+      - BT_TRAIN_PRERACE_ONLY=${BT_TRAIN_PRERACE_ONLY:-1}
+      - BT_CALIB_GUARD=${BT_CALIB_GUARD:-1}
+      - BT_DEVIG_GATES=${BT_DEVIG_GATES:-1}
+      - BT_ROI_DEPLOY_GATE=${BT_ROI_DEPLOY_GATE:-1}
+      - BT_CALIB_ON_RAW=${BT_CALIB_ON_RAW:-1}
+      - BT_OOS_WEIGHTS=${BT_OOS_WEIGHTS:-1}
+      - BT_COLLAPSE_LONGSHOT=${BT_COLLAPSE_LONGSHOT:-1}
+      - BT_COMBO_EV_NONE=${BT_COMBO_EV_NONE:-1}
+      - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
+      - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
+      - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ml_models:/app/models
+      - scrape_data:/app/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
           memory: 128M
 
 volumes:

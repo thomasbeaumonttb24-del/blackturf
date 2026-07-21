@@ -332,6 +332,22 @@ def explain_prediction(features: dict, proba_top3: float, proba_top1: float,
                          "detail": "Niveau (ELO) en nette progression sur ses dernières courses.",
                          "score": min(velo / 40, 1.0), "categorie": "elo"})
 
+    # ── CONFRONTATIONS DIRECTES (a-t-il déjà battu ses rivaux du jour ?) ─────
+    conf_nb = features.get("conf_nb_rencontres", 0)
+    conf_taux = features.get("conf_taux_victoire", 0)
+    conf_battus = features.get("conf_nb_rivaux_battus", 0)
+    conf_net = features.get("conf_bilan_net", 0)
+    if conf_nb >= 2 and conf_taux >= 0.60:
+        positifs.append({"feature": "conf_taux_victoire", "label": "Ascendant sur ses rivaux",
+                         "detail": (f"A déjà battu {int(conf_battus)} concurrent(s) présent(s) aujourd'hui "
+                                    f"({conf_taux*100:.0f}% de duels gagnés sur {int(conf_nb)} rencontres)."),
+                         "score": min(conf_taux * (1 + max(conf_net, 0)), 1.0), "categorie": "confrontation"})
+    elif conf_nb >= 2 and conf_taux <= 0.35:
+        negatifs.append({"feature": "conf_taux_victoire", "label": "Dominé en confrontation",
+                         "detail": (f"Souvent battu par des rivaux engagés aujourd'hui "
+                                    f"({conf_taux*100:.0f}% de duels gagnés sur {int(conf_nb)})."),
+                         "score": min((1 - conf_taux) * 0.8, 1.0), "categorie": "confrontation"})
+
     # Trier par score décroissant
     positifs.sort(key=lambda x: x["score"], reverse=True)
     negatifs.sort(key=lambda x: x["score"], reverse=True)
@@ -390,20 +406,24 @@ async def generate_race_narrative(
     course_summary = _build_course_summary(course_info, predictions_with_features, top_recommendation)
 
     prompt = f"""Tu es BlackTurf, un système d'analyse hippique expert.
-Analyse cette course et génère une analyse claire et utile pour un parieur.
+Analyse cette course et produis une synthèse courte mais COMPLÈTE pour un parieur.
 
 **Contexte course :**
 {course_summary}
 
 **Règles :**
-- Maximum 200 mots
-- Langue : français
-- Ton : expert, factuel, concis
-- Structure : 1 phrase intro, top recommandations avec raisons, 1 alerte si pertinent
-- Ne jamais garantir un résultat — utiliser des tournures probabilistes
-- Inclure la mention jeu responsable en fin si niveau VB ≥ 3
+- Maximum 160 mots, français, ton expert factuel.
+- Une ligne par point, dans cet ordre, en t'appuyant UNIQUEMENT sur les données ci-dessus :
+  1. Lecture : course ouverte ou favori détaché (déduis-le des écarts de proba de victoire).
+  2. Favori IA : le rang 1 du modèle + ses 2 atouts les plus concrets.
+  3. Également en vue : les rangs 2-3 (les chances secondaires logiques).
+  4. Outsiders / potentiels : chevaux sous-cotés par le marché (edge positif) ou à valeur, s'il y en a ; sinon l'écris pas.
+  5. Conclusion : le scénario le plus probable + comment le jouer (placé sécurisé, combiné, ou champ large si course ouverte).
+- Exploite les confrontations directes et les signaux marché quand ils sont fournis.
+- Ne jamais garantir un résultat — tournures probabilistes.
+- Mention jeu responsable en fin uniquement si niveau VB ≥ 3.
 
-Génère uniquement l'analyse, pas de titre ni d'en-tête."""
+Génère uniquement l'analyse, pas de titre, pas de markdown, pas de puces numérotées."""
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -445,12 +465,13 @@ def _build_course_summary(course_info: dict, predictions: list[dict],
         f"Terrain : {terrain}{f' ({pen:.1f})' if pen else ''}",
     ]
 
-    # Top 3 prédictions — classement modèle par proba de VICTOIRE (= rang_predit,
-    # cohérent avec le classement « Analyse algorithme »). Le rang 1 est le favori IA.
+    # Top 3 prédictions — trié par RANG_PREDIT (2026-07-13 : clé EXACTE du classement
+    # « Analyse algorithme » du front). Trier par proba_top1 divergeait dès que le ranker
+    # (BT_RANKER_BLEND) réordonnait le rang sans toucher la proba → favori narrative ≠ #1
+    # classement. On aligne pour garantir la corrélation pronos ↔ analyse.
     top3 = sorted(
         predictions,
-        key=lambda x: (x.get("proba_top1", 0), x.get("proba_top3", 0)),
-        reverse=True,
+        key=lambda x: (x.get("rang_predit") or 99, -x.get("proba_top1", 0)),
     )[:3]
     lines.append("Classement modèle (rang 1 = favori IA, par proba de victoire) :")
     for i, p in enumerate(top3, 1):
@@ -465,12 +486,41 @@ def _build_course_summary(course_info: dict, predictions: list[dict],
         ev = vb.get("ev_max", 0) if vb else 0
         cote = p.get("cote_pmu", 0)
 
-        top_signal = positifs[0]["label"] if positifs else ""
+        top_signals = " / ".join(_strip_emoji(f["label"]) for f in positifs[:2]) if positifs else ""
+        edge = _market_edge(p)
+        edge_str = f"· edge modèle {edge*100:+.0f}pt" if abs(edge) >= 0.02 else ""
         vb_str = f"· VB EV+{ev*100:.0f}%" if ev > 0.05 else ""
         lines.append(
-            f"#{i} N°{num} {nom} : victoire {p1*100:.0f}% · placé {p3*100:.0f}% · cote {cote:.1f} {vb_str} · {verdict}"
-            + (f" — Signal principal : {top_signal}" if top_signal else "")
+            f"#{i} N°{num} {nom} : victoire {p1*100:.0f}% · placé {p3*100:.0f}% · cote {cote:.1f} {edge_str} {vb_str} · {verdict}"
+            + (f" — Atouts : {top_signals}" if top_signals else "")
         )
+
+    # Outsiders à valeur : hors top1, cote longue, modèle au-dessus du marché ou value bet
+    fav_num = top3[0].get("numero") if top3 else None
+    outsiders = []
+    for p in predictions:
+        if p.get("numero") == fav_num:
+            continue
+        cote = float(p.get("cote_pmu") or 0)
+        edge = _market_edge(p)
+        vb_niv = (p.get("vb") or {}).get("niveau", 0)
+        if cote >= 6 and (edge > 0.03 or vb_niv >= 2):
+            outsiders.append((p, cote, edge))
+    outsiders.sort(key=lambda t: t[2], reverse=True)
+    if outsiders:
+        lines.append("Outsiders à valeur (sous-cotés par le marché) : " + " | ".join(
+            f"N°{p.get('numero')} {p.get('nom')} (cote {cote:.0f}, edge {edge*100:+.0f}pt)"
+            for p, cote, edge in outsiders[:3]
+        ))
+
+    # Confrontations directes : ascendant/dominé déjà résolu en facteurs (categorie confrontation)
+    confront = []
+    for p in predictions:
+        for f in p.get("explanation", {}).get("facteurs_positifs", []):
+            if f.get("categorie") == "confrontation":
+                confront.append(f"N°{p.get('numero')} {p.get('nom')} : {_strip_emoji(f['detail'])}")
+    if confront:
+        lines.append("Confrontations directes : " + " | ".join(confront[:3]))
 
     # Signaux marché
     market_signals = []
@@ -478,7 +528,7 @@ def _build_course_summary(course_info: dict, predictions: list[dict],
         exp = p.get("explanation", {})
         for f in exp.get("facteurs_positifs", []):
             if f.get("categorie") == "marche":
-                market_signals.append(f"{p.get('nom')} : {f['label']}")
+                market_signals.append(f"{p.get('nom')} : {_strip_emoji(f['label'])}")
     if market_signals:
         lines.append("Signaux marché : " + " | ".join(market_signals[:3]))
 
@@ -491,14 +541,14 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
     Narrative basée sur des règles (fallback sans Claude API).
     Produit un texte structuré depuis les explications ML.
     """
-    # Classement modèle = par proba de VICTOIRE (proba_top1), tiebreak placé —
-    # base identique à rang_predit et au classement « Analyse algorithme ». Le
-    # favori IA est le rang 1 du modèle, PAS le meilleur placé / value bet.
+    # Classement modèle = par RANG_PREDIT (2026-07-13 : clé EXACTE du classement
+    # « Analyse algorithme » du front). Avant : tri par proba_top1, qui divergeait du
+    # rang_predit dès que le ranker (BT_RANKER_BLEND) réordonnait → favori IA ≠ #1 affiché.
+    # Le favori IA est le rang 1 du modèle, PAS le meilleur placé / value bet.
     model_order = sorted(
         predictions,
-        key=lambda x: (x.get("proba_top1", 0), x.get("proba_top3", 0)),
-        reverse=True,
-    )[:3]
+        key=lambda x: (x.get("rang_predit") or 99, -x.get("proba_top1", 0)),
+    )
     if not model_order:
         return "Analyse non disponible — données insuffisantes."
 
@@ -512,41 +562,64 @@ def _generate_rule_based_narrative(course_info: dict, predictions: list[dict],
 
     lines = []
 
-    # Intro
-    hippodrome = course_info.get("hippodrome_nom", "")
-    discipline = course_info.get("discipline", "")
-    if hippodrome:
-        lines.append(f"**Course {hippodrome}** — {discipline}")
+    # En-tête course retiré : redondant avec l'en-tête de la fiche (hippodrome ·
+    # discipline · distance · partants déjà affichés). On va droit à l'analyse.
 
-    # Favori IA = rang 1 du modèle (cohérent avec le classement algo).
-    lines.append(f"**Favori IA : N°{num} {nom}** (victoire {p1*100:.0f}%, placé {p3*100:.0f}%)")
+    # 1. Lecture de course — favori détaché ou course ouverte (selon les écarts).
+    p1_2 = model_order[1].get("proba_top1", 0) if len(model_order) > 1 else 0
+    ecart = p1 - p1_2
+    if p1 >= 0.40 and ecart >= 0.12:
+        lecture = "favori IA détaché, il domine le classement du modèle."
+    elif p1 < 0.28:
+        lecture = "course ouverte — pas de favori marqué, le placé et les outsiders prennent de la valeur."
+    else:
+        lecture = "course resserrée — un favori léger devant un groupe d'outsiders crédibles."
+    lines.append(f"Lecture : {lecture}")
 
-    # Coup à tenter : meilleur value bet du champ s'il diffère du favori. On
-    # surface l'outsider à valeur SANS le faire passer pour le favori.
-    vbs = [p for p in predictions if (p.get("vb") or {}).get("niveau", 0) >= 2]
-    best_vb = max(vbs, key=lambda x: (x.get("vb") or {}).get("ev_max", 0), default=None)
-    if best_vb and best_vb.get("numero") != num:
-        ev = (best_vb.get("vb") or {}).get("ev_max", 0)
-        lines.append(
-            f"**Coup à tenter : N°{best_vb.get('numero')} {best_vb.get('nom')}** "
-            f"(value, EV +{ev*100:.0f}%, placé {best_vb.get('proba_top3', 0)*100:.0f}%)"
-        )
-
-    # Facteurs positifs du favori
+    # 2. Favori IA = rang 1 du modèle + ses atouts concrets.
+    lines.append(f"Favori IA : N°{num} {nom} — victoire {p1*100:.0f}%, placé {p3*100:.0f}%.")
     if positifs:
         raisons = " · ".join(_strip_emoji(f["label"]) for f in positifs[:3])
-        lines.append(f"Pourquoi : {raisons}")
+        lines.append(f"Atouts : {raisons}.")
 
-    # Autres chevaux (suite du classement modèle)
+    # 3. Également en vue : rangs 2-3 (chances secondaires logiques).
     if len(model_order) > 1:
-        autres = [f"N°{p['numero']} {p['nom']} (victoire {p.get('proba_top1', 0)*100:.0f}%)"
-                  for p in model_order[1:3]]
-        lines.append(f"Également en vue : {' · '.join(autres)}")
+        autres = [
+            f"N°{p['numero']} {p['nom']} (victoire {p.get('proba_top1', 0)*100:.0f}% / placé {p.get('proba_top3', 0)*100:.0f}%)"
+            for p in model_order[1:3]
+        ]
+        lines.append("Également en vue : " + " · ".join(autres) + ".")
 
-    # Alertes
-    alertes = explanation.get("alertes", [])
-    for a in alertes[:1]:
-        lines.append(f"{_strip_emoji(a['label'])}: {_strip_emoji(a.get('detail', ''))}")
+    # 4. Outsiders / potentiels : cote longue + modèle au-dessus du marché (edge) ou value bet.
+    outs = []
+    for p in model_order:
+        if p.get("numero") == num:
+            continue
+        cote = float(p.get("cote_pmu") or 0)
+        edge = _market_edge(p)
+        vb_niv = (p.get("vb") or {}).get("niveau", 0)
+        if cote >= 6 and (edge > 0.03 or vb_niv >= 2):
+            outs.append((p, cote, edge))
+    outs.sort(key=lambda t: t[2], reverse=True)
+    if outs:
+        labels = [f"N°{p['numero']} {p['nom']} (cote {cote:.0f}, jugé sous-coté)" for p, cote, _ in outs[:2]]
+        lines.append("Outsiders à valeur : " + " · ".join(labels) + ".")
+
+    # 5. Conclusion / scénario le plus probable + comment le jouer.
+    if p1 >= 0.40 and ecart >= 0.12:
+        scenario = (f"Conclusion : N°{num} doit confirmer sa supériorité — base solide pour le placé "
+                    f"et tête des combinés.")
+    elif p1 < 0.28:
+        scenario = ("Conclusion : arrivée indécise — privilégier le placé et glisser un outsider à valeur "
+                    "dans les jeux à champ large.")
+    else:
+        scenario = (f"Conclusion : N°{num} en patron logique mais le placé reste à portée des suivants — "
+                    f"sécuriser via un combiné placé avec les chances secondaires.")
+    lines.append(scenario)
+
+    # Alerte (point de vigilance sur le favori)
+    for a in explanation.get("alertes", [])[:1]:
+        lines.append(f"À surveiller — {_strip_emoji(a['label'])} : {_strip_emoji(a.get('detail', ''))}.")
 
     # Retire les marqueurs markdown gras (non rendus côté fiche → afficher propre).
     return "\n".join(lines).replace("**", "")
@@ -603,6 +676,124 @@ def _horse_facts(p: dict) -> dict:
     }
 
 
+# Poids d'affichage par catégorie : on remonte les signaux PROPRES au cheval
+# (forme, ELO, vitesse, confrontation, marché) et on rétrograde ceux que tout un
+# groupe partage (écurie/jockey) → moins de badges identiques d'un cheval à l'autre.
+_CAT_DISPLAY_WEIGHT = {
+    "marche": 1.18, "confrontation": 1.15, "forme": 1.10, "elo": 1.08,
+    "vitesse": 1.05, "classe": 1.04, "conditions": 1.0, "pedigree": 0.95,
+    "regularite": 0.95, "equipement": 0.9, "professionnel": 0.82, "modele": 0.8,
+}
+
+
+def _build_signaux(p: dict, exp: dict, field_size: int) -> list[dict]:
+    """Liste UNIFIÉE et ÉQUILIBRÉE de signaux pour l'affichage (atouts ET réserves),
+    100% dérivée de l'analyse réelle (aucune invention). Chaque signal porte un
+    `sens` (positif / negatif / neutre) pour un rendu coloré côté front.
+
+    Au-delà des facteurs ML déjà calculés, on ajoute deux signaux HONNÊTES tirés de
+    la sortie du modèle elle-même — pour que les chevaux faibles n'affichent plus QUE
+    du positif :
+      - lecture marché (edge) : coté trop court (surcote) ou au contraire valeur ;
+      - lecture modèle : chance limitée quand le cheval est classé loin par l'IA.
+    """
+    pos = exp.get("facteurs_positifs", []) or []
+    neg = exp.get("facteurs_negatifs", []) or []
+    alertes = exp.get("alertes", []) or []
+    cote = float(p.get("cote_pmu") or 0)
+    p1 = float(p.get("proba_top1") or 0)
+    p3 = float(p.get("proba_top3") or 0)
+    implied = 1.0 / cote if cote > 1.0 else 0.0
+    edge = p1 - implied
+    rang = p.get("rang_predit")
+
+    # Verdict du modèle = vérité de référence. On s'en sert pour ne PAS afficher de
+    # signal qui le contredit (ex. « Supérieur au champ » sur un cheval classé 13ᵉ).
+    weak = (p1 < 0.10) or (rang and field_size and rang > math.ceil(field_size * 0.6))
+    strong = (p1 >= 0.25) or (rang == 1)
+
+    sig: list[dict] = []
+    seen: set = set()
+
+    def _add(label, detail, sens, score, cat, feature=None):
+        key = (label or "").lower()
+        if not label or key in seen:
+            return
+        seen.add(key)
+        w = _CAT_DISPLAY_WEIGHT.get(cat, 1.0)
+        sig.append({
+            "label": _strip_emoji(label), "detail": _strip_emoji(detail or ""),
+            "sens": sens, "categorie": cat,
+            "score": round(float(score or 0), 3),
+            "_prio": round(float(score or 0) * w, 4),
+            "_feat": feature,
+        })
+
+    for f in pos:
+        _add(f.get("label"), f.get("detail"), "positif", f.get("score"), f.get("categorie"), f.get("feature"))
+    for f in neg:
+        _add(f.get("label"), f.get("detail"), "negatif", f.get("score"), f.get("categorie"), f.get("feature"))
+    for a in alertes:
+        _add(a.get("label"), a.get("detail"), "neutre", 0.5, "alerte")
+
+    # ── COHÉRENCE : on retire les claims « meilleur/moins bon que le champ » qui
+    # contredisent le verdict du modèle. Ces features comparent le cheval au reste
+    # du peloton (force ELO, confrontations directes) → si le modèle range le cheval
+    # à l'opposé, le badge devient un mensonge visuel. Les autres signaux (forme,
+    # terrain, fraîcheur, classe, poids…) sont CONDITIONNELS et peuvent coexister
+    # avec n'importe quel rang sans se contredire — on les garde.
+    _CONTRA = {"elo_vs_moyenne", "conf_taux_victoire"}
+    sig[:] = [
+        s for s in sig
+        if not (s.get("_feat") in _CONTRA and (
+            (s["sens"] == "positif" and weak) or (s["sens"] == "negatif" and strong)
+        ))
+    ]
+
+    # ── Lecture marché (edge) — réelle, calculée sur proba modèle vs cote ──────
+    if cote > 1.0 and p1 > 0:
+        if edge <= -0.05 and cote <= 12.0:
+            _add("Coté trop court",
+                 f"Le marché lui prête ~{implied*100:.0f}% de chances, le modèle {p1*100:.0f}% — "
+                 f"sa cote surévalue sa chance réelle.",
+                 "negatif", min(abs(edge) * 4, 1.0), "marche")
+        elif edge >= 0.05 and cote >= 5.0:
+            _add("Valeur (sous-coté)",
+                 f"Le modèle lui donne {p1*100:.0f}% vs ~{implied*100:.0f}% pour le marché — "
+                 f"cote plus généreuse que sa vraie chance.",
+                 "positif", min(edge * 4, 1.0), "marche")
+
+    # ── Angle PLACÉ — décision de jeu : cheval bien plus solide au placé qu'au
+    # gagnant. 100% tiré des proba du modèle (zéro invention). Oriente vers le
+    # placé / combiné placé plutôt que le gagnant.
+    if 0.55 <= p3 < 0.78 and p1 < 0.25 and (p3 - p1) >= 0.30:
+        _add("Profil placé",
+             f"Bien plus solide au placé ({p3*100:.0f}%) qu'au gagnant ({p1*100:.0f}%) — "
+             f"à jouer placé ou en combiné placé plutôt qu'au gagnant.",
+             "positif", 0.62, "modele")
+
+    # ── Verrou de sécurité au placé (valeur sûre) ────────────────────────────
+    if p3 >= 0.78:
+        _add("Valeur sûre placé",
+             f"Le modèle lui donne {p3*100:.0f}% de finir dans les 3 — base fiable pour sécuriser un placé.",
+             "positif", 0.7, "regularite")
+
+    # ── Lecture modèle — chance limitée pour les chevaux classés loin ─────────
+    has_reserve = any(s["sens"] != "positif" for s in sig)
+    if (not has_reserve and rang and field_size
+            and rang > max(3, math.ceil(field_size / 2))):
+        _add("Chances limitées",
+             f"Classé {int(rang)}ᵉ sur {int(field_size)} par le modèle "
+             f"({p1*100:.0f}% de victoire) — chance secondaire.",
+             "neutre", 0.42, "modele")
+
+    sig.sort(key=lambda x: x["_prio"], reverse=True)
+    for s in sig:
+        s.pop("_prio", None)
+        s.pop("_feat", None)
+    return sig
+
+
 def _chevaux_a_eviter(enriched: list[dict], exclude_nums: Optional[set] = None) -> list[dict]:
     """Chevaux que l'analyse déconseille de jouer, avec MOTIFS réels (pas de décor) :
       - « surcoté par le public » : cote courte mais proba modèle nettement sous la
@@ -617,7 +808,9 @@ def _chevaux_a_eviter(enriched: list[dict], exclude_nums: Optional[set] = None) 
     pas un piège), ou (3) déjà listé comme candidat outsider (`exclude_nums`). Ces trois
     gardes garantissent qu'un même cheval ne peut pas être « à jouer » ET « à éviter »."""
     exclude_nums = exclude_nums or set()
-    ranked = sorted(enriched, key=lambda x: float(x.get("proba_top1") or 0), reverse=True)
+    # top-3 par RANG_PREDIT (même clé que le classement affiché) — garde « ne jamais
+    # évincer un pick du modèle » cohérente avec ce que l'utilisateur voit.
+    ranked = sorted(enriched, key=lambda x: (x.get("rang_predit") or 99, -float(x.get("proba_top1") or 0)))
     top_nums = {p.get("numero") for p in ranked[:3]}
     out = []
     for p in enriched:
@@ -708,11 +901,22 @@ async def generate_full_course_analysis(
     # Fiche consolidée par partant (edge marché, proba placé/victoire, verdict,
     # confiance, tous les facteurs) → un maximum d'infos exploitables côté front,
     # sur la MÊME base de faits que les outsiders et les « à éviter ».
+    n_field = len(enriched)
     for e in enriched:
         e["fiche"] = _horse_facts(e)
+        # Signaux équilibrés (atouts + réserves) pour l'affichage par cheval —
+        # même base de faits, exposés dans explanation ET fiche.
+        signaux = _build_signaux(e, e.get("explanation", {}), n_field)
+        e["explanation"]["signaux"] = signaux
+        e["fiche"]["signaux"] = signaux
 
-    # Narrative globale
-    top_reco = max(enriched, key=lambda x: x.get("proba_top3", 0)) if enriched else None
+    # Narrative globale. top_recommendation = le « Favori IA » = le RANG 1 du modèle
+    # (2026-07-13 : clé rang_predit, EXACTEMENT le #1 du classement affiché). Avant : max
+    # proba_top1 → divergeait du #1 classement dès que le ranker réordonnait le rang.
+    top_reco = min(
+        enriched,
+        key=lambda x: (x.get("rang_predit") or 99, -x.get("proba_top1", 0)),
+    ) if enriched else None
     narrative = await generate_race_narrative(
         course_id=course_id,
         course_info=course_info,

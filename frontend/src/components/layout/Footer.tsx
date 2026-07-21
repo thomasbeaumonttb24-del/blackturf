@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { ShieldCheck, Database } from "lucide-react";
+import { ShieldCheck, Database, Mail } from "lucide-react";
 
 const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string }> }> = [
   {
@@ -16,8 +16,19 @@ const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string
     title: "Plans",
     links: [
       { href: "/tarifs", label: "Gratuit" },
-      { href: "/tarifs", label: "Standard — 19€/mois" },
-      { href: "/tarifs", label: "Expert — 39€/mois" },
+      { href: "/tarifs", label: "Standard — 12€/mois" },
+      { href: "/tarifs", label: "Expert — 19€/mois" },
+    ],
+  },
+  {
+    title: "Ressources",
+    links: [
+      { href: "/blog", label: "Blog" },
+      { href: "/hippodromes", label: "Hippodromes" },
+      { href: "/disciplines", label: "Disciplines" },
+      { href: "/guides", label: "Guides paris PMU" },
+      { href: "/guides/types-de-paris-pmu", label: "Types de paris" },
+      { href: "/guides/pari-de-valeur", label: "Pari de valeur" },
     ],
   },
   {
@@ -26,6 +37,7 @@ const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string
       { href: "/mentions-legales", label: "Mentions légales" },
       { href: "/confidentialite", label: "Confidentialité" },
       { href: "/cgu", label: "CGU" },
+      { href: "/cgv", label: "CGV" },
     ],
   },
 ];
@@ -37,7 +49,7 @@ export function Footer() {
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-8">
 
           {/* Brand */}
           <div className="col-span-2">
@@ -67,12 +79,20 @@ export function Footer() {
                 <ShieldCheck className="h-3 w-3" /> Chiffres vérifiables
               </span>
             </div>
+
+            {/* Contact */}
+            <a
+              href="mailto:contact@blackturf.fr"
+              className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 transition-colors hover:text-brand-gold-deep"
+            >
+              <Mail className="h-3.5 w-3.5" /> contact@blackturf.fr
+            </a>
           </div>
 
           {/* Columns */}
           {COLUMNS.map((col) => (
             <div key={col.title}>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">{col.title}</h4>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">{col.title}</h3>
               <ul className="space-y-2 text-sm text-gray-500">
                 {col.links.map((l) => (
                   <li key={l.label}>
@@ -87,10 +107,10 @@ export function Footer() {
         </div>
 
         <div className="mt-10 pt-8 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             © 2026 BlackTurf. Tous droits réservés.
           </p>
-          <p className="text-xs text-gray-400 text-center">
+          <p className="text-xs text-gray-500 text-center">
             Le jeu peut être dangereux. Jouez de façon responsable. Interdit aux mineurs.{" "}
             <a
               href="https://www.joueurs-info-service.fr"

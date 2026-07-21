@@ -6,13 +6,13 @@ import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
   Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
-  MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Swords,
+  MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil, Tv,
+  HelpCircle, X,
 } from "lucide-react";
 import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import { formatCote, formatEV, etoiles, formatDateTime, cn } from "@/lib/utils";
@@ -38,6 +38,8 @@ interface Partant {
   cote_betclic: number | null;
   cote_betclic_ouverture: number | null;
   cote_unibet: number | null;
+  cote_bet365: number | null;
+  cote_ladbrokes: number | null;
   cote_betfair_exchange: number | null;
   cote_min: number | null;
   cote_max: number | null;
@@ -181,13 +183,93 @@ interface MisePlan {
   avertissement: string;
   niveaux: NiveauPlan[];
   paris_ecartes?: PariEcarte[];   // candidats rejetés + motif (transparence)
+  prono_fige?: boolean;           // sélection figée (T-10) — paris/chevaux/mises immuables
+  gains_live_post_gel?: boolean;  // gains ré-évalués sur cotes live MÊME après le gel
+  roi_observe?: { roi: number; nb: number; jours: number };  // ROI RÉEL récent du profil (honnêteté vs espérance théorique)
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 // Badges présentationnels (ConfidenceMeter, EVBadge, ELOBadge, RunningStyleBadge,
 // MusiqueDisplay, PenetroBadge, PoolBadge) extraits dans components/courses/badges.
 
-function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: () => void; onSave: () => Promise<number> }) {
+// Profils de mise (source unique : formulaire + switch rapide dans le plan).
+const PROFILS_MISE = [
+  { key: "conservateur", label: "Prudent", emoji: "🛡️", desc: "Priorité au placé : gains plus petits mais plus fréquents." },
+  { key: "equilibre", label: "Modéré", emoji: "⚖️", desc: "Équilibre entre sécurité et rendement." },
+  { key: "agressif", label: "Risqué", emoji: "🔥", desc: "Vise les gros gains : plus rare, plus payant." },
+] as const;
+
+// ─── Palette du reskin (tokens du design handoff) ─────────────────────────────
+// Palette restreinte 4 familles. Or / Émeraude / Rose / Neutres chauds.
+const CX = {
+  // Or
+  gold: "#B45309", goldDeep: "#92400E", goldMuted: "#C99A3C", goldAmber: "#D97706",
+  goldGrad: "linear-gradient(135deg,#F59E0B,#D97706)", goldBg: "#FEF6E7", goldBd: "#F5DCA8", goldBd2: "#FCD34D",
+  // Émeraude
+  em: "#059669", emDeep: "#047857", emLight: "#10B981", emBg: "#ECFDF5", emBd: "#A7F3D0",
+  // Rose (négatif)
+  red: "#E11D48", redDeep: "#B91C1C", redBg: "#FEF2F2", redBd: "#FECACA",
+  // Neutres chauds
+  ink: "#111827", ink2: "#1F2937", gray700: "#374151", gray600: "#4B5563",
+  gray500: "#6B7280", gray400: "#9CA3AF", muted: "#B0A88F",
+  surf1: "#FFFFFF", surf2: "#FAF7EF", surf3: "#F7F4EC", surf4: "#F3F1EA", surf5: "#F1EEE6",
+  bd1: "#ECE7DC", bd2: "#EEE9DE", bd3: "#E7E1D3", bd4: "#F3EFE6",
+  slate: "#64748B",
+  sg: "'Space Grotesk',sans-serif",
+} as const;
+
+// Fond de page (design handoff).
+const CX_PAGE_BG =
+  "radial-gradient(ellipse at 18% 0%,rgba(245,158,11,.06) 0%,transparent 46%)," +
+  "radial-gradient(ellipse at 88% 6%,rgba(217,119,6,.04) 0%,transparent 40%)," +
+  "linear-gradient(180deg,#FFFDF6 0%,#FAFAF8 38%)";
+
+// Discipline → masque silhouette (assets détourés) + teinte discipline.
+const DISCIPLINE_MASK: Record<string, { file: string; color: string }> = {
+  Plat:     { file: "plat",     color: "#B45309" },
+  "Attelé": { file: "attele",   color: "#0E7C66" },
+  Monté:    { file: "monte",    color: "#2A5BD7" },
+  Obstacle: { file: "obstacle", color: "#C1502A" },
+  Haies:    { file: "obstacle", color: "#C1502A" },
+  Steeple:  { file: "obstacle", color: "#A32C3E" },
+  Cross:    { file: "obstacle", color: "#C1502A" },
+};
+function discMask(discipline: string): { url: string; color: string } {
+  const k = discipline ? discipline.charAt(0).toUpperCase() + discipline.slice(1).toLowerCase() : "";
+  const m = DISCIPLINE_MASK[k] ?? { file: "attele", color: "#0E7C66" };
+  return { url: `/img/disciplines/${m.file}-m.png`, color: m.color };
+}
+
+// Feuille de style injectée (keyframes + responsive du .dc.html).
+const CX_STYLE = `
+@keyframes cxDotPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(1.4)}}
+@keyframes cxFadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes cxBarGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.cx-badges>span{white-space:nowrap}
+.cx-meta>span{white-space:nowrap}
+.cx-fade{animation:cxFadeUp .5s cubic-bezier(.16,1,.3,1) both}
+@media (max-width:840px){ .cx-main{grid-template-columns:1fr !important} }
+@media (max-width:600px){
+  .cx-wrap{padding:16px 13px 72px !important}
+  .cx-hero{padding:20px 17px !important;border-radius:20px !important}
+  .cx-h1{font-size:23px !important}
+  .cx-hbtn{width:100% !important;justify-content:center !important;margin-top:4px}
+  .cx-prow{grid-template-columns:36px 1fr 48px 54px 20px !important;gap:8px !important}
+  .cx-algo{display:none !important}
+  .cx-2col{grid-template-columns:1fr !important}
+  .cx-hide-m{display:none !important}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none !important}}
+`;
+
+function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onSave }: {
+  plan: MisePlan;
+  profil: string;
+  switching: boolean;
+  onChangeProfil: (profil: string) => void;
+  onClose: () => void;
+  onSave: () => Promise<number>;
+}) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const handleSave = async () => {
     setSaveState("saving");
@@ -198,113 +280,111 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
       setSaveState("idle");
     }
   };
+  const profilDesc = PROFILS_MISE.find((p) => p.key === profil)?.desc;
+  const profilLabel = PROFILS_MISE.find((p) => p.key === profil)?.label ?? profil;
+  const evColor = plan.ev_global > 0 ? CX.em : CX.red;
+  // Teinte par niveau : Sécurité=émeraude, Rendement=or, Coup à tenter=rose.
+  const nivStyle = (niveau: string) =>
+    niveau === "securite" ? { bg: CX.emBg, bd: CX.emBd, color: CX.emDeep } :
+    niveau === "rendement" ? { bg: CX.goldBg, bd: CX.goldBd, color: CX.goldDeep } :
+    { bg: CX.redBg, bd: CX.redBd, color: CX.redDeep };
+  const cell = { borderRadius: 9, background: CX.surf3, padding: "8px 10px" } as const;
   return (
-    <div className="animate-slide-up">
+    <div style={{ animation: "cxFadeUp .4s cubic-bezier(.16,1,.3,1) both" }}>
+      {/* Switch profil rapide — même mise, recalcul instantané */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 4, borderRadius: 10, background: CX.surf5, padding: 4, marginBottom: 12 }}>
+        {PROFILS_MISE.map((p) => {
+          const active = profil === p.key;
+          return (
+            <button
+              key={p.key}
+              onClick={() => !active && onChangeProfil(p.key)}
+              disabled={switching}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, border: "none", borderRadius: 8, padding: "6px 4px", fontSize: 11, fontWeight: 600, cursor: switching ? "wait" : "pointer", transition: "all .15s", background: active ? "linear-gradient(135deg,#F59E0B,#D97706)" : "transparent", color: active ? "#1B1307" : CX.gray500, boxShadow: active ? "0 1px 3px rgba(0,0,0,.12)" : "none" }}
+            >
+              {switching && active ? <Loader2 className="h-3 w-3 animate-spin" /> : <span>{p.emoji}</span>}
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+      {profilDesc && (
+        <p className="hidden sm:block" style={{ margin: "0 0 10px", fontSize: 10, color: CX.muted }}>{profilDesc}</p>
+      )}
+
       {/* Header résumé */}
-      <div className="flex items-center justify-between mb-4">
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 12 }}>
         <div>
-          <p className="text-xs text-muted-foreground">Plan pour</p>
-          <p className="text-2xl font-bold tabular-nums text-brand-gold">{plan.montant_total}€</p>
-          {plan.mode_adaptatif && plan.mode_adaptatif !== "normal" && (
-            <span className={cn(
-              "mt-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-              plan.mode_adaptatif === "offensif"
-                ? "bg-brand-emerald/15 text-brand-emerald"
-                : "bg-brand-red/15 text-brand-red"
-            )}>
-              {plan.mode_adaptatif === "offensif" ? "⚡ Mode offensif" : "🛡️ Mode prudent"}
-            </span>
-          )}
+          <button onClick={onClose} style={{ background: "none", border: "none", padding: 0, fontSize: 11.5, color: CX.gray400, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            Plan pour · {profilLabel} <Pencil className="h-3 w-3" />
+          </button>
+          <div style={{ fontFamily: CX.sg, fontSize: 26, fontWeight: 700, color: CX.gold, lineHeight: 1 }}>{plan.montant_total}€</div>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-muted-foreground">Espérance globale estimée</p>
-          <p className={cn(
-            "text-xl font-bold tabular-nums",
-            plan.ev_global > 0 ? "text-brand-emerald" : "text-brand-red"
-          )}>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 10.5, color: CX.gray400 }} title="Espérance THÉORIQUE, calculée sur les rapports estimés. Le rendement RÉEL observé (ci-dessous) est ce qui compte.">Espérance théorique</div>
+          <div style={{ fontFamily: CX.sg, fontSize: 19, fontWeight: 700, color: evColor, lineHeight: 1, marginTop: 2 }}>
             {plan.ev_global > 0 ? "+" : ""}{(plan.ev_global * 100).toFixed(1)}%
-          </p>
+          </div>
         </div>
       </div>
 
-      {/* Explication espérance */}
-      <details className="mb-4 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs group">
-        <summary className="cursor-pointer font-semibold text-muted-foreground flex items-center gap-1.5 list-none">
-          <span className="text-brand-gold">ⓘ</span> C&apos;est quoi l&apos;espérance ?
-        </summary>
-        <div className="mt-2 space-y-1.5 text-muted-foreground leading-relaxed">
-          <p>
-            L&apos;<strong>espérance</strong> = le gain (ou la perte) moyen attendu pour 1€ misé,
-            si tu rejouais ce type de plan un très grand nombre de fois.
-          </p>
-          <p>
-            <strong className="text-brand-emerald">Positif</strong> = avantage : en moyenne le plan
-            rapporte. <strong className="text-brand-red">Négatif</strong> = perte moyenne.
-          </p>
-          <p>
-            Au PMU, le pari mutuel prélève ~15 à 25% des mises : une espérance légèrement négative
-            est <strong>normale</strong>. Plus elle est proche de 0% (ou positive), meilleure est la sélection.
-            L&apos;analyse BlackTurf vise à la maximiser, sans jamais garantir un gain.
-          </p>
+      {/* Rendement RÉEL observé — honnêteté (2026-07-13) : l'espérance ci-dessus est
+          théorique (rapports estimés) et ressort ~0/+2% ; le rendement réel de ce profil
+          est négatif (prélèvement PMU ~15-25%). On l'affiche sans détour. */}
+      {plan.roi_observe && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 10, border: `1px solid ${plan.roi_observe.roi >= 0 ? CX.emBd : CX.redBd}`, background: plan.roi_observe.roi >= 0 ? CX.emBg : CX.redBg, padding: "8px 11px", marginBottom: 12, fontSize: 11.5, lineHeight: 1.45, color: CX.gray600 }}>
+          <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: plan.roi_observe.roi >= 0 ? CX.em : CX.red, flexShrink: 0 }}>
+            {plan.roi_observe.roi > 0 ? "+" : ""}{(plan.roi_observe.roi * 100).toFixed(0)}%
+          </span>
+          <span>
+            Rendement <b>réel</b> moyen de ce profil sur {plan.roi_observe.nb} plans réglés ({plan.roi_observe.jours}&nbsp;j).
+            {plan.roi_observe.roi < 0 && " Sur la durée, jouer chaque course est perdant (prélèvement PMU) — ces plans limitent la perte, ils ne garantissent pas un gain."}
+          </span>
         </div>
-      </details>
+      )}
 
       {/* Résumé IA */}
-      <div className="rounded-lg border border-brand-gold/20 bg-brand-gold/5 p-3 mb-4 text-sm leading-relaxed">
-        <p className="text-muted-foreground text-xs font-semibold mb-1">💬 Analyse BlackTurf</p>
-        {plan.resume_ia}
-        <p className="mt-2 text-[11px] text-muted-foreground/70">
-          Mises réparties par simulation (Plackett-Luce) sur les probabilités du modèle : forme,
-          cotes, ELO, terrain, distance, jockey/entraîneur et historique de chaque cheval.
-        </p>
+      <div style={{ borderRadius: 11, border: "1px solid rgba(245,158,11,.2)", background: "rgba(245,158,11,.05)", padding: "10px 12px", marginBottom: 12, fontSize: 12, lineHeight: 1.5, color: CX.gray600 }}>
+        <span style={{ fontWeight: 700, color: CX.goldDeep }}>💬 </span>{plan.resume_ia}
       </div>
 
       {/* Niveaux */}
-      <div className="space-y-3">
-        {plan.niveaux.map((niv) => (
-          <div key={niv.niveau} className={cn(
-            "rounded-lg p-3",
-            niv.niveau === "securite" ? "plan-securite" :
-            niv.niveau === "rendement" ? "plan-rendement" : "plan-coup"
-          )}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+        {plan.niveaux.map((niv) => {
+          const ns = nivStyle(niv.niveau);
+          return (
+          <div key={niv.niveau} style={{ borderRadius: 12, padding: "11px 13px", background: ns.bg, border: `1px solid ${ns.bd}` }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span>{niv.emoji}</span>
-                <span className="font-bold text-sm">{niv.label}</span>
-                <Badge variant="secondary" className="text-[10px] px-1">{niv.pct}%</Badge>
+                <span style={{ fontWeight: 700, fontSize: 13, color: CX.ink2 }}>{niv.label}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: CX.gray400, background: "#FFFFFF", borderRadius: 999, padding: "1px 7px" }}>{niv.pct}%</span>
               </div>
-              <span className="font-mono font-bold tabular-nums" style={{ color: niv.couleur }}>
+              <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: ns.color }}>
                 {niv.montant.toFixed(2)}€
               </span>
             </div>
-            <div className="space-y-1.5">
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {niv.paris.map((p, i) => (
-                <div key={i} className="text-xs">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <span className="font-semibold">{p.type}</span>
-                      <span className="text-muted-foreground ml-1">
-                        {p.chevaux.map(c => `N°${c.numero}`).join(" + ")}
-                      </span>
-                      <span className="ml-2 text-muted-foreground/60">
-                        Proba ~{(p.probabilite * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="font-mono font-bold">{p.mise.toFixed(2)}€</div>
-                      <div className="text-brand-emerald font-mono">→ ~{p.gain_potentiel.toFixed(0)}€</div>
-                    </div>
+                <div key={i}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "2px 0" }}>
+                    <span style={{ color: CX.gray600 }}>
+                      <span style={{ fontWeight: 600, color: CX.ink2 }}>{p.type}</span> {p.chevaux.map(c => `N°${c.numero}`).join(" + ")} <span style={{ color: CX.muted }}>· proba ~{(p.probabilite * 100).toFixed(0)}%</span>
+                    </span>
+                    <span style={{ textAlign: "right", flexShrink: 0 }}>
+                      <span style={{ fontFamily: CX.sg, fontWeight: 700, color: CX.ink2 }}>{p.mise.toFixed(2)}€</span> <span style={{ color: CX.em, fontWeight: 600 }}>→ ~{p.gain_potentiel.toFixed(0)}€</span>
+                    </span>
                   </div>
                   {p.raisons && p.raisons.length > 0 && (
-                    <details className="mt-1 ml-1">
-                      <summary className="cursor-pointer text-[11px] text-brand-gold/90 font-semibold list-none select-none">
+                    <details style={{ margin: "1px 0 0 4px" }}>
+                      <summary style={{ cursor: "pointer", fontSize: 11, color: CX.gold, fontWeight: 600, listStyle: "none" }} className="select-none">
                         Pourquoi ce pari ? ▾
                       </summary>
-                      <ul className="mt-1 space-y-0.5 rounded bg-muted/30 p-2 text-[11px] text-muted-foreground leading-relaxed">
+                      <ul style={{ margin: "4px 0 0", padding: 8, listStyle: "none", borderRadius: 6, background: "rgba(255,255,255,.6)", fontSize: 11, color: CX.gray600, lineHeight: 1.5 }}>
                         {p.raisons.map((r, j) => (
-                          <li key={j} className="flex gap-1.5">
-                            <span className="text-brand-gold flex-shrink-0">·</span>
-                            <span className="min-w-0">{r}</span>
+                          <li key={j} style={{ display: "flex", gap: 6 }}>
+                            <span style={{ color: CX.gold, flexShrink: 0 }}>·</span>
+                            <span style={{ minWidth: 0 }}>{r}</span>
                           </li>
                         ))}
                       </ul>
@@ -314,91 +394,98 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Paris écartés — transparence : ce que l'IA refuse et POURQUOI */}
-      {plan.paris_ecartes && plan.paris_ecartes.length > 0 && (
-        <details className="mt-4 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-semibold text-muted-foreground list-none select-none">
-            Paris écartés par l&apos;algorithme ({plan.paris_ecartes.length}) ▾
-          </summary>
-          <div className="mt-2 space-y-2">
-            {plan.paris_ecartes.map((e, i) => (
-              <div key={i} className="rounded bg-background/60 border border-border/60 p-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold">
-                    {e.type}{" "}
-                    <span className="text-muted-foreground font-normal">
-                      {e.chevaux.map(c => `N°${c.numero}`).join(" + ")}
-                    </span>
-                  </span>
-                  <span className="text-muted-foreground/70 font-mono tabular-nums flex-shrink-0">
-                    {(e.probabilite * 100).toFixed(0)}%
-                  </span>
-                </div>
-                <p className="mt-0.5 text-brand-red/90">{e.motif}</p>
-              </div>
-            ))}
-          </div>
-        </details>
+      {/* Note « champ réduit » — modéré/risqué visent PLUSIEURS petites mises ; s'ils
+          tombent à 1 ticket, c'est que la course n'offre qu'un pari dans leur bande de
+          gain (petit champ). On l'explique pour ne pas donner l'impression d'un plan
+          bâclé. Exclu du prudent, qui joue volontairement UN seul placé sûr (design). */}
+      {profil !== "conservateur" && plan.niveaux.reduce((n, niv) => n + niv.paris.length, 0) === 1 && (
+        <p style={{ margin: "10px 0 0", fontSize: 10.5, color: CX.gray400, lineHeight: 1.5, background: CX.surf3, borderRadius: 8, padding: "7px 10px" }}>
+          Un seul pari entre dans la bande de gain de ce profil sur cette course (champ réduit). Choisis une course à plus de partants pour un plan étalé sur plusieurs mises.
+        </p>
       )}
 
       {/* Résumé totaux */}
-      <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
-        <div className="rounded bg-muted/30 p-2">
-          <div className="text-muted-foreground">Misé</div>
-          <div className="font-bold font-mono tabular-nums">{plan.montant_joue.toFixed(2)}€</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 7, marginTop: 12 }}>
+        <div style={cell}>
+          <div style={{ fontSize: 10, color: CX.gray400 }}>Misé</div>
+          <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: CX.ink2 }}>{plan.montant_joue.toFixed(2)}€</div>
         </div>
-        <div className="rounded bg-muted/30 p-2">
-          <div className="text-muted-foreground">Réserve</div>
-          <div className="font-bold font-mono tabular-nums text-brand-gold">{plan.montant_reserve.toFixed(2)}€</div>
+        <div style={cell}>
+          <div style={{ fontSize: 10, color: CX.gray400 }}>Réserve</div>
+          <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: CX.gold }}>{plan.montant_reserve.toFixed(2)}€</div>
         </div>
         {typeof plan.esperance_gain === "number" && (
-          <div className="rounded bg-muted/30 p-2">
-            <div className="text-muted-foreground">Espérance gain</div>
-            <div className={cn(
-              "font-bold font-mono tabular-nums",
-              plan.esperance_gain >= 0 ? "text-brand-emerald" : "text-brand-red"
-            )}>
+          <div style={cell}>
+            <div style={{ fontSize: 10, color: CX.gray400 }}>Espér. gain</div>
+            <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: plan.esperance_gain >= 0 ? CX.em : CX.red }}>
               {plan.esperance_gain >= 0 ? "+" : ""}{plan.esperance_gain.toFixed(2)}€
             </div>
           </div>
         )}
       </div>
 
-      {plan.kelly_warning && (
-        <div className="mt-3 rounded-lg border border-brand-red/30 bg-brand-red/5 p-2 text-xs text-brand-red flex gap-2">
+      {/* Paris écartés — transparence : ce que l'IA refuse et POURQUOI */}
+      {plan.paris_ecartes && plan.paris_ecartes.length > 0 && (
+        <details style={{ marginTop: 11, borderRadius: 11, border: `1px solid ${CX.bd2}`, background: CX.surf3 }}>
+          <summary className="select-none" style={{ cursor: "pointer", padding: "9px 12px", fontSize: 11.5, fontWeight: 600, color: CX.gray500, listStyle: "none" }}>
+            Paris écartés par l&apos;algorithme ({plan.paris_ecartes.length}) ▾
+          </summary>
+          <div style={{ padding: "0 12px 10px", display: "flex", flexDirection: "column", gap: 7 }}>
+            {plan.paris_ecartes.map((e, i) => (
+              <div key={i} style={{ borderRadius: 8, background: "#FFFFFF", border: `1px solid ${CX.bd2}`, padding: "7px 10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11.5 }}>
+                  <span style={{ fontWeight: 600, color: CX.ink2 }}>
+                    {e.type} <span style={{ fontWeight: 400, color: CX.gray400 }}>{e.chevaux.map(c => `N°${c.numero}`).join(" + ")}</span>
+                  </span>
+                  <span style={{ color: CX.gray400, fontFamily: CX.sg, flexShrink: 0 }}>{(e.probabilite * 100).toFixed(0)}%</span>
+                </div>
+                <p style={{ margin: "3px 0 0", fontSize: 11, color: CX.red }}>{e.motif}</p>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      <p style={{ margin: "10px 0 0", fontSize: 10.5, color: CX.em, display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.emLight, animation: "cxDotPulse 1.4s ease-in-out infinite" }} />
+        {plan.prono_fige
+          ? "🔒 Sélection figée — gains réévalués sur les cotes EN DIRECT jusqu'au départ."
+          : "Gains réévalués sur les cotes du marché EN DIRECT (mise à jour automatique)."}
+      </p>
+
+      {plan.kelly_warning ? (
+        <div style={{ marginTop: 12, borderRadius: 10, border: `1px solid ${CX.redBd}`, background: CX.redBg, padding: 8, fontSize: 12, color: CX.red, display: "flex", gap: 8 }}>
           <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
           {plan.avertissement}
         </div>
+      ) : (
+        <p style={{ marginTop: 12, fontSize: 10, color: CX.muted }}>{plan.avertissement}</p>
       )}
 
-      <p className="mt-3 text-[10px] text-muted-foreground/60">{plan.avertissement}</p>
-
       {saveState === "saved" ? (
-        <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-brand-emerald/30 bg-brand-emerald/5 py-2.5 text-sm font-semibold text-brand-emerald">
+        <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, border: `1px solid ${CX.emBd}`, background: CX.emBg, padding: "10px 0", fontSize: 14, fontWeight: 600, color: CX.em }}>
           <CheckCircle2 className="h-4 w-4" /> Paris enregistrés dans votre capital
         </div>
       ) : (
-        <Button
-          variant="brand"
-          className="mt-3 w-full bg-brand-gold hover:bg-brand-amber text-brand-dark font-bold"
+        <button
           onClick={handleSave}
           disabled={saveState === "saving"}
+          style={{ width: "100%", marginTop: 11, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#F59E0B,#D97706)", color: "#1B1307", fontWeight: 700, fontSize: 13.5, padding: 12, borderRadius: 12, boxShadow: "0 8px 20px -8px rgba(245,158,11,.55)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: saveState === "saving" ? 0.7 : 1 }}
         >
-          {saveState === "saving"
-            ? <Loader2 className="h-4 w-4 animate-spin" />
-            : <>Valider et enregistrer dans mon capital</>}
-        </Button>
+          {saveState === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Valider et enregistrer dans mon capital"}
+        </button>
       )}
-      <p className="mt-1.5 text-center text-[10px] text-muted-foreground/60">
-        Les gains/pertes seront calculés automatiquement à la fin de la course (vrais rapports PMU).
+      <p style={{ margin: "8px 0 0", textAlign: "center", fontSize: 10, color: CX.muted }}>
+        Gains/pertes calculés en fin de course (rapports PMU réels).
       </p>
 
-      <Button variant="ghost" size="sm" className="mt-1 w-full text-xs" onClick={onClose}>
+      <button onClick={onClose} style={{ width: "100%", marginTop: 6, border: "none", background: "none", cursor: "pointer", fontSize: 11.5, color: CX.gray400 }}>
         Modifier le montant
-      </Button>
+      </button>
     </div>
   );
 }
@@ -407,13 +494,16 @@ function PlanMiseDisplay({ plan, onClose, onSave }: { plan: MisePlan; onClose: (
 /* ─── Cotes comparaison table ────────────────────────────────────────────── */
 function ComparaisonCotes({ partants }: { partants: Partant[] }) {
   const actifs = partants.filter((p) => !p.non_partant);
+  // Design handoff : labels de sources en gris uniforme.
   const sources = [
-    { key: "cote_pmu",           label: "PMU",     accent: "text-blue-600" },
-    { key: "cote_geny",          label: "Geny",    accent: "text-purple-600" },
-    { key: "cote_winamax",       label: "Winamax", accent: "text-orange-600" },
-    { key: "cote_betclic",       label: "Betclic", accent: "text-red-600" },
-    { key: "cote_unibet",        label: "Unibet",  accent: "text-green-600" },
-    { key: "cote_betfair_exchange", label: "Betfair", accent: "text-cyan-700" },
+    { key: "cote_pmu",           label: "PMU",     accent: "text-muted-foreground" },
+    { key: "cote_geny",          label: "Geny",    accent: "text-muted-foreground" },
+    { key: "cote_winamax",       label: "Winamax", accent: "text-muted-foreground" },
+    { key: "cote_betclic",       label: "Betclic", accent: "text-muted-foreground" },
+    { key: "cote_unibet",        label: "Unibet",  accent: "text-muted-foreground" },
+    { key: "cote_bet365",        label: "Bet365",  accent: "text-muted-foreground" },
+    { key: "cote_ladbrokes",     label: "Ladbrokes", accent: "text-muted-foreground" },
+    { key: "cote_betfair_exchange", label: "Betfair", accent: "text-muted-foreground" },
   ] as const;
 
   // Ne montrer que les sources qui ont ≥1 cote non-null
@@ -422,72 +512,43 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
   );
   if (activeSources.length <= 1) return null;
 
+  const HEAD_CELL = { padding: "9px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, textAlign: "right" as const, color: CX.gray400, background: CX.surf2 };
+  const nbCols = activeSources.length;
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full text-xs min-w-[500px]">
-        <thead>
-          <tr className="border-b border-border/60 bg-muted/30">
-            <th className="text-left px-3 py-2 font-medium text-muted-foreground">N° Cheval</th>
-            {activeSources.map((s) => (
-              <th key={s.key} className={cn("text-right px-3 py-2 font-bold", s.accent)}>
-                {s.label}
-              </th>
-            ))}
-            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Min</th>
-            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Mouvement</th>
-          </tr>
-        </thead>
-        <tbody>
-          {actifs.map((p) => {
-            const coteMin = p.cote_min;
-            return (
-              <tr key={p.participation_id} className="border-b border-border/30 hover:bg-accent/10">
-                <td className="px-3 py-2 font-medium">
-                  <span className="text-muted-foreground mr-1.5">{p.numero}</span>
-                  {p.nom_cheval}
-                </td>
-                {activeSources.map((s) => {
-                  const val = (p as unknown as Record<string, unknown>)[s.key] as number | null;
-                  const isBest = val != null && coteMin != null && val === coteMin;
-                  return (
-                    <td key={s.key} className="px-3 py-2 text-right">
-                      <span className={cn(
-                        "font-mono font-semibold tabular-nums",
-                        isBest ? "text-emerald-600" : "text-foreground",
-                        !val && "text-muted-foreground/40",
-                      )}>
-                        {val ? val.toFixed(1) : "—"}
-                      </span>
-                    </td>
-                  );
-                })}
-                <td className="px-3 py-2 text-right">
-                  <span className="font-mono font-bold text-emerald-600 tabular-nums">
-                    {coteMin ? coteMin.toFixed(1) : "—"}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right">
-                  {p.mouvement_cote_pct != null ? (
-                    <span className={cn(
-                      "inline-flex items-center gap-0.5 font-mono font-semibold tabular-nums",
-                      p.mouvement_cote_pct > 0 ? "text-emerald-600" : "text-red-500",
-                    )}>
-                      {p.mouvement_cote_pct > 0 ? (
-                        <TrendingDown className="h-3 w-3" />
-                      ) : (
-                        <TrendingUp className="h-3 w-3" />
-                      )}
-                      {Math.abs(p.mouvement_cote_pct).toFixed(1)}%
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground/40">—</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div style={{ overflowX: "auto", borderTop: `1px solid ${CX.bd4}` }}>
+      <div style={{ display: "grid", gridTemplateColumns: `1.6fr repeat(${nbCols},1fr) 0.8fr`, gap: 0, minWidth: 640 }}>
+        {/* En-tête */}
+        <div style={{ padding: "9px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: CX.gray400, background: CX.surf2 }}>Cheval</div>
+        {activeSources.map((s) => (
+          <div key={s.key} style={HEAD_CELL}>{s.label}</div>
+        ))}
+        <div style={{ ...HEAD_CELL, padding: "9px 12px" }}>Mvt</div>
+        {/* Rangées */}
+        {actifs.map((p) => {
+          const coteMin = p.cote_min;
+          const mv = p.mouvement_cote_pct;
+          return (
+            <Fragment key={p.participation_id}>
+              <div style={{ padding: "9px 14px", fontSize: 12.5, color: CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
+                <span style={{ color: CX.gray400, marginRight: 5 }}>{p.numero}</span>{p.nom_cheval}
+              </div>
+              {activeSources.map((s) => {
+                const val = (p as unknown as Record<string, unknown>)[s.key] as number | null;
+                const isBest = val != null && coteMin != null && val === coteMin;
+                return (
+                  <div key={s.key} style={{ padding: "9px 8px", fontFamily: CX.sg, fontSize: 12.5, fontWeight: isBest ? 700 : 500, textAlign: "right", color: isBest ? CX.em : val == null ? CX.muted : CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
+                    {val ? val.toFixed(1) : "—"}
+                  </div>
+                );
+              })}
+              <div style={{ padding: "9px 12px", fontFamily: CX.sg, fontSize: 12, fontWeight: 600, textAlign: "right", color: mv == null ? CX.muted : mv > 0 ? CX.em : CX.red, borderTop: `1px solid ${CX.bd4}` }}>
+                {mv != null ? `${mv > 0 ? "▼" : "▲"} ${Math.abs(mv).toFixed(1)}%` : "—"}
+              </div>
+            </Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -515,60 +576,61 @@ function PronosticsPresse({ pronostics }: {
     paris_turf: "Paris-Turf",
     canalturf: "CanalTurf",
     geny_expert: "Geny Expert",
+    equidia: "Equidia",
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <Newspaper className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-sm font-semibold">Pronostics presse</h3>
-        <span className="text-xs text-muted-foreground">{pronostics.length} source{pronostics.length > 1 ? "s" : ""}</span>
-      </div>
+    <details className="group" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
+      <summary className="cursor-pointer select-none" style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px", listStyle: "none" }}>
+        <Newspaper className="h-4 w-4" style={{ color: CX.gray500 }} />
+        <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Pronostics presse</h3>
+        <span style={{ fontSize: 11.5, color: CX.gray400 }}>{pronostics.length} source{pronostics.length > 1 ? "s" : ""}</span>
+        <ChevronDown className="ml-auto transition-transform group-open:rotate-180 h-4 w-4" style={{ color: CX.gray400 }} />
+      </summary>
+      <div style={{ padding: "14px 18px", borderTop: `1px solid ${CX.bd4}` }}>
 
       {consensus.length > 0 && (
-        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-          <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide mb-1.5">
+        <div style={{ borderRadius: 12, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, padding: "10px 13px", marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.gold, marginBottom: 7 }}>
             Consensus experts
-          </p>
-          <div className="flex flex-wrap gap-1.5">
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {consensus.map(([num, { nb, nom }]) => (
-              <span key={num} className="inline-flex items-center gap-1 rounded-full bg-white border border-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                N°{num} {nom && <span className="font-normal text-amber-600">{nom}</span>}
-                <span className="text-[10px] text-amber-500">×{nb}</span>
+              <span key={num} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: CX.goldDeep, background: "#FFFFFF", border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "3px 9px" }}>
+                N°{num} {nom && <span style={{ fontWeight: 400, color: CX.gold }}>{nom}</span>}
+                <span style={{ fontSize: 10, color: CX.gold }}>×{nb}</span>
               </span>
             ))}
           </div>
         </div>
       )}
 
-      <div className="grid sm:grid-cols-2 gap-2">
+      <div className="cx-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
         {pronostics.map((p, i) => (
-          <div key={i} className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">
+          <div key={i} style={{ borderRadius: 11, border: `1px solid ${CX.bd2}`, background: CX.surf2, padding: "10px 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: CX.gray500 }}>
                 {SOURCE_LABEL[p.source] ?? p.source}
               </span>
               {p.journaliste && (
-                <span className="text-[10px] text-muted-foreground">{p.journaliste}</span>
+                <span style={{ fontSize: 10, color: CX.gray400 }}>{p.journaliste}</span>
               )}
             </div>
-            <div className="flex flex-wrap gap-1">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {p.selection.slice(0, 6).map((s, j) => (
-                <span key={j} className={cn(
-                  "inline-flex items-center rounded px-1.5 py-0 text-[11px] font-mono font-bold",
-                  j === 0 ? "bg-amber-100 text-amber-800" : "bg-muted text-muted-foreground"
-                )}>
+                <span key={j} style={{ fontFamily: CX.sg, fontSize: 11, fontWeight: 700, borderRadius: 5, padding: "1px 6px", color: j === 0 ? CX.goldDeep : CX.gray500, background: j === 0 ? "#FDE9C4" : CX.surf5 }}>
                   {s.numero}
                 </span>
               ))}
             </div>
             {p.commentaire && (
-              <p className="text-[10px] text-muted-foreground mt-1.5 line-clamp-2">{p.commentaire}</p>
+              <p className="line-clamp-2" style={{ margin: "7px 0 0", fontSize: 11, lineHeight: 1.4, color: CX.gray400 }}>{p.commentaire}</p>
             )}
           </div>
         ))}
       </div>
-    </div>
+      </div>
+    </details>
   );
 }
 
@@ -591,21 +653,32 @@ function MiseCalculatorWidget({
   const [profilChoisi, setProfilChoisi] = useState(profil || "equilibre");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function generate() {
+  async function generate(profilOverride?: string) {
     const m = parseFloat(montant);
     if (!m || m <= 0) return;
+    const prof = profilOverride ?? profilChoisi;
     setLoading(true);
     try {
       const res = await api.post(`/courses/${courseId}/mise-plan`, {
         montant: m,
-        profil_risque: profilChoisi,
+        profil_risque: prof,
       });
       setPlan(res.data);
-    } catch {
-      toast.error("Erreur lors du calcul du plan");
+    } catch (e: unknown) {
+      // Message précis du backend (ex. « Pronostic pas encore disponible ») si présent.
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || "Erreur lors du calcul du plan");
     } finally {
       setLoading(false);
     }
+  }
+
+  // Switch de profil depuis le plan affiché : garde la même mise, recalcule
+  // instantanément sans repasser par le formulaire (le plan reste visible).
+  async function switchProfil(p: string) {
+    if (p === profilChoisi || loading) return;
+    setProfilChoisi(p);
+    await generate(p);
   }
 
   async function saveBets(): Promise<number> {
@@ -623,17 +696,42 @@ function MiseCalculatorWidget({
     }
   }
 
+  // RAFRAÎCHISSEMENT LIVE des gains estimés : tant qu'un plan est affiché et que la course
+  // n'est PAS terminée, on recalcule le plan en silence toutes les ~15 s → les gains
+  // potentiels suivent les cotes EN DIRECT du marché (sinon l'utilisateur voit un gain figé
+  // au moment du clic, trompeur quand la cote bouge). On NE stoppe PLUS au gel T-10 : après
+  // le gel la SÉLECTION reste figée (backend) mais les GAINS sont ré-évalués sur les cotes
+  // live jusqu'au départ (gains_live_post_gel). Seule la fin de course arrête le refresh.
+  useEffect(() => {
+    if (!plan || statut === "termine") return;
+    const m = parseFloat(montant);
+    if (!m || m <= 0) return;
+    let cancelled = false;
+    const id = setInterval(async () => {
+      try {
+        const res = await api.post(`/courses/${courseId}/mise-plan`, {
+          montant: m,
+          profil_risque: profilChoisi,
+        });
+        if (!cancelled) setPlan(res.data);
+      } catch {
+        /* refresh silencieux : on garde le dernier plan en cas d'échec transitoire */
+      }
+    }, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [plan, montant, profilChoisi, statut, courseId]);
+
   if (!userPlan || userPlan === "free") {
     return (
-      <div className="text-center py-6">
-        <Calculator className="h-10 w-10 mx-auto mb-3 text-brand-gold opacity-60" />
-        <p className="text-sm font-semibold mb-1">Calculateur de mise</p>
-        <p className="text-xs text-muted-foreground mb-4">
+      <div style={{ textAlign: "center", padding: "24px 0" }}>
+        <Calculator className="h-10 w-10 mx-auto mb-3" style={{ color: CX.gold, opacity: 0.6 }} />
+        <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: CX.ink2 }}>Calculateur de mise</p>
+        <p style={{ fontSize: 12, color: CX.gray400, marginBottom: 16 }}>
           Entrez votre mise → BlackTurf génère votre plan de pari personnalisé.
           Disponible dès le plan Standard.
         </p>
         <Button variant="brand" size="sm" asChild>
-          <Link href="/tarifs">Passer Standard — 19€/mois</Link>
+          <Link href="/tarifs">Passer Standard — 12€/mois</Link>
         </Button>
       </div>
     );
@@ -641,8 +739,8 @@ function MiseCalculatorWidget({
 
   if (!predictions) {
     return (
-      <div className="text-center py-6 text-muted-foreground text-sm">
-        <Brain className="h-8 w-8 mx-auto mb-2 opacity-40" />
+      <div style={{ textAlign: "center", padding: "24px 0", color: CX.gray400, fontSize: 13 }}>
+        <Brain className="h-8 w-8 mx-auto mb-2" style={{ opacity: 0.4 }} />
         {statut === "termine"
           ? "Course non analysée par l'IA — calculateur indisponible."
           : "Lancez l'analyse d'abord pour activer le calculateur."}
@@ -650,40 +748,40 @@ function MiseCalculatorWidget({
     );
   }
 
-  if (plan) return <PlanMiseDisplay plan={plan} onClose={() => setPlan(null)} onSave={saveBets} />;
+  if (plan) return (
+    <PlanMiseDisplay
+      plan={plan}
+      profil={profilChoisi}
+      switching={loading}
+      onChangeProfil={switchProfil}
+      onClose={() => setPlan(null)}
+      onSave={saveBets}
+    />
+  );
 
   return (
     <div>
-      <p className="text-xs text-muted-foreground mb-3">
-        Combien souhaitez-vous miser sur cette course ? BlackTurf répartit votre
-        mise sur plusieurs paris selon son analyse.
+      <p style={{ margin: "0 0 12px", fontSize: 12.5, color: CX.gray500 }}>
+        Votre mise, répartie sur plusieurs paris selon l&apos;analyse.
       </p>
       {/* Profil de risque — change quels paris ET la répartition */}
-      <div className="mb-3">
-        <p className="text-[10px] text-muted-foreground mb-1.5">Profil de risque</p>
-        <div className="grid grid-cols-3 gap-1.5">
-          {[
-            { key: "conservateur", label: "Prudent", emoji: "🛡️" },
-            { key: "equilibre", label: "Modéré", emoji: "⚖️" },
-            { key: "agressif", label: "Risqué", emoji: "🔥" },
-          ].map((p) => (
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: CX.gray400, marginBottom: 7 }}>Profil de risque</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 12 }}>
+        {PROFILS_MISE.map((p) => {
+          const active = profilChoisi === p.key;
+          return (
             <button
               key={p.key}
               onClick={() => setProfilChoisi(p.key)}
-              className={cn(
-                "text-[11px] px-2 py-1.5 rounded border font-semibold transition-colors",
-                profilChoisi === p.key
-                  ? "border-brand-gold bg-brand-gold/10 text-brand-gold"
-                  : "border-border text-muted-foreground hover:border-brand-gold/40"
-              )}
+              style={{ border: `1px solid ${active ? "#F59E0B" : "#E5E1D3"}`, background: active ? CX.goldBg : "#FFFFFF", color: active ? CX.gold : CX.gray500, borderRadius: 10, padding: "7px 4px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", transition: "all .15s" }}
             >
               {p.emoji} {p.label}
             </button>
-          ))}
-        </div>
+          );
+        })}
       </div>
-      <div className="flex gap-2">
-        <div className="relative flex-1">
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ position: "relative", flex: 1 }}>
           <input
             ref={inputRef}
             type="number"
@@ -694,28 +792,27 @@ function MiseCalculatorWidget({
             onChange={(e) => setMontant(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && generate()}
             placeholder="10"
-            className="w-full rounded-lg border border-input bg-muted/30 px-3 py-2.5 text-sm font-mono pr-8 focus:outline-none focus:ring-2 focus:ring-brand-gold/50 focus:border-brand-gold/50 transition"
+            style={{ width: "100%", border: "1px solid #E5E1D3", borderRadius: 11, background: "#FFFFFF", padding: "11px 26px 11px 13px", fontSize: 14, fontFamily: CX.sg, fontWeight: 700, color: CX.ink2, outline: "none" }}
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">€</span>
+          <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: CX.gray400, fontSize: 14 }}>€</span>
         </div>
-        <Button
-          variant="brand"
-          onClick={generate}
+        <button
+          onClick={() => generate()}
           disabled={!montant || parseFloat(montant) <= 0 || loading}
-          className="px-4 bg-brand-gold hover:bg-brand-amber text-brand-dark font-bold"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#F59E0B,#D97706)", color: "#1B1307", fontWeight: 700, fontSize: 13.5, padding: "0 18px", borderRadius: 11, boxShadow: "0 8px 20px -8px rgba(245,158,11,.55)", opacity: !montant || parseFloat(montant) <= 0 || loading ? 0.6 : 1 }}
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
             <>Générer <ChevronRight className="h-3.5 w-3.5" /></>
           )}
-        </Button>
+        </button>
       </div>
       {/* Quick amounts */}
-      <div className="flex gap-1.5 mt-2 flex-wrap">
+      <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
         {[5, 10, 20, 30].map((v) => (
           <button
             key={v}
             onClick={() => setMontant(String(v))}
-            className="text-[10px] px-2 py-1 rounded border border-border hover:border-brand-gold/50 hover:text-brand-gold transition-colors tabular-nums"
+            style={{ fontSize: 11, fontFamily: CX.sg, fontWeight: 600, padding: "4px 11px", borderRadius: 8, border: "1px solid #E5E1D3", background: "#FFFFFF", color: CX.gray500, cursor: "pointer", transition: "all .15s" }}
           >
             {v}€
           </button>
@@ -728,26 +825,28 @@ function MiseCalculatorWidget({
 // ─── Résultats officiels (course terminée) ──────────────────────────────────────
 // Badge custom par type de pari (monogramme coloré — pas les logos PMU, qui sont
 // des marques déposées). Couvre toutes les clés de rapports réellement publiées.
+// Design handoff : badges rapports PMU en slate uniforme (#64748B),
+// sauf Quinté+ / Quarté+ en or (jackpots mis en avant).
 const RAPPORT_META: Record<string, { label: string; abbr: string; color: string; ordre: number }> = {
-  e_simple_gagnant:            { label: "Simple Gagnant", abbr: "SG", color: "#059669", ordre: 1 },
-  simple_gagnant_international: { label: "Simple Gagnant (int.)", abbr: "SG", color: "#059669", ordre: 2 },
-  e_simple_place:              { label: "Simple Placé", abbr: "SP", color: "#0EA5E9", ordre: 3 },
-  simple_place_international:   { label: "Simple Placé (int.)", abbr: "SP", color: "#0EA5E9", ordre: 4 },
-  e_couple_gagnant:            { label: "Couplé Gagnant", abbr: "CG", color: "#7C3AED", ordre: 5 },
-  e_couple_place:              { label: "Couplé Placé", abbr: "CP", color: "#8B5CF6", ordre: 6 },
-  e_couple_ordre:              { label: "Couplé Ordre", abbr: "CO", color: "#6D28D9", ordre: 7 },
-  couple_ordre_international:   { label: "Couplé Ordre (int.)", abbr: "CO", color: "#6D28D9", ordre: 8 },
-  e_deux_sur_quatre:           { label: "2 sur 4", abbr: "2/4", color: "#F59E0B", ordre: 9 },
-  e_super_quatre:              { label: "Super 4", abbr: "S4", color: "#F59E0B", ordre: 10 },
-  e_trio:                      { label: "Trio", abbr: "TRI", color: "#EA580C", ordre: 11 },
-  e_trio_ordre:                { label: "Trio Ordre", abbr: "TRO", color: "#C2410C", ordre: 12 },
-  e_tierce:                    { label: "Tiercé", abbr: "TIE", color: "#DC2626", ordre: 13 },
-  e_quarte_plus:               { label: "Quarté+", abbr: "Q4", color: "#DB2777", ordre: 14 },
-  e_quinte_plus:               { label: "Quinté+", abbr: "Q5", color: "#BE185D", ordre: 15 },
-  e_multi:                     { label: "Multi", abbr: "MUL", color: "#0891B2", ordre: 16 },
-  e_mini_multi:                { label: "Mini Multi", abbr: "mM", color: "#06B6D4", ordre: 17 },
-  e_pick5:                     { label: "Pick 5", abbr: "P5", color: "#4F46E5", ordre: 18 },
-  eb5:                         { label: "Pick 5 Bonus", abbr: "B5", color: "#6366F1", ordre: 19 },
+  e_simple_gagnant:            { label: "Simple Gagnant", abbr: "SG", color: "#64748B", ordre: 1 },
+  simple_gagnant_international: { label: "Simple Gagnant (int.)", abbr: "SG", color: "#64748B", ordre: 2 },
+  e_simple_place:              { label: "Simple Placé", abbr: "SP", color: "#64748B", ordre: 3 },
+  simple_place_international:   { label: "Simple Placé (int.)", abbr: "SP", color: "#64748B", ordre: 4 },
+  e_couple_gagnant:            { label: "Couplé Gagnant", abbr: "CG", color: "#64748B", ordre: 5 },
+  e_couple_place:              { label: "Couplé Placé", abbr: "CP", color: "#64748B", ordre: 6 },
+  e_couple_ordre:              { label: "Couplé Ordre", abbr: "CO", color: "#64748B", ordre: 7 },
+  couple_ordre_international:   { label: "Couplé Ordre (int.)", abbr: "CO", color: "#64748B", ordre: 8 },
+  e_deux_sur_quatre:           { label: "2 sur 4", abbr: "2/4", color: "#64748B", ordre: 9 },
+  e_super_quatre:              { label: "Super 4", abbr: "S4", color: "#64748B", ordre: 10 },
+  e_trio:                      { label: "Trio", abbr: "TRI", color: "#64748B", ordre: 11 },
+  e_trio_ordre:                { label: "Trio Ordre", abbr: "TRO", color: "#64748B", ordre: 12 },
+  e_tierce:                    { label: "Tiercé", abbr: "TIE", color: "#64748B", ordre: 13 },
+  e_quarte_plus:               { label: "Quarté+", abbr: "Q4", color: "#B45309", ordre: 14 },
+  e_quinte_plus:               { label: "Quinté+", abbr: "Q5", color: "#B45309", ordre: 15 },
+  e_multi:                     { label: "Multi", abbr: "MUL", color: "#64748B", ordre: 16 },
+  e_mini_multi:                { label: "Mini Multi", abbr: "mM", color: "#64748B", ordre: 17 },
+  e_pick5:                     { label: "Pick 5", abbr: "P5", color: "#64748B", ordre: 18 },
+  eb5:                         { label: "Pick 5 Bonus", abbr: "B5", color: "#64748B", ordre: 19 },
 };
 
 function _rapportAbbr(key: string): string {
@@ -756,16 +855,40 @@ function _rapportAbbr(key: string): string {
 
 function ResultatsSection({ resultats, partants }: {
   resultats: {
-    classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
+    classement: Array<{ numero: number; nom: string; position: number | null; temps: number | null; reduction_km: number | null; incident?: string | null; disqualifie?: boolean }>;
     rapports: Record<string, number> | null;
-    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number }>> | null;
+    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number; libelle?: string | null }>> | null;
     temps_gagnant: string | null;
     commentaire: string | null;
     duree_course: number | null;
   };
   partants: Partant[];
 }) {
-  const podium = [...(resultats.classement || [])].sort((a, b) => a.position - b.position);
+  // Classés (position réelle) triés ; disqualifiés/distancés (position absente +
+  // incident PMU) listés à part, EN FIN d'arrivée comme sur la feuille officielle.
+  const classement = resultats.classement || [];
+  const podium = classement
+    .filter((c) => c.position != null)
+    .sort((a, b) => (a.position as number) - (b.position as number));
+  const disqualifies = classement.filter((c) => c.position == null && (c.disqualifie || c.incident));
+  // Libellé FR de l'incident (varie selon le type de course : trot = allure/poteau,
+  // galop/obstacle = tombé/distancé/arrêté…). Repli générique pour codes inconnus.
+  const fmtIncident = (code: string | null | undefined): string => {
+    if (!code) return "Disqualifié";
+    const map: Record<string, string> = {
+      DISQUALIFIE_POUR_ALLURE_IRREGULIERE: "Disqualifié — allure irrégulière",
+      DISQUALIFIE_POUR_PARCOURS_IRREGULIER: "Disqualifié — parcours irrégulier",
+      DISQUALIFIE_POTEAU_GALOP: "Disqualifié — galop au poteau",
+      ARRETE: "Arrêté",
+      TOMBE: "Tombé",
+      DISTANCE: "Distancé",
+      DEROBE: "Dérobé",
+      RESTE_AU_POTEAU: "Resté au poteau",
+    };
+    if (map[code]) return map[code];
+    const txt = code.replace(/_/g, " ").toLowerCase();
+    return txt.charAt(0).toUpperCase() + txt.slice(1);
+  };
   const coteByNum: Record<number, number | null> = {};
   for (const p of partants) coteByNum[p.numero] = p.cote_pmu ?? null;
 
@@ -805,11 +928,11 @@ function ResultatsSection({ resultats, partants }: {
     : [];
 
   return (
-    <div className="mt-4 overflow-hidden rounded-xl border border-brand-emerald/30 bg-gradient-to-br from-brand-emerald/[0.07] to-transparent">
-      <div className="flex flex-wrap items-center gap-2 border-b border-brand-emerald/20 px-4 py-3">
-        <h2 className="flex items-center gap-2 text-base font-bold">Arrivée officielle</h2>
+    <div className="cx-fade" style={{ borderRadius: 20, border: "1px solid rgba(16,185,129,.3)", overflow: "hidden", background: "linear-gradient(180deg,rgba(16,185,129,.06),#FFFFFF 40%)" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "16px 20px", borderBottom: "1px solid rgba(16,185,129,.18)" }}>
+        <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 17, fontWeight: 700, color: CX.ink2 }}>Arrivée officielle</h2>
         {(tempsGagnant != null || resultats.temps_gagnant) && (
-          <span className="text-xs text-muted-foreground">
+          <span style={{ fontSize: 12, color: CX.gray500 }}>
             Chrono {tempsGagnant != null ? fmtChrono(tempsGagnant) : resultats.temps_gagnant}
             {podium[0]?.reduction_km != null ? ` · réd. ${fmtRedKm(podium[0].reduction_km)}/km` : ""}
           </span>
@@ -824,36 +947,60 @@ function ResultatsSection({ resultats, partants }: {
               <th className="px-2 py-1.5 font-medium">Pos.</th>
               <th className="px-2 py-1.5 font-medium">N°</th>
               <th className="px-2 py-1.5 font-medium">Cheval</th>
-              {hasTemps && <th className="px-2 py-1.5 text-right font-medium">Écart</th>}
-              <th className="px-2 py-1.5 text-right font-medium">Cote finale</th>
-              <th className="px-2 py-1.5 text-right font-medium">{hasRedKm ? "Réd. km" : "Temps"}</th>
+              {hasTemps && <th className="px-2 py-1.5 text-right font-medium hidden sm:table-cell">Écart</th>}
+              <th className="px-2 py-1.5 text-right font-medium">Cote</th>
+              <th className="px-2 py-1.5 text-right font-medium hidden sm:table-cell">{hasRedKm ? "Réd. km" : "Temps"}</th>
             </tr>
           </thead>
           <tbody>
             {podium.map((c) => {
+              const pos = c.position as number;
               const cote = coteByNum[c.numero];
               const temps = c.reduction_km != null ? fmtRedKm(c.reduction_km)
                 : c.temps != null ? fmtChrono(c.temps) : "—";
               return (
-                <tr key={c.numero} className={cn("rounded-lg", rowTint(c.position), c.position <= 3 && "font-semibold")}>
+                <tr key={c.numero} className={cn("rounded-lg", rowTint(pos), pos <= 3 && "font-semibold")}>
                   <td className="px-2 py-2">
-                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold tabular-nums", medalBox(c.position))}>
-                      {c.position}
+                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold tabular-nums", medalBox(pos))}>
+                      {pos}
                     </span>
                   </td>
                   <td className="px-2 py-2 tabular-nums">{c.numero}</td>
                   <td className="px-2 py-2">{c.nom}</td>
                   {hasTemps && (
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
-                      {fmtEcart(c)}
+                    <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
+                      {fmtEcart({ position: pos, temps: c.temps })}
                     </td>
                   )}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
                     {cote != null ? cote.toFixed(1) : "—"}
                   </td>
-                  <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                  <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
                     {temps}
                   </td>
+                </tr>
+              );
+            })}
+            {/* Disqualifiés / distancés — en fin d'arrivée, avec le motif PMU. */}
+            {disqualifies.map((c) => {
+              const cote = coteByNum[c.numero];
+              return (
+                <tr key={`dsq-${c.numero}`} className="text-muted-foreground">
+                  <td className="px-2 py-2">
+                    <span className="inline-flex h-6 min-w-[1.6rem] items-center justify-center rounded px-1 text-[10px] font-bold text-white" style={{ background: "#DC2626" }} title={fmtIncident(c.incident)}>
+                      DSQ
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 tabular-nums">{c.numero}</td>
+                  <td className="px-2 py-2">
+                    <span className="line-through decoration-rose-400/60">{c.nom}</span>
+                    <span className="ml-2 align-middle text-[11px] font-medium text-rose-600">{fmtIncident(c.incident)}</span>
+                  </td>
+                  {hasTemps && <td className="px-2 py-2 hidden sm:table-cell" />}
+                  <td className="px-2 py-2 text-right font-mono tabular-nums">
+                    {cote != null ? cote.toFixed(1) : "—"}
+                  </td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums hidden sm:table-cell">—</td>
                 </tr>
               );
             })}
@@ -901,7 +1048,15 @@ function ResultatsSection({ resultats, partants }: {
                   const label = meta?.label ?? k.replace(/^e_/, "").replace(/_/g, " ");
                   // Placé / Gagnant : 1 ligne par cheval. Combos : on limite l'affichage.
                   const isPlaceOrWin = k.includes("simple");
+                  // Multi/Mini Multi : 1 entrée par formule « en 4/5/6/7 » (même combinaison),
+                  // on affiche le libellé « en N » à côté de chaque rapport.
+                  const isMulti = k === "e_multi" || k === "e_mini_multi";
                   const rows = isPlaceOrWin ? arr : arr.slice(0, 6);
+                  // « e-Mini Multi en 4 » → « en 4 » (juste la formule, le type est déjà en titre).
+                  const fmtMulti = (lib: string | null | undefined): string => {
+                    const m = (lib || "").match(/en\s+\d+/i);
+                    return m ? m[0].toLowerCase() : "";
+                  };
                   return (
                     <div key={k} className="rounded-lg border border-border bg-white p-2.5">
                       <div className="mb-1.5 flex items-center gap-2">
@@ -911,7 +1066,11 @@ function ResultatsSection({ resultats, partants }: {
                       <div className="space-y-0.5">
                         {rows.map((r, i) => (
                           <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-                            <span className="truncate text-muted-foreground">{fmtCombo(r.combinaison) || "—"}</span>
+                            <span className="truncate text-muted-foreground">
+                              {isMulti
+                                ? <>{fmtMulti(r.libelle) && <span className="font-semibold text-foreground">{fmtMulti(r.libelle)}</span>}{fmtMulti(r.libelle) ? " · " : ""}{fmtCombo(r.combinaison)}</>
+                                : (fmtCombo(r.combinaison) || "—")}
+                            </span>
                             <span className="font-bold tabular-nums text-brand-emerald whitespace-nowrap">{r.rapport.toFixed(2)} €</span>
                           </div>
                         ))}
@@ -968,9 +1127,9 @@ function ResultatsSection({ resultats, partants }: {
 // recalculée : on lit les Prediction stockées (immuables) + le classement officiel.
 function PronosticVerdictSection({ predictions, classement }: {
   predictions: Prediction[];
-  classement: Array<{ numero: number; nom: string; position: number }>;
+  classement: Array<{ numero: number; nom: string; position: number | null }>;
 }) {
-  const posByNum = new Map<number, number>();
+  const posByNum = new Map<number, number | null>();
   for (const c of classement) posByNum.set(c.numero, c.position);
 
   const iaRanked = [...predictions].sort((a, b) => a.rang_predit - b.rang_predit);
@@ -993,7 +1152,7 @@ function PronosticVerdictSection({ predictions, classement }: {
     : favPlace
     ? { emoji: "✅", label: `Favori placé (${favPos}${favPos === 1 ? "er" : "e"})`, cls: "border-amber-300 bg-amber-50 text-amber-800" }
     : gagnantDansTop3IA
-    ? { emoji: "➕", label: `Vainqueur dans le top 3 IA (classé #${rangIAduGagnant})`, cls: "border-blue-300 bg-blue-50 text-blue-800" }
+    ? { emoji: "➕", label: `Vainqueur dans le top 3 IA (classé #${rangIAduGagnant})`, cls: "border-amber-300 bg-amber-50 text-amber-800" }
     : { emoji: "❌", label: "Pronostic manqué", cls: "border-rose-300 bg-rose-50 text-rose-800" };
 
   const pickVerdict = (pos: number | null | undefined) => {
@@ -1004,10 +1163,10 @@ function PronosticVerdictSection({ predictions, classement }: {
   };
 
   return (
-    <div className="mt-4 rounded-xl border border-brand-blue/30 bg-brand-blue/5 p-4">
-      <h2 className="mb-3 flex items-center gap-2 text-base font-bold">
+    <div className="cx-fade" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px" }}>
+      <h2 className="mb-3 flex flex-wrap items-center gap-2" style={{ margin: "0 0 14px", fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>
         Bilan du pronostic
-        <span className="text-xs font-normal text-muted-foreground">
+        <span style={{ fontSize: 11.5, fontWeight: 400, fontFamily: "'Inter',sans-serif", color: CX.gray400 }}>
           · pronostic figé avant la course
         </span>
       </h2>
@@ -1029,11 +1188,11 @@ function PronosticVerdictSection({ predictions, classement }: {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted-foreground border-b">
-              <th className="py-1 pr-2">Pronostic</th>
+              <th className="py-1 pr-2">Prono</th>
               <th className="py-1 pr-2">N°</th>
               <th className="py-1 pr-2">Cheval</th>
-              <th className="py-1 pr-2 text-right">Proba top-3</th>
-              <th className="py-1 pr-2 text-right">Arrivée réelle</th>
+              <th className="py-1 pr-2 text-right hidden sm:table-cell">Proba top-3</th>
+              <th className="py-1 pr-2 text-right">Arrivée</th>
             </tr>
           </thead>
           <tbody>
@@ -1045,7 +1204,7 @@ function PronosticVerdictSection({ predictions, classement }: {
                   <td className="py-1 pr-2 font-bold tabular-nums">#{p.rang_predit}</td>
                   <td className="py-1 pr-2 tabular-nums">{p.numero}</td>
                   <td className="py-1 pr-2">{p.nom_cheval}</td>
-                  <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground">
+                  <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground hidden sm:table-cell">
                     {(p.proba_top3 * 100).toFixed(0)}%
                   </td>
                   <td className={cn("py-1 pr-2 text-right tabular-nums", pv.cls)}>
@@ -1088,99 +1247,9 @@ interface BilanResp {
   verdict: "gagnant" | "perdant" | "en_attente";
 }
 
-interface ConfrontParCheval {
-  numero: number; nom: string; nb_adversaires_connus: number;
-  victoires: number; defaites: number; bilan: string;
-  top_victime: { nom: string; numero: number; nb: number } | null;
-  bete_noire: { nom: string; numero: number; nb: number } | null;
-}
-interface ConfrontPaire {
-  a_numero: number; a_nom: string; b_numero: number; b_nom: string;
-  nb_rencontres: number; a_victoires: number; b_victoires: number; nuls: number;
-}
-interface ConfrontResp {
-  nb_partants: number; nb_paires_avec_duel: number;
-  paires: ConfrontPaire[]; par_cheval: ConfrontParCheval[];
-}
-
-/* ─── Confrontations directes (head-to-head) ─────────────────────────────── */
-function ConfrontationsSection({ courseId }: { courseId: string }) {
-  const [data, setData] = useState<ConfrontResp | null>(null);
-  useEffect(() => {
-    let alive = true;
-    coursesApi.confrontations(courseId)
-      .then((r) => { if (alive) setData(r.data); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [courseId]);
-
-  if (!data || data.nb_paires_avec_duel === 0) return null;
-
-  // Chevaux ayant un vrai vécu de duels, meilleur bilan net d'abord
-  const acteurs = data.par_cheval
-    .filter((c) => c.victoires + c.defaites > 0)
-    .slice(0, 6);
-  const topPaires = data.paires.slice(0, 5);
-
-  return (
-    <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/40 to-white p-5 space-y-4">
-      <div className="flex items-center gap-2">
-        <Swords className="h-4 w-4 text-violet-500" />
-        <h3 className="text-sm font-semibold text-gray-900">Confrontations directes</h3>
-        <span className="ml-auto text-[10px] text-muted-foreground">
-          {data.nb_paires_avec_duel} duel{data.nb_paires_avec_duel > 1 ? "s" : ""} déjà disputé{data.nb_paires_avec_duel > 1 ? "s" : ""}
-        </span>
-      </div>
-
-      {/* Bilan par cheval */}
-      {acteurs.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {acteurs.map((c) => {
-            const net = c.victoires - c.defaites;
-            return (
-              <div key={c.numero} className="rounded-lg bg-white/70 border border-violet-100 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold">N°{c.numero} {c.nom}</span>
-                  <span className={cn(
-                    "ml-auto text-[11px] font-mono font-bold tabular-nums",
-                    net > 0 ? "text-emerald-600" : net < 0 ? "text-rose-600" : "text-muted-foreground",
-                  )}>
-                    {c.victoires}V – {c.defaites}D
-                  </span>
-                </div>
-                <div className="text-[10px] text-muted-foreground mt-0.5 space-x-2">
-                  {c.top_victime && <span>domine N°{c.top_victime.numero} ({c.top_victime.nb}×)</span>}
-                  {c.bete_noire && <span>bête noire N°{c.bete_noire.numero} ({c.bete_noire.nb}×)</span>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Duels marquants */}
-      {topPaires.length > 0 && (
-        <div className="space-y-1 pt-1">
-          {topPaires.map((p, i) => {
-            const lead = p.a_victoires === p.b_victoires
-              ? `${p.a_victoires}–${p.b_victoires} (équilibré)`
-              : p.a_victoires > p.b_victoires
-                ? `N°${p.a_numero} mène ${p.a_victoires}–${p.b_victoires}`
-                : `N°${p.b_numero} mène ${p.b_victoires}–${p.a_victoires}`;
-            return (
-              <div key={i} className="text-[11px] text-gray-600 flex items-center gap-1.5">
-                <span className="text-muted-foreground">N°{p.a_numero} {p.a_nom} vs N°{p.b_numero} {p.b_nom}</span>
-                <span className="ml-auto font-mono text-gray-800">{lead}</span>
-                <span className="text-muted-foreground/70">· {p.nb_rencontres} fois</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <p className="text-[10px] text-muted-foreground">Calculé depuis l&apos;historique réel des arrivées — qui a déjà battu qui.</p>
-    </div>
-  );
-}
+/* Confrontations directes : table d'affichage retirée (l'historique des duels
+   reste calculé côté backend — features `conf_*` — et nourrit le modèle et la
+   narrative, mais n'est plus montré tel quel à l'utilisateur). */
 
 /* Tableau de détail d'un bilan (paris réglés d'un profil) */
 function BilanDetail({ bilan }: { bilan: BilanData }) {
@@ -1238,10 +1307,33 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
 
   useEffect(() => {
     let alive = true;
-    api.get(`/courses/${courseId}/bilan-pronostic?montant=10`)
-      .then((r) => { if (alive) { setData(r.data); setState("ok"); } })
-      .catch(() => { if (alive) setState("error"); });
-    return () => { alive = false; };
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const load = () =>
+      api.get(`/courses/${courseId}/bilan-pronostic?montant=10`)
+        .then((r) => {
+          if (!alive) return;
+          const d = r.data as BilanResp;
+          setData(d);
+          setState("ok");
+          // On NE stoppe le polling QUE lorsque TOUT est réglé. Tant qu'un pari attend
+          // son rapport PMU (Multi/Mini Multi publiés en différé après l'arrivée), on
+          // continue de re-fetch → le bilan se met à jour DÈS que le rapport arrive,
+          // sans rechargement manuel (avant : on s'arrêtait au 1er succès et le
+          // « en attente » restait figé même une fois le rapport publié).
+          const pending = (d.bilans_profils ?? []).some(
+            (b) => b?.verdict === "en_attente" || b?.bilan?.en_attente,
+          ) || (!d.bilans_profils && (d.verdict === "en_attente" || d.bilan?.en_attente));
+          if (!pending && iv) { clearInterval(iv); iv = null; } // tout réglé → stop
+        })
+        .catch(() => {
+          // 404 = arrivee PMU pas encore publiee (course juste terminee) → on
+          // retentera. On ne fige pas en "error" pour laisser le retry afficher
+          // le bilan des qu'il est disponible.
+          if (alive) setState((prev) => (prev === "ok" ? prev : "loading"));
+        });
+    load();
+    iv = setInterval(load, 15000); // re-fetch jusqu'à ce que tous les rapports soient publiés
+    return () => { alive = false; if (iv) clearInterval(iv); };
   }, [courseId]);
 
   if (state !== "ok" || !data) return null;
@@ -1261,10 +1353,10 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
     : { label: `En attente de ${bilan.nb_en_attente} rapport${bilan.nb_en_attente > 1 ? "s" : ""} PMU`, cls: "border-amber-300 bg-amber-50 text-amber-800" };
 
   return (
-    <div className="mt-4 rounded-xl border border-brand-gold/30 bg-brand-gold/5 p-4">
-      <h2 className="mb-1 flex flex-wrap items-center gap-2 text-base font-bold">
-        Bilan du plan de mise — {data.montant}€
-        <span className="text-xs font-normal text-muted-foreground">
+    <div className="cx-fade" style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.3)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 45%)", padding: "18px 20px" }}>
+      <h2 className="mb-1 flex flex-wrap items-center gap-2" style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>
+        Bilan du plan — {data.montant}€
+        <span className="text-xs font-normal text-muted-foreground hidden sm:inline">
           {cur.source === "fige"
             ? "· plan figé AVANT le départ, réglé sur l'arrivée réelle (par profil)"
             : "· simulation rétrospective sur l'arrivée réelle, par profil"}
@@ -1339,7 +1431,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
                     const hit = realSet.has(n);
                     return (
                       <span key={n} className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold ring-1 tabular-nums",
-                        hit ? "bg-emerald-50 ring-emerald-300 text-emerald-700" : "bg-blue-50 ring-blue-200 text-blue-700")}>
+                        hit ? "bg-emerald-50 ring-emerald-300 text-emerald-700" : "bg-gray-50 ring-gray-200 text-gray-600")}>
                         <span className="text-[9px] font-normal text-muted-foreground">{i + 1}</span>N°{n}
                       </span>
                     );
@@ -1387,8 +1479,8 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
 
       <p className="mt-2 text-[10px] text-muted-foreground/70">
         {cur.source === "fige"
-          ? "Ce plan a été RÉELLEMENT figé avant le départ (un par profil : Prudent = placé fréquent · Modéré = équilibré · Risqué = gros gains), puis réglé aux rapports PMU définitifs réels — c'est le même prono que celui compté au palmarès. Jouez responsable."
-          : "Aucun plan figé pour ce profil sur cette course (antérieure au gel automatique) : simulation rétrospective de la méthode, réglée aux rapports PMU réels. Jouez responsable."}
+          ? "Plan figé avant le départ, réglé aux rapports PMU réels. Jouez responsable."
+          : "Simulation rétrospective réglée aux rapports PMU réels. Jouez responsable."}
       </p>
     </div>
   );
@@ -1397,22 +1489,238 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
 // ─── Marché des cotes (live) ────────────────────────────────────────────────────
 // Affiché uniquement avant/pendant la course. Poll les cotes PMU toutes les 5 s.
 // Une carte par cheval : cote actuelle + variation + graphe individuel d'évolution.
-function Sparkline({ data, color }: { data: number[]; color: string }) {
-  if (data.length < 2) return <div className="h-11" />;
-  const min = Math.min(...data), max = Math.max(...data);
-  const rng = max - min || 1;
-  const pts = data
-    .map((v, i) => `${(i / (data.length - 1)) * 100},${27 - ((v - min) / rng) * 25}`)
-    .join(" ");
-  const area = `0,28 ${pts} 100,28`;
-  const lastY = 27 - ((data[data.length - 1] - min) / rng) * 25;
+
+/* ─── Détail d'un partant (réutilisé : ligne dépliée desktop + carte mobile) ─── */
+function PartantDetail({ partant }: { partant: Partant }) {
+  const SUBCARD = { borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "#FFFFFF", padding: "11px 13px" } as const;
+  const HEAD_ST = { fontSize: 9.5, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: ".07em", color: CX.gray400, marginBottom: 8 };
+  const Head = ({ children }: { children: React.ReactNode }) => <div style={HEAD_ST}>{children}</div>;
+  const label = { fontSize: 11, color: CX.gray400 } as const;
+  const val = { color: CX.gray700 } as const;
+  const elo = partant.elo_global;
+  const eloColor = elo == null ? CX.gray400 : elo >= 1650 ? CX.gold : CX.ink2;
+  const mv = partant.mouvement_cote_pct;  // >0 = cote baissée = argent venu = signal +
+  const sexeLbl = partant.sexe ? ({ M: "Mâle", H: "Hongre", F: "Femelle" } as Record<string, string>)[partant.sexe] ?? partant.sexe : null;
+  const a = partant.analyse;
+  const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100));
+  const js = a?.jockey_stats, es = a?.entraineur_stats;
+  const chipStyle = (type: string) =>
+    type === "+" ? { fg: CX.emDeep, bg: CX.emBg, bd: CX.emBd, arrow: "▲" } :
+    type === "-" ? { fg: CX.redDeep, bg: CX.redBg, bd: CX.redBd, arrow: "▼" } :
+    { fg: CX.gold, bg: CX.goldBg, bd: CX.goldBd, arrow: "●" };
   return (
-    <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-11 w-full">
-      <polygon points={area} fill={color} fillOpacity={0.1} />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5}
-        vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={100} cy={lastY} r={2} fill={color} vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div>
+      {/* Points clés (le pourquoi) — chips en tête */}
+      {a?.points && a.points.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "0 0 12px" }}>
+          {a.points.map((pt, i) => {
+            const cs = chipStyle(pt.type);
+            return (
+              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, borderRadius: 999, padding: "3px 10px", color: cs.fg, background: cs.bg, border: `1px solid ${cs.bd}` }}>
+                {cs.arrow} {pt.txt}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Musique — forme récente */}
+      {partant.musique && (
+        <div style={{ ...SUBCARD, marginBottom: 10 }}>
+          <Head>Musique — forme récente</Head>
+          <MusiqueDisplay musique={partant.musique} />
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(178px,1fr))", gap: 10 }}>
+      {/* Forme chiffrée */}
+      {a && (pct(a.forme.taux_top3) != null || pct(a.forme.recent_win_rate) != null) && (
+        <div style={SUBCARD}>
+          <Head>Forme</Head>
+          {pct(a.forme.taux_top3) != null && (
+            <>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                <span style={label}>Dans les 3</span>
+                <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 14, color: CX.ink2 }}>{pct(a.forme.taux_top3)}%</span>
+              </div>
+              <div style={{ margin: "6px 0 8px", height: 6, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 999, background: CX.emLight, width: `${Math.min(100, pct(a.forme.taux_top3)!)}%` }} />
+              </div>
+            </>
+          )}
+          {pct(a.forme.recent_win_rate) != null && <div style={{ ...label, display: "flex", justifyContent: "space-between" }}><span>Victoires récentes</span><span style={val}>{pct(a.forme.recent_win_rate)}%</span></div>}
+          {pct(a.forme.regularite) != null && <div style={{ ...label, display: "flex", justifyContent: "space-between", marginTop: 2 }}><span>Régularité</span><span style={val}>{pct(a.forme.regularite)}%</span></div>}
+          {a.forme.tendance != null && Math.abs(a.forme.tendance) > 0.05 && (
+            <div style={{ fontSize: 11, fontWeight: 600, color: a.forme.tendance > 0 ? CX.em : CX.red, marginTop: 5 }}>
+              {a.forme.tendance > 0 ? "▲ en progression" : "▼ en baisse"}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Préférences contexte (distance / terrain / hippodrome) */}
+      {a && (pct(a.contexte.pref_distance) != null || pct(a.contexte.pref_terrain) != null || pct(a.contexte.pref_hippodrome) != null) && (
+        <div style={SUBCARD}>
+          <Head>À l&apos;aise sur…</Head>
+          {[
+            ["Distance", a.contexte.pref_distance, a.contexte.nb_distance],
+            ["Terrain", a.contexte.pref_terrain, a.contexte.nb_terrain],
+            ["Hippodrome", a.contexte.pref_hippodrome, a.contexte.nb_hippodrome],
+          ].map(([lbl, v, nb]) => {
+            const p2 = pct(v as number | null);
+            if (p2 == null) return null;
+            const good = p2 >= 60;
+            return (
+              <div key={lbl as string} style={{ marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                  <span style={{ color: CX.gray400 }}>{lbl as string}</span>
+                  {nb != null && (nb as number) > 0 && <span style={{ color: "#C9C2AE", fontSize: 10 }}>{nb as number}c</span>}
+                  <span style={{ marginLeft: "auto", fontWeight: 600, fontFamily: CX.sg, color: good ? CX.em : CX.gray700 }}>{p2}%</span>
+                </div>
+                <div style={{ marginTop: 3, height: 5, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
+                  <div style={{ height: "100%", borderRadius: 999, background: good ? CX.emLight : "#D1D5DB", width: `${Math.min(100, p2)}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Niveau & forme (ELO) */}
+      {(elo != null || partant.age != null || partant.running_style || partant.jours_depuis_derniere != null) && (
+        <div style={SUBCARD}>
+          <Head>Niveau &amp; forme</Head>
+          {elo != null && (
+            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+              <span style={label}>ELO</span>
+              <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 20, color: eloColor, lineHeight: 1 }}>{Math.round(elo)}</span>
+            </div>
+          )}
+          {a?.elo?.trend_30j != null && Math.abs(a.elo.trend_30j) >= 2 && (
+            <div style={{ fontSize: 11, marginTop: 4, fontWeight: 600, color: a.elo.trend_30j > 0 ? CX.em : CX.red }}>
+              {a.elo.trend_30j > 0 ? "▲ en hausse" : "▼ en baisse"} <span style={{ fontWeight: 400, color: CX.gray400 }}>30j</span>
+            </div>
+          )}
+          {a?.vitesse?.stamina != null && Math.abs(a.vitesse.stamina) >= 0.25 && (
+            <div style={{ fontSize: 11, color: CX.gray400, marginTop: 4 }}>
+              {a.vitesse.stamina > 0 ? "Tient bien la distance" : "Plus à l'aise sur la vitesse"}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: CX.gray400, marginTop: 4 }}>
+            {partant.age != null ? `${partant.age} ans` : ""}{sexeLbl ? ` · ${sexeLbl}` : ""}
+            {partant.jours_depuis_derniere != null ? ` · ${partant.jours_depuis_derniere}j de repos` : ""}
+          </div>
+          {partant.running_style && <div style={{ marginTop: 6 }}><RunningStyleBadge style={partant.running_style} /></div>}
+        </div>
+      )}
+
+      {/* Marché — cote + mouvement + fourchette */}
+      {partant.cote_pmu != null && (
+        <div style={SUBCARD}>
+          <Head>Marché</Head>
+          <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 16, color: CX.ink2 }}>
+            {partant.cote_pmu.toFixed(1)}
+            {mv != null && Math.abs(mv) >= 1 && (
+              <span style={{ fontSize: 11, fontWeight: 600, marginLeft: 5, color: mv > 0 ? CX.em : CX.red }}>
+                {mv > 0 ? "−" : "+"}{Math.abs(mv).toFixed(0)}% {mv > 0 ? "joué" : "délaissé"}
+              </span>
+            )}
+          </div>
+          {partant.cote_min != null && partant.cote_max != null && partant.cote_min !== partant.cote_max && (
+            <div style={{ fontSize: 11, color: CX.gray400, marginTop: 4 }}>Fourchette {partant.cote_min.toFixed(1)}–{partant.cote_max.toFixed(1)}{partant.nb_sources ? ` · ${partant.nb_sources} sources` : ""}</div>
+          )}
+          {/* Comparaison Betfair Exchange (marché efficient) — détecte sur/sous-cote PMU */}
+          {partant.cote_betfair_exchange != null && partant.cote_pmu != null && partant.cote_betfair_exchange > 1 && (() => {
+            const gap = (partant.cote_pmu! - partant.cote_betfair_exchange!) / partant.cote_betfair_exchange!;
+            const valFlag = gap >= 0.08, sev = gap <= -0.08;
+            return (
+              <div style={{ fontSize: 11, color: CX.gray400, marginTop: 2 }}>
+                Betfair {partant.cote_betfair_exchange!.toFixed(1)}
+                {(valFlag || sev) && (
+                  <span style={{ marginLeft: 4, fontWeight: 600, color: valFlag ? CX.em : CX.red }}>
+                    · PMU {gap > 0 ? "+" : "−"}{Math.abs(gap * 100).toFixed(0)}% {valFlag ? "(valeur)" : "(sévère)"}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
+          {/* Signaux marché avancés (argent pro) */}
+          {a && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+              {a.marche.spi != null && a.marche.spi >= 0.15 && <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 5, padding: "2px 6px", color: CX.gold, background: CX.goldBg }}>SPI {Math.round(a.marche.spi * 100)}% — argent pro</span>}
+              {a.marche.valeur_latente != null && a.marche.valeur_latente >= 0.2 && <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 5, padding: "2px 6px", color: CX.emDeep, background: CX.emBg }}>Sous-coté (valeur)</span>}
+              {a.marche.steam != null && a.marche.steam >= 0.2 && <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 5, padding: "2px 6px", color: CX.gold, background: CX.goldBg }}>Steam move</span>}
+              {a.marche.decote != null && a.marche.decote >= 0.2 && <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 5, padding: "2px 6px", color: CX.gold, background: CX.goldBg }}>Décote détectée</span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Jockey / Entraîneur */}
+      <div style={SUBCARD}>
+        <Head>Jockey / Entraîneur</Head>
+        <div style={{ fontSize: 13, fontWeight: 600, color: CX.ink2 }}>
+          {partant.jockey || "—"}
+          {partant.changement_jockey && <span style={{ marginLeft: 6, borderRadius: 4, background: CX.goldBg, padding: "1px 5px", fontSize: 9, fontWeight: 700, color: CX.gold, verticalAlign: "middle" }}>CHANGEMENT</span>}
+          {partant.jockey_suspendu && <span style={{ marginLeft: 6, borderRadius: 4, background: CX.redBg, padding: "1px 5px", fontSize: 9, fontWeight: 700, color: CX.redDeep, verticalAlign: "middle" }}>SUSPENDU</span>}
+        </div>
+        <div style={{ fontSize: 11, color: CX.gray400, marginTop: 1 }}>Entraîneur : {partant.entraineur || "—"}{partant.entraineur_suspendu && <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 700, color: CX.red }}>(suspendu)</span>}</div>
+        {js && (pct(js.taux_victoire) != null) && (
+          <div style={{ fontSize: 11, color: CX.gray600, marginTop: 5 }}>Jockey saison : <b style={{ color: CX.gray700 }}>{pct(js.taux_victoire)}%</b> V · {pct(js.taux_place)}% P{js.victoires_saison != null ? ` · ${js.victoires_saison}/${js.courses_saison}` : ""}{js.roi != null ? ` · ROI ${js.roi >= 0 ? "+" : ""}${Math.round(js.roi * 100)}%` : ""}</div>
+        )}
+        {es && (pct(es.taux_victoire) != null) && (
+          <div style={{ fontSize: 11, color: CX.gray600, marginTop: 2 }}>Entraîneur : <b style={{ color: CX.gray700 }}>{pct(es.taux_victoire)}%</b> V{es.roi != null ? ` · ROI ${es.roi >= 0 ? "+" : ""}${Math.round(es.roi * 100)}%` : ""}</div>
+        )}
+        {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 3 && (
+          <div style={{ fontSize: 11, color: CX.gold, marginTop: 5 }}>🤝 Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% sur {partant.asso_jockey_entraineur_nb} courses</div>
+        )}
+      </div>
+
+      {/* Carrière */}
+      {partant.nb_courses ? (
+        <div style={SUBCARD}>
+          <Head>Carrière</Head>
+          <div style={{ fontSize: 13, color: CX.ink2 }}>
+            <b style={{ fontFamily: CX.sg }}>{partant.nb_victoires ?? 0}</b> victoire{(partant.nb_victoires ?? 0) > 1 ? "s" : ""} <span style={{ color: CX.gray400 }}>sur</span> <b style={{ fontFamily: CX.sg }}>{partant.nb_courses}</b> courses
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+            <div style={{ flex: 1, height: 6, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 999, background: CX.emLight, width: `${Math.min(100, Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100))}%` }} />
+            </div>
+            <span style={{ fontSize: 11, color: CX.gray400, fontFamily: CX.sg }}>{Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%</span>
+          </div>
+          {partant.gains_carriere != null && partant.gains_carriere > 0 && (
+            <div style={{ fontSize: 11, color: CX.gray400, marginTop: 6 }}>
+              Gains carrière : <b style={{ color: CX.gray700 }}>{partant.gains_carriere.toLocaleString("fr-FR")} €</b>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* Équipement */}
+      <div style={SUBCARD}>
+        <Head>Équipement</Head>
+        <div style={{ fontSize: 12.5, color: CX.gray700, textTransform: "capitalize" }}>Déferré : <b>{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</b>{partant.premier_deferre && <span style={{ color: CX.gold, fontSize: 10, textTransform: "none" }}> 1ʳᵉ fois ★</span>}</div>
+        <div style={{ fontSize: 12.5, color: CX.gray700, marginTop: 3, textTransform: "capitalize" }}>Œillères : <b>{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "sans"}</b>{partant.premieres_oeilleres && <span style={{ color: CX.gold, fontSize: 10, textTransform: "none" }}> 1ʳᵉ fois ★</span>}</div>
+      </div>
+
+      {/* Poids / Départ */}
+      {(partant.handicap_poids || partant.poids_prevu || partant.numero_corde || partant.poids_reel_pesee) && (
+        <div style={SUBCARD}>
+          <Head>Poids / Départ</Head>
+          {(partant.handicap_poids ?? partant.poids_prevu) != null && (
+            <div style={{ fontSize: 12.5, color: CX.gray700 }}>Poids : <b style={{ fontFamily: CX.sg }}>{(partant.handicap_poids ?? partant.poids_prevu)} kg</b></div>
+          )}
+          {partant.numero_corde != null && (
+            <div style={{ fontSize: 12.5, color: CX.gray700, marginTop: 3 }}>Corde : <b style={{ fontFamily: CX.sg }}>{partant.numero_corde}</b></div>
+          )}
+          {partant.poids_reel_pesee != null && (
+            <div style={{ fontSize: 11, color: CX.gray400, marginTop: 3 }}>Pesée réelle : {partant.poids_reel_pesee} kg</div>
+          )}
+        </div>
+      )}
+      </div>
+    </div>
   );
 }
 
@@ -1509,78 +1817,85 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
   const colorFor = (delta: number) => (delta < -0.001 ? "#10B981" : delta > 0.001 ? "#EF4444" : "#9CA3AF");
 
   return (
-    <Card>
-      <CardHeader className="pb-1">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <TrendingUp className="h-4 w-4 text-brand-gold" />
-          Marché des cotes
-          {isLive ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              </span>
-              EN DIRECT
-            </span>
-          ) : (
-            <span className="text-xs font-normal text-muted-foreground">— final</span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {/* Une carte par cheval — graphe individuel d'évolution de la cote */}
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-          {runners.map((r) => {
-            if (!r.hasData) {
-              return (
-                <div key={r.num} className="rounded-xl border border-dashed border-border bg-muted/20 p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-300 text-xs font-bold text-white tabular-nums">{r.num}</span>
-                    <p className="truncate text-sm font-semibold text-muted-foreground">{r.nom}</p>
-                  </div>
-                  <div className="mt-3 flex h-11 items-center justify-center text-[11px] text-muted-foreground/60">
-                    Cote non publiée par le PMU
-                  </div>
-                </div>
-              );
-            }
-            const c = colorFor(r.delta);
-            const up = r.delta > 0.001;
-            const flat = Math.abs(r.delta) <= 0.001;
+    <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <TrendingUp className="h-4 w-4" style={{ color: CX.goldAmber }} />
+        <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Marché des cotes</h3>
+        {isLive ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: CX.em, background: CX.emBg, border: `1px solid ${CX.emBd}`, borderRadius: 999, padding: "2px 9px" }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.emLight, animation: "cxDotPulse 1.3s ease-in-out infinite" }} />EN DIRECT
+          </span>
+        ) : (
+          <span style={{ fontSize: 12, color: CX.gray400 }}>— final</span>
+        )}
+      </div>
+      {/* Gradients partagés des aires de sparkline */}
+      <svg width="0" height="0" style={{ position: "absolute", pointerEvents: "none" }}><defs>
+        <linearGradient id="mkg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#10B981" stopOpacity=".26" /><stop offset="1" stopColor="#10B981" stopOpacity="0" /></linearGradient>
+        <linearGradient id="mkr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#E11D48" stopOpacity=".22" /><stop offset="1" stopColor="#E11D48" stopOpacity="0" /></linearGradient>
+        <linearGradient id="mkn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#9CA3AF" stopOpacity=".18" /><stop offset="1" stopColor="#9CA3AF" stopOpacity="0" /></linearGradient>
+      </defs></svg>
+      {/* Une carte par cheval — graphe individuel d'évolution de la cote */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(158px,1fr))", gap: 10 }}>
+        {runners.map((r, idx) => {
+          if (!r.hasData) {
             return (
-              <div key={r.num} className="rounded-xl border border-border bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-900 text-xs font-bold text-white tabular-nums">{r.num}</span>
-                    <p className="truncate text-sm font-semibold">{r.nom}</p>
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    <p className="text-lg font-bold leading-none tabular-nums">{r.cur.toFixed(1)}</p>
-                    <p className="mt-0.5 text-[11px] font-bold tabular-nums" style={{ color: c }}>
-                      {flat ? "—" : `${up ? "▲" : "▼"} ${Math.abs(r.delta * 100).toFixed(0)}%`}
-                    </p>
-                  </div>
+              <div key={r.num} style={{ borderRadius: 14, border: `1px dashed ${CX.bd3}`, background: CX.surf2, padding: "11px 13px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 7, background: "#D1D5DB", color: "#FFFFFF", fontFamily: CX.sg, fontWeight: 700, fontSize: 11, flexShrink: 0 }}>{r.num}</span>
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.nom}</span>
                 </div>
-                <div className="mt-2">
-                  <Sparkline data={r.series} color={c} />
-                </div>
-                <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground/80">
-                  <span>Ouv. <span className="tabular-nums font-medium">{r.open.toFixed(1)}</span></span>
-                  <span className="tabular-nums">{r.lo.toFixed(1)} – {r.hi.toFixed(1)}</span>
+                <div style={{ marginTop: 12, height: 34, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, color: CX.muted }}>
+                  Cote non publiée
                 </div>
               </div>
             );
-          })}
-        </div>
+          }
+          const deltaColor = colorFor(r.delta);
+          const up = r.delta > 0.001;
+          const flat = Math.abs(r.delta) <= 0.001;
+          const fillId = flat ? "mkn" : up ? "mkr" : "mkg";
+          const deltaBg = flat ? CX.surf5 : up ? CX.redBg : CX.emBg;
+          const isFav = idx === 0;
+          // Sparkline sur viewBox 0 0 100 40 (aire dégradée + polyline + point final)
+          const mn = Math.min(...r.series), mx = Math.max(...r.series), rng = mx - mn || 1;
+          const pts = r.series.map((v, i) => `${(i / (r.series.length - 1)) * 100},${36 - ((v - mn) / rng) * 32}`).join(" ");
+          const area = `0,40 ${pts} 100,40`;
+          const dotY = 36 - ((r.cur - mn) / rng) * 32;
+          return (
+            <div key={r.num} className="hover:-translate-y-0.5" style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${isFav ? CX.goldBd : CX.bd1}`, background: isFav ? "#FFFCF4" : "#FFFFFF", padding: "11px 13px 0", boxShadow: "0 1px 2px rgba(0,0,0,.03)", transition: "transform .18s,box-shadow .18s" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 7, background: isFav ? CX.gold : CX.ink, color: "#FFFFFF", fontFamily: CX.sg, fontWeight: 700, fontSize: 11, flexShrink: 0 }}>{r.num}</span>
+                <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.nom}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 9 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                  <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 23, color: CX.ink2, lineHeight: 1 }}>{r.cur.toFixed(1)}</span>
+                  <span style={{ fontSize: 10, color: CX.gray400 }}>cote</span>
+                </div>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 10.5, fontWeight: 700, color: deltaColor, background: deltaBg, borderRadius: 999, padding: "2px 8px" }}>
+                  {flat ? "—" : `${up ? "▲" : "▼"} ${Math.abs(r.delta * 100).toFixed(0)}%`}
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 3, fontSize: 10, color: CX.muted, position: "relative", zIndex: 1 }}>
+                <span>Ouv. {r.open.toFixed(1)}</span><span>{r.lo.toFixed(1)}–{r.hi.toFixed(1)}</span>
+              </div>
+              <svg viewBox="0 0 100 40" preserveAspectRatio="none" style={{ display: "block", width: "100%", height: 34, marginTop: 2 }}>
+                <polygon points={area} fill={`url(#${fillId})`} />
+                <polyline points={pts} fill="none" stroke={deltaColor} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+                <circle cx={100} cy={dotY} r={2.6} fill={deltaColor} vectorEffect="non-scaling-stroke" />
+              </svg>
+            </div>
+          );
+        })}
+      </div>
 
-        <p className="mt-3 text-[10px] text-muted-foreground/70">
-          <span className="font-semibold text-emerald-600">▼ vert</span> = cote en baisse (cheval de plus en plus joué) ·
-          <span className="font-semibold text-rose-500"> ▲ rouge</span> = cote qui monte (délaissé).
-          {isLive && " Cotes PMU en direct — rafraîchies toutes les 5 s."}
-          {nbSansCote > 0 && ` ${nbSansCote} partant${nbSansCote > 1 ? "s" : ""} sans cote publiée par le PMU.`}
-        </p>
-      </CardContent>
-    </Card>
+      <p style={{ margin: "12px 0 0", fontSize: 11, color: CX.gray400, lineHeight: 1.5 }}>
+        <span style={{ color: CX.em, fontWeight: 700 }}>▼ vert</span> = cote en baisse (de plus en plus joué) · <span style={{ color: CX.red, fontWeight: 700 }}>▲ rouge</span> = délaissé.
+        {isLive && " Cotes PMU rafraîchies toutes les 5 s."}
+        {nbSansCote > 0 && ` ${nbSansCote} partant${nbSansCote > 1 ? "s" : ""} sans cote publiée.`}
+      </p>
+    </div>
   );
 }
 
@@ -1594,6 +1909,11 @@ export default function CoursePage() {
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
   const [expandedPartant, setExpandedPartant] = useState<string | null>(null);
+  const [showGlossaire, setShowGlossaire] = useState(false);
+  // Bascule « À venir / Résultats » : présentation uniquement. La disponibilité
+  // des résultats reste pilotée par le statut réel (les 2 jeux de données
+  // coexistent une fois la course terminée). Null = suit le statut par défaut.
+  const [viewMode, setViewMode] = useState<"live" | "resultats" | null>(null);
   const [analysis, setAnalysis] = useState<{
     narrative: string;
     market_signals: Array<{ numero: number; nom: string; signal: string; detail: string; score: number }>;
@@ -1602,6 +1922,7 @@ export default function CoursePage() {
       facteurs_positifs: Array<{ label: string; detail: string; score: number }>;
       facteurs_negatifs: Array<{ label: string; detail: string; score: number }>;
       alertes: Array<{ label: string; detail: string }>;
+      signaux?: Array<{ label: string; detail: string; sens: "positif" | "negatif" | "neutre"; categorie?: string; score: number }>;
       verdict: string;
       confiance_composite: number;
     }}>;
@@ -1655,9 +1976,9 @@ export default function CoursePage() {
   } | null>(null);
 
   const [resultats, setResultats] = useState<{
-    classement: Array<{ numero: number; nom: string; position: number; temps: number | null; reduction_km: number | null }>;
+    classement: Array<{ numero: number; nom: string; position: number | null; temps: number | null; reduction_km: number | null; incident?: string | null; disqualifie?: boolean }>;
     rapports: Record<string, number> | null;
-    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number }>> | null;
+    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number; libelle?: string | null }>> | null;
     temps_gagnant: string | null;
     commentaire: string | null;
     duree_course: number | null;
@@ -1730,7 +2051,13 @@ export default function CoursePage() {
     api.get(`/courses/${id}/analyse`)
       .then((res) => setAnalysis(res.data))
       .catch(() => {}); // fail silently
-  }, [id, user, course, predictions]); // refresh après prédictions
+    // Deps volontairement SANS l'objet `course` : il est recréé par le poll
+    // statut (60 s) → un refetch /analyse par minute, quota 500/j épuisé en
+    // une journée d'onglet ouvert → 429 permanent et sections Analyse /
+    // Outsiders / signaux vides (constaté 2026-07-03). On ne re-fetch que sur
+    // changement d'état de la course ou à l'arrivée des prédictions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, user, course?.statut, predictions]); // refresh après prédictions
 
   // Résultats (arrivée + rapports + commentaire). La course passe "Terminée"
   // AVANT que le PMU ne publie l'arrivée (5–10 min de décalage de scrape) : un
@@ -1802,660 +2129,526 @@ export default function CoursePage() {
   // Top value bet
   const topVB = predictions?.find((p) => p.value_bet && p.value_bet.niveau >= 3);
 
+  const disc = discMask(course.discipline);
+  const statutMeta = course.statut === "en_cours"
+    ? { label: "En cours", fg: CX.emDeep, bg: CX.emBg, bd: CX.emBd, dot: CX.emLight }
+    : course.statut === "termine"
+    ? { label: "Terminée", fg: CX.gray500, bg: CX.surf5, bd: CX.bd3, dot: CX.gray400 }
+    : { label: "À venir", fg: CX.gold, bg: CX.goldBg, bd: CX.goldBd, dot: "#F59E0B" };
+
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+    <div style={{ minHeight: "100vh", background: CX_PAGE_BG }}>
+      <style dangerouslySetInnerHTML={{ __html: CX_STYLE }} />
+      <div className="cx-wrap" style={{ maxWidth: 1120, margin: "0 auto", padding: "22px 20px 90px" }}>
       {/* Back */}
-      <Link href="/programme" className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm mb-5 transition-colors">
+      <Link href="/programme" className="inline-flex items-center gap-2 text-sm font-medium mb-4 transition-colors hover:opacity-70" style={{ color: CX.gray500, textDecoration: "none" }}>
         <ArrowLeft className="h-4 w-4" /> Programme
       </Link>
 
-      {/* ── HEADER ── */}
-      <div className="rounded-xl border border-border bg-card/60 p-5 mb-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2 mb-2">
+      {/* ── HERO ── */}
+      <div className="cx-hero cx-fade" style={{ position: "relative", overflow: "hidden", borderRadius: 26, border: "1px solid rgba(245,158,11,.18)", background: "linear-gradient(180deg,#FFFBF0 0%,#FFFFFF 100%)", padding: "26px 28px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,.04),0 16px 44px -22px rgba(180,83,9,.18)" }}>
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(55% 60% at 10% 6%,rgba(245,158,11,.10),transparent 62%),radial-gradient(50% 55% at 96% 18%,rgba(217,119,6,.07),transparent 60%)" }} />
+        <span aria-hidden style={{ position: "absolute", right: 30, bottom: 22, width: 250, height: 132, opacity: 0.1, background: "linear-gradient(120deg,#0E7C66,#0B5E4E)", WebkitMask: `url(${disc.url}) right bottom/contain no-repeat`, mask: `url(${disc.url}) right bottom/contain no-repeat`, pointerEvents: "none" }} />
+        <div style={{ position: "relative", display: "flex", flexWrap: "wrap", gap: 16, justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="cx-badges" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9, marginBottom: 12 }}>
               {(() => {
                 const m = course.course_id.match(/R(\d+)C(\d+)$/);
                 const r = course.numero_reunion ?? (m ? Number(m[1]) : null);
                 const c = course.numero ?? (m ? Number(m[2]) : null);
                 return r && c ? (
-                  <span className="inline-flex items-center rounded-md bg-foreground px-2.5 py-1 font-mono text-sm font-bold tracking-tight text-background tabular-nums">
-                    R{r}<span className="opacity-50 mx-0.5">·</span>C{c}
+                  <span style={{ fontFamily: CX.sg, fontSize: 13, fontWeight: 700, color: "#FFFFFF", background: CX.ink, borderRadius: 9, padding: "5px 11px", letterSpacing: "-.01em" }}>
+                    R{r}<span style={{ opacity: 0.45, margin: "0 3px" }}>·</span>C{c}
                   </span>
                 ) : null;
               })()}
-              <h1 className="text-xl font-bold">{course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}</h1>
-              {course.est_quinte && <Badge variant="gold" className="animate-pulse-slow">Quinté+</Badge>}
-              {course.est_quarte && <Badge variant="gold">Quarté+</Badge>}
-              {course.est_tierce && <Badge variant="secondary">Tiercé</Badge>}
-              <Badge variant={course.statut === "en_cours" ? "success" : course.statut === "termine" ? "secondary" : "warning"}>
-                {course.statut === "en_cours" ? "En cours" : course.statut === "termine" ? "Terminée" : "À venir"}
-              </Badge>
+              {course.est_quinte && (
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.gold, background: "linear-gradient(135deg,#FEF3C7,#FDE68A)", border: `1px solid ${CX.goldBd2}`, borderRadius: 999, padding: "4px 11px" }}>Quinté+</span>
+              )}
+              {course.est_quarte && (
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.gold, background: "linear-gradient(135deg,#FEF3C7,#FDE68A)", border: `1px solid ${CX.goldBd2}`, borderRadius: 999, padding: "4px 11px" }}>Quarté+</span>
+              )}
+              {course.est_tierce && (
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Tiercé</span>
+              )}
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: statutMeta.fg, background: statutMeta.bg, border: `1px solid ${statutMeta.bd}`, borderRadius: 999, padding: "4px 11px" }}>
+                {course.statut !== "termine" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: statutMeta.dot, animation: "cxDotPulse 1.8s ease-in-out infinite" }} />}
+                {statutMeta.label}
+              </span>
               {course.statut === "a_venir" && course.prono_fige && (
-                <Badge variant="secondary" title="À moins de 10 min du départ, le pronostic est figé. Les cotes affichées continuent d'évoluer.">
-                  Pronostic figé
-                </Badge>
+                <span title="À moins de 10 min du départ, le pronostic est figé. Les cotes affichées continuent d'évoluer." style={{ fontSize: 10.5, fontWeight: 600, color: CX.gray500, background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 999, padding: "4px 10px" }}>🔒 Pronostic figé</span>
               )}
               {wsConnected && (
-                <span className="flex items-center gap-1 text-[10px] font-semibold text-brand-emerald">
-                  <span className="h-1.5 w-1.5 rounded-full bg-brand-emerald animate-pulse" /> En direct
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: CX.em }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.emLight, animation: "cxDotPulse 1.4s ease-in-out infinite" }} /> En direct
                 </span>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
-              <span className="font-semibold text-foreground">{course.discipline}</span>
-              <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.hippodrome_nom}</span>
-              <span className="inline-flex items-center gap-1.5"><Ruler className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.distance} m</span>
-              <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.nb_partants} partants</span>
-              <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground/60" /> {formatDateTime(course.date_heure)}</span>
-              {course.terrain_officiel && <span className="inline-flex items-center gap-1.5"><Activity className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.terrain_officiel}</span>}
-              {/* allocation stockée en centimes → euros */}
+            <h1 className="cx-h1" style={{ margin: 0, fontFamily: CX.sg, fontSize: 30, fontWeight: 700, letterSpacing: "-.02em", lineHeight: 1.08, color: CX.ink2 }}>
+              {course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}
+            </h1>
+            <div className="cx-meta" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "7px 15px", marginTop: 13, fontSize: 13.5, color: CX.gray500 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 18, height: 14, background: disc.color, WebkitMask: `url(${disc.url}) center/contain no-repeat`, mask: `url(${disc.url}) center/contain no-repeat` }} />
+                <span style={{ fontWeight: 600, color: disc.color }}>{course.discipline}</span>
+              </span>
+              <span style={{ color: "#E5E1D5" }}>|</span><span>{course.hippodrome_nom}</span>
+              <span style={{ color: "#E5E1D5" }}>|</span><span>{course.distance} m</span>
+              <span style={{ color: "#E5E1D5" }}>|</span><span>{course.nb_partants} partants</span>
+              <span style={{ color: "#E5E1D5" }}>|</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Clock className="h-3.5 w-3.5" style={{ color: CX.gray400 }} /> {formatDateTime(course.date_heure)}</span>
+              {course.niveau_course && (<><span style={{ color: "#E5E1D5" }}>|</span><span>{course.niveau_course.replace(/_/g, " ")}</span></>)}
+              {course.meteo?.temperature != null && (<><span style={{ color: "#E5E1D5" }}>|</span><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Cloud className="h-3.5 w-3.5" style={{ color: CX.gray400 }} /> {course.meteo.temperature}°C</span></>)}
+            </div>
+            {/* Rangée de badges pills (or : dotation/gagnant ; reste gris neutre) */}
+            <div className="cx-badges" style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 14 }}>
               {course.allocation ? (
-                <span className="inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-muted-foreground/60" /> {Math.round(course.allocation / 100).toLocaleString("fr-FR")} € d&apos;allocation</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.goldDeep, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "4px 11px" }}>
+                  <Trophy className="h-3 w-3" style={{ color: CX.gold }} /> {Math.round(course.allocation / 100).toLocaleString("fr-FR")} € de dotation
+                </span>
               ) : null}
               {course.montant_offert_1er != null && course.montant_offert_1er > 0 && (
-                <span className="inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-brand-gold" /> {course.montant_offert_1er.toLocaleString("fr-FR")} € au gagnant</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "4px 11px" }}>🥇 {course.montant_offert_1er.toLocaleString("fr-FR")} € au gagnant</span>
+              )}
+              {course.pool_total_eur != null && course.pool_total_eur > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Enjeux {(course.pool_total_eur / 1_000_000).toFixed(2)} M€</span>
+              )}
+              {course.penetrometre_coef != null && course.penetrometre_desc && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Terrain {course.penetrometre_desc} ({course.penetrometre_coef})</span>
+              )}
+              {course.avantage_couloir && course.avantage_couloir !== "neutre" && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Avantage {course.avantage_couloir === "interieur" ? "intérieur" : "extérieur"}</span>
+              )}
+              {course.meteo?.pluie_24h != null && course.meteo.pluie_24h > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Pluie 24h {course.meteo.pluie_24h} mm</span>
               )}
               {course.categorie_particularite && (
-                <span className="inline-flex items-center gap-1.5 capitalize"><Tag className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
-              )}
-              {course.meteo?.temperature && (
-                <span className="inline-flex items-center gap-1.5"><Cloud className="h-3.5 w-3.5 text-muted-foreground/60" /> {course.meteo.temperature}°C</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px", textTransform: "capitalize" }}>{course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
               )}
             </div>
             {/* Conditions de course (texte officiel PMU) */}
             {course.conditions_texte && (
-              <details className="mt-2 text-xs text-muted-foreground">
-                <summary className="cursor-pointer font-semibold hover:text-foreground select-none inline-flex items-center gap-1.5">
+              <details style={{ marginTop: 12 }}>
+                <summary style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: CX.gray500, listStyle: "none" }}>
                   <FileText className="h-3.5 w-3.5" /> Conditions de la course
                 </summary>
-                <p className="mt-1.5 leading-relaxed rounded-lg bg-muted/40 p-2.5">{course.conditions_texte}</p>
+                <p style={{ margin: "9px 0 0", fontSize: 12.5, lineHeight: 1.55, color: CX.gray500, background: CX.surf3, border: `1px solid ${CX.bd2}`, borderRadius: 12, padding: "11px 13px" }}>{course.conditions_texte}</p>
               </details>
-            )}
-            {/* Nouvelles infos enrichies */}
-            {(course.penetrometre_coef || course.pool_total_eur || course.avantage_couloir) && (
-              <div className="flex flex-wrap gap-2 mt-2.5">
-                {course.penetrometre_coef != null && course.penetrometre_desc && (
-                  <PenetroBadge coef={course.penetrometre_coef} desc={course.penetrometre_desc} />
-                )}
-                {course.pool_total_eur != null && course.pool_total_eur > 0 && (
-                  <PoolBadge poolEur={course.pool_total_eur} />
-                )}
-                {course.avantage_couloir && course.avantage_couloir !== "neutre" && (
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-gray-100 ring-1 ring-gray-200 text-gray-700">
-                    Avantage {course.avantage_couloir === "interieur" ? "intérieur" : "extérieur"}
-                  </span>
-                )}
-              </div>
             )}
           </div>
 
+          {/* ── BOUTON DIRECT TV (lien sortant Equidia, page course = live/replay vidéo) ── */}
+          {(() => {
+            const m = course.course_id.match(/R(\d+)C(\d+)$/);
+            const r = course.numero_reunion ?? (m ? Number(m[1]) : null);
+            const c = course.numero ?? (m ? Number(m[2]) : null);
+            const d = course.course_id.slice(0, 8); // course_id = DDMMYYYY + RxCx
+            const live = course.statut === "en_cours";
+            const iso = /^\d{8}$/.test(d) ? `${d.slice(4, 8)}-${d.slice(2, 4)}-${d.slice(0, 2)}` : null;
+            const url = r && c && iso
+              ? `https://www.equidia.fr/courses/${iso}/R${r}/C${c}`
+              : "https://www.equidia.fr/direct";
+            return (
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Regarder la course en direct sur Equidia (ouvre un nouvel onglet)"
+                className="cx-hbtn"
+                style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 7, background: live ? "#DC2626" : CX.ink, color: "#FFFFFF", fontSize: 13.5, fontWeight: 700, padding: "10px 16px", borderRadius: 12, textDecoration: "none" }}
+              >
+                {live && <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFFFFF", animation: "cxDotPulse 1.4s ease-in-out infinite" }} />}
+                <Tv className="h-4 w-4" />
+                {live ? "Direct" : "Voir la course"}
+              </a>
+            );
+          })()}
         </div>
+      </div>
 
-        {/* ── STAT HERO : chiffres clés en avant (look "salle de marché") ── */}
-        {course.statut !== "termine" && predictions && predictions.length > 0 && (() => {
+      {/* ── BASCULE DE VUE : À venir / Résultats ── */}
+      {(() => {
+        const isTermine = course.statut === "termine";
+        const showResults = viewMode === "resultats" || (viewMode === null && isTermine);
+        // Onglet « Résultats » proposé dès que la course est terminée.
+        const tabs: Array<{ key: "live" | "resultats"; label: string; dot: string }> = [
+          { key: "live", label: "À venir", dot: "#F59E0B" },
+          ...(isTermine ? [{ key: "resultats" as const, label: "Résultats", dot: CX.em }] : []),
+        ];
+        return (
+          <>
+            {isTermine && (
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: CX.surf5, border: `1px solid ${CX.bd3}`, borderRadius: 14, padding: 4, marginBottom: 20 }}>
+                {tabs.map((t) => {
+                  const active = (t.key === "resultats") === showResults;
+                  return (
+                    <button key={t.key} onClick={() => setViewMode(t.key)}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 7, border: "none", cursor: "pointer", borderRadius: 10, padding: "8px 16px", fontSize: 13.5, fontWeight: 600, fontFamily: "'Inter',sans-serif", transition: "all .16s", background: active ? "#FFFFFF" : "transparent", color: active ? CX.ink : "#8A8471", boxShadow: active ? "0 1px 3px rgba(0,0,0,.12)" : "none" }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: active ? t.dot : "#C9C2AE" }} />{t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ═══════════ VUE RÉSULTATS ═══════════ */}
+            {showResults && (
+              <div className="cx-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {resultats && (
+                  <ResultatsSection resultats={resultats} partants={course.partants} />
+                )}
+                {resultats && predictions && predictions.length > 0 && (
+                  <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
+                )}
+                {predictions && predictions.length > 0 && (
+                  <BilanMiseSection courseId={id} />
+                )}
+                {!resultats && (
+                  <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "24px 20px", textAlign: "center", color: CX.gray500, fontSize: 13 }}>
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" style={{ color: CX.gray400 }} />
+                    Arrivée officielle en cours de publication…
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══════════ VUE À VENIR ═══════════ */}
+            {!showResults && (
+            <>
+        {/* ── 4 STAT CARDS ── */}
+        {predictions && predictions.length > 0 && (() => {
           const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];
           const favCote = liveCoteMap[fav.numero] ?? fav.cote_pmu;
           return (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mt-4 pt-4 border-t border-border/60">
-              {/* Favori */}
-              <div className="rounded-xl border border-brand-gold/30 bg-gradient-to-br from-brand-gold/[0.08] to-transparent p-3">
-                <p className="text-overline text-muted-foreground">Favori</p>
-                <p className="mt-0.5 text-[13px] font-bold truncate">N°{fav.numero} {fav.nom_cheval}</p>
-                <div className="mt-1 flex items-baseline gap-1.5">
-                  <span className="text-2xl font-bold tabular-nums text-brand-gold leading-none">{Math.round(fav.proba_top1 * 100)}%</span>
-                  <span className="text-[11px] text-muted-foreground">victoire</span>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, marginBottom: 16 }}>
+              {/* Favori algo */}
+              <div className="cx-fade" style={{ position: "relative", overflow: "hidden", borderRadius: 18, border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(135deg,rgba(245,158,11,.09),transparent 70%)", padding: "16px 18px", animationDelay: ".04s" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gold }}>Favori algo</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>N°{fav.numero} {fav.nom_cheval}</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.gold, lineHeight: 1 }}>{Math.round(fav.proba_top1 * 100)}%</span>
+                  <span style={{ fontSize: 11, color: CX.gray400 }}>victoire{favCote ? ` · cote ${formatCote(favCote)}` : ""}</span>
                 </div>
-                {favCote ? <p className="text-[11px] text-muted-foreground mt-0.5">cote {formatCote(favCote)}</p> : null}
               </div>
-              {/* Meilleure valeur détectée */}
-              <div className={cn("rounded-xl border p-3",
-                topVB ? "border-brand-emerald/30 bg-gradient-to-br from-brand-emerald/[0.08] to-transparent"
-                      : "border-border bg-muted/20")}>
-                <p className="text-overline text-muted-foreground">Pari de valeur</p>
+              {/* Pari de valeur */}
+              <div className="cx-fade" style={{ position: "relative", overflow: "hidden", borderRadius: 18, border: topVB ? "1px solid rgba(16,185,129,.28)" : `1px solid ${CX.bd1}`, background: topVB ? "linear-gradient(135deg,rgba(16,185,129,.09),transparent 70%)" : CX.surf1, padding: "16px 18px", animationDelay: ".08s" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: topVB ? CX.emDeep : CX.gray400 }}>Pari de valeur</div>
                 {topVB ? (
                   <>
-                    <p className="mt-0.5 text-[13px] font-bold truncate">N°{topVB.numero} {topVB.nom_cheval}</p>
-                    <div className="mt-1 flex items-baseline gap-1.5">
-                      <span className="text-2xl font-bold tabular-nums text-brand-emerald leading-none">
-                        +{Math.round(topVB.value_bet!.ev_max * 100)}%
-                      </span>
-                      <span className="text-[11px] text-muted-foreground">espérance</span>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>N°{topVB.numero} {topVB.nom_cheval}</div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                      <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</span>
+                      <span style={{ fontSize: 11, color: CX.gray400 }}>espérance · {etoiles(topVB.value_bet!.niveau)}</span>
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{etoiles(topVB.value_bet!.niveau)}</p>
                   </>
                 ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">Aucune valeur franche sur cette course.</p>
+                  <p style={{ marginTop: 8, fontSize: 12, color: CX.gray400 }}>Aucune valeur franche sur cette course.</p>
                 )}
               </div>
-              {/* Score de confiance IA */}
-              <div className="rounded-xl border border-border bg-muted/20 p-3">
-                <p className="text-overline text-muted-foreground">Confiance algo</p>
+              {/* Confiance algo */}
+              <div className="cx-fade" style={{ borderRadius: 18, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "16px 18px", animationDelay: ".12s" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gray400 }}>Confiance algo</div>
                 {confGlobal !== null ? (
                   <>
-                    <div className="mt-0.5 flex items-baseline gap-1.5">
-                      <span className={cn("text-2xl font-bold tabular-nums leading-none",
-                        confGlobal >= 70 ? "text-brand-emerald" : confGlobal >= 50 ? "text-brand-gold" : "text-brand-red")}>
-                        {Math.round(confGlobal)}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground">/ 100</span>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5 }}>
+                      <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>{Math.round(confGlobal)}</span>
+                      <span style={{ fontSize: 11, color: CX.gray400 }}>/ 100</span>
                     </div>
-                    <div className="mt-2"><ConfidenceMeter score={confGlobal} size="sm" /></div>
+                    <div style={{ marginTop: 9, height: 6, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, Math.round(confGlobal)))}%`, borderRadius: 999, background: "linear-gradient(90deg,#F59E0B,#059669)", transformOrigin: "left", animation: "cxBarGrow .7s cubic-bezier(.16,1,.3,1) .3s both" }} />
+                    </div>
                   </>
-                ) : <p className="mt-2 text-xs text-muted-foreground">—</p>}
+                ) : <p style={{ marginTop: 8, fontSize: 12, color: CX.gray400 }}>—</p>}
               </div>
-              {/* Champ */}
-              <div className="rounded-xl border border-border bg-muted/20 p-3">
-                <p className="text-overline text-muted-foreground">Le champ</p>
-                <div className="mt-0.5 flex items-baseline gap-1.5">
-                  <span className="text-2xl font-bold tabular-nums leading-none">{course.nb_partants}</span>
-                  <span className="text-[11px] text-muted-foreground">partants</span>
+              {/* Le champ */}
+              <div className="cx-fade" style={{ borderRadius: 18, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "16px 18px", animationDelay: ".16s" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gray400 }}>Le champ</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5 }}>
+                  <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.ink2, lineHeight: 1 }}>{course.nb_partants}</span>
+                  <span style={{ fontSize: 11, color: CX.gray400 }}>partants</span>
                 </div>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <div style={{ fontSize: 11, color: CX.gray400, marginTop: 7 }}>
                   {course.nb_partants >= 14 ? "champ ouvert" : course.nb_partants >= 10 ? "champ moyen" : "petit champ"}
-                </p>
+                </div>
               </div>
             </div>
           );
         })()}
 
-        {/* Résultats officiels (course terminée) */}
-        {course.statut === "termine" && resultats && (
-          <ResultatsSection resultats={resultats} partants={course.partants} />
-        )}
-
-        {/* Bilan du pronostic vs arrivée (course terminée) */}
-        {course.statut === "termine" && resultats && predictions && predictions.length > 0 && (
-          <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
-        )}
-
-        {/* Bilan du plan de mise 20€ rejoué sur l'arrivée réelle (course terminée) */}
-        {course.statut === "termine" && resultats && predictions && predictions.length > 0 && (
-          <BilanMiseSection courseId={id} />
-        )}
-
-        {/* Alert value bet exceptionnel */}
+        {/* Alerte pari de valeur (bandeau or) */}
         {topVB && (
-          <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand-gold/30 bg-brand-gold/5 px-3 py-2 text-sm">
-            <Zap className="h-4 w-4 text-brand-gold flex-shrink-0" />
+          <div style={{ display: "flex", alignItems: "center", gap: 9, borderRadius: 14, border: "1px solid rgba(245,158,11,.32)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)", padding: "11px 16px", marginBottom: 20, fontSize: 13, color: CX.gray600 }}>
+            <Zap className="h-4 w-4 flex-shrink-0" style={{ color: CX.gold }} />
             <span>
-              <strong>Pari de valeur exceptionnel</strong> — N°{topVB.numero} {topVB.nom_cheval} ·{" "}
-              {etoiles(topVB.value_bet!.niveau)} · Espérance <EVBadge ev={topVB.value_bet!.ev_max} />
+              <b style={{ color: CX.goldDeep }}>Pari de valeur exceptionnel</b> — N°{topVB.numero} {topVB.nom_cheval} · {etoiles(topVB.value_bet!.niveau)} · espérance <b style={{ color: CX.em }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</b> détectée par l&apos;algorithme.
             </span>
           </div>
         )}
-      </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="cx-main" style={{ display: "grid", gridTemplateColumns: "1.9fr 1fr", gap: 22, alignItems: "start" }}>
         {/* ── LEFT: Partants + Chart ── */}
-        <div className="lg:col-span-2 space-y-5">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
 
           {/* Tableau partants */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
-                Partants
-                <span className="text-xs font-normal text-muted-foreground/70 ml-1">
-                  — cliquez une ligne pour le détail
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full table-auto md:table-fixed text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/40 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <th className="text-center px-2 py-2 w-8">N°</th>
-                      <th className="text-left px-2 sm:px-3 py-2">Cheval</th>
-                      <th className="text-left px-3 py-2 hidden md:table-cell w-28">Jockey</th>
-                      <th className="text-right px-2 py-2 hidden sm:table-cell w-12">ELO</th>
-                      <th className="text-right px-2 sm:px-3 py-2 w-14">Cote</th>
-                      {predictions && <th className="text-right px-3 py-2 hidden sm:table-cell w-14">Algo</th>}
-                      {predictions && <th className="text-right px-2 sm:px-3 py-2 w-14">Proba</th>}
-                      {predictions && <th className="text-right px-2 sm:px-3 py-2 w-14">Valeur</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {course.partants
-                      .filter((p) => !p.non_partant)
-                      .map((partant) => {
-                        const pred = predictions?.find(
-                          (p) => p.participation_id === partant.participation_id
-                        );
-                        const liveCote = liveCoteMap[partant.numero];
-                        const cote = liveCote ?? partant.cote_pmu;
-                        const rang = pred?.rang_predit;
-                        const coteMoved = liveCote && partant.cote_pmu && liveCote < partant.cote_pmu;
-
-                        const isExp = expandedPartant === partant.participation_id;
-                        return (
-                          <Fragment key={partant.participation_id}>
-                          <tr
-                            onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
-                            className={cn(
-                              "cursor-pointer border-b border-border/40 align-top transition-colors hover:bg-accent/20",
-                              rang === 1 && "row-top1",
-                              rang === 2 && "row-top2",
-                              rang === 3 && "row-top3",
-                              isExp && "bg-accent/20",
-                            )}
-                          >
-                            <td className="px-2 py-2.5 font-bold text-foreground/70 text-center tabular-nums">
-                              {partant.numero}
-                            </td>
-                            <td className="px-2 sm:px-3 py-3 align-top">
-                              {/* Ligne 1 — nom + style + alertes */}
-                              <div className="flex items-center gap-x-2 gap-y-1 flex-wrap leading-tight">
-                                <span className="font-bold text-[15px] text-foreground break-words">{partant.nom_cheval}</span>
-                                {partant.running_style && (
-                                  <RunningStyleBadge style={partant.running_style} />
-                                )}
-                                {partant.changement_jockey && (
-                                  <span title="Changement de jockey vs dernière course" className="inline-flex items-center gap-0.5 rounded px-1.5 py-0 text-[9px] font-bold bg-orange-100 ring-1 ring-orange-300 text-orange-700">
-                                    <RefreshCw className="h-2.5 w-2.5" /> Jockey
-                                  </span>
-                                )}
-                                {(partant.jockey_suspendu || partant.entraineur_suspendu) && (
-                                  <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} className="inline-flex items-center gap-0.5 rounded px-1.5 py-0 text-[9px] font-bold bg-red-100 ring-1 ring-red-300 text-red-700">
-                                    <ShieldAlert className="h-2.5 w-2.5" />
-                                    {partant.jockey_suspendu ? "J. susp." : "E. susp."}
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* Ligne 2 — méta colorée, contrastée */}
-                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium leading-tight">
-                                {partant.age != null && <span className="text-foreground/70">{partant.age}a</span>}
-                                {partant.sexe && <span className="text-foreground/70">{partant.sexe}</span>}
-                                {partant.jours_depuis_derniere != null && (
-                                  <span className={cn(
-                                    partant.jours_depuis_derniere >= 14 && partant.jours_depuis_derniere <= 35
-                                      ? "text-emerald-600"
-                                      : partant.jours_depuis_derniere > 60
-                                      ? "text-orange-600"
-                                      : "text-foreground/70"
-                                  )}>
-                                    {partant.jours_depuis_derniere}j repos
-                                  </span>
-                                )}
-                                {partant.premier_deferre && <span className="text-amber-600 font-semibold">★ Déferré</span>}
-                                {partant.premieres_oeilleres && <span className="text-blue-600 font-semibold">★ Œillères</span>}
-                                {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 5 && (
-                                  <span className="text-violet-600 font-semibold">Duo {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}%</span>
-                                )}
-                              </div>
-
-                              {/* Musique colorée */}
-                              {partant.musique && (
-                                <div className="mt-1.5 flex items-center gap-1.5">
-                                  <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Mus.</span>
-                                  <MusiqueDisplay musique={partant.musique} />
-                                </div>
-                              )}
-
-                              {/* Toggle détail */}
-                              <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-brand-gold">
-                                <ChevronDown className={cn("h-3 w-3 transition-transform", isExp && "rotate-180")} />
-                                {isExp ? "Masquer" : "Détails"}
-                              </div>
-                            </td>
-                            <td className="px-3 py-2.5 hidden md:table-cell text-xs">
-                              <div className={cn(
-                                "text-muted-foreground",
-                                partant.jockey_suspendu && "line-through text-red-400"
-                              )}>
-                                {partant.jockey || "—"}
-                              </div>
-                              {partant.entraineur && (
-                                <div className={cn(
-                                  "text-[10px] text-muted-foreground/60 mt-0.5",
-                                  partant.entraineur_suspendu && "line-through text-red-400"
-                                )}>
-                                  {partant.entraineur}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5 text-right hidden sm:table-cell">
-                              <ELOBadge elo={partant.elo_global} />
-                            </td>
-                            <td className="px-2 sm:px-3 py-2.5 text-right">
-                              <span className={cn("font-mono font-semibold", coteMoved && "text-brand-emerald")}>
-                                {formatCote(cote)}
-                              </span>
-                              {liveCote && <span className="text-brand-emerald text-[10px] ml-1">↓</span>}
-                            </td>
-                            {predictions && (
-                              <td className="px-3 py-2.5 text-right text-muted-foreground font-mono text-xs hidden sm:table-cell">
-                                {pred?.cote_juste ? formatCote(pred.cote_juste) : "—"}
-                              </td>
-                            )}
-                            {predictions && (
-                              <td className="px-2 sm:px-3 py-2.5 text-right">
-                                {pred ? (
-                                  <div className="flex flex-col items-end leading-tight">
-                                    <span className={cn(
-                                      "font-bold tabular-nums text-sm",
-                                      rang === 1 ? "text-brand-gold" : "text-foreground",
-                                    )}>
-                                      {(pred.proba_top1 * 100).toFixed(0)}%
-                                    </span>
-                                    <span className="text-[10px] text-muted-foreground tabular-nums">
-                                      {(pred.proba_top3 * 100).toFixed(0)}% top-3
-                                    </span>
-                                  </div>
-                                ) : <span className="text-muted-foreground">—</span>}
-                              </td>
-                            )}
-                            {predictions && (
-                              <td className="px-2 sm:px-3 py-2.5 text-right">
-                                {(() => {
-                                  if (!pred) return <span className="text-muted-foreground">—</span>;
-                                  if (pred.value_bet) return (
-                                    <div className="flex flex-col items-end gap-0.5">
-                                      <EVBadge ev={pred.value_bet.ev_max} />
-                                      <span className="text-[10px]">{etoiles(pred.value_bet.niveau)}</span>
-                                    </div>
-                                  );
-                                  // Espérance pour TOUS : cote × proba victoire − 1 (gain moyen pour 1€).
-                                  if (cote && cote > 1 && pred.proba_top1 > 0) {
-                                    const ev = cote * pred.proba_top1 - 1;
-                                    return (
-                                      <span className={cn("text-xs font-mono font-semibold tabular-nums",
-                                        ev >= 0.05 ? "text-brand-emerald" : ev >= -0.2 ? "text-muted-foreground" : "text-muted-foreground/50")}>
-                                        {ev >= 0 ? "+" : ""}{(ev * 100).toFixed(0)}%
-                                      </span>
-                                    );
-                                  }
-                                  return <span className="text-muted-foreground">—</span>;
-                                })()}
-                              </td>
-                            )}
-                          </tr>
-                          {isExp && (
-                            <tr className="bg-muted/20">
-                              <td colSpan={predictions ? 8 : 5} className="px-3 pb-3 pt-1">
-                                {(() => {
-                                  const HEAD = "mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
-                                  const CARD = "rounded-xl border border-border bg-white p-3 shadow-sm";
-                                  const elo = partant.elo_global;
-                                  const eloColor = elo == null ? "#9CA3AF" : elo >= 1700 ? "#F59E0B" : elo >= 1500 ? "#3B82F6" : elo >= 1300 ? "#10B981" : "#6B7280";
-                                  const mv = partant.mouvement_cote_pct;  // >0 = cote baissée = argent venu = signal +
-                                  const sexeLbl = partant.sexe ? ({ M: "Mâle", H: "Hongre", F: "Femelle" } as Record<string, string>)[partant.sexe] ?? partant.sexe : null;
-                                  const a = partant.analyse;
-                                  const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100));
-                                  const js = a?.jockey_stats, es = a?.entraineur_stats;
-                                  return (
-                                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                                  {/* Musique */}
-                                  <div className={cn(CARD, "sm:col-span-2 lg:col-span-3")}>
-                                    <p className={HEAD}><Activity className="h-3 w-3 text-violet-500" /> Musique — forme récente</p>
-                                    <MusiqueDisplay musique={partant.musique} />
-                                  </div>
-
-                                  {/* Points clés (le pourquoi) */}
-                                  {a?.points && a.points.length > 0 && (
-                                    <div className={cn(CARD, "sm:col-span-2 lg:col-span-3 border-brand-gold/30 bg-brand-gold/[0.04]")}>
-                                      <p className={HEAD}><Target className="h-3 w-3 text-brand-gold" /> Points clés de l&apos;analyse</p>
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {a.points.map((pt, i) => (
-                                          <span key={i} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1",
-                                            pt.type === "+" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200")}>
-                                            {pt.type === "+" ? "▲" : "▼"} {pt.txt}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Forme chiffrée */}
-                                  {a && (pct(a.forme.taux_top3) != null || pct(a.forme.recent_win_rate) != null) && (
-                                    <div className={CARD}>
-                                      <p className={HEAD}><Activity className="h-3 w-3 text-emerald-500" /> Forme</p>
-                                      {pct(a.forme.taux_top3) != null && <p className="text-sm">Dans les 3 : <span className="font-bold tabular-nums">{pct(a.forme.taux_top3)}%</span></p>}
-                                      {pct(a.forme.recent_win_rate) != null && <p className="text-xs text-muted-foreground">Victoires récentes : {pct(a.forme.recent_win_rate)}%</p>}
-                                      {pct(a.forme.regularite) != null && <p className="text-xs text-muted-foreground">Régularité : {pct(a.forme.regularite)}%</p>}
-                                      {a.forme.tendance != null && Math.abs(a.forme.tendance) > 0.05 && (
-                                        <p className={cn("text-xs font-medium", a.forme.tendance > 0 ? "text-emerald-600" : "text-rose-600")}>
-                                          {a.forme.tendance > 0 ? "▲ en progression" : "▼ en baisse"}
-                                        </p>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Préférences contexte (distance / terrain / hippodrome) */}
-                                  {a && (pct(a.contexte.pref_distance) != null || pct(a.contexte.pref_terrain) != null || pct(a.contexte.pref_hippodrome) != null) && (
-                                    <div className={CARD}>
-                                      <p className={HEAD}><MapPin className="h-3 w-3 text-blue-500" /> À l&apos;aise sur…</p>
-                                      {[
-                                        ["Distance", a.contexte.pref_distance, a.contexte.nb_distance],
-                                        ["Terrain", a.contexte.pref_terrain, a.contexte.nb_terrain],
-                                        ["Hippodrome", a.contexte.pref_hippodrome, a.contexte.nb_hippodrome],
-                                      ].map(([lbl, v, nb]) => {
-                                        const p2 = pct(v as number | null);
-                                        if (p2 == null) return null;
-                                        const good = p2 >= 60;
-                                        return (
-                                          <p key={lbl as string} className="text-xs flex items-center gap-1.5">
-                                            <span className={good ? "text-emerald-600" : "text-muted-foreground"}>{good ? "✓" : "•"}</span>
-                                            <span className="text-muted-foreground">{lbl as string}</span>
-                                            <span className="font-semibold tabular-nums ml-auto">{p2}%</span>
-                                            {nb != null && (nb as number) > 0 && <span className="text-muted-foreground/60">({nb as number}c)</span>}
-                                          </p>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-
-                                  {/* Niveau & forme (ELO) */}
-                                  {(elo != null || partant.age != null || partant.running_style || partant.jours_depuis_derniere != null) && (
-                                    <div className={CARD}>
-                                      <p className={HEAD}><BarChart2 className="h-3 w-3 text-emerald-500" /> Niveau & forme</p>
-                                      {elo != null && (
-                                        <p className="text-sm flex items-baseline gap-1.5">
-                                          <span className="text-muted-foreground text-xs">ELO</span>
-                                          <span className="font-bold tabular-nums" style={{ color: eloColor }}>{Math.round(elo)}</span>
-                                        </p>
-                                      )}
-                                      <p className="text-xs text-muted-foreground">
-                                        {partant.age != null ? `${partant.age} ans` : ""}{sexeLbl ? ` · ${sexeLbl}` : ""}
-                                        {partant.jours_depuis_derniere != null ? ` · ${partant.jours_depuis_derniere}j de repos` : ""}
-                                      </p>
-                                      {partant.running_style && <div className="mt-1.5"><RunningStyleBadge style={partant.running_style} /></div>}
-                                    </div>
-                                  )}
-
-                                  {/* Marché — cote + mouvement + fourchette */}
-                                  {partant.cote_pmu != null && (
-                                    <div className={CARD}>
-                                      <p className={HEAD}><TrendingUp className="h-3 w-3 text-amber-500" /> Marché</p>
-                                      <p className="text-sm flex items-center gap-2">
-                                        <span className="font-bold tabular-nums">{partant.cote_pmu.toFixed(1)}</span>
-                                        {mv != null && Math.abs(mv) >= 1 && (
-                                          <span className={cn("inline-flex items-center gap-0.5 text-[11px] font-semibold", mv > 0 ? "text-emerald-600" : "text-rose-600")}>
-                                            {mv > 0 ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
-                                            {mv > 0 ? "−" : "+"}{Math.abs(mv).toFixed(0)}%
-                                            <span className="text-muted-foreground font-normal">{mv > 0 ? "joué" : "délaissé"}</span>
-                                          </span>
-                                        )}
-                                      </p>
-                                      {partant.cote_min != null && partant.cote_max != null && partant.cote_min !== partant.cote_max && (
-                                        <p className="text-xs text-muted-foreground tabular-nums">Fourchette {partant.cote_min.toFixed(1)}–{partant.cote_max.toFixed(1)}{partant.nb_sources ? ` · ${partant.nb_sources} sources` : ""}</p>
-                                      )}
-                                      {/* Signaux marché avancés (argent pro) */}
-                                      {a && (
-                                        <div className="mt-1 flex flex-wrap gap-1">
-                                          {a.marche.spi != null && a.marche.spi >= 0.15 && <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">SPI {Math.round(a.marche.spi * 100)}% — argent pro</span>}
-                                          {a.marche.valeur_latente != null && a.marche.valeur_latente >= 0.2 && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Sous-coté (valeur)</span>}
-                                          {a.marche.steam != null && a.marche.steam >= 0.2 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Steam move</span>}
-                                          {a.marche.decote != null && a.marche.decote >= 0.2 && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">Décote détectée</span>}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Jockey / Entraîneur */}
-                                  <div className={CARD}>
-                                    <p className={HEAD}><Users className="h-3 w-3 text-blue-500" /> Jockey / Entraîneur</p>
-                                    <p className="text-sm font-medium leading-snug">
-                                      {partant.jockey || "—"}
-                                      {partant.changement_jockey && <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700 align-middle">CHANGEMENT</span>}
-                                      {partant.jockey_suspendu && <span className="ml-1.5 rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-700 align-middle">SUSPENDU</span>}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">Entraîneur : {partant.entraineur || "—"}{partant.entraineur_suspendu && <span className="ml-1 text-[9px] font-bold text-rose-600">(suspendu)</span>}</p>
-                                    {js && (pct(js.taux_victoire) != null) && (
-                                      <p className="mt-1 text-[11px] text-muted-foreground">Jockey saison : <span className="font-semibold text-foreground">{pct(js.taux_victoire)}%</span> V · {pct(js.taux_place)}% P{js.victoires_saison != null ? ` · ${js.victoires_saison}/${js.courses_saison}` : ""}{js.roi != null ? ` · ROI ${js.roi >= 0 ? "+" : ""}${Math.round(js.roi * 100)}%` : ""}</p>
-                                    )}
-                                    {es && (pct(es.taux_victoire) != null) && (
-                                      <p className="text-[11px] text-muted-foreground">Entraîneur saison : <span className="font-semibold text-foreground">{pct(es.taux_victoire)}%</span> V · {pct(es.taux_place)}% P{es.roi != null ? ` · ROI ${es.roi >= 0 ? "+" : ""}${Math.round(es.roi * 100)}%` : ""}</p>
-                                    )}
-                                    {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 3 && (
-                                      <p className="mt-1 text-[11px] text-violet-600">🤝 Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% sur {partant.asso_jockey_entraineur_nb} courses</p>
-                                    )}
-                                  </div>
-
-                                  {/* Carrière */}
-                                  {partant.nb_courses ? (
-                                    <div className={CARD}>
-                                      <p className={HEAD}><Trophy className="h-3 w-3 text-amber-500" /> Carrière</p>
-                                      <p className="text-sm">
-                                        <span className="font-bold tabular-nums">{partant.nb_victoires ?? 0}</span> victoire{(partant.nb_victoires ?? 0) > 1 ? "s" : ""}
-                                        <span className="text-muted-foreground"> sur </span>
-                                        <span className="font-medium tabular-nums">{partant.nb_courses}</span> courses
-                                      </p>
-                                      <div className="mt-1 flex items-center gap-2">
-                                        <div className="h-1.5 flex-1 rounded-full bg-muted/40 overflow-hidden">
-                                          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100))}%` }} />
-                                        </div>
-                                        <span className="text-xs text-muted-foreground tabular-nums">{Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%</span>
-                                      </div>
-                                    </div>
-                                  ) : null}
-
-                                  {/* Équipement */}
-                                  <div className={CARD}>
-                                    <p className={HEAD}><Zap className="h-3 w-3 text-orange-500" /> Équipement</p>
-                                    <p className="text-sm">Déferré : <span className="font-medium capitalize">{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</span>{partant.premier_deferre && <span className="ml-1 text-[10px] font-semibold text-brand-gold">1ʳᵉ fois ★</span>}</p>
-                                    <p className="text-sm">Œillères : <span className="font-medium capitalize">{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "sans"}</span>{partant.premieres_oeilleres && <span className="ml-1 text-[10px] font-semibold text-brand-blue">1ʳᵉ fois ★</span>}</p>
-                                  </div>
-
-                                  {/* Poids / Départ */}
-                                  {(partant.handicap_poids || partant.poids_prevu || partant.numero_corde || partant.poids_reel_pesee) && (
-                                    <div className={CARD}>
-                                      <p className={HEAD}><Ruler className="h-3 w-3 text-slate-500" /> Poids / Départ</p>
-                                      {(partant.handicap_poids ?? partant.poids_prevu) != null && (
-                                        <p className="text-sm">Poids : <span className="font-medium tabular-nums">{(partant.handicap_poids ?? partant.poids_prevu)} kg</span></p>
-                                      )}
-                                      {partant.poids_reel_pesee != null && (
-                                        <p className="text-xs text-muted-foreground">Pesée réelle : {partant.poids_reel_pesee} kg</p>
-                                      )}
-                                      {partant.numero_corde != null && (
-                                        <p className="text-sm">Corde : <span className="font-medium tabular-nums">{partant.numero_corde}</span></p>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Origines */}
-                                  {(partant.pere || partant.mere) && (
-                                    <div className={CARD}>
-                                      <p className={HEAD}><Tag className="h-3 w-3 text-pink-500" /> Origines</p>
-                                      {partant.pere && <p className="text-xs">Père : <span className="font-medium">{partant.pere}</span></p>}
-                                      {partant.mere && <p className="text-xs">Mère : <span className="font-medium">{partant.mere}</span></p>}
-                                      {partant.pere_de_mere && <p className="text-xs text-muted-foreground">Père de mère : {partant.pere_de_mere}</p>}
-                                    </div>
-                                  )}
-                                </div>
-                                  );
-                                })()}
-                              </td>
-                            </tr>
+          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 12px" }}>
+              <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>Partants</h2>
+              <span className="hidden sm:inline" style={{ fontSize: 12, color: CX.gray400 }}>
+                — cliquez une ligne pour le détail
+              </span>
+            </div>
+            {/* ── En-tête colonnes (grille design) ── */}
+            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
+              <span style={{ textAlign: "center" }}>N°</span>
+              <span>Cheval</span>
+              <span style={{ textAlign: "right" }}>Cote</span>
+              <span className="cx-algo" style={{ textAlign: "right" }}>Algo</span>
+              <span style={{ textAlign: "right" }}>Proba</span>
+              <span />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {[...course.partants]
+                // Non-partants conservés mais relégués en bas (indiqués, hors prono).
+                .sort((a, b) => Number(!!a.non_partant) - Number(!!b.non_partant))
+                .map((partant) => {
+                  const pred = predictions?.find((p) => p.participation_id === partant.participation_id);
+                  const liveCote = liveCoteMap[partant.numero];
+                  const cote = liveCote ?? partant.cote_pmu;
+                  const rang = pred?.rang_predit;
+                  const coteMoved = !!(liveCote && partant.cote_pmu && liveCote < partant.cote_pmu);
+                  const isExp = expandedPartant === partant.participation_id;
+                  const np = !!partant.non_partant;
+                  // Espérance pour TOUS : cote × proba victoire − 1 (gain moyen pour 1€).
+                  const evAll = !pred?.value_bet && pred && cote && cote > 1 && pred.proba_top1 > 0 ? cote * pred.proba_top1 - 1 : null;
+                  const reposCol = partant.jours_depuis_derniere == null ? CX.gray400
+                    : partant.jours_depuis_derniere >= 14 && partant.jours_depuis_derniere <= 35 ? CX.em
+                    : partant.jours_depuis_derniere > 60 ? "#C2410C" : CX.gray400;
+                  return (
+                    <div key={partant.participation_id} style={{ borderTop: `1px solid ${CX.bd4}`, opacity: np ? 0.55 : 1 }}>
+                      <div
+                        onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
+                        className="cx-prow"
+                        style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
+                      >
+                        {/* N° + badge rang */}
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          {rang != null && rang <= 3 && (
+                            <span style={{ fontFamily: CX.sg, fontSize: 10, fontWeight: 800, color: rang === 1 ? CX.gold : CX.gray400, lineHeight: 1, marginBottom: 3 }}>#{rang}</span>
                           )}
-                          </Fragment>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                          <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 9, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, background: rang === 1 ? CX.goldBg : CX.surf3, color: rang === 1 ? CX.goldDeep : CX.gray700, border: `1px solid ${rang === 1 ? CX.goldBd : CX.bd1}` }}>
+                            {partant.numero}
+                          </span>
+                        </div>
+
+                        {/* Cheval : nom + badges + méta */}
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <span style={{ fontWeight: 700, fontSize: 14.5, color: np ? CX.gray400 : CX.ink2, textDecoration: np ? "line-through" : "none" }}>{partant.nom_cheval}</span>
+                            {np && (
+                              <span title="Cheval déclaré non-partant — retiré du pronostic" style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: "#71717A", background: "#E4E4E7", border: "1px solid #C4C4CC", borderRadius: 5, padding: "1px 5px" }}>Non partant</span>
+                            )}
+                            {partant.running_style && !np && <RunningStyleBadge style={partant.running_style} />}
+                            {partant.changement_jockey && (
+                              <span title="Changement de jockey vs dernière course" style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 700, color: "#C2410C", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 5, padding: "1px 5px" }}>⟳ Jockey</span>
+                            )}
+                            {(partant.jockey_suspendu || partant.entraineur_suspendu) && (
+                              <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} style={{ fontSize: 9, fontWeight: 700, color: CX.redDeep, background: CX.redBg, border: `1px solid ${CX.redBd}`, borderRadius: 5, padding: "1px 5px" }}>
+                                {partant.jockey_suspendu ? "J. susp." : "E. susp."}
+                              </span>
+                            )}
+                            {pred?.value_bet && (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: CX.emDeep, background: CX.emBg, border: `1px solid ${CX.emBd}`, borderRadius: 999, padding: "1px 7px" }}>
+                                ★ +{Math.round(pred.value_bet.ev_max * 100)}%
+                              </span>
+                            )}
+                            {evAll != null && evAll >= 0.05 && (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: CX.emDeep, borderRadius: 999, padding: "1px 2px" }}>+{Math.round(evAll * 100)}%</span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: 11.5, color: CX.gray400 }}>
+                            {partant.jockey && (
+                              <span style={{ textDecoration: partant.jockey_suspendu ? "line-through" : "none" }}>{partant.jockey}</span>
+                            )}
+                            {partant.entraineur && (
+                              <span className="cx-hide-m" style={{ color: "#C9C2AE", textDecoration: partant.entraineur_suspendu ? "line-through" : "none" }}>· {partant.entraineur}</span>
+                            )}
+                            {partant.age != null && <><span style={{ color: "#E5E1D5" }}>·</span><span>{partant.age}a{partant.sexe ? ` ${partant.sexe}` : ""}</span></>}
+                            {partant.jours_depuis_derniere != null && (
+                              <><span style={{ color: "#E5E1D5" }}>·</span><span style={{ color: reposCol, fontWeight: reposCol === CX.gray400 ? 400 : 600 }}>{partant.jours_depuis_derniere}j repos</span></>
+                            )}
+                            {partant.premier_deferre && <span style={{ color: CX.gold, fontWeight: 600 }}>· ★ Déferré</span>}
+                            {partant.premieres_oeilleres && <span className="cx-hide-m" style={{ color: CX.gold, fontWeight: 600 }}>· ★ Œillères</span>}
+                            {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 5 && (
+                              <span className="cx-hide-m" style={{ color: CX.gold, fontWeight: 600 }}>· Duo {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}%</span>
+                            )}
+                            {partant.musique && (
+                              <><span className="cx-hide-m" style={{ color: "#E5E1D5" }}>·</span><span className="cx-hide-m" style={{ fontFamily: CX.sg, letterSpacing: ".02em", color: CX.muted }}>{partant.musique}</span></>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Cote */}
+                        <div style={{ textAlign: "right" }}>
+                          {np ? (
+                            <span style={{ fontFamily: CX.sg, fontSize: 12, color: CX.gray400 }}>NP</span>
+                          ) : (
+                            <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: coteMoved ? CX.em : CX.ink2 }}>
+                              {formatCote(cote)}
+                              {liveCote != null && <span style={{ color: CX.em, fontSize: 11 }}> ↓</span>}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Algo (cote juste) */}
+                        <div className="cx-algo" style={{ textAlign: "right", fontFamily: CX.sg, fontSize: 12.5, color: CX.gray400 }}>
+                          {pred?.cote_juste ? formatCote(pred.cote_juste) : "—"}
+                        </div>
+
+                        {/* Proba */}
+                        <div style={{ textAlign: "right" }}>
+                          {pred ? (
+                            <>
+                              <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: rang === 1 ? CX.gold : CX.ink2 }}>{(pred.proba_top1 * 100).toFixed(0)}%</div>
+                              <div style={{ fontSize: 10, color: CX.gray400, marginTop: 1 }}>{(pred.proba_top3 * 100).toFixed(0)}% t3</div>
+                            </>
+                          ) : (
+                            <span style={{ color: CX.gray400 }}>—</span>
+                          )}
+                        </div>
+
+                        {/* Chevron */}
+                        <ChevronDown style={{ height: 14, width: 14, flexShrink: 0, color: "#D1D5DB", transform: isExp ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+                      </div>
+
+                      {/* Détail déplié */}
+                      {isExp && (
+                        <div style={{ padding: "2px 18px 16px 18px", background: CX.surf2 }}>
+                          <PartantDetail partant={partant} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
 
           {/* Graphique cotes historique */}
-          {/* ── Narrative IA ── */}
+          {/* ── Narrative IA (Analyse BlackTurf) ── */}
           {analysis?.narrative && (
-            <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/60 to-white p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <Brain className="h-4 w-4 text-violet-600" />
-                <h3 className="text-sm font-semibold text-gray-900">Analyse BlackTurf</h3>
+            <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+              <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
+                <Brain className="h-[17px] w-[17px]" style={{ color: CX.gold }} />
+                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Analyse BlackTurf</h3>
                 {analysis.field_confidence > 0 && (
-                  <span className={cn(
-                    "ml-auto text-[10px] font-semibold rounded-full px-2 py-0.5",
-                    analysis.field_confidence >= 0.7 ? "bg-emerald-100 text-emerald-700" :
-                    analysis.field_confidence >= 0.5 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
-                  )}>
+                  <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
                     Confiance {Math.round(analysis.field_confidence * 100)}%
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{analysis.narrative}</p>
+              {(() => {
+                // Présentation structurée : chaque ligne « Label : contenu » devient une
+                // entrée avec icône + label coloré. Ligne d'en-tête course (redondante,
+                // déjà affichée plus haut) ignorée. Si l'analyse est en prose libre (Claude),
+                // repli sur un simple paragraphe.
+                const META: Record<string, { Icon: typeof Brain; cls: string }> = {
+                  "Lecture": { Icon: Activity, cls: "text-violet-500" },
+                  "Favori IA": { Icon: Star, cls: "text-brand-gold" },
+                  "Atouts": { Icon: CheckCircle2, cls: "text-emerald-500" },
+                  "Également en vue": { Icon: Users, cls: "text-blue-500" },
+                  "Outsiders à valeur": { Icon: TrendingUp, cls: "text-emerald-600" },
+                  "Conclusion": { Icon: Target, cls: "text-violet-600" },
+                  "À surveiller": { Icon: AlertTriangle, cls: "text-amber-500" },
+                };
+                const lines = analysis.narrative.split("\n").map((l) => l.trim()).filter(Boolean);
+                const rows = lines
+                  .map((line) => {
+                    const m = line.match(/^([^:—]+?)\s*[:—]\s*(.+)$/);
+                    if (!m) return null;
+                    const label = m[1].trim();
+                    const meta = META[label];
+                    if (!meta) return null;
+                    return { label, rest: m[2].trim(), meta };
+                  })
+                  .filter(Boolean) as { label: string; rest: string; meta: { Icon: typeof Brain; cls: string } }[];
+                if (!rows.length) {
+                  return <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{analysis.narrative}</p>;
+                }
+                return (
+                  <div className="space-y-2">
+                    {rows.map(({ label, rest }, i) => {
+                      const concl = label === "Conclusion";
+                      return (
+                        <div key={i} className="flex gap-2.5" style={concl ? { marginTop: 4, borderRadius: 12, background: "rgba(245,158,11,.05)", padding: "8px 10px" } : undefined}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.goldMuted, marginTop: 7, flexShrink: 0 }} />
+                          <p className="text-[13px] leading-snug" style={{ color: CX.gray600 }}>
+                            <span style={{ fontWeight: 700, color: CX.ink2 }}>{label}</span> {rest}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* Chevaux à surveiller (signaux marché / argent pro) */}
               {analysis.market_signals?.length > 0 && (
-                <div className="pt-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">👁️ Chevaux à surveiller</p>
+                <div style={{ marginTop: 12, paddingTop: 11, borderTop: `1px solid ${CX.bd2}` }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: CX.gray400, marginBottom: 7 }}>👁️ Chevaux à surveiller</p>
                   <div className="flex flex-wrap gap-1.5">
                     {analysis.market_signals.map((s, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                      <span key={i} style={{ fontSize: 11, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "3px 10px" }}>
                         N°{s.numero} {s.nom} — {s.signal}
                       </span>
                     ))}
                   </div>
                 </div>
               )}
-              <p className="text-[10px] text-muted-foreground/70 pt-1">
-                Synthèse de l&apos;analyse. Les paris à jouer (selon ton montant et ton profil) sont dans le plan de mise ci-contre.
+              <p className="pt-1" style={{ fontSize: 10, color: CX.gray400 }}>
+                Les paris à jouer sont dans le plan de mise.
               </p>
             </div>
           )}
 
-          {/* ── Course à outsider (champ ouvert + grosses cotes à valeur détectée) ── */}
+          {/* ── Course à outsider (carte or/crème) ── */}
           {analysis?.detection_outsider?.course_a_outsider && (
-            <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-violet-600" />
-                <h3 className="text-sm font-bold text-violet-800">Course à outsider détectée</h3>
-                <span className="ml-auto text-[10px] font-bold rounded-full bg-violet-100 text-violet-700 px-2 py-0.5">
+            <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.22)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 60%)", padding: "18px 20px" }}>
+              <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
+                <Zap className="h-4 w-4" style={{ color: CX.gold }} />
+                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.goldDeep }}>Course à outsider détectée</h3>
+                <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
                   Score {Math.round(analysis.detection_outsider.score * 100)}/100
                 </span>
               </div>
               {analysis.detection_outsider.signaux.length > 0 && (
-                <ul className="text-xs text-violet-900/80 space-y-0.5">
+                <ul style={{ margin: "0 0 12px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
                   {analysis.detection_outsider.signaux.map((s, i) => (
-                    <li key={i} className="flex gap-1.5"><span>·</span><span>{s}</span></li>
+                    <li key={i} style={{ fontSize: 12, color: CX.gray500 }}>· {s}</li>
                   ))}
                 </ul>
               )}
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="cx-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {analysis.detection_outsider.candidats.map((c) => (
-                  <div key={c.numero} className="rounded-lg bg-white/80 border border-violet-200/70 p-2.5 space-y-1.5">
+                  <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "11px 13px" }} className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
-                      <span className="font-mono text-xs font-bold text-violet-700">cote {c.cote}</span>
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}>N°{c.numero} {c.nom}</span>
+                      <span style={{ fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
                     </div>
                     {/* Chiffres clés : valeur modèle vs marché */}
                     <div className="flex flex-wrap gap-1 text-[10px]">
-                      <span className="rounded bg-violet-100 text-violet-800 px-1.5 py-0.5 font-medium">
+                      <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>
                         Modèle {Math.round(c.proba_modele * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
                       </span>
                       {c.ratio_valeur != null && (
-                        <span className="rounded bg-emerald-100 text-emerald-800 px-1.5 py-0.5 font-bold">
+                        <span style={{ fontSize: 10, fontWeight: 700, color: CX.emDeep, background: CX.emBg, borderRadius: 5, padding: "2px 7px" }}>
                           ×{c.ratio_valeur} valeur
                         </span>
                       )}
                       {c.verdict && (
-                        <span className="rounded bg-gray-100 text-gray-700 px-1.5 py-0.5">{c.verdict}</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>{c.verdict}</span>
                       )}
                     </div>
                     {c.justification && (
-                      <p className="text-[11px] text-gray-700 leading-relaxed">{c.justification}</p>
+                      <p style={{ margin: "7px 0 0", fontSize: 11.5, lineHeight: 1.45, color: CX.gray600 }}>{c.justification}</p>
                     )}
                     {/* Facteurs qui appuient le choix */}
                     {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
@@ -2481,72 +2674,32 @@ export default function CoursePage() {
                   </div>
                 ))}
               </div>
-              <p className="text-[10px] text-violet-900/60">
-                Détection : ouverture du marché + écart modèle/marché + taux de surprises réel sur ce type de course.
-                Grosse cote = risque élevé ; réservé aux profils offensifs.
+              <p style={{ margin: "11px 0 0", fontSize: 10.5, color: CX.muted }}>
+                Grosse cote = risque élevé, réservé aux profils offensifs.
               </p>
             </div>
           )}
 
-          {/* ── Chevaux à éviter (surcotés par le public / facteurs défavorables) ── */}
-          {analysis?.chevaux_a_eviter && analysis.chevaux_a_eviter.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50/50 p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-red-500" />
-                <h3 className="text-sm font-bold text-red-700">Chevaux à éviter</h3>
-              </div>
-              <div className="space-y-2">
-                {analysis.chevaux_a_eviter.map((c) => (
-                  <div key={c.numero} className="rounded-lg bg-white/80 border border-red-200/70 p-2.5 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold">N°{c.numero} {c.nom}</span>
-                      <span className="font-mono text-xs text-gray-500">cote {c.cote}</span>
-                    </div>
-                    {/* Chiffres clés : le modèle sous le marché */}
-                    <div className="flex flex-wrap gap-1 text-[10px]">
-                      {c.proba_victoire != null && c.proba_marche != null && (
-                        <span className="rounded bg-red-100 text-red-800 px-1.5 py-0.5 font-medium">
-                          Modèle {Math.round(c.proba_victoire * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
-                        </span>
-                      )}
-                      {c.verdict && (
-                        <span className="rounded bg-gray-100 text-gray-700 px-1.5 py-0.5">{c.verdict}</span>
-                      )}
-                    </div>
-                    {c.justification && (
-                      <p className="text-[11px] text-gray-700 leading-relaxed font-medium">{c.justification}</p>
-                    )}
-                    <ul className="space-y-0.5">
-                      {c.raisons.map((r, i) => (
-                        <li key={i} className="text-[11px] text-gray-600 leading-relaxed flex gap-1.5">
-                          <span className="text-red-400 flex-shrink-0">·</span><span>{r}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-red-900/50">
-                Basé sur l&apos;écart modèle/marché et les facteurs réels — pas une garantie de défaite, un avertissement de valeur.
-              </p>
-            </div>
-          )}
+          {/* Bloc « Chevaux à éviter » supprimé définitivement (décision produit). */}
 
           {/* ── Comparaison multi-bookmakers (repliable — désencombre) ── */}
-          {course.partants.some((p) => p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_betfair_exchange) && (
-            <details className="group rounded-xl border border-border bg-card/40">
-              <summary className="cursor-pointer list-none flex items-center gap-2 px-4 py-3 select-none">
-                <BarChart2 className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-semibold">Comparaison des cotes</h3>
-                <span className="text-xs text-muted-foreground hidden sm:inline">
-                  {course.partants.filter(p => !p.non_partant)[0]?.nb_sources ?? 1} sources
+          {course.partants.some((p) => p.cote_geny || p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_bet365 || p.cote_ladbrokes || p.cote_betfair_exchange) && (
+            <details className="group" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
+              <summary className="cursor-pointer select-none" style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px", listStyle: "none" }}>
+                <BarChart2 className="h-4 w-4" style={{ color: CX.gray500 }} />
+                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comparaison des cotes</h3>
+                <span style={{ fontSize: 11.5, color: CX.gray400 }}>
+                  {(() => {
+                    // Même logique que ComparaisonCotes : sources avec ≥ 1 cote publiée.
+                    const keys = ["cote_pmu", "cote_geny", "cote_winamax", "cote_betclic", "cote_unibet", "cote_bet365", "cote_ladbrokes", "cote_betfair_exchange"] as const;
+                    const actifs = course.partants.filter((p) => !p.non_partant);
+                    const nb = keys.filter((k) => actifs.some((p) => p[k] != null)).length;
+                    return nb;
+                  })()} sources · vert = meilleure cote
                 </span>
-                <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                <ChevronDown className="ml-auto transition-transform group-open:rotate-180 h-4 w-4" style={{ color: CX.gray400 }} />
               </summary>
-              <div className="px-2 pb-3">
-                <p className="px-2 pb-2 text-[10px] text-emerald-600 font-medium">Vert = meilleure cote disponible</p>
-                <ComparaisonCotes partants={course.partants} />
-              </div>
+              <ComparaisonCotes partants={course.partants} />
             </details>
           )}
 
@@ -2555,9 +2708,6 @@ export default function CoursePage() {
             <PronosticsPresse pronostics={course.pronostics_presse} />
           )}
 
-          {/* ── Confrontations directes (head-to-head historique) ── */}
-          <ConfrontationsSection courseId={id} />
-
           {course.statut !== "termine" && (
             <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} />
           )}
@@ -2565,136 +2715,323 @@ export default function CoursePage() {
         </div>
 
         {/* ── RIGHT SIDEBAR ── */}
-        <div className="space-y-4">
-          {/* Analyse algorithme */}
-          <Card className="border-border/70">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Brain className="h-4 w-4 text-brand-gold" />
-                Analyse algorithme
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+          {/* Classement algo */}
+          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 6px" }}>
+              <Brain className="h-4 w-4" style={{ color: CX.goldAmber }} />
+              <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Classement algo</h3>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 9 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowGlossaire(true)}
+                  aria-label="Comment lire l'analyse"
+                  className="inline-flex items-center gap-1 transition-colors hover:opacity-80"
+                  style={{ border: `1px solid ${CX.bd3}`, background: "#FFFFFF", color: CX.gray500, borderRadius: 999, padding: "3px 9px", fontSize: 10, fontWeight: 600, cursor: "pointer" }}
+                >
+                  <HelpCircle className="h-3 w-3" />
+                  Légende
+                </button>
+                <span className="hidden lg:inline" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".04em", color: CX.muted }}>Gagnant · Top-3</span>
+              </div>
+            </div>
+            <div style={{ padding: "2px 12px 10px" }}>
               {!user ? (
-                <div className="text-center py-4">
-                  <p className="text-sm text-muted-foreground mb-3">Connectez-vous pour voir les prédictions</p>
+                <div style={{ textAlign: "center", padding: "16px 8px" }}>
+                  <p style={{ fontSize: 13, color: CX.gray500, marginBottom: 12 }}>Connectez-vous pour voir les prédictions</p>
                   <Button variant="brand" size="sm" asChild>
                     <Link href={`/login?redirect=/courses/${id}`}>Connexion</Link>
                   </Button>
                 </div>
               ) : ["free", "decouverte"].includes(user.plan) ? (
-                <div className="text-center py-4">
-                  <TrendingUp className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-                  <p className="text-sm text-muted-foreground mb-3">Disponible dès le plan Standard</p>
+                <div style={{ textAlign: "center", padding: "16px 8px" }}>
+                  <TrendingUp className="h-8 w-8 mx-auto mb-2" style={{ color: CX.gray400 }} />
+                  <p style={{ fontSize: 13, color: CX.gray500, marginBottom: 12 }}>Disponible dès le plan Standard</p>
                   <Button variant="brand" size="sm" asChild>
-                    <Link href="/tarifs">Passer Standard — 19€/mois</Link>
+                    <Link href="/tarifs">Passer Standard — 12€/mois</Link>
                   </Button>
                 </div>
               ) : loadingPred ? (
-                <div className="flex justify-center py-6">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}>
+                  <Loader2 className="h-5 w-5 animate-spin" style={{ color: CX.gray400 }} />
                 </div>
               ) : !predictions ? (
                 course.statut === "termine" ? (
-                  <div className="text-center py-4">
-                    <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                    <p className="text-sm font-medium text-muted-foreground">Course non analysée par l&apos;algorithme</p>
-                    <p className="text-xs text-muted-foreground/70 mt-1">
+                  <div style={{ textAlign: "center", padding: "16px 8px" }}>
+                    <Brain className="h-8 w-8 mx-auto mb-2" style={{ color: CX.gray400 }} />
+                    <p style={{ fontSize: 13, fontWeight: 500, color: CX.gray500 }}>Course non analysée par l&apos;algorithme</p>
+                    <p style={{ fontSize: 12, color: CX.gray400, marginTop: 4 }}>
                       Cette course (souvent étrangère) n&apos;a pas été couverte par le modèle.
                     </p>
                   </div>
                 ) : (
-                  <div className="text-center py-4">
-                    <Brain className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                    <p className="text-sm text-muted-foreground mb-3">Aucune analyse disponible</p>
+                  <div style={{ textAlign: "center", padding: "16px 8px" }}>
+                    <Brain className="h-8 w-8 mx-auto mb-2" style={{ color: CX.gray400 }} />
+                    <p style={{ fontSize: 13, color: CX.gray500, marginBottom: 12 }}>Aucune analyse disponible</p>
                     <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
                       {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse"}
                     </Button>
                   </div>
                 )
               ) : (
-                <div className="space-y-3">
-                  <div className="flex items-baseline justify-between">
-                    <p className="text-[11px] font-medium text-muted-foreground">
-                      Classement algorithme — {predictions.length} partant{predictions.length > 1 ? "s" : ""}
-                    </p>
-                    <div className="flex items-center gap-2 text-[9px] uppercase tracking-wide text-muted-foreground/70">
-                      <span>Gagnant</span><span>·</span><span>Top-3</span>
-                    </div>
-                  </div>
+                <div>
                   {/* Classement complet (scroll si beaucoup de partants) */}
-                  <div className="space-y-1.5 max-h-[28rem] overflow-y-auto pr-1 -mr-1">
-                    {[...predictions].sort((a, b) => a.rang_predit - b.rang_predit).map((p) => (
-                      <div key={p.prediction_id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-muted/40 transition-colors">
-                        <div className={cn(
-                          "h-6 w-6 rounded-md flex items-center justify-center text-[11px] font-bold flex-shrink-0 tabular-nums",
-                          p.rang_predit === 1 ? "bg-brand-gold/15 text-brand-gold ring-1 ring-brand-gold/30" :
-                          p.rang_predit <= 3 ? "bg-foreground/5 text-foreground ring-1 ring-border" :
-                          "bg-transparent text-muted-foreground/60",
-                        )}>
+                  <div style={{ display: "flex", flexDirection: "column", maxHeight: "28rem", overflowY: "auto" }} className="pr-0.5">
+                    {[...predictions].sort((a, b) => a.rang_predit - b.rang_predit).map((p) => {
+                      const isFav = p.rang_predit === 1;
+                      const badgeBg = isFav ? "#FEF6E7" : p.rang_predit <= 3 ? CX.surf5 : "transparent";
+                      const badgeFg = isFav ? CX.gold : p.rang_predit <= 3 ? CX.ink2 : CX.gray400;
+                      const badgeRing = isFav ? CX.goldBd : p.rang_predit <= 3 ? CX.bd3 : "transparent";
+                      const barColor = isFav ? "#F59E0B" : p.rang_predit <= 3 ? "#9CA3AF" : "#D1D5DB";
+                      return (
+                      <div key={p.prediction_id} className="hover:bg-[#FAF7EF]" style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 6px", borderRadius: 10, transition: "background .15s" }}>
+                        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 8, fontFamily: CX.sg, fontWeight: 700, fontSize: 12, flexShrink: 0, marginTop: 1, background: badgeBg, color: badgeFg, border: `1px solid ${badgeRing}` }}>
                           {p.rang_predit}
-                        </div>
-                        <div className="flex-1 min-w-0">
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-medium truncate">N°{p.numero} {p.nom_cheval}</p>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: CX.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", margin: 0 }}>N°{p.numero} {p.nom_cheval}</p>
                             {p.value_bet && <EVBadge ev={p.value_bet.ev_max} />}
                           </div>
                           {p.proba_top1_low != null && p.proba_top1_high != null && (
-                            <span className="text-[9px] text-muted-foreground/60 tabular-nums">
+                            <div style={{ fontSize: 9, color: CX.muted, marginTop: 1 }} className="tabular-nums">
                               intervalle {(p.proba_top1_low * 100).toFixed(0)}–{(p.proba_top1_high * 100).toFixed(0)}%
-                            </span>
+                            </div>
                           )}
-                          {/* Facteurs clés RÉELS (forme, ELO, J/E…) — montre que l'IA pèse bien plus que la cote */}
+                          {/* Barre de conviction du modèle (proba de victoire) — repère visuel honnête */}
+                          <div style={{ marginTop: 5, height: 4, maxWidth: 130, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
+                            <div
+                              style={{ height: "100%", borderRadius: 999, background: barColor, transformOrigin: "left", animation: "cxBarGrow .6s cubic-bezier(.16,1,.3,1) both", width: `${Math.max(Math.min(p.proba_top1 * 100, 100), 3)}%` }}
+                            />
+                          </div>
+                          {/* Signaux ÉQUILIBRÉS : atouts (vert), réserves (rose), vigilance (ambre) —
+                              tout dérivé de l'analyse réelle, plus jamais que du positif sur un cheval faible. */}
                           {(() => {
-                            const fac = analysis?.predictions?.find((ap) => ap.numero === p.numero)?.explanation?.facteurs_positifs ?? [];
-                            const labels = fac.slice(0, 3).map((f) => f.label.replace(/^[^A-Za-zÀ-ÿ0-9]+/, "").trim()).filter(Boolean);
-                            if (!labels.length) return null;
+                            const exp = analysis?.predictions?.find((ap) => ap.numero === p.numero)?.explanation;
+                            const sig = exp?.signaux ?? [];
+                            const clean = (s: string) => s.replace(/^[^A-Za-zÀ-ÿ0-9]+/, "").trim();
+                            // Aucune règle de quota : on affiche les signaux les plus pertinents
+                            // de l'analyse (déjà triés par pertinence côté backend), quel que soit
+                            // leur sens. Que du négatif → que du négatif ; que du positif → que du
+                            // positif ; mixte → mixte. Cap haut à 4 pour ne pas surcharger.
+                            let chips = sig.slice(0, 2);
+                            if (!chips.length) {
+                              // Repli (analyse en cache d'avant la mise à jour) : facteurs positifs seuls.
+                              const fac = exp?.facteurs_positifs ?? [];
+                              chips = fac.slice(0, 2).map((f) => ({ label: f.label, detail: f.detail, sens: "positif" as const, score: f.score }));
+                            }
+                            chips = chips.filter((c) => clean(c.label));
+                            if (!chips.length) return null;
+                            const chipStyle = (sens: string) =>
+                              sens === "positif" ? { fg: CX.emDeep, bg: CX.emBg, arrow: "▲" } :
+                              sens === "negatif" ? { fg: CX.redDeep, bg: CX.redBg, arrow: "▼" } :
+                              { fg: CX.gold, bg: CX.goldBg, arrow: "●" };
                             return (
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {labels.map((l, i) => (
-                                  <span key={i} className="inline-block rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70 px-1.5 py-0.5 text-[9px] font-medium leading-none">
-                                    {l}
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 5 }}>
+                                {chips.map((c, i) => {
+                                  const cs = chipStyle(c.sens);
+                                  return (
+                                  <span
+                                    key={i}
+                                    title={c.detail || undefined}
+                                    style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 600, borderRadius: 4, padding: "1px 5px", color: cs.fg, background: cs.bg, cursor: "default" }}
+                                  >
+                                    {cs.arrow} {clean(c.label)}
                                   </span>
-                                ))}
+                                  );
+                                })}
                               </div>
                             );
                           })()}
                         </div>
                         {/* Deux chiffres clairs alignés : victoire (gras) + placé */}
-                        <div className="flex items-center gap-3 flex-shrink-0 text-right">
-                          <div className="w-10">
-                            <div className="text-sm font-bold tabular-nums text-foreground">{(p.proba_top1 * 100).toFixed(0)}%</div>
-                          </div>
-                          <div className="w-10">
-                            <div className="text-xs font-medium tabular-nums text-muted-foreground">{(p.proba_top3 * 100).toFixed(0)}%</div>
-                          </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: CX.ink2 }}>{(p.proba_top1 * 100).toFixed(0)}%</div>
+                          <div style={{ fontSize: 10, color: CX.gray400 }}>{(p.proba_top3 * 100).toFixed(0)}%</div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                  <div className="pt-2 border-t border-border/50 space-y-1">
-                    <p className="text-[10px] text-muted-foreground flex gap-1.5">
-                      <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
-                      <span><strong className="text-foreground">Gagnant</strong> = probabilité de victoire · <strong className="text-foreground">Top-3</strong> = probabilité d&apos;être dans les 3 premiers. Probabilités calibrées sur résultats réels.</span>
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/70 pl-[18px]">
-                      Le modèle combine <strong className="text-foreground">80+ critères</strong> (forme, ELO, jockey/entraîneur, distance, terrain, descente de catégorie…) — la cote n&apos;est qu&apos;un facteur parmi d&apos;autres (~19% du poids). Aide à la décision — aucune garantie de gain.
+                  <div style={{ padding: "10px 6px 0", marginTop: 4, borderTop: `1px solid ${CX.bd4}` }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 9.5, color: CX.gray400, marginBottom: 5 }}>
+                      <span><span style={{ color: CX.emDeep }}>▲</span> atout</span>
+                      <span><span style={{ color: CX.redDeep }}>▼</span> réserve</span>
+                      <span><span style={{ color: CX.gold }}>●</span> à surveiller</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 10, color: CX.gray400, lineHeight: 1.5 }}>
+                      Modèle à <b style={{ color: CX.gray600 }}>80+ critères</b> (forme, ELO, J/E, distance, terrain…). Aide à la décision.
                     </p>
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+
+          {/* ── Modale LÉGENDE : explique les signaux sans encombrer la carte ── */}
+          {showGlossaire && (
+            <div
+              className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
+              style={{ background: "rgba(17,24,39,.5)", backdropFilter: "blur(3px)", animation: "cxFadeUp .2s ease both" }}
+              onClick={() => setShowGlossaire(false)}
+            >
+              <div
+                className="w-full overflow-y-auto rounded-t-2xl sm:rounded-[20px]"
+                style={{ maxWidth: 440, maxHeight: "82vh", background: "#FFFFFF", boxShadow: "0 30px 70px -20px rgba(0,0,0,.45)" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* En-tête collant */}
+                <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${CX.bd2}`, background: "rgba(255,255,255,.96)", backdropFilter: "blur(6px)" }}>
+                  <Brain className="h-4 w-4" style={{ color: CX.gold }} />
+                  <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comment lire l&apos;analyse</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowGlossaire(false)}
+                    aria-label="Fermer"
+                    className="ml-auto inline-flex items-center justify-center"
+                    style={{ width: 28, height: 28, borderRadius: 999, border: "none", background: CX.surf5, color: CX.gray500, cursor: "pointer" }}
+                  >
+                    <X className="h-[15px] w-[15px]" />
+                  </button>
+                </div>
+
+                <div className="px-4 py-3 space-y-4 text-[13px] leading-relaxed">
+                  {/* Les chiffres */}
+                  <section className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Les chiffres</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-bold tabular-nums">54%</span>
+                      <span className="text-muted-foreground"><strong className="text-foreground">Gagnant</strong> — probabilité de victoire estimée.</span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-medium tabular-nums text-muted-foreground">77%</span>
+                      <span className="text-muted-foreground"><strong className="text-foreground">Top-3</strong> — probabilité de finir dans les 3 premiers.</span>
+                    </div>
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <span className="h-1 w-10 rounded-full bg-brand-gold flex-shrink-0" />
+                      <span className="text-muted-foreground">La barre dorée = niveau de conviction du modèle (sa proba de victoire).</span>
+                    </div>
+                  </section>
+
+                  {/* Les pastilles */}
+                  <section className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Les pastilles</p>
+                    <div className="flex items-start gap-2">
+                      <span className="mt-0.5 inline-flex items-center rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70 px-1.5 py-0.5 text-[10px] font-medium"><span className="text-[8px] mr-0.5">▲</span> atout</span>
+                      <span className="text-muted-foreground">Un point fort en faveur du cheval.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="mt-0.5 inline-flex items-center rounded bg-rose-50 text-rose-700 ring-1 ring-rose-200/70 px-1.5 py-0.5 text-[10px] font-medium"><span className="text-[8px] mr-0.5">▼</span> réserve</span>
+                      <span className="text-muted-foreground">Un point faible qui pèse contre lui.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="mt-0.5 inline-flex items-center rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200/70 px-1.5 py-0.5 text-[10px] font-medium"><span className="text-[8px] mr-0.5">●</span> à surveiller</span>
+                      <span className="text-muted-foreground">Une incertitude à garder en tête (ni bon ni mauvais).</span>
+                    </div>
+                  </section>
+
+                  {/* Glossaire COMPLET — chaque signal expliqué (indispensable sur mobile,
+                      pas de survol). Sections dépliables (<details> natif, zéro lib). */}
+                  <section className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Tous les signaux expliqués</p>
+                    {([
+                      ["Cote & marché", [
+                        ["pos", "Valeur (sous-coté)", "Le modèle lui donne plus de chances que ne le suggère sa cote — cote généreuse."],
+                        ["neg", "Coté trop court", "Sa cote surévalue sa vraie chance : on le paierait trop cher."],
+                        ["pos", "Afflux de mises", "Le volume de paris sur lui monte fortement — l'argent arrive."],
+                        ["pos", "Steam / SPI", "Cote en forte baisse depuis l'ouverture — signe d'argent averti."],
+                        ["pos", "Gap PMU/Betfair", "Coté plus généreux au PMU que sur le marché de référence."],
+                      ]],
+                      ["Forme", [
+                        ["pos", "Forme excellente", "Très bonnes performances sur ses 5 dernières courses."],
+                        ["neg", "Forme basse", "Résultats récents décevants."],
+                        ["pos", "En progression", "Tendance qui monte course après course."],
+                        ["neg", "En régression", "Niveau en baisse sur ses dernières sorties."],
+                        ["pos", "Fraîcheur idéale", "Temps de repos optimal : revient frais et affûté."],
+                        ["amber", "Longue absence", "Beaucoup de jours sans courir — condition à confirmer."],
+                        ["amber", "Attention rebond", "Sort d'une course exceptionnelle — risque de contre-performance."],
+                      ]],
+                      ["Niveau & rivaux", [
+                        ["pos", "Supérieur au champ", "Niveau (ELO) au-dessus de la moyenne des concurrents du jour."],
+                        ["neg", "Inférieur au champ", "Niveau sous la moyenne des adversaires."],
+                        ["pos", "Cote ELO en hausse", "Son niveau progresse nettement ces derniers temps."],
+                        ["pos", "Ascendant sur ses rivaux", "A déjà battu en course des concurrents présents aujourd'hui."],
+                        ["neg", "Dominé en confrontation", "Souvent battu par des rivaux engagés aujourd'hui."],
+                      ]],
+                      ["Conditions de course", [
+                        ["pos", "Descente de catégorie", "Course moins relevée que d'habitude — adversité plus faible."],
+                        ["neg", "Montée de catégorie", "Course plus relevée/dotée qu'à son habitude — adversaires plus forts."],
+                        ["pos", "Terrain idéal", "Réussit bien sur ce type de sol."],
+                        ["neg", "Terrain défavorable", "Performances faibles sur ce type de sol."],
+                        ["pos", "Allègement", "Porte moins de poids que lors de ses dernières sorties."],
+                        ["neg", "Surcharge de poids", "Porte plus lourd que d'habitude — handicap réel."],
+                        ["pos", "Corde / Position favorable", "Numéro de départ historiquement avantageux ici."],
+                        ["neg", "Conflit de rythme", "Plusieurs chevaux de tête : bataille de vitesse probable."],
+                        ["neg", "Gros déplacement", "Court très loin de ses hippodromes habituels — voyage exigeant."],
+                        ["pos", "Vitesse de référence", "Chronos récents au-dessus du niveau type de la distance."],
+                        ["pos", "Pedigree adapté", "La lignée de son père réussit à cette distance / ce terrain."],
+                      ]],
+                      ["Jockey & écurie", [
+                        ["pos", "Jockey en forme", "Jockey avec un bon taux de réussite ces derniers jours."],
+                        ["pos", "Écurie en réussite", "Entraîneur en pleine réussite en ce moment."],
+                        ["pos", "Duo efficace", "Association jockey × entraîneur performante sur la durée."],
+                        ["amber", "Changement de jockey", "Jockey différent de la dernière course — signal ambigu."],
+                        ["pos", "Premiers défers / œillères", "Première mise au fer ou changement d'œillères — souvent une amélioration."],
+                      ]],
+                      ["Décision placé", [
+                        ["pos", "Régulier au podium", "Beaucoup de podiums en carrière — valeur sûre pour le placé."],
+                        ["pos", "Profil placé", "Bien plus solide au placé qu'au gagnant : à jouer placé/combiné placé."],
+                        ["pos", "Valeur sûre placé", "Très haute probabilité de finir dans les 3 — base fiable."],
+                      ]],
+                      ["Vigilance", [
+                        ["amber", "Chances limitées", "Classé loin par le modèle — chance secondaire."],
+                        ["amber", "Inédit", "N'a jamais couru — aucune référence, pari à l'aveugle."],
+                        ["amber", "Peu d'expérience", "Très peu de courses — marge de progression mais incertitude."],
+                      ]],
+                    ] as Array<[string, Array<[string, string, string]>]>).map(([fam, items], fi) => (
+                      <details key={fam} open={fi === 0} className="group rounded-lg border border-border/60 overflow-hidden">
+                        <summary className="flex items-center gap-2 cursor-pointer select-none px-3 py-2 text-[12px] font-medium hover:bg-muted/40 transition-colors list-none">
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+                          {fam}
+                        </summary>
+                        <div className="px-3 pb-2.5 pt-0.5 space-y-2 border-t border-border/40">
+                          {items.map(([sens, label, def]) => (
+                            <div key={label} className="flex gap-2">
+                              <span className={cn(
+                                "mt-1 text-[8px] leading-none flex-shrink-0",
+                                sens === "pos" ? "text-emerald-600" : sens === "neg" ? "text-rose-600" : "text-amber-600",
+                              )}>
+                                {sens === "pos" ? "▲" : sens === "neg" ? "▼" : "●"}
+                              </span>
+                              <p className="text-[12px] text-muted-foreground leading-snug">
+                                <strong className="text-foreground font-medium">{label}</strong> — {def}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ))}
+                  </section>
+
+                  <p className="flex items-start gap-1.5 rounded-lg bg-muted/50 px-2.5 py-2 text-[12px] text-muted-foreground">
+                    <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-brand-gold" />
+                    <span>Sur ordinateur, le survol d&apos;une pastille donne aussi le détail chiffré propre à ce cheval. Un signal qui contredirait le classement du modèle n&apos;est jamais affiché.</span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/70 text-center pb-1">
+                    Modèle à 80+ critères. Aide à la décision, aucune garantie de gain.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Calculateur de mise */}
-          <Card className="border-brand-gold/20">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Calculator className="h-4 w-4 text-brand-gold" />
-                Votre plan de mise
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+          <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 55%)", overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 12px" }}>
+              <Calculator className="h-4 w-4" style={{ color: CX.goldAmber }} />
+              <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Votre plan de mise</h3>
+            </div>
+            <div style={{ padding: "0 18px 18px" }}>
               <MiseCalculatorWidget
                 courseId={id}
                 userPlan={user?.plan}
@@ -2702,57 +3039,42 @@ export default function CoursePage() {
                 predictions={predictions}
                 statut={course.statut}
               />
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Infos course */}
-          <Card className="border-border/50">
-            <CardContent className="p-4 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Discipline</span>
-                <span className="font-medium">{course.discipline}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Distance</span>
-                <span className="font-mono font-medium">{course.distance}m</span>
-              </div>
-              {course.niveau_course && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Niveau</span>
-                  <span className="font-medium">{course.niveau_course.replace(/_/g, " ")}</span>
-                </div>
-              )}
-              {course.terrain_officiel && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Terrain</span>
-                  <span className="font-medium">{course.terrain_officiel}</span>
-                </div>
-              )}
-              {course.meteo && (
-                <>
-                  {course.meteo.temperature !== null && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Température</span>
-                      <span className="font-medium">{course.meteo.temperature}°C</span>
-                    </div>
-                  )}
-                  {course.meteo.pluie_24h !== null && course.meteo.pluie_24h > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Pluie 24h</span>
-                      <span className="font-medium text-brand-blue">{course.meteo.pluie_24h}mm</span>
-                    </div>
-                  )}
-                </>
-              )}
-              {course.allocation && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Dotation</span>
-                  <span className="font-mono font-medium">{Math.round(course.allocation / 100).toLocaleString("fr-FR")} €</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "16px 18px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <h3 style={{ margin: "0 0 11px", fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2 }}>Infos course</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(() => {
+                const rows: Array<{ label: string; val: string }> = [
+                  { label: "Discipline", val: course.discipline },
+                  { label: "Distance", val: `${course.distance} m` },
+                ];
+                if (course.niveau_course) rows.push({ label: "Niveau", val: course.niveau_course.replace(/_/g, " ") });
+                if (course.terrain_officiel) rows.push({ label: "Terrain", val: course.terrain_officiel });
+                if (course.penetrometre_desc && course.penetrometre_coef != null) rows.push({ label: "Pénétromètre", val: `${course.penetrometre_desc} (${course.penetrometre_coef})` });
+                if (course.meteo?.temperature != null) rows.push({ label: "Température", val: `${course.meteo.temperature}°C` });
+                if (course.meteo?.pluie_24h != null && course.meteo.pluie_24h > 0) rows.push({ label: "Pluie 24h", val: `${course.meteo.pluie_24h} mm` });
+                if (course.allocation) rows.push({ label: "Dotation", val: `${Math.round(course.allocation / 100).toLocaleString("fr-FR")} €` });
+                if (course.categorie_particularite) rows.push({ label: "Départ", val: course.categorie_particularite.replace(/_/g, " ").toLowerCase().replace(/^./, (ch) => ch.toUpperCase()) });
+                rows.push({ label: "Heure", val: formatDateTime(course.date_heure) });
+                return rows.map((r) => (
+                  <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5 }}>
+                    <span style={{ color: CX.gray400 }}>{r.label}</span>
+                    <span style={{ fontWeight: 600, color: CX.gray700 }}>{r.val}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
         </div>
+      </div>
+            </>
+            )}
+          </>
+        );
+      })()}
       </div>
     </div>
   );

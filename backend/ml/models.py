@@ -38,7 +38,26 @@ MODELS_DIR.mkdir(parents=True, exist_ok=True)
 # Poids fallback si stacking non disponible
 ENSEMBLE_WEIGHTS_FALLBACK = {"xgb": 0.50, "lgbm": 0.30, "catboost": 0.20}
 
-META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "label"}
+META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "label",
+             # champs TEXTE d'affichage/narratif (ajoutés au batch features) — jamais
+             # des features ML : exclure sinon XGBoost rejette les dtypes object.
+             "jockey_nom", "entraineur_nom", "cheval_nom",
+             # ── Exclus du MODÈLE (audit edge 2026-06-17) — restent dans le dict pour
+             #    narrative/valuebets, mais pas appris : ────────────────────────────
+             # (a) COTES DUPLIQUÉES : en live geny/bzh/unibet/winamax/betclic/betfair
+             #     valent cote_pmu (sources mortes, geny 403) → phantom + train/serve
+             #     skew. Ablation prouvée NEUTRE sur l'AUC (A_FULL≈B_DEDUP). On garde
+             #     cote_pmu + les dérivées pmu (prob_implicite, rang_cote, est_favori).
+             "cote_geny", "cote_bzh", "cote_unibet", "cote_winamax", "cote_betclic",
+             "cote_betfair_exchange", "cote_marche_min", "ratio_pmu_geny",
+             "gap_pmu_betfair", "spread_bookmakers", "decote_detectee", "valeur_latente",
+             "steam_move_betclic",
+             # (b) STATS SAISON BRUTES (compteurs/ROI cumulés saison) = FUITE au recompute
+             #     d'une course passée (la saison entière inclut le futur). Les TAUX
+             #     jockey/entraîneur/asso sont, eux, recalculés point-in-time (trailing
+             #     365j, date<départ) dans features.py et CONSERVÉS.
+             "jockey_victoires_saison", "entraineur_victoires_saison",
+             "jockey_montes_30j", "jockey_roi", "entraineur_roi"}
 
 # Brier score minimum requis avant déploiement
 BRIER_THRESHOLD = 0.18
@@ -92,6 +111,10 @@ class BlackTurfEnsemble:
         self.shap_importance: dict = {}
         self.trained_at: Optional[datetime] = None
         self._catboost_available: bool = False
+        # Modèle de RANKING (LGBMRanker lambdarank, groupé par course) — sert
+        # UNIQUEMENT à ordonner le classement affiché (rang_predit), jamais les
+        # probas/EV. None si non entraîné / LightGBM indispo.
+        self.ranker = None
 
     def train(self, X: pd.DataFrame, y: pd.Series, y_win: Optional[pd.Series] = None) -> dict:
         """
@@ -271,7 +294,10 @@ class BlackTurfEnsemble:
         log.info("model.walk_forward", scores=[round(s, 4) for s in wf_scores], mean=round(float(np.mean(wf_scores)), 4))
 
         # ── Métriques finales ──────────────────────────────
-        metrics = self._evaluate(X_test, y_test)
+        # course_id est une colonne META (retirée de X_feat) → on la repasse alignée sur
+        # l'index de X_test pour que la précision top-3 puisse grouper PAR COURSE (sinon 0).
+        _test_cid = X.loc[X_test.index, "course_id"] if "course_id" in X.columns else None
+        metrics = self._evaluate(X_test, y_test, _test_cid)
         metrics["walk_forward_auc"] = float(np.mean(wf_scores))
         metrics["walk_forward_variance"] = float(np.var(wf_scores))
 
@@ -319,7 +345,10 @@ class BlackTurfEnsemble:
         # (~1 gagnant / nb_partants) → scale_pos_weight + calibration isotonique.
         if y_win is not None and len(y_win) == n:
             try:
-                yw_train, yw_test = y_win.iloc[:split], y_win.iloc[split:]
+                # Aligner sur l'index de X_train/X_test → cohérent ET robuste aux DEUX
+                # modes de split (group_split par course = masque, sinon positionnel).
+                # Avant : iloc[:split] plantait sous group_split (`split` non défini).
+                yw_train, yw_test = y_win.loc[X_train.index], y_win.loc[X_test.index]
                 if yw_train.nunique() > 1:
                     pos_w_win = float((yw_train == 0).sum()) / max(float((yw_train == 1).sum()), 1)
                     win_base = XGBClassifier(
@@ -341,6 +370,35 @@ class BlackTurfEnsemble:
             except Exception as e:
                 log.warning("model.win_model_failed", err=str(e)[:160])
                 self.win_model = None
+
+        # ── Modèle de RANKING (LambdaRank, groupé par course) ─────────────────
+        # Optimise directement l'ORDRE d'arrivée intra-course (vs la classif top3
+        # binaire). Score utilisé seulement pour le classement affiché (blend côté
+        # predict, flag BT_RANKER_BLEND) — jamais pour les probas/EV calibrées.
+        self.ranker = None
+        if _AF.group_split and "course_id" in X.columns and y_win is not None and len(y_win) == n:
+            try:
+                import itertools
+                from lightgbm import LGBMRanker
+                _grp_src = X.loc[X_train.index, "course_id"].tolist()
+                _grp = [sum(1 for _ in g) for _, g in itertools.groupby(_grp_src)]
+                _yw = y_win.loc[X_train.index].to_numpy()
+                _y3 = y_train.to_numpy()
+                # relevance : gagnant=2, placé(top3)=1, autre=0 (label_gain associé)
+                _rel = np.where(_yw == 1, 2, np.where(_y3 == 1, 1, 0)).astype(int)
+                if sum(_grp) == len(X_train) and len(_grp) >= 2:
+                    _rk = LGBMRanker(
+                        objective="lambdarank", n_estimators=400, max_depth=6,
+                        learning_rate=0.05, num_leaves=40, subsample=0.8,
+                        colsample_bytree=0.8, random_state=42, verbose=-1, n_jobs=-1,
+                        label_gain=[0, 1, 3],
+                    )
+                    _rk.fit(X_train, _rel, group=_grp)
+                    self.ranker = _rk
+                    log.info("model.ranker_trained", n_groups=len(_grp))
+            except Exception as e:
+                log.warning("model.ranker_failed", err=str(e)[:160])
+                self.ranker = None
 
         # Brier threshold check
         if self.brier_score > BRIER_THRESHOLD:
@@ -469,6 +527,20 @@ class BlackTurfEnsemble:
             log.warning("model.predict_win_failed", err=str(e)[:140])
             return None
 
+    def predict_rank_score(self, X: pd.DataFrame) -> Optional[np.ndarray]:
+        """Score de ranking LambdaRank (plus haut = mieux classé). None si pas de
+        ranker (vieux modèle / LightGBM indispo). Sert UNIQUEMENT au classement.
+        """
+        rk = getattr(self, "ranker", None)
+        if rk is None:
+            return None
+        try:
+            X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+            return np.asarray(rk.predict(X_feat), dtype=float)
+        except Exception as e:
+            log.warning("model.ranker.predict_failed", err=str(e)[:120])
+            return None
+
     def _walk_forward_validation(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 6,
                                  groups: Optional[pd.Series] = None) -> list[float]:
         """Walk-forward validation pour détecter l'instabilité du modèle.
@@ -529,15 +601,16 @@ class BlackTurfEnsemble:
 
         return scores if scores else [0.5]
 
-    def _evaluate(self, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
+    def _evaluate(self, X_test: pd.DataFrame, y_test: pd.Series,
+                  course_ids: "pd.Series | None" = None) -> dict:
         """Métriques sur le set de test."""
         probas = self.predict_proba(X_test)
 
         auc = float(roc_auc_score(y_test, probas)) if y_test.nunique() > 1 else 0.5
         brier = float(brier_score_loss(y_test, probas))
 
-        # Précision top-3 : pour chaque course, le top-3 IA contient-il le vrai top-3 ?
-        prec_top3 = self._compute_precision_top3(X_test, y_test, probas)
+        # Précision top-3 : pour chaque course, le top-3 IA contient-il le vrai gagnant ?
+        prec_top3 = self._compute_precision_top3(X_test, y_test, probas, course_ids)
 
         # ROI simulé value bets (EV > 0.05)
         roi = self._simulate_roi(X_test, y_test, probas)
@@ -549,19 +622,28 @@ class BlackTurfEnsemble:
             "roi_simule": roi,
         }
 
-    def _compute_precision_top3(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray) -> float:
-        """Taux de courses où le top-3 IA inclut le gagnant réel."""
-        if "course_id" not in X.columns:
+    def _compute_precision_top3(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray,
+                                course_ids: "pd.Series | None" = None) -> float:
+        """Taux de courses où le top-3 IA inclut le gagnant réel.
+
+        `course_id` est une colonne META retirée des features → la passer explicitement
+        (sinon, absente de X, la fonction renvoyait toujours 0)."""
+        cid = course_ids
+        if cid is None and "course_id" in X.columns:
+            cid = X["course_id"]
+        if cid is None:
             return 0.0
-        df = X.copy()
-        df["proba"] = probas
-        df["label"] = y.values
+        df = pd.DataFrame({
+            "proba": np.asarray(probas),
+            "label": np.asarray(y.values if hasattr(y, "values") else y),
+            "course_id": np.asarray(cid),
+        })
 
         correct = 0
         total = 0
         for _, group in df.groupby("course_id"):
             top3_ia = set(group.nlargest(3, "proba").index)
-            gagnant = group[group["label"] == 1].index
+            gagnant = group.index[group["label"] == 1]
             if len(gagnant) > 0 and gagnant[0] in top3_ia:
                 correct += 1
             total += 1

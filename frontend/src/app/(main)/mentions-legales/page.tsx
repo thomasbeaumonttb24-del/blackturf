@@ -11,20 +11,34 @@ export default function MentionsLegalesPage() {
       <h1 className="text-2xl font-bold mb-8">Mentions légales</h1>
 
       <section className="mb-8">
-        <h2 className="text-lg font-bold mb-3">Éditeur</h2>
+        <h2 className="text-lg font-bold mb-3">Éditeur du site</h2>
         <p className="text-muted-foreground">
-          BlackTurf SAS<br />
-          Siège social : France<br />
-          Email : contact@blackturf.fr<br />
-          Site : https://blackturf.fr
+          Le site <strong>BlackTurf</strong> (blackturf.fr) est édité par :<br />
+          <strong>Thomas BEAUMONT</strong> — Entrepreneur individuel (micro-entreprise)<br />
+          Exploité sous le nom commercial « BlackTurf »<br />
+          Siège : 10 rue Alix d&apos;Unienville, 33100 Bordeaux, France<br />
+          SIREN : 907&nbsp;548&nbsp;184 — SIRET (siège) : 907&nbsp;548&nbsp;184&nbsp;00023<br />
+          RCS Bordeaux — immatriculé le 01/04/2025<br />
+          TVA : non applicable, article 293&nbsp;B du CGI (franchise en base)<br />
+          Email : contact@blackturf.fr — Site : https://blackturf.fr
+        </p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="text-lg font-bold mb-3">Directeur de la publication</h2>
+        <p className="text-muted-foreground">
+          Thomas BEAUMONT, en qualité d&apos;entrepreneur individuel.
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-lg font-bold mb-3">Hébergement</h2>
         <p className="text-muted-foreground">
-          Hébergé sur infrastructure cloud sécurisée (PostgreSQL + Redis + Docker).
-          Les données sont stockées en Europe (Union Européenne).
+          Le site est hébergé par :<br />
+          <strong>Hetzner Online GmbH</strong><br />
+          Industriestr. 25, 91710 Gunzenhausen, Allemagne<br />
+          Téléphone : +49&nbsp;(0)9831&nbsp;505-0 — Site : https://www.hetzner.com<br />
+          Les données sont hébergées au sein de l&apos;Union Européenne.
         </p>
       </section>
 
@@ -53,23 +67,34 @@ export default function MentionsLegalesPage() {
       <section className="mb-8">
         <h2 className="text-lg font-bold mb-3">Propriété intellectuelle</h2>
         <p className="text-muted-foreground">
-          Tous les contenus du site (textes, algorithmes, interface, marque BlackTurf) sont la propriété
-          exclusive de BlackTurf SAS. Toute reproduction sans autorisation est interdite.
+          L&apos;ensemble des contenus du site (textes, algorithmes, interface, marque et nom commercial
+          BlackTurf) est la propriété exclusive de Thomas BEAUMONT. Toute reproduction, représentation ou
+          exploitation, totale ou partielle, sans autorisation écrite préalable est interdite.
         </p>
       </section>
 
       <section className="mb-8">
-        <h2 className="text-lg font-bold mb-3">Données personnelles</h2>
+        <h2 className="text-lg font-bold mb-3">Données personnelles &amp; cookies</h2>
         <p className="text-muted-foreground">
-          Les données collectées (email, historique de paris) sont utilisées uniquement pour le
-          fonctionnement du service. Elles ne sont jamais revendues à des tiers.
-          Conformément au RGPD, vous disposez d&apos;un droit d&apos;accès, de rectification et de suppression.
-          Email : privacy@blackturf.fr
+          Le traitement des données personnelles est détaillé dans notre{" "}
+          <a href="/confidentialite" className="underline text-brand-gold">Politique de confidentialité</a>.
+          Conformément au RGPD, vous disposez de droits d&apos;accès, de rectification, d&apos;effacement,
+          de portabilité, de limitation et d&apos;opposition. Contact : privacy@blackturf.fr.
+          Réclamation possible auprès de la CNIL (www.cnil.fr).
+        </p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="text-lg font-bold mb-3">Conditions de vente</h2>
+        <p className="text-muted-foreground">
+          Les conditions applicables aux abonnements payants figurent dans nos{" "}
+          <a href="/cgv" className="underline text-brand-gold">Conditions Générales de Vente</a>{" "}
+          et nos <a href="/cgu" className="underline text-brand-gold">Conditions Générales d&apos;Utilisation</a>.
         </p>
       </section>
 
       <p className="text-xs text-muted-foreground mt-12">
-        Dernière mise à jour : mai 2026
+        Dernière mise à jour : juin 2026
       </p>
     </div>
   );

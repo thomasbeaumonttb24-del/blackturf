@@ -92,7 +92,7 @@ async def _make_standard_headers(client: AsyncClient) -> dict:
     # Register then set plan
     resp = await client.post("/api/v1/auth/register", json={
         "email": f"std_{uuid.uuid4().hex[:6]}@blackturf.fr",
-        "password": "Pass123!",
+        "password": "TestPass12!",
     })
     assert resp.status_code == 200
     token = resp.json()["access_token"]
@@ -108,13 +108,14 @@ async def test_get_predictions_requires_auth(client: AsyncClient, db: AsyncSessi
     assert resp.status_code == 401
 
 
-async def test_get_predictions_requires_paid_plan(client: AsyncClient, db: AsyncSession):
+async def test_get_predictions_free_preview_quota(client: AsyncClient, db: AsyncSession):
     await _seed_course_with_predictions(db)
-    # Free user
+    # Free user : la fiche prédictions est en PREVIEW gratuit borné par un quota
+    # journalier (funnel freemium, Redis). Sans Redis (env test) le quota fail-open →
+    # accès autorisé. Le hard-gate pro reste sur /predict (POST) et /value-bets.
     headers = await _make_standard_headers(client)
     resp = await client.get("/api/v1/courses/R99C1/predictions", headers=headers)
-    # Free plan → 403
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
 async def test_get_predictions_course_not_found(client: AsyncClient, db: AsyncSession, admin_headers):

@@ -3,6 +3,7 @@ Auth routes — BlackTurf.
 JWT (login/register/refresh) + Google OAuth.
 """
 import uuid
+import secrets
 import structlog
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -11,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import httpx
@@ -19,6 +20,7 @@ import httpx
 from api.config import get_settings
 from db.database import get_db
 from db.models import User
+from api.middleware.throttle import rate_limit_auth
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -36,9 +38,18 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ─────────────────────────────────────────────
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
+    # Politique mot de passe : 10-128 chars (bcrypt tronque >72 octets → cap),
+    # pas uniquement lettres ni uniquement chiffres (anti mots de passe triviaux).
+    password: str = Field(min_length=10, max_length=128)
     nom: Optional[str] = None
     prenom: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def _password_strength(cls, v: str) -> str:
+        if v.isalpha() or v.isdigit():
+            raise ValueError("Mot de passe trop faible : mélangez lettres et chiffres")
+        return v
 
 
 class TokenResponse(BaseModel):
@@ -84,7 +95,9 @@ def _verify(password: str, hashed: str) -> bool:
 
 def _create_token(data: dict, expires_delta: timedelta) -> str:
     payload = data.copy()
-    payload["exp"] = datetime.now(timezone.utc) + expires_delta
+    now = datetime.now(timezone.utc)
+    payload["iat"] = int(now.timestamp())   # permet l'invalidation au reset de mot de passe
+    payload["exp"] = now + expires_delta
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -142,7 +155,8 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
 # Routes
 # ─────────────────────────────────────────────
 @router.post("/register", response_model=TokenResponse)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db),
+                   _rl: None = Depends(rate_limit_auth)):
     result = await db.execute(select(User).where(User.email == body.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email déjà utilisé")
@@ -164,7 +178,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     try:
         import redis.asyncio as aioredis
         from services.alerts import send_email
-        token = str(uuid.uuid4())
+        token = secrets.token_urlsafe(32)
         r = aioredis.from_url(settings.redis_url)
         await r.setex(f"email_verify:{token}", 86400, user.user_id)
         await r.aclose()
@@ -190,6 +204,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 async def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_auth),
 ):
     result = await db.execute(select(User).where(User.email == form.username))
     user = result.scalar_one_or_none()
@@ -211,11 +226,40 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Token expiré")
 
+    # RÉVOCATION : un refresh token émis AVANT le dernier reset de mot de passe est
+    # rejeté (un token volé ne survit pas au reset). Vérifié seulement ici (refresh
+    # est rare) et pas à chaque requête (perf) — l'access token expire en 15 min.
+    if await _refresh_revoked(user_id, payload.get("iat")):
+        raise HTTPException(status_code=401, detail="Session expirée, reconnectez-vous")
+
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Utilisateur introuvable")
     return create_tokens(user.user_id, user.plan)
+
+
+async def _refresh_revoked(user_id: Optional[str], iat) -> bool:
+    """True si le token (émis à `iat`) précède le dernier reset de mot de passe."""
+    if not user_id or iat is None:
+        return False
+    import redis.asyncio as aioredis
+    r = aioredis.from_url(settings.redis_url)
+    try:
+        ts = await r.get(f"pwd_reset_at:{user_id}")
+    except Exception:
+        return False  # fail-open : panne Redis ne bloque pas le refresh légitime
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+    if not ts:
+        return False
+    try:
+        return int(iat) < int(ts)
+    except (TypeError, ValueError):
+        return False
 
 
 @router.post("/google", response_model=TokenResponse)
@@ -236,13 +280,22 @@ async def google_oauth(body: GoogleCallbackRequest, db: AsyncSession = Depends(g
         })
         if token_resp.status_code != 200:
             raise HTTPException(status_code=400, detail="Échange de code Google échoué")
-        g_token = token_resp.json()["access_token"]
+        g_token = token_resp.json().get("access_token")
+        if not g_token:
+            raise HTTPException(status_code=400, detail="Réponse Google invalide")
 
         user_resp = await client.get(GOOGLE_USERINFO_URL, headers={"Authorization": f"Bearer {g_token}"})
+        if user_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Profil Google inaccessible")
         g_user = user_resp.json()
 
-    google_id = g_user["id"]
-    email = g_user["email"]
+    google_id = g_user.get("id")
+    email = g_user.get("email")
+    if not google_id or not email:
+        raise HTTPException(status_code=400, detail="Profil Google incomplet")
+    # Refuser un email Google non vérifié (sinon usurpation d'email).
+    if g_user.get("verified_email") is False:
+        raise HTTPException(status_code=400, detail="Email Google non vérifié")
 
     result = await db.execute(select(User).where(User.google_id == google_id))
     user = result.scalar_one_or_none()
@@ -251,6 +304,14 @@ async def google_oauth(body: GoogleCallbackRequest, db: AsyncSession = Depends(g
         result2 = await db.execute(select(User).where(User.email == email))
         user = result2.scalar_one_or_none()
         if user:
+            # ANTI ACCOUNT-TAKEOVER : ne PAS lier automatiquement Google à un compte
+            # existant protégé par mot de passe (un attaquant créant un compte Google
+            # au même email prendrait le contrôle). Lien auto seulement si le compte
+            # n'a pas de mot de passe (créé via un autre SSO).
+            if user.hashed_password:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Un compte existe déjà avec cet email. Connectez-vous par mot de passe, puis liez Google depuis votre profil.")
             user.google_id = google_id
             user.email_verified = True
         else:
@@ -332,7 +393,7 @@ async def resend_verification(
         return {"ok": True}
     import redis.asyncio as aioredis
     from services.alerts import send_email
-    token = str(uuid.uuid4())
+    token = secrets.token_urlsafe(32)
     r = aioredis.from_url(settings.redis_url)
     try:
         await r.setex(f"email_verify:{token}", 86400, user.user_id)
@@ -380,6 +441,7 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
 async def forgot_password(
     body: dict,
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_auth),
 ):
     """Génère un token de reset et envoie un email. Anti-énumération : répond toujours 200."""
     import redis.asyncio as aioredis
@@ -394,7 +456,7 @@ async def forgot_password(
     if not user:
         return {"ok": True}  # Anti-enumeration
 
-    token = str(uuid.uuid4())
+    token = secrets.token_urlsafe(32)
     r = aioredis.from_url(settings.redis_url)
     try:
         await r.setex(f"pwd_reset:{token}", 3600, user.user_id)
@@ -422,6 +484,7 @@ async def forgot_password(
 async def reset_password(
     body: dict,
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_auth),
 ):
     """Réinitialise le mot de passe avec le token."""
     import redis.asyncio as aioredis
@@ -429,8 +492,9 @@ async def reset_password(
     token = body.get("token", "")
     new_password = body.get("password", "")
 
-    if not token or len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="Token ou mot de passe invalide")
+    # Même politique qu'au register (10 chars, pas trivial).
+    if not token or len(new_password) < 10 or new_password.isalpha() or new_password.isdigit():
+        raise HTTPException(status_code=400, detail="Mot de passe trop faible (min 10, lettres + chiffres)")
 
     r = aioredis.from_url(settings.redis_url)
     try:
@@ -438,10 +502,16 @@ async def reset_password(
         if not user_id:
             raise HTTPException(status_code=400, detail="Token expiré ou invalide")
         await r.delete(f"pwd_reset:{token}")
+        uid = user_id.decode()
+        # Invalide TOUS les tokens (access/refresh) émis avant ce reset : un token
+        # volé ne survit pas au changement de mot de passe. TTL = durée du refresh.
+        await r.setex(f"pwd_reset_at:{uid}",
+                      settings.refresh_token_expire_days * 86400 + 3600,
+                      int(datetime.now(timezone.utc).timestamp()))
     finally:
         await r.aclose()
 
-    result = await db.execute(select(User).where(User.user_id == user_id.decode()))
+    result = await db.execute(select(User).where(User.user_id == uid))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")

@@ -67,7 +67,7 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-start justify-center pt-16 px-4" onClick={onClose}>
       <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-          <Search className="h-4 w-4 text-gray-400 flex-shrink-0" />
+          <Search className="h-4 w-4 text-gray-500 flex-shrink-0" />
           <input
             ref={inputRef}
             value={q}
@@ -75,7 +75,7 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
             placeholder="Rechercher un cheval, jockey, hippodrome..."
             className="flex-1 outline-none text-sm bg-transparent text-gray-900 placeholder-gray-400"
           />
-          <kbd className="text-[10px] text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Esc</kbd>
+          <kbd className="text-[10px] text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">Esc</kbd>
         </div>
         {results && results.length > 0 ? (
           <ul className="py-2 max-h-80 overflow-y-auto">
@@ -88,16 +88,16 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
                   <span className="text-base flex-shrink-0">{TYPE_ICONS[r.type] ?? "🔍"}</span>
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate">{r.label}</div>
-                    <div className="text-xs text-gray-400 truncate">{r.sub}</div>
+                    <div className="text-xs text-gray-500 truncate">{r.sub}</div>
                   </div>
                 </button>
               </li>
             ))}
           </ul>
         ) : debouncedQ.length >= 2 ? (
-          <div className="py-8 text-center text-sm text-gray-400">Aucun résultat pour "{debouncedQ}"</div>
+          <div className="py-8 text-center text-sm text-gray-500">Aucun résultat pour "{debouncedQ}"</div>
         ) : (
-          <div className="py-6 text-center text-xs text-gray-400">Saisissez au moins 2 caractères</div>
+          <div className="py-6 text-center text-xs text-gray-500">Saisissez au moins 2 caractères</div>
         )}
       </div>
     </div>
@@ -145,13 +145,13 @@ export function Navbar() {
         <div className="flex h-16 items-center justify-between">
 
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 flex-shrink-0" aria-label="BlackTurf — Accueil">
+          <Link href="/" className="flex items-center gap-2 flex-shrink-0" aria-label="BlackTurf — Accueil">
             <Image
               src="/logo.png"
               alt="BlackTurf"
-              width={36}
-              height={36}
-              className="rounded-lg object-contain"
+              width={52}
+              height={52}
+              className="h-12 w-12 sm:h-[52px] sm:w-[52px] object-contain"
               priority
             />
             <span className="text-xl font-bold tracking-tight text-gray-900">
@@ -243,7 +243,7 @@ export function Navbar() {
                     >
                       {planLabel(user.plan)}
                     </Badge>
-                    <ChevronDown className="h-3 w-3 text-gray-400" />
+                    <ChevronDown className="h-3 w-3 text-gray-500" />
                   </button>
 
                   {userMenuOpen && (
@@ -254,7 +254,7 @@ export function Navbar() {
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <User className="h-4 w-4 text-gray-400" /> Mon profil
+                          <User className="h-4 w-4 text-gray-500" /> Mon profil
                         </Link>
                         <Link
                           href="/statistiques"
@@ -268,7 +268,7 @@ export function Navbar() {
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <Bell className="h-4 w-4 text-gray-400" /> Notifications
+                          <Bell className="h-4 w-4 text-gray-500" /> Notifications
                           {notifData?.count > 0 && (
                             <span className="ml-auto h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center">
                               {notifData.count > 9 ? "9+" : notifData.count}

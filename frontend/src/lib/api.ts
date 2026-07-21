@@ -156,6 +156,8 @@ export const adminApi = {
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
   users: (params?: Record<string, unknown>) =>
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),
+  userDetail: (id: string) =>
+    api.get(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
   updateUser: (id: string, data: Record<string, unknown>) =>
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
   adjustBankroll: (id: string, montant: number, note?: string) =>
@@ -169,6 +171,10 @@ export const adminApi = {
   scraperLogs: (params?: Record<string, unknown>) =>
     api.get("/scraper/logs", { baseURL: `${API_URL}/admin/api`, params }),
   scraperStatus: () => api.get("/scraper/status", { baseURL: `${API_URL}/admin/api` }),
+  errors: (params?: Record<string, unknown>) =>
+    api.get("/errors", { baseURL: `${API_URL}/admin/api`, params }),
+  resolveError: (id: number) =>
+    api.post(`/errors/${id}/resolve`, null, { baseURL: `${API_URL}/admin/api` }),
   // Adaptive learning & ML monitoring
   alState: () => api.get("/adaptive-learning/state", { baseURL: `${API_URL}/admin/api` }),
   alHistory: (limit = 50) =>

@@ -14,13 +14,15 @@ import structlog
 from datetime import date
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from db.models import Cheval, EloHistorique
 
 log = structlog.get_logger()
 
 ELO_INITIAL = 1500.0
+ELO_MIN = 800.0
+ELO_MAX = 2800.0
 ELO_K_BASE = 32
 ELO_K_GROUP1 = 64
 ELO_K_LISTED = 48
@@ -76,6 +78,22 @@ async def update_elo_after_race(
     classement : [{cheval_id, position, incident}, ...]
     Retourne {cheval_id: nouveau_elo}.
     """
+    # ── IDEMPOTENCE (anti-inflation) ─────────────────────────────────────────
+    # L'ELO est INCRÉMENTAL (on lit le rating courant, on ajoute le delta, on
+    # réécrit). Le pipeline post-course peut tourner plusieurs fois sur la même
+    # course (re-settlement, sync, catch-up). Sans garde, chaque passage RÉ-applique
+    # le delta → double-comptage → les ratings divergent jusqu'au plafond (bug
+    # observé : 5,9M lignes elo_historique pour 152k vrais résultats, ~39×). On
+    # n'applique l'ELO qu'UNE SEULE FOIS par course.
+    already = await session.execute(
+        select(func.count()).select_from(EloHistorique).where(
+            EloHistorique.course_id == course_id
+        )
+    )
+    if (already.scalar() or 0) > 0:
+        log.info("elo.skip_already_applied", course_id=course_id)
+        return {}
+
     k = get_k_factor(niveau_course, dotation)
     elo_field = DISCIPLINE_ELO_FIELD.get(discipline, "elo_score_plat")
 
@@ -86,34 +104,41 @@ async def update_elo_after_race(
     )
     chevaux = {c.cheval_id: c for c in result.scalars().all()}
 
-    # ELO actuels (global + discipline)
+    # ELO actuels (global + discipline) — snapshot AVANT course.
+    # On accumule les deltas séparément et on les applique en une fois après
+    # la double boucle, pour que le résultat ne dépende pas de l'ordre
+    # d'itération (calcul commutatif sur les ratings pré-course).
     elos = {}
     for cid in cheval_ids:
         cheval = chevaux.get(cid)
         if cheval:
-            elo_disc = getattr(cheval, elo_field, ELO_INITIAL)
+            elo_disc = getattr(cheval, elo_field, None) or ELO_INITIAL
+            elo_glob = cheval.elo_score_global or ELO_INITIAL
             elos[cid] = {
-                "global_avant": cheval.elo_score_global,
+                "global_avant": elo_glob,
                 "disc_avant": elo_disc,
-                "global_apres": cheval.elo_score_global,
-                "disc_apres": elo_disc,
+                "delta_disc": 0.0,
+                "delta_global": 0.0,
             }
 
     # Duels 2-à-2 entre partants valides
     valides = [r for r in classement if not r.get("incident") and r["cheval_id"] in elos]
-    valides.sort(key=lambda x: x.get("position") or 999)
+    valides.sort(key=lambda x: x["position"] if x.get("position") is not None else 999)
 
-    for i in range(len(valides)):
-        for j in range(i + 1, len(valides)):
+    n_valides = len(valides)
+    # Normaliser K par le nombre d'adversaires : un cheval dispute N-1 duels
+    # par course et encaissait la SOMME des deltas → explosion (+200/+400 pts
+    # en une course). k_eff borne le gain total ~ K, comme un ELO 1v1.
+    k_eff = k / max(1, n_valides - 1)
+
+    for i in range(n_valides):
+        for j in range(i + 1, n_valides):
             ci = valides[i]["cheval_id"]
             cj = valides[j]["cheval_id"]
-            if ci not in elos or cj not in elos:
-                continue
 
-            elo_i = elos[ci]["disc_apres"]
-            elo_j = elos[cj]["disc_apres"]
-
-            # Probabilité attendue
+            # Probabilité attendue sur les ELO AVANT course (commutatif)
+            elo_i = elos[ci]["disc_avant"]
+            elo_j = elos[cj]["disc_avant"]
             p_i = expected_prob(elo_i, elo_j)
             p_j = 1.0 - p_i
 
@@ -121,14 +146,22 @@ async def update_elo_after_race(
             ecart = j - i
             poids = max(0.3, 1.0 - (ecart - 1) * 0.07)
 
-            # i a battu j (position i < position j)
-            delta_i = k * poids * (1.0 - p_i)
-            delta_j = k * poids * (0.0 - p_j)
+            # Score réel : i est devant j (tri par position croissante),
+            # sauf ex-aequo (même position : dead-heat/photo-finish) → nul 0.5
+            pos_i = valides[i].get("position")
+            pos_j = valides[j].get("position")
+            if pos_i is not None and pos_j is not None and pos_i == pos_j:
+                score_i = 0.5
+            else:
+                score_i = 1.0
 
-            elos[ci]["disc_apres"] += delta_i
-            elos[cj]["disc_apres"] += delta_j
-            elos[ci]["global_apres"] += delta_i * 0.5  # Global plus stable
-            elos[cj]["global_apres"] += delta_j * 0.5
+            delta_i = k_eff * poids * (score_i - p_i)
+            delta_j = k_eff * poids * ((1.0 - score_i) - p_j)
+
+            elos[ci]["delta_disc"] += delta_i
+            elos[cj]["delta_disc"] += delta_j
+            elos[ci]["delta_global"] += delta_i * 0.5  # Global plus stable
+            elos[cj]["delta_global"] += delta_j * 0.5
 
     # Sauvegarder les nouveaux ELO
     today = date.today()
@@ -139,8 +172,9 @@ async def update_elo_after_race(
         if not cheval:
             continue
 
-        nouveau_disc = round(data["disc_apres"], 2)
-        nouveau_global = round(data["global_apres"], 2)
+        # Clamp pour empêcher la divergence (saturation de expected_prob à 0/1)
+        nouveau_disc = round(min(ELO_MAX, max(ELO_MIN, data["disc_avant"] + data["delta_disc"])), 2)
+        nouveau_global = round(min(ELO_MAX, max(ELO_MIN, data["global_avant"] + data["delta_global"])), 2)
         delta_disc = round(nouveau_disc - data["disc_avant"], 2)
 
         # Update cheval

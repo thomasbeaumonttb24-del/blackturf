@@ -71,6 +71,7 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
         if not preds or not classement:
             continue
         nb_part = c["nb_partants"] or len(preds)
+        non_partants = {int(p["numero"]) for p in preds if p.get("non_partant") and p.get("numero") is not None}
         course_info = {
             "nb_partants": nb_part,
             "est_quinte": c["est_quinte"], "est_quarte": c["est_quarte"], "est_tierce": c["est_tierce"],
@@ -99,7 +100,10 @@ def _compute(courses: list[dict], n_sims: int) -> dict:
             per_bet = []  # (type, mise, won, payout_winsorisé) pour l'apprentissage par type
             for x in sel:
                 nums = [h["numero"] for h in x["chevaux"]]
-                r = settle_pari(x["type_pari"], nums, classement, rapports, nb_part)
+                r = settle_pari(x["type_pari"], nums, classement, rapports, nb_part,
+                                non_partants=non_partants)
+                if r.get("rembourse"):
+                    continue  # cheval non-partant → mise remboursée, pari neutre (exclu)
                 if r["gagne"] and r["rapport_reel"] is None:
                     indetermine = True  # gagnant sans rapport publié → course non réglable
                     break
@@ -204,10 +208,19 @@ async def backtest_profils(db: AsyncSession, limit: int = 200, n_sims: int = 300
 
     course_ids = [c.course_id for c in courses]
 
+    # GARDE ANTI-LOOK-AHEAD : ne charger QUE les prédictions FIGÉES avant le départ.
+    # Une prédiction backfillée (régénérée après l'arrivée) a created_at > date_heure
+    # → exclue. Sans ce filtre, le backtest utilise des pronos qui « connaissent » le
+    # résultat → ROI illusoire (+150% in-sample vs -52% live). Cf. profil_learning.
     pred_rows = (await db.execute(
         select(Prediction, Participation)
         .join(Participation, Participation.participation_id == Prediction.participation_id)
-        .where(Prediction.course_id.in_(course_ids))
+        .join(Course, Course.course_id == Prediction.course_id)
+        .where(
+            Prediction.course_id.in_(course_ids),
+            Course.date_heure.isnot(None),
+            Prediction.created_at < Course.date_heure,
+        )
     )).all()
     preds_by_course: dict[str, list[dict]] = {}
     for pr, part in pred_rows:
@@ -217,6 +230,7 @@ async def backtest_profils(db: AsyncSession, limit: int = 200, n_sims: int = 300
             "proba_top1": pr.proba_top1,
             "proba_top3": pr.proba_top3,
             "cote_pmu": part.cote_pmu,
+            "non_partant": bool(part.non_partant),
         })
 
     res_rows = (await db.execute(

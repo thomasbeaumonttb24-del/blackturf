@@ -63,7 +63,7 @@ function KpiCard({
 }) {
   return (
     <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-      <CardContent className="p-5">
+      <CardContent className="p-4 sm:p-5">
         <div className="flex items-start justify-between mb-3">
           <div className={cn("p-2 rounded-lg", iconBg)}>
             <Icon className="w-4 h-4" />
@@ -76,7 +76,7 @@ function KpiCard({
             </span>
           )}
         </div>
-        <div className={cn("text-2xl font-bold tabular-nums",
+        <div className={cn("text-xl sm:text-2xl font-bold tabular-nums",
           positive === true ? "text-emerald-600" : positive === false ? "text-red-600" : "text-foreground"
         )}>
           {value}
@@ -196,17 +196,17 @@ export default function StatistiquesPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+      <div className="max-w-7xl mx-auto px-4 py-6 sm:py-8 space-y-6 sm:space-y-8">
 
         {/* ── Header ────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <BarChart3 className="w-6 h-6 text-amber-600" />
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600" />
               Mes Statistiques
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Performance personnelle sur {data.nb_paris} paris
+              {data.nb_paris} paris
             </p>
           </div>
           {data.streak.type !== "none" && data.streak.count > 1 && (
@@ -223,7 +223,7 @@ export default function StatistiquesPage() {
         </div>
 
         {/* ── KPIs ──────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <KpiCard
             label="Total misé"
             value={`${data.mise_totale.toFixed(0)}€`}
@@ -256,14 +256,14 @@ export default function StatistiquesPage() {
         </div>
 
         {/* ── Charts ────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
 
           {/* Monthly P&L */}
           <Card className="lg:col-span-2 border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-amber-600" />
-                Gains et pertes par mois (12 derniers mois)
+                Gains et pertes / mois
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -346,7 +346,7 @@ export default function StatistiquesPage() {
         </div>
 
         {/* ── Best / Worst bets ─────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           <Card className="border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Meilleurs paris</CardTitle>
@@ -383,7 +383,7 @@ export default function StatistiquesPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
 
               {/* % suivi */}
               <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-muted/40 text-center">

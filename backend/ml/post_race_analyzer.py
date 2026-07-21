@@ -110,7 +110,18 @@ class PostRaceAnalyzer:
         log_loss_course = log_loss_total / n_valid if n_valid > 0 else 10.0
 
         # Précision top-3 : notre sélection contient-elle le gagnant ?
-        top3_ia = sorted(pred_map.items(), key=lambda x: x[1].get("proba_top3", 0), reverse=True)[:3]
+        # ALIGNÉ SUR LE CLASSEMENT AFFICHÉ (2026-07-02) : tri par rang_predit (ce que
+        # voit l'utilisateur, ordonné proba_top1 puis proba_top3 par le pipeline).
+        # L'ancien tri par proba_top3 seul divergeait du rang affiché sur ~8% des
+        # courses (gagnant dans le top-3 AFFICHÉ mais marqué rang 99) → accuracy
+        # top-1/top-3 du palmarès sous-évaluées + label meta-learner bruité.
+        def _rank_key(item):
+            _num, p = item
+            rp = p.get("rang_predit")
+            return (float(rp) if rp else 9e9,
+                    -float(p.get("proba_top1") or 0.0),
+                    -float(p.get("proba_top3") or 0.0))
+        top3_ia = sorted(pred_map.items(), key=_rank_key)[:3]
         top3_ia_numeros = {num for num, _ in top3_ia}
         top3_precision = gagnant_numero in top3_ia_numeros if gagnant_numero else False
 

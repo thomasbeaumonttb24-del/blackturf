@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, and_, desc, text
 
 from api.routes.auth import get_current_user
 from db.database import get_db
@@ -164,13 +164,25 @@ async def settle_pending_bets(db: AsyncSession, user_id: Optional[str] = None) -
         if not res or not res.classement:
             continue
         nb_part = course.nb_partants or len(res.classement)
+        # Non-partants déclarés → paris remboursés (net 0, pas comptés perdants).
+        np_rows = (await db.execute(text("""
+            SELECT numero FROM participations
+            WHERE course_id = :cid AND non_partant = true
+        """), {"cid": cid})).all()
+        non_partants = {int(x[0]) for x in np_rows if x[0] is not None}
         for e in entries:
             nums = [int(n) for n in re.findall(r"\d+", e.chevaux or "")]
             if not nums:
                 continue
             r = settle_pari(e.type_pari, nums, res.classement, res.rapports, nb_part,
-                            getattr(res, "rapports_detail", None))
-            if r["gagne"]:
+                            getattr(res, "rapports_detail", None), non_partants)
+            if r.get("rembourse"):
+                # Cheval non-partant : mise rendue → net nul, jamais compté perdant.
+                e.gain_perte = 0.0
+                e.cote = 1.0
+                e.resultat = "rembourse"
+                changed = True
+            elif r["gagne"]:
                 if r["rapport_reel"] is not None:
                     # gain_mult < 1 sur formules combinées (ex. 2sur4 4 chevaux =
                     # 6 combinaisons, seules les gagnantes paient).

@@ -28,6 +28,11 @@ async def _check(
     per_day: int,
     redis: aioredis.Redis,
 ) -> None:
+    # Admin exempté : compte d'exploitation (monitoring, audits, onglets ouverts
+    # toute la journée) — le quota journalier le bloquait en 429 silencieux
+    # (analyse/outsiders/signaux absents de la page course, constaté 2026-07-03).
+    if getattr(user, "is_admin", False):
+        return
     uid = str(user.user_id)
     key_min = f"rl:{prefix}:min:{uid}"
     key_day = f"rl:{prefix}:day:{uid}"
@@ -78,7 +83,8 @@ async def rate_limit_public(
     redis: aioredis.Redis = Depends(get_redis),
 ) -> None:
     """Rate limit by IP for public endpoints — 60 req/min."""
-    ip = request.client.host if request.client else "unknown"
+    from api.middleware.throttle import _client_ip
+    ip = _client_ip(request)
     key = f"rl:public:min:{ip}"
     pipe = redis.pipeline()
     pipe.incr(key)

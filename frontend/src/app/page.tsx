@@ -1,394 +1,342 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
 import {
   ArrowRight, TrendingUp, Zap, Shield, Trophy,
-  Bell, Calculator, ChevronRight, Check, Brain,
-  Cpu, Sparkles, Database, AlertTriangle, X,
+  Bell, Calculator, ChevronRight, Check, Target,
+  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
-import { AnimatedCounter } from "@/components/ui/AnimatedCounter";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
+import { LivePalmares } from "@/components/home/LivePalmares";
+import { HeroStats } from "@/components/home/HeroStats";
 
-// Pronostics d'EXEMPLE (carte hero, taguée « Exemple »). Vrais pronostics =
-// cotes PMU réelles, réservés aux abonnés.
-const HERO_PICKS = [
-  { rank: 1, nom: "Paladin Noir", cote: "3,4", p: 42, win: true },
-  { rank: 2, nom: "Royal Flush", cote: "5,1", p: 28, win: false },
-  { rank: 3, nom: "Vent d'Est", cote: "7,2", p: 19, win: false },
+// ─── Exemple de course (illustratif, tagué « Exemple » partout) ──────────────
+const EXAMPLE = { hippo: "Deauville", code: "R4 · C5", disc: "Plat · 1600m" };
+const EXAMPLE_PICKS = [
+  { rank: 1, num: 2, nom: "Paladin Noir", cote: "3,4", p: 42 },
+  { rank: 2, num: 4, nom: "Royal Flush", cote: "5,1", p: 28 },
+  { rank: 3, num: 7, nom: "Vent d'Est", cote: "8,5", p: 19 },
 ];
-// Plan de mise COHÉRENT avec le pronostic ci-dessus (mêmes chevaux/cotes) : on
-// répartit 50€ sur les 3 favoris du modèle. Gain = mise × (cote − 1) si ce cheval gagne.
-const HERO_PLAN = [
-  { key: "securite", label: "Sécurité", cheval: "Paladin Noir", stake: 25, cote: 3.4 },
-  { key: "rendement", label: "Rendement", cheval: "Royal Flush", stake: 15, cote: 5.1 },
-  { key: "coup", label: "Coup", cheval: "Vent d'Est", stake: 10, cote: 7.2 },
-].map((p) => ({ ...p, gain: Math.round(p.stake * (p.cote - 1)) }));
 
-// "Sous le capot" — bloc vedette en premier (bento asymétrique).
-const FEATURE_MAIN = {
-  icon: Brain,
-  title: "Un modèle d'ensemble qui se réentraîne tout seul",
-  desc: "Trois algorithmes (XGBoost, LightGBM, CatBoost) votent ensemble sur 80+ variables par partant. Après chaque réunion, le modèle confronte ses prédictions aux arrivées réelles et recalibre ses probabilités. Calibration isotonique, Brier < 0,18.",
-  points: ["3 algorithmes combinés", "80+ variables / partant", "Réentraîné chaque nuit", "Probabilités calibrées"],
-};
-// Palette NEUTRE : un seul accent (or) pour toutes les icônes. Pas d'arc-en-ciel.
+// Plans de mise PAR PROFIL — reflet du vrai outil (Prudent / Modéré / Risqué).
+// Gains = potentiels SI le pari passe, à titre d'illustration.
+const PROFILS = [
+  {
+    key: "prudent", emoji: "🛡️", name: "Prudent", tagline: "Des gains réguliers, le risque minimal",
+    dot: "#059669",
+    bets: [
+      { type: "Placé", chevaux: "N°2", mise: "3€", gain: "≈ 6€" },
+      { type: "Couplé Placé", chevaux: "2 · 4", mise: "2€", gain: "≈ 14€" },
+    ],
+  },
+  {
+    key: "modere", emoji: "⚖️", name: "Modéré", tagline: "L'équilibre rendement / sécurité", popular: true,
+    dot: "#B45309",
+    bets: [
+      { type: "Couplé Placé", chevaux: "2 · 4 · 5", mise: "3€", gain: "≈ 32€" },
+      { type: "2 sur 4", chevaux: "2 · 4 · 5 · 7", mise: "2€", gain: "≈ 48€" },
+    ],
+  },
+  {
+    key: "risque", emoji: "🔥", name: "Risqué", tagline: "On vise les gros gains",
+    dot: "#D97706",
+    bets: [
+      { type: "Couplé Gagnant", chevaux: "2 · 4", mise: "2€", gain: "≈ 259€" },
+      { type: "Tiercé", chevaux: "2 · 4 · 5", mise: "2€", gain: "≈ 430€" },
+    ],
+  },
+];
+
+// Suivi de capital — exemple de paris RÉGLÉS (mix gagné/perdu : transparence, pas de promesse).
+const CAPITAL_DEPART = 100;
+const CAPITAL_DEMO = [
+  { type: "Couplé Placé", chevaux: "2 · 4", mise: 6, won: true, net: 12 },
+  { type: "Simple Placé", chevaux: "N°6", mise: 4, won: false, net: -4 },
+  { type: "2 sur 4", chevaux: "1 · 3 · 5 · 8", mise: 4, won: true, net: 24 },
+  { type: "Couplé Gagnant", chevaux: "4 · 7", mise: 4, won: false, net: -4 },
+  { type: "Simple Placé", chevaux: "N°3", mise: 4, won: true, net: 6 },
+];
+const CAPITAL_NET = CAPITAL_DEMO.reduce((s, b) => s + b.net, 0);
+const CAPITAL_WINS = CAPITAL_DEMO.filter((b) => b.won).length;
+
 const ICON_GOLD = { color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.16)" };
+const FEATURE_MAIN = {
+  icon: Target,
+  title: "80+ critères analysés pour chaque cheval",
+  desc: "Là où l'œil humain en retient une poignée, BlackTurf croise tout ce que le marché regarde — et ce qu'il oublie — puis se recale sur l'arrivée réelle après chaque réunion.",
+  categories: [
+    { label: "Forme & niveau", items: ["Forme sur 5 courses", "Régularité au podium", "ELO global + par discipline", "Progression & momentum"] },
+    { label: "Conditions de course", items: ["Affinité terrain & pénétromètre", "Distance de prédilection", "Corde / numéro de départ", "Poids porté & allègement"] },
+    { label: "Hommes & historique", items: ["Forme jockey & écurie", "Association jockey × entraîneur", "Confrontations directes", "Pedigree du père"] },
+    { label: "Marché & signaux", items: ["Mouvements de cote", "SPI — argent professionnel", "Écart PMU / Betfair", "Vitesse (réduction km) & fraîcheur"] },
+  ],
+};
 const FEATURES = [
-  { icon: Zap, title: "Paris de valeur", desc: "EV = (cote × proba) − 1, détectés sur 4 niveaux. Triangulation PMU / Geny / BZH.", ...ICON_GOLD },
-  { icon: TrendingUp, title: "Critère de Kelly", desc: "Demi-Kelly plafonné à 5 % du capital. Votre rendement comparé en direct à celui du modèle.", ...ICON_GOLD },
-  { icon: Shield, title: "ELO 4 dimensions", desc: "Global / plat / trot / obstacle + ELO de progression. Mis à jour après chaque course.", ...ICON_GOLD },
-  { icon: Bell, title: "Alertes & assistant", desc: "Push, e-mail, in-app. Digest matinal. Questions en langage naturel sur une course.", ...ICON_GOLD },
-  { icon: Database, title: "100 % données réelles", desc: "Programme et résultats PMU officiels. Aucun chiffre fabriqué : inconnu = « — ».", ...ICON_GOLD },
+  { icon: Zap, title: "Seulement la vraie valeur", desc: "Un pari n'est signalé que si la probabilité réelle dépasse ce que paie la cote. Des chiffres, pas un coup de cœur.", ...ICON_GOLD },
+  { icon: Calculator, title: "Plan de mise sur mesure", desc: "Vous donnez votre budget, vous recevez une répartition sécurité / rendement / coup selon votre profil.", ...ICON_GOLD },
+  { icon: Wallet, title: "Votre capital, sans enjolivure", desc: "Chaque pari réglé aux vrais rapports PMU. Votre rendement réel, suivi au centime.", ...ICON_GOLD },
+  { icon: Bell, title: "Alertes & assistant", desc: "Push, e-mail, digest matinal. Et vos questions sur une course, en langage naturel.", ...ICON_GOLD },
+  { icon: Database, title: "100 % données réelles", desc: "Programme et résultats PMU officiels. Aucun chiffre inventé : une donnée inconnue reste « — ».", ...ICON_GOLD },
 ];
 
 const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
-    features: ["Programme du jour", "Cotes publiques", "1 prédiction/jour", "Statistiques publiques du modèle"],
+    features: ["Programme du jour", "Cotes publiques", "2 pronostics/jour", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
-  { name: "Standard", price: "19€", period: "/mois", desc: "L'essentiel pour gagner", badge: "Populaire",
-    features: ["5 prédictions/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise standard", "Suivi du capital + statistiques", "Alertes push & e-mail", "Test sur historique 7 jours"],
+  { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux", badge: "Populaire",
+    features: ["6 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Suivi du capital + statistiques", "Alertes push & e-mail", "Historique des résultats"],
     cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: true },
-  { name: "Expert", price: "39€", period: "/mois", desc: "Pour les parieurs sérieux",
-    features: ["Prédictions illimitées", "Paris de valeur en temps réel ★★★★", "Calculateur Kelly avancé", "Assistant illimité", "Test sur historique 365 jours", "Créateur de stratégies 30+ filtres", "Export des données + API"],
+  { name: "Expert", price: "19€", period: "/mois", desc: "Pour les parieurs sérieux",
+    features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres", "Export des données"],
     cta: "Passer Expert", href: "/inscription?plan=expert", popular: false },
 ];
 
-// Placeholders HONNÊTES si l'API stats est indisponible (intégrité : jamais d'invention).
-const STATIC_STATS = { auc_roc: "—", roi_simule_6mois: "—", nb_courses_analysees: "—", nb_utilisateurs: "—", precision_top3: "—" };
+const DISC_LABEL: Record<string, string> = {
+  plat: "Plat", "attelé": "Trot attelé", attele: "Trot attelé",
+  "monté": "Trot monté", monte: "Trot monté", obstacle: "Obstacle", autre: "Autre",
+};
 
-async function fetchStats() {
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  try {
-    const res = await fetch(`${base}/api/v1/stats/public`, { next: { revalidate: 3600 } });
-    if (!res.ok) return null;
-    return res.json();
-  } catch { return null; }
+const numOf = (x: unknown): number | null =>
+  typeof x === "number" && !Number.isNaN(x) ? x : null;
+
+interface TrackRecord {
+  accuracy_top1: number | null;
+  accuracy_top3: number | null;
+  favori_place_rate: number | null;
+  favori_win_rate: number | null;
+  nb_courses: number | null;
+  by_discipline: Array<{ discipline: string; nb_courses: number; accuracy_top3: number }>;
+  by_day: Array<{ jour: string; accuracy_top3: number; nb_predictions: number }>;
 }
 
-// Dernier RÉSULTAT RÉEL vérifié (pronostic réglé) pour la carte hero. Données
-// publiques (courses passées), réactualisées chaque nuit via /stats/track-record.
-// Défensif : toute donnée absente/incohérente ⇒ null ⇒ la carte retombe sur l'exemple.
-async function fetchLatestResult() {
+async function fetchTrackRecord(): Promise<TrackRecord | null> {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   try {
     const res = await fetch(`${base}/api/v1/stats/track-record`, { next: { revalidate: 3600 } });
     if (!res.ok) return null;
-    const data = await res.json();
-    const list = Array.isArray(data?.best_pronostics) ? data.best_pronostics : [];
-    const p = list.find((x: Record<string, unknown>) =>
-      x && typeof x.cheval_predit === "string" && typeof x.cote === "number"
-      && x.cote > 1 && typeof x.date === "string" && (x.correct === true || x.correct === false)
-    );
-    if (!p) return null;
-    const won = p.correct === true;
+    const d = await res.json();
+    const g = d?.global ?? {};
+    const byDisc = Array.isArray(d?.by_discipline) ? d.by_discipline : [];
+    const byDay = Array.isArray(d?.by_day) ? d.by_day : [];
     return {
-      date: String(p.date),
-      hippodrome: typeof p.hippodrome === "string" ? p.hippodrome : "",
-      cheval: String(p.cheval_predit),
-      cote: Number(p.cote),
-      won,
-      pnl: won ? Math.round((Number(p.cote) - 1) * 10) : -10,
+      accuracy_top1: numOf(g.accuracy_top1),
+      accuracy_top3: numOf(g.accuracy_top3),
+      favori_place_rate: numOf(g.favori_place_rate),
+      favori_win_rate: numOf(g.favori_win_rate),
+      nb_courses: numOf(g.nb_courses_analysees),
+      by_discipline: byDisc
+        .filter((x: Record<string, unknown>) => numOf(x?.nb_courses) && (x.nb_courses as number) >= 10 && numOf(x?.accuracy_top3))
+        .map((x: Record<string, unknown>) => ({ discipline: String(x.discipline ?? "autre"), nb_courses: x.nb_courses as number, accuracy_top3: x.accuracy_top3 as number }))
+        .sort((a: { nb_courses: number }, b: { nb_courses: number }) => b.nb_courses - a.nb_courses),
+      by_day: byDay
+        .filter((x: Record<string, unknown>) => numOf(x?.nb_predictions) && (x.nb_predictions as number) > 0)
+        .map((x: Record<string, unknown>) => ({ jour: String(x.jour ?? ""), accuracy_top3: numOf(x.accuracy_top3) ?? 0, nb_predictions: x.nb_predictions as number })),
     };
   } catch { return null; }
 }
+
+async function fetchCoursesAnalysees(): Promise<number | null> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  try {
+    const res = await fetch(`${base}/api/v1/stats/public`, { next: { revalidate: 3600 } });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return numOf(d?.nb_courses_analysees);
+  } catch { return null; }
+}
+
 export default async function HomePage() {
-  const [v, latestResult] = await Promise.all([fetchStats(), fetchLatestResult()]);
-  const has = (x: unknown) => x !== null && x !== undefined && !(typeof x === "number" && Number.isNaN(x));
-  const stats = v
-    ? {
-        auc_roc: has(v.auc_roc) ? String(v.auc_roc) : "—",
-        roi_simule_6mois: has(v.roi_simule_6mois) ? `+${String(v.roi_simule_6mois).replace(".", ",")}%` : "—",
-        nb_courses_analysees: has(v.nb_courses_analysees) ? Number(v.nb_courses_analysees).toLocaleString("fr-FR") + "+" : "—",
-        nb_utilisateurs: has(v.nb_utilisateurs) ? String(v.nb_utilisateurs) : "—",
-        precision_top3: has(v.precision_top3) ? `${Math.round(v.precision_top3 * 100)}%` : "—",
-      }
-    : STATIC_STATS;
-
-  const parseStatNum = (s: string) => parseFloat(s.replace(",", ".").replace(/[^0-9.]/g, ""));
-  const precisionNum = parseStatNum(stats.precision_top3);
-  const aucNum = parseStatNum(stats.auc_roc);
-  const roiNum = parseStatNum(stats.roi_simule_6mois);
-  const coursesNum = parseStatNum(stats.nb_courses_analysees);
-
-  const HERO_STATS = [
-    { na: Number.isNaN(precisionNum), big: Number.isNaN(precisionNum) ? "—" : <AnimatedCounter end={precisionNum} duration={1800} decimals={0} suffix="%" />, label: "Précision Top-3", color: "#B45309" },
-    { na: Number.isNaN(coursesNum), big: Number.isNaN(coursesNum) ? "—" : <><AnimatedCounter end={coursesNum} duration={2200} decimals={0} />+</>, label: "Courses analysées", color: "#111827" },
-    { na: Number.isNaN(aucNum), big: Number.isNaN(aucNum) ? "—" : <AnimatedCounter end={aucNum} duration={1800} decimals={2} />, label: "AUC du modèle", color: "#111827" },
-    { na: Number.isNaN(roiNum), big: Number.isNaN(roiNum) ? "—" : <>+<AnimatedCounter end={roiNum} duration={2200} decimals={1} suffix="%" /></>, label: "Rendement 6 mois", color: "#059669" },
-  ];
+  const [tr, coursesAnalysees] = await Promise.all([fetchTrackRecord(), fetchCoursesAnalysees()]);
+  const fmtPct = (x: number | null, dec = 1) => (x == null ? "—" : `${x.toFixed(dec).replace(".", ",")}%`);
+  const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString("fr-FR"));
 
   return (
     <div className="flex flex-col min-h-screen bg-brand-warm">
       <Navbar />
 
-      {/* ══════════════ HERO — BENTO ══════════════ */}
-      <section className="relative gradient-hero-v2 grid-lines overflow-hidden">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-          <div className="orb-1 absolute top-[-60px] left-1/3 w-[600px] h-[280px] rounded-full bg-amber-400/10 blur-[90px]" />
-          <div className="orb-2 absolute bottom-0 right-[4%] w-72 h-72 rounded-full bg-amber-200/10 blur-[70px]" />
-        </div>
+      {/* ═══════════ HERO (image plein cadre + dynamisme, style palmarès) ═══════════ */}
+      <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">
+        {/* Image plein cadre + Ken Burns */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/img/hero-1600.webp" alt="Départ d'une course de chevaux aux portes numérotées"
+          srcSet="/img/hero-640.webp 640w, /img/hero-1024.webp 1024w, /img/hero-1600.webp 1600w"
+          sizes="100vw"
+          fetchPriority="high" decoding="async"
+          className="absolute inset-0 h-full w-full object-cover object-[68%_center] ken-burns" />
+        {/* Dégradés sombres (lisibilité texte blanc) */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/35" />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-transparent" />
 
-        <div className="relative mx-auto max-w-6xl w-full px-4 sm:px-6 lg:px-8 pt-28 pb-12 sm:pt-32 sm:pb-16">
-          <div className="grid lg:grid-cols-12 gap-4 lg:gap-5 items-stretch">
+        <div className="relative mx-auto max-w-5xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16 text-center">
+          <h1 className="font-display text-[2.4rem] leading-[1.04] sm:text-[4.25rem] sm:leading-[1.02] font-extrabold tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)]">
+            Pariez sur le PMU{" "}
+            <span className="text-gradient-animated">avec méthode</span>, plus au hasard.
+          </h1>
 
-            {/* ── Tuile titre (grande) — PAS de ScrollReveal : contenu hero critique,
-                doit s'afficher même sans JS hydraté (sinon hero vide). ── */}
-            <div className="lg:col-span-7">
-              <div className="glass-card bento-feature rounded-[1.75rem] h-full p-7 sm:p-10 flex flex-col justify-center">
-                <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-gold-deep mb-6">
-                  <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500" />
-                  Pronostics · paris de valeur · PMU
-                </span>
+          <p className="mt-6 text-base sm:text-lg text-white/85 leading-relaxed max-w-2xl mx-auto">
+            <span className="font-semibold text-white">BlackTurf analyse chaque course du PMU</span>, détecte les
+            paris où la cote sous-estime les vraies chances, puis calcule votre{" "}
+            <span className="font-semibold text-white">plan de mise</span> selon votre budget et votre profil de risque.
+          </p>
 
-                <h1 className="font-display text-[2.5rem] sm:text-5xl lg:text-[3.5rem] font-extrabold tracking-tight leading-[1.04] text-gray-900">
-                  Un algorithme qui{" "}
-                  <span className="text-gradient-animated">réapprend</span>
-                  <br className="hidden sm:block" /> à chaque course.
-                </h1>
-
-                <p className="mt-6 text-base sm:text-lg text-gray-600 max-w-xl leading-relaxed">
-                  <span className="font-bold text-gray-900">Ne pariez plus au hasard.</span> L&apos;IA note
-                  chaque cheval sur 80+ critères, la confronte aux cotes du marché et ne signale que les paris
-                  où la probabilité réelle dépasse la cote. Vous misez quand les chiffres sont pour vous — et
-                  le modèle apprend de chaque arrivée.
-                </p>
-
-                <div className="mt-8 flex flex-col sm:flex-row gap-3">
-                  <Button size="xl" asChild
-                    className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-400/30 transition-all">
-                    <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
-                  </Button>
-                  <Button variant="outline" size="xl" asChild
-                    className="press border-gray-300 text-gray-700 hover:border-brand-gold/50 hover:text-brand-gold-deep hover:bg-amber-50 transition-all">
-                    <Link href="/programme">Programme du jour</Link>
-                  </Button>
-                </div>
-
-                <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-500">
-                  {["Sans CB requis", "7 jours gratuit", "Annulation à tout moment"].map((t) => (
-                    <span key={t} className="flex items-center gap-1.5">
-                      <Check className="h-3.5 w-3.5 text-emerald-600" /> {t}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* ── Colonne droite : 2 tuiles data ── */}
-            <div className="lg:col-span-5 flex flex-col gap-4 lg:gap-5">
-
-              {/* Tuile pronostic */}
-              <div className="flex-1">
-                <div className="glass-card card-scan rounded-[1.75rem] h-full p-5">
-                  <div className="flex items-center justify-between">
-                    <span className="eyebrow text-amber-700 text-[10px] font-bold">
-                      <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      Pronostic du modèle
-                    </span>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-white bg-brand-gold-deep rounded px-1.5 py-0.5">Deauville</span>
-                    <span className="text-xs text-gray-400 font-mono">R4 · C5 · Plat 1600m</span>
-                  </div>
-                  <div className="mt-3 space-y-1.5">
-                    {HERO_PICKS.map((h, i) => (
-                      <div key={h.rank} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${h.win ? "bg-amber-50 ring-1 ring-amber-200" : "bg-gray-50"}`}>
-                        <span className={`num-display text-xs font-black w-5 ${h.win ? "text-brand-gold-deep" : "text-gray-400"}`}>#{h.rank}</span>
-                        <span className="text-sm font-medium text-gray-900 flex-1 truncate">{h.nom}</span>
-                        <div className="hidden md:block w-14 h-1.5 rounded-full bg-gray-200 overflow-hidden">
-                          <div className="proba-bar h-full rounded-full"
-                            style={{ "--w": `${h.p}%`, "--d": `${0.5 + i * 0.15}s`, background: h.win ? "linear-gradient(90deg,#D97706,#F59E0B)" : "#9CA3AF" } as CSSProperties} />
-                        </div>
-                        <span className="num-display text-xs font-bold text-gray-700 w-9 text-right">{h.p}%</span>
-                        <span className="text-[11px] font-mono text-gray-500 w-8 text-right">{h.cote}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
-                      <Zap className="h-3 w-3" /> Pari de valeur ★★★ détecté
-                    </span>
-                    <span className="text-[11px] text-gray-400">EV <span className="num-display font-bold text-emerald-600">+14,2%</span></span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Tuile plan + résultat */}
-              <div className="flex-1">
-                <div className="glass-card rounded-[1.75rem] h-full p-5">
-                  <div className="flex items-center justify-between mb-2.5">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Plan pour une mise de</span>
-                    <span className="num-display text-sm font-extrabold text-gray-900">50€</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {HERO_PLAN.map((p) => (
-                      <div key={p.key} className="flex items-center justify-between rounded-md bg-gray-50 py-1.5 pl-3 pr-3 text-xs">
-                        <span className="font-semibold text-gray-700 w-[4.75rem] flex-shrink-0">{p.label}</span>
-                        <span className="text-gray-500 flex-1 truncate">
-                          <span className="font-mono text-gray-700">{p.stake}€</span> · cote {String(p.cote).replace(".", ",")}
-                        </span>
-                        <span className="num-display font-bold tabular-nums text-gray-900 whitespace-nowrap">+{p.gain}€</span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-1.5 text-right text-[9px] uppercase tracking-wide text-gray-400">Gain net si le cheval gagne</p>
-
-                  {latestResult ? (
-                    <div className="mt-2.5">
-                      <div className="mb-1 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-400">
-                        <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        Dernier résultat vérifié · {latestResult.date}
-                      </div>
-                      <div className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${latestResult.won ? "vb-glow bg-gradient-to-r from-emerald-50 to-white border-emerald-200" : "bg-gray-50 border-gray-200"}`}>
-                        <span className={`flex items-center gap-2 text-xs font-semibold truncate ${latestResult.won ? "text-emerald-700" : "text-gray-600"}`}>
-                          {latestResult.won ? <Trophy className="h-3.5 w-3.5 flex-shrink-0" /> : <X className="h-3.5 w-3.5 flex-shrink-0" />}
-                          <span className="truncate">{latestResult.cheval}{latestResult.hippodrome ? ` · ${latestResult.hippodrome}` : ""} — {latestResult.won ? "gagné" : "battu"}</span>
-                        </span>
-                        <span className={`num-display text-sm font-extrabold whitespace-nowrap ${latestResult.won ? "text-emerald-600" : "text-gray-500"}`}>
-                          {latestResult.won ? "+" : ""}{latestResult.pnl}€
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-2.5">
-                      <div className="mb-1 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-400">
-                        Exemple de résultat réglé
-                      </div>
-                      <div className="vb-glow flex items-center justify-between rounded-xl bg-gradient-to-r from-emerald-50 to-white border border-emerald-200 px-3 py-2.5">
-                        <span className="flex items-center gap-2 text-xs font-semibold text-emerald-700 truncate">
-                          <Trophy className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span className="truncate">Paladin Noir · Deauville — gagné</span>
-                        </span>
-                        <span className="num-display text-sm font-extrabold text-emerald-600 whitespace-nowrap">+24€</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ── Tuile bandeau de stats (pleine largeur) ── */}
-            <div className="lg:col-span-12">
-              <div className="glass-card rounded-[1.75rem] grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-gray-100 overflow-hidden">
-                {HERO_STATS.map((s) => (
-                  <div key={s.label} className="px-5 py-5 sm:px-7 sm:py-6">
-                    <div className="num-display text-3xl sm:text-4xl font-extrabold" style={{ color: s.na ? "#D1D5DB" : s.color }}>{s.big}</div>
-                    <div className="text-[11px] uppercase tracking-wide text-gray-400 mt-1">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
+            <Button size="xl" asChild
+              className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-500/30">
+              <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
+            </Button>
+            <Button variant="outline" size="xl" asChild
+              className="press bg-white/10 backdrop-blur-sm border-white/25 text-white hover:bg-white/20 hover:text-white">
+              <Link href="/programme">Voir le programme du jour</Link>
+            </Button>
           </div>
-          <p className="mt-3 text-center lg:text-right text-[11px] text-gray-400">
-            Cartes illustratives — pronostics réels, plan de mise et suivi des résultats réservés aux abonnés. Chiffres calculés sur courses passées et vérifiables.
+          <p className="mt-5 text-[11px] text-white/55">7 jours gratuits · sans carte bancaire · annulation à tout moment</p>
+
+          {/* Stats clés — cartes verre + count-up (live, mêmes chiffres que le palmarès) */}
+          <HeroStats
+            fallback={{
+              accuracy_top3: tr?.accuracy_top3 ?? null,
+              favori_place_rate: tr?.favori_place_rate ?? null,
+              courses_analysees: coursesAnalysees ?? null,
+            }}
+          />
+        </div>
+      </section>
+
+      {/* ═══════════ BANDE PILIERS + STATS (épurée) ═══════════ */}
+      <section className="bg-white border-b border-gray-100">
+        <div className="mx-auto max-w-6xl px-5 sm:px-6 lg:px-8 py-10 sm:py-12">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+            {[
+              { icon: Search, t: "On analyse", d: "80 critères par cheval" },
+              { icon: Zap, t: "On détecte la valeur", d: "cote vs vraie chance" },
+              { icon: Wallet, t: "Vous misez malin", d: "un plan selon votre risque" },
+            ].map((p) => (
+              <div key={p.t} className="flex items-start gap-3">
+                <div className="icon-box h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.16)" }}>
+                  <p.icon className="h-5 w-5 text-brand-gold-deep" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-gray-900 leading-tight">{p.t}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{p.d}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-7 pt-6 border-t border-gray-100 text-[11px] text-gray-500 text-center sm:text-left">
+            Chiffres réels, mesurés sur les arrivées PMU officielles.
           </p>
         </div>
       </section>
 
-      {/* ══ RESULTS TAPE ══ */}
       <LiveTicker />
 
-      {/* ══════════════ MÉTHODE — flux horizontal ══════════════ */}
+      {/* ═══════════ PRONOSTICS PAR PROFIL DE RISQUE (vrai outil) ═══════════ */}
       <section className="py-24 bg-white">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <ScrollReveal>
-            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-14 gap-3">
-              <div>
-                <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-2">
-                  <Zap className="h-3.5 w-3.5" /> Comment ça marche
-                </span>
-                <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
-                  3 gestes pour vous,<br className="hidden sm:block" /> un cycle sans fin pour le modèle
-                </h2>
-              </div>
-              <p className="text-gray-500 text-sm sm:max-w-[200px] sm:text-right">Moins de 10 secondes côté parieur.</p>
-            </div>
-          </ScrollReveal>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              { step: "01", title: "Choisissez votre course", desc: "Le programme PMU du jour, déjà analysé. Un score de confiance 0-100 sur chaque course.", color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.18)" },
-              { step: "02", title: "Entrez votre mise", desc: "Indiquez le montant. Le calculateur répartit votre plan : sécurité, rendement, coup.", color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.18)" },
-              { step: "03", title: "Suivez — et le modèle apprend", desc: "BlackTurf enregistre les résultats réels, met à jour votre rendement, puis recalibre le modèle.", color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.18)" },
-            ].map((s, i) => (
-              <ScrollReveal key={s.step} delay={i * 100}>
-                <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
-                  <div className="glass-card rounded-2xl p-7 h-full">
-                    <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
-                      style={{ background: s.bg, border: `1px solid ${s.border}`, color: s.color }}>{s.step}</div>
-                    <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
-                  </div>
-                </div>
-              </ScrollReveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="section-divider" />
-
-      {/* ══════════════ SOUS LE CAPOT — bento asymétrique ══════════════ */}
-      <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
               <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
-                <Cpu className="h-3.5 w-3.5" /> Sous le capot
+                <Target className="h-3.5 w-3.5" /> Le cœur de BlackTurf
               </span>
               <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
-                Ce que l&apos;algorithme calcule{" "}
-                <span className="text-gradient">pour vous</span>
+                Un plan de mise{" "}
+                <span className="text-gradient">selon votre profil</span>
               </h2>
+              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+                Même course, trois façons de jouer. Vous choisissez votre profil et votre budget —
+                BlackTurf construit les paris adaptés et calcule le gain potentiel de chacun.
+              </p>
             </div>
           </ScrollReveal>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 auto-rows-fr">
-            {/* Tuile vedette */}
-            <ScrollReveal className="lg:col-span-2 lg:row-span-2">
-              <div className="glass-card bento-feature rounded-3xl h-full p-8 flex flex-col">
-                <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center mb-5"
-                  style={{ background: "#FFFBEB", border: "1px solid rgba(217,119,6,0.2)" }}>
-                  <FEATURE_MAIN.icon className="h-7 w-7" style={{ color: "#D97706" }} strokeWidth={2} />
+          {/* Course exemple + portrait */}
+          <div className="grid lg:grid-cols-3 gap-5 mb-6">
+            <ScrollReveal className="lg:col-span-1">
+              <div className="glass-card rounded-2xl p-5 h-full">
+                <div className="flex items-center justify-between">
+                  <span className="eyebrow text-amber-700 text-[10px] font-bold">
+                    <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> Pronostic BlackTurf
+                  </span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
-                <h3 className="font-display text-2xl font-bold text-gray-900 mb-3 leading-snug">{FEATURE_MAIN.title}</h3>
-                <p className="text-gray-500 leading-relaxed mb-6 max-w-lg">{FEATURE_MAIN.desc}</p>
-                <div className="mt-auto grid grid-cols-2 gap-3">
-                  {FEATURE_MAIN.points.map((p) => (
-                    <div key={p} className="flex items-center gap-2 rounded-xl bg-white/70 border border-amber-100 px-3 py-2.5">
-                      <Check className="h-4 w-4 flex-shrink-0 text-brand-gold-deep" />
-                      <span className="text-xs font-semibold text-gray-700">{p}</span>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-white bg-brand-gold-deep rounded px-1.5 py-0.5">{EXAMPLE.hippo}</span>
+                  <span className="text-xs text-gray-500 font-mono">{EXAMPLE.code} · {EXAMPLE.disc}</span>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  {EXAMPLE_PICKS.map((h) => (
+                    <div key={h.rank} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${h.rank === 1 ? "bg-amber-50 ring-1 ring-amber-200" : "bg-gray-50"}`}>
+                      <span className={`num-display text-xs font-black w-7 ${h.rank === 1 ? "text-brand-gold-deep" : "text-gray-500"}`}>N°{h.num}</span>
+                      <span className="text-sm font-medium text-gray-900 flex-1 truncate">{h.nom}</span>
+                      <span className="num-display text-xs font-bold text-gray-700 w-9 text-right">{h.p}%</span>
+                      <span className="text-[11px] font-mono text-gray-500 w-8 text-right">{h.cote}</span>
                     </div>
                   ))}
+                </div>
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-[11px]">
+                  <span className="flex items-center gap-1.5 font-semibold text-emerald-700"><Zap className="h-3 w-3" /> Valeur ★★★ détectée</span>
+                  <span className="text-gray-500">EV <span className="num-display font-bold text-emerald-600">+14,2%</span></span>
                 </div>
               </div>
             </ScrollReveal>
 
-            {FEATURES.map((f, i) => (
-              <ScrollReveal key={f.title} delay={i * 70}>
-                <div className="glass-card rounded-3xl h-full p-6">
-                  <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center mb-4"
-                    style={{ background: f.bg, border: `1px solid ${f.border}` }}>
-                    <f.icon className="h-5 w-5" style={{ color: f.color }} strokeWidth={2} />
+            {/* Portrait photo */}
+            <ScrollReveal className="lg:col-span-2" delay={80}>
+              <div className="relative rounded-2xl overflow-hidden h-full min-h-[220px]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/img/portrait.webp" alt="Cheval et jockey en tête de course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+                <div className="absolute inset-0 bg-gradient-to-t from-gray-950/85 via-gray-950/20 to-transparent" />
+                <div className="absolute bottom-0 left-0 p-6">
+                  <p className="text-white font-display text-xl font-bold leading-snug max-w-xs">Les bons chevaux, au bon prix, selon votre tolérance au risque.</p>
+                </div>
+              </div>
+            </ScrollReveal>
+          </div>
+
+          {/* 3 profils */}
+          <div className="grid md:grid-cols-3 gap-5">
+            {PROFILS.map((pr, i) => (
+              <ScrollReveal key={pr.key} delay={i * 90}>
+                <div className={`tilt-card rounded-3xl p-6 h-full bg-white ${pr.popular ? "border-2 border-amber-300 shadow-md" : "border border-gray-200 shadow-sm"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xl">{pr.emoji}</span>
+                    <h3 className="font-display text-lg font-bold text-gray-900">{pr.name}</h3>
+                    {pr.popular && <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">Le + choisi</span>}
                   </div>
-                  <h3 className="font-semibold text-gray-900 text-[15px] leading-snug mb-2">{f.title}</h3>
-                  <p className="text-[13px] text-gray-500 leading-relaxed">{f.desc}</p>
+                  <p className="text-xs text-gray-500 mb-4">{pr.tagline}</p>
+                  <div className="space-y-2">
+                    {pr.bets.map((b, j) => (
+                      <div key={j} className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-gray-900">{b.type}</span>
+                          <span className="text-[11px] font-mono text-gray-500">{b.chevaux}</span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-xs">
+                          <span className="text-gray-500">Mise <span className="font-mono font-semibold text-gray-700">{b.mise}</span></span>
+                          <span className="num-display font-bold text-emerald-600">{b.gain}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-[10px] text-gray-500">Gain potentiel si le pari est gagnant.</p>
                 </div>
               </ScrollReveal>
             ))}
           </div>
+          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto">
+            Exemple illustratif sur une course type. Les paris et gains varient selon la course, votre mise et les
+            rapports PMU réels. Parier comporte un risque de perte.
+          </p>
         </div>
       </section>
 
-      <div className="section-divider" />
-
-      {/* ══════════════ CALCULATEUR ══════════════ */}
-      <section className="py-24 bg-white">
+      {/* ═══════════ CALCULATEUR ═══════════ */}
+      <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <ScrollReveal direction="right" className="order-2 lg:order-1">
@@ -396,7 +344,7 @@ export default async function HomePage() {
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
                   <Calculator className="h-4 w-4 text-brand-gold-deep" />
                   <span className="text-xs font-semibold text-gray-700">Calculateur de mise</span>
-                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
+                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
                 </div>
                 <CalculatorDemo />
               </div>
@@ -404,7 +352,7 @@ export default async function HomePage() {
             <ScrollReveal direction="left" className="order-1 lg:order-2">
               <div>
                 <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
-                  <Calculator className="h-3.5 w-3.5" /> Exclusif
+                  <Calculator className="h-3.5 w-3.5" /> Essayez maintenant
                 </span>
                 <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
                   Votre mise, répartie au{" "}
@@ -430,40 +378,317 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <div className="section-divider" />
+      {/* ═══════════ BANDEAU CINÉMATIQUE ═══════════ */}
+      <section className="relative overflow-hidden bg-gray-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/img/showcase.webp" alt="Peloton de chevaux en pleine course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-950 via-gray-950/85 to-gray-950/25" />
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-950/90 via-transparent to-gray-950/30" />
+        <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
+          <div className="max-w-xl">
+            <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300 mb-5">
+              <span className="live-dot inline-block w-2 h-2 rounded-full bg-amber-400" /> Pourquoi BlackTurf
+            </span>
+            <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white leading-[1.08]">
+              Pendant qu'ils jouent au feeling,{" "}
+              <span className="text-gradient-animated">vous jouez aux chiffres.</span>
+            </h2>
+            <p className="mt-5 text-base sm:text-lg text-gray-200/90 leading-relaxed max-w-lg">
+              Chaque pronostic est confronté à l'arrivée réelle, puis le modèle se recale. La différence
+              entre parier et parier informé se joue exactement là.
+            </p>
+          </div>
+          {/* Inset photo */}
+          <div className="hidden lg:block absolute right-8 bottom-10 w-64">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/img/duel.webp" alt="Duel de chevaux à l'arrivée" loading="lazy" decoding="async" className="tilt-card w-full h-40 object-cover rounded-2xl ring-1 ring-white/20 shadow-2xl" />
+            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-300">
+              <Trophy className="h-3.5 w-3.5 text-amber-300" /> Réglé aux rapports PMU officiels
+            </div>
+          </div>
+        </div>
+      </section>
 
-      {/* ══════════════ PERFORMANCE — track record (chiffres réels) ══════════════ */}
+      {/* ═══════════ PARIS DE VALEUR (vrai outil) ═══════════ */}
+      <section className="py-24 bg-white">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <ScrollReveal direction="right">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <Zap className="h-3.5 w-3.5" /> Paris de valeur
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+                Miser quand la cote{" "}
+                <span className="text-gradient">se trompe</span>
+              </h2>
+              <p className="text-gray-600 leading-relaxed mb-6">
+                Un pari « de valeur », c'est quand un cheval a plus de chances que sa cote ne le laisse croire.
+                BlackTurf compare sa probabilité réelle au prix du marché et ne signale que ces écarts —
+                là où, sur la durée, le jeu penche de votre côté.
+              </p>
+              <ul className="space-y-2.5">
+                {["Probabilité du modèle vs cote du marché", "Niveaux de valeur ★ à ★★★★", "Triangulation PMU · Geny · BZH"].map((f) => (
+                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
+                    <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-600" /> {f}
+                  </li>
+                ))}
+              </ul>
+            </ScrollReveal>
+
+            <ScrollReveal direction="left">
+              <div className="glass-card rounded-3xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="eyebrow text-amber-700 text-[10px] font-bold"><Zap className="h-3 w-3" /> Pari de valeur détecté</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                </div>
+                <div className="flex items-center gap-3 rounded-2xl bg-amber-50 ring-1 ring-amber-200 px-4 py-3">
+                  <span className="num-display text-lg font-black text-brand-gold-deep">N°7</span>
+                  <div className="flex-1">
+                    <div className="font-semibold text-gray-900">Vent d'Est</div>
+                    <div className="text-[11px] text-gray-500">cote 8,5 · {EXAMPLE.hippo}</div>
+                  </div>
+                  <span className="text-[11px] font-bold text-emerald-600">★★★</span>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-gray-50 p-3">
+                    <div className="num-display text-lg font-extrabold text-gray-900">19%</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">Proba modèle</div>
+                  </div>
+                  <div className="rounded-xl bg-gray-50 p-3">
+                    <div className="num-display text-lg font-extrabold text-gray-500">12%</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">Proba marché</div>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50 ring-1 ring-emerald-100 p-3">
+                    <div className="num-display text-lg font-extrabold text-emerald-600">+14%</div>
+                    <div className="text-[10px] text-emerald-700/70 mt-0.5">Valeur (EV)</div>
+                  </div>
+                </div>
+                <p className="mt-4 text-xs text-gray-500 leading-relaxed">
+                  À 8,5, le marché lui donne ~12% de chances ; le modèle en voit 19%. La cote paie plus que le risque réel.
+                </p>
+              </div>
+            </ScrollReveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════ GESTION DU CAPITAL (vrai outil, image) ═══════════ */}
+      <section className="relative py-24 overflow-hidden bg-gray-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/img/value.jpg" alt="Chevaux sur la piste au soleil couchant" className="absolute inset-0 h-full w-full object-cover ken-burns opacity-40" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-gray-950/80 to-gray-950/60" />
+        <div className="relative mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <ScrollReveal direction="right">
+              <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300 mb-3">
+                <Wallet className="h-3.5 w-3.5" /> Gestion du capital
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-white mb-4">
+                Votre bankroll,{" "}
+                <span className="text-gradient-animated">suivie sans triche</span>
+              </h2>
+              <p className="text-gray-200/85 leading-relaxed mb-6">
+                Chaque pari validé est réglé automatiquement aux vrais rapports PMU. Vous voyez votre rendement
+                réel — les gains comme les pertes. Pas de chiffre maquillé : c'est ce qui vous permet de savoir
+                si vous gagnez vraiment.
+              </p>
+              <ul className="space-y-2.5">
+                {["Règlement automatique aux rapports officiels", "Rendement réel, gains ET pertes", "Critère de Kelly pour doser vos mises"].map((f) => (
+                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-200/90">
+                    <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-400" /> {f}
+                  </li>
+                ))}
+              </ul>
+            </ScrollReveal>
+
+            <ScrollReveal direction="left">
+              <div className="rounded-3xl bg-white/95 backdrop-blur p-5 shadow-2xl">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-gray-700">Suivi du capital</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                </div>
+
+                {/* Capital départ → actuel (comme le vrai suivi) */}
+                <div className="flex items-end justify-between rounded-xl bg-gradient-to-r from-emerald-50 to-white border border-emerald-100 px-4 py-3 mb-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Capital</div>
+                    <div className="num-display text-lg font-extrabold text-gray-900">{CAPITAL_DEPART}€ <span className="text-gray-300 font-normal">→</span> {CAPITAL_DEPART + CAPITAL_NET}€</div>
+                  </div>
+                  <div className="num-display text-lg font-extrabold text-emerald-600">{CAPITAL_NET >= 0 ? "+" : ""}{CAPITAL_NET}€</div>
+                </div>
+
+                <div className="space-y-1.5">
+                  {CAPITAL_DEMO.map((b, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
+                      <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${b.won ? "bg-emerald-500" : "bg-gray-300"}`} />
+                      <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-500">{b.chevaux}</span></span>
+                      <span className="text-gray-500 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
+                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-600" : "text-gray-500"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
+                  <span className="text-gray-500"><span className="font-semibold text-gray-700">{CAPITAL_WINS}/{CAPITAL_DEMO.length}</span> gagnés · réglé aux vrais rapports PMU</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold"><span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> temps réel</span>
+                </div>
+              </div>
+            </ScrollReveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════ PREUVES RÉELLES (track-record) ═══════════ */}
       <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
-            <div className="mb-12">
+            <div className="mb-12 text-center">
               <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
                 <Shield className="h-3.5 w-3.5" /> Performances vérifiables
               </span>
               <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
-                Nos résultats, en chiffres réels
+                Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
               </h2>
-              <p className="text-gray-500 text-sm mt-2 max-w-2xl">
-                Simulés à 10€ fixes sur chaque pari de valeur ★★★+ des courses passées.
-                Source de vérité : résultats PMU officiels, mis à jour chaque nuit.
+              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+                Chaque pronostic est confronté à l'arrivée officielle PMU. Voici la précision réelle de
+                BlackTurf, mesurée sur les courses déjà réglées — pas une simulation.
               </p>
             </div>
           </ScrollReveal>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {[
-              { label: "Rendement simulé 6 mois", value: stats.roi_simule_6mois, sub: "10€ fixes sur chaque pari de valeur ★★★+", accent: true },
-              { label: "Précision Top-3", value: stats.precision_top3, sub: "vs 33 % pour un choix au hasard" },
-              { label: "AUC-ROC du modèle", value: stats.auc_roc, sub: "calibration isotonique · Brier < 0,18" },
-              { label: "Courses analysées", value: stats.nb_courses_analysees, sub: "historique PMU officiel, vérifiable" },
+              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Précision Top-3", sub: "un de nos 3 favoris finit dans les 3", accent: true, icon: Target },
+              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers", icon: Shield },
+              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course", icon: Trophy },
+              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels", icon: Database },
             ].map((m, i) => (
-              <ScrollReveal key={m.label} delay={i * 80}>
-                <div className="metric-row flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-sm h-full">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{m.label}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
+              <ScrollReveal key={m.label} delay={i * 70}>
+                <div className="tilt-card relative overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
+                  <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300/60" />
+                  <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
+                  <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{m.sub}</p>
+                </div>
+              </ScrollReveal>
+            ))}
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            {tr && tr.by_discipline.length > 0 && (
+              <ScrollReveal>
+                <div className="glass-card rounded-2xl p-6 h-full">
+                  <div className="flex items-center gap-2 mb-5">
+                    <BarChart3 className="h-4 w-4 text-brand-gold-deep" />
+                    <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 par discipline</h3>
                   </div>
-                  <div className="num-display text-3xl font-extrabold" style={{ color: m.accent ? "#059669" : "#111827" }}>{m.value}</div>
+                  <div className="space-y-4">
+                    {tr.by_discipline.map((d) => (
+                      <div key={d.discipline}>
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                          <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
+                          <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
+                            <span className="text-gray-500 font-normal ml-1.5">· {d.nb_courses} courses</span>
+                          </span>
+                        </div>
+                        <div className="relative h-3 rounded-full bg-gray-100 overflow-hidden">
+                          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(d.accuracy_top3, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }} />
+                          {/* repère 33% (hasard) */}
+                          <div className="absolute top-0 bottom-0 w-px bg-gray-500/40" style={{ left: "33%" }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-500">
+                    <span className="inline-block w-px h-3 bg-gray-400/60" /> Repère « hasard » à 33 % · au-delà = l&apos;analyse fait mieux.
+                  </div>
+                </div>
+              </ScrollReveal>
+            )}
+
+            {tr && tr.by_day.length > 0 && (() => {
+              const avg = tr.by_day.reduce((s, d) => s + d.accuracy_top3, 0) / tr.by_day.length;
+              return (
+              <ScrollReveal delay={80}>
+                <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
+                  <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-emerald-600" />
+                      <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
+                    </div>
+                    <span className="text-[11px] text-gray-500">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
+                  </div>
+
+                  {/* Aire de chart à hauteur FIXE → barres % fiables */}
+                  <div className="relative h-44">
+                    {/* lignes repères */}
+                    {[25, 50, 75].map((g) => (
+                      <div key={g} className="absolute left-0 right-0 border-t border-dashed border-gray-100" style={{ bottom: `${g}%` }} />
+                    ))}
+                    {/* ligne moyenne */}
+                    <div className="absolute left-0 right-0 border-t border-dashed border-emerald-300" style={{ bottom: `${Math.min(avg, 100)}%` }}>
+                      <span className="absolute right-0 -top-3.5 text-[9px] font-semibold text-emerald-500 bg-white px-1">moyenne</span>
+                    </div>
+                    <div className="absolute inset-0 flex items-end justify-between gap-2.5">
+                      {tr.by_day.map((d) => (
+                        <div key={d.jour} className="group relative flex h-full flex-1 flex-col items-center justify-end">
+                          <span className="num-display text-[10px] font-bold text-gray-700 mb-1">{Math.round(d.accuracy_top3)}%</span>
+                          <div className="w-full max-w-[40px] rounded-t-lg bg-gradient-to-t from-amber-300 to-amber-500 shadow-sm transition-all duration-300 group-hover:from-amber-400 group-hover:to-amber-600"
+                            style={{ height: `${Math.max(4, Math.min(d.accuracy_top3, 100))}%` }}
+                            title={`${d.jour} · ${d.accuracy_top3.toFixed(1)}% · ${d.nb_predictions} pronostics`} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex justify-between gap-2.5">
+                    {tr.by_day.map((d) => (
+                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-500">{d.jour}</span>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-[11px] text-gray-500">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
+                </div>
+              </ScrollReveal>
+              );
+            })()}
+          </div>
+
+          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto leading-relaxed">
+            La précision d'analyse mesure la qualité du classement des chevaux. Ce n'est ni un taux de
+            gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
+          </p>
+        </div>
+      </section>
+
+      {/* ═══════════ PALMARÈS EN DIRECT (paris gagnés réels) ═══════════ */}
+      <LivePalmares />
+
+      <div className="section-divider" />
+
+      {/* ═══════════ COMMENT ÇA MARCHE ═══════════ */}
+      <section className="py-24 bg-white">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="text-center mb-12">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-2">
+                <Zap className="h-3.5 w-3.5" /> Comment ça marche
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">3 gestes, moins de 10 secondes</h2>
+            </div>
+          </ScrollReveal>
+          <div className="grid md:grid-cols-3 gap-6">
+            {[
+              { step: "01", title: "Choisissez votre course", desc: "Le programme PMU du jour, déjà analysé. Un score de confiance 0-100 par course." },
+              { step: "02", title: "Entrez votre mise", desc: "Indiquez le montant. Le plan se répartit : sécurité, rendement, coup — selon votre profil." },
+              { step: "03", title: "Pariez, puis suivez", desc: "BlackTurf règle les résultats réels et met votre rendement à jour, course après course." },
+            ].map((s, i) => (
+              <ScrollReveal key={s.step} delay={i * 100}>
+                <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
+                  <div className="glass-card tilt-card rounded-2xl p-7 h-full">
+                    <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
+                      style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
+                    <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
+                    <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
+                  </div>
                 </div>
               </ScrollReveal>
             ))}
@@ -473,8 +698,68 @@ export default async function HomePage() {
 
       <div className="section-divider" />
 
-      {/* ══════════════ PRICING ══════════════ */}
-      <section className="py-24 bg-white" id="tarifs">
+      {/* ═══════════ CE QUE VOUS OBTENEZ ═══════════ */}
+      <section className="py-24 bg-brand-warm">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="text-center mb-12">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <Target className="h-3.5 w-3.5" /> Ce que vous obtenez
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+                Pourquoi nos analyses{" "}
+                <span className="text-gradient">tapent juste</span>
+              </h2>
+            </div>
+          </ScrollReveal>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:auto-rows-fr">
+            <ScrollReveal className="lg:col-span-2 lg:row-span-2">
+              <div className="glass-card bento-feature rounded-3xl h-full p-8 flex flex-col">
+                <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center mb-5"
+                  style={{ background: "#FFFBEB", border: "1px solid rgba(217,119,6,0.2)" }}>
+                  <FEATURE_MAIN.icon className="h-7 w-7" style={{ color: "#D97706" }} strokeWidth={2} />
+                </div>
+                <h3 className="font-display text-2xl font-bold text-gray-900 mb-3 leading-snug">{FEATURE_MAIN.title}</h3>
+                <p className="text-gray-500 leading-relaxed mb-6 max-w-lg">{FEATURE_MAIN.desc}</p>
+                <div className="mt-auto grid sm:grid-cols-2 gap-3.5">
+                  {FEATURE_MAIN.categories.map((cat) => (
+                    <div key={cat.label} className="rounded-2xl bg-white/70 border border-amber-100 p-3.5">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-brand-gold-deep mb-2">{cat.label}</div>
+                      <ul className="space-y-1.5">
+                        {cat.items.map((it) => (
+                          <li key={it} className="flex items-start gap-2 text-xs text-gray-700 leading-snug">
+                            <Check className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-emerald-600" />
+                            <span>{it}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </ScrollReveal>
+
+            {FEATURES.map((f, i) => (
+              <ScrollReveal key={f.title} delay={i * 70}>
+                <div className="glass-card tilt-card rounded-3xl h-full p-6">
+                  <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center mb-4"
+                    style={{ background: f.bg, border: `1px solid ${f.border}` }}>
+                    <f.icon className="h-5 w-5" style={{ color: f.color }} strokeWidth={2} />
+                  </div>
+                  <h3 className="font-semibold text-gray-900 text-[15px] leading-snug mb-2">{f.title}</h3>
+                  <p className="text-[13px] text-gray-500 leading-relaxed">{f.desc}</p>
+                </div>
+              </ScrollReveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <div className="section-divider" />
+
+      {/* ═══════════ PRICING ═══════════ */}
+      <section className="py-24 bg-brand-warm" id="tarifs">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
@@ -489,7 +774,7 @@ export default async function HomePage() {
           <div className="grid md:grid-cols-3 gap-6 items-start">
             {PLANS.map((plan, i) => (
               <ScrollReveal key={plan.name} delay={i * 100}>
-                <div className={`relative rounded-3xl p-7 h-full ${plan.popular ? "plan-popular bg-white border border-amber-300 md:-translate-y-2" : "bg-white border border-gray-200 shadow-sm card-hover"}`}>
+                <div className={`relative rounded-3xl p-7 h-full ${plan.popular ? "plan-popular bg-white border border-amber-300 md:-translate-y-2" : "bg-white border border-gray-200 shadow-sm tilt-card"}`}>
                   {plan.badge && (
                     <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
                       <span className="inline-block text-xs bg-gradient-gold text-white font-bold px-4 py-1 rounded-full shadow-md shadow-amber-400/30">{plan.badge}</span>
@@ -519,40 +804,39 @@ export default async function HomePage() {
               </ScrollReveal>
             ))}
           </div>
-          <p className="text-center text-xs text-gray-400 mt-8">
+          <p className="text-center text-xs text-gray-500 mt-8">
             -20% avec l&apos;abonnement annuel · Paiement sécurisé Stripe · Annulation à tout moment
           </p>
         </div>
       </section>
 
-      <div className="section-divider" />
-
-      {/* ══════════════ CTA FINALE ══════════════ */}
-      <section className="py-24 relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-amber-50/30">
-        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-          <div className="orb-1 absolute top-0 left-1/2 w-[500px] h-[200px] rounded-full bg-amber-300/15 blur-[80px]" />
-        </div>
-        <div className="relative mx-auto max-w-3xl px-4 sm:px-6 text-center">
+      {/* ═══════════ CTA FINALE — photo ═══════════ */}
+      <section className="relative overflow-hidden bg-gray-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/img/cta.jpg" alt="Arrivée d'une course devant le public" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+        <div className="absolute inset-0 bg-gray-950/75" />
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/40 to-gray-950/70" />
+        <div className="relative mx-auto max-w-3xl px-4 sm:px-6 text-center py-24 sm:py-32">
           <ScrollReveal>
-            <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[11px] font-semibold mb-6">
+            <span className="badge-pulse eyebrow px-4 py-1.5 rounded-full bg-white/10 text-amber-200 border border-white/20 text-[11px] font-semibold mb-6">
               Commencez aujourd&apos;hui
             </span>
-            <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-gray-900 mb-5 leading-tight">
+            <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white mb-5 leading-tight">
               Pariez avec{" "}
               <span className="text-gradient-animated">une méthode</span>
               {" "}— pas avec votre instinct.
             </h2>
-            <p className="text-gray-600 text-lg mb-10 max-w-xl mx-auto">
-              Un algorithme entraîné sur les résultats réels du PMU, qui se corrige après chaque course.
-              Essayez-le 7 jours, sans engagement.
+            <p className="text-gray-200/90 text-lg mb-10 max-w-xl mx-auto">
+              Des analyses chiffrées et vérifiées sur les vrais résultats du PMU. Essayez BlackTurf
+              7 jours, sans engagement et sans carte bancaire.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="xl" asChild
-                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-400/25">
+                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-900/40">
                 <Link href="/inscription">Essai gratuit 7 jours — sans CB <ArrowRight className="h-5 w-5 ml-1" /></Link>
               </Button>
               <Button variant="outline" size="xl" asChild
-                className="press border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:bg-amber-50">
+                className="press border-white/30 bg-white/5 text-white hover:bg-white/15 hover:border-white/50">
                 <Link href="#tarifs">Voir les tarifs</Link>
               </Button>
             </div>
@@ -560,11 +844,11 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ══ JEU RESPONSABLE ══ */}
+      {/* ═══════════ JEU RESPONSABLE ═══════════ */}
       <section className="py-8 border-t border-gray-100 bg-brand-warm">
         <div className="mx-auto max-w-3xl px-4 text-center">
-          <p className="text-xs text-gray-400 leading-relaxed inline-flex flex-wrap items-center justify-center gap-x-1.5">
-            <AlertTriangle className="h-3.5 w-3.5 text-gray-400 inline" />
+          <p className="text-xs text-gray-500 leading-relaxed inline-flex flex-wrap items-center justify-center gap-x-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-gray-500 inline" />
             <span><strong className="text-gray-600">Jeu responsable.</strong> BlackTurf est un outil d&apos;aide à la décision,
             pas une garantie de gain. Les performances passées ne préjugent pas des performances futures.
             Interdit aux mineurs. En cas de difficulté :{" "}

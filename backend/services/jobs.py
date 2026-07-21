@@ -180,6 +180,26 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
+async def job_warm_caches() -> None:
+    """Pre-chauffe les caches Redis des pages publiques lentes (track-record :
+    la CLV agrege cotes_historique ~2s a froid). Tape l'API en interne pour que
+    l'endpoint recalcule et reecrive son cache -> l'utilisateur a toujours la
+    version chaude (~60ms), jamais le calcul froid."""
+    import httpx
+    urls = [
+        "http://api:8000/api/v1/stats/track-record",
+        "http://api:8000/api/v1/stats/palmares-gagnants",
+        "http://api:8000/api/v1/stats/profils",
+    ]
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for u in urls:
+            try:
+                r = await client.get(u, headers={"Host": "blackturf.fr"})
+                log.info("jobs.warm_cache", url=u, status=r.status_code)
+            except Exception as e:  # noqa: BLE001
+                log.warning("jobs.warm_cache.failed", url=u, err=str(e)[:120])
+
+
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
@@ -236,6 +256,15 @@ def start_scheduler() -> None:
         id="drift_check",
         replace_existing=True,
         misfire_grace_time=300,
+    )
+
+    # Pre-chauffe caches pages publiques lentes — toutes les 30 min
+    scheduler.add_job(
+        job_warm_caches,
+        CronTrigger(minute="*/30"),
+        id="warm_caches",
+        replace_existing=True,
+        misfire_grace_time=120,
     )
 
     scheduler.start()

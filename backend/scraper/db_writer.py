@@ -65,6 +65,11 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
     r = await session.execute(select(Cheval.cheval_id).where(Cheval.nom == cheval_nom))
     row = r.first()
     if not row:
+        # Fix 2026-06-17 : avant, tout l'historique du cheval était jeté en
+        # SILENCE (dépendance d'ordre : les partants doivent être saved avant).
+        # On trace désormais pour rendre la perte visible dans les logs.
+        log.warning("db_writer.historique_cheval_absent",
+                    cheval=cheval_nom, nb_courses_perdues=len(courses or []))
         return 0
     cheval_id = row[0]
 
@@ -102,6 +107,7 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
             corde=(_t(str(c.get("corde")), 15) if c.get("corde") is not None else None),
             poids_porte_course=(float(c["poids"]) if isinstance(c.get("poids"), (int, float)) else None),
             equipement_course=({"oeilleres": bool(c["oeilleres"])} if c.get("oeilleres") is not None else None),
+            commentaire_course=_t(c.get("commentaire"), 1000),   # déroulé / trip note (#9)
         ))
         added += 1
     return added
@@ -238,7 +244,7 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
     return cheval.cheval_id
 
 
-async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None:
+async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Optional[str]:
     """
     Sauvegarde une course et ses partants en DB.
     Upsert complet : hippodrome → réunion → course → chevaux → participations → équipements.
@@ -309,6 +315,20 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
     )
     await session.execute(stmt)
 
+    # ── Statut non-partant AVANT ce scrape (pour détecter les NOUVEAUX forfaits) ──
+    # On compare l'état stocké à l'état scrapé : un cheval qui passe partant→non-partant
+    # doit être retiré du pronostic et le prono régénéré sur le champ restant.
+    prev_np: dict[int, bool] = {}
+    _np_rows = await session.execute(text(
+        "SELECT numero, non_partant FROM participations WHERE course_id = :cid"),
+        {"cid": course.course_id})
+    for _num, _np in _np_rows.fetchall():
+        try:
+            prev_np[int(_num)] = bool(_np)
+        except (TypeError, ValueError):
+            continue
+    newly_scratched_pids: list[str] = []
+
     # Partants
     for partant in course.partants:
         cheval_id = await upsert_cheval(session, partant)
@@ -349,9 +369,10 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             nb_places_second=partant.nb_places_second,
             nb_places_troisieme=partant.nb_places_troisieme,
             handicap_distance=partant.handicap_distance,
+            valeur_handicap=partant.valeur_handicap,
             indicateur_inedit=partant.indicateur_inedit,
             jument_pleine=partant.jument_pleine,
-            non_partant=False,
+            non_partant=bool(partant.non_partant),
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
             set_={
@@ -368,14 +389,21 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
                 "nb_places_second": partant.nb_places_second,
                 "nb_places_troisieme": partant.nb_places_troisieme,
                 "handicap_distance": partant.handicap_distance,
+                "valeur_handicap": partant.valeur_handicap,
                 "indicateur_inedit": partant.indicateur_inedit,
                 "jument_pleine": partant.jument_pleine,
+                # Statut non-partant réactualisé à chaque scrape (forfait de dernière minute).
+                "non_partant": bool(partant.non_partant),
                 "updated_at": datetime.now(),
             },
         ).returning(Participation.participation_id)
 
         result = await session.execute(stmt)
         pid = result.scalar_one_or_none() or participation_id
+
+        # Transition partant → non-partant détectée sur CE scrape.
+        if bool(partant.non_partant) and not prev_np.get(partant.numero, False):
+            newly_scratched_pids.append(pid)
 
         # Équipement
         if any([partant.deferre, partant.oeilleres, partant.plaques]):
@@ -392,6 +420,23 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
             )
             session.add(cote_entry)
 
+    # ── NON-PARTANTS : nettoyage des pronos périmés ──
+    # Un cheval qui vient d'être déclaré non-partant ne doit plus apparaître dans le
+    # pronostic : on supprime sa prédiction et on désactive son value bet. Le prono
+    # du champ restant sera RÉGÉNÉRÉ par l'appelant (predict_course), même dans les
+    # 10 dernières minutes (exception au gel T-10 — uniquement sur forfait).
+    scratch_course: Optional[str] = None
+    if newly_scratched_pids:
+        await session.execute(text(
+            "DELETE FROM predictions WHERE participation_id = ANY(:pids)"),
+            {"pids": newly_scratched_pids})
+        await session.execute(text(
+            "UPDATE value_bets SET actif = false WHERE participation_id = ANY(:pids)"),
+            {"pids": newly_scratched_pids})
+        scratch_course = course.course_id
+        log.info("db_writer.non_partant_detected",
+                 course_id=course.course_id, n=len(newly_scratched_pids))
+
     await session.flush()
     log.info("db_writer.course_saved", course_id=course.course_id)
 
@@ -400,9 +445,12 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> None
         from db.redis_client import get_redis
         redis = await get_redis()
         await redis.delete(f"course_detail:{course.course_id}")
+        await redis.delete(f"analyse:{course.course_id}")
         await redis.delete(f"programme:{course.date_heure.date().isoformat() if hasattr(course.date_heure, 'date') else str(course.date_heure)[:10]}")
     except Exception:
         pass
+
+    return scratch_course
 
 
 async def _save_equipement(
@@ -486,6 +534,10 @@ async def save_resultat_to_db(session: AsyncSession, resultat: ResultatScrape) -
             "rapports_detail": getattr(resultat, "rapports_detail", None),
             "commentaire": getattr(resultat, "commentaire", None),
             "duree_course": getattr(resultat, "duree_course", None),
+            # Fix 2026-06-17 : temps_gagnant + incidents étaient insérés mais
+            # JAMAIS rafraîchis au re-scrape (souvent publiés après l'arrivée).
+            "temps_gagnant": resultat.temps_gagnant,
+            "incidents": resultat.incidents,
         },
     )
     await session.execute(stmt)
@@ -515,6 +567,12 @@ async def save_meteo_to_db(session: AsyncSession, course_id: str, meteo: dict) -
             "temperature": meteo.get("temperature"),
             "vent_vitesse": meteo.get("vent_vitesse"),
             "pluie_24h": meteo.get("pluie_24h"),
+            # Fix 2026-06-17 : ces 4 champs étaient insérés mais jamais mis à jour
+            # au re-scrape → la météo se figeait sur la 1re mesure du jour.
+            "vent_direction": meteo.get("vent_direction"),
+            "humidite": meteo.get("humidite"),
+            "pression": meteo.get("pression"),
+            "visibilite": meteo.get("visibilite"),
             "updated_at": datetime.now(),
         },
     )
@@ -693,7 +751,10 @@ async def save_penetrometre(session: AsyncSession, pen: PenetrometreScrape) -> N
             update(Course)
             .where(Course.reunion_id == pen.reunion_id)
             .values(
-                penetrometre_coef=pen.coefficient,
+                # Fix 2026-06-17 : on propage la valeur VALIDÉE (coef), pas la
+                # brute pen.coefficient — sinon une mesure aberrante polluait
+                # courses.penetrometre_coef alors que le log la rejetait.
+                penetrometre_coef=coef,
                 penetrometre_desc=pen.description,
                 updated_at=datetime.now(),
             )
@@ -969,6 +1030,93 @@ async def resolve_bookmaker_course_id(
 
     row = result.fetchone()
     return row[0] if row else None
+
+
+async def resolve_presse_course_id(
+    session: AsyncSession,
+    reunion: Optional[int],
+    course: Optional[int],
+    hippodrome_hint: str = "",
+) -> Optional[str]:
+    """Résout un pronostic presse (réunion + course PMU) en course_id réel.
+
+    Le course_id PMU = '{ddmmyyyy}R{r}C{c}' → on matche EXACTEMENT sur le suffixe
+    'R{r}C{c}' du jour (R/C unique par jour, plus fiable que l'heure pour la
+    presse). Ajouté 2026-06-17 : avant, la presse passait par
+    resolve_bookmaker_course_id avec une heure vide → 0 match → pronostics_presse
+    jamais alimenté alors que CanalTurf/Paris-Turf scrapaient bien les pronos.
+    """
+    from sqlalchemy import text
+    from datetime import date as date_type
+    try:
+        r, c = int(reunion), int(course)
+    except (TypeError, ValueError):
+        return None
+    result = await session.execute(text("""
+        SELECT course_id
+        FROM courses
+        WHERE DATE(date_heure) = :today
+          AND course_id LIKE :pat
+        LIMIT 1
+    """), {"today": date_type.today(), "pat": f"%R{r}C{c}"})
+    row = result.fetchone()
+    return row[0] if row else None
+
+
+async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -> tuple[int, int]:
+    """Calcule taux victoire/place GLOBAUX jockey & entraîneur depuis NOS résultats
+    (participations ⋈ resultats.classement) et upsert dans stats_jockeys /
+    stats_entraineurs (saison courante).
+
+    Ajouté 2026-06-17 : le scraper Turfoo (censé remplir ces tables) reçoit un 403
+    depuis l'IP du VPS → il créait des lignes à taux=0 → la feature
+    jockey/entraineur_taux tombait sur le défaut 0.12 pour TOUS → qualité
+    jockey/entraîneur absente de l'évaluation. On la calcule sur l'arrivée
+    officielle (aucune donnée inventée). Tourne dans le cycle associations (hebdo).
+    """
+    MIN_COURSES = 10
+    saison = datetime.now().year
+    agg = """
+        SELECT p.{a} AS aid, count(*) AS rides,
+               count(*) FILTER (WHERE (e->>'position') ~ '^[0-9]+$'
+                                      AND (e->>'position')::int = 1) AS wins,
+               count(*) FILTER (WHERE (e->>'position') ~ '^[0-9]+$'
+                                      AND (e->>'position')::int <= 3) AS places
+        FROM participations p
+        JOIN courses c   ON c.course_id = p.course_id
+        JOIN resultats r ON r.course_id = p.course_id
+        JOIN LATERAL jsonb_array_elements(r.classement) e
+                  ON (e->>'numero') ~ '^[0-9]+$' AND (e->>'numero')::int = p.numero
+        WHERE p.{a} IS NOT NULL
+          AND c.date_heure > now() - (:mois || ' months')::interval
+        GROUP BY p.{a} HAVING count(*) >= :minc
+    """
+    upsert = """
+        INSERT INTO {t} (stat_id, {a}, saison, victoires_saison,
+                         taux_victoire_global, taux_place_global)
+        VALUES (gen_random_uuid(), :aid, :saison, :wins, :tv, :tp)
+        ON CONFLICT ({a}, saison) DO UPDATE SET
+            victoires_saison = EXCLUDED.victoires_saison,
+            taux_victoire_global = EXCLUDED.taux_victoire_global,
+            taux_place_global = EXCLUDED.taux_place_global,
+            updated_at = now()
+    """
+    counts = []
+    for table, acteur in (("stats_jockeys", "jockey_id"), ("stats_entraineurs", "entraineur_id")):
+        rows = (await session.execute(text(agg.format(a=acteur)),
+                                      {"mois": str(mois), "minc": MIN_COURSES})).fetchall()
+        n = 0
+        for aid, rides, wins, places in rows:
+            if not rides:
+                continue
+            await session.execute(text(upsert.format(t=table, a=acteur)), {
+                "aid": aid, "saison": saison, "wins": int(wins),
+                "tv": round(wins / rides, 4), "tp": round(places / rides, 4),
+            })
+            n += 1
+        counts.append(n)
+    log.info("db_writer.acteur_stats_computed", jockeys=counts[0], entraineurs=counts[1])
+    return counts[0], counts[1]
 
 
 def _parse_date(date_str: Optional[str]):

@@ -31,6 +31,9 @@ _CODE_FLAG = {
     "E_TIERCE":         "est_tierce",
     "E_QUARTE_PLUS":    "est_quarte",
     "E_QUINTE_PLUS":    "est_quinte",
+    "E_MULTI":          "est_multi",
+    "E_PICK5":          "est_pick5",
+    "E_PICK_5":         "est_pick5",
 }
 
 # Tous les drapeaux gérés (init à False).
@@ -40,6 +43,7 @@ _ALL_FLAGS = (
     "est_trio", "est_trio_ordre",
     "est_2sur4", "est_super4",
     "est_tierce", "est_quarte", "est_quinte",
+    "est_multi", "est_pick5",
 )
 
 
@@ -60,9 +64,16 @@ def derive_bet_flags(
 
     if paris_disponibles:
         for code in paris_disponibles:
-            flag = _CODE_FLAG.get(str(code).upper())
+            c = str(code).upper()
+            flag = _CODE_FLAG.get(c)
             if flag:
                 flags[flag] = True
+            # Tolérance aux variantes de libellé PMU (E_MULTI_EN_4, MULTI, PICK_5…) :
+            # on détecte aussi par sous-chaîne pour ne pas rater un Multi/Pick5 mal préfixé.
+            elif "MULTI" in c:
+                flags["est_multi"] = True
+            elif "PICK" in c and "5" in c:
+                flags["est_pick5"] = True
         return flags
 
     # ── Fallback (legacy, pas de liste) ──

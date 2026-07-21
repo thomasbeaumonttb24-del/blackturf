@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from api.config import get_settings
 from api.routes.auth import get_current_user
@@ -86,7 +86,8 @@ async def create_checkout(
         success_url=f"{settings.frontend_url}/abonnement/succes?session_id={{CHECKOUT_SESSION_ID}}&plan={_normalize_plan(body.plan)}",
         cancel_url=f"{settings.frontend_url}/tarifs",
         subscription_data={
-            "trial_period_days": 7,
+            # Essai gratuit 7 jours : Standard uniquement (Expert/Pro = paiement direct).
+            **({"trial_period_days": 7} if _normalize_plan(body.plan) == "standard" else {}),
             "metadata": {"user_id": user.user_id, "plan": _normalize_plan(body.plan)},
         },
         allow_promotion_codes=True,
@@ -113,6 +114,69 @@ async def customer_portal(
     return {"url": session.url}
 
 
+@router.post("/stripe/cancel")
+async def cancel_subscription(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Résiliation de l'abonnement en self-service (honore L215-1-1 « résiliation en
+    quelques clics »). Fonctionne AVEC ou SANS Stripe configuré :
+    - Stripe + abonnement actif → annulation à la fin de la période (cancel_at_period_end).
+    - Sinon (plan accordé manuellement / Stripe non configuré) → la demande est
+      enregistrée et notifiée par email ; l'accès reste ouvert jusqu'à traitement.
+    """
+    cancelled_via_stripe = False
+    # 1) Essai Stripe si configuré + abonnement connu
+    if settings.stripe_secret_key and user.stripe_customer_id:
+        try:
+            res = await db.execute(
+                select(Subscription).where(
+                    Subscription.user_id == user.user_id,
+                    Subscription.statut == "active",
+                )
+            )
+            sub = res.scalar_one_or_none()
+            if sub and sub.stripe_subscription_id:
+                stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
+                sub.statut = "cancel_at_period_end"
+                await db.commit()
+                cancelled_via_stripe = True
+        except Exception as e:  # noqa: BLE001
+            log.warning("stripe.cancel.api_failed", user_id=user.user_id, error=str(e)[:120])
+
+    # 2) Toujours notifier (preuve de la demande) — sans dépendre de Stripe
+    try:
+        from services.alerts import send_email
+        await send_email(
+            to="contact@blackturf.fr",
+            subject=f"[BlackTurf] Demande de résiliation — {user.email}",
+            html=f"<p>Demande de résiliation.</p><p>User: {user.email} ({user.user_id})</p>"
+                 f"<p>Plan: {user.plan} — via Stripe: {cancelled_via_stripe}</p>",
+        )
+        await send_email(
+            to=user.email,
+            subject="BlackTurf — Votre demande de résiliation",
+            html="<p>Votre demande de résiliation a bien été enregistrée.</p>"
+                 + ("<p>Votre abonnement prendra fin à l'échéance de la période en cours ; "
+                    "vous gardez l'accès jusque-là.</p>" if cancelled_via_stripe else
+                    "<p>Elle sera traitée sous 72h. Vous conservez l'accès jusqu'au traitement. "
+                    "Pour toute question : contact@blackturf.fr</p>")
+                 + "<hr/><p style='color:#666;font-size:11px;'>Jeu responsable — "
+                   "joueurs-info-service.fr — 09 74 75 13 13</p>",
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("stripe.cancel.email_failed", user_id=user.user_id, error=str(e)[:120])
+
+    log.info("stripe.cancel.requested", user_id=user.user_id, via_stripe=cancelled_via_stripe)
+    return {
+        "ok": True,
+        "via_stripe": cancelled_via_stripe,
+        "message": ("Résiliation enregistrée : effective à la fin de la période en cours."
+                    if cancelled_via_stripe else
+                    "Demande de résiliation enregistrée. Traitée sous 72h, accès maintenu jusque-là."),
+    }
+
+
 @router.post("/stripe/webhook")
 async def stripe_webhook(
     request: Request,
@@ -132,8 +196,24 @@ async def stripe_webhook(
 
     event_type = event["type"]
     data = event["data"]["object"]
+    event_id = event.get("id", "")
 
-    log.info("stripe.webhook", event_type=event_type)
+    # Idempotence / anti-replay : Stripe redélivre les webhooks (at-least-once) et un
+    # payload+signature capturé peut être rejoué dans la fenêtre de 5 min. On ignore
+    # tout event_id déjà traité. Table créée à la volée (pattern maison, cf. profil_run_log).
+    await db.execute(text(
+        "CREATE TABLE IF NOT EXISTS stripe_events ("
+        "event_id TEXT PRIMARY KEY, event_type TEXT, "
+        "processed_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+    ))
+    if event_id:
+        seen = await db.execute(text("SELECT 1 FROM stripe_events WHERE event_id = :e"),
+                                {"e": event_id})
+        if seen.first() is not None:
+            log.info("stripe.webhook.duplicate_ignored", event_id=event_id)
+            return {"ok": True}
+
+    log.info("stripe.webhook", event_type=event_type, event_id=event_id)
 
     if event_type == "customer.subscription.created":
         await _handle_subscription_created(data, db)
@@ -146,6 +226,15 @@ async def stripe_webhook(
     elif event_type == "invoice.payment_failed":
         await _handle_payment_failed(data, db)
 
+    # Marque l'event traité APRÈS le traitement métier (at-least-once + handlers
+    # idempotents → aucun event perdu, aucun double-effet).
+    if event_id:
+        await db.execute(text(
+            "INSERT INTO stripe_events (event_id, event_type) VALUES (:e, :t) "
+            "ON CONFLICT (event_id) DO NOTHING"
+        ), {"e": event_id, "t": event_type})
+        await db.commit()
+
     return {"ok": True}
 
 
@@ -154,15 +243,47 @@ async def _find_user_by_customer(customer_id: str, db: AsyncSession) -> Optional
     return result.scalar_one_or_none()
 
 
+def _ts(sub: dict, key: str):
+    """Convertit un timestamp Stripe en datetime UTC, None si absent (gardes .get :
+    selon l'event/la version d'API la clé peut manquer → éviter un KeyError → 500 →
+    retry Stripe en boucle)."""
+    v = sub.get(key)
+    return datetime.fromtimestamp(v, tz=timezone.utc) if v else None
+
+
+def _plan_from_sub(sub: dict) -> Optional[str]:
+    """Plan dérivé du price_id réel. None si price inconnu → on N'ACCORDE PAS de plan
+    par défaut (l'ancien fallback 'standard' donnait un accès payant gratuitement)."""
+    try:
+        price_id = sub["items"]["data"][0]["price"]["id"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return PLAN_FROM_PRICE.get(price_id)
+
+
 async def _handle_subscription_created(sub: dict, db: AsyncSession):
-    user = await _find_user_by_customer(sub["customer"], db)
+    user = await _find_user_by_customer(sub.get("customer"), db)
     if not user:
-        log.warning("stripe.webhook.user_not_found", customer=sub["customer"])
+        log.warning("stripe.webhook.user_not_found", customer=sub.get("customer"))
         return
 
+    # Idempotence : si l'abonnement existe déjà (re-livraison/retry), on délègue à
+    # l'update plutôt que de créer un doublon (qui faussait MRR/ARR).
+    existing = await db.execute(
+        select(Subscription).where(Subscription.stripe_subscription_id == sub.get("id"))
+    )
+    if existing.scalar_one_or_none() is not None:
+        await _handle_subscription_updated(sub, db)
+        return
+
+    plan = _plan_from_sub(sub)
+    if plan is None:
+        log.error("stripe.unknown_price", sub=sub.get("id"))
+        return  # ne PAS accorder de plan sur un price non mappé
+
     price_id = sub["items"]["data"][0]["price"]["id"]
-    plan = PLAN_FROM_PRICE.get(price_id, "standard")
-    periodicite = "annual" if "annual" in price_id else "monthly"
+    recurring = (sub["items"]["data"][0]["price"].get("recurring") or {})
+    periodicite = "annual" if recurring.get("interval") == "year" or "annual" in price_id else "monthly"
 
     import uuid
     subscription = Subscription(
@@ -171,10 +292,10 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
         stripe_subscription_id=sub["id"],
         plan=plan,
         periodicite=periodicite,
-        statut="active" if sub["status"] in ("active", "trialing") else sub["status"],
-        periode_debut=datetime.fromtimestamp(sub["current_period_start"], tz=timezone.utc),
-        periode_fin=datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc),
-        essai_fin=datetime.fromtimestamp(sub["trial_end"], tz=timezone.utc) if sub.get("trial_end") else None,
+        statut="active" if sub.get("status") in ("active", "trialing") else sub.get("status"),
+        periode_debut=_ts(sub, "current_period_start"),
+        periode_fin=_ts(sub, "current_period_end"),
+        essai_fin=_ts(sub, "trial_end"),
     )
     db.add(subscription)
 
@@ -192,15 +313,17 @@ async def _handle_subscription_updated(sub: dict, db: AsyncSession):
         await _handle_subscription_created(sub, db)
         return
 
-    price_id = sub["items"]["data"][0]["price"]["id"]
-    plan = PLAN_FROM_PRICE.get(price_id, "standard")
+    plan = _plan_from_sub(sub)
+    if plan is None:
+        log.error("stripe.unknown_price", sub=sub.get("id"))
+        return
 
     subscription.plan = plan
-    subscription.statut = "active" if sub["status"] in ("active", "trialing") else sub["status"]
-    subscription.periode_debut = datetime.fromtimestamp(sub["current_period_start"], tz=timezone.utc)
-    subscription.periode_fin = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc)
+    subscription.statut = "active" if sub.get("status") in ("active", "trialing") else sub.get("status")
+    subscription.periode_debut = _ts(sub, "current_period_start") or subscription.periode_debut
+    subscription.periode_fin = _ts(sub, "current_period_end") or subscription.periode_fin
 
-    user = await _find_user_by_customer(sub["customer"], db)
+    user = await _find_user_by_customer(sub.get("customer"), db)
     if user:
         user.plan = plan if subscription.statut == "active" else "free"
 

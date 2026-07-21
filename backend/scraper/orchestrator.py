@@ -56,6 +56,8 @@ from scraper.db_writer import (
     detect_jockey_change,
     compute_jours_depuis_derniere,
     resolve_bookmaker_course_id,
+    resolve_presse_course_id,
+    compute_and_save_acteur_stats,
 )
 
 log = structlog.get_logger()
@@ -84,6 +86,12 @@ async def _detect_smart_money(session, course_id: str) -> None:
     if prev > 0 and (latest - prev) / prev > 0.20:
         log.info("smart_money.detected", course_id=course_id,
                  variation_pct=round((latest - prev) / prev * 100, 1))
+
+
+def _is_deadlock(exc: Exception) -> bool:
+    """Vrai si l'exception est un deadlock PostgreSQL (transitoire, à rejouer)."""
+    s = (str(getattr(exc, "orig", "")) + " " + str(exc)).lower()
+    return "deadlock detected" in s or "deadlockdetected" in s
 
 
 class BlackTurfOrchestrator:
@@ -189,6 +197,36 @@ class BlackTurfOrchestrator:
         except Exception as log_exc:  # ne jamais laisser le logging casser le cycle
             log.error("orchestrator.log_error_failed", source=source, err=str(log_exc)[:120])
 
+    async def _log_ok(self, source: str, *, nb_courses: int = 0, duree_ms: int = 0) -> None:
+        """Trace une ligne ``ok`` dans scrape_log → la source repasse au vert dans /admin
+        dès qu'un cycle réussit (sinon, sans log de succès, l'UI reste figée sur l'erreur)."""
+        try:
+            async with AsyncSessionLocal() as session:
+                await log_scrape_result(session, source, "ok",
+                                        nb_courses=nb_courses, duree_ms=duree_ms)
+                await session.commit()
+        except Exception as e:  # noqa: BLE001
+            log.warning("orchestrator.log_ok_failed", source=source, err=str(e)[:120])
+
+    async def _commit_unit(self, work, *, retries: int = 4) -> bool:
+        """Exécute ``work(session)`` dans une transaction ISOLÉE puis commit, avec retry
+        sur DEADLOCK (PostgreSQL tue une des 2 transactions concurrentes → on rejoue après
+        un court backoff). De PETITES transactions par unité (course) = fenêtre de lock
+        minimale → on n'a plus le deadlock chronique de resultats/pool_pmu (1 grosse txn sur
+        toutes les courses, en concurrence avec le poller par-course + le cycle PMU)."""
+        for attempt in range(retries):
+            try:
+                async with AsyncSessionLocal() as session:
+                    await work(session)
+                    await session.commit()
+                return True
+            except Exception as e:  # noqa: BLE001
+                if _is_deadlock(e) and attempt < retries - 1:
+                    await asyncio.sleep(0.25 * (2 ** attempt))
+                    continue
+                raise
+        return False
+
     async def run_pmu_cycle(self) -> None:
         """Cycle PMU : récupère programme + cotes live + résultats."""
         t0 = time.time()
@@ -200,6 +238,7 @@ class BlackTurfOrchestrator:
             self._courses_today = courses
 
             nb_partants_total = 0
+            scratched_courses: set[str] = set()   # courses où un cheval vient d'être déclaré non-partant
             for course in courses:
                 r_id = course.reunion_id
                 c_num = int(course.course_id.split("C")[-1])
@@ -219,7 +258,9 @@ class BlackTurfOrchestrator:
                 # commit toutes les bonnes (sinon 1 erreur avorte tout le cycle).
                 try:
                     async with AsyncSessionLocal() as session:
-                        await save_course_to_db(session, course)
+                        scratched_cid = await save_course_to_db(session, course)
+                        if scratched_cid:
+                            scratched_courses.add(scratched_cid)
                         if course.date_heure:
                             # préfixe date du course_id (ddmmyyyy) → garantit que le
                             # course_id du résultat == celui de la course stockée
@@ -244,6 +285,23 @@ class BlackTurfOrchestrator:
                 except Exception as e:
                     log.error("orchestrator.course_save_failed",
                               course_id=course.course_id, err=str(e)[:200])
+
+            # ── NON-PARTANTS : régénérer le prono des courses touchées ──
+            # Quand un cheval est déclaré non-partant, on recalcule immédiatement le
+            # pronostic sur le champ restant (compute_all_features_for_course exclut
+            # déjà non_partant=false → probas renormalisées). On appelle predict_course
+            # DIRECTEMENT : le gel T-10 n'est imposé que par la requête du cycle
+            # prédictions, pas ici → le prono est refait MÊME dans les 10 dernières
+            # minutes, uniquement dans ce cas (exception au gel demandée).
+            if scratched_courses:
+                from ml.pipeline import predict_course
+                for cid in scratched_courses:
+                    try:
+                        await predict_course(cid)
+                        log.info("orchestrator.repredict_after_scratch", course_id=cid)
+                    except Exception as e:
+                        log.error("orchestrator.repredict_scratch_failed",
+                                  course_id=cid, err=str(e)[:200])
 
             duree = int((time.time() - t0) * 1000)
             async with AsyncSessionLocal() as session:
@@ -280,14 +338,21 @@ class BlackTurfOrchestrator:
                     for cheval_data in course_data.get("chevaux", []):
                         nom = cheval_data.get("nom", "").strip()
                         cote_str = cheval_data.get("cote_geny", "")
+                        rang_geny = cheval_data.get("rang_pronostic_geny")
                         if not nom or not cote_str:
                             continue
                         try:
                             cote = float(str(cote_str).replace(",", "."))
-                        except ValueError:
+                        except (ValueError, TypeError):
                             continue
 
-                        # Mise à jour cote_geny dans participations
+                        # Mise à jour cote_geny (+ rang pronostic Geny) dans participations.
+                        # Wiring 2026-06-17 : rang_pronostic_geny est une feature ML qui
+                        # n'était JAMAIS alimentée (donnée extraite puis jetée). Le scraper
+                        # httpx+bs4 la fournit désormais → on la persiste ici.
+                        vals = {"cote_geny": cote}
+                        if isinstance(rang_geny, int) and rang_geny > 0:
+                            vals["rang_pronostic_geny"] = rang_geny
                         stmt = (
                             update(Participation)
                             .where(
@@ -295,7 +360,7 @@ class BlackTurfOrchestrator:
                                     select(Cheval.cheval_id).where(Cheval.nom == nom)
                                 )
                             )
-                            .values(cote_geny=cote)
+                            .values(**vals)
                         )
                         await session.execute(stmt)
 
@@ -630,17 +695,25 @@ class BlackTurfOrchestrator:
         """
         log.info("orchestrator.pool_pmu_start")
         pmu = PmuScraper()
+        t0 = time.time()
         try:
-            async with AsyncSessionLocal() as session:
-                for course in self._courses_today:
+            # Une transaction PAR COURSE + retry deadlock (cf. poll_resultats) : pool_pmu
+            # écrit pool_pmu_historique pendant que d'autres cycles touchent les mêmes
+            # courses → la grosse txn globale deadlockait. Petites txns isolées = robuste.
+            ok_n = 0
+            for course in self._courses_today:
+                try:
                     pool_data = await pmu.get_pool_data(course.reunion_id, course.course_id)
                     if pool_data:
-                        await save_pool_pmu(session, pool_data)
-
-                        # Calculer l'évolution du pool (smart money indicator)
-                        await _detect_smart_money(session, course.course_id)
-
-                await session.commit()
+                        async def _w(session, _pd=pool_data, _cid=course.course_id):
+                            await save_pool_pmu(session, _pd)
+                            await _detect_smart_money(session, _cid)  # smart money indicator
+                        if await self._commit_unit(_w):
+                            ok_n += 1
+                except Exception as e:
+                    log.warning("orchestrator.pool_pmu_course_failed",
+                                course_id=course.course_id, err=str(e)[:160])
+            await self._log_ok("pool_pmu", nb_courses=ok_n, duree_ms=int((time.time() - t0) * 1000))
         except Exception as e:
             log.error("orchestrator.pool_pmu_error", error=str(e))
             await self._log_error("pool_pmu", e)
@@ -725,23 +798,37 @@ class BlackTurfOrchestrator:
 
             pt_pronos = await scraper.get_pronostics_paris_turf()
             ct_pronos = await scraper.get_pronostics_canalturf()
-            all_pronos = pt_pronos + ct_pronos
+            eq_pronos = await scraper.get_pronostics_equidia()
+            all_pronos = pt_pronos + ct_pronos + eq_pronos
 
+            import re as _re
             async with AsyncSessionLocal() as session:
+                nb_saved = 0
                 for prono in all_pronos:
-                    # Résoudre le pseudo_id en course_id PMU réel
-                    parts = prono.course_id.split("_")
-                    hippodrome_hint = parts[1] if len(parts) > 1 else ""
-                    real_course_id = await resolve_bookmaker_course_id(
-                        session, hippodrome_hint, ""
-                    )
+                    # Résolution course_id : priorité au suffixe R{r}C{c} (EXACT,
+                    # encodé par les scrapers presse 2026-06-17), repli sur
+                    # l'hippodrome. Avant, l'heure vide → 0 match → presse perdue.
+                    real_course_id = None
+                    m = _re.search(r"_R(\d+)C(\d+)$", prono.course_id)
+                    if m:
+                        real_course_id = await resolve_presse_course_id(
+                            session, int(m.group(1)), int(m.group(2))
+                        )
+                    if not real_course_id:
+                        parts = prono.course_id.split("_")
+                        hippodrome_hint = parts[1] if len(parts) > 1 else ""
+                        real_course_id = await resolve_bookmaker_course_id(
+                            session, hippodrome_hint, ""
+                        )
                     if real_course_id:
                         await save_pronostic_presse(session, prono, real_course_id)
+                        nb_saved += 1
 
                 await session.commit()
+                log.info("orchestrator.presse_saved", scraped=len(all_pronos), saved=nb_saved)
                 await log_scrape_result(
                     session, "paris_turf", "ok",
-                    nb_courses=len(all_pronos),
+                    nb_courses=nb_saved,
                     duree_ms=int((time.time() - t0) * 1000),
                 )
                 await session.commit()
@@ -815,6 +902,10 @@ class BlackTurfOrchestrator:
         try:
             async with AsyncSessionLocal() as session:
                 await compute_and_save_jockey_entraineur_assoc(session, saison)
+                await session.commit()
+                # Stats globales jockey/entraîneur calculées depuis nos résultats
+                # (Turfoo 403 → tables à 0 sinon → features qualité acteur mortes).
+                await compute_and_save_acteur_stats(session)
                 await session.commit()
                 await log_scrape_result(session, "associations", "ok")
                 await session.commit()
@@ -986,7 +1077,7 @@ class BlackTurfOrchestrator:
                       WHERE p.course_id = c.course_id AND p.non_partant = false
                   )
                   AND (
-                      c.date_heure > now() + interval '10 minutes'
+                      c.date_heure > now() + interval '5 minutes'
                       OR NOT EXISTS (
                           SELECT 1 FROM predictions pr
                           JOIN participations pp
@@ -1033,6 +1124,7 @@ class BlackTurfOrchestrator:
     async def poll_resultats(self) -> None:
         """Polling résultats toutes les 3 minutes pour courses en cours."""
         pmu = PmuScraper()
+        t0 = time.time()
         try:
             async with AsyncSessionLocal() as session:
                 from sqlalchemy import select, and_
@@ -1040,35 +1132,64 @@ class BlackTurfOrchestrator:
                 from datetime import datetime, timedelta
 
                 now = datetime.now()
-                # Courses qui auraient dû finir (fenêtre 36h pour rattraper hier)
-                result = await session.execute(
-                    select(DBCourse)
-                    .where(
-                        and_(
-                            DBCourse.statut == "a_venir",
-                            DBCourse.date_heure < now,
-                            DBCourse.date_heure > now - timedelta(hours=36),
-                        )
-                    )
-                )
-                courses = result.scalars().all()
+                win = now - timedelta(hours=36)
+                # Courses à (re)poller dans une fenêtre 36h :
+                #  - 'a_venir' déjà passées → récupérer l'arrivée ;
+                #  - 'termine' MAIS rapports PMU encore absents, OU runs profil non
+                #    réglés ('pending'/'partial'). Le PMU publie l'arrivée PUIS les
+                #    RAPPORTS 5-10 min plus tard ; une course passée 'termine' sur la
+                #    seule arrivée ne re-fetchait JAMAIS ses rapports (ancien filtre
+                #    statut='a_venir' uniquement) → gains figés "en attente". On
+                #    re-poll jusqu'à rapports publiés + tous les runs réglés, puis la
+                #    course sort d'elle-même du périmètre (set borné par la fenêtre).
+                from sqlalchemy import text as _text
+                courses = (await session.execute(_text("""
+                    SELECT c.course_id AS course_id, c.reunion_id AS reunion_id,
+                           c.date_heure AS date_heure
+                    FROM courses c
+                    LEFT JOIN resultats r ON r.course_id = c.course_id
+                    WHERE c.date_heure < :now AND c.date_heure > :win
+                      AND (
+                        c.statut = 'a_venir'
+                        OR (c.statut = 'termine' AND (
+                              r.course_id IS NULL
+                              OR r.rapports IS NULL
+                              OR r.rapports::text IN ('{}', 'null')
+                              OR EXISTS (SELECT 1 FROM profil_run_log p
+                                         WHERE p.course_id = c.course_id
+                                           AND p.statut IN ('pending', 'partial'))
+                        ))
+                      )
+                    ORDER BY c.date_heure
+                """), {"now": now, "win": win})).all()
 
-                for course in courses:
+            # Sauvegarde PAR COURSE en transaction ISOLÉE + retry deadlock. La fenêtre 36h
+            # repolle des courses que le cycle PMU + le poller live touchent aussi → une
+            # grosse transaction globale deadlockait en boucle (resultats KO depuis des
+            # semaines). Chaque course = sa propre petite txn, indépendante et rejouable.
+            ok_n = 0
+            for course in courses:
+                try:
                     r_id = course.reunion_id
                     c_num = int(course.course_id.split("C")[-1])
                     cid_prefix = course.course_id[:8] if course.course_id[:8].isdigit() else course.date_heure
                     resultat = await pmu.get_rapports_definitifs(r_id, c_num, cid_prefix)
                     if resultat and resultat.ordre_arrivee:
-                        await save_resultat_to_db(session, resultat)
-                        log.info("orchestrator.resultat_polled", course_id=course.course_id)
+                        async def _w(session, _r=resultat):
+                            await save_resultat_to_db(session, _r)
+                        if await self._commit_unit(_w):
+                            ok_n += 1
+                            log.info("orchestrator.resultat_polled", course_id=course.course_id)
+                            # Déclencher le pipeline post-course via RQ
+                            from rq import Queue
+                            import redis
+                            rq = Queue(connection=redis.from_url(settings.redis_url))
+                            rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
+                except Exception as e:  # une course fautive n'arrête pas le poll
+                    log.warning("orchestrator.resultat_course_failed",
+                                course_id=course.course_id, err=str(e)[:160])
 
-                        # Déclencher le pipeline post-course via RQ
-                        from rq import Queue
-                        import redis
-                        rq = Queue(connection=redis.from_url(settings.redis_url))
-                        rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
-
-                await session.commit()
+            await self._log_ok("resultats", nb_courses=ok_n, duree_ms=int((time.time() - t0) * 1000))
         except Exception as e:
             log.error("orchestrator.resultats_error", error=str(e))
             await self._log_error("resultats", e)

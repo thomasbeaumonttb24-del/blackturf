@@ -154,17 +154,17 @@ export default function AlgorithmeMonitoringPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-5 sm:py-8 space-y-5 sm:space-y-8">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Brain className="w-6 h-6 text-blue-600" />
-              Monitoring Algorithme
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
+              <Brain className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 shrink-0" />
+              Monitoring Algo
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Adaptive learning · Drift detection · Meta-learner · Biais contextuels
+            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+              Adaptive learning · Drift · Meta-learner · Biais
             </p>
           </div>
           <Button
@@ -172,10 +172,10 @@ export default function AlgorithmeMonitoringPage() {
             size="sm"
             onClick={() => refreshState()}
             disabled={loadingState}
-            className="gap-2"
+            className="gap-2 shrink-0"
           >
             <RefreshCw className={`w-4 h-4 ${loadingState ? "animate-spin" : ""}`} />
-            Actualiser
+            <span className="hidden sm:inline">Actualiser</span>
           </Button>
         </div>
 
@@ -415,8 +415,8 @@ export default function AlgorithmeMonitoringPage() {
                   <div className="space-y-1">
                     {learning.signaux.map((s: { signal: string; n: number; win_rate: number; roi: number }) => (
                       <div key={s.signal} className="flex items-center gap-2 text-[11px]">
-                        <span className="w-40 shrink-0 truncate font-medium">{s.signal}</span>
-                        <span className={`w-16 text-right font-mono font-bold ${s.roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                        <span className="w-28 sm:w-40 shrink-0 truncate font-medium">{s.signal}</span>
+                        <span className={`w-12 sm:w-16 text-right font-mono font-bold ${s.roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                           {s.roi >= 0 ? "+" : ""}{Math.round(s.roi * 100)}%
                         </span>
                         <span className="text-muted-foreground tabular-nums">win {Math.round(s.win_rate * 100)}% · {s.n}</span>
@@ -710,7 +710,36 @@ export default function AlgorithmeMonitoringPage() {
             ) : !history?.length ? (
               <div className="p-8 text-center text-sm text-muted-foreground">Aucune donnée disponible</div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* Mobile : cartes par course */}
+              <div className="sm:hidden space-y-2 p-3">
+                {(history as HistoryEntry[]).map((h, i) => (
+                  <div key={h.log_id ?? i} className={`rounded-lg border border-border/60 p-2.5 text-xs ${h.was_surprise ? "bg-red-500/5" : ""}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium truncate">{h.hippodrome ?? "—"}</span>
+                      <span className="text-muted-foreground font-mono shrink-0">
+                        {h.analyzed_at ? format(new Date(h.analyzed_at), "dd/MM HH:mm") : "—"}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
+                      <span className="text-muted-foreground">{h.discipline ?? "—"}</span>
+                      <span className="text-muted-foreground">Brier <span className={`font-mono ${(h.brier_score ?? 0) > 0.25 ? "text-red-600" : (h.brier_score ?? 0) < 0.18 ? "text-emerald-600" : "text-foreground"}`}>{h.brier_score?.toFixed(4) ?? "—"}</span></span>
+                      <span className="text-muted-foreground">IA {h.gagnant_proba_ia != null ? `${(h.gagnant_proba_ia * 100).toFixed(1)}%` : "—"}</span>
+                      {h.gagnant_rang_predit != null && (
+                        <span className={`font-bold ${h.gagnant_rang_predit === 1 ? "text-emerald-600" : h.gagnant_rang_predit <= 3 ? "text-amber-600" : "text-muted-foreground"}`}>#{h.gagnant_rang_predit}</span>
+                      )}
+                      {h.was_surprise && <span className="text-red-600 font-bold">⚡ surprise</span>}
+                      {h.temperature_update != null && (
+                        <span className={`font-mono ${h.temperature_update > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                          ΔT° {h.temperature_update > 0 ? "+" : ""}{h.temperature_update.toFixed(4)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop : tableau */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border/60">
@@ -768,6 +797,7 @@ export default function AlgorithmeMonitoringPage() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -800,7 +830,29 @@ export default function AlgorithmeMonitoringPage() {
                 Pas encore de biais détectés (nécessite ≥5 courses par contexte)
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* Mobile : cartes par contexte */}
+              <div className="sm:hidden space-y-2 p-3">
+                {biasRows.map((row, i) => (
+                  <div key={i} className="rounded-lg border border-border/60 p-2.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] truncate" title={row.contexte}>{row.hippodrome ?? row.contexte}</span>
+                      <span className={`font-bold font-mono shrink-0 ${Math.abs(row.correction_factor ?? 0) > 0.08 ? ((row.correction_factor ?? 0) > 0 ? "text-red-600" : "text-blue-600") : "text-muted-foreground"}`}>
+                        {(row.correction_factor ?? 0) > 0 ? "+" : ""}{(row.correction_factor ?? 0).toFixed(4)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums text-muted-foreground">
+                      {row.discipline && <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{row.discipline}</Badge>}
+                      {row.terrain && <span>{row.terrain}</span>}
+                      <span>{row.nb_courses} courses</span>
+                      <span className="text-amber-600">{(((row.taux_surprise ?? 0) * 100)).toFixed(1)}% surpr.</span>
+                      <span className="font-mono">Brier {row.brier_moyen?.toFixed(4) ?? "—"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop : tableau */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border/60">
@@ -844,6 +896,7 @@ export default function AlgorithmeMonitoringPage() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>

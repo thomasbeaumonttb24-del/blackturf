@@ -5,7 +5,7 @@ from datetime import datetime, timezone, date
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Hippodrome, Reunion, Course, Cheval, Participation
+from db.models import Hippodrome, Reunion, Course, Cheval, Participation, Prediction
 
 pytestmark = pytest.mark.asyncio
 
@@ -61,6 +61,18 @@ async def _create_test_course(db: AsyncSession) -> str:
         non_partant=False,
     )
     db.add(part)
+
+    # Prédiction figée : sans elle, /mise-plan renvoie 409 (« pronostic pas encore
+    # disponible »). Le test du happy-path doit donc fournir un prono.
+    pred = Prediction(
+        prediction_id=str(uuid.uuid4()),
+        participation_id=part.participation_id,
+        course_id="R1C1",
+        proba_top1=0.35,
+        proba_top3=0.70,
+        rang_predit=1,
+    )
+    db.add(pred)
     await db.commit()
     return "R1C1"
 

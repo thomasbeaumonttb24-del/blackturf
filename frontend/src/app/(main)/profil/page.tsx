@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,8 +10,6 @@ import {
   TrendingUp, Zap, Brain, Star, ChevronRight, Lock,
 } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { authApi, api } from "@/lib/api";
 import { planLabel, formatDate, cn } from "@/lib/utils";
@@ -88,26 +86,29 @@ const RISK_OPTIONS = [
   {
     value: "conservateur" as const,
     icon: "🛡️",
-    label: "Conservateur",
-    desc: "Mises faibles, protection du capital",
+    label: "Prudent",
+    desc: "Mises faibles, capital protégé",
     color: "text-blue-600",
     activeBorder: "border-blue-400 bg-blue-50",
+    dot: "bg-blue-500",
   },
   {
     value: "equilibre" as const,
     icon: "⚖️",
-    label: "Équilibré",
-    desc: "Rapport risque / rendement optimal",
+    label: "Modéré",
+    desc: "Risque / rendement équilibré",
     color: "text-amber-600",
     activeBorder: "border-amber-400 bg-amber-50",
+    dot: "bg-amber-500",
   },
   {
     value: "agressif" as const,
     icon: "🚀",
-    label: "Agressif",
-    desc: "Mises maximisées, rendement prioritaire",
+    label: "Risqué",
+    desc: "Mises max, rendement visé",
     color: "text-red-600",
     activeBorder: "border-red-400 bg-red-50",
+    dot: "bg-red-500",
   },
 ];
 
@@ -138,18 +139,29 @@ export default function ProfilPage() {
   const { user, loading, refreshUser } = useRequireAuth();
   const [savingProfile, setSavingProfile] = useState(false);
   const [loadingPortal, setLoadingPortal] = useState(false);
+  const [loadingCancel, setLoadingCancel] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [activeSection, setActiveSection] = useState<"profile" | "plan" | "notifs" | "security">("profile");
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<ProfileForm>({
+  const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      prenom: user?.prenom || "",
-      nom: user?.nom || "",
-      bankroll_initiale: user?.bankroll_initiale || undefined,
-      profil_risque: (user?.profil_risque as "conservateur" | "equilibre" | "agressif") || "equilibre",
+      prenom: "", nom: "", bankroll_initiale: undefined, profil_risque: "equilibre",
     },
   });
+
+  // useRequireAuth charge `user` de façon asynchrone : sans ce reset, le formulaire
+  // resterait sur les valeurs vides du 1er rendu (bug d'affichage : champs vides).
+  useEffect(() => {
+    if (user) {
+      reset({
+        prenom: user.prenom || "",
+        nom: user.nom || "",
+        bankroll_initiale: user.bankroll_initiale ?? undefined,
+        profil_risque: (user.profil_risque as "conservateur" | "equilibre" | "agressif") || "equilibre",
+      });
+    }
+  }, [user, reset]);
 
   const profilRisque = watch("profil_risque");
   const isFree = user && ["free", "decouverte"].includes(user.plan);
@@ -177,6 +189,19 @@ export default function ProfilPage() {
     } catch {
       toast.error("Erreur d'accès au portail Stripe");
       setLoadingPortal(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!window.confirm("Résilier votre abonnement ? Vous conservez l'accès jusqu'à la fin de la période en cours.")) return;
+    setLoadingCancel(true);
+    try {
+      const res = await api.post("/stripe/cancel");
+      toast.success(res.data?.message || "Demande de résiliation enregistrée.");
+    } catch {
+      toast.error("Erreur lors de la résiliation. Contactez contact@blackturf.fr");
+    } finally {
+      setLoadingCancel(false);
     }
   }
 
@@ -219,10 +244,10 @@ export default function ProfilPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5 sm:space-y-6">
 
       {/* ── User header card ── */}
-      <div className="rounded-2xl border border-gray-200 bg-white px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
+      <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-white to-amber-50/40 px-4 sm:px-6 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
         <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center text-white text-xl font-bold shadow-sm flex-shrink-0">
           {initials}
         </div>
@@ -255,7 +280,7 @@ export default function ProfilPage() {
         {isFree && (
           <Link
             href="/tarifs"
-            className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
+            className="flex-shrink-0 self-start inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
           >
             <Zap className="h-4 w-4" /> Passer Standard
           </Link>
@@ -265,17 +290,17 @@ export default function ProfilPage() {
       {/* ── Sidebar nav + content ── */}
       <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-4">
 
-        {/* Sidebar */}
-        <div className="flex sm:flex-col gap-1 overflow-x-auto sm:overflow-visible">
+        {/* Sidebar — 2×2 sur mobile (pas de scroll), colonne sur desktop */}
+        <div className="grid grid-cols-2 sm:flex sm:flex-col gap-1.5 sm:gap-1">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveSection(id)}
               className={cn(
-                "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-all text-left whitespace-nowrap",
+                "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
                 activeSection === id
                   ? "bg-gray-900 text-white shadow-sm"
-                  : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+                  : "text-gray-600 bg-gray-50 sm:bg-transparent hover:bg-gray-100 hover:text-gray-900",
               )}
             >
               <Icon className="h-4 w-4 flex-shrink-0" />
@@ -290,11 +315,11 @@ export default function ProfilPage() {
           {/* ── Profile ── */}
           {activeSection === "profile" && (
             <form onSubmit={handleSubmit(onSave)}>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Informations personnelles</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Vos données de compte et préférences IA</p>
               </div>
-              <div className="px-6 py-5 space-y-5">
+              <div className="px-4 sm:px-6 py-5 space-y-5">
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Prénom" error={errors.prenom?.message}>
                     <input {...register("prenom")} className={inputCls} placeholder="Jean" />
@@ -324,14 +349,14 @@ export default function ProfilPage() {
                   <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide">
                     Profil de risque
                   </label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     {RISK_OPTIONS.map((opt) => (
                       <button
                         key={opt.value}
                         type="button"
                         onClick={() => setValue("profil_risque", opt.value)}
                         className={cn(
-                          "relative rounded-xl border-2 p-3 text-left transition-all",
+                          "relative rounded-xl border-2 p-2.5 sm:p-3 text-left transition-all",
                           profilRisque === opt.value
                             ? opt.activeBorder
                             : "border-gray-200 hover:border-gray-300 bg-white",
@@ -349,7 +374,7 @@ export default function ProfilPage() {
                         </div>
                         <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">{opt.desc}</div>
                         {profilRisque === opt.value && (
-                          <span className="absolute top-2 right-2 h-4 w-4 rounded-full bg-current flex items-center justify-center">
+                          <span className={cn("absolute top-2 right-2 h-4 w-4 rounded-full flex items-center justify-center", opt.dot)}>
                             <Check className="h-2.5 w-2.5 text-white" />
                           </span>
                         )}
@@ -358,7 +383,7 @@ export default function ProfilPage() {
                   </div>
                 </div>
               </div>
-              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+              <div className="px-4 sm:px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
                 <button
                   type="submit"
                   disabled={savingProfile}
@@ -374,16 +399,16 @@ export default function ProfilPage() {
           {/* ── Plan ── */}
           {activeSection === "plan" && (
             <div>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Abonnement</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Gérez votre plan et votre facturation</p>
               </div>
-              <div className="px-6 py-5 space-y-5">
+              <div className="px-4 sm:px-6 py-5 space-y-5">
 
                 {/* Current plan badge */}
                 <div
                   className={cn(
-                    "rounded-2xl p-5 border-2",
+                    "rounded-2xl p-4 sm:p-5 border-2",
                     ["pro", "expert"].includes(planKey)
                       ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-white"
                       : ["starter", "standard"].includes(planKey)
@@ -429,13 +454,13 @@ export default function ProfilPage() {
 
                 {/* CTA */}
                 {isFree ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 space-y-3">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 space-y-3">
                     <div className="flex items-center gap-2">
                       <Zap className="h-5 w-5 text-amber-500" />
-                      <p className="font-semibold text-amber-800">Débloquez toutes les fonctionnalités</p>
+                      <p className="font-semibold text-amber-800">Débloquez tout</p>
                     </div>
                     <p className="text-sm text-amber-700">
-                      Passez Standard pour accéder aux paris de valeur illimités, à l&apos;assistant IA et aux notifications en temps réel.
+                      Paris de valeur illimités, assistant IA et notifications en temps réel.
                     </p>
                     <Link
                       href="/tarifs"
@@ -445,15 +470,25 @@ export default function ProfilPage() {
                     </Link>
                   </div>
                 ) : (
-                  <button
-                    onClick={handlePortal}
-                    disabled={loadingPortal}
-                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors disabled:opacity-50"
-                  >
-                    {loadingPortal ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                    Gérer l&apos;abonnement via Stripe
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={handlePortal}
+                      disabled={loadingPortal}
+                      className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors disabled:opacity-50"
+                    >
+                      {loadingPortal ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                      Gérer l&apos;abonnement via Stripe
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      disabled={loadingCancel}
+                      className="flex items-center gap-2 text-sm text-red-500 hover:text-red-600 font-medium transition-colors disabled:opacity-50"
+                    >
+                      {loadingCancel ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Résilier mon abonnement
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -462,12 +497,12 @@ export default function ProfilPage() {
           {/* ── Notifications ── */}
           {activeSection === "notifs" && (
             <div>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Notifications</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Recevez les alertes paris de valeur en temps réel</p>
+                <p className="text-xs text-gray-500 mt-0.5">Alertes paris de valeur en temps réel</p>
               </div>
-              <div className="px-6 py-5 space-y-4">
-                <div className="flex items-center justify-between rounded-2xl border border-gray-200 p-4">
+              <div className="px-4 sm:px-6 py-5 space-y-4">
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 p-4">
                   <div>
                     <p className="text-sm font-semibold text-gray-800">Notifications</p>
                     <p className="text-xs text-gray-400 mt-0.5">Alertes de valeur instantanées sur votre appareil</p>
@@ -506,17 +541,17 @@ export default function ProfilPage() {
           {/* ── Security ── */}
           {activeSection === "security" && (
             <div>
-              <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Sécurité</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Statut de votre compte</p>
               </div>
-              <div className="px-6 py-5 space-y-3">
+              <div className="px-4 sm:px-6 py-5 space-y-3">
 
                 {/* Email verified row */}
-                <div className="flex items-center justify-between rounded-2xl border border-gray-200 p-4">
-                  <div>
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 p-4">
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-800">E-mail vérifié</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{user.email}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{user.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {user.email_verified ? (
@@ -558,7 +593,7 @@ export default function ProfilPage() {
       </div>
 
       {/* ── Responsible gambling ── */}
-      <div className="rounded-2xl border border-orange-100 bg-orange-50/50 px-5 py-4 text-xs text-orange-700">
+      <div className="rounded-2xl border border-orange-100 bg-orange-50/50 px-4 sm:px-5 py-4 text-xs text-orange-700">
         <p className="font-semibold mb-1">⚠️ Jeu responsable</p>
         <p>
           Si vous avez des difficultés à contrôler votre jeu, appelez le{" "}

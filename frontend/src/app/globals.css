@@ -485,3 +485,104 @@
 @media (prefers-reduced-motion: reduce) {
   .loop-orbit, .loop-flow, .loop-node, .delta-blink { animation: none !important; }
 }
+
+/* ════════ VISUEL / PHOTO — refonte cinématique ════════ */
+
+/* Ken Burns : zoom + pan lents sur les photos de fond (cinématique). */
+@keyframes kenBurns {
+  0%   { transform: scale(1.08) translate(0, 0); }
+  50%  { transform: scale(1.16) translate(-1.5%, -1.5%); }
+  100% { transform: scale(1.08) translate(0, 0); }
+}
+.ken-burns { animation: kenBurns 22s ease-in-out infinite; will-change: transform; }
+
+/* Carte qui se soulève au survol (dynamisme). */
+.tilt-card { transition: transform .35s cubic-bezier(0.16,1,0.3,1), box-shadow .35s ease; }
+.tilt-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 22px 48px -18px rgba(180,83,9,0.35), 0 8px 20px -12px rgba(17,24,39,0.25);
+}
+
+/* Fond mesh-gradient animé (or/ambre premium, sans photo). */
+@keyframes meshShift {
+  0%, 100% { background-position: 0% 50%, 100% 50%, 50% 0%; }
+  50%      { background-position: 100% 50%, 0% 50%, 50% 100%; }
+}
+.mesh-anim {
+  background:
+    radial-gradient(60% 60% at 15% 25%, rgba(245,158,11,0.18), transparent 60%),
+    radial-gradient(55% 55% at 85% 30%, rgba(217,119,6,0.14), transparent 60%),
+    radial-gradient(70% 70% at 50% 100%, rgba(251,191,36,0.12), transparent 60%);
+  background-size: 200% 200%, 200% 200%, 200% 200%;
+  animation: meshShift 16s ease-in-out infinite;
+}
+
+/* Puce flottante (chips de stats sur le bandeau cinématique). */
+@keyframes chipFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+.float-chip { animation: chipFloat 5s ease-in-out infinite; }
+.float-chip:nth-child(2) { animation-delay: .8s; }
+.float-chip:nth-child(3) { animation-delay: 1.6s; }
+
+/* Apparition douce de l'image cinématique. */
+@keyframes cineFade { from { opacity: 0; } to { opacity: 1; } }
+.cine-fade { animation: cineFade 1.2s ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ken-burns, .float-chip, .cine-fade { animation: none !important; }
+  .tilt-card { transition: none !important; }
+  .tilt-card:hover { transform: none !important; }
+}
+
+/* Blog & guides article typography */
+.blog-prose p { margin: 0 0 1rem; line-height: 1.7; color: #374151; font-size: 0.95rem; }
+.blog-prose h2 { margin: 1.75rem 0 0.6rem; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; color: #111827; }
+.blog-prose a { color: #b45309; text-decoration: underline; text-underline-offset: 2px; }
+.blog-prose a:hover { color: #92400e; }
+.blog-prose strong { color: #111827; font-weight: 600; }
+.blog-prose em { font-style: italic; }
+.blog-prose ul { margin: 0 0 1rem 1.1rem; list-style: disc; }
+.blog-prose li { margin: 0.25rem 0; line-height: 1.6; color: #374151; font-size: 0.95rem; }
+
+/* ── Article typography premium (override de la base) ── */
+.blog-prose { color: #374151; font-size: 1rem; }
+.blog-prose > p:first-of-type { font-size: 1.075rem; line-height: 1.75; color: #1f2937; }
+.blog-prose p { margin: 0 0 1.1rem; line-height: 1.78; }
+.blog-prose h2 {
+  position: relative;
+  margin: 2.1rem 0 0.7rem;
+  padding-left: 0.85rem;
+  font-family: var(--font-space-grotesk, var(--font-inter));
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: #111827;
+}
+.blog-prose h2::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.18em; bottom: 0.18em;
+  width: 4px; border-radius: 999px;
+  background: linear-gradient(180deg, #B45309, #F59E0B);
+}
+.blog-prose h3 { margin: 1.4rem 0 0.4rem; font-weight: 600; font-size: 1.02rem; color: #111827; }
+.blog-prose a { color: #B45309; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgba(180,83,9,0.35); transition: color .15s, text-decoration-color .15s; }
+.blog-prose a:hover { color: #92400E; text-decoration-color: #92400E; }
+.blog-prose strong { color: #111827; font-weight: 600; }
+.blog-prose em { font-style: italic; }
+.blog-prose ul { margin: 0 0 1.1rem; padding: 0; list-style: none; }
+.blog-prose ul li { position: relative; margin: 0.4rem 0; padding-left: 1.4rem; line-height: 1.65; }
+.blog-prose ul li::before {
+  content: "";
+  position: absolute; left: 0.15rem; top: 0.6em;
+  width: 7px; height: 7px; border-radius: 999px;
+  background: linear-gradient(135deg, #D97706, #F59E0B);
+}
+.blog-prose blockquote {
+  margin: 1.3rem 0; padding: 0.6rem 1rem;
+  border-left: 3px solid #F59E0B;
+  background: #FFFBEB; border-radius: 0 0.5rem 0.5rem 0;
+  color: #4b5563; font-style: italic;
+}

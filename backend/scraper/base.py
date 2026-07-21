@@ -181,10 +181,12 @@ class PartantScrape:
     nb_places_second: Optional[int] = None
     nb_places_troisieme: Optional[int] = None
     handicap_distance: Optional[int] = None      # distance de handicap (mètres)
+    valeur_handicap: Optional[int] = None        # valeurHandicap PMU — note handicapeur (#10)
     indicateur_inedit: Optional[bool] = None     # cheval n'ayant jamais couru
     jument_pleine: Optional[bool] = None
     race: Optional[str] = None                   # race/breed
     robe: Optional[str] = None                   # robe (couleur)
+    non_partant: Optional[bool] = None           # statut PMU NON_PARTANT (cheval retiré)
     source: str = "pmu"
     scraped_at: str = ""
 

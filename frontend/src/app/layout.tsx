@@ -53,6 +53,30 @@ export const metadata: Metadata = {
     description: "Plan de mise personnalisé. Paris de valeur en temps réel.",
   },
   robots: { index: true, follow: true },
+  alternates: { canonical: "/" },
+};
+
+// Données structurées globales (organisation + site) → éligibilité rich results / sitelinks.
+const orgJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "BlackTurf",
+  url: "https://blackturf.fr",
+  logo: "https://blackturf.fr/logo.png",
+  description:
+    "Conseiller IA en paris hippiques PMU : plan de mise personnalisé et paris de valeur, réentraîné après chaque course.",
+};
+const siteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "BlackTurf",
+  url: "https://blackturf.fr",
+  inLanguage: "fr-FR",
+  potentialAction: {
+    "@type": "SearchAction",
+    target: "https://blackturf.fr/recherche?q={search_term_string}",
+    "query-input": "required name=search_term_string",
+  },
 };
 
 export const viewport: Viewport = {
@@ -64,11 +88,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-      </head>
       <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased min-h-screen bg-background`}>
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }} />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(siteJsonLd) }} />
         <AuthProvider>{children}</AuthProvider>
         <Toaster
           theme="light"

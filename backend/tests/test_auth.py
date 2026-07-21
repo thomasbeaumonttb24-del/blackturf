@@ -9,7 +9,7 @@ pytestmark = pytest.mark.asyncio
 async def test_register_success(client: AsyncClient):
     resp = await client.post("/api/v1/auth/register", json={
         "email": "new@blackturf.fr",
-        "password": "Pass123!",
+        "password": "TestPass12!",
     })
     assert resp.status_code == 200
     data = resp.json()
@@ -21,7 +21,7 @@ async def test_register_success(client: AsyncClient):
 async def test_register_duplicate_email(client: AsyncClient, auth_headers):
     resp = await client.post("/api/v1/auth/register", json={
         "email": "test@blackturf.fr",
-        "password": "Pass123!",
+        "password": "TestPass12!",
     })
     assert resp.status_code == 400
 
@@ -131,7 +131,7 @@ async def test_register_new_user_plan_is_free(client: AsyncClient):
     """Nouveaux inscrits → plan free par défaut."""
     resp = await client.post("/api/v1/auth/register", json={
         "email": "newuser2@blackturf.fr",
-        "password": "Pass123!",
+        "password": "TestPass12!",
         "prenom": "Jean",
         "nom": "Dupont",
     })
@@ -142,7 +142,7 @@ async def test_register_new_user_plan_is_free(client: AsyncClient):
 async def test_profil_risque_defaut_equilibre(client: AsyncClient):
     resp = await client.post("/api/v1/auth/register", json={
         "email": "newuser3@blackturf.fr",
-        "password": "Pass123!",
+        "password": "TestPass12!",
     })
     assert resp.status_code == 200
     token = resp.json()["access_token"]

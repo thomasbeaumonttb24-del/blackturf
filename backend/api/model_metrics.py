@@ -145,9 +145,25 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
 
     roi = plausible_roi(mv.roi_simule if mv else None)
 
+    # ROI RÉEL observé sur les pronos émis RÉGLÉS (profil_run_log, statut='settled') : le
+    # SEUL ROI honnête. La sim d'entraînement (roi_simule) est une illusion in-sample (cf.
+    # audit edge : +150% in-sample → -52% live) → déjà masquée. On publie ici le ROI
+    # réellement réalisé (négatif assumé : pas d'edge PMU). Non attribuable par version
+    # (profil_run_log n'a pas de version_id) → représentatif du modèle ACTIF en service.
+    roi_reel = None
+    try:
+        _r = (await db.execute(_text(
+            "SELECT AVG(roi_reel) FROM profil_run_log "
+            "WHERE statut = 'settled' AND roi_reel IS NOT NULL"))).scalar()
+        if _r is not None:
+            roi_reel = round(float(_r), 4)
+    except Exception:
+        roi_reel = None
+
     return {
         "auc_roc": auc,
         "precision_top3": precision_top3,
         "roi_simule": roi,
+        "roi_reel": roi_reel,
         "nb_courses_evaluees": rll_total,
     }
