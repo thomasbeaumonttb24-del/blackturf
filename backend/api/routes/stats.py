@@ -67,15 +67,26 @@ def _winner_entry(classement) -> Optional[dict]:
 async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float = 10.0, start: float = 1000.0) -> dict:
     """Backtest HONNÊTE : 10€ flat en Simple Gagnant sur chaque value bet ★★★+
     (niveau ≥ 3) des `since_days` derniers jours, réglé sur l'arrivée RÉELLE à la
-    COTE PMU RÉELLE. Source unique pour la courbe d'équité ET le ROI simulé 6 mois
-    (évite toute divergence). is_real=False si < 10 paris."""
+    COTE FIGÉE pré-départ (jamais la cote de clôture) et UNIQUEMENT sur les value
+    bets détectés AVANT le départ (garde anti-backfill). Même méthode honnête que
+    backtest.py / edge_monitor.py — cf. audit 2026-07-21. Source unique pour la
+    courbe d'équité ET le ROI simulé 6 mois. is_real=False si < 10 paris."""
     since = datetime.now(timezone.utc) - timedelta(days=since_days)
     rows = (await db.execute(
-        select(ValueBet, Participation, Course, Resultat)
+        select(ValueBet, Participation, Course, Resultat, Prediction)
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
         .join(Course, Course.course_id == ValueBet.course_id)
+        .outerjoin(Prediction, Prediction.prediction_id == ValueBet.prediction_id)
         .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
-        .where(ValueBet.niveau >= 3, Course.statut == "termine", Course.date_heure >= since)
+        .where(
+            ValueBet.niveau >= 3,
+            Course.statut == "termine",
+            Course.date_heure >= since,
+            # Garde ANTI-BACKFILL : le value bet doit avoir été détecté AVANT le
+            # départ. Sinon = pari reconstruit a posteriori sur une course connue
+            # (in-sample) → ROI gonflé.
+            ValueBet.detecte_a < Course.date_heure,
+        )
         .order_by(Course.date_heure)
         .limit(500)
     )).all()
@@ -85,11 +96,14 @@ async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float
 
     bankroll = start
     points = []
-    for vb, part, course, resultat in rows:
+    for vb, part, course, resultat, pred in rows:
         _w = _winner_entry(resultat.classement) if resultat else None
         gagne = bool(_w and _w.get("numero") == part.numero)
-        if gagne and part.cote_pmu and part.cote_pmu > 1:
-            bankroll += (part.cote_pmu - 1) * mise
+        # COTE FIGÉE au moment du prono (pré-départ) ; fallback cote_pmu si absente.
+        # Régler à cote_pmu seule pouvait utiliser une cote de clôture → ROI biaisé.
+        cote = pred.cote_figee if (pred and pred.cote_figee and pred.cote_figee > 1) else part.cote_pmu
+        if gagne and cote and cote > 1:
+            bankroll += (cote - 1) * mise
         else:
             bankroll -= mise
         points.append({"date": course.date_heure.strftime("%Y-%m-%d"), "bankroll": round(bankroll, 2)})
