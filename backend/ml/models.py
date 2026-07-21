@@ -13,6 +13,7 @@ SHAP :
   Calculé sur XGBoost (meilleure compatibilité).
   Valeurs SHAP stockées dans feature_importance + disponibles par partant.
 """
+import os
 import pickle
 import json
 import structlog
@@ -32,8 +33,17 @@ from lightgbm import LGBMClassifier
 
 log = structlog.get_logger()
 
-MODELS_DIR = Path("/app/models")
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR = Path(os.getenv("BT_MODELS_DIR", "/app/models"))
+try:
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+except (PermissionError, OSError):
+    # Environnements sans /app en écriture (CI, tests) : ne pas casser l'import.
+    # Les tests qui écrivent des modèles doivent passer BT_MODELS_DIR (ex. tmpdir).
+    log.warning("models.dir.not_writable", path=str(MODELS_DIR))
+
+# Parallélisme d'entraînement — capé pour éviter l'OOM sur petit VPS (7,6 Gio).
+# n_jobs=_N_JOBS prenait tous les cœurs + pic RAM ~4,6 Go → OOM-kill du retrain nocturne.
+_N_JOBS = int(os.getenv("BT_TRAIN_NJOBS", "2"))
 
 # Poids fallback si stacking non disponible
 ENSEMBLE_WEIGHTS_FALLBACK = {"xgb": 0.50, "lgbm": 0.30, "catboost": 0.20}
@@ -161,7 +171,7 @@ class BlackTurfEnsemble:
             eval_metric="logloss",
             tree_method="hist",
             random_state=42,
-            n_jobs=-1,
+            n_jobs=_N_JOBS,
         )
         self.xgb = CalibratedClassifierCV(xgb_base, method="isotonic", cv=3)
         self.xgb.fit(X_train, y_train)
@@ -179,7 +189,7 @@ class BlackTurfEnsemble:
             is_unbalance=True,
             random_state=42,
             verbose=-1,
-            n_jobs=-1,
+            n_jobs=_N_JOBS,
         )
         self.lgbm = CalibratedClassifierCV(lgbm_base, method="isotonic", cv=3)
         self.lgbm.fit(X_train, y_train)
@@ -239,7 +249,7 @@ class BlackTurfEnsemble:
                     subsample=0.8, colsample_bytree=0.8,
                     scale_pos_weight=pos_weight, use_label_encoder=False,
                     eval_metric="logloss", tree_method="hist",
-                    random_state=42, n_jobs=-1, verbosity=0
+                    random_state=42, n_jobs=_N_JOBS, verbosity=0
                 )
                 xgb_fold.fit(Xf_tr, yf_tr)
                 oof_xgb[fold_val_idx] = xgb_fold.predict_proba(Xf_val)[:, 1]
@@ -247,7 +257,7 @@ class BlackTurfEnsemble:
                 lgbm_fold = LGBMClassifier(
                     n_estimators=200, max_depth=5, learning_rate=0.05,
                     num_leaves=31, subsample=0.8, colsample_bytree=0.8,
-                    is_unbalance=True, random_state=42, verbose=-1, n_jobs=-1
+                    is_unbalance=True, random_state=42, verbose=-1, n_jobs=_N_JOBS
                 )
                 lgbm_fold.fit(Xf_tr, yf_tr)
                 oof_lgbm[fold_val_idx] = lgbm_fold.predict_proba(Xf_val)[:, 1]
@@ -278,7 +288,7 @@ class BlackTurfEnsemble:
             self.meta_learner = LGBMClassifier(
                 n_estimators=300, max_depth=4, learning_rate=0.03,
                 num_leaves=15, subsample=0.8, colsample_bytree=0.7,
-                is_unbalance=True, random_state=42, verbose=-1, n_jobs=-1
+                is_unbalance=True, random_state=42, verbose=-1, n_jobs=_N_JOBS
             )
             self.meta_learner.fit(meta_X_train, y_train)
             self._stacking_trained = True
@@ -356,7 +366,7 @@ class BlackTurfEnsemble:
                         subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
                         scale_pos_weight=pos_w_win, use_label_encoder=False,
                         eval_metric="logloss", tree_method="hist",
-                        random_state=42, n_jobs=-1,
+                        random_state=42, n_jobs=_N_JOBS,
                     )
                     self.win_model = CalibratedClassifierCV(win_base, method="isotonic", cv=3)
                     self.win_model.fit(X_train, yw_train)
@@ -390,7 +400,7 @@ class BlackTurfEnsemble:
                     _rk = LGBMRanker(
                         objective="lambdarank", n_estimators=400, max_depth=6,
                         learning_rate=0.05, num_leaves=40, subsample=0.8,
-                        colsample_bytree=0.8, random_state=42, verbose=-1, n_jobs=-1,
+                        colsample_bytree=0.8, random_state=42, verbose=-1, n_jobs=_N_JOBS,
                         label_gain=[0, 1, 3],
                     )
                     _rk.fit(X_train, _rel, group=_grp)
@@ -561,7 +571,7 @@ class BlackTurfEnsemble:
             try:
                 quick_xgb = XGBClassifier(
                     n_estimators=100, max_depth=4, learning_rate=0.1,
-                    use_label_encoder=False, eval_metric="logloss", random_state=42, n_jobs=-1,
+                    use_label_encoder=False, eval_metric="logloss", random_state=42, n_jobs=_N_JOBS,
                 )
                 quick_xgb.fit(X_tr, y_tr)
                 p = quick_xgb.predict_proba(X_te)[:, 1]
