@@ -59,6 +59,31 @@ def _bet_flags(course_info: dict) -> dict:
     return merged
 
 
+# Cap modèle/marché (flag combo_market_cap, audit ROI 2026-07-02) : même seuil que
+# le gate value bet (valuebets.MAX_MODEL_MARKET_RATIO) appliqué aux probas CHEVAUX
+# qui alimentent la simulation des combos. Cotes ≥ CAP_COTE_MIN uniquement (sur les
+# favoris un fort écart au marché peut être un vrai edge).
+CAP_RATIO = 1.55
+CAP_COTE_MIN = 4.0
+
+
+def _cap_model_probas(p1: np.ndarray, pm: np.ndarray, cotes: np.ndarray) -> np.ndarray:
+    """Cape la proba modèle de chaque cheval (cote ≥ 4) à CAP_RATIO × sa proba marché
+    dé-viguée, puis renormalise Σ=1. Mesuré (edge_monitor) : conviction modèle >1.1×
+    le marché → ROI −42.9% (pire que base) ; sans ce cap les combos d'outsiders
+    héritent de probas sur-évaluées que le gate 1.55 ne filtrait qu'en Simple
+    Gagnant → P(gain)/EV des Trio/Couplé gonflées. Flag off → probas inchangées."""
+    try:
+        from ml.algo_flags import FLAGS as _AF
+        if not _AF.combo_market_cap:
+            return p1
+    except Exception:
+        pass
+    capped = np.where(cotes >= CAP_COTE_MIN, np.minimum(p1, CAP_RATIO * pm), p1)
+    s = capped.sum()
+    return capped / s if s > 0 else p1
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Simulation Plackett-Luce (Gumbel-max) — ordre d'arrivée
 # ──────────────────────────────────────────────────────────────────────────────
@@ -194,6 +219,7 @@ def build_combo_proposals(
     # le rapport pari-mutuel (rapport ≈ TRJ / proba_marché de la combinaison).
     pm = 1.0 / np.clip(cotes, 1.01, None)
     pm = pm / pm.sum()
+    p1 = _cap_model_probas(p1, pm, cotes)   # cap 1.55× marché sur cote ≥ 4 (flag)
 
     order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
     sim = _Sim(order, len(parts))
@@ -345,6 +371,7 @@ def enumerate_bet_candidates(
 
     pm = 1.0 / np.clip(cotes, 1.01, None)
     pm = pm / pm.sum()
+    p1 = _cap_model_probas(p1, pm, cotes)   # cap 1.55× marché sur cote ≥ 4 (flag)
 
     order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
     sim = _Sim(order, len(parts))
@@ -515,8 +542,8 @@ def enumerate_bet_candidates(
         # (proba placé marché ≥ 0.50 = se place très souvent) MÊME sans edge/EV → ancre
         # « gagne souvent » du prudent (DONNÉE : favori marché se place ~72% vs ~60% pick
         # modèle vs ~29% mid-cote). Sans ça le placé favori est jeté (modèle sous-cote le
-        # favori → edge<0, + marge PMU → -EV). Seul le prudent autorise le Simple Placé →
-        # zéro pollution des autres profils. Proba affichée = max(modèle, marché) : le
+        # favori → edge<0, + marge PMU → -EV). L'ancre reste PRUDENTE (bande ×1.8-4) : en
+        # modéré le rapport <4 la filtre (seul un placé d'outsider ≥×4 y entre). Proba affichée = max(modèle, marché) : le
         # marché est PLUS JUSTE sur les favoris (mesuré).
         is_anchor = p_pl_m >= 0.50
         if edge_pl <= 0 and ev <= 0 and not is_anchor:
@@ -545,7 +572,7 @@ def enumerate_bet_candidates(
     # à 1.1× = gain dérisoire, inutile à jouer). On ANCRE donc le Simple Placé du cheval le
     # PLUS susceptible de se placer PARMI ceux dont le placé paie ≥1.8× (typiquement cote ~5).
     # Backtest : 44% de réussite (vs 28%), chaque gain ≥1.8×. Sans cette ancre, ce placé est
-    # jeté (sans edge/EV). Seul le prudent autorise le Simple Placé → zéro impact modéré/risqué.
+    # jeté (sans edge/EV). Bande de rapport ×1.8-4 → cette ancre ne touche que le prudent.
     # On ne se base PAS QUE sur la cote (user) : on classe par proba_top3 du MODÈLE → un cheval
     # à grosse cote (jusqu'à 20) n'est ancré QUE si le modèle le « sent » vraiment (proba_top3
     # la plus haute parmi les placés ≥1.8). + bonus VALUE : si proba_top3 > implicite marché,
@@ -795,6 +822,7 @@ def build_coverage_bets(
 
     pm = 1.0 / np.clip(cotes, 1.01, None)
     pm = pm / pm.sum()
+    p1 = _cap_model_probas(p1, pm, cotes)   # cap 1.55× marché sur cote ≥ 4 (flag)
 
     order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
     sim = _Sim(order, len(parts))

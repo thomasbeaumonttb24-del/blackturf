@@ -297,7 +297,7 @@ async def run_post_course(course_id: str) -> None:
                 # Charger les prédictions sauvegardées pour cette course
                 pred_result = await al_session.execute(text("""
                     SELECT p.participation_id, p.proba_top3, p.proba_top1,
-                           p.confidence_score, pa.numero
+                           p.confidence_score, pa.numero, p.rang_predit
                     FROM predictions p
                     JOIN participations pa ON p.participation_id = pa.participation_id
                     WHERE p.course_id = :cid
@@ -312,6 +312,7 @@ async def run_post_course(course_id: str) -> None:
                         "proba_top1": float(r[2] or 0),
                         "confidence_score": float(r[3] or 0),
                         "numero": r[4],
+                        "rang_predit": int(r[5]) if r[5] is not None else None,
                     }
                     for r in pred_rows
                 ]
@@ -412,6 +413,15 @@ async def run_post_course(course_id: str) -> None:
             if n_pl:
                 # Recalcul léger des poids appris → la prochaine sélection en profite.
                 await compute_profil_weights(pl_session)
+                # Recalcul de la calibration estimé→réel du rapport (par profil × type) :
+                # les bandes de cote restent fidèles aux paiements PMU réels les plus récents.
+                try:
+                    from ml.signal_performance import (
+                        compute_rapport_calibration, persist_rapport_calibration)
+                    _rc = await compute_rapport_calibration(pl_session)
+                    await persist_rapport_calibration(pl_session, _rc)
+                except Exception as e:
+                    log.warning("pipeline.rapport_calib_skip", course_id=course_id, err=str(e)[:140])
     except Exception as e:
         log.warning("pipeline.profil_learning_settle_skip", course_id=course_id, err=str(e)[:140])
 
@@ -528,6 +538,16 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.cote_calibration_done", n=_cc.get("n_total"))
     except Exception as e:
         log.warning("pipeline.nightly_cote_calib_skip", err=str(e)[:140])
+    # RATTRAPAGE du règlement des runs profils (audit ROI 2026-07-02 : 287 runs
+    # pending/partial bloqués = apprentissage sur échantillon amputé). AVANT les
+    # apprentissages ci-dessous pour qu'ils agrègent des données complètes.
+    try:
+        from ml.profil_learning import settle_catchup
+        async with AsyncSessionLocal() as sc_session:
+            _sc = await settle_catchup(sc_session)
+            log.info("pipeline.settle_catchup_done", **_sc)
+    except Exception as e:
+        log.warning("pipeline.nightly_settle_catchup_skip", err=str(e)[:140])
     # Ré-apprend le ROI réel PAR SIGNAL (duo J/E, ELO, pedigree, forme-piège…) →
     # module la sélection des value bets vers ce qui rapporte. Auto-amélioration.
     try:
@@ -543,6 +563,18 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.signal_performance_done", n=_sp.get("n_total"))
     except Exception as e:
         log.warning("pipeline.nightly_signal_perf_skip", err=str(e)[:140])
+    # Ré-apprend le ROI réel PAR BANDE D'EV → rétrograde les bandes perdantes (zone
+    # toxique) au lieu d'un couperet dur. La sélection s'adapte au ROI mesuré.
+    try:
+        from ml.signal_performance import (
+            compute_ev_band_performance, persist_ev_band_performance,
+        )
+        async with AsyncSessionLocal() as evb_session:
+            _evb = await compute_ev_band_performance(evb_session)
+            await persist_ev_band_performance(evb_session, _evb)
+            log.info("pipeline.ev_band_performance_done", n=_evb.get("n_total"))
+    except Exception as e:
+        log.warning("pipeline.nightly_ev_band_perf_skip", err=str(e)[:140])
     # Ré-apprend les poids PAR PROFIL depuis les PRONOS ÉMIS réglés (profil_run_log) :
     # l'algo apprend de SES recommandations réelles par profil, pas du top-3.
     try:
@@ -552,6 +584,19 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.profil_weights_done", n_runs=_plw.get("n_total_runs"))
     except Exception as e:
         log.warning("pipeline.nightly_profil_weights_skip", err=str(e)[:140])
+    # Ré-apprend la calibration estimé→réel du RAPPORT par (profil × type) depuis les
+    # pronos figés réglés → le gate de bande s'applique au rapport RÉELLEMENT attendu :
+    # un type qui paie sous la tranche de son profil (ex. Placé favori ×1.3 en prudent)
+    # est écarté. C'est l'apprentissage qui fait respecter les tranches sur le réel.
+    try:
+        from ml.signal_performance import (
+            compute_rapport_calibration, persist_rapport_calibration)
+        async with AsyncSessionLocal() as rc_session:
+            _rc = await compute_rapport_calibration(rc_session)
+            await persist_rapport_calibration(rc_session, _rc)
+            log.info("pipeline.rapport_calibration_done", n_runs=_rc.get("n_runs"))
+    except Exception as e:
+        log.warning("pipeline.nightly_rapport_calib_skip", err=str(e)[:140])
     # Surveillance HONNÊTE de l'edge : test hors-échantillon (le filtre conviction≥1.1
     # bat-il encore le marché ?) journalisé → on détecte une dégradation de l'edge.
     try:
@@ -977,10 +1022,16 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # sur-évalue les outsiders (ratio 1.76 sur cote 20-40) et "plafonne" ~0.043
         # quand le marché continue de décroître. On dégrade donc ALPHA avec la cote :
         # au-delà du seuil, le marché (mieux calibré) domine progressivement.
-        ALPHA_MAX = 0.55          # confiance modèle sur favoris (cote ≤ ALPHA_FULL_COTE)
-        ALPHA_MIN = 0.15          # plancher : sur gros outsiders le marché domine
+        # RECENTRAGE MARCHÉ (2026-07-02, priorité ROI) : le marché PMU agrège l'info de
+        # milliers de parieurs + pros ; un modèle ne le bat que là où il a un signal
+        # PROUVÉ. ALPHA_MAX 0.55→0.42 : même sur les favoris le marché garde la majorité
+        # — l'edge doit venir d'un vrai désaccord persistant, pas d'une sur-confiance.
+        # ALPHA_DECAY 0.022→0.030 : au-delà de cote 12 la confiance modèle tombe plus
+        # vite (ratio proba/réel 1.76 mesuré sur cote 20-40 = sur-évaluation avérée).
+        ALPHA_MAX = 0.42          # confiance modèle sur favoris (cote ≤ ALPHA_FULL_COTE)
+        ALPHA_MIN = 0.12          # plancher : sur gros outsiders le marché domine
         ALPHA_FULL_COTE = 12.0    # en-deçà : modèle de confiance
-        ALPHA_DECAY = 0.022       # pente de décroissance par unité de cote au-delà du seuil
+        ALPHA_DECAY = 0.030       # pente de décroissance par unité de cote au-delà du seuil
         cotes_pmu = np.array([float(f.get("cote_pmu") or 0.0) for f in features_list])
         alpha = np.clip(
             ALPHA_MAX - ALPHA_DECAY * np.maximum(cotes_pmu - ALPHA_FULL_COTE, 0.0),
@@ -1104,6 +1155,15 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             _sig_mult = _sig_mult_fn
         except Exception:
             _signal_perf = None
+        # ROI réel par BANDE D'EV (recalc nightly) — gate d'ÉMISSION des value bets
+        # (bande au ROI shrinké négatif → pas de VB, cf. flag ev_band_gate). Était
+        # calculé nightly mais JAMAIS passé à l'émission live (trou audit 2026-07-02) :
+        # 59% des paris sortaient dans des bandes prouvées perdantes.
+        try:
+            from ml.signal_performance import load_ev_band_performance
+            _ev_band_perf = await load_ev_band_performance(session)
+        except Exception:
+            _ev_band_perf = None
 
         # FLAG devig_gates : overround du champ = Σ probas implicites marché pondéré.
         # Sert à dé-vigger les gates value bet (la proba implicite brute 1/cote
@@ -1257,6 +1317,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 cote_calib=_cote_calib,
                 signal_mult=(_sig_mult(feat, _signal_perf) if (_sig_mult and _signal_perf) else None),
                 field_overround=_field_overround,
+                ev_band_perf=_ev_band_perf,
             )
             niveau_vb = 0
             ev_max = 0.0

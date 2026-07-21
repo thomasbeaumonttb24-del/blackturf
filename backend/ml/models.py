@@ -294,7 +294,10 @@ class BlackTurfEnsemble:
         log.info("model.walk_forward", scores=[round(s, 4) for s in wf_scores], mean=round(float(np.mean(wf_scores)), 4))
 
         # ── Métriques finales ──────────────────────────────
-        metrics = self._evaluate(X_test, y_test)
+        # course_id est une colonne META (retirée de X_feat) → on la repasse alignée sur
+        # l'index de X_test pour que la précision top-3 puisse grouper PAR COURSE (sinon 0).
+        _test_cid = X.loc[X_test.index, "course_id"] if "course_id" in X.columns else None
+        metrics = self._evaluate(X_test, y_test, _test_cid)
         metrics["walk_forward_auc"] = float(np.mean(wf_scores))
         metrics["walk_forward_variance"] = float(np.var(wf_scores))
 
@@ -598,15 +601,16 @@ class BlackTurfEnsemble:
 
         return scores if scores else [0.5]
 
-    def _evaluate(self, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
+    def _evaluate(self, X_test: pd.DataFrame, y_test: pd.Series,
+                  course_ids: "pd.Series | None" = None) -> dict:
         """Métriques sur le set de test."""
         probas = self.predict_proba(X_test)
 
         auc = float(roc_auc_score(y_test, probas)) if y_test.nunique() > 1 else 0.5
         brier = float(brier_score_loss(y_test, probas))
 
-        # Précision top-3 : pour chaque course, le top-3 IA contient-il le vrai top-3 ?
-        prec_top3 = self._compute_precision_top3(X_test, y_test, probas)
+        # Précision top-3 : pour chaque course, le top-3 IA contient-il le vrai gagnant ?
+        prec_top3 = self._compute_precision_top3(X_test, y_test, probas, course_ids)
 
         # ROI simulé value bets (EV > 0.05)
         roi = self._simulate_roi(X_test, y_test, probas)
@@ -618,19 +622,28 @@ class BlackTurfEnsemble:
             "roi_simule": roi,
         }
 
-    def _compute_precision_top3(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray) -> float:
-        """Taux de courses où le top-3 IA inclut le gagnant réel."""
-        if "course_id" not in X.columns:
+    def _compute_precision_top3(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray,
+                                course_ids: "pd.Series | None" = None) -> float:
+        """Taux de courses où le top-3 IA inclut le gagnant réel.
+
+        `course_id` est une colonne META retirée des features → la passer explicitement
+        (sinon, absente de X, la fonction renvoyait toujours 0)."""
+        cid = course_ids
+        if cid is None and "course_id" in X.columns:
+            cid = X["course_id"]
+        if cid is None:
             return 0.0
-        df = X.copy()
-        df["proba"] = probas
-        df["label"] = y.values
+        df = pd.DataFrame({
+            "proba": np.asarray(probas),
+            "label": np.asarray(y.values if hasattr(y, "values") else y),
+            "course_id": np.asarray(cid),
+        })
 
         correct = 0
         total = 0
         for _, group in df.groupby("course_id"):
             top3_ia = set(group.nlargest(3, "proba").index)
-            gagnant = group[group["label"] == 1].index
+            gagnant = group.index[group["label"] == 1]
             if len(gagnant) > 0 and gagnant[0] in top3_ia:
                 correct += 1
             total += 1

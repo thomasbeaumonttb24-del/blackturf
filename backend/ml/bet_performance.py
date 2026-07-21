@@ -215,12 +215,28 @@ async def compute_model_heat(session: AsyncSession) -> dict:
         terms.append(max(-1.0, min(1.0, roi_recent / 0.30)))
 
     heat = round(sum(terms) / len(terms), 3) if terms else 0.0
+
+    # GEL OFFENSIF EN DÉRIVE (2026-07-02) : quand le drift detector est en severity
+    # 'critical', le modèle dérive MAINTENANT — un heat > 0 (calé sur le brier/ROI
+    # d'AVANT la dérive) assouplirait les gates au pire moment. On cape à ≤ 0
+    # (mode prudent/normal) jusqu'à ce que le retrain ramène la severity sous critical.
+    drift_freeze = False
+    try:
+        row = (await session.execute(text(
+            "SELECT severity FROM drift_detector_state LIMIT 1"))).first()
+        if row and row[0] == "critical" and heat > 0:
+            heat = 0.0
+            drift_freeze = True
+    except Exception:
+        pass
+
     return {
         "heat": heat,
         "brier": round(brier, 4) if brier is not None else None,
         "roi_recent": round(roi_recent, 4) if roi_recent is not None else None,
         "n_races": n_races,
         "n_bets": n_bets,
+        "drift_freeze": drift_freeze,
     }
 
 

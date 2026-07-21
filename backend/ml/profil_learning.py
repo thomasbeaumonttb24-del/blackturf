@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 import structlog
@@ -30,8 +31,49 @@ MIN_RUNS_FOR_WEIGHTS = 10   # en-dessous, poids neutres (pas d'invention)
 MIN_RUNS_FOR_WEIGHTS_CTX = 12   # seuil par bucket CONTEXTE (plus haut : plus granulaire)
 MIN_RUNS_FOR_SUPPRESS = 25   # preuve solide avant de COUPER un (type×contexte)
 ROI_SUPPRESS = -0.40         # ROI réel ≤ -40% sur n≥seuil → suppression dure (poids 0)
-SHRINK_K = 15            # shrinkage du ROI vers 0 (anti sur-réaction petit n)
+# ── SUPPRESSION GLOBALE « 0 GAIN » (audit ROI 2026-07-02) ────────────────────
+# La suppression contextuelle (25 runs PAR bucket discipline×peloton) ne coupait
+# jamais les types gros-lot : leurs tickets s'éparpillent sur plein de buckets.
+# Mesuré en prod : Tiercé/Quarté+/Quinté+ Désordre, Super 4, Pick5, Multi en 4/5
+# = 0 gain sur ~91 tickets (−100%). Deux règles GLOBALES par profil, sur les BRUTS :
+#   1. type à 0 gain sur n ≥ ZERO_WIN_SUPPRESS_N → poids 0 ;
+#   2. famille JACKPOT poolée (types tout-ou-rien ci-dessous) : si le pool a
+#      n ≥ JACKPOT_POOL_SUPPRESS_N tickets et AUCUN gain, chaque membre 0-gain
+#      (n ≥ 3) est coupé — le pool fournit la preuve que chaque petit n n'a pas.
+# RÉHABILITATION AUTOMATIQUE : dès qu'un type gagne UNE fois, il sort de la règle.
+ZERO_WIN_SUPPRESS_N = 15
+JACKPOT_POOL_SUPPRESS_N = 25
+JACKPOT_TYPES = {"Tiercé Désordre", "Tiercé Ordre", "Quarté+ Désordre",
+                 "Quinté+ Désordre", "Super 4", "Pick5", "Multi en 4", "Multi en 5"}
+
+
+def _is_jackpot_type(t: str) -> bool:
+    return (t or "").replace("Mini Multi", "Multi") in JACKPOT_TYPES
+
+
+def zero_win_suppression(types_agg: dict) -> set[str]:
+    """Types à couper (poids 0) pour un profil — fonction PURE (testable sans DB).
+    `types_agg` : {type: {"n": int, "win": int, ...}} (agrégats BRUTS du profil)."""
+    jn = sum(ts.get("n", 0) for t, ts in types_agg.items() if _is_jackpot_type(t))
+    jw = sum(ts.get("win", 0) for t, ts in types_agg.items() if _is_jackpot_type(t))
+    out: set[str] = set()
+    for t, ts in types_agg.items():
+        if ts.get("win", 0) > 0:
+            continue                                  # a déjà gagné → jamais coupé ici
+        if ts.get("n", 0) >= ZERO_WIN_SUPPRESS_N:
+            out.add(t)
+        elif (_is_jackpot_type(t) and ts.get("n", 0) >= 3
+                and jn >= JACKPOT_POOL_SUPPRESS_N and jw == 0):
+            out.add(t)
+    return out
+SHRINK_K = 20            # shrinkage du ROI vers 0 (anti sur-réaction petit n ; 15→20
+                         # après audit : 3-4 paris perdants ne doivent pas basculer un poids)
 W_MIN, W_MAX = 0.5, 1.6
+# DECAY TEMPOREL des runs (demi-vie en jours) : un run d'il y a 45j pèse moitié moins
+# qu'un run d'hier → les poids SUIVENT le régime actuel du modèle/marché au lieu de
+# moyenner 2024 avec aujourd'hui. La SUPPRESSION dure reste sur les totaux BRUTS
+# (une preuve de perte n'expire pas à la légère). Decay appliqué aux POIDS uniquement.
+DECAY_HALF_LIFE_DAYS = 45.0
 
 
 def ctx_key(discipline, nb_partants) -> str:
@@ -169,6 +211,18 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         sig_perf = await load_signal_performance(session)
     except Exception:
         sig_perf = None
+    # Calibration estimé→réel (par profil × type) : MÊME entrée que /mise-plan → le plan
+    # figé applique les rapports corrigés, donc identique à ce que l'utilisateur voit.
+    try:
+        from ml.signal_performance import load_rapport_calibration
+        rapport_calib = await load_rapport_calibration(session)
+    except Exception:
+        rapport_calib = None
+    try:
+        from ml.signal_performance import load_ev_band_performance
+        ev_band_perf = await load_ev_band_performance(session)
+    except Exception:
+        ev_band_perf = None
 
     n_written = 0
     for profil in PROFILS:
@@ -192,7 +246,8 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             # montant complet + concentration gain_target) → le plan FIGÉ est identique
             # à ce que l'utilisateur voit, donc identique au bilan affiché après course.
             plan = generer_plan(MISE_REF, profil, preds, course_info,
-                                None, roi_weights, heat, sig_mults, respect_montant=True)
+                                None, roi_weights, heat, sig_mults, respect_montant=True,
+                                rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
             plan_d = plan_to_dict(plan)
         except Exception as e:
             log.warning("profil_learning.plan_failed", course_id=course_id,
@@ -287,12 +342,68 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
 
 
 # ─────────────────────────────────────────────────────────────
+# 2b. RATTRAPAGE du règlement (audit ROI 2026-07-02)
+# ─────────────────────────────────────────────────────────────
+# Constat prod : 114 runs 'pending' + 173 'partial' bloqués depuis des semaines —
+# le règlement inline de run_post_course a été manqué (worker down, résultat scrapé
+# en retard) et n'était JAMAIS retenté → poids/bandes/calibrations apprises sur un
+# échantillon amputé (pertes non comptées → ROI appris surestimé).
+CATCHUP_TIMEOUT_DAYS = 7
+
+
+async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIMEOUT_DAYS) -> dict:
+    """Rattrapage périodique (nightly + CLI) du règlement des runs profils.
+
+    1. RE-RÈGLE tous les runs pending/partial dont la course est terminée : le
+       règlement inline a pu être manqué, et un rapport absent au premier passage
+       a pu être scrapé depuis (les 'partial' n'étaient sinon JAMAIS retentés).
+    2. EXPIRE (statut 'expired') les runs encore pending/partial au-delà de
+       `timeout_days` : rapport jamais publié ou course jamais réglée. On ne
+       fabrique JAMAIS un gain — le run sort explicitement du pool d'apprentissage
+       (toutes les agrégations filtrent statut='settled') au lieu de traîner
+       indéfiniment en faux 'en attente'. Motif conservé dans meta.expired_reason.
+
+    Retourne {"resettled": n, "expired": n, "remaining": n}."""
+    await ensure_tables(session)
+    course_ids = [r[0] for r in (await session.execute(text("""
+        SELECT DISTINCT r.course_id
+        FROM profil_run_log r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE r.statut IN ('pending', 'partial') AND c.statut = 'termine'
+    """))).all()]
+    resettled = 0
+    for cid in course_ids:
+        try:
+            resettled += await settle_profil_runs(session, cid)
+        except Exception as e:                    # une course cassée ne bloque pas le lot
+            log.warning("profil_learning.catchup_course_failed",
+                        course_id=cid, err=str(e)[:120])
+    expired = (await session.execute(text("""
+        UPDATE profil_run_log
+        SET statut = 'expired',
+            meta = COALESCE(meta, '{}'::jsonb)
+                   || jsonb_build_object('expired_reason', 'timeout_' || statut),
+            settled_at = COALESCE(settled_at, now())
+        WHERE statut IN ('pending', 'partial')
+          AND created_at < now() - make_interval(days => :d)
+    """), {"d": int(timeout_days)})).rowcount or 0
+    remaining = (await session.execute(text(
+        "SELECT count(*) FROM profil_run_log WHERE statut IN ('pending','partial')"
+    ))).scalar() or 0
+    await session.commit()
+    log.info("profil_learning.settle_catchup",
+             resettled=resettled, expired=expired, remaining=remaining)
+    return {"resettled": resettled, "expired": expired, "remaining": remaining}
+
+
+# ─────────────────────────────────────────────────────────────
 # 3. POIDS D'APPRENTISSAGE depuis les pronos émis réglés
 # ─────────────────────────────────────────────────────────────
-def shrunk_weight(net: float, mise: float, n: int,
+def shrunk_weight(net: float, mise: float, n: float,
                   k: int = SHRINK_K, w_min: float = W_MIN, w_max: float = W_MAX) -> float:
     """Multiplicateur appris : 1 + ROI shrinké vers 0 (n/(n+k)), borné [w_min, w_max].
-    Fonction PURE (testable sans DB). n ou mise nuls → neutre 1.0."""
+    Fonction PURE (testable sans DB). n ou mise nuls → neutre 1.0.
+    `n` accepte un flottant (n EFFECTIF pondéré par la récence, cf. DECAY_HALF_LIFE_DAYS)."""
     if mise <= 0 or n <= 0:
         return 1.0
     roi = net / mise
@@ -313,7 +424,8 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
     from ml.algo_flags import FLAGS as _AF
     if _AF.oos_weights:
         rows = (await session.execute(text("""
-            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants
+            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants,
+                   r.created_at
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
@@ -323,7 +435,8 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         """))).all()
     else:
         rows = (await session.execute(text("""
-            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants
+            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants,
+                   r.created_at
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
@@ -332,7 +445,11 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
     def _new_agg():
         return {"types": {}, "n_runs": 0, "mise": 0.0, "gain": 0.0, "runs_benef": 0}
 
-    def _accumulate(agg, res):
+    def _accumulate(agg, res, decay: float = 1.0):
+        """Accumule un run réglé. Champs BRUTS (n/mise/gain/win : diagnostics + gate de
+        suppression, une preuve de perte n'expire pas) ET champs EFFECTIFS pondérés par
+        `decay` (récence) — les POIDS appris se calculent sur l'effectif → ils suivent
+        le régime récent du modèle/marché au lieu de moyenner tout l'historique à plat."""
         agg["n_runs"] += 1
         agg["mise"] += float(res.get("total_mise") or 0)
         agg["gain"] += float(res.get("total_gain") or 0)
@@ -342,23 +459,43 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
             t = pari.get("type")
             if not t:
                 continue
-            ts = agg["types"].setdefault(t, {"n": 0, "mise": 0.0, "gain": 0.0, "win": 0})
+            ts = agg["types"].setdefault(t, {"n": 0, "mise": 0.0, "gain": 0.0, "win": 0,
+                                             "n_e": 0.0, "mise_e": 0.0, "gain_e": 0.0})
+            mise = float(pari.get("mise") or 0)
             ts["n"] += 1
-            ts["mise"] += float(pari.get("mise") or 0)
+            ts["mise"] += mise
+            ts["n_e"] += decay
+            ts["mise_e"] += mise * decay
             if pari.get("statut") == "gagne":
+                gain = float(pari.get("gain") or 0)
                 ts["win"] += 1
-                ts["gain"] += float(pari.get("gain") or 0)
+                ts["gain"] += gain
+                ts["gain_e"] += gain * decay
+
+    _now = datetime.now(timezone.utc)
+
+    def _decay_of(created_at) -> float:
+        """Poids de récence exponentiel (demi-vie DECAY_HALF_LIFE_DAYS)."""
+        if created_at is None:
+            return 1.0
+        try:
+            ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+            age_days = max(0.0, (_now - ts).total_seconds() / 86400.0)
+            return 0.5 ** (age_days / DECAY_HALF_LIFE_DAYS)
+        except Exception:
+            return 1.0
 
     by_profil: dict[str, dict] = {p: _new_agg() for p in PROFILS}
     # buckets contextuels : by_ctx[profil][ctx_key] = agg
     by_ctx: dict[str, dict] = {p: {} for p in PROFILS}
-    for profil, resultat, _roi, discipline, nb_partants in rows:
+    for profil, resultat, _roi, discipline, nb_partants, created_at in rows:
         if profil not in by_profil:
             continue
         res = resultat if isinstance(resultat, dict) else json.loads(resultat)
-        _accumulate(by_profil[profil], res)
+        d = _decay_of(created_at)
+        _accumulate(by_profil[profil], res, decay=d)
         ck = ctx_key(discipline, nb_partants)
-        _accumulate(by_ctx[profil].setdefault(ck, _new_agg()), res)
+        _accumulate(by_ctx[profil].setdefault(ck, _new_agg()), res, decay=d)
 
     out = {"profils": {}, "n_total_runs": sum(a["n_runs"] for a in by_profil.values())}
     for profil, agg in by_profil.items():
@@ -366,7 +503,10 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         detail = {}
         for t, ts in agg["types"].items():
             if ts["n"] >= MIN_RUNS_FOR_WEIGHTS:
-                w = shrunk_weight(ts["gain"] - ts["mise"], ts["mise"], ts["n"])
+                # Poids sur les agrégats EFFECTIFS (récence) : le ROI récent pilote,
+                # l'ancien s'estompe (demi-vie DECAY_HALF_LIFE_DAYS). Seuil d'activation
+                # sur le n BRUT (préserve « pas d'invention sous 10 runs »).
+                w = shrunk_weight(ts["gain_e"] - ts["mise_e"], ts["mise_e"], ts["n_e"])
             else:
                 w = 1.0          # échantillon insuffisant → neutre, pas d'invention
             weights[t] = round(w, 3)
@@ -375,6 +515,15 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                 "roi": round((ts["gain"] - ts["mise"]) / ts["mise"] * 100, 1) if ts["mise"] > 0 else None,
                 "poids": round(w, 3),
             }
+        # SUPPRESSION GLOBALE « 0 GAIN » (cf. zero_win_suppression) : coupe les types
+        # jamais gagnants (solo n≥15, ou famille jackpot poolée sans aucun gain). Le
+        # gate dur roi_weights ≤ 0.001 de mise_calculator les écarte alors de la
+        # sélection ; le filet « chaque course jouée » reste hors gates.
+        for t in zero_win_suppression(agg["types"]):
+            weights[t] = 0.0
+            if t in detail:
+                detail[t]["poids"] = 0.0
+                detail[t]["suppressed"] = "zero_win"
         # ── Poids CONTEXTUELS : {ctx_key: {type: poids}} ────────────────────
         # Un bucket (discipline×peloton) n'émet un poids que s'il a ≥ seuil runs ;
         # sinon absent → la conso retombe sur le poids type global (puis 1.0).
@@ -390,10 +539,20 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                     # GATE DUR : type prouvé perdant DANS CE CONTEXTE → poids 0 = jamais
                     # proposé. Contextuel (pas global) : le même type reste jouable là où
                     # il gagne (ex. Couplé nul au plat, +660% au trot → seul le plat coupé).
-                    cw[t] = 0.0
-                    suppressed.append(f"{ck}:{t} (roi={round(roi*100)}% n={n})")
+                    # RÉHABILITATION par la récence : si le ROI EFFECTIF (récent) est
+                    # redevenu ≥ -15%, on ne coupe plus (le régime a changé) — on
+                    # sous-pondère seulement. Une suppression ne doit pas être éternelle.
+                    roi_e = ((ts["gain_e"] - ts["mise_e"]) / ts["mise_e"]
+                             if ts.get("mise_e", 0) > 0 else roi)
+                    if roi_e <= -0.15:
+                        cw[t] = 0.0
+                        suppressed.append(f"{ck}:{t} (roi={round(roi*100)}% n={n})")
+                    else:
+                        cw[t] = round(shrunk_weight(ts["gain_e"] - ts["mise_e"],
+                                                    ts["mise_e"], ts["n_e"]), 3)
                 elif n >= MIN_RUNS_FOR_WEIGHTS_CTX:
-                    cw[t] = round(shrunk_weight(gain - mise, mise, n), 3)
+                    cw[t] = round(shrunk_weight(ts["gain_e"] - ts["mise_e"],
+                                                ts["mise_e"], ts["n_e"]), 3)
             if cw:
                 ctx_weights[ck] = cw
         if suppressed:

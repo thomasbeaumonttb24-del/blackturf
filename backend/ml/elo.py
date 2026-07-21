@@ -14,7 +14,7 @@ import structlog
 from datetime import date
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from db.models import Cheval, EloHistorique
 
@@ -78,6 +78,22 @@ async def update_elo_after_race(
     classement : [{cheval_id, position, incident}, ...]
     Retourne {cheval_id: nouveau_elo}.
     """
+    # ── IDEMPOTENCE (anti-inflation) ─────────────────────────────────────────
+    # L'ELO est INCRÉMENTAL (on lit le rating courant, on ajoute le delta, on
+    # réécrit). Le pipeline post-course peut tourner plusieurs fois sur la même
+    # course (re-settlement, sync, catch-up). Sans garde, chaque passage RÉ-applique
+    # le delta → double-comptage → les ratings divergent jusqu'au plafond (bug
+    # observé : 5,9M lignes elo_historique pour 152k vrais résultats, ~39×). On
+    # n'applique l'ELO qu'UNE SEULE FOIS par course.
+    already = await session.execute(
+        select(func.count()).select_from(EloHistorique).where(
+            EloHistorique.course_id == course_id
+        )
+    )
+    if (already.scalar() or 0) > 0:
+        log.info("elo.skip_already_applied", course_id=course_id)
+        return {}
+
     k = get_k_factor(niveau_course, dotation)
     elo_field = DISCIPLINE_ELO_FIELD.get(discipline, "elo_score_plat")
 

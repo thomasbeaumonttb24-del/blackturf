@@ -40,10 +40,10 @@ CONFIANCE_SEUILS = {
     4: 0.22,   # favori net
 }
 
-# Plafond d'EX-CÉDENT d'EV (ev_max = cote×proba − 1) au-delà duquel on REJETTE le
-# value bet : zone toxique mesurée (ROI réalisé EV>1.4 = −42% sur n=2133, EV 1.15-1.4
-# = −22%). Au-dessus, le "value" est de la sur-confiance longshot, pas un edge.
-EV_MAX_EXCESS_VB = 0.25
+# NB : pas de couperet dur sur l'EX-CÉDENT d'EV. Les bandes d'EV historiquement
+# perdantes (zone toxique) ne sont PAS rejetées mais RÉTROGRADÉES selon le ROI réel
+# appris nightly (ml.signal_performance.ev_band_multiplier) — la sélection s'adapte
+# à ce que l'algo mesure au fil de l'eau au lieu de bannir une bande en dur.
 
 # ── Garde-fous calibration longshot ──────────────────────────────────────────
 # Au-delà de ce ratio proba_modèle / proba_marché_implicite, le "value" est
@@ -57,7 +57,10 @@ EV_MAX_EXCESS_VB = 0.25
 # Resserré : l'inflation d'EV se produit dès la zone cote 4-8 (ex. proba modèle
 # 38% sur une cote 6.8 = 2.5× le marché → EV +118% non crédible), pas seulement
 # au-delà de 8. Gate appliqué dès cote 4, écart max 1.7× la proba marché.
-MAX_MODEL_MARKET_RATIO = 1.7
+# 1.7→1.55 (2026-07-02, priorité ROI) : un modèle qui voit >1.55× la proba du marché
+# sur une cote ≥4 est quasi toujours du sur-fit outsider, pas de l'edge. Resserrer
+# coupe les faux signaux les plus toxiques (l'inflation d'EV en zone cote 4-8).
+MAX_MODEL_MARKET_RATIO = 1.55
 LONGSHOT_COTE_MIN = 4.0
 # Court-cote : sur cote < LONGSHOT_COTE_MIN, on cape la proba modèle au marché ×
 # ce ratio. Le sous-ensemble VB cote<4 est sur-coté (ROI réel −44%) → edge max
@@ -201,6 +204,7 @@ def detect_value_bet(
     cote_calib: Optional[dict] = None,
     signal_mult: Optional[float] = None,
     field_overround: Optional[float] = None,
+    ev_band_perf: Optional[dict] = None,
 ) -> Optional[dict]:
     """
     Détecte si un partant est un value bet — version multi-sources.
@@ -303,19 +307,6 @@ def detect_value_bet(
     cote_ev = min(cote_meilleure, cote_mediane * COTE_CEIL_FACTOR)
     ev_max = calculer_ev(cote_ev, proba_top1)
 
-    # ── Garde-fou EV HAUT (zone toxique, mesuré 2026-06-19) ──────────────────
-    # ROI réalisé par bande d'EV (predictions ⋈ résultats, simple gagnant flat) :
-    # EV 1.0-1.15 = +7%, EV 1.15-1.4 = -22% (n=833), EV >1.4 = -42% (n=2133).
-    # Le "value" qui claironne un gros edge = sur-confiance longshot, PAS un edge.
-    # determine_niveau récompensait justement le haut EV (niveau 4 = EV≥0.30) = la
-    # pire zone. On REJETTE au-delà du seuil pour couper le saignement grand-n.
-    # Conservateur : 0.25 enlève tout le -42% + l'essentiel du -22%, garde marge
-    # au-dessus du bord de la bande positive (1.15). À affiner via backtest 15k.
-    if ev_max > EV_MAX_EXCESS_VB:
-        log.info("valuebets.ev_too_high_rejected",
-                 ev=round(ev_max, 3), cote=round(cote_ev, 2), proba=round(proba_top1, 4))
-        return None
-
     niveau = determine_niveau(ev_max, proba_top1)
     if niveau is None:
         return None
@@ -340,6 +331,29 @@ def detect_value_bet(
         if signal_mult <= 0.80 and niveau > 1:
             niveau -= 1
         elif signal_mult >= 1.30 and niveau < 4:
+            niveau += 1
+
+    # ── Apprentissage par BANDE D'EV (ROI réel appris nightly, K_SHRINK=60) ──
+    # GATE D'ÉMISSION (flag ev_band_gate, audit ROI 2026-07-02) : une bande au ROI
+    # shrinké NÉGATIF (multiplier < 1.0) n'émet PLUS de value bet du tout. Mesuré
+    # sur 12 432 paris figés : seules les bandes EV 0.10-0.35 rapportent (+1.7/+2.7%) ;
+    # 0-0.10 = −14%, 0.35-0.60 = −6%, >0.60 = −21%. Rétrograder d'un niveau (ancien
+    # comportement) laissait ces paris sortir → 59% de l'émission en zone perdante.
+    # Bande neutre (pas de données, multiplier exactement 1.0) → émission normale
+    # (cold-start sûr). Flag off → retour à la simple rétrogradation.
+    if ev_band_perf is not None:
+        from ml.signal_performance import ev_band_multiplier
+        from ml.algo_flags import FLAGS as _AF
+        ev_mult = ev_band_multiplier(ev_max, ev_band_perf)
+        if _AF.ev_band_gate and ev_mult < 0.9995:
+            log.info("valuebets.ev_band_rejected",
+                     ev=round(ev_max, 3), band_mult=round(ev_mult, 3))
+            return None
+        if ev_mult <= 0.65:
+            niveau = max(1, niveau - 2)
+        elif ev_mult <= 0.85 and niveau > 1:
+            niveau -= 1
+        elif ev_mult >= 1.20 and niveau < 4:
             niveau += 1
 
     return {
