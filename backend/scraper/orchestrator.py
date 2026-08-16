@@ -19,6 +19,7 @@ Fréquences :
 import asyncio
 import argparse
 import os
+import threading
 import time
 import structlog
 from datetime import datetime
@@ -62,6 +63,68 @@ from scraper.db_writer import (
 
 log = structlog.get_logger()
 settings = get_settings()
+
+
+# ── Anti-gel du daemon ────────────────────────────────────────────────────────
+# Le 2026-08-11 à 22:59 le daemon s'est figé dans run_bookmakers_cycle (page
+# Playwright bloquée). Aucune exception n'a été levée : le try/except de
+# run_daemon n'a rien vu, `restart: unless-stopped` ne relance qu'un process
+# MORT, et le conteneur n'avait pas de healthcheck. Résultat : 4 j 16 h sans une
+# seule course en base, sans la moindre alerte (0 ligne dans system_errors).
+#
+# Trois lignes de défense, de la plus douce à la plus brutale :
+#   1. asyncio.wait_for  — annule un cycle bloqué sur un await annulable ;
+#   2. watchdog THREAD   — tue le process quand l'annulation elle-même se bloque
+#                          (cas Playwright) ou que la boucle asyncio est starvée ;
+#   3. heartbeat fichier — lu par le healthcheck Docker, rend le gel VISIBLE.
+CYCLE_TIMEOUT_S = int(os.getenv("BT_SCRAPER_CYCLE_TIMEOUT", "1200"))  # 20 min
+# Marge avant le kill dur : laisse wait_for tenter l'annulation propre d'abord,
+# sinon les deux mécanismes se déclencheraient au même instant (course).
+WATCHDOG_GRACE_S = int(os.getenv("BT_SCRAPER_WATCHDOG_GRACE", "120"))
+HEARTBEAT_PATH = os.getenv("BT_SCRAPER_HEARTBEAT", "/app/data/scraper_heartbeat")
+
+# Monotonic du début du cycle en cours ; None = aucun cycle en vol.
+_cycle_started_at: float | None = None
+
+
+def _write_heartbeat() -> None:
+    """Marque « un cycle vient d'aboutir ». Best-effort : jamais fatal."""
+    try:
+        parent = os.path.dirname(HEARTBEAT_PATH)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(HEARTBEAT_PATH, "w") as fh:
+            fh.write(str(time.time()))
+    except Exception as e:  # un heartbeat raté ne doit pas tuer le scraping
+        log.warning("orchestrator.heartbeat_failed", error=str(e)[:160])
+
+
+def _start_cycle_watchdog() -> None:
+    """Tue le process si un cycle dépasse CYCLE_TIMEOUT_S + WATCHDOG_GRACE_S.
+
+    Un THREAD, pas une task asyncio : si la boucle d'événements est bloquée, une
+    task ne s'exécuterait jamais — c'est exactement le mode de panne du 11/08.
+    `os._exit` court-circuite atexit/finally À DESSEIN : on veut sortir même si
+    c'est `await browser.close()` qui est lui-même bloqué. Docker relance
+    derrière un process propre (restart: unless-stopped).
+    """
+    deadline = CYCLE_TIMEOUT_S + WATCHDOG_GRACE_S
+
+    def _loop() -> None:
+        while True:
+            time.sleep(30)
+            started = _cycle_started_at
+            if started is None:
+                continue
+            elapsed = time.monotonic() - started
+            if elapsed > deadline:
+                log.error("orchestrator.watchdog_kill",
+                          elapsed_s=int(elapsed), deadline_s=deadline)
+                os._exit(1)
+
+    threading.Thread(target=_loop, name="cycle-watchdog", daemon=True).start()
+    log.info("orchestrator.watchdog_started",
+             timeout_s=CYCLE_TIMEOUT_S, deadline_s=deadline)
 
 
 async def _detect_smart_money(session, course_id: str) -> None:
@@ -1028,13 +1091,30 @@ class BlackTurfOrchestrator:
             await playwright.stop()
 
     async def run_daemon(self, interval_minutes: int = 5) -> None:
-        """Daemon continu — boucle infinie."""
+        """Daemon continu — boucle infinie, chaque cycle BORNÉ dans le temps.
+
+        Un cycle complet mesuré en prod dure 2,5 à 6 min ; le timeout à 20 min
+        laisse donc ~3× de marge. Au-delà, le cycle est considéré gelé : au pire
+        on perd 20 min de données au lieu des 4 jours du 11/08.
+        """
+        global _cycle_started_at
         log.info("orchestrator.daemon_start", interval_min=interval_minutes)
+        _start_cycle_watchdog()
+        _write_heartbeat()  # le conteneur vient de démarrer : il est vivant
         while True:
+            _cycle_started_at = time.monotonic()
             try:
-                await self.run_once()
+                await asyncio.wait_for(self.run_once(), timeout=CYCLE_TIMEOUT_S)
+                _write_heartbeat()
+            except asyncio.TimeoutError:
+                # L'annulation a abouti : inutile de tuer le process, le cycle
+                # suivant repart sur un navigateur neuf. Si elle N'aboutit PAS,
+                # on ne passe jamais ici et c'est le watchdog thread qui tranche.
+                log.error("orchestrator.cycle_timeout", timeout_s=CYCLE_TIMEOUT_S)
             except Exception as e:
                 log.error("orchestrator.daemon_error", error=str(e))
+            finally:
+                _cycle_started_at = None
             await asyncio.sleep(interval_minutes * 60)
 
     async def run_predictions_cycle(self) -> None:
