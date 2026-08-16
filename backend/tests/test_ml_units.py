@@ -205,12 +205,15 @@ def test_ev_band_gate_off_retrograde_seulement(monkeypatch):
 def test_longshot_gate_rejette_proba_sur_evaluee():
     """Modèle attribue P(win) >> proba marché implicite sur grosse cote → None.
 
-    cote_marché ≈ 10 (≥ LONGSHOT_COTE_MIN), implicite ≈ 0.10. proba 0.60 donne
-    un ratio de 6× : c'est le sur-fit outsider qui générait les EV absurdes.
+    cote_marché = 30 (≥ LONGSHOT_COTE_MIN, recalibré à 20.0 le 2026-08-16 —
+    scripts/calibration_longshots.py montre le modèle bien calibré jusqu'à cote 20,
+    donc le fixture doit être AU-DESSUS pour rester dans la zone de sur-fit
+    mesurée), implicite ≈ 0.033. proba 0.60 donne un ratio de 18× : c'est le
+    sur-fit outsider qui générait les EV absurdes (+296%).
     """
-    assert LONGSHOT_COTE_MIN <= 10.0
+    assert LONGSHOT_COTE_MIN <= 30.0
     vb = detect_value_bet(
-        proba_top1=0.60, cote_pmu=10.0, cote_geny=10.0, cote_bzh=10.0,
+        proba_top1=0.60, cote_pmu=30.0, cote_geny=30.0, cote_bzh=30.0,
     )
     assert vb is None
 
@@ -231,6 +234,51 @@ def test_cote_max_vb_rejette_outsider_extreme():
     cote = COTE_MAX_VB + 5.0
     vb = detect_value_bet(proba_top1=0.30, cote_pmu=cote)
     assert vb is None
+
+
+# ─────────────────────────────────────────────
+# Recalibrage longshot 2026-08-16 (audit "value bets en extinction")
+# scripts/calibration_longshots.py sur 37 970 prédictions ⋈ résultats réels :
+# modèle bien calibré (ratio proba_prédite/fréquence_réelle 0.87-1.13) jusqu'à
+# cote 20 ; le gate à l'ancien seuil (cote≥4) rejetait donc des value bets
+# légitimes dans toute la zone 4-20 sans sur-fit réel à corriger.
+# ─────────────────────────────────────────────
+@pytest.mark.parametrize("cote", [5.0, 8.0, 12.0, 19.0])
+def test_zone_4_20_bien_calibree_nest_plus_rejetee_a_tort(cote):
+    """Régression ciblée : un edge modeste et honnête (proba modèle légèrement
+    au-dessus du marché) dans la zone où le modèle est mesuré bien calibré ne
+    doit plus se faire rejeter par le gate longshot — c'était le bug qui asséchait
+    l'émission de value bets dans la fourchette de cote la plus fréquente."""
+    implied = 1.0 / cote
+    # edge modeste (sous le ratio 1.67), mais toujours ≥ CONFIANCE_SEUILS[1]=0.10 —
+    # sur les grosses cotes de ce bucket, implied×1.3 seul passerait sous le
+    # plancher de confiance (bug de fixture, pas du gate testé ici).
+    proba = min(0.95, max(0.12, implied * 1.3))
+    vb = detect_value_bet(proba_top1=proba, cote_pmu=cote, cote_geny=cote, cote_bzh=cote)
+    assert vb is not None, f"cote={cote} devrait rester éligible (zone bien calibrée)"
+
+
+def test_zone_20_plus_reste_protegee_apres_recalibrage():
+    """Le recalibrage élargit la zone de confiance, il ne désarme pas la
+    protection : au-delà de cote 20, un écart massif au marché reste rejeté."""
+    vb = detect_value_bet(
+        proba_top1=0.60, cote_pmu=25.0, cote_geny=25.0, cote_bzh=25.0,
+    )
+    assert vb is None
+
+
+def test_max_model_market_ratio_recalibre_a_1_67():
+    """Documente la valeur mesurée (ratio médian des buckets sur-évalués) — si ce
+    test casse, la constante a changé sans que ce commit le documente."""
+    assert MAX_MODEL_MARKET_RATIO == pytest.approx(1.67)
+
+
+def test_longshot_cote_min_recalibre_a_20():
+    assert LONGSHOT_COTE_MIN == pytest.approx(20.0)
+
+
+def test_cote_max_vb_recalibre_a_40():
+    assert COTE_MAX_VB == pytest.approx(40.0)
 
 
 def test_winners_curse_ev_plafonnee_a_mediane():

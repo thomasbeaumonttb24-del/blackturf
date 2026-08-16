@@ -49,22 +49,38 @@ CONFIANCE_SEUILS = {
 # Au-delà de ce ratio proba_modèle / proba_marché_implicite, le "value" est
 # presque toujours une erreur de calibration sur outsider (le modèle sur-évalue
 # les grosses cotes), PAS un edge réel. On refuse → pas de faux signal.
-# NOTE : valeur conservatrice ; à recaler avec scripts/calibration_longshots.py
-# (proba prédite vs fréquence réelle observée par bucket de cote).
 # Le gate ne s'applique qu'AU-DELÀ de LONGSHOT_COTE_MIN : sur les favoris (cote
 # basse) le modèle est bien calibré et un fort écart au marché peut être un vrai
 # edge ; c'est uniquement sur les grosses cotes que l'écart trahit le sur-fit.
-# Resserré : l'inflation d'EV se produit dès la zone cote 4-8 (ex. proba modèle
-# 38% sur une cote 6.8 = 2.5× le marché → EV +118% non crédible), pas seulement
-# au-delà de 8. Gate appliqué dès cote 4, écart max 1.7× la proba marché.
-# 1.7→1.55 (2026-07-02, priorité ROI) : un modèle qui voit >1.55× la proba du marché
-# sur une cote ≥4 est quasi toujours du sur-fit outsider, pas de l'edge. Resserrer
-# coupe les faux signaux les plus toxiques (l'inflation d'EV en zone cote 4-8).
-MAX_MODEL_MARKET_RATIO = 1.55
-LONGSHOT_COTE_MIN = 4.0
-# Court-cote : sur cote < LONGSHOT_COTE_MIN, on cape la proba modèle au marché ×
+#
+# RECALIBRÉ le 2026-08-16 (scripts/calibration_longshots.py sur 37 970 prédictions
+# ⋈ résultats réels, cf. audit "value bets en extinction" 27/mois en août contre
+# 1170/mois en juin). Le seuil précédent (cote≥4, ratio 1.55) datait d'un audit de
+# sur-fit (2026-07-02) mais n'avait jamais été recalé sur données fraîches malgré
+# le TODO explicite dans ce fichier. Le diagnostic montre que le modèle est BIEN
+# calibré jusqu'à cote 20 (ratio proba_prédite/fréquence_réelle = 0.87 à 1.13 sur
+# les 7 buckets [1–20), tous "ok") — le gate à cote≥4 rejetait donc des value bets
+# LÉGITIMES dans toute la zone 4-20, sans que le modèle y soit réellement en
+# sur-fit. Le biais réel ne commence qu'à cote 20 (ratio 1.60) et s'aggrave à
+# cote 40+ (ratio 1.73). Nouveaux seuils dérivés des buckets fiables (n≥30) :
+#   longshot_cote_min      4.0  → 20.0
+#   max_model_market_ratio 1.55 → 1.67  (ratio médian des buckets sur-évalués)
+# À re-mesurer périodiquement (le calibrage dérive avec le modèle) : la commande
+# reste `python -m scripts.calibration_longshots --json`.
+MAX_MODEL_MARKET_RATIO = 1.67
+LONGSHOT_COTE_MIN = 20.0
+# Court-cote : sur cote < SHORT_COTE_MAX, on cape la proba modèle au marché ×
 # ce ratio. Le sous-ensemble VB cote<4 est sur-coté (ROI réel −44%) → edge max
 # crédible sur favori court = +30% vs marché. Tue les faux value bets courts.
+# SHORT_COTE_MAX est une constante SÉPARÉE de LONGSHOT_COTE_MIN (avant le
+# recalibrage 2026-08-16 les deux partageaient la même valeur 4.0, un couplage
+# accidentel) : le −44% n'a été mesuré QUE sous cote 4, pas jusqu'à 20. Faire
+# suivre ce cap à LONGSHOT_COTE_MIN aurait étendu une correction calibrée sur
+# cote<4 à toute la zone 4-20 — précisément la zone que calibration_longshots.py
+# montre bien calibrée (ratio 0.87-1.13, aucun cap nécessaire). Entre
+# SHORT_COTE_MAX et LONGSHOT_COTE_MIN, la proba modèle passe donc SANS
+# correction : ni cap court-cote, ni rejet longshot.
+SHORT_COTE_MAX = 4.0
 SHORT_MAX_RATIO = 1.3
 
 # Cote max retenue pour le calcul de l'EV = médiane marché × ce facteur.
@@ -74,7 +90,11 @@ COTE_CEIL_FACTOR = 1.15
 
 # Cote gagnant max absolue pour un value bet. Au-delà, le modèle est trop peu
 # fiable (cf. biais longshot) pour qu'un edge soit crédible.
-COTE_MAX_VB = 25.0
+# Recalibré 2026-08-16 avec LONGSHOT_COTE_MIN/MAX_MODEL_MARKET_RATIO ci-dessus :
+# la fréquence réelle de victoire ne s'effondre (<2%) qu'à partir de cote 40
+# (bucket [20-40) encore à 2.7% de victoires réelles, edge encore mesurable
+# une fois passé par le gate longshot qui corrige déjà le sur-fit à ce niveau).
+COTE_MAX_VB = 40.0
 
 # Poids des sources pour le calcul de la cote marché de référence
 # Betfair Exchange = marché sans marge bookmaker → poids le plus élevé
@@ -285,11 +305,11 @@ def detect_value_bet(
             return None
 
     # ── Garde-fou COURT-COTE (symétrique du longshot) ────────────────────────
-    # Sur cote < LONGSHOT_COTE_MIN, le sous-ensemble value bet (modèle > marché) est
+    # Sur cote < SHORT_COTE_MAX, le sous-ensemble value bet (modèle > marché) est
     # SUR-coté : ROI réel mesuré −44% (le modèle surestime les courts qu'il aime).
     # On CAPE la P(victoire) au marché × SHORT_MAX_RATIO → EV honnête, plus de faux
     # value bet court (don au PMU). Mesuré sur predictions ⋈ résultats par bucket.
-    elif cote_marche and 1.0 < cote_marche < LONGSHOT_COTE_MIN:
+    elif cote_marche and 1.0 < cote_marche < SHORT_COTE_MAX:
         from ml.algo_flags import FLAGS as _FLAGS
         if _FLAGS.devig_gates and field_overround and field_overround > 0:
             # Cap court-cote sur la proba juste dé-viggée (cohérent avec le gate longshot).

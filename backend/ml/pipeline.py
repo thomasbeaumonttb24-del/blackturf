@@ -232,6 +232,58 @@ async def _head_to_head_auc(
     }
 
 
+# Part minimale du champ devant avoir une cote réelle pour que l'overround calculé
+# soit fiable. Sous ce seuil, la somme des probas implicites SOUS-COMPTE l'overround
+# réel (des partants pesants manquent) et peut tomber près de 0.
+MIN_OVERROUND_COVERAGE = 0.70
+
+
+def compute_field_overround(features_list: list[dict]) -> Optional[float]:
+    """Overround du champ = Σ probas implicites marché pondérées (cf. cote_marche_ponderee).
+
+    Sert à dé-vigger les gates value bet (`ml.valuebets.detect_value_bet`) : la
+    proba implicite brute 1/cote contient la marge bookmaker (~12-20% overround)
+    → comparaison biaisée sans correction.
+
+    GARDE-FOU COUVERTURE (2026-08-16, audit "value bets en extinction", 27/mois en
+    août contre 1170/mois en juin). Si seule une minorité des partants a une cote,
+    la somme sous-compte l'overround réel et peut tomber près de 0.
+    `implied_marche / field_overround` DIVISE alors par ce quasi-zéro → explose
+    vers l'infini → le gate anti-longshot (`proba_top1 > MAX_MODEL_MARKET_RATIO *
+    implied_marche`) ne se déclenche PLUS JAMAIS (rien ne peut dépasser l'infini) :
+    une couverture cotes faible désactivait silencieusement le garde-fou au lieu de
+    le renforcer — l'inverse de l'effet recherché. En pratique la couverture PMU du
+    jour est bonne (~85-100%), donc rarement déclenché, mais le défaut était réel
+    (champ clairsemé, réunion étrangère mal couverte, panne de scraping) et sans
+    filet. On n'utilise donc l'overround QUE si au moins MIN_OVERROUND_COVERAGE du
+    champ a une cote réelle ; sinon None, qui fait tourner le gate SANS dé-vig
+    (comparaison au marché brut, plus prudente — cf. detect_value_bet) plutôt que
+    de le neutraliser.
+    """
+    from ml.valuebets import cote_marche_ponderee
+
+    if not features_list:
+        return None
+
+    total_implied = 0.0
+    n_priced = 0
+    for f in features_list:
+        cote = cote_marche_ponderee({
+            "pmu": f.get("cote_pmu"), "geny": f.get("cote_geny"),
+            "bzh": f.get("cote_bzh"), "winamax": f.get("cote_winamax"),
+            "betclic": f.get("cote_betclic"), "unibet": f.get("cote_unibet"),
+            "betfair": f.get("cote_betfair_exchange"),
+        })
+        if cote and cote > 1.0:
+            total_implied += 1.0 / cote
+            n_priced += 1
+
+    coverage = n_priced / len(features_list)
+    if total_implied <= 0 or coverage < MIN_OVERROUND_COVERAGE:
+        return None
+    return total_implied
+
+
 # ─────────────────────────────────────────────
 # Capture cote de clôture (fondation CLV)
 # ─────────────────────────────────────────────
@@ -1320,26 +1372,14 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception:
             _ev_band_perf = None
 
-        # FLAG devig_gates : overround du champ = Σ probas implicites marché pondéré.
-        # Sert à dé-vigger les gates value bet (la proba implicite brute 1/cote
-        # contient la marge bookmaker ~12-20% → comparaison biaisée). Calculé une
-        # fois par course. None si flag off → detect_value_bet inchangé.
+        # FLAG devig_gates : overround du champ. Calculé une fois par course.
+        # None si flag off, ou couverture cotes insuffisante → detect_value_bet
+        # inchangé (cf. compute_field_overround).
         _field_overround = None
         try:
             from ml.algo_flags import FLAGS as _AF
             if _AF.devig_gates:
-                from ml.valuebets import cote_marche_ponderee as _cmp
-                _imp = 0.0
-                for _f in features_list:
-                    _cm = _cmp({
-                        "pmu": _f.get("cote_pmu"), "geny": _f.get("cote_geny"),
-                        "bzh": _f.get("cote_bzh"), "winamax": _f.get("cote_winamax"),
-                        "betclic": _f.get("cote_betclic"), "unibet": _f.get("cote_unibet"),
-                        "betfair": _f.get("cote_betfair_exchange"),
-                    })
-                    if _cm and _cm > 1.0:
-                        _imp += 1.0 / _cm
-                _field_overround = _imp if _imp > 0 else None
+                _field_overround = compute_field_overround(features_list)
         except Exception:
             _field_overround = None
 
