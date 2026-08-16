@@ -4,6 +4,7 @@ import { Check, X, Zap, ChevronRight, Calculator } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { CheckoutButton } from "@/components/billing/CheckoutButton";
 
 export const metadata: Metadata = {
   title: "Tarifs — Gratuit, Standard, Expert",
@@ -120,11 +121,13 @@ export default function TarifsPage() {
                 </li>
               ))}
             </ul>
-            <Button variant="brand" className="w-full" size="lg" asChild>
-              <Link href="/inscription?plan=standard">
-                Essayer 7 jours gratuit <ChevronRight className="h-4 w-4" />
-              </Link>
-            </Button>
+            <CheckoutButton
+              plan="standard"
+              periodicite="monthly"
+              label="Essayer 7 jours gratuit"
+              variant="brand"
+              className="w-full"
+            />
             <p className="text-center text-xs text-muted-foreground mt-2">Sans CB requis</p>
           </CardContent>
         </Card>
@@ -154,11 +157,13 @@ export default function TarifsPage() {
                 </li>
               ))}
             </ul>
-            <Button variant="brand-outline" className="w-full" size="lg" asChild>
-              <Link href="/inscription?plan=expert">
-                Essayer Expert <ChevronRight className="h-4 w-4" />
-              </Link>
-            </Button>
+            <CheckoutButton
+              plan="expert"
+              periodicite="monthly"
+              label="Essayer Expert"
+              variant="brand-outline"
+              className="w-full"
+            />
           </CardContent>
         </Card>
       </div>
@@ -252,11 +257,14 @@ export default function TarifsPage() {
       <div className="mt-12 sm:mt-16 text-center p-6 sm:p-8 rounded-2xl gradient-hero border border-brand-gold/20">
         <h2 className="text-xl sm:text-2xl font-bold mb-3">Prêt à parier plus intelligemment ?</h2>
         <p className="text-muted-foreground mb-6">7 jours d&apos;essai gratuit. Sans carte bancaire.</p>
-        <Button variant="brand" size="xl" asChild>
-          <Link href="/inscription?plan=standard">
-            Commencer l&apos;essai gratuit <ChevronRight className="h-5 w-5" />
-          </Link>
-        </Button>
+        <CheckoutButton
+          plan="standard"
+          periodicite="monthly"
+          label="Commencer l'essai gratuit"
+          variant="brand"
+          size="xl"
+          className="w-auto"
+        />
       </div>
 
       {/* Disclaimer */}
