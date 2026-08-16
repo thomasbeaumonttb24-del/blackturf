@@ -32,9 +32,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
     // Revalide la session au chargement : un access_token expire (ex. mobile) ne doit pas
     // laisser un "user" fantome connecte (-> "aucune analyse disponible"). On appelle
-    // /auth/me ; l intercepteur 401 rafraichit le token, et si le refresh echoue il nettoie
-    // la session et redirige vers /login.
-    if (cached && typeof window !== "undefined" && localStorage.getItem("access_token")) {
+    // /auth/me meme si access_token a disparu du localStorage (mais pas "user") : sans
+    // token la requete part sans header, 401 "Not authenticated", l intercepteur tente le
+    // refresh via refresh_token, et si ca echoue aussi il nettoie et redirige vers /login.
+    // Avant ce fix, ce cas (access_token absent, "user" encore en cache) ne revalidait
+    // jamais rien : navbar affichait "connecte" a vie, toutes les requetes API 401
+    // silencieuses, aucune analyse IA / plan de mise ne s'affichait jamais.
+    if (cached && typeof window !== "undefined") {
       authApi
         .me()
         .then((res) => {
