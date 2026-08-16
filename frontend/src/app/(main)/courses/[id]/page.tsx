@@ -248,7 +248,7 @@ const CX_STYLE = `
 .cx-badges>span{white-space:nowrap}
 .cx-meta>span{white-space:nowrap}
 .cx-fade{animation:cxFadeUp .5s cubic-bezier(.16,1,.3,1) both}
-@media (max-width:840px){ .cx-main{grid-template-columns:1fr !important} }
+@media (max-width:840px){ .cx-main{grid-template-columns:1fr !important} .cx-sticky-mise{position:static !important;top:auto !important} }
 @media (max-width:600px){
   .cx-wrap{padding:16px 13px 72px !important}
   .cx-hero{padding:20px 17px !important;border-radius:20px !important}
@@ -2590,19 +2590,36 @@ export default function CoursePage() {
                 if (!rows.length) {
                   return <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{analysis.narrative}</p>;
                 }
+                // Résumé : Favori IA + Conclusion visibles d'emblée ; le reste (Lecture,
+                // Atouts, Également en vue, Outsiders à valeur, À surveiller) replié —
+                // désencombre la carte, texte détaillé toujours accessible en 1 clic.
+                const resumeRows = rows.filter((r) => r.label === "Favori IA" || r.label === "Conclusion");
+                const detailRows = rows.filter((r) => r.label !== "Favori IA" && r.label !== "Conclusion");
+                const Row = ({ label, rest }: { label: string; rest: string }) => {
+                  const concl = label === "Conclusion";
+                  return (
+                    <div className="flex gap-2.5" style={concl ? { marginTop: 4, borderRadius: 12, background: "rgba(245,158,11,.05)", padding: "9px 11px" } : { padding: "1px 0" }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.goldMuted, marginTop: 8, flexShrink: 0 }} />
+                      <p className="text-[13.5px] leading-relaxed" style={{ color: CX.gray600 }}>
+                        <span style={{ fontWeight: 700, color: CX.ink2 }}>{label}</span> {rest}
+                      </p>
+                    </div>
+                  );
+                };
                 return (
-                  <div className="space-y-2">
-                    {rows.map(({ label, rest }, i) => {
-                      const concl = label === "Conclusion";
-                      return (
-                        <div key={i} className="flex gap-2.5" style={concl ? { marginTop: 4, borderRadius: 12, background: "rgba(245,158,11,.05)", padding: "8px 10px" } : undefined}>
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.goldMuted, marginTop: 7, flexShrink: 0 }} />
-                          <p className="text-[13px] leading-snug" style={{ color: CX.gray600 }}>
-                            <span style={{ fontWeight: 700, color: CX.ink2 }}>{label}</span> {rest}
-                          </p>
+                  <div className="flex flex-col" style={{ gap: 10 }}>
+                    {resumeRows.map((r, i) => <Row key={i} {...r} />)}
+                    {detailRows.length > 0 && (
+                      <details className="group">
+                        <summary className="select-none flex items-center gap-1.5" style={{ cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: CX.gold, listStyle: "none", padding: "2px 0" }}>
+                          Voir l&apos;analyse complète
+                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div className="flex flex-col" style={{ gap: 10, marginTop: 8 }}>
+                          {detailRows.map((r, i) => <Row key={i} {...r} />)}
                         </div>
-                      );
-                    })}
+                      </details>
+                    )}
                   </div>
                 );
               })()}
@@ -2643,9 +2660,11 @@ export default function CoursePage() {
                   ))}
                 </ul>
               )}
-              <div className="cx-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {analysis.detection_outsider.candidats.map((c) => (
-                  <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "11px 13px" }} className="space-y-1.5">
+              <div className="cx-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {analysis.detection_outsider.candidats.map((c) => {
+                  const hasDetail = !!(c.justification || (c.facteurs_positifs && c.facteurs_positifs.length > 0) || (c.points_vigilance && c.points_vigilance.length > 0));
+                  return (
+                  <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "13px 14px" }} className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span style={{ fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}>N°{c.numero} {c.nom}</span>
                       <span style={{ fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
@@ -2664,32 +2683,43 @@ export default function CoursePage() {
                         <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>{c.verdict}</span>
                       )}
                     </div>
-                    {c.justification && (
-                      <p style={{ margin: "7px 0 0", fontSize: 11.5, lineHeight: 1.45, color: CX.gray600 }}>{c.justification}</p>
-                    )}
-                    {/* Facteurs qui appuient le choix */}
-                    {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
-                      <ul className="space-y-0.5">
-                        {c.facteurs_positifs.slice(0, 4).map((f, i) => (
-                          <li key={i} className="text-[10px] text-emerald-800 flex gap-1">
-                            <span className="flex-shrink-0">✓</span>
-                            <span><b>{f.label}</b>{f.detail ? ` — ${f.detail}` : ""}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {/* Points de vigilance (honnêteté : un outsider garde des risques) */}
-                    {c.points_vigilance && c.points_vigilance.length > 0 && (
-                      <ul className="space-y-0.5">
-                        {c.points_vigilance.map((v, i) => (
-                          <li key={i} className="text-[10px] text-amber-700 flex gap-1">
-                            <span className="flex-shrink-0">⚠</span><span>{v}</span>
-                          </li>
-                        ))}
-                      </ul>
+                    {hasDetail && (
+                      <details className="group" style={{ marginTop: 2 }}>
+                        <summary className="select-none flex items-center gap-1" style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 600, color: CX.gold, listStyle: "none" }}>
+                          Voir le détail
+                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div style={{ marginTop: 6 }} className="space-y-1.5">
+                          {c.justification && (
+                            <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: CX.gray600 }}>{c.justification}</p>
+                          )}
+                          {/* Facteurs qui appuient le choix */}
+                          {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
+                            <ul className="space-y-0.5">
+                              {c.facteurs_positifs.slice(0, 4).map((f, i) => (
+                                <li key={i} className="text-[10.5px] text-emerald-800 flex gap-1">
+                                  <span className="flex-shrink-0">✓</span>
+                                  <span><b>{f.label}</b>{f.detail ? ` — ${f.detail}` : ""}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {/* Points de vigilance (honnêteté : un outsider garde des risques) */}
+                          {c.points_vigilance && c.points_vigilance.length > 0 && (
+                            <ul className="space-y-0.5">
+                              {c.points_vigilance.map((v, i) => (
+                                <li key={i} className="text-[10.5px] text-amber-700 flex gap-1">
+                                  <span className="flex-shrink-0">⚠</span><span>{v}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </details>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <p style={{ margin: "11px 0 0", fontSize: 10.5, color: CX.muted }}>
                 Grosse cote = risque élevé, réservé aux profils offensifs.
@@ -2732,10 +2762,10 @@ export default function CoursePage() {
         </div>
 
         {/* ── RIGHT SIDEBAR ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
           {/* Classement algo */}
           <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 6px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "17px 20px 6px" }}>
               <Brain className="h-4 w-4" style={{ color: CX.goldAmber }} />
               <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Classement algo</h3>
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 9 }}>
@@ -3042,13 +3072,14 @@ export default function CoursePage() {
             </div>
           )}
 
-          {/* Calculateur de mise */}
-          <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 55%)", overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 12px" }}>
+          {/* Calculateur de mise — sticky au scroll (desktop uniquement, cf. .cx-sticky-mise) */}
+          <div className="cx-sticky-mise" style={{ position: "sticky", top: 84, zIndex: 10, alignSelf: "start" }}>
+          <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 55%)", overflow: "hidden", boxShadow: "0 8px 24px -12px rgba(0,0,0,.12)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "17px 20px 12px" }}>
               <Calculator className="h-4 w-4" style={{ color: CX.goldAmber }} />
               <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Votre plan de mise</h3>
             </div>
-            <div style={{ padding: "0 18px 18px" }}>
+            <div style={{ padding: "0 20px 20px" }}>
               <MiseCalculatorWidget
                 courseId={id}
                 userPlan={user?.plan}
@@ -3058,11 +3089,12 @@ export default function CoursePage() {
               />
             </div>
           </div>
+          </div>
 
           {/* Infos course */}
-          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "16px 18px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <h3 style={{ margin: "0 0 11px", fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2 }}>Infos course</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <h3 style={{ margin: "0 0 12px", fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2 }}>Infos course</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
               {(() => {
                 const rows: Array<{ label: string; val: string }> = [
                   { label: "Discipline", val: course.discipline },
@@ -3077,7 +3109,7 @@ export default function CoursePage() {
                 if (course.categorie_particularite) rows.push({ label: "Départ", val: course.categorie_particularite.replace(/_/g, " ").toLowerCase().replace(/^./, (ch) => ch.toUpperCase()) });
                 rows.push({ label: "Heure", val: formatDateTime(course.date_heure) });
                 return rows.map((r) => (
-                  <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5 }}>
+                  <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13 }}>
                     <span style={{ color: CX.gray400 }}>{r.label}</span>
                     <span style={{ fontWeight: 600, color: CX.gray700 }}>{r.val}</span>
                   </div>

@@ -133,7 +133,7 @@ function StatutBadge({ statut }: { statut: string }) {
       </span>
     );
   if (statut === "termine")
-    return <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500">Terminée</span>;
+    return <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-500 ring-1 ring-gray-200">Terminée</span>;
   if (statut === "annule")
     return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] text-red-500 ring-1 ring-red-200">Annulée</span>;
   return null;
@@ -255,37 +255,45 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
 }
 
 /* ─── Ligne de course (timeline) ────────────────────────── */
-function TimelineRow({ course, reunionNum, vbCount, delay }: { course: CourseSummary; reunionNum: number; vbCount?: number; delay: number }) {
+function TimelineRow({ course, reunionNum, vbCount, delay, targetId }: { course: CourseSummary; reunionNum: number; vbCount?: number; delay: number; targetId?: string }) {
   const m = discMeta(course.discipline);
   const isLive = course.statut === "en_cours";
   const isDone = course.statut === "termine" || course.statut === "annule";
   const countdown = useCountdown(course.date_heure, course.statut);
-  const codeCls = course.est_quinte
+  const codeCls = isDone
+    ? "text-gray-400 bg-gray-100/70 ring-gray-200"
+    : course.est_quinte
     ? "text-amber-700 bg-amber-50 ring-amber-200"
     : isLive ? "text-emerald-700 bg-emerald-50 ring-emerald-200" : "text-gray-700 bg-gray-100 ring-gray-200";
   return (
     <Link
       href={`/courses/${course.course_id}`}
-      className="group relative flex items-center gap-2.5 rounded-2xl border border-[#ECE7DC] px-3 py-2.5 no-underline shadow-[0_1px_2px_rgba(0,0,0,.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-[0_16px_32px_-14px_rgba(180,83,9,.28)] sm:gap-3 sm:px-4 sm:py-3"
-      style={{ background: isLive ? "#F0FDF8" : "#FFFFFF", opacity: isDone ? 0.62 : 1, animation: `fadeUp .5s cubic-bezier(.16,1,.3,1) ${delay}s both` }}
+      id={targetId}
+      className={cn(
+        "group relative flex scroll-mt-28 items-center gap-2.5 rounded-2xl border px-3 py-2.5 no-underline transition-all duration-200 sm:gap-3 sm:px-4 sm:py-3",
+        isDone
+          ? "border-[#E9E6DC] hover:border-gray-300"
+          : "border-[#ECE7DC] shadow-[0_1px_2px_rgba(0,0,0,.03)] hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-[0_16px_32px_-14px_rgba(180,83,9,.28)]",
+      )}
+      style={{ background: isLive ? "#F0FDF8" : isDone ? "#F5F4EF" : "#FFFFFF", animation: `fadeUp .5s cubic-bezier(.16,1,.3,1) ${delay}s both` }}
     >
-      <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : course.est_quinte ? "#F59E0B" : "transparent" }} />
+      <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : !isDone && course.est_quinte ? "#F59E0B" : "transparent" }} />
       <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
-        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-600" : isDone ? "text-gray-400" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-600" : isDone ? "text-gray-400 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
           {formatTime(course.date_heure)}
         </span>
         {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-600">{countdown}</span>}
       </div>
-      <span className="hidden h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: m.bg, border: `1px solid ${m.ring}` }}>
-        <DiscIcon discipline={course.discipline} />
+      <span className="hidden h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: isDone ? "#EFEDE4" : m.bg, border: `1px solid ${isDone ? "#E2DFD3" : m.ring}` }}>
+        <DiscIcon discipline={course.discipline} color={isDone ? "#B7B2A0" : undefined} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             R{reunionNum}C{course.numero}
           </span>
-          <span className="max-w-full truncate text-sm font-semibold text-gray-800 sm:max-w-[230px]">
-            <span className="text-gray-500">{course.hippodrome_nom}</span>
+          <span className={cn("max-w-full truncate text-sm font-semibold sm:max-w-[230px]", isDone ? "text-gray-500" : "text-gray-800")}>
+            <span className="text-gray-400">{course.hippodrome_nom}</span>
             <span className="text-gray-300"> · </span>
             {course.nom || `Course ${course.numero}`}
           </span>
@@ -298,7 +306,7 @@ function TimelineRow({ course, reunionNum, vbCount, delay }: { course: CourseSum
           ) : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-400">
-          <span className="font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
+          <span className="font-semibold" style={{ color: isDone ? "#9CA3AF" : m.color }}>{titleCase(course.discipline)}</span>
           <span className="text-gray-300">·</span><span>{course.distance} m</span>
           <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
           {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-500 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
@@ -428,6 +436,20 @@ export default function ProgrammePage() {
   const restDate = format(selectedDate, "d MMMM yyyy", { locale: fr });
 
   const resetFilters = () => { setDiscFilter("Tous"); setReunionFilter("all"); setHippoSearch(""); setVbOnly(false); };
+
+  /* Auto-scroll : à l'ouverture de la page (jour = aujourd'hui), amène directement sur la
+     prochaine course dans la timeline — évite de défiler manuellement au-delà des courses
+     terminées. Une seule fois par jour sélectionné (pas de re-scroll sur le refresh 60s). */
+  const scrolledForDate = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || !isToday || !nextRace) return;
+    const dateKey = format(selectedDate, "yyyy-MM-dd");
+    if (scrolledForDate.current === dateKey) return;
+    const el = document.getElementById("next-race-row");
+    if (!el) return;
+    scrolledForDate.current = dateKey;
+    requestAnimationFrame(() => el.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [loading, isToday, nextRace, selectedDate, groups]);
 
   return (
     <div
@@ -625,6 +647,7 @@ export default function ProgrammePage() {
                         reunionNum={reunionNum}
                         vbCount={isPaid ? vbByCourse[course.course_id] : undefined}
                         delay={Math.min(i, 8) * 0.05}
+                        targetId={course.course_id === nextRace?.course.course_id ? "next-race-row" : undefined}
                       />
                     ))}
                   </div>
