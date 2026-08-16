@@ -8,8 +8,8 @@ ROI, profit, hit-rate, drawdown max, ventilation par type.
 Objectif : PROUVER (ou réfuter) qu'une stratégie « assure du gain » sur l'historique,
 au lieu d'optimiser à l'aveugle.
 
-RÈGLE D'INTÉGRITÉ : aucun payout fabriqué. Un pari gagnant est réglé à la cote
-RÉELLE à laquelle on aurait parié (meilleure cote disponible au scrape). Les paris
+RÈGLE D'INTÉGRITÉ : aucun payout fabriqué. La sélection rejoue la cote disponible
+avant course, mais un pari gagnant est réglé à la cote PMU FINALE. Les paris
 dont on ne peut pas déterminer le gain réel (ex. placé sans rapport placé connu)
 sont ignorés, pas estimés.
 """
@@ -470,9 +470,12 @@ async def run_backtest(
         if not arrivee:
             continue
 
-        # Partants + cotes + proba prédite
+        # Partants + cotes + proba prédite. `cote_selection` rejoue honnêtement ce
+        # que le moteur connaissait avant le départ ; `cote_finale` ne sert JAMAIS à
+        # sélectionner, uniquement au règlement du gain après l'arrivée.
         rows = await session.execute(text("""
-            SELECT p.numero, COALESCE(pr.cote_figee, p.cote_pmu) AS cote_pmu, p.cote_geny, p.cote_bzh,
+            SELECT p.numero, COALESCE(pr.cote_figee, p.cote_pmu) AS cote_selection,
+                   p.cote_pmu AS cote_finale, p.cote_geny, p.cote_bzh,
                    p.cote_winamax, p.cote_betclic, p.cote_unibet, p.cote_betfair_exchange,
                    pr.proba_top3, pr.proba_top1
             FROM participations p
@@ -489,8 +492,9 @@ async def run_backtest(
                 "proba_top3": float(r.proba_top3),
                 # P(victoire) stockée → value bet GAGNANT calibré (sinon estimée par _p_win)
                 "proba_top1": float(r.proba_top1) if r.proba_top1 is not None else None,
+                "cote_finale": float(r.cote_finale) if r.cote_finale else None,
                 "cotes": {
-                    "pmu": r.cote_pmu, "geny": r.cote_geny, "bzh": r.cote_bzh,
+                    "pmu": r.cote_selection, "geny": r.cote_geny, "bzh": r.cote_bzh,
                     "winamax": r.cote_winamax, "betclic": r.cote_betclic,
                     "unibet": r.cote_unibet, "betfair": r.cote_betfair_exchange,
                 },
@@ -505,7 +509,14 @@ async def run_backtest(
             "distance": course.distance, "hippodrome": course.hippodrome_nom,
         }, bankroll=bankroll, **strategy_kwargs)
         nb_courses_joues += 1
+        final_by_num = {int(p["numero"]): p.get("cote_finale") for p in partants}
         for bet in bets:
+            # La cote figée/live historique décide si le pari aurait été pris. Le
+            # paiement, lui, suit la cote PMU finale conformément au résultat réel.
+            if _norm_type(bet.type) in _SIMPLE_TYPES:
+                final = final_by_num.get(int(bet.numero))
+                if final and final > 1.0:
+                    bet.cote = float(final)
             sb = settle_bet(bet, arrivee, nb_partants=course.nb_partants, rapports=resultat.rapports)
             if sb is not None:   # None = non réglable (jamais estimé)
                 all_settled.append(sb)

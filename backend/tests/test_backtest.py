@@ -172,7 +172,7 @@ def test_value_bet_strategy_pas_de_pari_sans_edge():
 # ── Runner DB ──────────────────────────────────────────────────
 # proba=0.8 → proba_top1=0.4 ; à cote 3.0, EV gagnant = 3.0×0.4−1 = +0.2 → vrai
 # value bet (le runner détecte sur P(victoire), pas sur la proba placé).
-async def _seed_course(db, cid, num1_pos, cote=3.0, proba=0.8):
+async def _seed_course(db, cid, num1_pos, cote=3.0, proba=0.8, cote_figee=None):
     db.add(Course(
         course_id=cid, reunion_id="R1", numero=1, nom="Test",
         date_heure=datetime(2026, 1, int(cid[-1]) + 1, 13, 0, tzinfo=timezone.utc),
@@ -186,6 +186,7 @@ async def _seed_course(db, cid, num1_pos, cote=3.0, proba=0.8):
     db.add(Prediction(
         prediction_id=f"pred-{cid}-1", participation_id=f"p-{cid}-1",
         course_id=cid, proba_top1=proba / 2, proba_top3=proba, rang_predit=1,
+        cote_figee=cote_figee,
     ))
     # Arrivée réaliste : le cheval prédit (#1) + un autre (#2) comme gagnant de secours
     autre_pos = 1 if num1_pos != 1 else 2
@@ -210,6 +211,19 @@ async def test_run_backtest_end_to_end(db):
     # 1 gagné à cote 3 (+2×mise), 1 perdu (-mise) → profit net positif
     assert res.profit > 0
     assert len(res.equity_curve) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_backtest_selection_cote_figee_gain_cote_finale(db):
+    """La cote pré-course pilote l'éligibilité, mais le gain est payé à la cote finale."""
+    await _seed_course(db, "C3", num1_pos=1, cote=5.0, cote_figee=3.0)
+    await db.commit()
+
+    res = await run_backtest(db, ["C3"], bankroll=100.0)
+
+    assert res.nb_bets == 1
+    assert res.nb_wins == 1
+    assert res.total_returned == pytest.approx(res.total_staked * 5.0, abs=0.01)
 
 
 @pytest.mark.asyncio
