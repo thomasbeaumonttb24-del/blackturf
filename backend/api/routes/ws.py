@@ -7,12 +7,17 @@ WebSocket routes — BlackTurf.
 import asyncio
 import json
 import structlog
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from jose import JWTError, jwt
 from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Plans autorisés sur les flux value bets — même ensemble que require_pro (auth.py).
+# Dupliqué ici plutôt qu'importé : auth.py importe get_db (dépendance HTTP), pas
+# adapté aux routes WebSocket qui gèrent leur propre session (async_session_factory).
+PLANS_ABONNES = ("starter", "standard", "pro", "expert")
 
 from api.config import get_settings
 from db.database import get_db, async_session_factory
@@ -90,6 +95,14 @@ async def _get_user_from_token(token: str) -> str | None:
         return payload.get("sub")
     except JWTError:
         return None
+
+
+async def _get_user_plan(user_id: str) -> str | None:
+    """Plan de l'utilisateur, ou None si introuvable/désactivé."""
+    async with async_session_factory() as db:
+        result = await db.execute(select(User.plan).where(User.user_id == user_id))
+        row = result.first()
+        return row[0] if row else None
 
 
 async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None:
@@ -205,29 +218,47 @@ async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query
 # ─────────────────────────────────────────────
 @router.websocket("/value-bets")
 async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
-    """Stream des value bets actifs. Refresh 60s + ping/pong heartbeat."""
+    """Stream des value bets actifs. Refresh 60s + ping/pong heartbeat.
+
+    Réservé aux abonnés (même règle que GET /value-bets, cf. require_pro) : avant
+    ce fix, l'authentification JWT suffisait mais AUCUN plan n'était vérifié — un
+    compte gratuit pouvait streamer en direct les value bets réservés Standard+,
+    la donnée payante la plus sensible du produit, en contournant entièrement le
+    paywall REST (audit 2026-08-16).
+    """
     await websocket.accept()
     user_id = await _authenticate_ws(websocket, token)
     if not user_id:
         await websocket.close(code=4401)
         return
 
+    plan = await _get_user_plan(user_id)
+    if plan not in PLANS_ABONNES:
+        log.warning("ws.valuebets.paywall_reject", user_id=user_id, plan=plan)
+        await websocket.close(code=4403)
+        return
+
     last_pong = asyncio.get_event_loop().time()
-    log.info("ws.valuebets.connect", user_id=user_id)
+    log.info("ws.valuebets.connect", user_id=user_id, plan=plan)
 
     async def send_vbs():
         async with async_session_factory() as db:
+            filters = [
+                ValueBet.actif == True,
+                Course.statut.in_(["a_venir", "en_cours"]),
+            ]
+            # Même délai 15 min que GET /value-bets (briefing §4.2) : Standard voit
+            # les value bets décalés, Pro/Expert en direct. Sans ce flux WS aligné,
+            # un compte Standard aurait pu contourner le délai en passant par ici.
+            if plan == "standard":
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+                filters.append(ValueBet.detecte_a <= cutoff)
             q = (
                 select(ValueBet, Participation, Cheval, Course)
                 .join(Participation, Participation.participation_id == ValueBet.participation_id)
                 .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
                 .join(Course, Course.course_id == ValueBet.course_id)
-                .where(
-                    and_(
-                        ValueBet.actif == True,
-                        Course.statut.in_(["a_venir", "en_cours"]),
-                    )
-                )
+                .where(and_(*filters))
                 .order_by(desc(ValueBet.ev_max))
                 .limit(20)
             )
