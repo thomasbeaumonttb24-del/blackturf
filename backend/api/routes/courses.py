@@ -830,6 +830,41 @@ async def _profil_roi_observe(db: AsyncSession, profil: str, days: int = 30) -> 
     return {}
 
 
+# Essai gratuit du calculateur de plan de mise (décision produit 2026-08-16,
+# Thomas) : Free/Découverte pouvaient auparavant tester GRATUITEMENT le
+# calculateur — corrigé en 403 total. Free/Découverte = 1/jour (goûter avant de
+# payer), Standard/Starter = 6/jour (déjà abonné, quota large), Pro/Expert =
+# illimité. Même style que PRONO_DAILY_LIMITS/_prono_quota_check (predictions.py).
+MISE_PLAN_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 6, "starter": 6}
+
+
+async def _mise_plan_quota_check(user, course_id: str) -> tuple[bool, int, int]:
+    """(autorisé, quota_restant, limite_configurée). Compteur Redis par user/jour
+    (set de course_ids, TTL 36h) — ré-ouvrir une course déjà comptée aujourd'hui
+    ne reconsomme pas le quota. -1/-1 = illimité. Fail-open si Redis indisponible
+    (disponibilité du produit > paywall strict)."""
+    if getattr(user, "is_admin", False):
+        return True, -1, -1
+    limit = MISE_PLAN_DAILY_LIMITS.get(user.plan)
+    if limit is None:  # standard+/expert (plans hors table) = illimité
+        return True, -1, -1
+    try:
+        redis = await get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"mise_plan_quota:{user.user_id}:{day}"
+        if await redis.sismember(key, course_id):
+            return True, max(0, limit - await redis.scard(key)), limit
+        used = await redis.scard(key)
+        if used >= limit:
+            return False, 0, limit
+        await redis.sadd(key, course_id)
+        await redis.expire(key, 129600)  # 36h
+        return True, max(0, limit - (used + 1)), limit
+    except Exception:
+        log.warning("mise_plan_quota.redis_unavailable", user_id=getattr(user, "user_id", None))
+        return True, -1, -1
+
+
 @router.post("/courses/{course_id}/mise-plan")
 async def get_mise_plan(
     course_id: str,
@@ -839,14 +874,20 @@ async def get_mise_plan(
 ):
     """
     Génère un plan de mise personnalisé selon montant + profil.
-    Requiert plan Standard ou Expert.
+    Quota journalier selon le plan (funnel freemium, cf. MISE_PLAN_DAILY_LIMITS) :
+    Free/Découverte 1/jour, Standard/Starter 6/jour, Pro/Expert illimité.
     """
     from services.mise_calculator import generer_plan, plan_to_dict
     from db.models import Prediction as PredModel, ValueBet
 
-    if user.plan in ("free", "decouverte"):
+    autorise, quota_restant, quota_limite = await _mise_plan_quota_check(user, course_id)
+    if not autorise:
         from fastapi import HTTPException as _H
-        raise _H(status_code=403, detail="Plan Standard ou Expert requis")
+        raise _H(
+            status_code=403,
+            detail=f"Quota quotidien atteint ({quota_limite}/jour pour votre plan) — "
+                   "passez à un plan supérieur pour un accès plus large.",
+        )
 
     montant = float(body.get("montant", 0))
     if montant <= 0 or montant > 10000:
@@ -1039,6 +1080,10 @@ async def get_mise_plan(
     out["cotes_live_utilisees"] = bool(live_cotes) and not fige
     # ROI RÉEL observé de ce profil (honnêteté : l'espérance affichée est théorique).
     out["roi_observe"] = await _profil_roi_observe(db, profil)
+    # Quota restant (essai gratuit Free/Découverte, funnel large Standard/Starter) —
+    # -1 = illimité (Pro/Expert/admin). Permet au front d'afficher « 1 essai
+    # restant aujourd'hui » plutôt qu'un 403 surprise à la prochaine tentative.
+    out["quota_restant"] = quota_restant
     # GAINS LIVE après gel : la sélection reste figée, mais on ré-évalue l'ordre de
     # grandeur des gains sur les cotes du marché EN DIRECT jusqu'au départ.
     if fige:

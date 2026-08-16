@@ -131,11 +131,22 @@ async def test_mise_plan_requires_auth(client: AsyncClient, db: AsyncSession):
     assert resp.status_code == 401
 
 
-async def test_mise_plan_requires_paid_plan(client: AsyncClient, db: AsyncSession, auth_headers):
+async def test_mise_plan_free_plan_gets_one_free_try_per_day(client: AsyncClient, db: AsyncSession, auth_headers):
+    """Décision produit 2026-08-16 (Thomas) : Free n'est plus bloqué à 403 total,
+    il a droit à 1 essai gratuit du calculateur par jour (funnel freemium,
+    cf. MISE_PLAN_DAILY_LIMITS dans api/routes/courses.py).
+
+    Le comptage RÉEL du quota (1er OK, 2e à 403) est couvert précisément par
+    tests/test_mise_plan_quota.py, avec un FakeRedis qui suit un vrai état — le
+    mock Redis générique du fixture `client` ici (conftest.py) n'implémente pas
+    sismember/scard/sadd avec un état réel, donc `_mise_plan_quota_check` bascule
+    en fail-open (comportement voulu : disponibilité > paywall strict si Redis ne
+    répond pas correctement). Ce test-ci vérifie seulement le VRAI changement de
+    règle au niveau route : Free n'est plus bloqué net (403 systématique)."""
     await _create_test_course(db)
     resp = await client.post("/api/v1/courses/R1C1/mise-plan", json={"montant": 50}, headers=auth_headers)
-    # Free plan → 403
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert "quota_restant" in resp.json()
 
 
 async def test_mise_plan_returns_plan(client: AsyncClient, db: AsyncSession, admin_headers):

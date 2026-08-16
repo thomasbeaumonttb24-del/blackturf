@@ -14,9 +14,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
 
-from api.model_metrics import real_model_metrics, plausible_auc, plausible_roi_pct
+from api.model_metrics import real_model_metrics, plausible_auc
 from api.profil_backtest import backtest_profils
-from api.routes.auth import get_current_user
+from api.routes.auth import get_current_user, require_admin
 from db.database import get_db
 from db.redis_client import get_redis
 from db.models import (
@@ -141,15 +141,11 @@ async def public_stats(
     # non fiable/indisponible renvoie null → le front affiche "—", jamais un placeholder
     # marketing. Plus de _STATIC_STATS (487 users / 12 450 courses / roi 8,4% fictifs).
     metrics = await real_model_metrics(db, mv)
-    # ROI simulé 6 mois = backtest réel 10€ flat sur value bets ★★★+ (même source que
-    # la courbe d'équité). null si pas assez d'historique OU si aberrant (+307% =
-    # biais longshot sur petit échantillon) → le front affiche "—".
-    _bt = await _vb_flat_backtest(db)
-    roi_pct = plausible_roi_pct(_bt["roi_pct"] if _bt["is_real"] else None)
-
+    # ROI VOLONTAIREMENT ABSENT du public (exigence produit : le ROI n'est visible
+    # que par l'admin, cf. endpoints /stats/equity-curve & /stats/palmares-gagnants
+    # gardés par require_admin). Public = qualité du modèle uniquement (AUC, précision).
     result = {
         "auc_roc": metrics["auc_roc"],               # gardé ∈ [0.5,1], sinon null (jamais 0.06)
-        "roi_simule_6mois": roi_pct,
         "nb_courses_analysees": nb_courses,          # vrai nombre de courses terminées
         "nb_utilisateurs": nb_users,                 # vrai nombre d'utilisateurs
         "precision_top3": metrics["precision_top3"], # réelle (race_learning_log) ou null
@@ -162,6 +158,7 @@ async def public_stats(
 async def equity_curve(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
+    _: User = Depends(require_admin),   # ROI/courbe capital = admin uniquement
 ):
     """
     Courbe capital simulée — basée sur NOS PLANS DE MISE 10€ PAR PROFIL, joués sur
@@ -974,6 +971,7 @@ async def stats_profils(
 @router.get("/stats/palmares-gagnants")
 async def stats_palmares_gagnants(
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),   # ROI/gains par profil = admin uniquement
 ):
     """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — UNIQUEMENT
     les pronostics RÉELLEMENT FIGÉS AVANT LE DÉPART de la course (profil_run_log),
