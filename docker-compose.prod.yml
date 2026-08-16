@@ -279,8 +279,15 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.runtime.conf:/etc/nginx/nginx.conf:ro
-      - ${TLS_CERT_DIR:-/etc/letsencrypt/live/blackturf.fr}/fullchain.pem:/etc/nginx/ssl/fullchain.pem:ro
-      - ${TLS_CERT_DIR:-/etc/letsencrypt/live/blackturf.fr}/privkey.pem:/etc/nginx/ssl/privkey.pem:ro
+      # Monter le RÉPERTOIRE /etc/letsencrypt, jamais les .pem un par un.
+      # `live/*.pem` sont des SYMLINKS vers `archive/*N.pem` : un bind-mount de
+      # fichier est résolu à la CRÉATION du conteneur et épingle l'inode courant
+      # (archive/fullchain1.pem). Après un renouvellement, certbot écrit
+      # fullchain2.pem et repointe le symlink — le conteneur, lui, continuerait de
+      # servir l'ANCIEN certificat, y compris après `nginx -s reload`, jusqu'à un
+      # recreate. En montant le répertoire, le symlink est suivi à la LECTURE :
+      # un simple reload suffit à prendre le nouveau certificat.
+      - ${TLS_ROOT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro
     depends_on:
       api:
