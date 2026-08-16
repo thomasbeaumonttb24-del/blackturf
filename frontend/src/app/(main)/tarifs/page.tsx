@@ -80,7 +80,7 @@ export default function TarifsPage() {
               <span className="text-muted-foreground">/mois</span>
             </div>
             <ul className="space-y-3 mb-8">
-              {["Programme PMU du jour", "Cotes publiques", "Classement IA (limité)", "1 alerte par jour"].map((f) => (
+              {["Programme PMU du jour", "Cotes publiques", "Classement IA : 1 course/jour", "1 alerte par jour"].map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm">
                   <Check className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   {f}
@@ -104,8 +104,8 @@ export default function TarifsPage() {
             <p className="text-xs text-muted-foreground mb-6">ou 115€/an (−20%)</p>
             <ul className="space-y-3 mb-8">
               {[
-                { label: "Prédictions IA complètes", icon: null },
-                { label: "Paris de valeur illimités", icon: null },
+                { label: "Prédictions IA : 5 courses/jour", icon: null },
+                { label: "Paris de valeur illimités (délai 15 min)", icon: null },
                 { label: "Calculateur de mise", icon: <Calculator className="h-3 w-3" /> },
                 { label: "Alertes e-mail + notifications", icon: null },
                 { label: "Suivi de capital", icon: null },

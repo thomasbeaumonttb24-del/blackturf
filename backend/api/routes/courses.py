@@ -921,9 +921,11 @@ async def _profil_roi_observe(db: AsyncSession, profil: str, days: int = 30) -> 
 # Essai gratuit du calculateur de plan de mise (décision produit 2026-08-16,
 # Thomas) : Free/Découverte pouvaient auparavant tester GRATUITEMENT le
 # calculateur — corrigé en 403 total. Free/Découverte = 1/jour (goûter avant de
-# payer), Standard/Starter = 6/jour (déjà abonné, quota large), Pro/Expert =
-# illimité. Même style que PRONO_DAILY_LIMITS/_prono_quota_check (predictions.py).
-MISE_PLAN_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 6, "starter": 6}
+# payer), Standard/Starter = 5/jour, Expert = illimité.
+# Volontairement ALIGNÉ sur PRONO_DAILY_LIMITS (predictions.py) : le compte Free
+# consulte le classement IA et le plan de mise de la même course, pas de l'une sans
+# l'autre. Toute modification doit porter sur les DEUX tables.
+MISE_PLAN_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 5, "starter": 5}
 
 
 async def _mise_plan_quota_check(user, course_id: str) -> tuple[bool, int, int]:

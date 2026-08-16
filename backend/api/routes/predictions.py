@@ -37,10 +37,12 @@ def _is_prono_fige(date_heure) -> bool:
 
 
 # Quota journalier de pronostics consultés (funnel freemium).
-# 1 prono = 1 course dont on ouvre les prédictions IA. Free = 1/jour, Standard = 5/jour,
-# Expert/Pro/admin = illimité. Re-consulter une course déjà ouverte aujourd'hui ne
-# reconsomme pas le quota.
-PRONO_DAILY_LIMITS = {"free": 2, "decouverte": 2, "standard": 6, "starter": 6}
+# 1 prono = 1 course dont on ouvre les prédictions IA. Re-consulter une course déjà
+# ouverte aujourd'hui ne reconsomme pas le quota.
+# Valeurs arrêtées par Thomas le 2026-08-16 : Free/Découverte 1/jour, Standard/Starter
+# 5/jour, Expert/admin illimité. Identiques à MISE_PLAN_DAILY_LIMITS (courses.py) :
+# un compte Free ouvre le classement IA ET son plan de mise sur la MÊME course du jour.
+PRONO_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 5, "starter": 5}
 
 
 async def _prono_quota_check(user: User, course_id: str) -> tuple[bool, int]:
