@@ -32,11 +32,18 @@ const offersJsonLd = {
   ],
 };
 
-const FEATURES_COMPARISON = [
+// Une cellule vaut true (✓), false (✗) ou une CHAÎNE quand la différence entre
+// plans est une quantité, pas une présence : afficher ✓ partout laisserait croire
+// que Standard donne un accès illimité alors qu'il est plafonné (cf. quotas
+// PRONO_DAILY_LIMITS / MISE_PLAN_DAILY_LIMITS côté backend), et masquerait le
+// délai de 15 min appliqué à Standard sur les paris de valeur.
+type Cellule = boolean | string;
+
+const FEATURES_COMPARISON: { label: string; free: Cellule; standard: Cellule; expert: Cellule }[] = [
   { label: "Programme PMU du jour", free: true, standard: true, expert: true },
   { label: "Cotes publiques", free: true, standard: true, expert: true },
-  { label: "Prédictions IA complètes", free: false, standard: true, expert: true },
-  { label: "Paris de valeur en temps réel", free: false, standard: true, expert: true },
+  { label: "Prédictions IA", free: "1 course/jour", standard: "5 courses/jour", expert: "Illimité" },
+  { label: "Paris de valeur", free: false, standard: "Délai 15 min", expert: "Temps réel" },
   { label: "Calculateur de mise personnalisé", free: false, standard: true, expert: true },
   { label: "Alertes e-mail + notifications", free: false, standard: true, expert: true },
   { label: "Suivi de capital", free: false, standard: true, expert: true },
@@ -183,6 +190,9 @@ export default function TarifsPage() {
                 <li key={row.label} className="flex items-center gap-2 text-sm">
                   <Check className={`h-4 w-4 flex-shrink-0 ${plan.color}`} />
                   {row.label}
+                  {typeof row[plan.key] === "string" && (
+                    <span className={`text-xs ${plan.color}`}>· {row[plan.key]}</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -206,13 +216,19 @@ export default function TarifsPage() {
               <tr key={row.label} className={i % 2 === 0 ? "bg-muted/10" : ""}>
                 <td className="p-4">{row.label}</td>
                 <td className="p-4 text-center">
-                  {row.free ? <Check className="h-4 w-4 text-muted-foreground mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
+                  {typeof row.free === "string"
+                    ? <span className="text-muted-foreground text-xs">{row.free}</span>
+                    : row.free ? <Check className="h-4 w-4 text-muted-foreground mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
                 </td>
                 <td className="p-4 text-center">
-                  {row.standard ? <Check className="h-4 w-4 text-brand-gold mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
+                  {typeof row.standard === "string"
+                    ? <span className="text-brand-gold text-xs font-medium">{row.standard}</span>
+                    : row.standard ? <Check className="h-4 w-4 text-brand-gold mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
                 </td>
                 <td className="p-4 text-center">
-                  {row.expert ? <Check className="h-4 w-4 text-brand-emerald mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
+                  {typeof row.expert === "string"
+                    ? <span className="text-brand-emerald text-xs font-medium">{row.expert}</span>
+                    : row.expert ? <Check className="h-4 w-4 text-brand-emerald mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
                 </td>
               </tr>
             ))}
