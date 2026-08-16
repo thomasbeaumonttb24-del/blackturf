@@ -46,23 +46,37 @@ async def _load(session, limit):
     data = []
     for cid in cids:
         rows = (await session.execute(text("""
-            SELECT pa.numero, ch.nom, pr.proba_top3, pr.proba_top1, pa.cote_pmu, pa.non_partant
+            SELECT pa.numero, ch.nom, pr.proba_top3, pr.proba_top1,
+                   COALESCE(pr.cote_figee, pa.cote_pmu), pa.non_partant
             FROM predictions pr
             JOIN participations pa ON pa.participation_id = pr.participation_id
             JOIN chevaux ch ON ch.cheval_id = pa.cheval_id
-            WHERE pa.course_id = :c ORDER BY pr.rang_predit
+            JOIN courses co ON co.course_id = pr.course_id
+            WHERE pa.course_id = :c
+              AND co.date_heure IS NOT NULL AND pr.created_at < co.date_heure
+            ORDER BY pr.rang_predit
         """), {"c": cid})).fetchall()
+        if not rows:
+            continue
         preds = [{"numero": r[0], "nom_cheval": r[1], "proba_top3": r[2],
                   "proba_top1": r[3], "cote_pmu": r[4], "non_partant": r[5]} for r in rows]
         ci = (await session.execute(text(
-            "SELECT est_quinte, est_quarte, est_tierce, nb_partants FROM courses WHERE course_id = :c"
+            """SELECT est_quinte, est_quarte, est_tierce, est_2sur4, nb_partants,
+                      paris_disponibles, discipline
+               FROM courses WHERE course_id = :c"""
         ), {"c": cid})).first()
         res = (await session.execute(text(
-            "SELECT classement, rapports FROM resultats WHERE course_id = :c"
+            "SELECT classement, rapports, rapports_detail FROM resultats WHERE course_id = :c"
         ), {"c": cid})).first()
+        from services.bet_catalog import derive_bet_flags
+        course_info = derive_bet_flags(
+            ci[5], est_tierce=bool(ci[2]), est_quarte=bool(ci[1]),
+            est_quinte=bool(ci[0]), est_2sur4=bool(ci[3]),
+        )
+        course_info["nb_partants"] = ci[4]
+        course_info["discipline"] = ci[6]
         data.append((preds,
-                     {"est_quinte": ci[0], "est_quarte": ci[1], "est_tierce": ci[2], "nb_partants": ci[3]},
-                     res[0], res[1], ci[3] or len(preds)))
+                     course_info, res[0], res[1], res[2], ci[4] or len(preds)))
     return data
 
 
@@ -72,9 +86,32 @@ def _roi(g, m):
 
 async def main(limit=400, montants=(5, 20, 100)):
     async with AsyncSessionLocal() as s:
-        rw = await compute_type_roi_weights(s)
+        # Reproduire les mêmes entrées apprises que /mise-plan et profil_run_log.
+        # Le repli bankroll reste utile si l'état profils n'existe pas encore.
+        rw_fallback = await compute_type_roi_weights(s)
+        try:
+            from ml.profil_learning import load_profil_weights, effective_type_weights
+            profil_state = await load_profil_weights(s) or {}
+        except Exception:
+            profil_state = {}
+            effective_type_weights = None
+        try:
+            from ml.bet_performance import get_model_heat
+            heat = await get_model_heat(s)
+        except Exception:
+            heat = 0.0
+        try:
+            from ml.signal_performance import (
+                load_rapport_calibration, load_ev_band_performance,
+            )
+            rapport_calib = await load_rapport_calibration(s)
+            ev_band_perf = await load_ev_band_performance(s)
+        except Exception:
+            rapport_calib = ev_band_perf = None
+
         data = await _load(s, limit)
-        print(f"courses testables : {len(data)} | roi_weights réels : {rw}\n")
+        print(f"courses testables : {len(data)} | roi_weights repli : {rw_fallback}"
+              f" | heat={heat}\n")
 
         glob = defaultdict(lambda: {"mise": 0.0, "gain": 0.0, "gainw": 0.0, "n": 0, "win": 0,
                                     "att": 0, "courses": 0})
@@ -84,10 +121,22 @@ async def main(limit=400, montants=(5, 20, 100)):
             for m in montants:
                 key = (profil, m)
                 a = glob[key]
-                for preds, ci, cl, rp, nbp in data:
+                pdata = ((profil_state.get("profils") or {}).get(profil) or {})
+                for preds, ci, cl, rp, rd, nbp in data:
                     a["courses"] += 1
-                    plan = plan_to_dict(generer_plan(m, profil, preds, ci, None, rw, 0.0))
-                    bilan = settle_plan(plan, cl, rp, nbp)
+                    if effective_type_weights and pdata:
+                        rw = effective_type_weights(
+                            pdata, ci.get("discipline"), ci.get("nb_partants")
+                        )
+                    else:
+                        rw = rw_fallback
+                    plan = plan_to_dict(generer_plan(
+                        m, profil, preds, ci, None, rw, heat,
+                        respect_montant=True,
+                        rapport_calib=rapport_calib,
+                        ev_band_perf=ev_band_perf,
+                    ))
+                    bilan = settle_plan(plan, cl, rp, nbp, rd)
                     for p in bilan["paris"]:
                         if p["statut"] == "en_attente":
                             a["att"] += 1
