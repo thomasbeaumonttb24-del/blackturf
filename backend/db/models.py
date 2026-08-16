@@ -610,6 +610,13 @@ class User(Base):
     # Push notifications
     push_subscription: Mapped[dict | None] = mapped_column(JSON)
 
+    # Désabonnement des e-mails MARKETING (non transactionnels), ex. le digest
+    # hebdomadaire « meilleur value bet de la semaine ». NULL = abonné ; une date
+    # = désabonné à cet instant (obligation RGPD : lien de désinscription réel et
+    # honoré à l'envoi). N'affecte PAS les e-mails transactionnels (reset de mot
+    # de passe, facturation), qui ne relèvent pas du consentement marketing.
+    marketing_opt_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Bankroll de référence
     bankroll_initiale: Mapped[float | None] = mapped_column(Float)
 

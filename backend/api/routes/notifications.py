@@ -31,6 +31,10 @@ class PrefsUpdate(BaseModel):
     alertes_systeme: bool | None = None
 
 
+class DesabonnementRequest(BaseModel):
+    token: str
+
+
 # ─── helpers ───────────────────────────────────────────────────
 
 def _alerte_dict(a: AlerteLog) -> dict[str, Any]:
@@ -141,6 +145,41 @@ async def mark_all_read(
     )
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/desabonnement")
+async def desabonnement_marketing(
+    body: DesabonnementRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Désabonnement des e-mails MARKETING via le jeton signé du lien de l'e-mail.
+
+    PUBLIC et sans login : exiger une connexion pour exercer son droit
+    d'opposition (RGPD) reviendrait à ne pas offrir de désinscription réelle.
+    Le jeton porte une audience dédiée (`unsub`) — il ne peut PAS servir de
+    jeton d'accès, et ne permet rien d'autre que de poser cet opt-out.
+
+    Idempotent : re-cliquer le lien renvoie le même succès. Réponse volontairement
+    identique (200 {"ok": true}) que le jeton corresponde ou non à un compte
+    existant — ne pas transformer ce endpoint public en oracle d'existence de
+    comptes (énumération).
+    """
+    from datetime import datetime, timezone
+    from services.alerts import read_unsubscribe_token
+
+    user_id = read_unsubscribe_token(body.token)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Lien de désabonnement invalide ou expiré")
+
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
+    if user and user.marketing_opt_out_at is None:
+        user.marketing_opt_out_at = datetime.now(timezone.utc)
+        db.add(user)
+        await db.commit()
+        log.info("notifications.desabonnement_marketing", user_id=user_id)
+
+    return {"ok": True, "message": "Vous ne recevrez plus d'e-mails de ce type."}
 
 
 @router.get("/prefs")

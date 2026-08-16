@@ -15,7 +15,10 @@ from db.models import (
     Hippodrome, Reunion, Course, Cheval, Participation,
     Prediction, ValueBet, Resultat, User,
 )
-from services.alerts import _best_value_bet_last_week, send_weekly_best_value_bet
+from services.alerts import (
+    _best_value_bet_last_week, send_weekly_best_value_bet,
+    _weekly_best_vb_email_html, make_unsubscribe_token, read_unsubscribe_token,
+)
 from api.routes.auth import _hash
 
 pytestmark = pytest.mark.asyncio
@@ -181,6 +184,82 @@ async def test_envoie_le_push_si_utilisateur_abonne(db: AsyncSession, monkeypatc
     await send_weekly_best_value_bet(db)
 
     assert mock_push.await_count == 1  # seulement l'utilisateur avec push_subscription
+
+
+# ─────────────────────────────────────────────
+# Conformité de l'e-mail : désabonnement RGPD + jeu responsable
+# ─────────────────────────────────────────────
+async def test_email_contient_lien_desabonnement_et_jeu_responsable():
+    """E-mail non transactionnel : les deux mentions obligatoires doivent y être."""
+    vb = {"nom_cheval": "Test", "niveau": 3, "cote": 5.0, "ev": 0.2,
+          "hippodrome_nom": "Vincennes", "gain_reference_10e": 50.0}
+    html = _weekly_best_vb_email_html(vb, "https://blackturf.fr/desabonnement?token=abc")
+    assert "https://blackturf.fr/desabonnement?token=abc" in html
+    assert "désabonner" in html.lower()
+    assert "joueurs-info-service.fr" in html
+    assert "09 74 75 13 13" in html
+
+
+async def test_jeton_desabonnement_aller_retour():
+    token = make_unsubscribe_token("user-42")
+    assert read_unsubscribe_token(token) == "user-42"
+
+
+async def test_jeton_desabonnement_invalide_rejete():
+    assert read_unsubscribe_token("pas-un-jeton") is None
+
+
+async def test_access_token_ne_sert_pas_de_jeton_desabonnement():
+    """Cloisonnement des audiences : un access_token ne doit pas être accepté ici."""
+    from api.routes.auth import _create_token
+    from datetime import timedelta
+    access = _create_token({"sub": "user-42", "type": "access"}, timedelta(minutes=5))
+    assert read_unsubscribe_token(access) is None
+
+
+async def test_envoi_exclut_les_desabonnes(db: AsyncSession, monkeypatch):
+    """Un opt-out non honoré à l'envoi = pas de désinscription réelle."""
+    await _seed_value_bet(db, "V10", ev=0.30, rapport_sg=5.0)
+    mock_email = AsyncMock(return_value=True)
+    monkeypatch.setattr("services.alerts.send_email", mock_email)
+
+    abonne = await _make_user(db, "free")
+    desabonne = await _make_user(db, "free")
+    desabonne.marketing_opt_out_at = datetime.now(timezone.utc)
+    db.add(desabonne)
+    await db.commit()
+
+    await send_weekly_best_value_bet(db)
+
+    sent_to = {call.kwargs["to"] for call in mock_email.await_args_list}
+    assert abonne.email in sent_to
+    assert desabonne.email not in sent_to
+
+
+async def test_endpoint_desabonnement_pose_l_opt_out(client, db: AsyncSession):
+    user = await _make_user(db, "free")
+    assert user.marketing_opt_out_at is None
+    token = make_unsubscribe_token(user.user_id)
+
+    resp = await client.post("/api/v1/notifications/desabonnement", json={"token": token})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    await db.refresh(user)
+    assert user.marketing_opt_out_at is not None
+
+
+async def test_endpoint_desabonnement_idempotent(client, db: AsyncSession):
+    user = await _make_user(db, "free")
+    token = make_unsubscribe_token(user.user_id)
+    r1 = await client.post("/api/v1/notifications/desabonnement", json={"token": token})
+    r2 = await client.post("/api/v1/notifications/desabonnement", json={"token": token})
+    assert r1.status_code == 200 and r2.status_code == 200
+
+
+async def test_endpoint_desabonnement_rejette_jeton_invalide(client):
+    resp = await client.post("/api/v1/notifications/desabonnement", json={"token": "bidon"})
+    assert resp.status_code == 400
 
 
 # ─────────────────────────────────────────────

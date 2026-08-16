@@ -250,6 +250,59 @@ async def notify_value_bet(
     log.info("alerts.notify_value_bet", nb_users=len(users))
 
 
+# ─────────────────────────────────────────────
+# Désabonnement e-mails marketing (RGPD)
+# ─────────────────────────────────────────────
+# Un e-mail non transactionnel DOIT porter un lien de désinscription réel. On
+# signe un jeton dédié (audience "unsub") avec la clé de l'app : il permet le
+# désabonnement EN UN CLIC, sans login (contrainte RGPD : ne pas exiger la
+# création/récupération d'un compte pour exercer le droit d'opposition). Le
+# jeton ne donne AUCUN autre droit que de poser l'opt-out marketing.
+UNSUB_AUDIENCE = "unsub"
+
+
+def make_unsubscribe_token(user_id: str) -> str:
+    """Jeton de désabonnement signé, valable 90 jours (durée de vie d'un e-mail
+    archivé dans une boîte). Audience dédiée → inutilisable comme jeton d'accès."""
+    from jose import jwt as _jwt
+    from datetime import timedelta as _td
+    payload = {
+        "sub": user_id,
+        "aud": UNSUB_AUDIENCE,
+        "exp": datetime.now(timezone.utc) + _td(days=90),
+    }
+    return _jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+
+
+def read_unsubscribe_token(token: str) -> Optional[str]:
+    """user_id si le jeton est valide et d'audience `unsub`, sinon None.
+    L'audience est VÉRIFIÉE : un access_token ne doit jamais servir ici, et
+    réciproquement ce jeton ne doit jamais ouvrir de session."""
+    from jose import jwt as _jwt, JWTError as _JWTError
+    try:
+        payload = _jwt.decode(
+            token, settings.secret_key,
+            algorithms=[settings.jwt_algorithm],
+            audience=UNSUB_AUDIENCE,
+        )
+    except _JWTError:
+        return None
+    if payload.get("aud") != UNSUB_AUDIENCE:
+        return None
+    return payload.get("sub")
+
+
+def _unsubscribe_url(user_id: str) -> str:
+    return f"https://blackturf.fr/desabonnement?token={make_unsubscribe_token(user_id)}"
+
+
+# Mention légale jeu responsable — identique au reste du site (footer, page tarifs).
+JEU_RESPONSABLE_TXT = (
+    "Le jeu peut créer une dépendance. Interdit aux mineurs. Jouez de façon responsable — "
+    "joueurs-info-service.fr — 09 74 75 13 13."
+)
+
+
 def _winner_entry(classement) -> Optional[dict]:
     """Entrée du VAINQUEUR (position == 1) dans un classement JSON, robuste à
     l'ordre du tableau — `classement[0]` n'est PAS garanti être le 1er. Même
@@ -333,8 +386,10 @@ async def _best_value_bet_last_week(session: AsyncSession) -> Optional[dict]:
     return None
 
 
-def _weekly_best_vb_email_html(vb: dict) -> str:
-    """Template email hebdo — UN SEUL exemple réel, pas une moyenne enjolivée."""
+def _weekly_best_vb_email_html(vb: dict, unsubscribe_url: str) -> str:
+    """Template email hebdo — UN SEUL exemple réel, pas une moyenne enjolivée.
+    Porte les deux mentions obligatoires : lien de désinscription (RGPD, e-mail
+    non transactionnel) et numéro national jeu responsable."""
     etoiles = "⭐" * vb["niveau"]
     return f"""
 <!DOCTYPE html>
@@ -355,12 +410,17 @@ def _weekly_best_vb_email_html(vb: dict) -> str:
     </table>
     <p style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px; opacity: 0.7;">
       Un seul exemple réel de la semaine passée — pas une moyenne, pas une promesse de gain futur.
-      ⚠️ Le jeu doit rester un plaisir. Jouez de façon responsable. BlackTurf ne garantit aucun gain.
-      Interdiction de participer aux jeux d'argent aux mineurs.
+      BlackTurf est un outil d'aide à la décision et ne garantit aucun gain.
+      ⚠️ {JEU_RESPONSABLE_TXT}
     </p>
     <a href="https://blackturf.fr/tarifs" style="display: block; text-align: center; margin-top: 15px; padding: 12px 24px; background: #e94560; color: white; text-decoration: none; border-radius: 6px;">
       Voir les paris de valeur en direct — passer Standard →
     </a>
+  </div>
+  <div style="padding: 16px 20px; text-align: center; font-size: 11px; color: #6b7280;">
+    Vous recevez cet e-mail parce que vous avez un compte gratuit BlackTurf.
+    <a href="{unsubscribe_url}" style="color: #6b7280; text-decoration: underline;">Se désabonner de ces e-mails</a>
+    — désinscription immédiate, en un clic.
   </div>
 </body>
 </html>
@@ -382,17 +442,26 @@ async def send_weekly_best_value_bet(session: AsyncSession):
         log.info("alerts.weekly_best_vb.no_candidate")
         return
 
+    # RGPD : on EXCLUT à l'envoi les comptes qui se sont désabonnés des e-mails
+    # marketing (le lien de désinscription du mail précédent doit être réellement
+    # honoré — un opt-out non appliqué vaut absence de lien).
     users_res = await session.execute(
-        select(User).where(User.plan.in_(["free", "decouverte"]), User.is_active == True)
+        select(User).where(
+            User.plan.in_(["free", "decouverte"]),
+            User.is_active == True,
+            User.marketing_opt_out_at.is_(None),
+        )
     )
     users = users_res.scalars().all()
     if not users:
         log.info("alerts.weekly_best_vb.no_recipients")
         return
 
-    html = _weekly_best_vb_email_html(best)
     subject = f"🏇 Le meilleur pari de la semaine : {best['nom_cheval']} à {best.get('cote', '?')}"
     for user in users:
+        # Le lien de désabonnement est PAR destinataire (jeton signé) → le HTML
+        # est rendu par utilisateur, pas mutualisé.
+        html = _weekly_best_vb_email_html(best, _unsubscribe_url(user.user_id))
         ok_email = await send_email(to=user.email, subject=subject, html=html)
         await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best, ok_email)
 
