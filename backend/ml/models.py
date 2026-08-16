@@ -163,6 +163,7 @@ class BlackTurfEnsemble:
         Walk-forward validation sur 6 fenêtres.
         Si y_win fourni, entraîne aussi le modèle de VICTOIRE dédié (P(top1) apprise).
         """
+        n_samples = len(X)
         self.feature_names = [c for c in X.columns if c not in META_COLS]
         X_feat = X[self.feature_names].fillna(0)
 
@@ -371,7 +372,7 @@ class BlackTurfEnsemble:
         # ── Modèle de VICTOIRE dédié (label = arrivé 1er) ─────────────────
         # Donne une P(top1) APPRISE (vs heuristique p3**1.6). Fortement déséquilibré
         # (~1 gagnant / nb_partants) → scale_pos_weight + calibration isotonique.
-        if y_win is not None and len(y_win) == n:
+        if y_win is not None and len(y_win) == n_samples:
             try:
                 # Aligner sur l'index de X_train/X_test → cohérent ET robuste aux DEUX
                 # modes de split (group_split par course = masque, sinon positionnel).
@@ -404,7 +405,7 @@ class BlackTurfEnsemble:
         # binaire). Score utilisé seulement pour le classement affiché (blend côté
         # predict, flag BT_RANKER_BLEND) — jamais pour les probas/EV calibrées.
         self.ranker = None
-        if _AF.group_split and "course_id" in X.columns and y_win is not None and len(y_win) == n:
+        if _AF.group_split and "course_id" in X.columns and y_win is not None and len(y_win) == n_samples:
             try:
                 import itertools
                 from lightgbm import LGBMRanker

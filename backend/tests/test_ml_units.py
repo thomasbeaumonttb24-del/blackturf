@@ -590,14 +590,21 @@ def test_model_train_and_predict_smoke(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from ml.models import BlackTurfEnsemble
     X, y = _make_synthetic_dataset(300)
+    X["course_id"] = [f"course_{i // 10:03d}" for i in range(len(X))]
+    # Le réentraînement réel fournit aussi le label victoire. Garder ce chemin
+    # dans le smoke test évite qu'une régression tardive annule tout le modèle.
+    y_win = pd.Series(np.zeros(len(y), dtype=int), index=y.index)
+    y_win.loc[y[y == 1].index[::3]] = 1
     model = BlackTurfEnsemble()
-    metrics = model.train(X, y)
+    metrics = model.train(X, y, y_win=y_win)
     assert "auc_roc" in metrics
     assert 0.4 <= metrics["auc_roc"] <= 1.0
     assert "brier_score" in metrics
     assert metrics["brier_score"] < 1.0
     assert "walk_forward_auc" in metrics
     assert metrics["walk_forward_auc"] > 0.0
+    assert model.win_model is not None
+    assert model.ranker is not None
 
 
 def test_model_predict_proba_range(tmp_path, monkeypatch):
