@@ -674,6 +674,94 @@ async def get_resultats(course_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
+class FavoriIAResultatOut(BaseModel):
+    course_id: str
+    disponible: bool = False              # False = pas de comparaison honnête possible (course pas terminée,
+                                           # résultat pas encore publié, ou favori absent du classement)
+    numero: Optional[int] = None
+    nom_cheval: Optional[str] = None
+    a_gagne: Optional[bool] = None
+    position_reelle: Optional[int] = None
+    cote_depart: Optional[float] = None
+    gain_reference_10e: Optional[float] = None  # gain réel d'un Simple Gagnant 10€ SI le favori a gagné
+
+
+@router.get("/courses/{course_id}/favori-ia-resultat", response_model=FavoriIAResultatOut)
+async def get_favori_ia_resultat(course_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Comparaison post-course factuelle (décision produit 2026-08-16, Thomas) : le
+    favori de l'IA (rang_predit=1) sur une course déjà TERMINÉE, sa cote au départ,
+    et — s'il a gagné — le gain réel d'un Simple Gagnant de référence à 10€. Sert le
+    funnel de conversion Free : « le favori IA a gagné à cote X — un abonné Standard
+    aurait gagné Y€ ».
+
+    Gardes strictes (honnêteté des données + paywall) :
+    - Public, mais ne répond QUE sur course.statut == 'termine' : jamais de rang/proba
+      exposé avant le départ, même à un compte non abonné (ça casserait le paywall
+      pré-course sur les prédictions).
+    - Aucun chiffre inventé : si le favori n'a PAS gagné, on renvoie honnêtement sa
+      position réelle (a_gagne=False, gain_reference_10e=None) plutôt que de cacher
+      l'échec ou d'inventer un gain. Si le rapport PMU réel n'est pas publié malgré
+      la victoire, gain_reference_10e reste None (jamais de gain approximatif).
+    """
+    course = (await db.execute(select(Course).where(Course.course_id == course_id))).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+
+    if course.statut != "termine":
+        return FavoriIAResultatOut(course_id=course_id, disponible=False)
+
+    resultat = (await db.execute(select(Resultat).where(Resultat.course_id == course_id))).scalar_one_or_none()
+    if not resultat or not resultat.classement:
+        return FavoriIAResultatOut(course_id=course_id, disponible=False)
+
+    fav_row = (await db.execute(
+        select(PredictionModel, Participation, Cheval)
+        .join(Participation, Participation.participation_id == PredictionModel.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .where(PredictionModel.course_id == course_id, PredictionModel.rang_predit == 1)
+        .limit(1)
+    )).first()
+    if not fav_row:
+        return FavoriIAResultatOut(course_id=course_id, disponible=False)
+    pred, part, cheval = fav_row
+
+    position_reelle = None
+    for c in resultat.classement:
+        if isinstance(c, dict) and c.get("numero") == part.numero:
+            position_reelle = c.get("position")
+            break
+    if position_reelle is None:
+        # Non-partant / disqualifié / absent du classement → pas de comparaison
+        # honnête possible (le favori n'a pas "perdu", il n'a pas couru dans les
+        # conditions normales) : on préfère ne rien afficher plutôt qu'un message trompeur.
+        return FavoriIAResultatOut(course_id=course_id, disponible=False)
+
+    a_gagne = position_reelle == 1
+    cote_depart = pred.cote_figee if pred.cote_figee else part.cote_pmu
+
+    # Gain RÉEL d'un Simple Gagnant 10€ (référence pédagogique du funnel) — mêmes
+    # clés que le règlement des paris réels (services/bet_settlement.py, base 1€).
+    gain_reference_10e = None
+    if a_gagne and resultat.rapports:
+        for key in ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international"):
+            val = resultat.rapports.get(key)
+            if val is not None:
+                gain_reference_10e = round(10 * float(val), 2)
+                break
+
+    return FavoriIAResultatOut(
+        course_id=course_id,
+        disponible=True,
+        numero=part.numero,
+        nom_cheval=cheval.nom,
+        a_gagne=a_gagne,
+        position_reelle=position_reelle,
+        cote_depart=round(cote_depart, 2) if cote_depart else None,
+        gain_reference_10e=gain_reference_10e,
+    )
+
+
 @router.get("/courses/{course_id}/paris-disponibles")
 async def get_paris_disponibles(course_id: str, db: AsyncSession = Depends(get_db)):
     """Types de paris RÉELLEMENT proposés par le PMU pour cette course.
