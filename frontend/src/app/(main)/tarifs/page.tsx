@@ -94,10 +94,7 @@ export default function TarifsPage() {
         </Card>
 
         {/* Standard */}
-        <Card className="card-hover border-brand-gold ring-2 ring-brand-gold/30 relative">
-          <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-            <Badge variant="gold">Recommandé</Badge>
-          </div>
+        <Card className="card-hover relative">
           <CardContent className="p-6 sm:p-8">
             <h2 className="text-xl font-bold mb-1">Standard</h2>
             <div className="flex items-baseline gap-1 mb-1">
@@ -125,7 +122,7 @@ export default function TarifsPage() {
               plan="standard"
               periodicite="monthly"
               label="Essayer 7 jours gratuit"
-              variant="brand"
+              variant="brand-outline"
               className="w-full"
             />
             <p className="text-center text-xs text-muted-foreground mt-2">Sans CB requis</p>
@@ -133,7 +130,10 @@ export default function TarifsPage() {
         </Card>
 
         {/* Expert */}
-        <Card className="card-hover">
+        <Card className="card-hover border-brand-emerald ring-2 ring-brand-emerald/30 relative">
+          <div className="absolute -top-4 left-1/2 -translate-x-1/2">
+            <Badge variant="gold">Recommandé</Badge>
+          </div>
           <CardContent className="p-6 sm:p-8">
             <h2 className="text-xl font-bold mb-1">Expert</h2>
             <div className="flex items-baseline gap-1 mb-1">
@@ -160,10 +160,11 @@ export default function TarifsPage() {
             <CheckoutButton
               plan="expert"
               periodicite="monthly"
-              label="Essayer Expert"
-              variant="brand-outline"
+              label="Essayer 7 jours gratuit"
+              variant="brand"
               className="w-full"
             />
+            <p className="text-center text-xs text-muted-foreground mt-2">Sans CB requis</p>
           </CardContent>
         </Card>
       </div>
