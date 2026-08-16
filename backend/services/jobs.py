@@ -83,8 +83,20 @@ async def job_drift_check() -> None:
     """
     log.info("jobs.drift_check.start")
     try:
-        from ml.drift_detector import get_drift_detector
-        dd = get_drift_detector()
+        # Le conteneur `scheduler` n'a AUCUN hook de démarrage qui appelle
+        # initialize_drift_detector() (seul api/main.py:lifespan le fait, et RQ
+        # worker le fait par job — cf. pipeline.py run_post_course). `get_drift_detector()`
+        # nu levait donc RuntimeError à CHAQUE run depuis toujours : ce job a échoué
+        # TOUTES LES HEURES en silence (log.error, jamais remonté), et le retraining
+        # incrémental sur dérive critique n'a donc jamais pu se déclencher par cette
+        # voie. Fix : recharger l'état depuis la DB à chaque exécution — pas un init
+        # une fois au boot du conteneur, qui resterait figé sur le snapshot de ce
+        # boot alors que le worker RQ met l'état à jour en continu à chaque course
+        # (même raisonnement que le commentaire de pipeline.py:402-408).
+        from db.database import AsyncSessionLocal
+        from ml.drift_detector import initialize_drift_detector
+        async with AsyncSessionLocal() as dd_session:
+            dd = await initialize_drift_detector(dd_session)
         report = dd.get_drift_report()
         severity = report.get("status", "healthy")
 
