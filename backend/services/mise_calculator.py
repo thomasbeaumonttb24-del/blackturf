@@ -144,14 +144,14 @@ def _palier(montant: int) -> dict:
 # `rapport_min`/`rapport_max` : bornes sur le RAPPORT (multiplicateur de gain) du PARI
 #   lui-même. C'EST le séparateur produit demandé, en cohérence avec l'analyse :
 #     • PRUDENT  : gain quasi assuré, viser ~×2          → rapport_min ≈ 1.8.
-#     • MODÉRÉ   : plus de risque, viser entre ×2 et ×10 → rapport ∈ [2, 10].
+#     • MODÉRÉ   : plus de risque, viser entre ×4 et ×15 → rapport ∈ [4, 15].
 #     • RISQUÉ   : gros rapport, au moins ×10            → rapport_min = 10.
-#   Un même pari ne peut donc PAS tomber dans deux profils : ses bandes de rapport
-#   sont contiguës. Le « pourquoi » de chaque pari est ainsi justifié par son rapport.
+#   Les bandes se chevauchent volontairement : le profil module aussi probabilité,
+#   type de pari et allocation. Le « pourquoi » reste justifié par le gain du ticket.
 PROFIL_CONFIG = {
     # PRUDENT — privilégie le PLACÉ : Simple Placé, Duo Placé (Couplé Placé), 2/4.
     # Cote des chevaux COURTE (cote_max 9) = gain quasi assuré, MAIS on exige un
-    # rapport ≥ ~1.8 (viser ×2) : on écarte le placé sec à 1.1× (argent mort).
+    # rapport ≥ 1.8 : on écarte le placé sec à 1.1× (argent mort).
     # Mises prudentes : peu de paris, plancher franc.
     # + SIMPLE GAGNANT « DOMINATEUR » (demande user) : quand un cheval ÉCRASE la course
     #   (proba victoire ≥ sg_min_proba) ET que sa cote tombe dans la bande (rapport
@@ -159,20 +159,19 @@ PROFIL_CONFIG = {
     #   élevée, gain ≥ ×1.8. Gate sg_min_proba : jamais de SG prudent sur un cheval
     #   qui ne domine pas.
     "conservateur": {
-        "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 2.0, "rapport_max": 5.0,
+        "cote_min": 0.0, "cote_max": 9.0, "rapport_min": 1.8, "rapport_max": 5.0,
         "min_proba": 0.20, "ev_min": -0.15, "max_coup": 0,
         "sg_min_proba": 0.34,
         "bets_factor": 0.9, "min_stake_factor": 1.0,
         # keep_frac : on garde les paris dont la conviction ≥ 65% du meilleur → le NB de
         # paris VARIE selon la course (1 si un placé domine, 2-3 si plusieurs comparables).
         "keep_frac": 0.65,
-        # BANDE ×2–5 sur le GAIN / MISE TOTALE (demande user 2026-07-13) : comme le modéré/
+        # BANDE ×1.8–5 sur le GAIN / MISE TOTALE : comme le modéré/
         # risqué, le prudent passe désormais par l'allocation "spread" — chaque ticket GAGNANT
-        # rend ≥ gain_cible_mult × le TOTAL (×2) et ≤ gain_cible_max × le TOTAL (×5). Sur une
-        # mise fractionnée (2×5€), un ticket gagnant vise donc ≥ ×2 des 10€ = 20€, pas ×2 de SA
-        # mise. rapport_min 2 au niveau candidat garantit qu'un ticket plein budget atteint ≥×2 ;
+        # rend ≥ gain_cible_mult × le TOTAL (×1.8) et ≤ gain_cible_max × le TOTAL (×5).
+        # rapport_min 1.8 garantit qu'un ticket plein budget atteint le plancher ;
         # min_proba 0.20 exclut les placés à gros rapport peu probables (le prudent reste FRÉQUENT).
-        "gain_cible_mult": 2.0,
+        "gain_cible_mult": 1.8,
         "gain_cible_max": 5.0,
         "alloc": "spread",
         # Multi en 6/7 = large filet qui TOMBE SOUVENT (4 premiers dans 6-7 chevaux) →
@@ -185,17 +184,17 @@ PROFIL_CONFIG = {
         "var_cap": 1.0,
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
-    # MODÉRÉ — viser un rapport ENTRE ×4 et ×10 : duo gagnant, couplé placé, 2/4, trio
-    # de favoris + SIMPLE GAGNANT à cote intéressante (cote 4-10 = rapport dans la
+    # MODÉRÉ — viser un rapport ENTRE ×4 et ×15 : duo gagnant, couplé placé, 2/4, trio
+    # de favoris + SIMPLE GAGNANT à cote intéressante (cote 4-15 = rapport dans la
     # bande, demande user) + SIMPLE PLACÉ d'outsider quand son rapport tombe dans la
     # bande (placé payant ≥×4 = vrai pari modéré). Cotes chevaux capées à 20.
     # PETITES mises réparties sur PLUSIEURS combinaisons (spectre PMU).
     "equilibre": {
-        # Bande de RAPPORT 4–10 : un pari à mise franche (10€) doit pouvoir rendre
+        # Bande de RAPPORT 4–15 : un pari à mise franche (10€) doit pouvoir rendre
         # ≥ ×4 du total → rapport ≥ 4. EV plus tolérante (-0.45) : le modéré vise le
-        # GAIN (un duo/trio de favoris paie ×3–×10 mais reste -EV à cause du prélèvement
+        # GAIN (un duo/trio de favoris paie un rapport intermédiaire mais reste -EV à cause du prélèvement
         # PMU) — l'utilisateur préfère un vrai gain si ça passe à des micro-tickets +EV.
-        "cote_min": 0.0, "cote_max": 20.0, "rapport_min": 4.0, "rapport_max": 10.0,
+        "cote_min": 0.0, "cote_max": 20.0, "rapport_min": 4.0, "rapport_max": 15.0,
         # max_coup 3 : les combos/SG de favoris sont -EV (prélèvement PMU) donc classés
         # « spéculatifs » ; on en autorise jusqu'à 3 pour pouvoir COUVRIR le risque avec
         # 2 paris (ex. 2 SG cote ≥5). Bornés par la cible de gain + le nb de paris.
@@ -218,12 +217,11 @@ PROFIL_CONFIG = {
         # _allocate_spread (manuel/figés) taillent la mise de CHAQUE ticket à
         # ceil(cible/rapport) ; un pari qui ne peut pas atteindre ×4 du total est écarté.
         "gain_cible_mult": 4.0,
-        # Plafond de bande : chaque ticket gagnant ≤ ×10 du TOTAL misé (borne haute modéré).
-        "gain_cible_max": 10.0,
-        # Multi en 5/6/7 = rapport ×2-×10 qui tombe assez souvent (cœur du modéré).
-        # Simple Gagnant RÉTABLI (demande user) mais borné à la bande : SG cote 4-10
-        # UNIQUEMENT (rapport_max 10 → un SG cote ≥10 appartient au risqué, pas
-        # d'overlap). Simple Placé autorisé quand son rapport tombe dans la bande
+        # Plafond de bande : chaque ticket gagnant ≤ ×15 du TOTAL misé (borne haute modéré).
+        "gain_cible_max": 15.0,
+        # Multi en 5/6/7 = rapports intermédiaires qui tombent assez souvent (cœur du modéré).
+        # Simple Gagnant RÉTABLI mais borné à la bande : SG cote 4-15.
+        # Simple Placé autorisé quand son rapport tombe dans la bande
         # (placé d'outsider payant ≥×4) — le placé sec ~×1.8 reste exclu par rapport_min.
         "types": {"Simple Gagnant", "Simple Placé", "Couplé Placé", "Couplé Gagnant",
                   "Couplé Ordre", "2sur4", "Trio",
@@ -303,7 +301,7 @@ def _effective_config(profil: str, heat: float) -> dict:
     cfg = {
         "cote_min":  max(0.0, base.get("cote_min", 0.0) * (1.0 - 0.20 * h)),
         "cote_max":  max(4.0, base["cote_max"] * (1.0 + 0.30 * h)),
-        # Bandes de RAPPORT = contrat produit (×2 / ×2–×10 / ≥×10) → NON modulées par
+        # Bandes de RAPPORT = contrat produit (×1.8–5 / ×4–15 / ≥×10) → NON modulées par
         # le heat : le profil risqué doit TOUJOURS viser ≥×10, etc.
         "rapport_min": base.get("rapport_min", 0.0),
         "rapport_max": base.get("rapport_max"),
@@ -670,10 +668,9 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # Reliquat ∝ conviction — les mises ne font que MONTER (gain ≥ cible préservé). Le
     # plancher de bande (×g du total) est STRICT (dimensionnement `besoin`). Le PLAFOND de
     # bande (gain ≤ gmax×total) borne le reliquat : on ne charge pas un ticket au-delà de sa
-    # tranche tant qu'un autre peut absorber. Si TOUT est au plafond, le montant manuel devant
-    # être joué en entier, on pose le reliquat sur le ticket au PLUS FAIBLE rapport (celui dont
-    # le gain/total monte le moins vite → dépassement de bande minimal). Risqué : gmax None →
-    # plafonds = M/cap_hv, aucun dépassement de bande possible.
+    # tranche tant qu'un autre peut absorber. La sélection amont complète le plan avec assez
+    # de tickets pour absorber la totalité. Le filet final conserve l'invariant produit
+    # « montant saisi = montant joué » même sur une course atypique.
     if reste > 0:
         ws = [_w(b) for b in kept]
         tw = sum(ws) or 1.0
@@ -697,7 +694,8 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
             if not placed:
                 break                       # tous au plafond de bande
         if overflow > 0:
-            # Full-spend en dernier recours : ticket au plus FAIBLE rapport, non-HV de préférence.
+            # Invariant absolu du calculateur manuel : aucune réserve. Ce filet ne doit
+            # servir que si le catalogue ne fournit pas assez de tickets compatibles.
             pool = [b for b in kept if not _is_high_variance(b)] or kept
             tgt = min(pool, key=lambda b: float(b.get("rapport_estime") or 1.0))
             tgt["mise"] += overflow
@@ -896,7 +894,7 @@ def _select_conviction(
         # est le rapport). Exempté pour les jackpots désordre.
         if bet_cote < cote_min and "Désordre" not in c["type_pari"]:
             return False
-        # BANDE DE RAPPORT = séparateur produit (×2 / ×2–×10 / ≥×10). Le pari doit
+        # BANDE DE RAPPORT = séparateur produit (×1.8–5 / ×4–15 / ≥×10). Le pari doit
         # rapporter dans la fourchette du profil, sinon il appartient à un autre profil.
         rap = float(c.get("rapport_estime", 0.0) or 0.0)
         if rap < rapport_min:                                # rapport trop faible pour ce profil
@@ -1032,10 +1030,10 @@ def _select_conviction(
 
         def _in_rapport(c):
             r = float(c.get("rapport_estime", 0.0) or 0.0)
-            return r >= rapport_min and (rapport_max is None or r <= rapport_max)
+            return r >= rapport_min and (rapport_max_eff is None or r <= rapport_max_eff)
 
-        # Replis successifs : type+rapport+cote → type+rapport → type → tout. On garde
-        # la bande de rapport du profil le plus longtemps possible (contrat ×2/×10).
+        # Replis successifs : type+rapport+cote → type+rapport → rapport tout type →
+        # type → tout. On garde la tranche du profil le plus longtemps possible.
         in_band = [c for c in cands if _in_type(c) and _in_rapport(c)
                    and cote_min <= _bet_cote_max(c) <= cote_max]
         in_band = in_band or [c for c in cands if _in_type(c) and _in_rapport(c)]
@@ -1046,7 +1044,8 @@ def _select_conviction(
         # dernier recours, et on le SIGNALE (note honnête, le multiplicateur visé n'est pas
         # garanti sur cette course). Aucune invention : ce sont de vrais paris PMU éligibles.
         relaxed = (
-            [c for c in cands if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
+            [c for c in cands if _in_rapport(c)]
+            or [c for c in cands if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
             or [c for c in cands if _in_type(c)]
             or list(cands)
         )
@@ -1487,9 +1486,9 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict],
     # 0. Objectif du profil + rapport RÉEL de ce pari → justifie « pourquoi je joue ça ».
     rap = float(c.get("rapport_estime", 0.0) or 0.0)
     _obj = {
-        "conservateur": f"Objectif PRUDENT : cote courte, gain quasi assuré — viser ×2 à ×5 "
+        "conservateur": f"Objectif PRUDENT : cote courte, gain fréquent — viser ×1,8 à ×5 "
                         f"de la mise totale. Ce pari rapporte ~×{rap:.1f}.",
-        "equilibre":    f"Objectif MODÉRÉ : plus de cote/risque — viser ×4 à ×10 de la mise "
+        "equilibre":    f"Objectif MODÉRÉ : plus de cote/risque — viser ×4 à ×15 de la mise "
                         f"totale. Ce pari rapporte ~×{rap:.1f}.",
         "agressif":     f"Objectif RISQUÉ : viser gros, au moins ×10 de la mise totale. "
                         f"Ce pari rapporte ~×{rap:.1f}.",

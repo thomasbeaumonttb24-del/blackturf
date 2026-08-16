@@ -1,5 +1,5 @@
 """Tests algo d'apprentissage 2026-06-29 :
-- TRANCHES de GAIN / MISE TOTALE par profil (prudent ×2–5 / modéré ×4–10 / risqué ≥10,
+- TRANCHES de GAIN / MISE TOTALE par profil (prudent ×1.8–5 / modéré ×4–15 / risqué ≥10,
   demande user 2026-07-13) : chaque ticket GAGNANT reste dans la bande de son profil,
   mesurée sur la mise TOTALE du plan (y compris mise fractionnée en plusieurs tickets) ;
 - CALIBRATION estimé→réel du rapport (rapport_realization_factor) : recale le rapport
@@ -117,24 +117,26 @@ class TestTranchesRespectees:
             assert g >= 10 - 0.1, f"risqué/{t} ×{g:.2f} du total sous la bande ×10"
 
     def test_bandes_profils(self):
-        """Prudent ×2–5, modéré ×4–10, risqué ≥10 (demande user 2026-07-13). Les bandes
-        prudent/modéré se CHEVAUCHENT désormais sur 4–5 (un pari ×4.5 peut être prudent OU
-        modéré) ; la séparation stricte n'est plus requise."""
-        assert PROFIL_CONFIG["conservateur"]["rapport_min"] == 2.0
+        """Prudent ×1.8–5, modéré ×4–15, risqué ≥10. Les bandes
+        prudent/modéré se chevauchent sur 4–5 et modéré/risqué sur 10–15 ;
+        la séparation stricte n'est donc pas requise."""
+        assert PROFIL_CONFIG["conservateur"]["rapport_min"] == 1.8
         assert PROFIL_CONFIG["conservateur"]["rapport_max"] == 5.0
-        assert PROFIL_CONFIG["conservateur"]["gain_cible_mult"] == 2.0
+        assert PROFIL_CONFIG["conservateur"]["gain_cible_mult"] == 1.8
         assert PROFIL_CONFIG["conservateur"]["gain_cible_max"] == 5.0
         assert PROFIL_CONFIG["equilibre"]["rapport_min"] == 4.0
-        assert PROFIL_CONFIG["equilibre"]["rapport_max"] == 10.0
+        assert PROFIL_CONFIG["equilibre"]["rapport_max"] == 15.0
         assert PROFIL_CONFIG["equilibre"]["gain_cible_mult"] == 4.0
-        assert PROFIL_CONFIG["equilibre"]["gain_cible_max"] == 10.0
+        assert PROFIL_CONFIG["equilibre"]["gain_cible_max"] == 15.0
         assert PROFIL_CONFIG["agressif"]["rapport_min"] == 10.0
         assert PROFIL_CONFIG["agressif"]["gain_cible_mult"] == 10.0
         assert PROFIL_CONFIG["agressif"]["gain_cible_max"] is None
 
     @pytest.mark.parametrize("profil,mult,montant", [
-        ("conservateur", 2.0, 20), ("equilibre", 4.0, 20), ("agressif", 10.0, 20),
-        ("conservateur", 2.0, 10), ("equilibre", 4.0, 10), ("agressif", 10.0, 10),
+        ("conservateur", 1.8, 20), ("equilibre", 4.0, 20), ("agressif", 10.0, 20),
+        ("conservateur", 1.8, 10), ("equilibre", 4.0, 10), ("agressif", 10.0, 10),
+        ("conservateur", 1.8, 6), ("equilibre", 4.0, 6), ("agressif", 10.0, 6),
+        ("conservateur", 1.8, 30), ("equilibre", 4.0, 30), ("agressif", 10.0, 30),
     ])
     def test_gain_vs_mise_totale(self, profil, mult, montant):
         """Contrat 2026-07-13 (bande RESPECTÉE même fractionnée) : CHAQUE ticket gagnant
@@ -273,6 +275,33 @@ def test_filet_agressif_ne_choisit_pas_le_plus_gros_rapport_aveuglement():
 
     assert selected
     assert selected[0]["chevaux"][0]["numero"] == 1
+
+
+@pytest.mark.parametrize("montant", [6, 30])
+@pytest.mark.parametrize("profil", ["conservateur", "equilibre", "agressif"])
+def test_montant_saisi_est_toujours_integralement_joue(montant, profil):
+    plan = plan_to_dict(generer_plan(
+        montant, profil, _field(10), COURSE, respect_montant=True,
+    ))
+
+    assert plan["montant_joue"] == montant
+    assert plan["montant_reserve"] == 0
+
+
+def test_le_montant_change_la_strategie_et_pas_seulement_un_ratio():
+    petit = plan_to_dict(generer_plan(
+        6, "equilibre", _field(10), COURSE, respect_montant=True,
+    ))
+    grand = plan_to_dict(generer_plan(
+        30, "equilibre", _field(10), COURSE, respect_montant=True,
+    ))
+    paris_petit = [p for n in petit["niveaux"] for p in n["paris"]]
+    paris_grand = [p for n in grand["niveaux"] for p in n["paris"]]
+
+    assert len(paris_petit) != len(paris_grand)
+    assert [(p["type"], p["mise"]) for p in paris_petit] != [
+        (p["type"], p["mise"]) for p in paris_grand
+    ]
 
 
 # ── 5. Réévaluation des GAINS aux cotes LIVE (sélection figée) ────────────────
