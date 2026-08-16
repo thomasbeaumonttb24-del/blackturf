@@ -28,6 +28,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const cached = getStoredUser();
+    const hasAccess = typeof window !== "undefined" && !!localStorage.getItem("access_token");
+    const hasRefresh = typeof window !== "undefined" && !!localStorage.getItem("refresh_token");
+
+    // SESSION IRRECUPERABLE : "user" en cache mais AUCUN token (ni access ni refresh).
+    // Ce cas n'etait rattrape par personne (constate en prod 2026-08-16) : le fix
+    // precedent comptait sur l intercepteur d api.ts pour nettoyer, mais celui-ci ne
+    // fait son menage que `if (refresh)` -> sans refresh_token le 401 de /auth/me est
+    // simplement rejete, le .catch() l avale, et le "user" cache SURVIT indefiniment.
+    // Consequence reelle : un compte dont les tokens ont disparu restait affiche comme
+    // connecte AVEC SON ANCIEN PLAN (ex. expert) -> toute l UI paywallee se comportait
+    // comme pour un abonne (et, cote funnel, le bandeau de conversion destine aux
+    // comptes Free/deconnectes ne s affichait JAMAIS). On nettoie donc tout de suite :
+    // sans token, il n y a aucune session a revalider.
+    if (cached && !hasAccess && !hasRefresh) {
+      clearAuth();
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
     setUser(cached);
     setLoading(false);
     // Revalide la session au chargement : un access_token expire (ex. mobile) ne doit pas
@@ -45,8 +65,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           storeUser(res.data);
           setUser(res.data);
         })
-        .catch(() => {
-          /* gere par l intercepteur api (refresh / redirect) */
+        .catch((err) => {
+          // L intercepteur d api.ts ne nettoie QUE s il existe un refresh_token a tenter.
+          // Sans refresh_token, un 401 ici signifie session morte -> on nettoie nous-memes
+          // plutot que de laisser le "user" cache faire croire a une session valide.
+          if (err?.response?.status === 401 && !localStorage.getItem("refresh_token")) {
+            clearAuth();
+            setUser(null);
+          }
+          /* sinon : gere par l intercepteur api (refresh / redirect) */
         });
     }
     // Synchro entre onglets : un login/logout dans un autre onglet met à jour celui-ci.
