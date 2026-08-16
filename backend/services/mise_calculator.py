@@ -1052,10 +1052,25 @@ def _select_conviction(
         )
         pool = in_band or relaxed
         if pool:
-            if objectif == "gain":
-                safe = max(pool, key=lambda c: c["rapport_estime"])
-            else:
-                safe = max(pool, key=lambda c: c["proba_gain"])
+            def _fallback_score(c):
+                """Meilleur compromis disponible quand toutes les gates ont échoué.
+
+                L'ancien repli agressif prenait le rapport maximal, donc presque toujours
+                la combinaison la moins probable. On conserve la promesse d'un plan sur
+                chaque course, mais on minimise ce coût : probabilité prioritaire en
+                prudent, rendement attendu capé en modéré/risqué, puis pondérations
+                historiques atténuées (jamais nulles puisque ce chemin est un secours).
+                """
+                p = max(float(c.get("proba_gain", 0.0) or 0.0), 0.0)
+                r = max(float(c.get("rapport_estime", 1.0) or 1.0), 1.0)
+                edge = max(float(c.get("edge", 0.0) or 0.0), 0.0)
+                learned = max(0.10, min(2.0, roi_w(c)))
+                signal = max(0.50, min(2.0, sig_factor(c)))
+                band = max(0.50, min(1.60, evb(c)))
+                base = p if objectif == "proba" else p * min(r, 40.0)
+                return base * (1.0 + 2.0 * edge) * learned * signal * band
+
+            safe = max(pool, key=lambda c: (_fallback_score(c), c["proba_gain"]))
             safe["_roi_w"] = roi_w(safe)
             safe["_sig"] = sig_factor(safe)
             # Hors bande de rapport visée → marqué pour la note du plan.

@@ -248,6 +248,33 @@ class TestEvBandStaking:
         assert any("bande d'EV" in r for r in raisons), "facteur bande-EV non exposé"
 
 
+def test_filet_agressif_ne_choisit_pas_le_plus_gros_rapport_aveuglement():
+    """Quand aucun pari ne passe les gates, le plan reste non vide mais choisit le
+    meilleur rendement attendu, pas le jackpot le moins probable."""
+    from services.mise_calculator import _effective_config, _palier, _select_conviction
+
+    def candidat(numero, proba, rapport, ev):
+        return {
+            "type_pari": "Simple Gagnant",
+            "chevaux": [{"numero": numero, "cote": rapport}],
+            "proba_gain": proba,
+            "rapport_estime": rapport,
+            "ev": ev,
+            "edge": 0.0,
+            "niveau": "coup",
+        }
+
+    credible = candidat(1, 0.20, 12.0, -0.50)
+    jackpot = candidat(2, 0.001, 100.0, -0.90)
+    selected = _select_conviction(
+        [jackpot, credible], 10, _palier(10), _effective_config("agressif", 0.0),
+        roi_weights={}, respect_montant=True,
+    )
+
+    assert selected
+    assert selected[0]["chevaux"][0]["numero"] == 1
+
+
 # ── 5. Réévaluation des GAINS aux cotes LIVE (sélection figée) ────────────────
 def _all_paris(plan):
     return [p for niv in plan["niveaux"] for p in niv["paris"]]
