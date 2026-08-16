@@ -13,6 +13,7 @@ import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import { formatCote, formatEV, etoiles, formatDateTime, cn } from "@/lib/utils";
@@ -652,6 +653,14 @@ function MiseCalculatorWidget({
   const [loading, setLoading] = useState(false);
   const [profilChoisi, setProfilChoisi] = useState(profil || "equilibre");
   const inputRef = useRef<HTMLInputElement>(null);
+  // Essai gratuit Free/Découverte (1/jour, backend commit 4ef13d6) : on garde
+  // le quota restant renvoyé par l'API pour informer AVANT le clic, et un
+  // état dédié pour le 403 "quota atteint" (message clair + CTA /tarifs, pas
+  // un simple toast qu'on rate en scrollant).
+  const isFreeTier = userPlan === "free" || userPlan === "decouverte";
+  const [quotaRestant, setQuotaRestant] = useState<number | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
 
   async function generate(profilOverride?: string) {
     const m = parseFloat(montant);
@@ -664,10 +673,23 @@ function MiseCalculatorWidget({
         profil_risque: prof,
       });
       setPlan(res.data);
+      if (typeof res.data?.quota_restant === "number") setQuotaRestant(res.data.quota_restant);
     } catch (e: unknown) {
-      // Message précis du backend (ex. « Pronostic pas encore disponible ») si présent.
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(detail || "Erreur lors du calcul du plan");
+      const response = (e as { response?: { data?: { detail?: unknown }; status?: number } })?.response;
+      // Le `detail` FastAPI n'est pas TOUJOURS une string (422 de validation Pydantic
+      // = liste d'objets) : ne jamais le rendre tel quel dans un composant texte
+      // (cause connue du crash React #31 ailleurs dans le projet).
+      const detailRaw = response?.data?.detail;
+      const detail = typeof detailRaw === "string" ? detailRaw : undefined;
+      if (response?.status === 403 && isFreeTier) {
+        // Quota d'essai gratuit épuisé aujourd'hui — état dédié, pas un toast qui
+        // disparaît : on affiche le message backend (déjà une phrase propre) + CTA.
+        setQuotaExceeded(true);
+        setQuotaMessage(detail || "Essai gratuit utilisé aujourd'hui — passez à Standard pour un accès illimité.");
+        setQuotaRestant(0);
+      } else {
+        toast.error(detail || "Erreur lors du calcul du plan");
+      }
     } finally {
       setLoading(false);
     }
@@ -682,6 +704,13 @@ function MiseCalculatorWidget({
   }
 
   async function saveBets(): Promise<number> {
+    // Suivi de capital = fonctionnalité Standard+ (backend 403 sur /enregistrer-paris
+    // pour free/decouverte, cf. courses.py:1112). L'essai gratuit du calculateur laisse
+    // VOIR le plan, mais pas le SUIVRE — message honnête plutôt qu'un 403 générique.
+    if (isFreeTier) {
+      toast.error("Le suivi de capital est réservé aux abonnés Standard et Expert.");
+      throw new Error("save_requires_subscription");
+    }
     const m = parseFloat(montant);
     try {
       const res = await api.post(`/courses/${courseId}/enregistrer-paris`, {
@@ -721,23 +750,51 @@ function MiseCalculatorWidget({
     return () => { cancelled = true; clearInterval(id); };
   }, [plan, montant, profilChoisi, statut, courseId]);
 
-  if (!userPlan || userPlan === "free") {
+  // Pas connecté : impossible d'appeler l'API (pas de user_id pour le quota) →
+  // CTA connexion plutôt qu'un message "Passer Standard" trompeur pour un visiteur
+  // qui n'a même pas encore de compte gratuit.
+  if (!userPlan) {
     return (
       <div style={{ textAlign: "center", padding: "24px 0" }}>
         <Calculator className="h-10 w-10 mx-auto mb-3" style={{ color: CX.gold, opacity: 0.6 }} />
         <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: CX.ink2 }}>Calculateur de mise</p>
         <p style={{ fontSize: 12, color: CX.gray400, marginBottom: 16 }}>
           Entrez votre mise → BlackTurf génère votre plan de pari personnalisé.
-          Disponible dès le plan Standard.
         </p>
         <Button variant="brand" size="sm" asChild>
-          <Link href="/tarifs">Passer Standard — 12€/mois</Link>
+          <Link href={`/login?redirect=/courses/${courseId}`}>Se connecter</Link>
         </Button>
       </div>
     );
   }
 
-  if (!predictions) {
+  // Essai gratuit Free/Découverte épuisé pour aujourd'hui (403 backend) : message
+  // clair + CTA abonnement, pas un simple toast qu'on rate en scrollant plus bas.
+  if (quotaExceeded) {
+    return (
+      <div style={{ textAlign: "center", padding: "24px 0" }}>
+        <Calculator className="h-10 w-10 mx-auto mb-3" style={{ color: CX.gold, opacity: 0.6 }} />
+        <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: CX.ink2 }}>Essai gratuit utilisé aujourd&apos;hui</p>
+        <p style={{ fontSize: 12, color: CX.gray400, marginBottom: 16 }}>
+          {quotaMessage || "Revenez demain pour un nouvel essai gratuit, ou passez à Standard pour un accès illimité au calculateur."}
+        </p>
+        <CheckoutButton
+          plan="standard"
+          periodicite="monthly"
+          label="Passer Standard — 12€/mois"
+          variant="brand"
+          className="w-auto"
+        />
+      </div>
+    );
+  }
+
+  // Standard+/Expert : le calculateur suppose l'analyse IA déjà lancée (predictions
+  // chargées côté page). Free/Découverte n'a JAMAIS `predictions` chargé (paywall du
+  // classement, cf. useEffect plus haut qui skip le fetch pour ces plans) — ce n'est
+  // PAS un signal d'absence de pronostic pour eux : on les laisse tenter l'appel,
+  // le backend renvoie un message clair (409) si le pronostic n'est pas encore prêt.
+  if (!isFreeTier && !predictions) {
     return (
       <div style={{ textAlign: "center", padding: "24px 0", color: CX.gray400, fontSize: 13 }}>
         <Brain className="h-8 w-8 mx-auto mb-2" style={{ opacity: 0.4 }} />
@@ -761,6 +818,15 @@ function MiseCalculatorWidget({
 
   return (
     <div>
+      {isFreeTier && (
+        <p style={{ margin: "0 0 10px", fontSize: 11.5, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 9, padding: "7px 10px" }}>
+          {quotaRestant === null
+            ? "Essai gratuit — 1 calcul par jour avec votre plan Découverte."
+            : quotaRestant > 0
+              ? `Essai gratuit — encore ${quotaRestant} aujourd'hui.`
+              : "Dernier essai gratuit du jour utilisé."}
+        </p>
+      )}
       <p style={{ margin: "0 0 12px", fontSize: 12.5, color: CX.gray500 }}>
         Votre mise, répartie sur plusieurs paris selon l&apos;analyse.
       </p>
@@ -1233,6 +1299,69 @@ function PronosticVerdictSection({ predictions, classement }: {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ─── Comparaison post-course pour Free/Découverte (funnel, décision 2026-08-16) ───
+// Free n'a JAMAIS accès aux pronostics, avant OU après la course. Ce bloc montre,
+// une fois la course terminée, ce que l'IA avait repéré — factuel uniquement (donnée
+// servie par un endpoint dédié gated côté backend sur statut 'termine', jamais de
+// fuite pré-course). Affiché aussi bien si le favori a gagné que s'il a perdu :
+// honnêteté du produit avant tout, jamais de chiffre inventé.
+function FavoriTeaserCard({ teaser }: {
+  teaser: {
+    disponible: boolean;
+    numero: number | null;
+    nom_cheval: string | null;
+    a_gagne: boolean | null;
+    position_reelle: number | null;
+    cote_depart: number | null;
+    gain_reference_10e: number | null;
+  };
+}) {
+  if (!teaser.disponible) return null;
+  return (
+    <div className="cx-fade" style={{
+      borderRadius: 20,
+      border: teaser.a_gagne ? "1px solid rgba(16,185,129,.35)" : `1px solid ${CX.bd1}`,
+      background: teaser.a_gagne ? "linear-gradient(135deg,rgba(16,185,129,.09),transparent 70%)" : CX.surf1,
+      padding: "18px 20px",
+    }}>
+      <h2 style={{ margin: "0 0 10px", fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2, display: "flex", alignItems: "center", gap: 8 }}>
+        {teaser.a_gagne ? "🎯" : "📊"} Le favori de l&apos;IA sur cette course
+      </h2>
+      {teaser.a_gagne ? (
+        <>
+          <p style={{ margin: "0 0 6px", fontSize: 14, color: CX.ink2 }}>
+            <strong>N°{teaser.numero} {teaser.nom_cheval}</strong>, favori de l&apos;algorithme,
+            a gagné{teaser.cote_depart ? <> à la cote {formatCote(teaser.cote_depart)}</> : null}.
+          </p>
+          {teaser.gain_reference_10e != null && (
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: CX.gray500 }}>
+              Un pari Simple Gagnant de 10€ sur ce cheval aurait rapporté{" "}
+              <strong style={{ color: CX.em }}>{teaser.gain_reference_10e.toFixed(2)}€</strong>.
+            </p>
+          )}
+        </>
+      ) : (
+        <p style={{ margin: "0 0 12px", fontSize: 13, color: CX.gray500 }}>
+          Le favori de l&apos;algorithme — N°{teaser.numero} {teaser.nom_cheval}
+          {teaser.cote_depart ? <>, coté {formatCote(teaser.cote_depart)}</> : null} — a terminé{" "}
+          {teaser.position_reelle}e cette fois, pas gagnant.
+        </p>
+      )}
+      <p style={{ margin: "0 0 14px", fontSize: 12, color: CX.gray400 }}>
+        En plan Découverte, ce pronostic ne vous a pas été montré avant le départ.
+        Passez à Standard pour voir le classement complet de l&apos;IA sur chaque course, avant qu&apos;elle ne parte.
+      </p>
+      <CheckoutButton
+        plan="standard"
+        periodicite="monthly"
+        label="Voir les pronostics — 12€/mois"
+        variant="brand"
+        className="w-auto"
+      />
     </div>
   );
 }
@@ -2097,6 +2226,29 @@ export default function CoursePage() {
     return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [id, course, resultats]);
 
+  // Comparaison post-course favori IA (funnel Free, décision 2026-08-16) : Free/
+  // Découverte n'a jamais accès aux prédictions (paywall), même une fois la course
+  // terminée — cet appel dédié récupère UNIQUEMENT le favori + résultat réel
+  // (jamais de rang/proba pré-course, endpoint gated côté backend sur statut
+  // 'termine'). Chargé uniquement pour ces plans, sur course déjà terminée.
+  const [favoriTeaser, setFavoriTeaser] = useState<{
+    disponible: boolean;
+    numero: number | null;
+    nom_cheval: string | null;
+    a_gagne: boolean | null;
+    position_reelle: number | null;
+    cote_depart: number | null;
+    gain_reference_10e: number | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!user || !["free", "decouverte"].includes(user.plan)) return;
+    if (!course || course.statut !== "termine") return;
+    let cancelled = false;
+    api.get(`/courses/${id}/favori-ia-resultat`)
+      .then((res) => { if (!cancelled) setFavoriTeaser(res.data); })
+      .catch(() => {}); // pas grave si indisponible — simple bloc marketing
+    return () => { cancelled = true; };
+  }, [id, user, course?.statut]);
 
   async function handleTriggerPred() {
     setTriggeringPred(true);
@@ -2316,6 +2468,9 @@ export default function CoursePage() {
                 )}
                 {resultats && predictions && predictions.length > 0 && (
                   <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
+                )}
+                {resultats && favoriTeaser && user && ["free", "decouverte"].includes(user.plan) && (
+                  <FavoriTeaserCard teaser={favoriTeaser} />
                 )}
                 {predictions && predictions.length > 0 && (
                   <BilanMiseSection courseId={id} />
