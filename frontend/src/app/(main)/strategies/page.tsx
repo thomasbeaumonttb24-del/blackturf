@@ -118,7 +118,7 @@ export default function StrategiesPage() {
   });
 
   const { data: strategies, mutate } = useSWR<Strategie[]>(
-    ["pro", "expert"].includes(user?.plan ?? "") ? "/strategies" : null,
+    user?.plan === "expert" ? "/strategies" : null,
     () => api.get("/strategies").then((r) => r.data)
   );
 
@@ -176,7 +176,7 @@ export default function StrategiesPage() {
 
   if (authLoading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
 
-  if (!user || !["pro", "expert"].includes(user.plan)) {
+  if (!user || user.plan !== "expert") {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 sm:py-20 text-center">
         <TrendingUp className="h-14 w-14 sm:h-16 sm:w-16 mx-auto mb-4 text-muted-foreground opacity-50" />

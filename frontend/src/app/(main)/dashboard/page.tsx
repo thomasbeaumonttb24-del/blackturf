@@ -115,7 +115,7 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Badge variant={user?.plan === "expert" ? "expert" : user?.plan === "pro" ? "pro" : "secondary"} className="text-xs px-3 py-1">
+            <Badge variant={user?.plan === "expert" ? "expert" : "secondary"} className="text-xs px-3 py-1">
               {(user?.plan ?? "free").toUpperCase()}
             </Badge>
             <Button asChild variant="brand" size="sm">

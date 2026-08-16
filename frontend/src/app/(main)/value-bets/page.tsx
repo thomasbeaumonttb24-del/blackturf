@@ -281,7 +281,7 @@ export default function ValueBetsPage() {
   const [showFilters, setShowFilters] = useState(false);
 
   const isPro = user && !["free", "decouverte"].includes(user.plan ?? "free");
-  const isExpert = user && ["pro", "expert"].includes(user.plan ?? "free");
+  const isExpert = user?.plan === "expert";
 
   const { valueBets: streamBets, connected } = useValueBetsStream(!!isPro);
 

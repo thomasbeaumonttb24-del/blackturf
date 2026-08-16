@@ -226,7 +226,7 @@ async def notify_value_bet(
         await _log_alerte(session, user.user_id, "value_bet", "in-app", vb_data, ok_inapp)
 
         # Email (starter+)
-        if user.plan in ("starter", "standard", "pro", "expert"):
+        if user.plan in ("starter", "standard", "expert"):
             html = _value_bet_email_html(vb_data)
             ok_email = await send_email(
                 to=user.email,
@@ -517,7 +517,7 @@ async def send_morning_digest(session: AsyncSession):
 
     # Utilisateurs abonnés
     users_res = await session.execute(
-        select(User).where(User.plan.in_(["starter", "standard", "pro", "expert"]), User.is_active == True)
+        select(User).where(User.plan.in_(["starter", "standard", "expert"]), User.is_active == True)
     )
     users = users_res.scalars().all()
 

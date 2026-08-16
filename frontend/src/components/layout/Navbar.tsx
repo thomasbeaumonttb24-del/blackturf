@@ -233,7 +233,7 @@ export function Navbar() {
                     </span>
                     <Badge
                       variant={
-                        ["pro", "expert"].includes(user.plan)
+                        user.plan === "expert"
                           ? "expert"
                           : ["starter", "standard"].includes(user.plan)
                           ? "gold"

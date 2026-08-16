@@ -53,7 +53,13 @@ function InscriptionContent() {
         router.push("/programme");
       }
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      let msg: string | undefined;
+      if (Array.isArray(detail)) {
+        msg = detail.map((d) => (d as { msg?: string })?.msg).filter(Boolean).join(", ");
+      } else if (typeof detail === "string") {
+        msg = detail;
+      }
       toast.error(msg || "Erreur lors de la création du compte");
     } finally {
       setLoading(false);

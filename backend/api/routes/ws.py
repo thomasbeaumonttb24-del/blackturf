@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Plans autorisés sur les flux value bets — même ensemble que require_pro (auth.py).
 # Dupliqué ici plutôt qu'importé : auth.py importe get_db (dépendance HTTP), pas
 # adapté aux routes WebSocket qui gèrent leur propre session (async_session_factory).
-PLANS_ABONNES = ("starter", "standard", "pro", "expert")
+PLANS_ABONNES = ("starter", "standard", "expert")
 
 from api.config import get_settings
 from db.database import get_db, async_session_factory

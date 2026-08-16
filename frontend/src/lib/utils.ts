@@ -64,6 +64,10 @@ export function planLabel(plan: string): string {
 }
 
 export function planColor(plan: string): string {
+  // Anciens noms conservés ici uniquement pour l'AFFICHAGE : le plan "pro" a été
+  // supprimé du produit le 2026-08-16, mais une valeur héritée doit rester
+  // colorée comme un abonné plutôt que de retomber sur le gris des comptes
+  // gratuits. Ne pas s'en servir comme contrôle d'accès (cf. _normalize_plan).
   const p = plan === "starter" ? "standard" : plan === "pro" ? "expert" : plan;
   return (
     {

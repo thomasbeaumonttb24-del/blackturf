@@ -380,7 +380,7 @@ async def change_user_plan(
 ):
     """Change le plan d'un utilisateur manuellement (gift / test)."""
     new_plan = body.get("plan")
-    if not new_plan or new_plan not in {"free", "standard", "expert", "pro", "starter"}:
+    if not new_plan or new_plan not in {"free", "standard", "expert", "starter"}:
         raise HTTPException(status_code=400, detail="Plan invalide. Valeurs: free/standard/expert")
 
     result = await db.execute(select(User).where(User.user_id == user_id))
@@ -1169,7 +1169,7 @@ async def revenue_stats(
     since_12m = now - timedelta(days=365)
 
     # Prix par plan (centimes → euros mapping)
-    PLAN_PRICE_MONTHLY = {"standard": 9.90, "expert": 19.90, "pro": 19.90, "starter": 9.90}
+    PLAN_PRICE_MONTHLY = {"standard": 9.90, "expert": 19.90, "starter": 9.90}
 
     active_subs = (await db.execute(
         select(Subscription).where(Subscription.statut == "active")

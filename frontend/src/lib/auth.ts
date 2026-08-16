@@ -5,7 +5,7 @@ export interface AuthUser {
   email: string;
   nom: string | null;
   prenom: string | null;
-  plan: "free" | "decouverte" | "starter" | "standard" | "pro" | "expert";
+  plan: "free" | "decouverte" | "starter" | "standard" | "expert";
   created_at: string;
   profil_risque: string;
   email_verified: boolean;

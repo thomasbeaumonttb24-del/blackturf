@@ -124,7 +124,7 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-xl font-bold">{[data.user.prenom, data.user.nom].filter(Boolean).join(" ") || "—"}</h2>
                 {data.user.is_admin && <Badge variant="secondary" className="text-[9px]">ADMIN</Badge>}
-                <Badge variant={["pro", "expert"].includes(data.user.plan) ? "expert" : ["starter", "standard"].includes(data.user.plan) ? "gold" : "secondary"} className="text-[10px]">{data.user.plan}</Badge>
+                <Badge variant={data.user.plan === "expert" ? "expert" : ["starter", "standard"].includes(data.user.plan) ? "gold" : "secondary"} className="text-[10px]">{data.user.plan}</Badge>
                 {data.user.is_active
                   ? <Badge variant="success" className="text-[10px]">Actif</Badge>
                   : <Badge variant="secondary" className="text-[10px] text-destructive">Suspendu</Badge>}
@@ -791,7 +791,7 @@ export default function AdminPage() {
                         <div className="text-[11px] text-muted-foreground truncate">{u.email}</div>
                       </button>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <Badge variant={["pro", "expert"].includes(u.plan) ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
+                        <Badge variant={u.plan === "expert" ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
                         {u.is_active ? <CheckCircle className="h-4 w-4 text-green-600" /> : <XCircle className="h-4 w-4 text-destructive" />}
                       </div>
                     </div>
@@ -864,7 +864,7 @@ export default function AdminPage() {
                       </div>
                     </td>
                     <td className="p-3 text-center">
-                      <Badge variant={["pro", "expert"].includes(u.plan) ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
+                      <Badge variant={u.plan === "expert" ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
                     </td>
                     <td className="p-3 text-center text-xs text-muted-foreground capitalize">{u.profil_risque}</td>
                     <td className="p-3 text-right font-mono tabular-nums">{u.solde_actuel?.toFixed(0)}€</td>

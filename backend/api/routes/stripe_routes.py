@@ -45,6 +45,14 @@ PLAN_FROM_PRICE = {
 }
 
 def _normalize_plan(plan: str) -> str:
+    """Anciens noms de plans -> noms canoniques.
+
+    "pro" a été supprimé du produit le 2026-08-16 (aucun compte, aucun prix
+    Stripe) : il ne reste QUE ce point de normalisation, volontairement, pour
+    qu'un client ou un lien de checkout périmé qui enverrait encore "pro"
+    aboutisse sur "expert" au lieu d'échouer. Ne pas réintroduire "pro" dans les
+    contrôles d'accès — le plan stocké doit toujours être canonique.
+    """
     return {"starter": "standard", "pro": "expert"}.get(plan, plan)
 
 

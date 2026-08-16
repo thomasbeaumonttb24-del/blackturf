@@ -2160,7 +2160,7 @@ async def _broadcast_value_bet_alert(
                     select(User).where(
                         User.push_subscription.isnot(None),
                         User.is_active == True,
-                        User.plan.in_(["starter", "standard", "pro", "expert"]),
+                        User.plan.in_(["starter", "standard", "expert"]),
                     )
                 )
                 users = users_res.scalars().all()

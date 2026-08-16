@@ -117,7 +117,7 @@ def test_plans_abonnes_exclut_free_et_decouverte():
     """Documente l'ensemble protégé — doit rester aligné avec require_pro (auth.py)."""
     assert "free" not in PLANS_ABONNES
     assert "decouverte" not in PLANS_ABONNES
-    assert set(PLANS_ABONNES) == {"starter", "standard", "pro", "expert"}
+    assert set(PLANS_ABONNES) == {"starter", "standard", "expert"}
 
 
 # ─────────────────────────────────────────────
@@ -137,7 +137,7 @@ async def test_plan_gratuit_rejette_avec_4403(db, monkeypatch, plan):
     assert ws.sent == [], "aucune donnée value bet ne doit fuiter avant le close"
 
 
-@pytest.mark.parametrize("plan", ["starter", "standard", "pro", "expert"])
+@pytest.mark.parametrize("plan", ["starter", "standard", "expert"])
 @pytest.mark.asyncio
 async def test_plan_abonne_recoit_le_flux(db, monkeypatch, plan):
     _patch_session_factory(monkeypatch, db)

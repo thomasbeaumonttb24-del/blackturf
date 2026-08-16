@@ -140,7 +140,7 @@ async def get_current_user(
 
 
 async def require_pro(user: User = Depends(get_current_user)) -> User:
-    if user.plan not in ("starter", "standard", "pro", "expert"):
+    if user.plan not in ("starter", "standard", "expert"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Abonnement requis")
     return user
 

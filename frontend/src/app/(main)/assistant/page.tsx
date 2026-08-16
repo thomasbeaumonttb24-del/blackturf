@@ -45,7 +45,7 @@ export default function AssistantPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { data: suggestions } = useSWR(
-    ["pro", "expert"].includes(user?.plan ?? "") ? "/assistant/suggestions" : null,
+    user?.plan === "expert" ? "/assistant/suggestions" : null,
     () => api.get("/assistant/suggestions").then((r) => r.data.suggestions as string[])
   );
 
@@ -148,7 +148,7 @@ export default function AssistantPage() {
     </div>
   );
 
-  if (!user || !["pro", "expert"].includes(user.plan)) {
+  if (!user || user.plan !== "expert") {
     return (
       <div className="max-w-lg mx-auto px-4 py-20 text-center space-y-5">
         <div className="mx-auto h-20 w-20 rounded-3xl bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center shadow-lg shadow-amber-200">

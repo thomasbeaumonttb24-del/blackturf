@@ -176,7 +176,7 @@ async def job_vb_notify() -> None:
             # Get all paid users
             users_res = await session.execute(
                 select(User.user_id).where(
-                    User.plan.in_(["starter", "standard", "pro", "expert"]),
+                    User.plan.in_(["starter", "standard", "expert"]),
                     User.is_active == True,
                 )
             )

@@ -451,8 +451,8 @@ async def chat(
     _rl: None = Depends(rate_limit_assistant),
 ):
     """Chat avec l'IA hippique. Plan Expert uniquement."""
-    if user.plan not in ("pro", "expert"):
-        raise HTTPException(status_code=403, detail="Assistant IA réservé au plan Pro")
+    if user.plan != "expert":
+        raise HTTPException(status_code=403, detail="Assistant IA réservé au plan Expert")
 
     # Valider et nettoyer les messages
     messages = [
@@ -566,7 +566,7 @@ async def get_suggestions(
     user: User = Depends(get_current_user),
 ):
     """Questions suggérées contextuelles."""
-    if user.plan not in ("pro", "expert"):
+    if user.plan != "expert":
         raise HTTPException(status_code=403, detail="Plan Expert requis")
 
     # Vérifier s'il y a des courses aujourd'hui

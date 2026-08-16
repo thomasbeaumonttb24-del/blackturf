@@ -261,7 +261,7 @@ export default function ProfilPage() {
             <span
               className={cn(
                 "text-xs font-semibold px-2 py-0.5 rounded-full",
-                ["pro", "expert"].includes(planKey)
+                planKey === "expert"
                   ? "bg-emerald-100 text-emerald-700"
                   : ["starter", "standard"].includes(planKey)
                   ? "bg-amber-100 text-amber-700"
@@ -409,7 +409,7 @@ export default function ProfilPage() {
                 <div
                   className={cn(
                     "rounded-2xl p-4 sm:p-5 border-2",
-                    ["pro", "expert"].includes(planKey)
+                    planKey === "expert"
                       ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-white"
                       : ["starter", "standard"].includes(planKey)
                       ? "border-amber-200 bg-gradient-to-br from-amber-50 to-white"
@@ -422,7 +422,7 @@ export default function ProfilPage() {
                       <p
                         className={cn(
                           "text-2xl font-bold",
-                          ["pro", "expert"].includes(planKey)
+                          planKey === "expert"
                             ? "text-emerald-700"
                             : ["starter", "standard"].includes(planKey)
                             ? "text-amber-700"
@@ -432,7 +432,7 @@ export default function ProfilPage() {
                         {planLabel(planKey)}
                       </p>
                     </div>
-                    {["pro", "expert"].includes(planKey) && <Star className="h-8 w-8 text-emerald-400" />}
+                    {planKey === "expert" && <Star className="h-8 w-8 text-emerald-400" />}
                     {["starter", "standard"].includes(planKey) && <TrendingUp className="h-8 w-8 text-amber-400" />}
                     {isFree && <Brain className="h-8 w-8 text-gray-300" />}
                   </div>

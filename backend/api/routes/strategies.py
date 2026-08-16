@@ -67,7 +67,7 @@ async def list_strategies(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.plan not in ("pro", "expert"):
+    if user.plan != "expert":
         raise HTTPException(status_code=403, detail="Plan Expert requis")
     rows = (await db.execute(
         select(Strategie).where(Strategie.user_id == user.user_id).order_by(desc(Strategie.created_at))
@@ -89,7 +89,7 @@ async def create_strategy(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.plan not in ("pro", "expert"):
+    if user.plan != "expert":
         raise HTTPException(status_code=403, detail="Plan Expert requis")
 
     s = Strategie(
@@ -177,10 +177,10 @@ async def backtest_strategy(
     user: User = Depends(get_current_user),
 ):
     """Simule l'application de la stratégie sur les N derniers jours."""
-    if user.plan not in ("standard", "pro", "expert"):
+    if user.plan not in ("standard", "expert"):
         raise HTTPException(status_code=403, detail="Abonnement Standard ou Expert requis")
 
-    max_jours = 365 if user.plan in ("pro", "expert") else 7
+    max_jours = 365 if user.plan == "expert" else 7
     jours = min(jours, max_jours)
 
     result = await db.execute(

@@ -15,7 +15,6 @@ import redis.asyncio as aioredis
 
 # Limites par plan (par minute / par jour)
 LIMITS: dict[str, tuple[int, int]] = {
-    "pro":    (15, 200),
     "expert": (15, 200),
 }
 DEFAULT_LIMIT = (5, 30)  # free / standard — ne devrait pas accéder
