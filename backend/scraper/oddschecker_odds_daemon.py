@@ -24,9 +24,11 @@ Aucune donnée inventée : pas de match nom → pas d'écriture.
 Lancé par systemd (oddschecker-odds), tourne dans /opt/scrapling_venv.
 """
 from __future__ import annotations
+import os
 import re
 import signal
 import subprocess
+import threading
 import time
 import unicodedata
 from datetime import datetime, timezone, timedelta
@@ -52,6 +54,34 @@ def _stop(*_):
     _run = False
 signal.signal(signal.SIGTERM, _stop)
 signal.signal(signal.SIGINT, _stop)
+
+# ── Anti-gel ─────────────────────────────────────────────────────────────────
+# Constaté le 2026-08-16 : le daemon s'est figé le 02/08 à 11:01 (driver Playwright
+# mort — "Connection closed while reading from the driver"), et le process Python
+# est resté vivant, spinnant à 92% CPU EN CONTINU pendant 15 jours (`systemctl
+# status` : "Active: active (running) since 2026-08-01", même PID). Le try/except
+# du cycle capte les erreurs applicatives, mais un appel sync Playwright/Camoufox
+# qui bloque sur un pipe IPC mort ne lève rien — il ne rend simplement jamais la
+# main. `Restart=always` de systemd est configuré mais NE SERT À RIEN tant que le
+# process ne meurt pas de lui-même : il faut le tuer explicitement.
+#
+# Script SYNCHRONE (Camoufox sync API) : pas d'event loop à annuler proprement
+# comme pour l'orchestrator asyncio → seul un watchdog THREAD, indépendant du
+# thread principal, peut détecter le gel et forcer la sortie.
+CYCLE_TIMEOUT_S = int(os.getenv("BT_ODDSCHECKER_CYCLE_TIMEOUT", str(ENUM_INTERVAL * 3)))
+_cycle_started_at: float | None = None
+
+
+def _start_watchdog() -> None:
+    def _loop() -> None:
+        while True:
+            time.sleep(30)
+            started = _cycle_started_at
+            if started is not None and (time.time() - started) > CYCLE_TIMEOUT_S:
+                log("watchdog.kill", elapsed_s=int(time.time() - started),
+                    timeout_s=CYCLE_TIMEOUT_S)
+                os._exit(1)  # systemd Restart=always relance avec un driver neuf
+    threading.Thread(target=_loop, name="cycle-watchdog", daemon=True).start()
 
 def log(msg: str, **kv):
     extra = " ".join(f"{k}={v}" for k, v in kv.items())
@@ -199,10 +229,18 @@ def match_course(bt: dict, slug: str, dt_utc: datetime):
 
 # ─── Boucle principale ──────────────────────────────────────────────────────
 def main():
-    log("oddschecker_daemon.start", enum=ENUM_INTERVAL, window_h=WINDOW_H)
+    global _cycle_started_at
+    log("oddschecker_daemon.start", enum=ENUM_INTERVAL, window_h=WINDOW_H,
+        cycle_timeout_s=CYCLE_TIMEOUT_S)
+    _start_watchdog()
+    # Le watchdog est armé AVANT l'ouverture du navigateur : un hang dans
+    # `Camoufox(...)` lui-même (déjà observé sur les daemons soeurs) est
+    # couvert, pas seulement les hangs à l'intérieur de la boucle `while _run`.
+    _cycle_started_at = time.time()
     with Camoufox(headless=True, geoip=True) as browser:
         page = browser.new_page()
         while _run:
+            _cycle_started_at = time.time()
             t0 = time.time()
             try:
                 bt = load_blackturf()
