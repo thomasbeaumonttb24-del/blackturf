@@ -250,6 +250,165 @@ async def notify_value_bet(
     log.info("alerts.notify_value_bet", nb_users=len(users))
 
 
+def _winner_entry(classement) -> Optional[dict]:
+    """Entrée du VAINQUEUR (position == 1) dans un classement JSON, robuste à
+    l'ordre du tableau — `classement[0]` n'est PAS garanti être le 1er. Même
+    logique que `_winner_entry` dans api/routes/stats.py (dupliquée ici, pure et
+    minuscule, pour éviter un import routes→services)."""
+    if not classement or not isinstance(classement, list):
+        return None
+    best = None
+    best_pos = None
+    for e in classement:
+        if not isinstance(e, dict):
+            continue
+        p = e.get("position")
+        if not isinstance(p, (int, float)):
+            continue
+        if best_pos is None or p < best_pos:
+            best_pos, best = int(p), e
+    return best
+
+
+async def _best_value_bet_last_week(session: AsyncSession) -> Optional[dict]:
+    """Meilleur value bet RÉEL des 7 derniers jours : niveau ≥3, GAGNANT
+    (comparé au classement officiel), avec un rapport PMU Simple Gagnant
+    RÉELLEMENT publié (jamais de gain approximé). Classé par EV décroissant —
+    on renvoie le premier candidat valide, donc le plus haut EV parmi les
+    gagnants réglés. None si aucun candidat honnête sur la période (le job
+    appelant doit alors ne rien envoyer, pas inventer un exemple)."""
+    from datetime import timedelta
+    from sqlalchemy import select as _select
+    from db.models import ValueBet, Participation, Cheval, Course, Resultat, Prediction
+
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    rows = (await session.execute(
+        _select(ValueBet, Participation, Cheval, Course, Resultat, Prediction)
+        .join(Participation, Participation.participation_id == ValueBet.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .join(Course, Course.course_id == ValueBet.course_id)
+        .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
+        .outerjoin(Prediction, Prediction.prediction_id == ValueBet.prediction_id)
+        .where(
+            ValueBet.niveau >= 3,
+            Course.statut == "termine",
+            Course.date_heure >= since,
+            # Garde anti-backfill (même principe que _vb_flat_backtest dans
+            # stats.py) : le value bet doit avoir été détecté AVANT le départ,
+            # sinon c'est un pari reconstruit a posteriori sur un résultat connu.
+            ValueBet.detecte_a < Course.date_heure,
+        )
+        .order_by(ValueBet.ev_max.desc())
+        .limit(200)
+    )).all()
+
+    for vb, part, cheval, course, resultat, pred in rows:
+        if not resultat or not resultat.classement:
+            continue
+        winner = _winner_entry(resultat.classement)
+        if not winner or winner.get("numero") != part.numero:
+            continue  # ce value bet n'a pas gagné
+        rapport = None
+        if resultat.rapports:
+            for key in ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international"):
+                v = resultat.rapports.get(key)
+                if v is not None:
+                    rapport = float(v)
+                    break
+        if rapport is None:
+            continue  # pas de rapport publié → pas de gain calculable honnêtement
+        cote = pred.cote_figee if (pred and pred.cote_figee and pred.cote_figee > 1) else part.cote_pmu
+        return {
+            "course_id": course.course_id,
+            "nom_cheval": cheval.nom,
+            "numero": part.numero,
+            "hippodrome_nom": course.hippodrome_nom,
+            "date_heure": course.date_heure.isoformat() if course.date_heure else None,
+            "cote": round(cote, 2) if cote else None,
+            "ev": round(vb.ev_max, 4),
+            "niveau": vb.niveau,
+            "rapport_simple_gagnant": round(rapport, 2),
+            "gain_reference_10e": round(10 * rapport, 2),
+        }
+    return None
+
+
+def _weekly_best_vb_email_html(vb: dict) -> str:
+    """Template email hebdo — UN SEUL exemple réel, pas une moyenne enjolivée."""
+    etoiles = "⭐" * vb["niveau"]
+    return f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: #1a1a2e; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+    <h1 style="margin: 0; font-size: 24px;">🏇 BlackTurf</h1>
+    <p style="margin: 5px 0 0; opacity: 0.7;">Le meilleur pari de valeur de la semaine</p>
+  </div>
+  <div style="background: #0f3460; color: white; padding: 20px; border-radius: 0 0 8px 8px;">
+    <h2 style="color: #4ade80;">{etoiles} {vb['nom_cheval']} — gagnant à la cote {vb.get('cote', 'N/A')}</h2>
+    <table style="width: 100%; border-collapse: collapse;">
+      <tr><td style="padding: 8px 0; opacity: 0.7;">Hippodrome</td><td style="font-weight: bold;">{vb.get('hippodrome_nom', 'N/A')}</td></tr>
+      <tr><td style="padding: 8px 0; opacity: 0.7;">Cote au départ</td><td>{vb.get('cote', 'N/A')}</td></tr>
+      <tr><td style="padding: 8px 0; opacity: 0.7;">EV détecté</td><td style="color: #4ade80;">+{round(vb.get('ev', 0) * 100, 1)}%</td></tr>
+      <tr><td style="padding: 8px 0; opacity: 0.7;">Un Simple Gagnant 10€</td><td style="color: #4ade80; font-weight: bold;">aurait rapporté {vb.get('gain_reference_10e', 'N/A')}€</td></tr>
+    </table>
+    <p style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px; opacity: 0.7;">
+      Un seul exemple réel de la semaine passée — pas une moyenne, pas une promesse de gain futur.
+      ⚠️ Le jeu doit rester un plaisir. Jouez de façon responsable. BlackTurf ne garantit aucun gain.
+      Interdiction de participer aux jeux d'argent aux mineurs.
+    </p>
+    <a href="https://blackturf.fr/tarifs" style="display: block; text-align: center; margin-top: 15px; padding: 12px 24px; background: #e94560; color: white; text-decoration: none; border-radius: 6px;">
+      Voir les paris de valeur en direct — passer Standard →
+    </a>
+  </div>
+</body>
+</html>
+"""
+
+
+async def send_weekly_best_value_bet(session: AsyncSession):
+    """
+    Job hebdomadaire (funnel conversion Free, décision produit 2026-08-16) :
+    identifie le meilleur value bet RÉEL de la semaine passée (EV le plus haut
+    parmi les value bets ★★★+ réglés ET gagnants, rapport PMU publié) et
+    l'envoie par email + push aux comptes Free/Découverte, avec CTA d'abonnement.
+
+    Honnêteté stricte : si aucun value bet ★★★+ n'a gagné la semaine passée (ou
+    qu'aucun rapport n'est encore publié), on N'ENVOIE RIEN plutôt que d'inventer
+    un exemple ou de lisser sur une moyenne."""
+    best = await _best_value_bet_last_week(session)
+    if not best:
+        log.info("alerts.weekly_best_vb.no_candidate")
+        return
+
+    users_res = await session.execute(
+        select(User).where(User.plan.in_(["free", "decouverte"]), User.is_active == True)
+    )
+    users = users_res.scalars().all()
+    if not users:
+        log.info("alerts.weekly_best_vb.no_recipients")
+        return
+
+    html = _weekly_best_vb_email_html(best)
+    subject = f"🏇 Le meilleur pari de la semaine : {best['nom_cheval']} à {best.get('cote', '?')}"
+    for user in users:
+        ok_email = await send_email(to=user.email, subject=subject, html=html)
+        await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best, ok_email)
+
+        if user.push_subscription:
+            ok_push = await send_web_push(
+                user.push_subscription,
+                title="🏇 Meilleur pari de la semaine",
+                body=f"{best['nom_cheval']} gagnant à {best.get('cote', '?')} — un 10€ aurait rapporté {best.get('gain_reference_10e', '?')}€",
+                data=best,
+            )
+            await _log_alerte(session, user.user_id, "weekly_best_vb", "push", best, ok_push)
+
+    await session.commit()
+    log.info("alerts.weekly_best_vb", nb_users=len(users), course_id=best["course_id"], cheval=best["nom_cheval"])
+
+
 async def send_morning_digest(session: AsyncSession):
     """
     Digest matinal — envoyé aux abonnés actifs.

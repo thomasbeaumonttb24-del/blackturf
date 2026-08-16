@@ -27,6 +27,22 @@ async def job_morning_digest() -> None:
         log.error("jobs.morning_digest.error", error=str(e))
 
 
+async def job_weekly_best_value_bet() -> None:
+    """Lundi 09:00 Paris — funnel conversion Free (décision produit 2026-08-16) :
+    identifie le meilleur value bet RÉEL de la semaine passée et l'envoie par
+    email/push aux comptes Free/Découverte. N'envoie rien si aucun value bet
+    ★★★+ n'a gagné la semaine passée (honnêteté > relance à tout prix)."""
+    log.info("jobs.weekly_best_value_bet.start")
+    try:
+        from db.database import AsyncSessionLocal
+        from services.alerts import send_weekly_best_value_bet
+        async with AsyncSessionLocal() as session:
+            await send_weekly_best_value_bet(session)
+        log.info("jobs.weekly_best_value_bet.done")
+    except Exception as e:
+        log.error("jobs.weekly_best_value_bet.error", error=str(e))
+
+
 async def job_retrain_trigger() -> None:
     """02:00 UTC — enqueue ML retrain in RQ worker (heavy CPU, don't run in API process)."""
     log.info("jobs.retrain.trigger")
@@ -229,6 +245,15 @@ def start_scheduler() -> None:
         id="morning_digest",
         replace_existing=True,
         misfire_grace_time=600,
+    )
+
+    # Meilleur value bet de la semaine — lundi 09:00 Paris (funnel Free)
+    scheduler.add_job(
+        job_weekly_best_value_bet,
+        CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="Europe/Paris"),
+        id="weekly_best_value_bet",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     # Model retrain trigger — 02:00 UTC
