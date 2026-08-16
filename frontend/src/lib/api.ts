@@ -95,6 +95,9 @@ export const predictionsApi = {
     api.get("/value-bets", { params: { niveau_min: niveauMin } }),
   valueBetsHistory: (limit = 50, offset = 0) =>
     api.get("/value-bets/historique", { params: { limit, offset } }),
+  // Compteur agrégé public (bandeau Free) — jamais de détail individuel, juste un total.
+  valueBetsCompteur: (niveauMin = 3) =>
+    api.get("/value-bets/compteur", { params: { niveau_min: niveauMin } }),
   pariDuJour: () => api.get("/pari-du-jour"),
   pariDuJourProfils: () => api.get("/pari-du-jour-profils"),
   modelVersion: () => api.get("/model/version"),

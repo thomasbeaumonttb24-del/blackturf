@@ -254,6 +254,45 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
   );
 }
 
+/* ─── Bandeau value bets actifs (funnel Free, décision 2026-08-16) ─────────
+   Compteur AGRÉGÉ honnête (vrai COUNT(*) côté backend, endpoint public/léger
+   /value-bets/compteur) — jamais le détail (cheval/course/cote) d'un value bet
+   à un compte non abonné. Visible tant que l'utilisateur n'est pas déjà payant
+   (free/decouverte ou visiteur non connecté) : donne un signal de ce qui se
+   joue EN CE MOMENT sans casser le paywall. */
+function ValueBetsCompteurBanner() {
+  const { data } = useSWR(
+    "/value-bets-compteur-banner",
+    () => predictionsApi.valueBetsCompteur(3).then((r) => r.data as { count: number; niveau_min: number }),
+    { refreshInterval: 60000 },
+  );
+  if (!data || !data.count) return null;
+  return (
+    <Link
+      href="/tarifs"
+      className="relative flex flex-wrap items-center justify-between gap-3 overflow-hidden rounded-2xl px-4 py-3.5 transition-transform hover:-translate-y-0.5 sm:px-5 sm:py-4"
+      style={{ border: "1px solid rgba(16,185,129,.28)", background: "linear-gradient(135deg,rgba(16,185,129,.08),rgba(255,255,255,.92))" }}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+        </span>
+        <p className="text-[13.5px] font-semibold text-gray-800">
+          <span className="tabular-nums text-[15px] font-bold text-emerald-700">{data.count}</span>{" "}
+          {data.count > 1 ? "paris de valeur" : "pari de valeur"} ★★★+ actif{data.count > 1 ? "s" : ""} maintenant
+        </p>
+      </div>
+      <span
+        className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-[12.5px] font-bold text-white shadow-sm"
+        style={{ background: "linear-gradient(135deg,#10B981,#059669)" }}
+      >
+        Visibles dès Standard <ChevronRight className="h-3.5 w-3.5" />
+      </span>
+    </Link>
+  );
+}
+
 /* ─── Ligne de course (timeline) ────────────────────────── */
 function TimelineRow({ course, reunionNum, vbCount, delay, targetId }: { course: CourseSummary; reunionNum: number; vbCount?: number; delay: number; targetId?: string }) {
   const m = discMeta(course.discipline);
@@ -520,6 +559,9 @@ export default function ProgrammePage() {
 
         {/* ── Prochaine course ── */}
         {nextRace && <NextRaceBanner item={nextRace} />}
+
+        {/* ── Bandeau value bets actifs (Free/Découverte + visiteurs non connectés) ── */}
+        {!isPaid && <ValueBetsCompteurBanner />}
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (

@@ -399,6 +399,38 @@ async def get_value_bets_live(
     ]
 
 
+@router.get("/value-bets/compteur")
+async def get_value_bets_compteur(
+    niveau_min: int = Query(default=3, ge=1, le=4),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Compteur AGRÉGÉ de value bets actifs (funnel Free, décision produit 2026-08-16,
+    Thomas) : bandeau "N paris de valeur ★★★+ actifs maintenant — visibles dès
+    Standard" sur le programme/dashboard, pour donner à Free un signal honnête de
+    ce qu'il rate EN CE MOMENT.
+
+    Public et volontairement minimal : UNIQUEMENT un entier (`count`), JAMAIS le
+    détail d'un value bet (cheval / course / cote) — même principe d'autorisation
+    que le fix appliqué à /ws/value-bets (authentification ≠ autorisation : on ne
+    sert pas la donnée protégée juste parce que la requête est "en lecture seule"
+    ou "juste pour un total"). Le nombre est un vrai `COUNT(*)` en base, jamais une
+    estimation ni un chiffre arrondi à la hausse.
+    """
+    q = (
+        select(func.count(ValueBet.vb_id))
+        .select_from(ValueBet)
+        .join(Course, Course.course_id == ValueBet.course_id)
+        .where(
+            ValueBet.actif == True,
+            ValueBet.niveau >= niveau_min,
+            Course.statut.in_(["a_venir", "en_cours"]),
+        )
+    )
+    count = (await db.execute(q)).scalar_one()
+    return {"count": int(count), "niveau_min": niveau_min}
+
+
 @router.get("/pari-du-jour-profils")
 async def get_pari_du_jour_profils(
     db: AsyncSession = Depends(get_db),
