@@ -16,6 +16,7 @@ Aucune donnée inventée : si pas de correspondance course/partant, on ignore.
 Lancé par systemd, tourne dans /opt/scrapling_venv (camoufox installé).
 """
 from __future__ import annotations
+import os
 import re
 import sys
 import time
@@ -26,6 +27,7 @@ import unicodedata
 from datetime import datetime, timezone, timedelta
 
 from camoufox.sync_api import Camoufox
+from live_daemon_watchdog import CycleWatchdog
 
 # ─── Config ─────────────────────────────────────────────────────────────────
 DB_CONTAINER = "blackturf_db"
@@ -37,6 +39,11 @@ SLOW_INTERVAL = 90      # s — ré-énumération complète du programme
 FAST_INTERVAL = 5       # s — relecture cote de la course imminente
 MATCH_MIN = 14          # ±minutes pour matcher course zeturf ↔ BlackTurf
 PAGE_WAIT_MS = 4500     # attente rendu cotes après navigation
+WATCHDOG_TIMEOUT_S = int(os.getenv("BT_ZETURF_CYCLE_TIMEOUT", "1200"))
+WATCHDOG_GRACE_S = int(os.getenv("BT_ZETURF_WATCHDOG_GRACE", "120"))
+HEARTBEAT_PATH = os.getenv(
+    "BT_ZETURF_HEARTBEAT", "/opt/blackturf_odds/zeturf_heartbeat"
+)
 
 _run = True
 def _stop(*_):
@@ -48,6 +55,15 @@ signal.signal(signal.SIGINT, _stop)
 def log(msg: str, **kv):
     extra = " ".join(f"{k}={v}" for k, v in kv.items())
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg} {extra}".rstrip(), flush=True)
+
+
+_watchdog = CycleWatchdog(
+    name="zeturf_daemon",
+    timeout_s=WATCHDOG_TIMEOUT_S,
+    grace_s=WATCHDOG_GRACE_S,
+    heartbeat_path=HEARTBEAT_PATH,
+    log=log,
+)
 
 # ─── DB via docker exec psql ────────────────────────────────────────────────
 def db_query(sql: str) -> list[list[str]]:
@@ -250,12 +266,14 @@ def read_course(page, url: str) -> tuple[dict[int, float], datetime | None]:
 # ─── Boucle principale ──────────────────────────────────────────────────────
 def main():
     log("zeturf_daemon.start", slow=SLOW_INTERVAL, fast=FAST_INTERVAL)
+    _watchdog.start()
     with Camoufox(headless=True, geoip=True) as browser:
         page = browser.new_page()
         last_slow = 0.0
         bt = {}
         imminent = None  # (course_id, url, partants)
         while _run:
+            _watchdog.begin_cycle()
             now = time.time()
             # ── LENTE : ré-énumère + mappe tout ──
             if now - last_slow >= SLOW_INTERVAL:
@@ -309,6 +327,7 @@ def main():
                         log("fast", course=cid, partants=n)
                 except Exception as e:
                     log("fast.error", err=str(e)[:120])
+            _watchdog.finish_cycle()
             time.sleep(FAST_INTERVAL)
     log("zeturf_daemon.stop")
 
