@@ -59,6 +59,8 @@ def _should_deploy(
     min_auc: float = MIN_DEPLOYABLE_AUC,
     roi_gate_enabled: bool = False,
     betting_edge_ok: bool = True,
+    h2h_delta: Optional[float] = None,
+    h2h_tolerance: float = 0.002,
 ) -> bool:
     """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
 
@@ -66,18 +68,28 @@ def _should_deploy(
     que soit la situation de l'actif. C'est ce plancher qui manquait et qui a laissé un
     modèle à AUC 0.06 passer en prod (l'actif "non fiable" déployait n'importe quoi).
 
+    ARBITRE DE RANKING — `h2h_delta` (AUC_challenger − AUC_champion, mesurés sur le MÊME
+    hold-out hors-échantillon pour les deux) quand il est disponible, sinon repli sur la
+    comparaison des walk-forward.
+
+    Pourquoi : le walk-forward RÉ-ENTRAÎNE un XGB rapide sur des folds du dataset
+    COURANT — c'est une mesure du DATASET, pas du modèle. Comparer le wf d'un challenger
+    au wf STOCKÉ d'un champion entraîné sur une autre génération de données revient à
+    comparer deux datasets, et le champion gagne mécaniquement. Constat 2026-08-16 :
+    référence figée à 0.8104 (juin, 151k lignes) vs challengers stables à 0.794
+    (août, 168k lignes) → 14 rejets d'affilée, modèle gelé 48 jours. `h2h_delta` est la
+    seule comparaison honnête entre deux modèles.
+
     FLAG roi_deploy_gate : si `roi_gate_enabled`, la couche PARIS doit prouver un edge
     hors-échantillon (`betting_edge_ok`, ex. edge_monitor edge_ok). MAIS cette gate ne
-    bloque QUE la promotion d'un modèle SANS mérite de ranking (wf qui ne progresse pas).
-    Un modèle qui AMÉLIORE le walk-forward AUC (`new_wf >= current_wf`) est un meilleur
-    CLASSEUR → toujours promu : il améliore les pronostics affichés, sans placer d'argent.
-    Le ROI/edge est une couche distincte (staking, BT_STAKING_SAFE) gérée à part. Sans ce
-    dégel, un edge durablement négatif (audit -52%) figerait le modèle À VIE et empêcherait
-    toute amélioration du ranking — exactement le blocage du 2026-06-19 (wf 0.8165>0.8141
-    rejeté à tort en `worse_wf`).
+    bloque QUE la promotion d'un modèle SANS mérite de ranking. Un meilleur CLASSEUR est
+    toujours promu : il améliore les pronostics affichés, sans placer d'argent. Le ROI/edge
+    est une couche distincte (staking, BT_STAKING_SAFE) gérée à part. Sans ce dégel, un
+    edge durablement négatif (audit -52%) figerait le modèle À VIE — exactement le blocage
+    du 2026-06-19 (wf 0.8165>0.8141 rejeté à tort en `worse_wf`).
 
     Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
-    saut de données massif, OU walk-forward au moins aussi bon (tolérance régression).
+    saut de données massif, OU mérite de ranking (tolérance régression).
     """
     if new_wf < min_auc:
         return False
@@ -88,18 +100,136 @@ def _should_deploy(
     structural_replace = (
         current_is_synth or no_current or current_unreliable or data_jump
     )
-    # Gate ROI : ne fige PAS une amelioration de ranking (wf au moins aussi bon
-    # que l'actif) NI un remplacement structurel (ex. modele 18 mois remplacant un
-    # modele a fenetre courte sur-ajuste dont le wf gonfle bloquait tout -- bug
-    # 2026-06-29 : roi_gate court-circuitait avant data_jump).
-    ranking_improvement = new_wf >= current_wf
+    # Mérite de ranking : head-to-head si mesuré, sinon walk-forward (repli).
+    if h2h_delta is not None:
+        ranking_improvement = h2h_delta >= 0.0
+        ranking_acceptable = h2h_delta >= -h2h_tolerance
+    else:
+        ranking_improvement = new_wf >= current_wf
+        ranking_acceptable = new_wf >= current_wf - seuil_regression
+    # Gate ROI : ne fige PAS un mérite de ranking NI un remplacement structurel (ex.
+    # modele 18 mois remplacant un modele a fenetre courte sur-ajuste dont le wf gonfle
+    # bloquait tout -- bug 2026-06-29 : roi_gate court-circuitait avant data_jump).
     if (roi_gate_enabled and not betting_edge_ok
             and not ranking_improvement and not structural_replace):
         return False
-    return (
-        structural_replace
-        or new_wf >= current_wf - seuil_regression
-    )
+    return structural_replace or ranking_acceptable
+
+
+def _edge_undecidable(em: dict) -> bool:
+    """L'edge_monitor a-t-il assez de matière pour CONCLURE quoi que ce soit ?
+
+    `compute_edge_monitor` signale l'insuffisance par DEUX clés distinctes :
+      - `insufficient` : dataset global < 500 lignes (cas d'amorçage, quasi jamais) ;
+      - `enough_filt`  : moins de `min_filt` paris retenus par le filtre de conviction
+                         — LE cas courant en régime normal.
+    Dans les deux cas `edge_ok` vaut False PAR CONSTRUCTION, ce qui ne veut pas dire
+    « edge prouvé mauvais » mais « indécidable ».
+
+    Régression protégée (2026-08-16) : le pipeline ne testait que `insufficient`, une
+    clé qui n'apparaît jamais en régime normal. En prod, `n_filt=25 < min_filt=50`
+    donnait donc edge_ok=False lu au premier degré → roi_gate bloquait → 14 rejets
+    consécutifs, modèle gelé 48 jours.
+    """
+    return bool(em.get("insufficient")) or not em.get("enough_filt", True)
+
+
+def _edge_gate_ok(em: dict) -> bool:
+    """Valeur à passer à `_should_deploy(betting_edge_ok=…)`.
+
+    Indécidable → True (on ne bloque pas sur du bruit). Sinon on lit `edge_ok`.
+    """
+    if _edge_undecidable(em):
+        return True
+    return bool(em.get("edge_ok", True))
+
+
+# Taille minimale de l'échantillon d'arbitrage. Sous ce seuil l'AUC est du bruit :
+# on préfère « indécidable » (repli walk-forward) à une promotion sur 200 lignes.
+H2H_MIN_ROWS = 2000
+
+
+async def _head_to_head_auc(
+    session: AsyncSession,
+    challenger: BlackTurfEnsemble,
+    X_hold: pd.DataFrame,
+    y_hold: pd.Series,
+    current_mv: Optional[ModelVersion],
+) -> Optional[dict]:
+    """AUC du champion ET du challenger sur EXACTEMENT le même échantillon.
+
+    L'échantillon = le hold-out temporel du challenger (courses qu'il n'a pas vues),
+    RESTREINT aux courses postérieures à la création du champion — donc hors-échantillon
+    pour les DEUX modèles. Sans cette restriction le champion aurait un avantage
+    mécanique : il a été entraîné sur une partie de ce hold-out.
+
+    Coût : de l'inférence pure, pas de ré-entraînement. Le champion est chargé puis
+    libéré immédiatement (le garder en RAM à côté du challenger ET du dataset était la
+    cause de l'OOM en phase de promotion, cf. commentaire de _do_retraining).
+
+    Retourne None quand la comparaison n'est pas fiable (pas de champion, échantillon
+    trop mince, features incompatibles) → l'appelant retombe sur le walk-forward.
+    """
+    if current_mv is None or getattr(current_mv, "created_at", None) is None:
+        return None
+    if "course_id" not in X_hold.columns or len(X_hold) == 0:
+        return None
+
+    try:
+        rows = await session.execute(
+            text("SELECT course_id FROM courses WHERE date_heure > :cutoff"),
+            {"cutoff": current_mv.created_at},
+        )
+        oos_courses = {r[0] for r in rows}
+    except Exception as e:
+        log.warning("pipeline.h2h.courses_query_failed", err=str(e)[:160])
+        return None
+
+    mask = X_hold["course_id"].isin(oos_courses).to_numpy()
+    n_rows = int(mask.sum())
+    if n_rows < H2H_MIN_ROWS:
+        log.info("pipeline.h2h.sample_too_small", n_rows=n_rows, min_rows=H2H_MIN_ROWS)
+        return None
+
+    X_oos, y_oos = X_hold[mask], y_hold[mask]
+    if y_oos.nunique() < 2:
+        return None
+
+    import gc
+    from sklearn.metrics import roc_auc_score
+
+    try:
+        champion = BlackTurfEnsemble.load_current()
+        if champion is None:
+            return None
+        # predict_proba reindexe sur ses propres feature_names → tolère une dérive
+        # du schéma de features entre les deux générations.
+        auc_champion = float(roc_auc_score(y_oos, champion.predict_proba(X_oos)))
+    except Exception as e:
+        log.warning("pipeline.h2h.champion_scoring_failed", err=str(e)[:160])
+        return None
+    finally:
+        champion = None
+        gc.collect()
+
+    try:
+        auc_challenger = float(roc_auc_score(y_oos, challenger.predict_proba(X_oos)))
+    except Exception as e:
+        log.warning("pipeline.h2h.challenger_scoring_failed", err=str(e)[:160])
+        return None
+
+    delta = auc_challenger - auc_champion
+    n_courses = int(X_oos["course_id"].nunique())
+    log.info("pipeline.h2h.measured",
+             auc_challenger=round(auc_challenger, 4), auc_champion=round(auc_champion, 4),
+             delta=round(delta, 4), n_rows=n_rows, n_courses=n_courses)
+    return {
+        "auc_challenger": auc_challenger,
+        "auc_champion": auc_champion,
+        "delta": delta,
+        "n_rows": n_rows,
+        "n_courses": n_courses,
+    }
 
 
 # ─────────────────────────────────────────────
@@ -687,10 +817,16 @@ async def _do_retraining(mois: int, label: str) -> None:
         # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
         model = BlackTurfEnsemble()
         metrics = model.train(X, y, y_win)
+        # Hold-out temporel (MÊME découpage que train()) conservé pour l'arbitrage
+        # champion/challenger. ~20% des lignes en float32 = quelques dizaines de Mo :
+        # négligeable face aux Go du dataset complet qu'on libère juste après.
+        from ml.models import temporal_holdout_mask
+        _hm = temporal_holdout_mask(X)
+        X_hold, y_hold = X[_hm].copy(), y[_hm].copy()
         # X/y/y_win ne servent plus à la décision de promotion (métriques déjà calculées)
         # → on libère avant la phase métriques/edge_monitor pour ne pas cumuler le pic RAM.
         n_train_rows = len(X)
-        del X, y, y_win
+        del X, y, y_win, _hm
         gc.collect()
 
         # Récupérer le modèle actif EN BASE pour une comparaison HONNÊTE.
@@ -740,12 +876,19 @@ async def _do_retraining(mois: int, label: str) -> None:
             try:
                 from ml.edge_monitor import compute_edge_monitor
                 _em = await compute_edge_monitor(session)
-                # edge_ok absent (échantillon insuffisant) → on ne bloque pas un premier
-                # déploiement, mais un edge explicitement mauvais (edge_ok=False) bloque.
-                _betting_edge_ok = bool(_em.get("edge_ok", True)) if not _em.get("insufficient") else True
+                _betting_edge_ok = _edge_gate_ok(_em)
+                if _edge_undecidable(_em):
+                    log.info("pipeline.retrain.edge_undecidable",
+                             n_filt=_em.get("n_filt"), min_filt=_em.get("min_filt"))
             except Exception as _e:
                 log.warning("pipeline.retrain.edge_gate_skip", err=str(_e)[:120])
                 _betting_edge_ok = True
+
+        # Arbitrage champion/challenger sur un hold-out commun (cf. _head_to_head_auc).
+        _h2h = await _head_to_head_auc(session, model, X_hold, y_hold, current_mv)
+        del X_hold, y_hold
+        gc.collect()
+        _h2h_delta = _h2h["delta"] if _h2h else None
 
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
         if _should_deploy(
@@ -756,6 +899,7 @@ async def _do_retraining(mois: int, label: str) -> None:
             data_jump=data_jump,
             roi_gate_enabled=_AF.roi_deploy_gate,
             betting_edge_ok=_betting_edge_ok,
+            h2h_delta=_h2h_delta,
         ):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
@@ -792,7 +936,10 @@ async def _do_retraining(mois: int, label: str) -> None:
                 wf_auc=round(new_wf, 4),
                 prev_wf_auc=round(current_wf, 4),
                 reason=("synth" if current_is_synth else "unreliable_active" if current_unreliable
-                        else "data_jump" if data_jump else "better_wf"),
+                        else "data_jump" if data_jump
+                        else "better_h2h" if _h2h_delta is not None else "better_wf"),
+                h2h_delta=round(_h2h_delta, 4) if _h2h_delta is not None else None,
+                h2h_n_courses=_h2h["n_courses"] if _h2h else None,
                 train_n=new_train_n,
             )
 
@@ -817,10 +964,18 @@ async def _do_retraining(mois: int, label: str) -> None:
                 "pipeline.retrain.rollback",
                 new_wf_auc=round(new_wf, 4),
                 current_wf_auc=round(current_wf, 4),
+                # Le head-to-head est l'arbitre quand il a pu être mesuré : le tracer
+                # ici évite de re-diagnostiquer un rejet à partir des seuls wf (qui,
+                # eux, ne sont PAS comparables d'une génération à l'autre).
+                h2h_delta=round(_h2h_delta, 4) if _h2h_delta is not None else None,
+                h2h_auc_challenger=round(_h2h["auc_challenger"], 4) if _h2h else None,
+                h2h_auc_champion=round(_h2h["auc_champion"], 4) if _h2h else None,
                 reason=(
                     "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
                     else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
+                                        and not (_h2h_delta is not None and _h2h_delta >= 0)
                                         and new_wf < current_wf)
+                    else "worse_h2h" if _h2h_delta is not None
                     else "worse_wf"
                 ),
             )

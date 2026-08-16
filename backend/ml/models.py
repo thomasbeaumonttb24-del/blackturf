@@ -89,6 +89,37 @@ def _try_import_catboost():
         return None
 
 
+def temporal_holdout_mask(X: "pd.DataFrame", frac_train: float = 0.8) -> "np.ndarray":
+    """Masque booléen du hold-out temporel : True = courses les plus RÉCENTES.
+
+    SOURCE UNIQUE DE VÉRITÉ du découpage. `BlackTurfEnsemble.train()` s'en sert
+    pour son split 80/20, et le pipeline de promotion le réutilise pour faire
+    prédire champion et challenger sur EXACTEMENT le même échantillon. Les deux
+    doivent rester d'accord au participant près, d'où la fonction partagée.
+
+    FLAG group_split : découpage PAR COURSE (course_id), pas par cheval. Sans ça
+    des chevaux de la MÊME course tombent à cheval sur train/test → le modèle
+    mémorise la course via les features de champ (field_hhi, elo_vs_moyenne…)
+    → AUC/Brier gonflés, modèle overfit promu, -52% live (cf. audit edge).
+    Flag off → découpage positionnel historique inchangé.
+
+    X est supposé trié chronologiquement (les requêtes de dataset font
+    ORDER BY date_heure).
+    """
+    from ml.algo_flags import FLAGS as _AF
+
+    if _AF.group_split and "course_id" in X.columns:
+        courses_ordered = list(dict.fromkeys(X["course_id"].tolist()))  # chrono
+        cut = int(len(courses_ordered) * frac_train)
+        train_courses = set(courses_ordered[:cut])
+        return ~X["course_id"].isin(train_courses).to_numpy()
+
+    n = len(X)
+    mask = np.zeros(n, dtype=bool)
+    mask[int(n * frac_train):] = True
+    return mask
+
+
 class BlackTurfEnsemble:
     """
     Ensemble calibré XGBoost + LightGBM + CatBoost.
@@ -135,24 +166,11 @@ class BlackTurfEnsemble:
         self.feature_names = [c for c in X.columns if c not in META_COLS]
         X_feat = X[self.feature_names].fillna(0)
 
-        n = len(X_feat)
-        # FLAG group_split : split PAR COURSE (course_id), pas par cheval. Sans ça,
-        # des chevaux de la MÊME course tombent à cheval sur train/test → le modèle
-        # mémorise la course via les features de champ (field_hhi, elo_vs_moyenne…)
-        # → AUC/Brier gonflés, modèle overfit promu, -52% live (cf. audit edge).
-        # Flag off → split positionnel historique inchangé.
         from ml.algo_flags import FLAGS as _AF
-        if _AF.group_split and "course_id" in X.columns:
-            courses_ordered = list(dict.fromkeys(X["course_id"].tolist()))  # chrono (ORDER BY date_heure)
-            cut = int(len(courses_ordered) * 0.8)
-            train_courses = set(courses_ordered[:cut])
-            train_mask = X["course_id"].isin(train_courses).to_numpy()
-            X_train, X_test = X_feat[train_mask], X_feat[~train_mask]
-            y_train, y_test = y[train_mask], y[~train_mask]
-        else:
-            split = int(n * 0.8)
-            X_train, X_test = X_feat.iloc[:split], X_feat.iloc[split:]
-            y_train, y_test = y.iloc[:split], y.iloc[split:]
+        holdout_mask = temporal_holdout_mask(X)
+        train_mask = ~holdout_mask
+        X_train, X_test = X_feat[train_mask], X_feat[holdout_mask]
+        y_train, y_test = y[train_mask], y[holdout_mask]
 
         log.info("model.training", n_train=len(X_train), n_test=len(X_test), pos_rate=float(y_train.mean()))
 
