@@ -234,6 +234,8 @@ services:
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
       - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
+      # Fenêtre compatible avec le worker 6 Gio (~40k partants actuellement).
+      - RETRAIN_HISTORY_MONTHS=${RETRAIN_HISTORY_MONTHS:-3}
     depends_on:
       db:
         condition: service_healthy
@@ -245,7 +247,7 @@ services:
     deploy:
       resources:
         limits:
-          # 6G : le retrain 18 mois pointe ~5G ; marge pour éviter le cgroup-OOM.
+          # 6G : plafond du retrain 3 mois, sans affamer les services web/DB.
           # L'hôte (7,6G RAM + 6G swap) ne peut pas global-OOM tant que ce cap tient.
           memory: 6G
         reservations:

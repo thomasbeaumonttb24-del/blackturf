@@ -685,10 +685,15 @@ async def run_incremental_retraining() -> None:
 async def run_nightly_retraining() -> None:
     """
     Retraining complet nightly à 2h UTC.
-    18 mois de données, validation, déploiement conditionnel.
+    Fenêtre récente configurable, validation et déploiement conditionnel.
+
+    La production utilise trois mois par défaut : ses features JSON représentent
+    déjà environ 40 000 partants et tiennent sous la limite mémoire de 6 Gio du
+    worker. Une fenêtre de 18 mois provoquait un arrêt cgroup (signal 9) avant
+    même l'entraînement et empêchait donc tout apprentissage nocturne.
     """
     log.info("pipeline.nightly_retrain.start")
-    await _do_retraining(mois=18, label="nightly")
+    await _do_retraining(mois=settings.retrain_history_months, label="nightly")
     # Recalcule la calibration longshots sur toutes les données réelles à jour
     try:
         from ml.longshot_calibration import compute_and_store

@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     model_min_auc: float = 0.60
     retrain_hour_utc: int = 2
     retrain_every_n_results: int = 20
+    # Le dataset JSON se déplie fortement en mémoire pendant l'entraînement.
+    # Trois mois (~40k partants en production) tiennent dans le worker 6 Gio ;
+    # une fenêtre plus longue reste configurable sur un serveur plus puissant.
+    retrain_history_months: int = Field(default=3, ge=1, le=36)
 
     # Telegram
     telegram_bot_token: str = ""
