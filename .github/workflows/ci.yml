@@ -137,7 +137,11 @@ jobs:
         run: docker build -t blackturf-api:ci ./backend
 
       - name: Build frontend image
-        run: docker build -t blackturf-frontend:ci ./frontend
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=https://api.blackturf.fr \
+            --build-arg NEXT_PUBLIC_WS_URL=wss://api.blackturf.fr/ws \
+            -t blackturf-frontend:ci ./frontend
 
       - name: Smoke test API image
         run: |
