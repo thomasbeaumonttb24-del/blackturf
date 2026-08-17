@@ -203,6 +203,7 @@ class CourseScrape:
     date_heure: str
     discipline: str
     distance: int
+    pays: Optional[str] = None
     terrain: Optional[str] = None
     terrain_code: Optional[int] = None
     dotation: Optional[int] = None  # en centimes

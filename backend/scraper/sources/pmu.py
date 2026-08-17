@@ -183,7 +183,7 @@ class PmuScraper(BaseScraper):
             # numOfficiel pour les URLs API PMU, mais on affiche numExterne.
             r_public = reunion.get("numExterne") or r_num
             hippodrome = reunion.get("hippodrome", {}).get("libelleLong", "Inconnu")
-            pays = reunion.get("hippodrome", {}).get("pays", {}).get("code", "FR")
+            pays = reunion.get("hippodrome", {}).get("pays", {}).get("code")
 
             # Préfixe = date INTERROGÉE (today_str). On vient de demander
             # /programme/{today_str}, donc toutes ces réunions sont de ce jour.
@@ -245,6 +245,7 @@ class PmuScraper(BaseScraper):
                     course_id=c_id,
                     numero_reunion=int(r_public) if r_public else None,
                     hippodrome=hippodrome,
+                    pays=pays,
                     date_heure=c_data.get("heureDepart", ""),
                     discipline=DISCIPLINE_MAP.get(c_data.get("specialite", ""), c_data.get("specialite", "")),
                     distance=c_data.get("distance", 0),

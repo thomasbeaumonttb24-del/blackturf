@@ -117,17 +117,17 @@ def gen_uuid() -> str:
     return str(uuid.uuid4())
 
 
-async def upsert_hippodrome(session: AsyncSession, nom: str) -> str:
+async def upsert_hippodrome(session: AsyncSession, nom: str, pays: str | None = None) -> str:
     """Upsert hippodrome, retourne hippodrome_id."""
     code = nom.upper().replace(" ", "_")[:20]
     stmt = pg_insert(Hippodrome).values(
         hippodrome_id=gen_uuid(),
         nom=nom,
         code=code,
-        pays="FR",
+        pays=pays or "UNK",
     ).on_conflict_do_update(
         index_elements=["code"],
-        set_={"nom": nom},
+        set_={"nom": nom, "pays": pays or "UNK"},
     ).returning(Hippodrome.hippodrome_id)
     result = await session.execute(stmt)
     return result.scalar_one()
@@ -142,8 +142,11 @@ async def upsert_reunion(session: AsyncSession, course: CourseScrape, hippodrome
         hippodrome_id=hippodrome_id,
         hippodrome_nom=course.hippodrome,
         numero=int(course.reunion_id),
-        pays="FR",
-    ).on_conflict_do_nothing(index_elements=["reunion_id"])
+        pays=course.pays or "UNK",
+    ).on_conflict_do_update(
+        index_elements=["reunion_id"],
+        set_={"pays": course.pays or "UNK"},
+    )
     await session.execute(stmt)
 
 
@@ -252,7 +255,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
     log.info("db_writer.save_course", course_id=course.course_id, partants=len(course.partants))
 
     # Hippodrome
-    hippodrome_id = await upsert_hippodrome(session, course.hippodrome)
+    hippodrome_id = await upsert_hippodrome(session, course.hippodrome, course.pays)
 
     # Réunion
     await upsert_reunion(session, course, hippodrome_id)

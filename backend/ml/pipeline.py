@@ -1985,8 +1985,17 @@ async def _update_jockey_stats_cache(session: AsyncSession, course_id: str, clas
 
 async def _save_historical_course(session: AsyncSession, course: Course, resultat: Resultat) -> None:
     """Sauvegarde le résultat dans historique_courses pour enrichir l'historique."""
-    from db.models import HistoriqueCourse
+    from db.models import HistoriqueCourse, Hippodrome
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    # Ne jamais inventer le pays : il appartient à la réunion officielle. L'ancien
+    # fallback "FR" marquait à tort les courses ARG/URY/CHL comme françaises.
+    pays = await session.scalar(
+        select(Hippodrome.pays).where(Hippodrome.nom == course.hippodrome_nom)
+    )
+    if not pays or not course.date_heure:
+        log.error("pipeline.history.missing_official_metadata", course_id=course.course_id)
+        return
 
     for entry in resultat.classement:
         # Trouver le cheval_id
@@ -2027,9 +2036,9 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
             historique_id=str(uuid.uuid4()),
             cheval_id=cheval_id,
             course_id=course.course_id,
-            date_course=course.date_heure.date() if course.date_heure else date.today(),
+            date_course=course.date_heure.date(),
             hippodrome=course.hippodrome_nom,
-            pays="FR",
+            pays=pays,
             discipline=course.discipline,
             distance=course.distance,
             terrain=course.terrain_officiel,
@@ -2052,6 +2061,7 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
             set_={
                 "position_arrivee": entry.get("position"),
                 "incident": entry.get("incident"),
+                "pays": pays,
                 "temps_officiel": (str(entry.get("temps")) if entry.get("temps") is not None else None),
                 "reduction_km": reduction_km,
                 "acceleration_index": accel_idx,
