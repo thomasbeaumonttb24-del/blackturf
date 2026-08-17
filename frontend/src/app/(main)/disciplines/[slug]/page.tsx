@@ -13,8 +13,9 @@ export function generateStaticParams() {
   return DISCIPLINES.map((d) => ({ slug: d.slug }));
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const d = getDiscipline(params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const d = getDiscipline(slug);
   if (!d) return { title: "Discipline" };
   return {
     title: d.name,
@@ -28,8 +29,9 @@ function todayParis(): string {
   return new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(new Date());
 }
 
-export default async function DisciplinePage({ params }: { params: { slug: string } }) {
-  const d = getDiscipline(params.slug);
+export default async function DisciplinePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const d = getDiscipline(slug);
   if (!d) notFound();
 
   const prog = await fetchProgramme(todayParis());

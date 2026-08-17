@@ -11,8 +11,9 @@ export function generateStaticParams() {
   return ARTICLES.map((a) => ({ slug: a.slug }));
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const a = getArticle(params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const a = getArticle(slug);
   if (!a) return { title: "Article introuvable" };
   return {
     title: a.title,
@@ -30,8 +31,9 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   };
 }
 
-export default function BlogArticle({ params }: { params: { slug: string } }) {
-  const a = getArticle(params.slug);
+export default async function BlogArticle({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const a = getArticle(slug);
   if (!a) notFound();
   const { Body } = a;
 

@@ -13,8 +13,9 @@ export function generateStaticParams() {
   return HIPPODROMES.map((h) => ({ slug: h.slug }));
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const h = getHippodrome(params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const h = getHippodrome(slug);
   if (!h) return { title: "Hippodrome" };
   const title = `${h.name} — programme et courses PMU`;
   const description =
@@ -33,8 +34,9 @@ function todayParis(): string {
   return new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(new Date());
 }
 
-export default async function HippodromePage({ params }: { params: { slug: string } }) {
-  const h = getHippodrome(params.slug);
+export default async function HippodromePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const h = getHippodrome(slug);
   if (!h) notFound();
 
   const prog = await fetchProgramme(todayParis());

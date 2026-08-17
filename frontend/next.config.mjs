@@ -2,8 +2,6 @@
 const nextConfig = {
   output: "standalone",
   compress: true,
-  // Ne pas bloquer le build de prod sur des warnings ESLint (la vérif TS reste active).
-  eslint: { ignoreDuringBuilds: true },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
