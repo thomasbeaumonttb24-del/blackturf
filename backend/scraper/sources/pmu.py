@@ -183,7 +183,9 @@ class PmuScraper(BaseScraper):
             # numOfficiel pour les URLs API PMU, mais on affiche numExterne.
             r_public = reunion.get("numExterne") or r_num
             hippodrome = reunion.get("hippodrome", {}).get("libelleLong", "Inconnu")
-            pays = reunion.get("hippodrome", {}).get("pays", {}).get("code")
+            # Le pays est au niveau RÉUNION dans le payload PMU (pas imbriqué dans
+            # hippodrome). Ne jamais retomber silencieusement sur "FR".
+            pays = reunion.get("pays", {}).get("code")
 
             # Préfixe = date INTERROGÉE (today_str). On vient de demander
             # /programme/{today_str}, donc toutes ces réunions sont de ce jour.
