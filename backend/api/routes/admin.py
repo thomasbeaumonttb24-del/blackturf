@@ -182,6 +182,21 @@ async def list_users(
             agg.setdefault(uid, {}).setdefault("nb_paris", 0)
             agg[uid]["capital_initial"] = float(init)
 
+    # ── Statut d'abonnement RÉEL par user (dernière Subscription, pas juste "a un
+    # customer_id Stripe") — un customer Stripe est créé dès le clic sur "S'abonner",
+    # AVANT que le paiement soit rempli/validé : `stripe_client=True` seul ne prouve
+    # rien. `abonnement_statut=None` avec `stripe_client=True` = checkout démarré et
+    # jamais terminé (carte non renseignée, session Stripe abandonnée).
+    sub_status: dict[str, str] = {}
+    if uids:
+        sub_rows = (await db.execute(
+            select(Subscription.user_id, Subscription.statut)
+            .where(Subscription.user_id.in_(uids))
+            .order_by(Subscription.user_id, desc(Subscription.created_at))
+        )).all()
+        for uid, statut in sub_rows:
+            sub_status.setdefault(uid, statut)
+
     result = []
     for u in users:
         a = agg.get(u.user_id, {})
@@ -200,8 +215,9 @@ async def list_users(
             "email_verified": u.email_verified,
             "auth_method": "google" if u.google_id else "email",
             "stripe_client": bool(u.stripe_customer_id),
+            "abonnement_statut": sub_status.get(u.user_id),
             "created_at": u.created_at,
-            "last_login": u.updated_at,
+            "last_login": u.last_login_at,
             # Portefeuille
             "bankroll_initiale": u.bankroll_initiale,
             "capital_initial": round(cap0, 2),
@@ -339,6 +355,7 @@ async def get_user_detail(
             "stripe_client": bool(user.stripe_customer_id),
             "created_at": user.created_at,
             "updated_at": user.updated_at,
+            "last_login": user.last_login_at,
         },
         "portefeuille": {
             "capital_initial": round(cap0, 2),
@@ -496,11 +513,20 @@ async def export_users_csv(
         )).all():
             agg.setdefault(uid, {})["cap"] = float(init)
 
+    sub_status: dict[str, str] = {}
+    if uids:
+        for uid, statut in (await db.execute(
+            select(Subscription.user_id, Subscription.statut)
+            .where(Subscription.user_id.in_(uids))
+            .order_by(Subscription.user_id, desc(Subscription.created_at))
+        )).all():
+            sub_status.setdefault(uid, statut)
+
     out = io.StringIO()
     w = _csv.writer(out)
     w.writerow(["Email", "Nom", "Prenom", "Plan", "Profil", "Auth", "Email verifie", "Actif",
-                "Admin", "Inscrit le", "Capital", "Solde", "Mise totale", "Gain net", "ROI %",
-                "Paris", "Gagnes"])
+                "Admin", "Inscrit le", "Derniere connexion", "Client Stripe", "Statut abonnement",
+                "Capital", "Solde", "Mise totale", "Gain net", "ROI %", "Paris", "Gagnes"])
     for u in users:
         a = agg.get(u.user_id, {})
         mise = a.get("mise", 0.0); net = a.get("net", 0.0)
@@ -510,6 +536,9 @@ async def export_users_csv(
                     "google" if u.google_id else "email", "oui" if u.email_verified else "non",
                     "oui" if u.is_active else "non", "oui" if u.is_admin else "non",
                     u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "",
+                    u.last_login_at.strftime("%Y-%m-%d %H:%M") if u.last_login_at else "jamais",
+                    "oui" if u.stripe_customer_id else "non",
+                    sub_status.get(u.user_id) or ("checkout abandonne" if u.stripe_customer_id else ""),
                     round(cap, 2), round(cap + net, 2), round(mise, 2), round(net, 2), roi,
                     a.get("nb", 0), a.get("gagnes", 0)])
     out.seek(0)

@@ -617,6 +617,11 @@ class User(Base):
     # de passe, facturation), qui ne relèvent pas du consentement marketing.
     marketing_opt_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Dernière connexion réelle (login email/Google ou reprise de session via /auth/me).
+    # Distinct de `updated_at`, qui bouge à CHAQUE modification de la ligne (plan,
+    # bankroll, profil…) et ne reflète donc pas l'usage du site.
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Bankroll de référence
     bankroll_initiale: Mapped[float | None] = mapped_column(Float)
 

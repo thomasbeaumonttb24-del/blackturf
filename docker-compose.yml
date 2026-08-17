@@ -112,6 +112,16 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # NEXT_PUBLIC_* sont figées au build par Next.js (inlinées dans le bundle JS),
+      # PAS lues au runtime : les passer seulement sous `environment:` ci-dessous ne
+      # fait rien. Sans ce bloc `args`, `docker compose build frontend` compile avec
+      # ces variables VIDES (le Dockerfile les déclare en ARG sans défaut) → fetch
+      # vers une URL relative au build → hang + échec de génération statique de "/"
+      # (constaté le 2026-08-17, contourné une fois via --build-arg en ligne de
+      # commande ; ceci le rend permanent pour tout futur rebuild).
+      args:
+        NEXT_PUBLIC_API_URL: https://api.blackturf.fr
+        NEXT_PUBLIC_WS_URL: wss://api.blackturf.fr/ws
     container_name: blackturf_frontend
     environment:
       - NEXT_PUBLIC_API_URL=https://api.blackturf.fr

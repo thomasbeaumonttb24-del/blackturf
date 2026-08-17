@@ -212,6 +212,8 @@ async def login(
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Compte désactivé")
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
     log.info("auth.login", user_id=user.user_id)
     return create_tokens(user.user_id, user.plan)
 
@@ -326,6 +328,7 @@ async def google_oauth(body: GoogleCallbackRequest, db: AsyncSession = Depends(g
             )
             db.add(user)
 
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
     log.info("auth.google", user_id=user.user_id, email=user.email)
@@ -333,7 +336,19 @@ async def google_oauth(body: GoogleCallbackRequest, db: AsyncSession = Depends(g
 
 
 @router.get("/me", response_model=UserMeResponse)
-async def me(user: User = Depends(get_current_user)):
+async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # Reprise de session = signal d'usage réel (appelé au chargement de l'app) : on ne
+    # le pose PAS à chaque requête (get_current_user est un Depends partagé partout),
+    # seulement ici, pour ne pas noyer /me sous des écritures inutiles.
+    now = datetime.now(timezone.utc)
+    last = user.last_login_at
+    # SQLite (tests) renvoie un datetime naïf malgré TIMESTAMPTZ en prod (Postgres) :
+    # on le suppose UTC plutôt que de planter sur la comparaison.
+    if last and last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    if not last or (now - last) > timedelta(minutes=5):
+        user.last_login_at = now
+        await db.commit()
     return UserMeResponse(
         user_id=user.user_id,
         email=user.email,

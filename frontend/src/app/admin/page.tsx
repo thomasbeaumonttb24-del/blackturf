@@ -77,7 +77,7 @@ interface UserDetail {
     user_id: string; email: string; nom: string | null; prenom: string | null;
     plan: string; is_active: boolean; is_admin: boolean; profil_risque: string;
     bankroll_initiale: number | null; email_verified: boolean; auth_method: string;
-    stripe_client: boolean; created_at: string; updated_at: string;
+    stripe_client: boolean; created_at: string; updated_at: string; last_login: string | null;
   };
   portefeuille: {
     capital_initial: number; solde_actuel: number; mise_totale: number; gain_net: number;
@@ -100,6 +100,30 @@ function resultBadge(r: string | null) {
   if (r === "perd") return <Badge variant="secondary" className="text-[10px] text-destructive">Perdu</Badge>;
   if (r === "annule") return <Badge variant="secondary" className="text-[10px]">Annulé</Badge>;
   return <Badge variant="warning" className="text-[10px]">En attente</Badge>;
+}
+
+// Statut réel de l'abonnement — distinct de "a un customer_id Stripe" (créé dès le
+// clic sur "S'abonner", avant même que la personne remplisse sa carte). `null` avec
+// `stripeClient=true` = checkout démarré et jamais terminé (abandon).
+function subBadge(statut: string | null, stripeClient: boolean) {
+  if (statut === "active" || statut === "trialing")
+    return <Badge variant="success" className="text-[10px]">{statut === "trialing" ? "Essai" : "Actif"}</Badge>;
+  if (statut === "cancel_at_period_end")
+    return <Badge variant="warning" className="text-[10px]">Résilié (fin période)</Badge>;
+  if (statut === "past_due")
+    return <Badge variant="secondary" className="text-[10px] text-destructive">Paiement échoué</Badge>;
+  if (statut === "canceled")
+    return <Badge variant="secondary" className="text-[10px] text-muted-foreground">Résilié</Badge>;
+  if (statut === "incomplete" || statut === "incomplete_expired")
+    return <Badge variant="secondary" className="text-[10px] text-amber-600">Paiement incomplet</Badge>;
+  if (stripeClient)
+    return <Badge variant="secondary" className="text-[10px] text-muted-foreground" title="Client Stripe créé, jamais d'abonnement finalisé">Checkout abandonné</Badge>;
+  return <span className="text-muted-foreground text-xs">—</span>;
+}
+
+function lastLoginLabel(v: string | null) {
+  if (!v) return <span className="text-muted-foreground">Jamais</span>;
+  return formatDateTime(v);
 }
 
 function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => void }) {
@@ -134,6 +158,7 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
                 <span>· {data.user.auth_method === "google" ? "Google" : "Email"}</span>
                 <span>· Profil {data.user.profil_risque}</span>
                 <span>· Inscrit {formatDateTime(data.user.created_at)}</span>
+                <span>· Vu {lastLoginLabel(data.user.last_login)}</span>
               </div>
             </div>
 
@@ -773,6 +798,7 @@ export default function AdminPage() {
                 user_id: string; email: string; nom: string | null; prenom: string | null;
                 plan: string; profil_risque: string; is_active: boolean; is_admin: boolean;
                 email_verified: boolean; auth_method: string; stripe_client: boolean;
+                abonnement_statut: string | null; last_login: string | null;
                 created_at: string; solde_actuel: number; mise_totale: number; gain_net: number;
                 roi: number | null; nb_paris: number; nb_gagnes: number;
               }>).map((u) => {
@@ -802,6 +828,10 @@ export default function AdminPage() {
                       <span className="text-muted-foreground">{u.nb_gagnes}/{u.nb_paris} paris</span>
                       <span className="text-muted-foreground capitalize">{u.profil_risque}</span>
                     </div>
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11px]">
+                      {subBadge(u.abonnement_statut, u.stripe_client)}
+                      <span className="text-muted-foreground">Vu {lastLoginLabel(u.last_login)}</span>
+                    </div>
                     <div className="mt-2 flex gap-2">
                       <button
                         onClick={() => toggleActive(u.user_id, u.is_active)}
@@ -821,7 +851,7 @@ export default function AdminPage() {
             </div>
           {/* Desktop : tableau complet */}
           <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-sm min-w-[920px]">
+            <table className="w-full text-sm min-w-[1120px]">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="text-left p-3">Utilisateur</th>
@@ -833,6 +863,8 @@ export default function AdminPage() {
                   <th className="text-right p-3">ROI</th>
                   <th className="text-center p-3">Paris</th>
                   <th className="text-center p-3">Statut</th>
+                  <th className="text-center p-3">Abonnement</th>
+                  <th className="text-right p-3">Dernière connexion</th>
                   <th className="text-right p-3">Inscrit le</th>
                   <th className="text-center p-3">Actions</th>
                 </tr>
@@ -842,6 +874,7 @@ export default function AdminPage() {
                   user_id: string; email: string; nom: string | null; prenom: string | null;
                   plan: string; profil_risque: string; is_active: boolean; is_admin: boolean;
                   email_verified: boolean; auth_method: string; stripe_client: boolean;
+                  abonnement_statut: string | null; last_login: string | null;
                   created_at: string; solde_actuel: number; mise_totale: number; gain_net: number;
                   roi: number | null; nb_paris: number; nb_gagnes: number;
                 }>).map((u) => {
@@ -873,6 +906,8 @@ export default function AdminPage() {
                     <td className={cn("p-3 text-right font-mono tabular-nums", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-600" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</td>
                     <td className="p-3 text-center text-xs tabular-nums">{u.nb_gagnes}/{u.nb_paris}</td>
                     <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-600 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
+                    <td className="p-3 text-center">{subBadge(u.abonnement_statut, u.stripe_client)}</td>
+                    <td className="p-3 text-right text-muted-foreground text-xs whitespace-nowrap">{lastLoginLabel(u.last_login)}</td>
                     <td className="p-3 text-right text-muted-foreground text-xs">{formatDateTime(u.created_at)}</td>
                     <td className="p-3 text-center whitespace-nowrap">
                       <button

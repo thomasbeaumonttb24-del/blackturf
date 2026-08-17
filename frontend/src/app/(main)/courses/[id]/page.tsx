@@ -7,7 +7,7 @@ import {
   Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
   MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil, Tv,
-  HelpCircle, X,
+  HelpCircle, X, ShieldCheck, Gauge, Flame, LockKeyhole, Radio, WalletCards,
 } from "lucide-react";
 import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
@@ -195,9 +195,9 @@ interface MisePlan {
 
 // Profils de mise (source unique : formulaire + switch rapide dans le plan).
 const PROFILS_MISE = [
-  { key: "conservateur", label: "Prudent", emoji: "🛡️", desc: "Priorité au placé : gains plus petits mais plus fréquents." },
-  { key: "equilibre", label: "Modéré", emoji: "⚖️", desc: "Équilibre entre sécurité et rendement." },
-  { key: "agressif", label: "Risqué", emoji: "🔥", desc: "Vise les gros gains : plus rare, plus payant." },
+  { key: "conservateur", label: "Prudent", desc: "Favorise la régularité et limite l’exposition." },
+  { key: "equilibre", label: "Modéré", desc: "Équilibre la régularité et le rendement." },
+  { key: "agressif", label: "Risqué", desc: "Accepte plus de variance pour viser plus haut." },
 ] as const;
 
 // ─── Palette du reskin (tokens du design handoff) ─────────────────────────────
@@ -249,6 +249,10 @@ const CX_STYLE = `
 .cx-badges>span{white-space:nowrap}
 .cx-meta>span{white-space:nowrap}
 .cx-fade{animation:cxFadeUp .5s cubic-bezier(.16,1,.3,1) both}
+.cx-plan button:focus-visible,.cx-plan input:focus-visible,.cx-plan summary:focus-visible{outline:2px solid #B45309 !important;outline-offset:2px}
+.cx-plan button:disabled{cursor:not-allowed !important}
+.cx-plan details>summary svg{transition:transform .2s ease}
+.cx-plan details[open]>summary svg:last-child{transform:rotate(180deg)}
 @media (max-width:840px){ .cx-main{grid-template-columns:1fr !important} .cx-sticky-mise{position:static !important;top:auto !important} }
 @media (max-width:600px){
   .cx-wrap{padding:16px 13px 72px !important}
@@ -282,48 +286,50 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
     }
   };
   const profilDesc = PROFILS_MISE.find((p) => p.key === profil)?.desc;
-  const profilLabel = PROFILS_MISE.find((p) => p.key === profil)?.label ?? profil;
   const evColor = plan.ev_global > 0 ? CX.em : CX.red;
   // Teinte par niveau : Sécurité=émeraude, Rendement=or, Coup à tenter=rose.
   const nivStyle = (niveau: string) =>
     niveau === "securite" ? { bg: CX.emBg, bd: CX.emBd, color: CX.emDeep } :
     niveau === "rendement" ? { bg: CX.goldBg, bd: CX.goldBd, color: CX.goldDeep } :
     { bg: CX.redBg, bd: CX.redBd, color: CX.redDeep };
-  const cell = { borderRadius: 9, background: CX.surf3, padding: "8px 10px" } as const;
+  const cell = { borderRadius: 12, border: `1px solid ${CX.bd2}`, background: CX.surf1, padding: "11px 12px" } as const;
   return (
-    <div style={{ animation: "cxFadeUp .4s cubic-bezier(.16,1,.3,1) both" }}>
+    <div className="cx-plan" style={{ animation: "cxFadeUp .4s cubic-bezier(.16,1,.3,1) both", color: CX.ink2 }}>
       {/* Switch profil rapide — même mise, recalcul instantané */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 4, borderRadius: 10, background: CX.surf5, padding: 4, marginBottom: 12 }}>
+      <div role="tablist" aria-label="Profil de risque" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 4, borderRadius: 13, background: CX.surf4, padding: 4, marginBottom: 8 }}>
         {PROFILS_MISE.map((p) => {
           const active = profil === p.key;
+          const Icon = p.key === "conservateur" ? ShieldCheck : p.key === "equilibre" ? Gauge : Flame;
           return (
             <button
               key={p.key}
+              role="tab"
+              aria-selected={active}
               onClick={() => !active && onChangeProfil(p.key)}
               disabled={switching}
-              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, border: "none", borderRadius: 8, padding: "6px 4px", fontSize: 11, fontWeight: 600, cursor: switching ? "wait" : "pointer", transition: "all .15s", background: active ? "linear-gradient(135deg,#F59E0B,#D97706)" : "transparent", color: active ? "#1B1307" : CX.gray500, boxShadow: active ? "0 1px 3px rgba(0,0,0,.12)" : "none" }}
+              style={{ minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, border: active ? `1px solid ${CX.goldBd}` : "1px solid transparent", borderRadius: 10, padding: "8px 6px", fontSize: 12, fontWeight: active ? 700 : 600, cursor: switching ? "wait" : "pointer", transition: "background-color .2s, border-color .2s, color .2s, box-shadow .2s", background: active ? CX.surf1 : "transparent", color: active ? CX.goldDeep : CX.gray500, boxShadow: active ? "0 1px 3px rgba(17,24,39,.08)" : "none" }}
             >
-              {switching && active ? <Loader2 className="h-3 w-3 animate-spin" /> : <span>{p.emoji}</span>}
+              {switching && active ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" aria-hidden="true" />}
               {p.label}
             </button>
           );
         })}
       </div>
       {profilDesc && (
-        <p className="hidden sm:block" style={{ margin: "0 0 10px", fontSize: 10, color: CX.muted }}>{profilDesc}</p>
+        <p style={{ margin: "0 2px 18px", fontSize: 11.5, lineHeight: 1.45, color: CX.gray500 }}>{profilDesc}</p>
       )}
 
       {/* Header résumé */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 12 }}>
-        <div>
-          <button onClick={onClose} style={{ background: "none", border: "none", padding: 0, fontSize: 11.5, color: CX.gray400, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-            Plan pour · {profilLabel} <Pencil className="h-3 w-3" />
-          </button>
-          <div style={{ fontFamily: CX.sg, fontSize: 26, fontWeight: 700, color: CX.gold, lineHeight: 1 }}>{plan.montant_total}€</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+        <div style={{ borderRadius: 14, border: `1px solid ${CX.bd2}`, background: CX.surf1, padding: "13px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }}>
+            <WalletCards className="h-3.5 w-3.5" aria-hidden="true" /> Budget
+          </div>
+          <div style={{ fontFamily: CX.sg, fontSize: 25, fontWeight: 700, color: CX.ink, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{plan.montant_total}€</div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 10.5, color: CX.gray400 }} title="Espérance THÉORIQUE, calculée sur les rapports estimés. Le rendement RÉEL observé (ci-dessous) est ce qui compte.">Espérance théorique</div>
-          <div style={{ fontFamily: CX.sg, fontSize: 19, fontWeight: 700, color: evColor, lineHeight: 1, marginTop: 2 }}>
+        <div style={{ borderRadius: 14, border: `1px solid ${CX.bd2}`, background: CX.surf1, padding: "13px 14px", textAlign: "right" }}>
+          <div style={{ marginBottom: 5, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }} title="Projection calculée à partir des rapports estimés.">Rendement estimé</div>
+          <div style={{ fontFamily: CX.sg, fontSize: 20, fontWeight: 700, color: evColor, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
             {plan.ev_global > 0 ? "+" : ""}{(plan.ev_global * 100).toFixed(1)}%
           </div>
         </div>
@@ -333,58 +339,68 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           théorique (rapports estimés) et ressort ~0/+2% ; le rendement réel de ce profil
           est négatif (prélèvement PMU ~15-25%). On l'affiche sans détour. */}
       {plan.roi_observe && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 10, border: `1px solid ${plan.roi_observe.roi >= 0 ? CX.emBd : CX.redBd}`, background: plan.roi_observe.roi >= 0 ? CX.emBg : CX.redBg, padding: "8px 11px", marginBottom: 12, fontSize: 11.5, lineHeight: 1.45, color: CX.gray600 }}>
-          <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: plan.roi_observe.roi >= 0 ? CX.em : CX.red, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 12, border: `1px solid ${plan.roi_observe.roi >= 0 ? CX.emBd : CX.redBd}`, background: plan.roi_observe.roi >= 0 ? CX.emBg : CX.redBg, padding: "10px 12px", marginBottom: 12, fontSize: 11.5, lineHeight: 1.4, color: CX.gray600 }}>
+          <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 16, color: plan.roi_observe.roi >= 0 ? CX.emDeep : CX.redDeep, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
             {plan.roi_observe.roi > 0 ? "+" : ""}{(plan.roi_observe.roi * 100).toFixed(0)}%
           </span>
           <span>
-            Rendement <b>réel</b> moyen de ce profil sur {plan.roi_observe.nb} plans réglés ({plan.roi_observe.jours}&nbsp;j).
-            {plan.roi_observe.roi < 0 && " Sur la durée, jouer chaque course est perdant (prélèvement PMU) — ces plans limitent la perte, ils ne garantissent pas un gain."}
+            <b>Rendement réel observé</b> sur {plan.roi_observe.nb} plans · {plan.roi_observe.jours}&nbsp;j
+            <span style={{ display: "block", marginTop: 1, fontSize: 10.5, color: CX.gray500 }}>Aucune garantie de gain.</span>
           </span>
         </div>
       )}
 
       {/* Résumé IA */}
-      <div style={{ borderRadius: 11, border: "1px solid rgba(245,158,11,.2)", background: "rgba(245,158,11,.05)", padding: "10px 12px", marginBottom: 12, fontSize: 12, lineHeight: 1.5, color: CX.gray600 }}>
-        <span style={{ fontWeight: 700, color: CX.goldDeep }}>💬 </span>{plan.resume_ia}
-      </div>
+      <details style={{ borderRadius: 12, border: `1px solid ${CX.bd2}`, background: CX.surf2, marginBottom: 16 }}>
+        <summary className="select-none" style={{ minHeight: 44, cursor: "pointer", padding: "0 12px", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11.5, fontWeight: 650, color: CX.gray600 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><Info className="h-3.5 w-3.5" aria-hidden="true" /> Lecture de l&apos;algorithme</span>
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+        </summary>
+        <p style={{ margin: 0, padding: "0 12px 12px 32px", fontSize: 11.5, lineHeight: 1.55, color: CX.gray600 }}>{plan.resume_ia}</p>
+      </details>
 
       {/* Niveaux */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {plan.niveaux.map((niv) => {
           const ns = nivStyle(niv.niveau);
+          const NiveauIcon = niv.niveau === "securite" ? ShieldCheck : niv.niveau === "rendement" ? TrendingUp : Zap;
           return (
-          <div key={niv.niveau} style={{ borderRadius: 12, padding: "11px 13px", background: ns.bg, border: `1px solid ${ns.bd}` }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span>{niv.emoji}</span>
-                <span style={{ fontWeight: 700, fontSize: 13, color: CX.ink2 }}>{niv.label}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: CX.gray400, background: "#FFFFFF", borderRadius: 999, padding: "1px 7px" }}>{niv.pct}%</span>
+          <section key={niv.niveau} aria-label={niv.label} style={{ borderRadius: 15, overflow: "hidden", background: CX.surf1, border: `1px solid ${ns.bd}`, boxShadow: "0 1px 2px rgba(17,24,39,.025)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${CX.bd4}`, background: ns.bg }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 28, height: 28, borderRadius: 9, display: "inline-flex", alignItems: "center", justifyContent: "center", color: ns.color, background: "rgba(255,255,255,.75)", border: "1px solid rgba(255,255,255,.9)" }}><NiveauIcon className="h-4 w-4" aria-hidden="true" /></span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 12.5, color: CX.ink2 }}>{niv.label}</div>
+                  <div style={{ fontSize: 10.5, color: CX.gray500 }}>{niv.pct}% du budget</div>
+                </div>
               </div>
-              <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: ns.color }}>
+              <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 14, color: ns.color, fontVariantNumeric: "tabular-nums" }}>
                 {niv.montant.toFixed(2)}€
               </span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ display: "flex", flexDirection: "column" }}>
               {niv.paris.map((p, i) => (
-                <div key={i}>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "2px 0" }}>
-                    <span style={{ color: CX.gray600 }}>
-                      <span style={{ fontWeight: 600, color: CX.ink2 }}>{p.type}</span> {p.chevaux.map(c => `N°${c.numero}`).join(" + ")} <span style={{ color: CX.muted }}>· proba ~{(p.probabilite * 100).toFixed(0)}%</span>
-                    </span>
-                    <span style={{ textAlign: "right", flexShrink: 0 }}>
-                      <span style={{ fontFamily: CX.sg, fontWeight: 700, color: CX.ink2 }}>{p.mise.toFixed(2)}€</span> <span style={{ color: CX.em, fontWeight: 600 }}>→ ~{p.gain_potentiel.toFixed(0)}€</span>
-                    </span>
+                <div key={i} style={{ padding: "13px 14px", borderTop: i ? `1px solid ${CX.bd4}` : "none" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "start", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: CX.ink2 }}>{p.type}</div>
+                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map(c => `N°${c.numero}`).join(" + ")}</div>
+                      <div style={{ marginTop: 3, fontSize: 10.5, color: CX.gray500 }}>Probabilité estimée {(p.probabilite * 100).toFixed(0)}%</div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{p.mise.toFixed(2)}€</div>
+                      <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 650, color: CX.emDeep }}>Gain estimé ~{p.gain_potentiel.toFixed(0)}€</div>
+                    </div>
                   </div>
                   {p.raisons && p.raisons.length > 0 && (
-                    <details style={{ margin: "1px 0 0 4px" }}>
-                      <summary style={{ cursor: "pointer", fontSize: 11, color: CX.gold, fontWeight: 600, listStyle: "none" }} className="select-none">
-                        Pourquoi ce pari ? ▾
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ minHeight: 32, cursor: "pointer", fontSize: 10.5, color: CX.goldDeep, fontWeight: 650, listStyle: "none", display: "inline-flex", alignItems: "center", gap: 4 }} className="select-none">
+                        Voir les raisons <ChevronDown className="h-3 w-3" aria-hidden="true" />
                       </summary>
-                      <ul style={{ margin: "4px 0 0", padding: 8, listStyle: "none", borderRadius: 6, background: "rgba(255,255,255,.6)", fontSize: 11, color: CX.gray600, lineHeight: 1.5 }}>
+                      <ul style={{ margin: "2px 0 0", padding: "9px 10px", listStyle: "none", borderRadius: 9, background: CX.surf3, fontSize: 11, color: CX.gray600, lineHeight: 1.5 }}>
                         {p.raisons.map((r, j) => (
                           <li key={j} style={{ display: "flex", gap: 6 }}>
-                            <span style={{ color: CX.gold, flexShrink: 0 }}>·</span>
+                            <span style={{ color: CX.gold, flexShrink: 0 }}>—</span>
                             <span style={{ minWidth: 0 }}>{r}</span>
                           </li>
                         ))}
@@ -394,7 +410,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                 </div>
               ))}
             </div>
-          </div>
+          </section>
           );
         })}
       </div>
@@ -404,21 +420,24 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           gain (petit champ). On l'explique pour ne pas donner l'impression d'un plan
           bâclé. Exclu du prudent, qui joue volontairement UN seul placé sûr (design). */}
       {profil !== "conservateur" && plan.niveaux.reduce((n, niv) => n + niv.paris.length, 0) === 1 && (
-        <p style={{ margin: "10px 0 0", fontSize: 10.5, color: CX.gray400, lineHeight: 1.5, background: CX.surf3, borderRadius: 8, padding: "7px 10px" }}>
-          Un seul pari entre dans la bande de gain de ce profil sur cette course (champ réduit). Choisis une course à plus de partants pour un plan étalé sur plusieurs mises.
-        </p>
+        <details style={{ marginTop: 10, borderRadius: 10, background: CX.surf3 }}>
+          <summary className="select-none" style={{ minHeight: 40, cursor: "pointer", padding: "0 11px", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 10.5, fontWeight: 600, color: CX.gray500 }}>
+            Pourquoi un seul pari ? <ChevronDown className="h-3 w-3" aria-hidden="true" />
+          </summary>
+          <p style={{ margin: 0, padding: "0 11px 10px", fontSize: 10.5, color: CX.gray500, lineHeight: 1.5 }}>Cette course n&apos;offre qu&apos;un pari dans la bande de gain du profil. Une course avec plus de partants permettra un plan plus étalé.</p>
+        </details>
       )}
 
       {/* Résumé totaux */}
-      <div style={{ display: "grid", gridTemplateColumns: typeof plan.esperance_gain === "number" ? "repeat(2,1fr)" : "1fr", gap: 7, marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: typeof plan.esperance_gain === "number" ? "repeat(2,1fr)" : "1fr", gap: 8, marginTop: 14 }}>
         <div style={cell}>
-          <div style={{ fontSize: 10, color: CX.gray400 }}>Mise totale jouée</div>
-          <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: CX.ink2 }}>{plan.montant_joue.toFixed(2)}€</div>
+          <div style={{ fontSize: 10.5, color: CX.gray500 }}>Total joué</div>
+          <div style={{ marginTop: 3, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{plan.montant_joue.toFixed(2)}€</div>
         </div>
         {typeof plan.esperance_gain === "number" && (
           <div style={cell}>
-            <div style={{ fontSize: 10, color: CX.gray400 }}>Espér. gain</div>
-            <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: plan.esperance_gain >= 0 ? CX.em : CX.red }}>
+            <div style={{ fontSize: 10.5, color: CX.gray500 }}>Gain projeté</div>
+            <div style={{ marginTop: 3, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, color: plan.esperance_gain >= 0 ? CX.emDeep : CX.redDeep, fontVariantNumeric: "tabular-nums" }}>
               {plan.esperance_gain >= 0 ? "+" : ""}{plan.esperance_gain.toFixed(2)}€
             </div>
           </div>
@@ -427,61 +446,64 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
 
       {/* Paris écartés — transparence : ce que l'IA refuse et POURQUOI */}
       {plan.paris_ecartes && plan.paris_ecartes.length > 0 && (
-        <details style={{ marginTop: 11, borderRadius: 11, border: `1px solid ${CX.bd2}`, background: CX.surf3 }}>
-          <summary className="select-none" style={{ cursor: "pointer", padding: "9px 12px", fontSize: 11.5, fontWeight: 600, color: CX.gray500, listStyle: "none" }}>
-            Paris écartés par l&apos;algorithme ({plan.paris_ecartes.length}) ▾
+        <details style={{ marginTop: 10, borderRadius: 12, border: `1px solid ${CX.bd2}`, background: CX.surf2 }}>
+          <summary className="select-none" style={{ minHeight: 44, cursor: "pointer", padding: "0 12px", fontSize: 11.5, fontWeight: 600, color: CX.gray600, listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span>Paris non retenus <span style={{ marginLeft: 4, color: CX.gray400 }}>({plan.paris_ecartes.length})</span></span><ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
           </summary>
           <div style={{ padding: "0 12px 10px", display: "flex", flexDirection: "column", gap: 7 }}>
             {plan.paris_ecartes.map((e, i) => (
-              <div key={i} style={{ borderRadius: 8, background: "#FFFFFF", border: `1px solid ${CX.bd2}`, padding: "7px 10px" }}>
+              <div key={i} style={{ borderRadius: 9, background: CX.surf1, border: `1px solid ${CX.bd2}`, padding: "9px 10px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11.5 }}>
                   <span style={{ fontWeight: 600, color: CX.ink2 }}>
                     {e.type} <span style={{ fontWeight: 400, color: CX.gray400 }}>{e.chevaux.map(c => `N°${c.numero}`).join(" + ")}</span>
                   </span>
                   <span style={{ color: CX.gray400, fontFamily: CX.sg, flexShrink: 0 }}>{(e.probabilite * 100).toFixed(0)}%</span>
                 </div>
-                <p style={{ margin: "3px 0 0", fontSize: 11, color: CX.red }}>{e.motif}</p>
+                <p style={{ margin: "4px 0 0", fontSize: 10.5, lineHeight: 1.4, color: CX.gray500 }}>{e.motif}</p>
               </div>
             ))}
           </div>
         </details>
       )}
 
-      <p style={{ margin: "10px 0 0", fontSize: 10.5, color: CX.em, display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.emLight, animation: "cxDotPulse 1.4s ease-in-out infinite" }} />
+      <p style={{ margin: "12px 2px 0", fontSize: 10.5, color: CX.gray500, display: "flex", alignItems: "center", gap: 7, lineHeight: 1.4 }}>
+        {plan.prono_fige ? <LockKeyhole className="h-3.5 w-3.5 flex-shrink-0" style={{ color: CX.emDeep }} aria-hidden="true" /> : <Radio className="h-3.5 w-3.5 flex-shrink-0" style={{ color: CX.emDeep }} aria-hidden="true" />}
         {plan.prono_fige
-          ? "🔒 Sélection figée — gains réévalués sur les cotes EN DIRECT jusqu'au départ."
-          : "Gains réévalués sur les cotes du marché EN DIRECT (mise à jour automatique)."}
+          ? "Sélection figée · gains actualisés jusqu’au départ"
+          : "Cotes en direct · gains actualisés automatiquement"}
       </p>
 
       {plan.kelly_warning ? (
-        <div style={{ marginTop: 12, borderRadius: 10, border: `1px solid ${CX.redBd}`, background: CX.redBg, padding: 8, fontSize: 12, color: CX.red, display: "flex", gap: 8 }}>
-          <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+        <div role="alert" style={{ marginTop: 12, borderRadius: 11, border: `1px solid ${CX.redBd}`, background: CX.redBg, padding: "10px 11px", fontSize: 11, lineHeight: 1.45, color: CX.redDeep, display: "flex", gap: 8 }}>
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
           {plan.avertissement}
         </div>
       ) : (
-        <p style={{ marginTop: 12, fontSize: 10, color: CX.muted }}>{plan.avertissement}</p>
+        <details style={{ marginTop: 6 }}>
+          <summary className="select-none" style={{ minHeight: 36, cursor: "pointer", listStyle: "none", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: CX.gray500 }}>Conditions du plan <ChevronDown className="h-3 w-3" aria-hidden="true" /></summary>
+          <p style={{ margin: "0 0 6px", fontSize: 10.5, lineHeight: 1.45, color: CX.gray500 }}>{plan.avertissement}</p>
+        </details>
       )}
 
       {saveState === "saved" ? (
-        <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, border: `1px solid ${CX.emBd}`, background: CX.emBg, padding: "10px 0", fontSize: 14, fontWeight: 600, color: CX.em }}>
+        <div role="status" style={{ minHeight: 48, marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, border: `1px solid ${CX.emBd}`, background: CX.emBg, padding: "10px 12px", fontSize: 12.5, fontWeight: 650, color: CX.emDeep }}>
           <CheckCircle2 className="h-4 w-4" /> Paris enregistrés dans votre capital
         </div>
       ) : (
         <button
           onClick={handleSave}
           disabled={saveState === "saving"}
-          style={{ width: "100%", marginTop: 11, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#F59E0B,#D97706)", color: "#1B1307", fontWeight: 700, fontSize: 13.5, padding: 12, borderRadius: 12, boxShadow: "0 8px 20px -8px rgba(245,158,11,.55)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: saveState === "saving" ? 0.7 : 1 }}
+          style={{ width: "100%", minHeight: 48, marginTop: 12, border: `1px solid ${CX.goldDeep}`, cursor: saveState === "saving" ? "wait" : "pointer", background: CX.goldDeep, color: "#FFFFFF", fontWeight: 700, fontSize: 12.5, padding: "12px 14px", borderRadius: 12, boxShadow: "0 5px 14px -9px rgba(146,64,14,.65)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: saveState === "saving" ? 0.65 : 1, transition: "background-color .2s, opacity .2s, box-shadow .2s" }}
         >
-          {saveState === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Valider et enregistrer dans mon capital"}
+          {saveState === "saving" ? <><Loader2 className="h-4 w-4 animate-spin" /> Enregistrement…</> : "Enregistrer ce plan"}
         </button>
       )}
-      <p style={{ margin: "8px 0 0", textAlign: "center", fontSize: 10, color: CX.muted }}>
-        Gains/pertes calculés en fin de course (rapports PMU réels).
+      <p style={{ margin: "8px 0 0", textAlign: "center", fontSize: 10, lineHeight: 1.4, color: CX.gray400 }}>
+        Calcul final selon les rapports PMU officiels.
       </p>
 
-      <button onClick={onClose} style={{ width: "100%", marginTop: 6, border: "none", background: "none", cursor: "pointer", fontSize: 11.5, color: CX.gray400 }}>
-        Modifier le montant
+      <button onClick={onClose} style={{ width: "100%", minHeight: 44, marginTop: 2, border: "none", background: "none", cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: CX.gray500, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Modifier le montant
       </button>
     </div>
   );
@@ -813,7 +835,7 @@ function MiseCalculatorWidget({
   );
 
   return (
-    <div>
+    <div className="cx-plan">
       {isFreeTier && (
         <p style={{ margin: "0 0 10px", fontSize: 11.5, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 9, padding: "7px 10px" }}>
           {quotaRestant === null
@@ -823,21 +845,24 @@ function MiseCalculatorWidget({
               : "Dernier essai gratuit du jour utilisé."}
         </p>
       )}
-      <p style={{ margin: "0 0 12px", fontSize: 12.5, color: CX.gray500 }}>
-        Votre mise, répartie sur plusieurs paris selon l&apos;analyse.
+      <p style={{ margin: "0 0 16px", fontSize: 12, lineHeight: 1.5, color: CX.gray500 }}>
+        Définissez votre budget et votre niveau de risque.
       </p>
       {/* Profil de risque — change quels paris ET la répartition */}
-      <div style={{ fontSize: 10.5, fontWeight: 600, color: CX.gray400, marginBottom: 7 }}>Profil de risque</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 12 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 650, color: CX.gray500, marginBottom: 7 }}>Profil de risque</div>
+      <div role="tablist" aria-label="Profil de risque" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 4, borderRadius: 13, background: CX.surf4, padding: 4, marginBottom: 16 }}>
         {PROFILS_MISE.map((p) => {
           const active = profilChoisi === p.key;
+          const Icon = p.key === "conservateur" ? ShieldCheck : p.key === "equilibre" ? Gauge : Flame;
           return (
             <button
               key={p.key}
+              role="tab"
+              aria-selected={active}
               onClick={() => setProfilChoisi(p.key)}
-              style={{ border: `1px solid ${active ? "#F59E0B" : "#E5E1D3"}`, background: active ? CX.goldBg : "#FFFFFF", color: active ? CX.gold : CX.gray500, borderRadius: 10, padding: "7px 4px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", transition: "all .15s" }}
+              style={{ minHeight: 44, border: active ? `1px solid ${CX.goldBd}` : "1px solid transparent", background: active ? CX.surf1 : "transparent", color: active ? CX.goldDeep : CX.gray500, borderRadius: 10, padding: "8px 5px", fontSize: 11.5, fontWeight: active ? 700 : 600, cursor: "pointer", transition: "background-color .2s, border-color .2s, color .2s, box-shadow .2s", boxShadow: active ? "0 1px 3px rgba(17,24,39,.08)" : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
             >
-              {p.emoji} {p.label}
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" /> {p.label}
             </button>
           );
         })}
@@ -854,14 +879,15 @@ function MiseCalculatorWidget({
             onChange={(e) => setMontant(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && generate()}
             placeholder="10"
-            style={{ width: "100%", border: "1px solid #E5E1D3", borderRadius: 11, background: "#FFFFFF", padding: "11px 26px 11px 13px", fontSize: 14, fontFamily: CX.sg, fontWeight: 700, color: CX.ink2, outline: "none" }}
+            aria-label="Montant du budget"
+            style={{ width: "100%", minHeight: 48, border: `1px solid ${CX.bd3}`, borderRadius: 12, background: CX.surf1, padding: "11px 30px 11px 13px", fontSize: 14, fontFamily: CX.sg, fontWeight: 700, color: CX.ink2, outline: "none" }}
           />
           <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: CX.gray400, fontSize: 14 }}>€</span>
         </div>
         <button
           onClick={() => generate()}
           disabled={!montant || parseFloat(montant) <= 0 || loading}
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#F59E0B,#D97706)", color: "#1B1307", fontWeight: 700, fontSize: 13.5, padding: "0 18px", borderRadius: 11, boxShadow: "0 8px 20px -8px rgba(245,158,11,.55)", opacity: !montant || parseFloat(montant) <= 0 || loading ? 0.6 : 1 }}
+          style={{ minHeight: 48, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${CX.goldDeep}`, cursor: loading ? "wait" : "pointer", background: CX.goldDeep, color: "#FFFFFF", fontWeight: 700, fontSize: 12.5, padding: "0 16px", borderRadius: 12, boxShadow: "0 5px 14px -9px rgba(146,64,14,.65)", opacity: !montant || parseFloat(montant) <= 0 || loading ? 0.55 : 1 }}
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
             <>Générer <ChevronRight className="h-3.5 w-3.5" /></>
@@ -869,12 +895,12 @@ function MiseCalculatorWidget({
         </button>
       </div>
       {/* Quick amounts */}
-      <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+      <div aria-label="Montants suggérés" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginTop: 8 }}>
         {[5, 10, 20, 30].map((v) => (
           <button
             key={v}
             onClick={() => setMontant(String(v))}
-            style={{ fontSize: 11, fontFamily: CX.sg, fontWeight: 600, padding: "4px 11px", borderRadius: 8, border: "1px solid #E5E1D3", background: "#FFFFFF", color: CX.gray500, cursor: "pointer", transition: "all .15s" }}
+            style={{ minHeight: 40, fontSize: 11, fontFamily: CX.sg, fontWeight: 650, padding: "7px 8px", borderRadius: 9, border: `1px solid ${CX.bd3}`, background: CX.surf1, color: CX.gray600, cursor: "pointer", transition: "background-color .2s, border-color .2s" }}
           >
             {v}€
           </button>
@@ -3225,12 +3251,17 @@ export default function CoursePage() {
 
           {/* Calculateur de mise — sticky au scroll (desktop uniquement, cf. .cx-sticky-mise) */}
           <div className="cx-sticky-mise" style={{ position: "sticky", top: 84, zIndex: 10, alignSelf: "start" }}>
-          <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 55%)", overflow: "hidden", boxShadow: "0 8px 24px -12px rgba(0,0,0,.12)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "17px 20px 12px" }}>
-              <Calculator className="h-4 w-4" style={{ color: CX.goldAmber }} />
-              <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Votre plan de mise</h3>
+          <div style={{ borderRadius: 22, border: `1px solid ${CX.bd3}`, background: CX.surf2, overflow: "hidden", boxShadow: "0 14px 32px -24px rgba(17,24,39,.28)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 22px 16px" }}>
+              <span style={{ width: 34, height: 34, borderRadius: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", color: CX.goldDeep, background: CX.goldBg, border: `1px solid ${CX.goldBd}` }}>
+                <Calculator className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div>
+                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Votre plan de mise</h3>
+                <p style={{ margin: "2px 0 0", fontSize: 10.5, color: CX.gray500 }}>Plan personnalisé pour cette course</p>
+              </div>
             </div>
-            <div style={{ padding: "0 20px 20px" }}>
+            <div style={{ padding: "0 22px 22px" }}>
               <MiseCalculatorWidget
                 courseId={id}
                 userPlan={user?.plan}

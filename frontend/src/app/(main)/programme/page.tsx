@@ -476,20 +476,6 @@ export default function ProgrammePage() {
 
   const resetFilters = () => { setDiscFilter("Tous"); setReunionFilter("all"); setHippoSearch(""); setVbOnly(false); };
 
-  /* Auto-scroll : à l'ouverture de la page (jour = aujourd'hui), amène directement sur la
-     prochaine course dans la timeline — évite de défiler manuellement au-delà des courses
-     terminées. Une seule fois par jour sélectionné (pas de re-scroll sur le refresh 60s). */
-  const scrolledForDate = useRef<string | null>(null);
-  useEffect(() => {
-    if (loading || !isToday || !nextRace) return;
-    const dateKey = format(selectedDate, "yyyy-MM-dd");
-    if (scrolledForDate.current === dateKey) return;
-    const el = document.getElementById("next-race-row");
-    if (!el) return;
-    scrolledForDate.current = dateKey;
-    requestAnimationFrame(() => el.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, [loading, isToday, nextRace, selectedDate, groups]);
-
   return (
     <div
       className="min-h-screen"

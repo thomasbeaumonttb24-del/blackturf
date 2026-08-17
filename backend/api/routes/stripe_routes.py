@@ -94,8 +94,8 @@ async def create_checkout(
         success_url=f"{settings.frontend_url}/abonnement/succes?session_id={{CHECKOUT_SESSION_ID}}&plan={_normalize_plan(body.plan)}",
         cancel_url=f"{settings.frontend_url}/tarifs",
         subscription_data={
-            # Essai gratuit 7 jours : Standard uniquement (Expert/Pro = paiement direct).
-            **({"trial_period_days": 7} if _normalize_plan(body.plan) == "standard" else {}),
+            # Essai gratuit 7 jours : Standard ET Expert (alignés, cf. page /tarifs).
+            "trial_period_days": 7,
             "metadata": {"user_id": user.user_id, "plan": _normalize_plan(body.plan)},
         },
         allow_promotion_codes=True,
@@ -294,22 +294,32 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
     periodicite = "annual" if recurring.get("interval") == "year" or "annual" in price_id else "monthly"
 
     import uuid
+    statut_reel = sub.get("status")
+    est_active = statut_reel in ("active", "trialing")
     subscription = Subscription(
         sub_id=str(uuid.uuid4()),
         user_id=user.user_id,
         stripe_subscription_id=sub["id"],
         plan=plan,
         periodicite=periodicite,
-        statut="active" if sub.get("status") in ("active", "trialing") else sub.get("status"),
+        statut="active" if est_active else statut_reel,
         periode_debut=_ts(sub, "current_period_start"),
         periode_fin=_ts(sub, "current_period_end"),
         essai_fin=_ts(sub, "trial_end"),
     )
     db.add(subscription)
 
-    user.plan = plan
+    # BUG corrigé (2026-08-17) : le plan était accordé ICI même quand `statut_reel`
+    # valait "incomplete" (carte non validée / 3-D Secure non terminé / checkout
+    # abandonné avant confirmation) — Stripe émet quand même `subscription.created`
+    # dès la création de l'objet, avant paiement effectif. Résultat : un compte
+    # affiché comme abonné côté site sans paiement réel. On aligne sur
+    # _handle_subscription_updated, qui lui vérifiait déjà le statut.
+    if est_active:
+        user.plan = plan
     await db.commit()
-    log.info("stripe.subscription_created", user_id=user.user_id, plan=plan)
+    log.info("stripe.subscription_created", user_id=user.user_id, plan=plan,
+             statut=statut_reel, plan_accorde=est_active)
 
 
 async def _handle_subscription_updated(sub: dict, db: AsyncSession):

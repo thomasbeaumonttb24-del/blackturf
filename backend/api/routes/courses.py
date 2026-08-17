@@ -346,8 +346,8 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             handicap_poids=p.handicap_poids,
             poids_prevu=p.poids_prevu,
             numero_corde=p.numero_corde,
-            # Carrière (PerformanceCarriere, 1:1 cheval)
-            gains_carriere=pc.gains_carriere_total if pc else None,
+            # Carrière (PerformanceCarriere, 1:1 cheval) — stocké en centimes
+            gains_carriere=int(pc.gains_carriere_total / 100) if pc and pc.gains_carriere_total else None,
             nb_victoires=pc.nb_victoires_total if pc else None,
             nb_courses=pc.nb_courses_total if pc else None,
             # Généalogie
@@ -2084,8 +2084,8 @@ async def get_cheval(cheval_id: str, db: AsyncSession = Depends(get_db)):
             "nb_courses": perf.nb_courses_total if perf else 0,
             "nb_victoires": perf.nb_victoires_total if perf else 0,
             "nb_places": perf.nb_places_total if perf else 0,
-            "gains_total": perf.gains_carriere_total if perf else 0,
-            "gains_annee_n": perf.gains_annee_n if perf else 0,
+            "gains_total": int(perf.gains_carriere_total / 100) if perf and perf.gains_carriere_total else 0,
+            "gains_annee_n": int(perf.gains_annee_n / 100) if perf and perf.gains_annee_n else 0,
             "nb_courses_annee": perf.nb_courses_annee if perf else 0,
             "nb_victoires_annee": perf.nb_victoires_annee if perf else 0,
             "meilleur_temps_all": perf.meilleur_temps_all if perf else None,
