@@ -748,7 +748,15 @@ class BlackTurfEnsemble:
         import shutil
         path = self.save(version_num)
         current = MODELS_DIR / "current_model.pkl"
-        shutil.copy2(path, current)
+        # La copie directe exposait brièvement un pickle partiel aux processus de
+        # prédiction concurrents ("pickle data was truncated"). Écrire sur le même
+        # volume puis renommer garantit une bascule atomique ancien -> nouveau.
+        pending = MODELS_DIR / f".current_model.{os.getpid()}.tmp"
+        try:
+            shutil.copy2(path, pending)
+            os.replace(pending, current)
+        finally:
+            pending.unlink(missing_ok=True)
         log.info("model.deployed", version=version_num)
 
 
