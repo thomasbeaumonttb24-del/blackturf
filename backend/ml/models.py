@@ -225,6 +225,7 @@ class BlackTurfEnsemble:
                 eval_metric="AUC",
                 class_weights=[1.0, pos_weight],
                 random_seed=42,
+                thread_count=_N_JOBS,
                 verbose=0,
             )
             self.catboost = CalibratedClassifierCV(cb_base, method="isotonic", cv=3)
@@ -287,7 +288,7 @@ class BlackTurfEnsemble:
                     cb_fold = CatBoostCls_fold(
                         iterations=150, depth=5, learning_rate=0.06,
                         loss_function="Logloss", class_weights=[1.0, pos_weight],
-                        random_seed=42, verbose=0
+                        random_seed=42, thread_count=_N_JOBS, verbose=0
                     )
                     cb_fold.fit(Xf_tr, yf_tr)
                     oof_cb[fold_val_idx] = cb_fold.predict_proba(Xf_val)[:, 1]
