@@ -9,15 +9,17 @@ import uuid
 import pytest
 from datetime import datetime, timedelta, timezone, date
 from unittest.mock import AsyncMock
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
     Hippodrome, Reunion, Course, Cheval, Participation,
-    Prediction, ValueBet, Resultat, User,
+    Prediction, ValueBet, Resultat, User, AlerteLog,
 )
 from services.alerts import (
     _best_value_bet_last_week, send_weekly_best_value_bet,
     _weekly_best_vb_email_html, make_unsubscribe_token, read_unsubscribe_token,
+    notify_value_bets, send_morning_digest, _digest_email_html,
 )
 from api.routes.auth import _hash
 
@@ -260,6 +262,67 @@ async def test_endpoint_desabonnement_idempotent(client, db: AsyncSession):
 async def test_endpoint_desabonnement_rejette_jeton_invalide(client):
     resp = await client.post("/api/v1/notifications/desabonnement", json={"token": "bidon"})
     assert resp.status_code == 400
+
+
+# ─────────────────────────────────────────────
+# Anti-spam value bets temps réel + digest quotidien
+# ─────────────────────────────────────────────
+async def test_value_bets_temps_reel_regroupes_sans_email(db: AsyncSession, monkeypatch):
+    user = await _make_user(db, "expert", push=True)
+    mock_email = AsyncMock(return_value=True)
+    mock_push = AsyncMock(return_value=True)
+    mock_inapp = AsyncMock(return_value=True)
+    monkeypatch.setattr("services.alerts.send_email", mock_email)
+    monkeypatch.setattr("services.alerts.send_web_push", mock_push)
+    monkeypatch.setattr("services.alerts.send_inapp", mock_inapp)
+
+    vb1 = {"course_id": "R1C1", "participation_id": "P1", "nom_cheval": "Alpha", "ev": 0.2}
+    vb1_recalcule = {**vb1, "ev": 0.25}  # même signal, cote/EV rafraîchie
+    vb2 = {"course_id": "R1C1", "participation_id": "P2", "nom_cheval": "Beta", "ev": 0.3}
+    await notify_value_bets(db, [user.user_id], [vb1, vb1_recalcule, vb2])
+
+    mock_email.assert_not_called()  # jamais d'e-mail unitaire
+    assert mock_inapp.await_count == 1
+    assert mock_push.await_count == 1
+    assert mock_push.await_args.kwargs["data"]["nb_value_bets"] == 2
+
+    # Deuxième lot dans les 4 h : toujours aucun e-mail et aucun second push.
+    await notify_value_bets(db, [user.user_id], [vb2])
+    mock_email.assert_not_called()
+    assert mock_push.await_count == 1
+
+
+async def test_digest_html_regroupe_tous_les_value_bets_et_desabonnement():
+    html = _digest_email_html([
+        {"heure": "12:00", "hippodrome": "Vincennes", "nom_cheval": "Alpha", "numero": 1, "ev": 0.2, "niveau": 2},
+        {"heure": "12:30", "hippodrome": "Deauville", "nom_cheval": "Beta", "numero": 4, "ev": 0.3, "niveau": 3},
+    ], "https://blackturf.fr/desabonnement?token=test")
+    assert "Alpha" in html and "Beta" in html
+    assert "Un seul digest quotidien" in html
+    assert "desabonnement?token=test" in html
+
+
+async def test_digest_quotidien_idempotent(db: AsyncSession, monkeypatch):
+    await _seed_value_bet(db, "DIGEST1", days_ago=-0.05, statut="a_venir")
+    user = await _make_user(db, "standard")
+    mock_email = AsyncMock(return_value=True)
+    monkeypatch.setattr("services.alerts.send_email", mock_email)
+
+    await send_morning_digest(db)
+    await send_morning_digest(db)  # relance manuelle / restart le même jour
+
+    assert mock_email.await_count == 1
+    assert mock_email.await_args.kwargs["to"] == user.email
+    assert "Cheval DIGEST1" in mock_email.await_args.kwargs["html"]
+    logs = (await db.execute(
+        select(AlerteLog).where(
+            AlerteLog.user_id == user.user_id,
+            AlerteLog.type_alerte == "digest_matin",
+            AlerteLog.canal == "email",
+            AlerteLog.envoye == True,
+        )
+    )).scalars().all()
+    assert len(logs) == 1
 
 
 # ─────────────────────────────────────────────

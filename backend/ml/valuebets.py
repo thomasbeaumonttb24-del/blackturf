@@ -426,6 +426,8 @@ async def save_value_bet(
     ).on_conflict_do_update(
         index_elements=["participation_id"],   # upsert si recalculé
         set_={
+            "prediction_id": prediction_id,
+            "course_id": course_id,
             "ev_pmu": vb.get("ev_pmu"),
             "ev_geny": vb.get("ev_geny"),
             "ev_bzh": vb.get("ev_bzh"),
@@ -434,6 +436,7 @@ async def save_value_bet(
             "niveau": vb["niveau"],
             "spi_detected": vb.get("spi_detected", False),
             "spi_score": vb.get("spi_score"),
+            "actif": True,
         },
     )
     await session.execute(stmt)

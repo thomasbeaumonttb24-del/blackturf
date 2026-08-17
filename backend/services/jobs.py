@@ -149,7 +149,7 @@ async def job_vb_notify() -> None:
     try:
         from db.database import AsyncSessionLocal
         from db.models import ValueBet, Participation, Cheval, Course, User
-        from services.alerts import notify_value_bet
+        from services.alerts import notify_value_bets
         from sqlalchemy import select, and_
         from datetime import datetime, timedelta, timezone
 
@@ -184,9 +184,11 @@ async def job_vb_notify() -> None:
             if not user_ids:
                 return
 
+            vb_batch = []
             for vb, part, cheval, course in rows:
-                vb_data = {
+                vb_batch.append({
                     "vb_id": vb.vb_id,
+                    "participation_id": vb.participation_id,
                     "nom_cheval": cheval.nom,
                     "hippodrome": course.hippodrome_nom,
                     "cote": part.cote_pmu,
@@ -194,9 +196,12 @@ async def job_vb_notify() -> None:
                     "niveau": vb.niveau,
                     "course_id": vb.course_id,
                     "heure_depart": course.date_heure.isoformat() if course.date_heure else None,
-                }
-                await notify_value_bet(session, user_ids, vb_data)
+                })
                 vb.notifie = True
+
+            # Une seule notification récapitulative pour tout le lot. Aucun e-mail
+            # unitaire : l'unique e-mail est le digest quotidien de 10h.
+            await notify_value_bets(session, user_ids, vb_batch)
 
             await session.commit()
             log.info("jobs.vb_notify.done", nb_vbs=len(rows))
@@ -237,11 +242,11 @@ async def job_warm_caches() -> None:
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
-    # Morning digest — 07:00 Paris (= 05:00 UTC in winter, 06:00 UTC in summer)
-    # Use Europe/Paris timezone for correct DST handling
+    # Digest value bets unique — 10:00 Paris, après la majorité des détections
+    # matinales et avant les premières courses françaises. Un seul e-mail/jour.
     scheduler.add_job(
         job_morning_digest,
-        CronTrigger(hour=7, minute=0, timezone="Europe/Paris"),
+        CronTrigger(hour=10, minute=0, timezone="Europe/Paris"),
         id="morning_digest",
         replace_existing=True,
         misfire_grace_time=600,

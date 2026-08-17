@@ -5,7 +5,8 @@ Email (Resend) + Web Push (VAPID) + In-app (WebSocket via Redis).
 import json
 import uuid
 import structlog
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,40 +57,7 @@ async def send_email(
         return False
 
 
-def _value_bet_email_html(vb: dict) -> str:
-    """Template email value bet."""
-    etoiles = "⭐" * vb["niveau"]
-    return f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: #1a1a2e; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-    <h1 style="margin: 0; font-size: 24px;">🏇 BlackTurf</h1>
-    <p style="margin: 5px 0 0; opacity: 0.7;">Le Terminal IA des Parieurs Gagnants</p>
-  </div>
-  <div style="background: #0f3460; color: white; padding: 20px; border-radius: 0 0 8px 8px;">
-    <h2 style="color: #e94560;">Value Bet détecté {etoiles}</h2>
-    <table style="width: 100%; border-collapse: collapse;">
-      <tr><td style="padding: 8px 0; opacity: 0.7;">Cheval</td><td style="font-weight: bold;">{vb.get('nom_cheval', 'N/A')}</td></tr>
-      <tr><td style="padding: 8px 0; opacity: 0.7;">Hippodrome</td><td>{vb.get('hippodrome', 'N/A')}</td></tr>
-      <tr><td style="padding: 8px 0; opacity: 0.7;">Cote</td><td>{vb.get('cote', 'N/A')}</td></tr>
-      <tr><td style="padding: 8px 0; opacity: 0.7;">EV</td><td style="color: #4ade80;">+{round(vb.get('ev', 0) * 100, 1)}%</td></tr>
-    </table>
-    <p style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px; opacity: 0.7;">
-      ⚠️ Le jeu doit rester un plaisir. Jouez de façon responsable. BlackTurf ne garantit aucun gain.
-      Interdiction de participer aux jeux d'argent aux mineurs.
-    </p>
-    <a href="https://blackturf.fr/programme" style="display: block; text-align: center; margin-top: 15px; padding: 12px 24px; background: #e94560; color: white; text-decoration: none; border-radius: 6px;">
-      Voir sur BlackTurf →
-    </a>
-  </div>
-</body>
-</html>
-"""
-
-
-def _digest_email_html(courses: list[dict]) -> str:
+def _digest_email_html(courses: list[dict], unsubscribe_url: str) -> str:
     """Template digest matinal."""
     rows = ""
     for c in courses:
@@ -130,6 +98,9 @@ def _digest_email_html(courses: list[dict]) -> str:
     <a href="https://blackturf.fr/programme" style="display: block; text-align: center; margin-top: 15px; padding: 12px; background: #e94560; color: white; text-decoration: none; border-radius: 6px;">
       Voir le programme complet →
     </a>
+  </div>
+  <div style="padding: 16px 20px; text-align: center; font-size: 11px; color: #6b7280;">
+    Un seul digest quotidien. <a href="{unsubscribe_url}" style="color: #6b7280; text-decoration: underline;">Se désabonner de ces e-mails</a>.
   </div>
 </body>
 </html>
@@ -203,51 +174,81 @@ async def _log_alerte(
 # ─────────────────────────────────────────────
 # API de haut niveau
 # ─────────────────────────────────────────────
-async def notify_value_bet(
+async def notify_value_bets(
     session: AsyncSession,
     user_ids: list[str],
-    vb_data: dict,
+    value_bets: list[dict],
 ):
     """
-    Notifie les utilisateurs d'un nouveau value bet.
-    Canaux : in-app + email (si starter/pro) + push (si souscrit).
+    Notifie un LOT de nouveaux value bets sans e-mail unitaire.
+
+    - un seul message in-app par lot ;
+    - un seul push récapitulatif, avec cooldown persistant de 4 heures ;
+    - aucun e-mail ici : le digest quotidien `send_morning_digest` est l'unique
+      e-mail value bet afin d'éviter tout risque de spam.
     """
+    # Même signal présent plusieurs fois dans le lot : une seule ligne. La clé ne
+    # dépend pas de vb_id (historiquement recréé à chaque recalcul), mais de la
+    # course et du partant.
+    uniques: dict[str, dict] = {}
+    for vb in value_bets:
+        key = f"{vb.get('course_id', '')}:{vb.get('participation_id') or vb.get('nom_cheval', '')}"
+        uniques[key] = vb
+    batch = list(uniques.values())
+    if not batch:
+        return
+
     users_res = await session.execute(
         select(User).where(User.user_id.in_(user_ids))
     )
     users = users_res.scalars().all()
 
+    payload = {
+        "nb_value_bets": len(batch),
+        "value_bets": batch,
+        "signal_keys": list(uniques),
+    }
+
     for user in users:
         if not user.is_active:
             continue
 
-        # In-app (tous)
-        ok_inapp = await send_inapp(user.user_id, "value_bet", vb_data)
-        await _log_alerte(session, user.user_id, "value_bet", "in-app", vb_data, ok_inapp)
+        ok_inapp = await send_inapp(user.user_id, "value_bet_digest", payload)
+        await _log_alerte(session, user.user_id, "value_bet_digest", "in-app", payload, ok_inapp)
 
-        # Email (starter+)
-        if user.plan in ("starter", "standard", "expert"):
-            html = _value_bet_email_html(vb_data)
-            ok_email = await send_email(
-                to=user.email,
-                subject=f"🏇 Value Bet détecté — {vb_data.get('nom_cheval', '')}",
-                html=html,
-            )
-            await _log_alerte(session, user.user_id, "value_bet", "email", vb_data, ok_email)
-
-        # Push (si souscrit)
+        # Au plus un push toutes les 4 heures par utilisateur, même après restart.
         if user.push_subscription:
-            etoiles = "⭐" * vb_data.get("niveau", 1)
-            ok_push = await send_web_push(
-                user.push_subscription,
-                title=f"Value Bet {etoiles}",
-                body=f"{vb_data.get('nom_cheval')} — EV +{round(vb_data.get('ev', 0)*100, 1)}%",
-                data=vb_data,
+            recent_push = await session.scalar(
+                select(AlerteLog.alerte_id).where(
+                    AlerteLog.user_id == user.user_id,
+                    AlerteLog.type_alerte == "value_bet_digest",
+                    AlerteLog.canal == "push",
+                    AlerteLog.envoye == True,
+                    AlerteLog.created_at >= datetime.now(timezone.utc) - timedelta(hours=4),
+                ).limit(1)
             )
-            await _log_alerte(session, user.user_id, "value_bet", "push", vb_data, ok_push)
+            if not recent_push:
+                noms = ", ".join(str(v.get("nom_cheval", "")) for v in batch[:3])
+                suffixe = "…" if len(batch) > 3 else ""
+                ok_push = await send_web_push(
+                    user.push_subscription,
+                    title=f"{len(batch)} value bet{'s' if len(batch) > 1 else ''} détecté{'s' if len(batch) > 1 else ''}",
+                    body=f"{noms}{suffixe}",
+                    data=payload,
+                )
+                await _log_alerte(session, user.user_id, "value_bet_digest", "push", payload, ok_push)
 
     await session.commit()
-    log.info("alerts.notify_value_bet", nb_users=len(users))
+    log.info("alerts.notify_value_bets", nb_users=len(users), nb_value_bets=len(batch))
+
+
+async def notify_value_bet(
+    session: AsyncSession,
+    user_ids: list[str],
+    vb_data: dict,
+):
+    """Compatibilité des anciens appelants : passe toujours par le lot anti-spam."""
+    await notify_value_bets(session, user_ids, [vb_data])
 
 
 # ─────────────────────────────────────────────
@@ -483,21 +484,26 @@ async def send_morning_digest(session: AsyncSession):
     Digest matinal — envoyé aux abonnés actifs.
     Recense les value bets du jour.
     """
-    from datetime import date
     from db.models import ValueBet, Course, Participation, Cheval
 
-    today = date.today()
+    now_utc = datetime.now(timezone.utc)
+    now_paris = now_utc.astimezone(ZoneInfo("Europe/Paris"))
+    start_paris = now_paris.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_paris = start_paris + timedelta(days=1)
+    start_utc = start_paris.astimezone(timezone.utc)
+    end_utc = end_paris.astimezone(timezone.utc)
     q = (
         select(ValueBet, Participation, Cheval, Course)
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
         .join(Course, Course.course_id == ValueBet.course_id)
         .where(
-            Course.date_heure >= datetime.combine(today, datetime.min.time()),
+            Course.date_heure >= start_utc,
+            Course.date_heure < end_utc,
+            Course.date_heure > now_utc,
             ValueBet.actif == True,
         )
         .order_by(ValueBet.ev_max.desc())
-        .limit(20)
     )
     rows = (await session.execute(q)).all()
     if not rows:
@@ -517,12 +523,30 @@ async def send_morning_digest(session: AsyncSession):
 
     # Utilisateurs abonnés
     users_res = await session.execute(
-        select(User).where(User.plan.in_(["starter", "standard", "expert"]), User.is_active == True)
+        select(User).where(
+            User.plan.in_(["starter", "standard", "expert"]),
+            User.is_active == True,
+            User.marketing_opt_out_at.is_(None),
+        )
     )
     users = users_res.scalars().all()
 
-    html = _digest_email_html(courses_list)
     for user in users:
+        # Idempotence persistante : un redémarrage ou un lancement manuel le même
+        # jour ne doit jamais produire un second digest.
+        deja_envoye = await session.scalar(
+            select(AlerteLog.alerte_id).where(
+                AlerteLog.user_id == user.user_id,
+                AlerteLog.type_alerte == "digest_matin",
+                AlerteLog.canal == "email",
+                AlerteLog.envoye == True,
+                AlerteLog.created_at >= start_utc,
+                AlerteLog.created_at < end_utc,
+            ).limit(1)
+        )
+        if deja_envoye:
+            continue
+        html = _digest_email_html(courses_list, _unsubscribe_url(user.user_id))
         ok = await send_email(
             to=user.email,
             subject=f"🏇 BlackTurf — {len(courses_list)} value bets aujourd'hui",

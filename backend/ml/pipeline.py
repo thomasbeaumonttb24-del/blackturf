@@ -1300,11 +1300,13 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.isotonic_calibration_skip", err=str(e)[:140])
 
-        # Purge des value bets de la course avant recalcul : un partant qui n'est
-        # PLUS un value bet (recalibré) doit disparaître, sinon des paris obsolètes
-        # (ex. ancien EV gonflé) restent affichés. save_value_bet ne fait qu'upsert.
+        # Désactive avant recalcul, sans SUPPRIMER : l'identité du value bet et son
+        # flag `notifie` doivent survivre aux rafraîchissements de cotes. L'ancien
+        # DELETE recréait les mêmes lignes avec notifie=false toutes les 20 minutes
+        # et provoquait des dizaines d'e-mails identiques par abonné.
         await session.execute(
-            text("DELETE FROM value_bets WHERE course_id = :cid"), {"cid": course_id}
+            text("UPDATE value_bets SET actif = false WHERE course_id = :cid"),
+            {"cid": course_id},
         )
 
         # Récupérer version modèle active
@@ -1526,16 +1528,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 niveau_vb = vb["niveau"]
                 ev_max = vb["ev_max"]
 
-                # Alerte push si VB fort (niveau ≥ 2)
-                if niveau_vb >= 2:
-                    asyncio.create_task(_broadcast_value_bet_alert(
-                        course_id=course_id,
-                        nom_cheval=feat.get("nom", ""),
-                        hippodrome=course.hippodrome_nom or "",
-                        heure=course.date_heure.strftime("%H:%M") if course.date_heure else "",
-                        vb=vb,
-                        cote=cote_pmu,
-                    ))
+                # Les notifications utilisateurs sont volontairement regroupées
+                # par `job_vb_notify`. Un push ici serait relancé à CHAQUE recalcul
+                # de cote et contournerait le cooldown anti-spam persistant.
 
             predictions.append({
                 "participation_id": pid,
