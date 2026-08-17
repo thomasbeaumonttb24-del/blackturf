@@ -4,16 +4,16 @@ import { useState } from "react";
 
 // Démo FIDÈLE au vrai plan de mise du site (page course) : profils
 // Prudent / Modéré / Risqué, niveaux Sécurité / Rendement / Coup, vrais types de
-// paris PMU (Simple, Couplé, 2 sur 4, Tiercé, Trio), EV global, misé + réserve.
+// paris PMU (Simple, Couplé, 2 sur 4, Tiercé, Trio) et EV global.
 // Cotes/rapports d'EXEMPLE (le vrai calculateur utilise les rapports PMU réels).
 
 type Pari = { type: string; chevaux: string; rapport: number; proba: number };
 type Niveau = { key: "securite" | "rendement" | "coup"; label: string; emoji: string; pct: number; paris: Pari[] };
-type Profil = { key: string; emoji: string; label: string; ev: number; reserve: number; popular?: boolean; niveaux: Niveau[] };
+type Profil = { key: string; emoji: string; label: string; ev: number; popular?: boolean; niveaux: Niveau[] };
 
 const PROFILS: Profil[] = [
   {
-    key: "prudent", emoji: "🛡️", label: "Prudent", ev: 4, reserve: 0.15,
+    key: "prudent", emoji: "🛡️", label: "Prudent", ev: 4,
     niveaux: [
       { key: "securite", label: "Sécurité", emoji: "🛡️", pct: 0.55, paris: [
         { type: "Simple Placé", chevaux: "N°2", rapport: 1.8, proba: 0.74 },
@@ -25,7 +25,7 @@ const PROFILS: Profil[] = [
     ],
   },
   {
-    key: "modere", emoji: "⚖️", label: "Modéré", ev: 9, reserve: 0.10, popular: true,
+    key: "modere", emoji: "⚖️", label: "Modéré", ev: 9, popular: true,
     niveaux: [
       { key: "securite", label: "Sécurité", emoji: "🛡️", pct: 0.40, paris: [
         { type: "Couplé Placé", chevaux: "2 · 4", rapport: 4.4, proba: 0.41 },
@@ -39,7 +39,7 @@ const PROFILS: Profil[] = [
     ],
   },
   {
-    key: "risque", emoji: "🔥", label: "Risqué", ev: 15, reserve: 0.10,
+    key: "risque", emoji: "🔥", label: "Risqué", ev: 15,
     niveaux: [
       { key: "rendement", label: "Rendement", emoji: "📈", pct: 0.45, paris: [
         { type: "Couplé Gagnant", chevaux: "2 · 4", rapport: 28, proba: 0.09 },
@@ -62,7 +62,7 @@ export function CalculatorDemo() {
   const m = Number.isFinite(mise) && mise > 0 ? mise : 0;
   const profil = PROFILS.find((p) => p.key === profilKey) ?? PROFILS[1];
 
-  const reserve = m * profil.reserve;
+  const totalWeight = profil.niveaux.reduce((sum, niveau) => sum + niveau.pct, 0);
 
   return (
     <div className="mt-6 rounded-xl border border-amber-200/70 bg-white/70 p-4">
@@ -113,13 +113,16 @@ export function CalculatorDemo() {
       {/* Niveaux + paris (structure du vrai plan) */}
       <div className="mt-3 space-y-2.5">
         {profil.niveaux.map((niv) => {
-          const montantNiv = m * niv.pct;
+          // Les poids expriment seulement la répartition relative : 100 % de la mise
+          // est toujours jouée, même si un profil comporte moins de niveaux.
+          const part = totalWeight > 0 ? niv.pct / totalWeight : 0;
+          const montantNiv = m * part;
           const stake = niv.paris.length ? montantNiv / niv.paris.length : 0;
           return (
             <div key={niv.key} className={`rounded-lg p-3 ${NIV_CLASS[niv.key] ?? ""}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-xs font-bold text-gray-800">{niv.emoji} {niv.label}</span>
-                <span className="text-[11px] text-gray-500 num-display">{Math.round(niv.pct * 100)}% · {eur(montantNiv)}€</span>
+                <span className="text-[11px] text-gray-500 num-display">{Math.round(part * 100)}% · {eur(montantNiv)}€</span>
               </div>
               <div className="space-y-1.5">
                 {niv.paris.map((p, i) => (
@@ -141,15 +144,10 @@ export function CalculatorDemo() {
         })}
       </div>
 
-      {/* Misé / Réserve (comme le vrai plan) */}
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div className="mt-3 text-xs">
         <div className="rounded-md bg-gray-50 px-3 py-2">
-          <div className="text-gray-500">Misé</div>
-          <div className="num-display font-bold text-gray-900">{eur(m - reserve)}€</div>
-        </div>
-        <div className="rounded-md bg-gray-50 px-3 py-2">
-          <div className="text-gray-500">Réserve</div>
-          <div className="num-display font-bold text-brand-gold-deep">{eur(reserve)}€</div>
+          <div className="text-gray-500">Mise totale jouée</div>
+          <div className="num-display font-bold text-gray-900">{eur(m)}€</div>
         </div>
       </div>
 

@@ -406,7 +406,7 @@ def _weekly_best_vb_email_html(vb: dict, unsubscribe_url: str) -> str:
       <tr><td style="padding: 8px 0; opacity: 0.7;">Hippodrome</td><td style="font-weight: bold;">{vb.get('hippodrome_nom', 'N/A')}</td></tr>
       <tr><td style="padding: 8px 0; opacity: 0.7;">Cote au départ</td><td>{vb.get('cote', 'N/A')}</td></tr>
       <tr><td style="padding: 8px 0; opacity: 0.7;">EV détecté</td><td style="color: #4ade80;">+{round(vb.get('ev', 0) * 100, 1)}%</td></tr>
-      <tr><td style="padding: 8px 0; opacity: 0.7;">Un Simple Gagnant 10€</td><td style="color: #4ade80; font-weight: bold;">aurait rapporté {vb.get('gain_reference_10e', 'N/A')}€</td></tr>
+      <tr><td style="padding: 8px 0; opacity: 0.7;">Rapport officiel pour 10€</td><td style="color: #4ade80; font-weight: bold;">{vb.get('gain_reference_10e', 'N/A')}€ (mise incluse)</td></tr>
     </table>
     <p style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px; opacity: 0.7;">
       Un seul exemple réel de la semaine passée — pas une moyenne, pas une promesse de gain futur.
@@ -469,7 +469,7 @@ async def send_weekly_best_value_bet(session: AsyncSession):
             ok_push = await send_web_push(
                 user.push_subscription,
                 title="🏇 Meilleur pari de la semaine",
-                body=f"{best['nom_cheval']} gagnant à {best.get('cote', '?')} — un 10€ aurait rapporté {best.get('gain_reference_10e', '?')}€",
+                body=f"{best['nom_cheval']} gagnant à {best.get('cote', '?')} — rapport officiel pour 10€ : {best.get('gain_reference_10e', '?')}€ (mise incluse)",
                 data=best,
             )
             await _log_alerte(session, user.user_id, "weekly_best_vb", "push", best, ok_push)

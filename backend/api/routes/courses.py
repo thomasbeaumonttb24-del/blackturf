@@ -965,7 +965,7 @@ async def get_mise_plan(
     """
     Génère un plan de mise personnalisé selon montant + profil.
     Quota journalier selon le plan (funnel freemium, cf. MISE_PLAN_DAILY_LIMITS) :
-    Free/Découverte 1/jour, Standard/Starter 6/jour, Pro/Expert illimité.
+    Free/Découverte 1/jour, Standard/Starter 5/jour, Pro/Expert illimité.
     """
     from services.mise_calculator import generer_plan, plan_to_dict
     from db.models import Prediction as PredModel, ValueBet

@@ -410,14 +410,10 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
       )}
 
       {/* Résumé totaux */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 7, marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: typeof plan.esperance_gain === "number" ? "repeat(2,1fr)" : "1fr", gap: 7, marginTop: 12 }}>
         <div style={cell}>
-          <div style={{ fontSize: 10, color: CX.gray400 }}>Misé</div>
+          <div style={{ fontSize: 10, color: CX.gray400 }}>Mise totale jouée</div>
           <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: CX.ink2 }}>{plan.montant_joue.toFixed(2)}€</div>
-        </div>
-        <div style={cell}>
-          <div style={{ fontSize: 10, color: CX.gray400 }}>Réserve</div>
-          <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: CX.gold }}>{plan.montant_reserve.toFixed(2)}€</div>
         </div>
         {typeof plan.esperance_gain === "number" && (
           <div style={cell}>
