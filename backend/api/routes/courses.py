@@ -1019,8 +1019,8 @@ async def get_mise_plan(
     if bankroll and bankroll >= 10:
         try:
             from services.bet_plan_snapshots import daily_exposure_total, subject_hash as _subj
-            from api.config import settings as _settings
-            _subj_hash = _subj(getattr(user, "user_id", None), _settings.secret_key)
+            from api.config import get_settings as _get_settings
+            _subj_hash = _subj(getattr(user, "user_id", None), _get_settings().secret_key)
             _deja_joue = await daily_exposure_total(db, _subj_hash)
             _cap = bankroll * DAILY_EXPOSURE_CAP_FRAC
             if _deja_joue + montant > _cap:
@@ -1259,7 +1259,7 @@ async def _record_plan_emission(
     apprises volumineuses sont résumées par leur empreinte, pas recopiées.
     """
     try:
-        from api.config import settings
+        from api.config import get_settings
         from ml.algo_flags import FLAGS
         from ml.prediction_snapshots import canonical_json
         from services.bet_plan_snapshots import (
@@ -1304,7 +1304,7 @@ async def _record_plan_emission(
             algo_config=algo_config,
             emitted_at=datetime.now(timezone.utc),
             course_start_at=course.date_heure,
-            subject=subject_hash(getattr(user, "user_id", None), settings.secret_key),
+            subject=subject_hash(getattr(user, "user_id", None), get_settings().secret_key),
             prediction_run_id=await latest_prediction_run_id(db, course.course_id),
             origin=origin,
         )

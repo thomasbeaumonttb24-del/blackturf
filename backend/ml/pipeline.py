@@ -624,19 +624,6 @@ async def run_post_course(course_id: str) -> None:
     except Exception as e:
         log.warning("pipeline.settle_all_skip", course_id=course_id, err=str(e)[:140])
 
-    # ── 6c-bis. Notifier le RÉSULTAT à ceux que la course concerne (paris
-    # enregistrés réglés, ou value bet dont on les avait alertés). APRÈS le
-    # règlement : c'est lui qui remplit bankroll_entries.resultat / gain_perte, donc
-    # l'inverse annoncerait « 0 pari réglé ». Sans cet appel l'onglet « Résultats »
-    # du centre de notifications restait structurellement vide et le suivi
-    # s'arrêtait au signal (cf. services/alerts.notify_resultats_course).
-    try:
-        from services.alerts import notify_resultats_course
-        async with AsyncSessionLocal() as notif_session:
-            await notify_resultats_course(notif_session, course_id)
-    except Exception as e:
-        log.warning("pipeline.notify_resultats_skip", course_id=course_id, err=str(e)[:140])
-
     # ── 6d. Régler les PRONOS ÉMIS PAR PROFIL (profil_run_log) sur cette course :
     # l'apprentissage se fait sur les recommandations réellement émises (figées
     # avant course), réglées aux vrais rapports PMU — pas sur le top-3 du modèle.
