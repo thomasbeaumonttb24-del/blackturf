@@ -263,6 +263,14 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
     # Heure de départ
     date_heure = _parse_datetime(course.date_heure)
 
+    # Statut dérivé du PMU : seule l'ANNULATION est déduite ici. Une course annulée
+    # ne recevra JAMAIS d'ordreArrivee du PMU, donc sans ça elle reste 'a_venir' à
+    # vie une fois sortie de la fenêtre 36h de poll_resultats (159 courses en prod
+    # au 2026-08-17, 100 % COURSE_ANNULEE). Le passage à 'termine' reste piloté par
+    # save_resultat_to_db (arrivée réelle en base). Cf. services/course_resolution.
+    from services.course_resolution import statut_interne_depuis_pmu
+    statut_annule = statut_interne_depuis_pmu(getattr(course, "statut_pmu", None))
+
     # Course (upsert)
     stmt = pg_insert(Course).values(
         course_id=course.course_id,
@@ -292,7 +300,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
         categorie_particularite=_t(course.categorie_particularite, 30),
         montant_offert_1er=course.montant_offert_1er,
         nombre_declares_partants=course.nombre_declares_partants,
-        statut="a_venir",
+        statut=statut_annule or "a_venir",
     ).on_conflict_do_update(
         index_elements=["course_id"],
         set_={
@@ -314,6 +322,11 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             "est_2sur4": course.est_2sur4,
             "paris_disponibles": course.paris_disponibles,
             "updated_at": datetime.now(),
+            # Annulation en cours de journée (cas le plus fréquent : le PMU annule une
+            # réunion entière après la publication du programme). Écriture CONDITIONNELLE :
+            # on ne remet jamais un statut existant à 'a_venir' — un re-scrape ne doit
+            # pas ressusciter une course déjà 'termine'.
+            **({"statut": statut_annule} if statut_annule else {}),
         },
     )
     await session.execute(stmt)

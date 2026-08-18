@@ -252,7 +252,15 @@ class Course(Base):
     paris_disponibles: Mapped[list | None] = mapped_column(JSON)
 
     # Statut
-    statut: Mapped[str] = mapped_column(String(20), default="a_venir")  # a_venir/en_cours/termine/annule
+    # a_venir / en_cours / termine / annule / sans_resultat
+    #   annule        : le PMU a annulé la course (statut PMU COURSE_ANNULEE) — elle
+    #                   n'aura jamais d'arrivée.
+    #   sans_resultat : passée, non annulée, mais aucun résultat n'est arrivé après
+    #                   plusieurs jours (statut terminal posé par
+    #                   services/course_resolution.py). Sans ces deux statuts la
+    #                   course restait 'a_venir' à vie une fois hors de la fenêtre
+    #                   36h de poll_resultats.
+    statut: Mapped[str] = mapped_column(String(20), default="a_venir")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

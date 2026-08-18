@@ -33,6 +33,24 @@ def make_course_id(date_ddmmyyyy: str, reunion_id, course_num) -> str:
     return f"{date_ddmmyyyy}R{reunion_id}C{course_num}"
 
 
+def _fmt_date_pmu(course_date=None) -> str:
+    """Normalise une date vers le format d'URL PMU `ddmmyyyy`.
+
+    Accepte : None (= aujourd'hui), str ddmmyyyy (préfixe de course_id) ou ISO,
+    epoch ms (heureDepart PMU), date/datetime. Tolérant : sert juste à bâtir l'URL.
+    """
+    if course_date is None:
+        return date.today().strftime("%d%m%Y")
+    if isinstance(course_date, str):
+        return (course_date if (len(course_date) == 8 and course_date.isdigit())
+                else date.today().strftime("%d%m%Y"))
+    if isinstance(course_date, bool):  # garde-fou : bool est un int en Python
+        return date.today().strftime("%d%m%Y")
+    if isinstance(course_date, (int, float)):
+        return datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
+    return course_date.strftime("%d%m%Y")
+
+
 def _first_poids(p: dict):
     """Poids porté en kg depuis le PMU (poidsConditionMonte/poidsJockey/handicapPoids).
     handicapPoids est en décigrammes (560 = 56,0 kg). On normalise : toute valeur
@@ -270,6 +288,12 @@ class PmuScraper(BaseScraper):
                     categorie_particularite=c_data.get("categorieParticularite"),
                     montant_offert_1er=c_data.get("montantOffert1er"),
                     nombre_declares_partants=c_data.get("nombreDeclaresPartants"),
+                    # Statut PMU BRUT (PROGRAMMEE / FIN_COURSE / ARRIVEE_DEFINITIVE_*
+                    # / COURSE_ANNULEE). Ignoré jusqu'au 2026-08-17 → une course
+                    # annulée n'avait aucun moyen de quitter 'a_venir' (le PMU ne
+                    # publie jamais son ordreArrivee). Cf. services/course_resolution.
+                    statut_pmu=(str(c_data.get("statut")).strip().upper()
+                                if c_data.get("statut") else None),
                     source="pmu",
                 )
                 courses.append(course)
@@ -373,16 +397,7 @@ class PmuScraper(BaseScraper):
         - rapports (dividendes) : endpoint /rapports-definitifs (LISTE de typePari)
         course_date : date de la course (date|datetime|str ddmmyyyy). Défaut = aujourd'hui.
         """
-        if course_date is None:
-            d = date.today().strftime("%d%m%Y")
-        elif isinstance(course_date, str):
-            # déjà au format ddmmyyyy (préfixe course_id) ou ISO → on garde 8 chiffres
-            d = course_date if (len(course_date) == 8 and course_date.isdigit()) else date.today().strftime("%d%m%Y")
-        elif isinstance(course_date, (int, float)):
-            # epoch ms → date (heure de départ). Tolérant : sert juste à bâtir l'URL.
-            d = datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
-        else:
-            d = course_date.strftime("%d%m%Y")
+        d = _fmt_date_pmu(course_date)
 
         c_id = make_course_id(d, reunion_id, course_num)
         base_rc = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}"
@@ -497,6 +512,26 @@ class PmuScraper(BaseScraper):
             duree_course=duree_course,
             source="pmu",
         )
+
+    async def get_statut_course(
+        self, reunion_id: str, course_num: int, course_date=None
+    ) -> Optional[str]:
+        """Statut PMU BRUT d'une course (PROGRAMMEE / FIN_COURSE /
+        ARRIVEE_DEFINITIVE_COMPLETE / COURSE_ANNULEE …), None si indisponible.
+
+        Indispensable pour clôturer les courses ANNULÉES : le PMU ne publie jamais
+        d'ordreArrivee pour elles, donc `get_rapports_definitifs` renvoie None à vie
+        et la course restait 'a_venir' indéfiniment (159 cas en prod au 2026-08-17,
+        100 % COURSE_ANNULEE). Cf. services/course_resolution.py.
+        """
+        d = _fmt_date_pmu(course_date)
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}?specialisation=INTERNET"
+        data = await self._fetch_json(url)
+        if not isinstance(data, dict):
+            return None
+        course = data.get("course") if isinstance(data.get("course"), dict) else data
+        statut = course.get("statut")
+        return str(statut).strip().upper() if statut else None
 
     async def get_cotes_live(self, reunion_id: str, course_num: int) -> dict[int, float]:
         """

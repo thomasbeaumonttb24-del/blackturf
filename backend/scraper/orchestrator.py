@@ -1203,6 +1203,7 @@ class BlackTurfOrchestrator:
 
     async def poll_resultats(self) -> None:
         """Polling résultats toutes les 3 minutes pour courses en cours."""
+        from services.course_resolution import STATUT_ANNULE, statut_interne_depuis_pmu
         pmu = PmuScraper()
         t0 = time.time()
         try:
@@ -1225,7 +1226,8 @@ class BlackTurfOrchestrator:
                 from sqlalchemy import text as _text
                 courses = (await session.execute(_text("""
                     SELECT c.course_id AS course_id, c.reunion_id AS reunion_id,
-                           c.date_heure AS date_heure
+                           c.date_heure AS date_heure, c.statut AS statut,
+                           (c.date_heure < now() - interval '30 minutes') AS depart_ancien
                     FROM courses c
                     LEFT JOIN resultats r ON r.course_id = c.course_id
                     WHERE c.date_heure < :now AND c.date_heure > :win
@@ -1248,6 +1250,7 @@ class BlackTurfOrchestrator:
             # grosse transaction globale deadlockait en boucle (resultats KO depuis des
             # semaines). Chaque course = sa propre petite txn, indépendante et rejouable.
             ok_n = 0
+            annule_n = 0
             for course in courses:
                 try:
                     r_id = course.reunion_id
@@ -1265,11 +1268,34 @@ class BlackTurfOrchestrator:
                             import redis
                             rq = Queue(connection=redis.from_url(settings.redis_url))
                             rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
+                        continue
+
+                    # Pas d'arrivée : course ANNULÉE ? Le PMU ne publiera JAMAIS
+                    # d'ordreArrivee pour elle — sans ce test la course tourne en
+                    # boucle jusqu'à sortir de la fenêtre 36h, puis reste 'a_venir'
+                    # à vie (159 cas en prod au 2026-08-17, 100 % COURSE_ANNULEE).
+                    # Sonde seulement passé 30 min après l'heure de départ : entre la
+                    # fin de course et la publication de l'arrivée l'absence
+                    # d'ordreArrivee est NORMALE, inutile de payer une requête de plus.
+                    if course.statut == "a_venir" and course.depart_ancien:
+                        statut_pmu = await pmu.get_statut_course(r_id, c_num, cid_prefix)
+                        if statut_interne_depuis_pmu(statut_pmu) == STATUT_ANNULE:
+                            async def _wa(session, _cid=course.course_id):
+                                await session.execute(_text(
+                                    "UPDATE courses SET statut = :s, updated_at = now() "
+                                    "WHERE course_id = :c"),
+                                    {"s": STATUT_ANNULE, "c": _cid})
+                            if await self._commit_unit(_wa):
+                                annule_n += 1
+                                log.info("orchestrator.course_annulee",
+                                         course_id=course.course_id, statut_pmu=statut_pmu)
                 except Exception as e:  # une course fautive n'arrête pas le poll
                     log.warning("orchestrator.resultat_course_failed",
                                 course_id=course.course_id, err=str(e)[:160])
 
             await self._log_ok("resultats", nb_courses=ok_n, duree_ms=int((time.time() - t0) * 1000))
+            if annule_n:
+                log.info("orchestrator.resultats_annulees", n=annule_n)
         except Exception as e:
             log.error("orchestrator.resultats_error", error=str(e))
             await self._log_error("resultats", e)
