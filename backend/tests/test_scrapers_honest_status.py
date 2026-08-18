@@ -159,3 +159,26 @@ def test_le_seuil_de_recreation_laisse_passer_un_creux_normal():
             assert 2 <= valeur <= 6, "seuil trop agressif ou trop laxiste"
             return
     raise AssertionError("ENUM_VIDES_AVANT_RECREATION introuvable")
+
+
+ZETURF = (BACKEND / "scraper/zeturf_live_daemon.py").read_text(encoding="utf-8")
+
+
+def test_le_daemon_zeturf_a_la_meme_auto_reparation():
+    """Correctif PRÉVENTIF : zeturf partage le défaut d'oddschecker (une page
+    Camoufox pour toute la vie du process) et alimente `cote_unibet`, la
+    meilleure couverture hors PMU (88 %). Sa perte silencieuse coûterait la
+    comparaison de marché sans qu'aucun signal ne parte."""
+    normalise = " ".join(ZETURF.split())
+    assert "ENUM_VIDES_AVANT_RECREATION" in normalise
+    assert "session.recreate" in normalise
+    assert "if zc: enum_vides = 0" in normalise
+
+
+def test_genybet_cree_une_session_par_appel_donc_non_concerne():
+    """`StealthyFetcher.fetch(url)` ouvre une session neuve à chaque appel : ce
+    daemon ne peut pas rester figé sur une session morte, inutile d'y ajouter la
+    recréation."""
+    genybet = (BACKEND / "scraper/genybet_live_daemon.py").read_text(encoding="utf-8")
+    assert "StealthyFetcher.fetch" in genybet
+    assert "ENUM_VIDES_AVANT_RECREATION" not in genybet

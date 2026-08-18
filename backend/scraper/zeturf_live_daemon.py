@@ -39,6 +39,9 @@ SLOW_INTERVAL = 90      # s — ré-énumération complète du programme
 FAST_INTERVAL = 5       # s — relecture cote de la course imminente
 MATCH_MIN = 14          # ±minutes pour matcher course zeturf ↔ BlackTurf
 PAGE_WAIT_MS = 4500     # attente rendu cotes après navigation
+# Énumérations vides consécutives avant de recréer la page — même correctif que
+# le daemon oddschecker (18/08/2026). 3 cycles de SLOW_INTERVAL = 4,5 min.
+ENUM_VIDES_AVANT_RECREATION = 3
 WATCHDOG_TIMEOUT_S = int(os.getenv("BT_ZETURF_CYCLE_TIMEOUT", "1200"))
 WATCHDOG_GRACE_S = int(os.getenv("BT_ZETURF_WATCHDOG_GRACE", "120"))
 HEARTBEAT_PATH = os.getenv(
@@ -270,6 +273,7 @@ def main():
     with Camoufox(headless=True, geoip=True) as browser:
         page = browser.new_page()
         last_slow = 0.0
+        enum_vides = 0
         bt = {}
         imminent = None  # (course_id, url, partants)
         while _run:
@@ -296,6 +300,28 @@ def main():
                             continue
                         visit.append(z)
                     log("enum", zeturf=len(zc), blackturf=len(bt), fenetre_3h=len(visit))
+
+                    # AUTO-RÉPARATION D'UNE SESSION FIGÉE — même défaut que le
+                    # daemon oddschecker, corrigé le 18/08/2026 : la page Camoufox
+                    # vit aussi longtemps que le process, et une session figée
+                    # (bannière de consentement, redirection géo, session expirée)
+                    # ne se rétablit jamais. Le watchdog ne voit rien : aucun cycle
+                    # ne dépasse son timeout, le daemon tourne « sainement » en ne
+                    # ramenant plus rien. Correctif préventif ici : zeturf alimente
+                    # `cote_unibet`, la meilleure couverture hors PMU (88 %), sa
+                    # perte silencieuse coûterait la comparaison de marché.
+                    if zc:
+                        enum_vides = 0
+                    else:
+                        enum_vides += 1
+                        if enum_vides >= ENUM_VIDES_AVANT_RECREATION:
+                            log("session.recreate", enum_vides=enum_vides)
+                            try:
+                                page.close()
+                            except Exception as e:
+                                log("session.close_error", err=str(e)[:90])
+                            page = browser.new_page()
+                            enum_vides = 0
                     matched = 0
                     soonest = None
                     for z in visit:
