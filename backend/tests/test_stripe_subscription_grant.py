@@ -88,3 +88,33 @@ async def test_active_subscription_grants_plan(db, monkeypatch):
 
     await db.refresh(user)
     assert user.plan == "standard"
+
+
+@pytest.mark.asyncio
+async def test_checkout_tient_la_promesse_essai_sans_carte(db, monkeypatch):
+    """« 7 jours d'essai sans carte bancaire » est promis sur l'accueil, sur /tarifs
+    et dans les CGU. Le défaut Stripe (`payment_method_collection="always"`) réclame
+    la carte malgré l'essai → la session DOIT passer `if_required`, et prévoir
+    l'absence de moyen de paiement à la fin de l'essai."""
+    import api.routes.stripe_routes as sr
+
+    captured = {}
+
+    def _fake_create(**kwargs):
+        captured.update(kwargs)
+        return type("S", (), {"url": "https://checkout.stripe.test/x"})()
+
+    monkeypatch.setattr(sr.stripe.checkout.Session, "create", _fake_create)
+    monkeypatch.setattr(sr, "PRICE_MAP", {"standard_monthly": "price_test_standard"})
+
+    user = User(user_id=str(uuid.uuid4()), email="essai@blackturf.fr",
+                plan="free", stripe_customer_id="cus_test")
+    db.add(user)
+    await db.commit()
+
+    await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, user)
+
+    assert captured["payment_method_collection"] == "if_required"
+    assert captured["subscription_data"]["trial_period_days"] == 7
+    assert (captured["subscription_data"]["trial_settings"]["end_behavior"]
+            ["missing_payment_method"]) == "cancel"

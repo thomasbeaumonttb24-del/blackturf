@@ -93,9 +93,18 @@ async def create_checkout(
         mode="subscription",
         success_url=f"{settings.frontend_url}/abonnement/succes?session_id={{CHECKOUT_SESSION_ID}}&plan={_normalize_plan(body.plan)}",
         cancel_url=f"{settings.frontend_url}/tarifs",
+        # « 7 jours d'essai SANS CARTE BANCAIRE » est promis sur la page d'accueil, sur
+        # /tarifs ET dans les CGU. Sans ce paramètre, Stripe Checkout applique son
+        # défaut `always` et réclame quand même la carte : la promesse était rompue à
+        # l'étape la plus sensible du tunnel (corrigé le 2026-08-17).
+        payment_method_collection="if_required",
         subscription_data={
             # Essai gratuit 7 jours : Standard ET Expert (alignés, cf. page /tarifs).
             "trial_period_days": 7,
+            # Sans carte enregistrée, rien ne peut être prélevé à la fin de l'essai :
+            # on annule proprement au lieu de laisser un abonnement impayé traîner
+            # (le webhook repasse alors l'utilisateur en `free`).
+            "trial_settings": {"end_behavior": {"missing_payment_method": "cancel"}},
             "metadata": {"user_id": user.user_id, "plan": _normalize_plan(body.plan)},
         },
         allow_promotion_codes=True,
