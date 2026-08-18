@@ -321,3 +321,35 @@ async def test_settle_course_plans_ne_recalcule_jamais_un_plan_deja_settled(db):
         "SELECT count(*) FROM bet_plan_settlements WHERE plan_snapshot_id = :id"
     ), {"id": values["plan_snapshot_id"]})).scalar()
     assert n_rows == 1   # pas de second règlement ajouté
+
+
+# ── Régression : la config réelle du moteur contient des `set` ──────────────
+# Incident 2026-08-18 : `algo_config` embarque `_effective_config()`, dont la clé
+# "types" (familles de paris autorisées du profil) est un SET. canonical_json le
+# refusait ("unsupported snapshot value: set") — l'erreur, avalée par le
+# try/except de record_plan_snapshot, rendait la journalisation des plans
+# totalement inopérante en production sans aucun signal.
+
+def test_le_hash_accepte_la_configuration_reelle_du_moteur():
+    from services.mise_calculator import _effective_config, _palier
+
+    algo_config = {
+        "profil": "equilibre",
+        "cfg": _effective_config("equilibre", 0.0),   # contient un set "types"
+        "palier": _palier(10),
+    }
+    values = _values(algo_config=algo_config)
+
+    assert values["algo_version"].startswith("mp-")
+    # Le set est serialise comme une liste TRIEE → empreinte stable d'un appel a
+    # l'autre (sans quoi l'idempotence de bet_plan_snapshots ne tiendrait pas).
+    assert _values(algo_config=algo_config)["algo_version"] == values["algo_version"]
+
+
+def test_canonical_json_serialise_les_sets_de_facon_deterministe():
+    from ml.prediction_snapshots import canonical_json
+
+    a = canonical_json({"types": {"Trio", "Couplé Placé", "2sur4"}})
+    b = canonical_json({"types": {"2sur4", "Trio", "Couplé Placé"}})
+    assert a == b                       # ordre d'insertion sans effet
+    assert '"2sur4"' in a and '"Trio"' in a

@@ -44,6 +44,13 @@ def _json_safe(value: Any) -> Any:
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        # Un set n'a pas d'ordre : on le TRIE pour que l'empreinte reste stable
+        # d'un appel à l'autre (deux plans identiques doivent donner le même hash,
+        # sinon l'idempotence de bet_plan_snapshots tombe). Tri par représentation
+        # textuelle : les familles de paris d'un profil sont des chaînes, et cela
+        # reste défini même sur un set hétérogène.
+        return [_json_safe(item) for item in sorted(value, key=str)]
     return value
 
 
