@@ -406,3 +406,50 @@ async def test_scraper_qui_n_enregistre_rien_du_tout_est_signale(db):
 
     out = await dq.sante_scrapers(db)
     assert out["sources"]["unibet"]["statut"] == "ok_but_empty"
+
+
+@pytest.mark.asyncio
+async def test_source_en_sommeil_assume_ne_declenche_pas_d_alerte(db, monkeypatch):
+    """Une source explicitement désactivée ne doit pas crier chaque heure : la
+    décision est déjà prise. On la rapporte (`silent_disabled`) sans alerter."""
+    monkeypatch.setenv("SCRAPER_DISABLED_SOURCES", "geny,winamax")
+    await _course(db, "CD", depart=MAINTENANT - timedelta(hours=2))
+    for n in range(1, 61):
+        await _partant(db, "CD", n, cote_pmu=3.0, cote_geny=None)
+    await db.commit()
+
+    out = await dq.couverture_sources(db)
+    assert out["sources"]["geny"]["statut"] == "silent_disabled"
+
+    rapport = await dq.rapport_qualite(db)
+    muettes = [a for a in rapport["anomalies"] if a["code"] == "source_muette"]
+    assert not any("geny" in a["message"] for a in muettes)
+
+
+@pytest.mark.asyncio
+async def test_source_alimentee_par_un_autre_producteur_reste_ok(db, monkeypatch):
+    """`cote_unibet` vient du daemon zeturf : le scraper `unibet` est en sommeil,
+    mais la DONNÉE arrive — la source ne doit pas être dite muette."""
+    monkeypatch.setenv("SCRAPER_DISABLED_SOURCES", "unibet")
+    await _course(db, "CE", depart=MAINTENANT - timedelta(hours=2))
+    for n in range(1, 61):
+        db.add(__import__("db.models", fromlist=["Participation"]).Participation(
+            participation_id=f"p-CE-{n}", course_id="CE", cheval_id=f"ch-CE-{n}",
+            numero=n, cote_pmu=3.0, cote_unibet=3.2, non_partant=False))
+    await db.commit()
+
+    out = await dq.couverture_sources(db)
+    assert out["sources"]["unibet"]["statut"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_source_muette_non_desactivee_alerte_toujours(db, monkeypatch):
+    """Le silence d'une source ACTIVE reste une anomalie : c'est le vrai signal."""
+    monkeypatch.setenv("SCRAPER_DISABLED_SOURCES", "")
+    await _course(db, "CF2", depart=MAINTENANT - timedelta(hours=2))
+    for n in range(1, 61):
+        await _partant(db, "CF2", n, cote_pmu=3.0, cote_geny=None)
+    await db.commit()
+
+    out = await dq.couverture_sources(db)
+    assert out["sources"]["geny"]["statut"] == "silent"

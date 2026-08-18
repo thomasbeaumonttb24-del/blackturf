@@ -98,6 +98,13 @@ async def _scalar(session: AsyncSession, sql: str, params: dict | None = None):
     return (await session.execute(text(sql), params or {})).scalar()
 
 
+def _sources_en_sommeil() -> set[str]:
+    """Sources listées dans SCRAPER_DISABLED_SOURCES (silence assumé)."""
+    import os
+    return {s.strip().lower() for s in
+            os.getenv("SCRAPER_DISABLED_SOURCES", "").split(",") if s.strip()}
+
+
 async def couverture_sources(session: AsyncSession, jours: int = 2) -> dict:
     """Part des partants réellement cotés, par source, sur les N derniers jours."""
     colonnes = ", ".join(
@@ -118,6 +125,7 @@ async def couverture_sources(session: AsyncSession, jours: int = 2) -> dict:
            "jusqua": maintenant})).first()
 
     total = int(row[0] or 0) if row else 0
+    en_sommeil = _sources_en_sommeil()
     sources: dict[str, dict] = {}
     for idx, nom in enumerate(SOURCES_COTES, start=1):
         n = int(row[idx] or 0) if row else 0
@@ -127,10 +135,18 @@ async def couverture_sources(session: AsyncSession, jours: int = 2) -> dict:
             statut = "insufficient_data"
         elif critique:
             statut = "ok" if pct >= SEUIL_COUVERTURE_CRITIQUE_PCT else "degraded"
-        elif pct < SEUIL_COUVERTURE_MUETTE_PCT:
-            statut = "silent"
-        else:
+        elif pct >= SEUIL_COUVERTURE_MUETTE_PCT:
+            # Une source peut être alimentée par un AUTRE producteur que son
+            # scraper : `cote_unibet` vient du daemon zeturf, donc `unibet` reste
+            # « ok » même si le scraper du même nom est en sommeil.
             statut = "ok"
+        elif nom in en_sommeil:
+            # Silence ASSUMÉ : la source est explicitement désactivée. On le
+            # rapporte sans alerter, sinon la surveillance crie en permanence
+            # sur une décision déjà prise.
+            statut = "silent_disabled"
+        else:
+            statut = "silent"
         sources[nom] = {"n_cotes": n, "couverture_pct": pct,
                         "critique": critique, "statut": statut}
     return {"fenetre_jours": jours, "n_partants": total, "sources": sources,
