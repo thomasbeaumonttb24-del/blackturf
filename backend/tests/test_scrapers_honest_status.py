@@ -182,3 +182,48 @@ def test_genybet_cree_une_session_par_appel_donc_non_concerne():
     genybet = (BACKEND / "scraper/genybet_live_daemon.py").read_text(encoding="utf-8")
     assert "StealthyFetcher.fetch" in genybet
     assert "ENUM_VIDES_AVANT_RECREATION" not in genybet
+
+
+# ── Driver Playwright mort : sortir pour que systemd relance ─────────────────
+
+@pytest.mark.parametrize("fichier", [
+    "scraper/oddschecker_odds_daemon.py",
+    "scraper/zeturf_live_daemon.py",
+])
+def test_un_driver_mort_fait_sortir_le_process(fichier):
+    """Constaté le 18/08/2026 : le driver Node de Playwright crashe sur un bug
+    interne, puis CHAQUE appel échoue avec « Connection closed while reading from
+    the driver ». Le process Python reste vivant, attrape l'exception, dort,
+    recommence — indéfiniment. Le watchdog ne se déclenche jamais (les cycles
+    échouent VITE, loin de leur timeout) et `Restart=always` ne sert à rien tant
+    que le process ne meurt pas : `NRestarts=0` apres des heures de panne."""
+    source = (BACKEND / fichier).read_text(encoding="utf-8")
+    normalise = " ".join(source.split())
+    assert "_exit_si_driver_mort" in normalise
+    assert "driver.dead_exit" in normalise
+    assert "os._exit(1)" in normalise
+
+
+@pytest.mark.parametrize("message,doit_sortir", [
+    # Message REEL observe en production le 18/08/2026.
+    ("Page.goto: Connection closed while reading from the driver", True),
+    ("Target closed", True),
+    ("Browser has been closed", True),
+    # Erreurs applicatives ordinaires : surtout NE PAS tuer le process.
+    ("Timeout 45000ms exceeded", False),
+    ("net::ERR_NAME_NOT_RESOLVED", False),
+    ("no such element", False),
+])
+def test_seul_un_driver_mort_declenche_la_sortie(message, doit_sortir, monkeypatch):
+    """Une erreur de page ordinaire ne doit jamais tuer le daemon : ce serait un
+    redémarrage en boucle sur un simple timeout."""
+    import re as _re
+
+    source = (BACKEND / "scraper/oddschecker_odds_daemon.py").read_text(encoding="utf-8")
+    bloc = _re.search(r"_DRIVER_MORT = \((.*?)\)", source, _re.S)
+    assert bloc, "_DRIVER_MORT introuvable"
+    signatures = _re.findall(r'"([^"]+)"', bloc.group(1))
+
+    declenche = any(s in message.lower() for s in signatures)
+    assert declenche is doit_sortir, (
+        f"{message!r} -> sortie={declenche}, attendu {doit_sortir}")

@@ -94,6 +94,38 @@ def log(msg: str, **kv):
     extra = " ".join(f"{k}={v}" for k, v in kv.items())
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg} {extra}".rstrip(), flush=True)
 
+
+# Signatures d'un driver Playwright MORT : le process Node qui pilote le
+# navigateur a crashé, et plus aucun appel ne pourra aboutir.
+_DRIVER_MORT = (
+    "connection closed",
+    "target closed",
+    "browser has been closed",
+    "browser closed",
+)
+
+
+def _exit_si_driver_mort(exc: BaseException) -> None:
+    """Sort du process quand le driver est mort, pour que systemd relance.
+
+    Constaté le 18/08/2026 : le driver Node de Playwright a crashé sur un bug
+    interne (`Cannot read properties of undefined (reading 'url')` dans son
+    propre bundle, déclenché par une erreur JS de la page). Ensuite CHAQUE appel
+    échoue avec « Connection closed while reading from the driver », mais le
+    process Python reste bien vivant : le cycle attrape l'exception, la
+    journalise, dort, recommence — indéfiniment. Le watchdog ne se déclenche
+    jamais puisque les cycles échouent VITE, loin de dépasser leur timeout, et
+    `Restart=always` ne sert à rien tant que le process ne meurt pas
+    (`NRestarts=0` après des heures de panne).
+
+    Recréer la page ne suffit pas : `browser.new_page()` échoue aussi. Seule la
+    sortie du process permet de repartir avec un driver neuf.
+    """
+    message = str(exc).lower()
+    if any(signature in message for signature in _DRIVER_MORT):
+        log("driver.dead_exit", err=str(exc)[:120])
+        os._exit(1)   # systemd Restart=always relance avec un driver neuf
+
 # ─── DB via docker exec psql (même pattern que zeturf/genybet daemons) ──────
 def db_query(sql: str) -> list[list[str]]:
     out = subprocess.run(
@@ -308,6 +340,7 @@ def main():
                         log("race.error", url=r["url"][-40:], err=str(e)[:100])
             except Exception as e:
                 log("cycle.error", err=str(e)[:140])
+                _exit_si_driver_mort(e)
             # attente jusqu'au prochain cycle (interruptible)
             elapsed = time.time() - t0
             for _ in range(int(max(5.0, ENUM_INTERVAL - elapsed))):

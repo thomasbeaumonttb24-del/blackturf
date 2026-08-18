@@ -60,6 +60,33 @@ def log(msg: str, **kv):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg} {extra}".rstrip(), flush=True)
 
 
+# Signatures d'un driver Playwright MORT : le process Node qui pilote le
+# navigateur a crashé, plus aucun appel ne pourra aboutir.
+_DRIVER_MORT = (
+    "connection closed",
+    "target closed",
+    "browser has been closed",
+    "browser closed",
+)
+
+
+def _exit_si_driver_mort(exc: BaseException) -> None:
+    """Sort du process quand le driver est mort, pour que systemd relance.
+
+    Observé sur le daemon oddschecker le 18/08/2026 : le driver Node de
+    Playwright crashe sur un bug interne, puis CHAQUE appel échoue avec
+    « Connection closed while reading from the driver » — mais le process Python
+    reste vivant, attrape l'exception, dort et recommence indéfiniment. Le
+    watchdog ne se déclenche jamais (les cycles échouent VITE, loin de leur
+    timeout) et `Restart=always` ne sert à rien tant que le process ne meurt pas.
+    Recréer la page ne suffit pas : `browser.new_page()` échoue aussi.
+    """
+    message = str(exc).lower()
+    if any(signature in message for signature in _DRIVER_MORT):
+        log("driver.dead_exit", err=str(exc)[:120])
+        os._exit(1)   # systemd Restart=always relance avec un driver neuf
+
+
 _watchdog = CycleWatchdog(
     name="zeturf_daemon",
     timeout_s=WATCHDOG_TIMEOUT_S,
@@ -343,6 +370,7 @@ def main():
                     log("slow.done", matched=matched, imminent=(imminent[0] if imminent else None))
                 except Exception as e:
                     log("slow.error", err=str(e)[:140])
+                    _exit_si_driver_mort(e)
             # ── RAPIDE : relit la cote de la course imminente ──
             if imminent:
                 try:
@@ -353,6 +381,7 @@ def main():
                         log("fast", course=cid, partants=n)
                 except Exception as e:
                     log("fast.error", err=str(e)[:120])
+                    _exit_si_driver_mort(e)
             _watchdog.finish_cycle()
             time.sleep(FAST_INTERVAL)
     log("zeturf_daemon.stop")
