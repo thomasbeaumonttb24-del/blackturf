@@ -1,19 +1,23 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import {
-  Zap, Loader2, Lock, Star, Clock, SlidersHorizontal,
+  Zap, Lock, Star, Clock, SlidersHorizontal,
   LayoutGrid, List, TrendingUp, Filter, X, ArrowUpDown,
+  Flame, Target, AlertTriangle, RefreshCw, type LucideIcon,
 } from "lucide-react";
 import useSWR from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AnimatedCounter } from "@/components/ui/AnimatedCounter";
+import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { useAuth } from "@/hooks/useAuth";
 import { useValueBetsStream } from "@/hooks/useWebSocket";
 import { predictionsApi } from "@/lib/api";
-import { formatCote, formatEV, etoiles, formatDateTime, cn } from "@/lib/utils";
+import { formatCote, formatEV, formatDateTime, cn } from "@/lib/utils";
 
 // ─── constants ───────────────────────────────────────────────
 const NIVEAU_COLORS: Record<number, string> = {
@@ -61,22 +65,23 @@ const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   winamax: { label: "Winamax", color: "text-orange-600" },
   betclic: { label: "Betclic", color: "text-red-600" },
   unibet:  { label: "Unibet",  color: "text-green-600" },
-  betfair: { label: "Betfair 🔵", color: "text-cyan-600" },
+  betfair: { label: "Betfair", color: "text-cyan-600" },
 };
 
-const SPI_METHOD_LABELS: Record<string, string> = {
-  cotes_history: "⚡ Afflux historique",
-  betclic_steam: "🔥 Afflux Betclic",
-  betfair_gap:   "🎯 Écart Betfair",
-  market_gap:    "📈 Écart marché",
+// SVG icons plutôt qu'emoji (cohérence + accessibilité) pour la méthode de détection SPI.
+const SPI_METHOD_META: Record<string, { icon: LucideIcon; label: string }> = {
+  cotes_history: { icon: Zap,        label: "Afflux historique" },
+  betclic_steam: { icon: Flame,      label: "Afflux Betclic" },
+  betfair_gap:   { icon: Target,     label: "Écart Betfair" },
+  market_gap:    { icon: TrendingUp, label: "Écart marché" },
 };
 
 // ─── sub-components ──────────────────────────────────────────
 function StarRating({ n }: { n: number }) {
   return (
-    <span className="flex gap-0.5">
+    <span className="flex gap-0.5" aria-label={`Niveau ${n} sur 4 — ${NIVEAU_LABELS[n]}`}>
       {Array.from({ length: 4 }).map((_, i) => (
-        <Star key={i} className={`w-3 h-3 ${i < n ? "fill-current" : "opacity-20"} ${NIVEAU_COLORS[n]}`} />
+        <Star key={i} className={`w-3 h-3 ${i < n ? "fill-current" : "opacity-20"} ${NIVEAU_COLORS[n]}`} aria-hidden="true" />
       ))}
     </span>
   );
@@ -87,21 +92,67 @@ function ConfidenceBar({ v }: { v: number }) {
   const color = pct >= 70 ? "#10b981" : pct >= 50 ? "#f59e0b" : "#ef4444";
   return (
     <div className="flex items-center gap-1.5">
-      <div className="flex-1 h-1.5 bg-muted/60 rounded-full overflow-hidden">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      <div
+        className="flex-1 h-1.5 bg-muted/60 rounded-full overflow-hidden"
+        role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Confiance IA"
+      >
+        <div
+          className="h-full rounded-full transition-[width] duration-700 ease-out"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
       </div>
-      <span className="text-[10px] font-mono" style={{ color }}>{pct.toFixed(0)}%</span>
+      <span className="text-[10px] font-mono tabular-nums" style={{ color }}>{pct.toFixed(0)}%</span>
+    </div>
+  );
+}
+
+// ─── loading skeletons (mêmes dimensions que les vraies cartes) ──
+function VBCardSkeletonGrid() {
+  return (
+    <Card className="glass-card h-full border-0 shadow-none">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-4 w-14 rounded-full" />
+        </div>
+        <Skeleton className="h-4 w-3/4 mb-2" />
+        <Skeleton className="h-3 w-1/2 mb-1" />
+        <Skeleton className="h-3 w-1/3 mb-3" />
+        <div className="grid grid-cols-2 gap-2">
+          <Skeleton className="h-12 rounded-lg" />
+          <Skeleton className="h-12 rounded-lg" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function VBCardSkeletonList() {
+  return (
+    <div className="flex items-center gap-3 sm:gap-4 p-3 rounded-xl border border-border/60">
+      <Skeleton className="h-8 w-12 sm:w-16 shrink-0" />
+      <div className="flex-1 min-w-0 space-y-2">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-3 w-1/2" />
+      </div>
+      <Skeleton className="h-8 w-12 shrink-0" />
+      <Skeleton className="h-8 w-16 shrink-0" />
     </div>
   );
 }
 
 function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid" | "list" }) {
+  const spiMeta = vb.spi_method ? SPI_METHOD_META[vb.spi_method] : null;
+  const SpiIcon = spiMeta?.icon;
+  const isFeatured = vb.niveau >= 4;
+
   if (view === "list") {
     return (
-      <Link href={`/courses/${vb.course_id}`}>
+      <Link href={`/courses/${vb.course_id}`} className="press block">
         <div className={cn(
-          "flex items-center gap-3 sm:gap-4 p-3 rounded-xl border hover:bg-accent/30 transition-all group cursor-pointer",
-          NIVEAU_BORDERS[vb.niveau]
+          "flex items-center gap-3 sm:gap-4 p-3 rounded-xl border hover:bg-accent/30 hover:border-brand-gold/30 transition-all group cursor-pointer",
+          NIVEAU_BORDERS[vb.niveau],
+          isFeatured && "bg-gradient-to-r from-emerald-500/[0.04] to-transparent"
         )}>
           {/* Stars */}
           <div className="shrink-0 w-12 sm:w-16 text-center">
@@ -116,8 +167,8 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             <div className="flex items-center gap-2">
               <span className="font-semibold text-sm truncate">{vb.nom_cheval}</span>
               {isExpert && vb.spi_detected && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 shrink-0">
-                  ⚡ Afflux
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 shrink-0 gap-0.5">
+                  <Zap className="w-2.5 h-2.5" aria-hidden="true" /> Afflux
                 </Badge>
               )}
             </div>
@@ -125,7 +176,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
               <span>{vb.hippodrome_nom}</span>
               {vb.discipline && <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5">{vb.discipline}</Badge>}
               <span className="flex items-center gap-0.5">
-                <Clock className="w-3 h-3" />{formatDateTime(vb.date_heure)}
+                <Clock className="w-3 h-3" aria-hidden="true" />{formatDateTime(vb.date_heure)}
               </span>
             </div>
           </div>
@@ -146,7 +197,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             </div>
             <div className="text-right">
               <div className="text-xs text-muted-foreground">Espérance</div>
-              <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <div className={`font-bold text-sm tabular-nums ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
                 {formatEV(vb.ev_max)}
               </div>
             </div>
@@ -176,29 +227,32 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
 
   // grid view
   return (
-    <Link href={`/courses/${vb.course_id}`}>
+    <Link href={`/courses/${vb.course_id}`} className="press block h-full">
       <Card className={cn(
-        "h-full cursor-pointer hover:border-brand-gold/40 hover:-translate-y-0.5 transition-all duration-200",
-        NIVEAU_BORDERS[vb.niveau]
+        "glass-card h-full cursor-pointer border-0 shadow-none",
+        NIVEAU_BORDERS[vb.niveau],
+        isFeatured && "gold-glow"
       )}>
         <CardContent className="p-4">
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
             <div className="space-y-1">
-              <StarRating n={vb.niveau} />
+              <span className={isFeatured ? "badge-pulse rounded-full inline-block" : ""}>
+                <StarRating n={vb.niveau} />
+              </span>
               {vb.nb_sources != null && vb.nb_sources > 1 && (
-                <span className="text-[9px] text-muted-foreground">{vb.nb_sources} sources</span>
+                <span className="block text-[9px] text-muted-foreground">{vb.nb_sources} sources</span>
               )}
             </div>
             <div className="flex flex-col items-end gap-1">
-              {isExpert && vb.spi_detected && vb.spi_method && (
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 gap-0.5">
-                  {SPI_METHOD_LABELS[vb.spi_method] ?? "⚡ Afflux"}
+              {isExpert && vb.spi_detected && spiMeta && SpiIcon && (
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 gap-1">
+                  <SpiIcon className="w-2.5 h-2.5" aria-hidden="true" />{spiMeta.label}
                 </Badge>
               )}
               {vb.jockey_suspendu && (
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-red-500 text-red-500">
-                  ⚠ Jockey susp.
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-red-500 text-red-500 gap-1">
+                  <AlertTriangle className="w-2.5 h-2.5" aria-hidden="true" /> Jockey susp.
                 </Badge>
               )}
             </div>
@@ -214,7 +268,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
               )}
             </div>
             <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-              <Clock className="w-3 h-3" />{formatDateTime(vb.date_heure)}
+              <Clock className="w-3 h-3" aria-hidden="true" />{formatDateTime(vb.date_heure)}
             </div>
           </div>
 
@@ -222,7 +276,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           <div className={cn("grid gap-2 mt-3", vb.mouvement_cote_pct != null && Math.abs(vb.mouvement_cote_pct) >= 5 ? "grid-cols-3" : "grid-cols-2")}>
             <div className="rounded-lg bg-muted/50 p-2 text-center">
               <div className="text-[10px] text-muted-foreground">Espérance</div>
-              <div className={`font-bold text-sm ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <div className={`font-bold text-sm tabular-nums ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
                 {formatEV(vb.ev_max)}
               </div>
             </div>
@@ -279,6 +333,7 @@ export default function ValueBetsPage() {
   const [sort, setSort] = useState("ev_desc");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [showFilters, setShowFilters] = useState(false);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
 
   const isPro = user && !["free", "decouverte"].includes(user.plan ?? "free");
   const isExpert = user?.plan === "expert";
@@ -292,6 +347,14 @@ export default function ValueBetsPage() {
   );
 
   const rawBets = (streamBets.length > 0 ? streamBets : apiBets ?? []) as VB[];
+
+  // Horodatage de fraîchreté : chaque nouvelle donnée (poll REST 60s ou message WS)
+  // met à jour ce repère. Le backend garantit désormais (job_expire_stale_value_bets,
+  // filet de sécurité 6h) qu'aucun pari affiché ici ne peut dater de plusieurs jours —
+  // ce badge documente juste QUAND la liste a été rafraîchie pour la dernière fois.
+  useEffect(() => {
+    if (rawBets.length > 0 || apiBets) setLastSync(new Date());
+  }, [rawBets.length, apiBets, streamBets]);
 
   // Filter + sort
   const bets = useMemo(() => {
@@ -314,13 +377,21 @@ export default function ValueBetsPage() {
 
   // Stats
   const nbPremium = rawBets.filter((v) => v.niveau >= 3).length;
-  const avgEV = rawBets.length ? ((rawBets.reduce((s, v) => s + v.ev_max, 0) / rawBets.length) * 100).toFixed(1) : null;
+  const avgEV = rawBets.length ? (rawBets.reduce((s, v) => s + v.ev_max, 0) / rawBets.length) * 100 : null;
+  const disciplineCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const v of rawBets) {
+      const d = v.discipline || "Autre";
+      m[d] = (m[d] ?? 0) + 1;
+    }
+    return m;
+  }, [rawBets]);
 
   // ── unauthenticated ──
   if (!user) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center">
-        <Lock className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+        <Lock className="h-12 w-12 mx-auto mb-4 text-muted-foreground" aria-hidden="true" />
         <h1 className="text-2xl font-bold mb-2">Paris de valeur IA</h1>
         <p className="text-muted-foreground mb-6">
           Connectez-vous pour accéder aux paris de valeur détectés en temps réel.
@@ -336,7 +407,7 @@ export default function ValueBetsPage() {
   if (!isPro) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center">
-        <Zap className="h-12 w-12 mx-auto mb-4 text-brand-gold" />
+        <Zap className="h-12 w-12 mx-auto mb-4 text-brand-gold" aria-hidden="true" />
         <h1 className="text-2xl font-bold mb-3">Paris de valeur en temps réel</h1>
         <p className="text-muted-foreground mb-2">
           Détection automatique espérance {">"} 0 · 4 niveaux d&apos;étoiles · Triangulation 3 sources.
@@ -361,79 +432,104 @@ export default function ValueBetsPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
 
-      {/* ── Header ────────────────────────────── */}
-      <div className="flex flex-row items-center justify-between gap-3 mb-5 sm:mb-6">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
-            <Zap className="h-5 w-5 sm:h-6 sm:w-6 text-brand-gold shrink-0" />
-            Paris de valeur
-            {connected && (
-              <span className="flex items-center gap-1 text-sm font-normal text-emerald-600 ml-1 sm:ml-2">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="hidden sm:inline">En direct</span>
-              </span>
-            )}
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1 hidden sm:block">
-            Opportunités à espérance positive détectées par l&apos;IA
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* View toggle */}
-          <div className="flex rounded-lg border border-border/60 overflow-hidden">
-            <button
-              onClick={() => setView("grid")}
-              className={cn("p-1.5 transition-colors", view === "grid" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setView("list")}
-              className={cn("p-1.5 transition-colors", view === "list" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
-          {/* Filters toggle */}
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn("gap-2", showFilters && "border-brand-gold text-brand-gold")}
-            onClick={() => setShowFilters((v) => !v)}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            Filtres
-            {(discipline !== "Tous" || niveauMin > 1) && (
-              <span className="bg-brand-gold text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center">
-                {(discipline !== "Tous" ? 1 : 0) + (niveauMin > 1 ? 1 : 0)}
-              </span>
-            )}
-          </Button>
-        </div>
-      </div>
+      {/* ── Hero ──────────────────────────────── */}
+      <div className="vb-hero gradient-hero-v2 relative overflow-hidden rounded-[24px] border border-brand-gold/15 px-5 py-6 sm:px-7 sm:py-7 mb-6 animate-[fadeUp_.5s_cubic-bezier(.16,1,.3,1)_both]">
+        <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}@media (prefers-reduced-motion:reduce){.vb-hero{animation:none!important}}`}</style>
 
-      {/* ── Stats bar ─────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mb-4 pb-4 border-b border-border/40">
-        <span className="text-muted-foreground">
-          <span className="font-semibold text-foreground">{rawBets.length}</span> pari{rawBets.length !== 1 ? "s" : ""} de valeur actif{rawBets.length !== 1 ? "s" : ""}
-        </span>
-        {nbPremium > 0 && (
-          <span className="text-amber-600 flex items-center gap-1">
-            <Star className="w-3 h-3 fill-amber-500" />
-            <span className="font-semibold">{nbPremium}</span> premium (★★★+)
-          </span>
-        )}
-        {avgEV && (
-          <span className="text-muted-foreground flex items-center gap-1">
-            <TrendingUp className="w-3 h-3 text-emerald-600" />
-            Espérance moyenne : <span className="font-semibold text-emerald-600">+{avgEV}%</span>
-          </span>
-        )}
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div className="min-w-0">
+            <span className="eyebrow text-[11px] font-semibold text-brand-gold-deep mb-1.5">
+              <Zap className="h-3 w-3" aria-hidden="true" /> Détection IA en direct
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-bold font-display flex items-center gap-2.5 flex-wrap">
+              Paris de valeur
+              {connected ? (
+                <span className="flex items-center gap-1.5 text-sm font-normal text-emerald-600 rounded-full border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-0.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 live-dot" aria-hidden="true" />
+                  En direct
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground rounded-full border border-border px-2.5 py-0.5">
+                  <RefreshCw className="h-3 w-3" aria-hidden="true" /> Actualisation 60s
+                </span>
+              )}
+            </h1>
+            <p className="text-muted-foreground text-sm mt-1.5">
+              Opportunités à espérance positive détectées par l&apos;IA
+              {lastSync && (
+                <span className="text-muted-foreground/70"> · actualisé à {lastSync.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+              )}
+            </p>
+          </div>
+
+          {/* View toggle + filters */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex rounded-lg border border-border/60 bg-background/60 overflow-hidden">
+              <button
+                onClick={() => setView("grid")}
+                aria-label="Vue en grille"
+                aria-pressed={view === "grid"}
+                className={cn("p-2 transition-colors", view === "grid" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
+              >
+                <LayoutGrid className="w-4 h-4" aria-hidden="true" />
+              </button>
+              <button
+                onClick={() => setView("list")}
+                aria-label="Vue en liste"
+                aria-pressed={view === "list"}
+                className={cn("p-2 transition-colors", view === "list" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
+              >
+                <List className="w-4 h-4" aria-hidden="true" />
+              </button>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn("gap-2 bg-background/60", showFilters && "border-brand-gold text-brand-gold")}
+              onClick={() => setShowFilters((v) => !v)}
+              aria-pressed={showFilters}
+            >
+              <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
+              Filtres
+              {(discipline !== "Tous" || niveauMin > 1) && (
+                <span className="bg-brand-gold text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center">
+                  {(discipline !== "Tous" ? 1 : 0) + (niveauMin > 1 ? 1 : 0)}
+                </span>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {/* Stat tiles */}
+        <div className="grid grid-cols-3 gap-2.5 sm:gap-3 mt-5">
+          <div className="glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Actifs maintenant</div>
+            <div className="num-display text-xl sm:text-2xl font-bold text-foreground">
+              <AnimatedCounter end={rawBets.length} duration={900} />
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1">
+              <Star className="h-3 w-3 text-amber-500 fill-amber-500" aria-hidden="true" /> Premium ★★★+
+            </div>
+            <div className="num-display text-xl sm:text-2xl font-bold text-amber-600">
+              <AnimatedCounter end={nbPremium} duration={900} />
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1">
+              <TrendingUp className="h-3 w-3 text-emerald-600" aria-hidden="true" /> Espérance moy.
+            </div>
+            <div className="num-display text-xl sm:text-2xl font-bold text-emerald-600">
+              {avgEV != null ? <>+<AnimatedCounter end={avgEV} decimals={1} duration={900} />%</> : "—"}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ── Filters panel ─────────────────────── */}
       {showFilters && (
-        <div className="mb-6 p-4 rounded-xl border border-border/60 bg-muted/20 space-y-4">
+        <div className="mb-6 p-4 rounded-xl border border-border/60 bg-muted/20 space-y-4 animate-[fadeUp_.3s_ease_both]">
           <div className="flex flex-wrap gap-4">
             {/* Niveau */}
             <div>
@@ -460,27 +556,31 @@ export default function ValueBetsPage() {
             <div>
               <div className="text-xs text-muted-foreground mb-2">Discipline</div>
               <div className="flex flex-wrap gap-1">
-                {DISCIPLINES.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setDiscipline(d)}
-                    className={cn(
-                      "text-xs px-3 py-1.5 rounded-lg border transition-all",
-                      discipline === d
-                        ? "bg-brand-gold/20 border-brand-gold text-brand-gold font-medium"
-                        : "border-border/60 text-muted-foreground hover:border-brand-gold/40 hover:text-foreground"
-                    )}
-                  >
-                    {d}
-                  </button>
-                ))}
+                {DISCIPLINES.map((d) => {
+                  const count = d === "Tous" ? rawBets.length : disciplineCounts[d] ?? 0;
+                  return (
+                    <button
+                      key={d}
+                      onClick={() => setDiscipline(d)}
+                      className={cn(
+                        "text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5",
+                        discipline === d
+                          ? "bg-brand-gold/20 border-brand-gold text-brand-gold font-medium"
+                          : "border-border/60 text-muted-foreground hover:border-brand-gold/40 hover:text-foreground"
+                      )}
+                    >
+                      {d}
+                      <span className="text-[10px] tabular-nums opacity-70">{count}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             {/* Sort */}
             <div>
               <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
-                <ArrowUpDown className="w-3 h-3" />Trier par
+                <ArrowUpDown className="w-3 h-3" aria-hidden="true" />Trier par
               </div>
               <div className="flex flex-wrap gap-1">
                 {SORT_OPTIONS.map((o) => (
@@ -507,7 +607,7 @@ export default function ValueBetsPage() {
               onClick={() => { setDiscipline("Tous"); setNiveauMin(1); }}
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
             >
-              <X className="w-3 h-3" />Réinitialiser les filtres
+              <X className="w-3 h-3" aria-hidden="true" />Réinitialiser les filtres
             </button>
           )}
         </div>
@@ -515,30 +615,44 @@ export default function ValueBetsPage() {
 
       {/* ── Content ───────────────────────────── */}
       {isLoading ? (
-        <div className="flex justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
+        view === "grid" ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-busy="true" aria-label="Chargement des paris de valeur">
+            {Array.from({ length: 6 }).map((_, i) => <VBCardSkeletonGrid key={i} />)}
+          </div>
+        ) : (
+          <div className="space-y-2" aria-busy="true" aria-label="Chargement des paris de valeur">
+            {Array.from({ length: 6 }).map((_, i) => <VBCardSkeletonList key={i} />)}
+          </div>
+        )
       ) : bets.length === 0 ? (
-        <div className="text-center py-20 text-muted-foreground">
-          <Zap className="h-12 w-12 mx-auto mb-4 opacity-20" />
-          <p className="font-medium">Aucun pari de valeur{discipline !== "Tous" ? ` en ${discipline}` : ""} pour le moment.</p>
+        <div className="glass-card rounded-2xl border-dashed text-center py-16 px-6 text-muted-foreground">
+          <Zap className="h-12 w-12 mx-auto mb-4 opacity-20" aria-hidden="true" />
+          <p className="font-medium text-foreground">Aucun pari de valeur{discipline !== "Tous" ? ` en ${discipline}` : ""} pour le moment.</p>
           <p className="text-xs mt-2">
-            {discipline !== "Tous" ? "Essayez une autre discipline ou " : ""}
-            Revenez lors des courses du jour.
+            {discipline !== "Tous" ? "Essayez une autre discipline ou revenez " : "Revenez "}
+            lors des prochaines courses du jour.
           </p>
           {discipline !== "Tous" && (
             <button onClick={() => setDiscipline("Tous")} className="mt-3 text-xs text-brand-gold hover:underline flex items-center gap-1 mx-auto">
-              <Filter className="w-3 h-3" /> Voir tous les paris de valeur
+              <Filter className="w-3 h-3" aria-hidden="true" /> Voir tous les paris de valeur
             </button>
           )}
         </div>
       ) : view === "grid" ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {bets.map((vb) => <VBCard key={vb.vb_id} vb={vb} isExpert={!!isExpert} view="grid" />)}
+          {bets.map((vb, i) => (
+            <ScrollReveal key={vb.vb_id} delay={Math.min(i, 8) * 40} className="h-full">
+              <VBCard vb={vb} isExpert={!!isExpert} view="grid" />
+            </ScrollReveal>
+          ))}
         </div>
       ) : (
         <div className="space-y-2">
-          {bets.map((vb) => <VBCard key={vb.vb_id} vb={vb} isExpert={!!isExpert} view="list" />)}
+          {bets.map((vb, i) => (
+            <ScrollReveal key={vb.vb_id} delay={Math.min(i, 10) * 30}>
+              <VBCard vb={vb} isExpert={!!isExpert} view="list" />
+            </ScrollReveal>
+          ))}
         </div>
       )}
 

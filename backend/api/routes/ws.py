@@ -246,6 +246,11 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
             filters = [
                 ValueBet.actif == True,
                 Course.statut.in_(["a_venir", "en_cours"]),
+                # cf. job_expire_stale_value_bets (jobs.py) : garde-fou contre les
+                # courses jamais passées à 'termine' faute de résultat (piste
+                # étrangère non couverte PMU, panne scraper) — sans lui, un value
+                # bet pouvait rester "actif" indéfiniment et sortir sur ce flux.
+                Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
             ]
             # Même délai 15 min que GET /value-bets (briefing §4.2) : Standard voit
             # les value bets décalés, Pro/Expert en direct. Sans ce flux WS aligné,

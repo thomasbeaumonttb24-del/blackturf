@@ -363,6 +363,13 @@ async def get_value_bets_live(
         ValueBet.actif == True,
         ValueBet.niveau >= niveau_min,
         Course.statut.in_(["a_venir", "en_cours"]),
+        # Garde-fou en plus de `actif` (cf. job_expire_stale_value_bets) : une course
+        # jamais passée à statut='termine' faute de résultat (piste étrangère non
+        # couverte PMU, panne scraper) restait "a_venir" indéfiniment et ses value
+        # bets s'affichaient toujours, parfois vieux de plusieurs mois (constaté
+        # 2026-08-17). Le job de nettoyage tourne toutes les 15 min ; ce filtre rend
+        # l'endpoint correct même entre deux exécutions.
+        Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
     ]
     # Standard plan: 15min delay on value bets (briefing §4.2)
     if user.plan == "standard":
@@ -427,6 +434,7 @@ async def get_value_bets_compteur(
             ValueBet.actif == True,
             ValueBet.niveau >= niveau_min,
             Course.statut.in_(["a_venir", "en_cours"]),
+            Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
         )
     )
     count = (await db.execute(q)).scalar_one()
