@@ -942,6 +942,12 @@ async def _profil_roi_observe(db: AsyncSession, profil: str, days: int = 30) -> 
 # consulte le classement IA et le plan de mise de la même course, pas de l'une sans
 # l'autre. Toute modification doit porter sur les DEUX tables.
 MISE_PLAN_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 5, "starter": 5}
+# Part max du bankroll RÉEL jouable en un jour, tous plans confondus (Point 12 audit :
+# « exposition maximale par jour »). Valeur POLICY documentée, pas apprise — au-delà,
+# même un joueur discipliné course après course peut cumuler une exposition qu'aucun
+# calcul par-course ne voit (chaque plan individuel semble raisonnable, le TOTAL ne
+# l'est plus). À valider empiriquement (cf. Point 11) plutôt qu'à considérer figée.
+DAILY_EXPOSURE_CAP_FRAC = 0.30
 
 
 async def _mise_plan_quota_check(user, course_id: str) -> tuple[bool, int, int]:
@@ -1002,6 +1008,36 @@ async def get_mise_plan(
 
     profil = body.get("profil_risque") or (user.profil_risque or "equilibre")
     bankroll = body.get("bankroll") or user.bankroll_initiale
+
+    # EXPOSITION MAXIMALE PAR JOUR (Point 12) — uniquement quand un bankroll RÉEL est
+    # renseigné (même seuil ≥10€ que kelly_warn/staking_safe : le défaut 1.0 n'est pas
+    # un vrai bankroll, on ne bloque jamais dessus). Le cumul se lit sur les plans
+    # RÉELLEMENT émis (bet_plan_snapshots, Point 10) — pas une reconstruction. Un
+    # utilisateur qui a déjà beaucoup joué aujourd'hui est freiné AVANT de générer un
+    # nouveau plan, avec un message clair (pas un montant silencieusement raboté, qui
+    # trahirait le contrat « montant saisi = tout joué »).
+    if bankroll and bankroll >= 10:
+        try:
+            from services.bet_plan_snapshots import daily_exposure_total, subject_hash as _subj
+            from api.config import settings as _settings
+            _subj_hash = _subj(getattr(user, "user_id", None), _settings.secret_key)
+            _deja_joue = await daily_exposure_total(db, _subj_hash)
+            _cap = bankroll * DAILY_EXPOSURE_CAP_FRAC
+            if _deja_joue + montant > _cap:
+                from fastapi import HTTPException as _H
+                _reste = max(0.0, round(_cap - _deja_joue, 2))
+                raise _H(
+                    status_code=422,
+                    detail=(f"Exposition quotidienne atteinte : {_deja_joue:.0f}€ déjà "
+                            f"joués aujourd'hui sur {bankroll:.0f}€ de bankroll "
+                            f"(plafond {DAILY_EXPOSURE_CAP_FRAC:.0%}). "
+                            f"Il reste {_reste:.0f}€ jouables aujourd'hui."),
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.warning("mise_plan.daily_exposure_check_skip", user_id=getattr(user, "user_id", None),
+                       err=str(e)[:140])
 
     # Charger la course
     course_res = await db.execute(select(Course).where(Course.course_id == course_id))
@@ -1097,6 +1133,8 @@ async def get_mise_plan(
             "nom_cheval": cheval.nom,
             "proba_top3": pred.proba_top3,
             "proba_top1": pred.proba_top1,
+            "proba_top1_low": pred.proba_top1_low,
+            "proba_top1_high": pred.proba_top1_high,
             "cote_pmu": cote,
             "non_partant": part.non_partant,
             "value_bet": {"ev_max": vb.ev_max, "niveau": vb.niveau} if vb else None,
@@ -1194,7 +1232,85 @@ async def get_mise_plan(
     # grandeur des gains sur les cotes du marché EN DIRECT jusqu'au départ.
     if fige:
         out = await _reprice_gains_live(db, course, out)
+
+    # AUDIT — fige le conseil EXACTEMENT tel qu'il part chez l'utilisateur (après
+    # re-pricing éventuel). Le ROI du produit se mesure sur ces plans réellement
+    # émis, jamais sur une reconstruction faite une fois le résultat connu. Ne
+    # peut pas casser la réponse : record_plan_snapshot avale ses erreurs.
+    await _record_plan_emission(
+        db, course=course, out=out, profil=profil, montant=montant,
+        bankroll=bankroll, preds=preds, heat=heat, roi_weights=roi_weights,
+        signal_mults=signal_mults, rapport_calib=rapport_calib,
+        ev_band_perf=ev_band_perf, user=user, origin="mise_plan",
+    )
     return out
+
+
+async def _record_plan_emission(
+    db, *, course, out: dict, profil: str, montant: float, bankroll,
+    preds: list[dict], heat: float, roi_weights: dict, signal_mults: dict,
+    rapport_calib, ev_band_perf, user=None, origin: str = "mise_plan",
+) -> None:
+    """Journalise un plan émis dans ``bet_plan_snapshots`` (append-only).
+
+    ``algo_config`` décrit la configuration RÉELLEMENT appliquée : elle dérive la
+    version de l'algorithme, donc deux plans émis sous des réglages différents
+    ne sont jamais agrégés ensemble dans les mesures de rentabilité. Les entrées
+    apprises volumineuses sont résumées par leur empreinte, pas recopiées.
+    """
+    try:
+        from api.config import settings
+        from ml.algo_flags import FLAGS
+        from ml.prediction_snapshots import canonical_json
+        from services.bet_plan_snapshots import (
+            latest_prediction_run_id, record_plan_snapshot, subject_hash,
+        )
+        import hashlib as _hl
+
+        def _digest(value) -> str | None:
+            if not value:
+                return None
+            return _hl.sha256(canonical_json(value).encode("utf-8")).hexdigest()[:16]
+
+        from services.mise_calculator import _effective_config, _palier
+        algo_config = {
+            "profil": profil,
+            "heat": round(float(heat or 0.0), 4),
+            "cfg": _effective_config(profil, float(heat or 0.0)),
+            "palier": _palier(int(montant)),
+            "respect_montant": True,
+            "flags": {
+                "devig_gates": bool(getattr(FLAGS, "devig_gates", False)),
+                "calib_on_raw": bool(getattr(FLAGS, "calib_on_raw", False)),
+                "oos_weights": bool(getattr(FLAGS, "oos_weights", False)),
+            },
+            "inputs": {
+                "roi_weights": _digest(roi_weights),
+                "signal_mults": _digest(signal_mults),
+                "rapport_calib": _digest(rapport_calib),
+                "ev_band_perf": _digest(ev_band_perf),
+            },
+        }
+        cotes = {int(p["numero"]): float(p["cote_pmu"]) for p in preds
+                 if p.get("cote_pmu")}
+        await record_plan_snapshot(
+            db,
+            course_id=course.course_id,
+            plan=out,
+            profil=profil,
+            montant_demande=float(montant),
+            bankroll=float(bankroll) if bankroll is not None else None,
+            cotes_utilisees=cotes,
+            algo_config=algo_config,
+            emitted_at=datetime.now(timezone.utc),
+            course_start_at=course.date_heure,
+            subject=subject_hash(getattr(user, "user_id", None), settings.secret_key),
+            prediction_run_id=await latest_prediction_run_id(db, course.course_id),
+            origin=origin,
+        )
+    except Exception as e:
+        log.warning("mise_plan.snapshot_skip",
+                    course_id=getattr(course, "course_id", None), err=str(e)[:140])
 
 
 @router.post("/courses/{course_id}/enregistrer-paris")

@@ -10,6 +10,30 @@ from apscheduler.triggers.cron import CronTrigger
 log = structlog.get_logger()
 _scheduler: AsyncIOScheduler | None = None
 
+_DRIFT_RETRAIN_TRIGGER_KEY = "ml:drift_retrain_trigger_cooldown"
+_DRIFT_RETRAIN_TRIGGER_TTL_S = 6 * 3600
+
+
+def _enqueue_drift_retrain_once(redis_client, queue):
+    """Déduplique les demandes horaires de retrain tant que le drift reste critique."""
+    claimed = redis_client.set(
+        _DRIFT_RETRAIN_TRIGGER_KEY,
+        "1",
+        nx=True,
+        ex=_DRIFT_RETRAIN_TRIGGER_TTL_S,
+    )
+    if not claimed:
+        return None
+    try:
+        return queue.enqueue(
+            "ml.pipeline.run_incremental_retraining_sync",
+            result_ttl=86400,
+        )
+    except Exception:
+        # L'enqueue n'a pas eu lieu : rendre immédiatement le droit de réessayer.
+        redis_client.delete(_DRIFT_RETRAIN_TRIGGER_KEY)
+        raise
+
 
 # ─────────────────────────────────────────────
 # Job functions
@@ -126,8 +150,11 @@ async def job_drift_check() -> None:
             from api.config import get_settings
             r = sync_redis.from_url(get_settings().redis_url)
             q = Queue("ml", connection=r, default_timeout=3600)
-            job = q.enqueue("ml.pipeline.run_incremental_retraining_sync", result_ttl=86400)
-            log.info("jobs.drift_check.retrain_enqueued", job_id=job.id)
+            job = _enqueue_drift_retrain_once(r, q)
+            if job is None:
+                log.info("jobs.drift_check.retrain_deduplicated")
+            else:
+                log.info("jobs.drift_check.retrain_enqueued", job_id=job.id)
         else:
             log.info("jobs.drift_check.ok", status=severity, brier_mean=report.get("brier_mean"))
     except Exception as e:
@@ -182,6 +209,55 @@ async def job_expire_stale_value_bets() -> None:
                 log.info("jobs.expire_stale_value_bets.done", n=result.rowcount)
     except Exception as e:
         log.error("jobs.expire_stale_value_bets.error", error=str(e))
+
+
+async def job_notifications_retention() -> None:
+    """1x/jour — hygiène du centre de notifications.
+
+    `AlerteLog.lue` n'était posé à True que par un clic utilisateur : le compte admin
+    accumulait 22 400 alertes in-app non lues (67 175 tous canaux confondus) et le
+    badge navbar affichait « 9+ » à vie. Un value bet de la semaine dernière est de
+    l'information MORTE — le garder « non lu » ne signale plus rien.
+
+      1. auto-lecture des alertes de plus de BT_NOTIF_AUTOREAD_JOURS (défaut 7 j) :
+         le badge redevient un signal utile ;
+      2. purge des lignes in-app de plus de BT_NOTIF_PURGE_JOURS (défaut 90 j) :
+         l'historique consultable reste large, la table ne gonfle pas indéfiniment.
+         Les lignes email/push sont CONSERVÉES — ce sont des preuves d'envoi
+         (audit RGPD / support), pas du contenu d'interface.
+    """
+    try:
+        import os
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import delete, update
+        from db.database import AsyncSessionLocal
+        from db.models import AlerteLog
+
+        autoread_jours = int(os.getenv("BT_NOTIF_AUTOREAD_JOURS", "7"))
+        purge_jours = int(os.getenv("BT_NOTIF_PURGE_JOURS", "90"))
+        now = datetime.now(timezone.utc)
+
+        async with AsyncSessionLocal() as session:
+            lues = await session.execute(
+                update(AlerteLog)
+                .where(
+                    AlerteLog.lue == False,  # noqa: E712
+                    AlerteLog.created_at < now - timedelta(days=autoread_jours),
+                )
+                .values(lue=True)
+            )
+            purgees = await session.execute(
+                delete(AlerteLog).where(
+                    AlerteLog.canal == "in-app",
+                    AlerteLog.created_at < now - timedelta(days=purge_jours),
+                )
+            )
+            await session.commit()
+            log.info("jobs.notifications_retention.done",
+                     auto_lues=lues.rowcount or 0, purgees=purgees.rowcount or 0,
+                     autoread_jours=autoread_jours, purge_jours=purge_jours)
+    except Exception as e:
+        log.error("jobs.notifications_retention.error", error=str(e))
 
 
 async def job_resolve_courses_sans_resultat() -> None:
@@ -370,6 +446,15 @@ def start_scheduler() -> None:
         id="expire_stale_value_bets",
         replace_existing=True,
         misfire_grace_time=300,
+    )
+
+    # Hygiène du centre de notifications — 04:45 UTC (avant la reprise de journée)
+    scheduler.add_job(
+        job_notifications_retention,
+        CronTrigger(hour=4, minute=45, timezone="UTC"),
+        id="notifications_retention",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     # Clôture des courses sans résultat — 05:15 UTC, après la fin de toutes les

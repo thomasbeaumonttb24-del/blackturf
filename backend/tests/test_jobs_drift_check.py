@@ -42,6 +42,22 @@ class _FakeDriftDetector:
         return {"status": self._status, "brier_mean": self._brier_mean}
 
 
+class _FakeSyncRedis:
+    def __init__(self):
+        self.claimed = False
+
+    def set(self, _key, _value, *, nx, ex):
+        assert nx is True
+        assert ex > 0
+        if self.claimed:
+            return False
+        self.claimed = True
+        return True
+
+    def delete(self, _key):
+        self.claimed = False
+
+
 @pytest.mark.asyncio
 async def test_ne_leve_plus_meme_si_get_drift_detector_nu_casse(monkeypatch):
     """LE test de la régression : avant le fix, `job_drift_check` dépendait de
@@ -121,6 +137,8 @@ async def test_severite_critical_enqueue_le_retrain_incremental(monkeypatch):
         return _FakeDriftDetector("critical")
 
     monkeypatch.setattr("ml.drift_detector.initialize_drift_detector", _fake_init)
+    fake_redis = _FakeSyncRedis()
+    monkeypatch.setattr("redis.from_url", lambda _url: fake_redis)
 
     enqueued = []
 
@@ -130,6 +148,33 @@ async def test_severite_critical_enqueue_le_retrain_incremental(monkeypatch):
 
     monkeypatch.setattr("rq.Queue.enqueue", _fake_enqueue)
 
+    await jobs.job_drift_check()
+
+    assert enqueued == ["ml.pipeline.run_incremental_retraining_sync"]
+
+
+@pytest.mark.asyncio
+async def test_drift_critique_restreint_a_un_enqueue_par_cooldown(monkeypatch):
+    import db.database as dbmod
+
+    monkeypatch.setattr(dbmod, "AsyncSessionLocal", _fake_session_local())
+
+    async def _fake_init(session):
+        return _FakeDriftDetector("critical")
+
+    monkeypatch.setattr("ml.drift_detector.initialize_drift_detector", _fake_init)
+    fake_redis = _FakeSyncRedis()
+    monkeypatch.setattr("redis.from_url", lambda _url: fake_redis)
+
+    enqueued = []
+
+    def _fake_enqueue(self, name, **kw):
+        enqueued.append(name)
+        return SimpleNamespace(id="job-1")
+
+    monkeypatch.setattr("rq.Queue.enqueue", _fake_enqueue)
+
+    await jobs.job_drift_check()
     await jobs.job_drift_check()
 
     assert enqueued == ["ml.pipeline.run_incremental_retraining_sync"]

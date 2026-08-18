@@ -449,7 +449,7 @@ async def run_backtest(
     d'équity / drawdown cohérente.
     """
     from sqlalchemy import select, text
-    from db.models import Course, Resultat, Participation, Prediction
+    from db.models import Course, Resultat
 
     strategy_kwargs = strategy_kwargs or {}
 
@@ -479,9 +479,12 @@ async def run_backtest(
                    p.cote_winamax, p.cote_betclic, p.cote_unibet, p.cote_betfair_exchange,
                    pr.proba_top3, pr.proba_top1
             FROM participations p
-            JOIN predictions pr ON pr.participation_id = p.participation_id
+            JOIN prediction_evaluation pr ON pr.participation_id = p.participation_id
             WHERE p.course_id = :cid AND p.non_partant = false
-        """), {"cid": course.course_id})
+              AND pr.created_at IS NOT NULL
+              AND pr.created_at < :course_time
+              AND pr.is_replayable = true
+        """), {"cid": course.course_id, "course_time": course.date_heure})
         partants = []
         for r in rows.fetchall():
             if r.proba_top3 is None:

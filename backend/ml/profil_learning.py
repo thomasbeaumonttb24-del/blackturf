@@ -23,6 +23,8 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ml.prediction_evaluation import MIN_PROFIL_WEIGHTS_RUNS
+
 log = structlog.get_logger()
 
 PROFILS = ("conservateur", "equilibre", "agressif")
@@ -278,11 +280,61 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             "meta": json.dumps({"heat": round(float(heat), 3), "mise": MISE_REF,
                                 "pre_course": True}),
         })
+        # Même conseil, journalisé aussi dans le registre append-only commun aux
+        # plans utilisateurs : profil_run_log est upserté (le dernier prono
+        # pré-départ écrase le précédent), donc il ne conserve PAS l'historique
+        # des états successifs. bet_plan_snapshots, lui, ne perd rien.
+        await _record_system_plan_snapshot(
+            session, course_id=course_id, plan_d=plan_d, profil=profil,
+            heat=heat, model_version_id=model_version_id,
+            preds=preds, course_start_at=_date_heure,
+        )
         n_written += 1
     await session.commit()
     if n_written:
         log.info("profil_learning.runs_recorded", course_id=course_id, n=n_written)
     return n_written
+
+
+async def _record_system_plan_snapshot(
+    session, *, course_id: str, plan_d: dict, profil: str, heat: float,
+    model_version_id, preds: list[dict], course_start_at,
+) -> None:
+    """Fige un plan émis par le job interne (origin='profil_run', sujet 'system')."""
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        from services.bet_plan_snapshots import (
+            latest_prediction_run_id, record_plan_snapshot,
+        )
+        from services.mise_calculator import _effective_config, _palier
+
+        cotes = {int(p["numero"]): float(p["cote_pmu"]) for p in preds
+                 if p.get("cote_pmu")}
+        await record_plan_snapshot(
+            session,
+            course_id=course_id,
+            plan=plan_d,
+            profil=profil,
+            montant_demande=float(MISE_REF),
+            bankroll=None,
+            cotes_utilisees=cotes,
+            algo_config={
+                "profil": profil,
+                "heat": round(float(heat or 0.0), 4),
+                "cfg": _effective_config(profil, float(heat or 0.0)),
+                "palier": _palier(int(MISE_REF)),
+                "respect_montant": False,
+                "origin": "profil_run",
+            },
+            emitted_at=_dt.now(_tz.utc),
+            course_start_at=course_start_at,
+            model_version_id=model_version_id,
+            prediction_run_id=await latest_prediction_run_id(session, course_id),
+            origin="profil_run",
+        )
+    except Exception as e:
+        log.warning("profil_learning.plan_snapshot_skip",
+                    course_id=course_id, profil=profil, err=str(e)[:140])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -417,30 +469,37 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
     purgeable à chaque fin de course (peu coûteux)."""
     await ensure_tables(session)
 
-    # FLAG oos_weights : n'agrège que les runs RÉELLEMENT émis avant le départ et non
-    # backfillés (mêmes gardes que le palmarès). Sans ça, les runs backfillés (plan
-    # régénéré après résultat connu) gonflent le ROI affiché (+150% illusion vs -52%
-    # honnête de edge_monitor). Flag off → comportement historique (tous les settled).
-    from ml.algo_flags import FLAGS as _AF
-    if _AF.oos_weights:
-        rows = (await session.execute(text("""
-            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants,
-                   r.created_at
-            FROM profil_run_log r
-            JOIN courses c ON c.course_id = r.course_id
-            WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
-              AND c.date_heure IS NOT NULL
-              AND r.created_at < c.date_heure
-              AND COALESCE(r.meta->>'backfill', '') <> 'true'
-        """))).all()
-    else:
-        rows = (await session.execute(text("""
-            SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants,
-                   r.created_at
-            FROM profil_run_log r
-            JOIN courses c ON c.course_id = r.course_id
-            WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
-        """))).all()
+    # Intégrité inconditionnelle : seuls les plans réellement émis avant départ et
+    # non backfillés peuvent apprendre des poids. Aucun flag de rollback ne peut
+    # réintroduire les runs reconstruits après résultat.
+    rows = (await session.execute(text("""
+        SELECT r.profil, r.resultat, r.roi_reel, c.discipline, c.nb_partants,
+               r.created_at
+        FROM profil_run_log r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
+          AND c.date_heure IS NOT NULL
+          AND r.created_at < c.date_heure
+          AND COALESCE(r.meta->>'backfill', '') <> 'true'
+    """))).all()
+
+    # Cold start / cohorte amputée : sous ce volume, l'agrégat ne peut produire que
+    # des poids neutres et perdrait les suppressions déjà prouvées (types 0-gain,
+    # buckets à ROI ≤ -40 %). On PRÉSERVE l'état appris : rien n'est réécrit, la
+    # nuit suivante réessaiera. L'état existant est renvoyé tel quel pour que les
+    # lecteurs en mémoire continuent d'appliquer la même chose qu'avant.
+    if len(rows) < MIN_PROFIL_WEIGHTS_RUNS:
+        log.warning(
+            "profil_learning.skipped_insufficient_replayable_data",
+            n_runs=len(rows), min_runs=MIN_PROFIL_WEIGHTS_RUNS,
+        )
+        existing = await load_profil_weights(session) or {}
+        # "profils" toujours présent : les scripts de diagnostic l'indexent
+        # directement, un cold start total ne doit pas les faire planter.
+        return {"profils": {}, **existing,
+                "n_observed_runs": len(rows),
+                "status": "skipped_insufficient_replayable_data",
+                "min_runs": MIN_PROFIL_WEIGHTS_RUNS}
 
     def _new_agg():
         return {"types": {}, "n_runs": 0, "mise": 0.0, "gain": 0.0, "runs_benef": 0}

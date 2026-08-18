@@ -21,6 +21,13 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ml.prediction_evaluation import (
+    MIN_EV_BAND_OBS,
+    MIN_EV_BAND_REPLAYABLE_OBS,
+    MIN_RAPPORT_CALIB_RUNS,
+    MIN_SIGNAL_PERF_OBS,
+)
+
 log = structlog.get_logger()
 
 # Définitions des signaux = (nom, prédicat sur le dict features). Alignées sur
@@ -202,7 +209,20 @@ def _safe(pred, f) -> bool:
         return False
 
 
-async def persist_signal_performance(session: AsyncSession, perf: dict) -> None:
+async def persist_signal_performance(session: AsyncSession, perf: dict) -> bool:
+    """Persiste les multiplicateurs de signaux. False = état existant PRÉSERVÉ.
+
+    Cold start : la garde anti-leakage (features figées avant départ) peut ne
+    retenir aucune ligne. ``compute_signal_performance`` renvoie alors tous les
+    signaux à multiplier=1.0 — une structure complète, donc indiscernable d'un
+    apprentissage légitime une fois écrite. On refuse l'écriture sous le seuil.
+    """
+    if int(perf.get("n_total") or 0) < MIN_SIGNAL_PERF_OBS:
+        log.warning(
+            "signal_performance.skipped_insufficient_replayable_data",
+            n_obs=int(perf.get("n_total") or 0), min_obs=MIN_SIGNAL_PERF_OBS,
+        )
+        return False
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS signal_performance (
             id INT PRIMARY KEY DEFAULT 1,
@@ -216,6 +236,7 @@ async def persist_signal_performance(session: AsyncSession, perf: dict) -> None:
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
     """), {"d": json.dumps(perf)})
     await session.commit()
+    return True
 
 
 async def load_signal_performance(session: AsyncSession) -> dict | None:
@@ -255,7 +276,7 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
     rows = (await session.execute(text("""
         SELECT p.cote_figee, p.proba_top1,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
-        FROM predictions p
+        FROM prediction_evaluation p
         JOIN participations pa ON pa.participation_id = p.participation_id
         JOIN courses c ON c.course_id = p.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = p.course_id
@@ -263,6 +284,7 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
           AND p.proba_top1 IS NOT NULL AND jsonb_typeof(r.classement) = 'array'
           -- ANTI-LEAKAGE : prono FIGÉ avant le départ uniquement (cf. signal learner).
           AND c.date_heure IS NOT NULL AND p.created_at < c.date_heure
+          AND p.is_replayable = true
     """))).fetchall()
 
     agg = {f"{lo:.2f}_{hi:.2f}": {"n": 0, "wins": 0, "stake": 0.0, "payout": 0.0}
@@ -284,18 +306,27 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
             continue
         roi = (a["payout"] - a["stake"]) / a["stake"]
         roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + EV_K_SHRINK)
-        mult = float(max(0.5, min(1.6, 1.0 + roi_shrunk)))
+        reliable = n >= MIN_EV_BAND_OBS
+        mult = float(max(0.5, min(1.6, 1.0 + roi_shrunk))) if reliable else 1.0
         bands[key] = {
             "n": n,
             "win_rate": round(a["wins"] / n, 3),
             "roi": round(roi, 3),
             "roi_shrunk": round(roi_shrunk, 3),
             "multiplier": round(mult, 3),
+            "reliable": reliable,
         }
     return {"bands": bands, "n_total": len(rows)}
 
 
-async def persist_ev_band_performance(session: AsyncSession, perf: dict) -> None:
+async def persist_ev_band_performance(session: AsyncSession, perf: dict) -> bool:
+    if int(perf.get("n_total") or 0) < MIN_EV_BAND_REPLAYABLE_OBS:
+        log.warning(
+            "ev_band_performance.skipped_insufficient_replayable_data",
+            n_obs=int(perf.get("n_total") or 0),
+            min_obs=MIN_EV_BAND_REPLAYABLE_OBS,
+        )
+        return False
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS ev_band_performance (
             id INT PRIMARY KEY DEFAULT 1,
@@ -309,6 +340,7 @@ async def persist_ev_band_performance(session: AsyncSession, perf: dict) -> None
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
     """), {"d": json.dumps(perf)})
     await session.commit()
+    return True
 
 
 async def load_ev_band_performance(session: AsyncSession) -> dict | None:
@@ -441,7 +473,20 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
     return out
 
 
-async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> None:
+async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> bool:
+    """Persiste la calibration estimé→réel des rapports. False = état PRÉSERVÉ.
+
+    Source : ``profil_run_log`` réglé, filtré par les gardes anti-leakage. Si ce
+    filtre ne laisse plus rien (règlement en retard, backfills exclus), les
+    facteurs retombent tous à 1.0 et le gate de bande cesserait d'écarter les
+    types qui paient sous la tranche de leur profil.
+    """
+    if int(perf.get("n_runs") or 0) < MIN_RAPPORT_CALIB_RUNS:
+        log.warning(
+            "rapport_calibration.skipped_insufficient_replayable_data",
+            n_runs=int(perf.get("n_runs") or 0), min_runs=MIN_RAPPORT_CALIB_RUNS,
+        )
+        return False
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS rapport_calibration (
             id INT PRIMARY KEY DEFAULT 1,
@@ -455,6 +500,7 @@ async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> None
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
     """), {"d": json.dumps(perf)})
     await session.commit()
+    return True
 
 
 async def load_rapport_calibration(session: AsyncSession) -> dict | None:

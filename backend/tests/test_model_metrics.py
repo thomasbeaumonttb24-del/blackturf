@@ -7,6 +7,7 @@ Garantit la règle projet : NE JAMAIS afficher de fausse donnée.
 - pas assez de courses évaluées → précision None (pas de chiffre inventé)
 """
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -18,7 +19,9 @@ from api.model_metrics import (
     plausible_roi_pct,
     real_model_metrics,
 )
-from db.models import ModelVersion, RaceLearningLog
+from db.models import (
+    Course, ModelVersion, Prediction, PredictionSnapshot, RaceLearningLog,
+)
 
 
 # ─── plausible_roi (pur) ──────────────────────────────────────────────
@@ -84,12 +87,56 @@ def _mv(roi_simule: float, precision_top3: float = 0.0, auc_roc: float = 0.71) -
     )
 
 
-async def _add_rll(db, n_total: int, n_top3: int):
+async def _add_rll(db, n_total: int, n_top3: int, n_contaminated: int = 0):
     """n_total courses évaluées, dont n_top3 avec gagnant dans le top-3 prédit."""
     for i in range(n_total):
+        course_id = f"course-{i}-{uuid.uuid4().hex[:8]}"
+        depart = datetime.now(timezone.utc) - timedelta(days=1)
+        db.add(Course(
+            course_id=course_id,
+            reunion_id=f"reunion-{i}",
+            numero=i + 1,
+            date_heure=depart,
+            hippodrome_nom="Test",
+            discipline="Plat",
+            distance=2000,
+            nb_partants=1,
+            statut="termine",
+        ))
+        prediction_id = str(uuid.uuid4())
+        participation_id = str(uuid.uuid4())
+        is_replayable = i < n_total - n_contaminated
+        observed_at = depart - timedelta(minutes=10) if is_replayable else depart + timedelta(minutes=1)
+        db.add(Prediction(
+            prediction_id=prediction_id,
+            participation_id=participation_id,
+            course_id=course_id,
+            proba_top1=0.2,
+            proba_top3=0.5,
+            rang_predit=1,
+            created_at=observed_at,
+        ))
+        db.add(PredictionSnapshot(
+            snapshot_id=str(uuid.uuid4()),
+            prediction_run_id=str(uuid.uuid4()),
+            prediction_id=prediction_id,
+            participation_id=participation_id,
+            course_id=course_id,
+            features={},
+            features_hash="a" * 64,
+            feature_schema_hash="b" * 64,
+            proba_top1=0.2,
+            proba_top3=0.5,
+            rang_predit=1,
+            observed_at=observed_at,
+            course_start_at=depart,
+            is_pre_course=is_replayable,
+            origin="live",
+            is_replayable=True,
+        ))
         db.add(RaceLearningLog(
             log_id=str(uuid.uuid4()),
-            course_id=f"course-{i}-{uuid.uuid4().hex[:8]}",
+            course_id=course_id,
             gagnant_rang_predit=(2 if i < n_top3 else 7),
         ))
     await db.commit()
@@ -110,6 +157,15 @@ async def test_precision_reelle_observee(db):
     out = await real_model_metrics(db, _mv(roi_simule=6.029, precision_top3=0.0))
     assert out["precision_top3"] == pytest.approx(54 / 77, abs=1e-4)
     assert out["nb_courses_evaluees"] == 77
+    assert out["prediction_data_quality"]["n_replayable"] == 77
+
+
+@pytest.mark.asyncio
+async def test_predictions_post_course_sont_exclues_des_metriques(db):
+    await _add_rll(db, n_total=12, n_top3=12, n_contaminated=2)
+    out = await real_model_metrics(db, _mv(roi_simule=0.0))
+    assert out["nb_courses_evaluees"] == 10
+    assert out["precision_top3"] == 1.0
 
 
 @pytest.mark.asyncio

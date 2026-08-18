@@ -69,18 +69,19 @@ async def _fetch_proba_outcomes(session: AsyncSession) -> list[tuple[float, int,
     """
     from ml.algo_flags import FLAGS as _AF
     _col = "COALESCE(pr.proba_top1_raw, pr.proba_top1)" if _AF.calib_on_raw else "pr.proba_top1"
-    _guard = ("AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL "
-              "AND pr.created_at < c.date_heure") if _AF.calib_on_raw else ""
     rows = await session.execute(text(f"""
         SELECT {_col}, pa.numero, pr.course_id, c.discipline,
                (SELECT count(*) FROM participations pp
                  WHERE pp.course_id = pr.course_id AND pp.non_partant = false) AS nb_part
-        FROM predictions pr
+        FROM prediction_evaluation pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN resultats r       ON r.course_id        = pr.course_id
         JOIN courses c         ON c.course_id        = pr.course_id
         WHERE {_col} IS NOT NULL
-          {_guard}
+          AND c.date_heure IS NOT NULL
+          AND pr.created_at IS NOT NULL
+          AND pr.created_at < c.date_heure
+          AND pr.is_replayable = true
     """))
     winners = await fetch_winners(session)
     out: list[tuple[float, int, str]] = []
@@ -125,6 +126,13 @@ async def compute_and_store(session: AsyncSession) -> dict:
     rupture en DB. Retourne {x, y, n_obs} ; courbe vide si données insuffisantes.
     """
     data = await _fetch_proba_outcomes(session)
+    if len(data) < MIN_OBS:
+        log.warning(
+            "isotonic.skipped_insufficient_replayable_data",
+            n_obs=len(data), min_obs=MIN_OBS,
+        )
+        return {"x": [], "y": [], "n_obs": len(data), "segments": {},
+                "status": "skipped_insufficient_replayable_data"}
     # Courbe GLOBALE (fallback) sur toutes les obs.
     curve: dict = _fit_curve([(p, w) for p, w, _ in data])
 

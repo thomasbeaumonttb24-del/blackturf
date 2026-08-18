@@ -308,6 +308,13 @@ class MetaLearner:
                       WHERE pp.course_id = rll.course_id
                         AND fm.computed_at < c.date_heure
                   )
+                  AND EXISTS (
+                      SELECT 1 FROM prediction_evaluation pred
+                      WHERE pred.course_id = rll.course_id
+                        AND pred.created_at IS NOT NULL
+                        AND pred.created_at < c.date_heure
+                        AND pred.is_replayable = true
+                  )
                 GROUP BY
                     rll.course_id,
                     rll.gagnant_rang_predit,

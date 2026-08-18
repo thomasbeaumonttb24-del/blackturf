@@ -13,6 +13,12 @@ import math
 # plancher EFFECTIF du moteur, indépendant des minima PMU ci-dessous.
 MISE_PLANCHER = 2
 
+# Pénalité de mise sur l'incertitude du modèle (largeur IC proba_top1_high−low),
+# appliquée en staking Kelly : discount = 1/(1 + CI_WIDTH_PENALTY × largeur).
+# Ex. largeur 0.30 (grosse incertitude) → mise ×0.53 ; largeur 0.10 → ×0.77 ;
+# largeur 0 (ou absente) → ×1.0 (aucun effet). Valeur POLICY, à valider Point 11.
+CI_WIDTH_PENALTY = 3.0
+
 # Montant minimum PMU par type de pari (référence réglementaire ; le moteur
 # applique MISE_PLANCHER=2€ par-dessus).
 MISE_MIN = {
@@ -407,6 +413,11 @@ def generer_plan(
     cfg = _effective_config(profil, heat)
 
     preds = []
+    # Largeur de l'intervalle de confiance de proba_top1, PAR CHEVAL — sert à réduire la
+    # mise Kelly (cf. _allocate_kelly.weight) quand l'incertitude du modèle est large,
+    # sans toucher à combo_bets.py (la proba SIMULÉE reste inchangée, seul le STAKING en
+    # tient compte). Absent → 0.0 (aucune pénalité, jamais d'incertitude inventée).
+    ci_width_by_num: dict[int, float] = {}
     for p in predictions:
         if p.get("non_partant"):
             continue
@@ -417,10 +428,21 @@ def generer_plan(
             "proba_top3": p.get("proba_top3"),
             "cote_pmu": p.get("cote_pmu"),
         })
+        lo, hi = p.get("proba_top1_low"), p.get("proba_top1_high")
+        if lo is not None and hi is not None:
+            try:
+                ci_width_by_num[int(p["numero"])] = max(0.0, float(hi) - float(lo))
+            except (TypeError, ValueError):
+                pass
 
     cands = enumerate_bet_candidates(preds, course_info)
     if not cands:
         return _plan_vide(montant, profil)
+    if ci_width_by_num:
+        for c in cands:
+            c["_ci_width"] = max(
+                (ci_width_by_num.get(int(h["numero"]), 0.0) for h in c.get("chevaux", [])
+                 if h.get("numero") is not None), default=0.0)
 
     # CALIBRATION estimé→réel : recale le rapport (et donc l'EV) de chaque candidat sur le
     # rapport RÉEL appris par (profil × type), AVANT les gates de bande. Un Placé estimé
@@ -1157,6 +1179,15 @@ def _select_conviction(
     return selected
 
 
+def _uncertainty_discount(ci_width) -> float:
+    """discount = 1/(1 + CI_WIDTH_PENALTY × largeur IC) ∈ (0, 1]. Largeur absente/None
+    → 1.0 (aucun effet, jamais d'incertitude inventée)."""
+    w = float(ci_width or 0.0)
+    if w <= 0:
+        return 1.0
+    return 1.0 / (1.0 + CI_WIDTH_PENALTY * w)
+
+
 def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
                     respect_montant: bool = False, min_keep: int = 1) -> None:
     """Dispatch `montant` (€ entiers) par fraction de KELLY réelle (ev/(cote-1))
@@ -1187,8 +1218,13 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
         # à 2.0 → la demi-Kelly tiltée ne dépasse JAMAIS le Kelly PLEIN (0.5×2.0). Sans ce cap
         # le produit montait ~8× = bien au-dessus de Kelly plein = ruine sur série de pertes,
         # surtout edge surestimé (cf. audit edge : edge réel non prouvé).
+        # Incertitude du modèle (largeur de l'IC de proba_top1, Point 12 audit) : plus
+        # l'IC est large, moins l'edge mesuré est fiable → on réduit la conviction AVANT
+        # le cap anti sur-staking (donc le plafond « jamais > Kelly plein » reste garanti
+        # dans tous les cas). Absent (0.0) → discount=1.0, comportement inchangé.
+        unc_discount = _uncertainty_discount(c.get("_ci_width", 0.0))
         mult = min(certitude * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0)
-                   * float(c.get("_evb", 1.0) or 1.0), 2.0)
+                   * float(c.get("_evb", 1.0) or 1.0) * unc_discount, 2.0)
         return max(f * mult, 1e-3)
 
     weights = [weight(c) for c in selected]
@@ -1236,6 +1272,11 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
     # sûrs (ou d'autres gros-rapports décorrélés), sinon le laisse en réserve. Dernier
     # passage → ne peut pas être défait par la concentration du gain target.
     _apply_variance_cap(selected, montant, cfg, min_stake, respect_montant=respect_montant)
+    # GARDE-FOU CORRÉLATION : plusieurs paris qui misent sur le MÊME cheval ne sont pas
+    # diversifiés (cf. Point 12 audit) — même après le plafond de variance ci-dessus, qui
+    # ne regarde que le TYPE de pari (haute variance ou non), pas le chevauchement réel de
+    # chevaux entre paris différents.
+    _apply_correlation_cap(selected, montant, min_stake, respect_montant=respect_montant)
 
 
 def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
@@ -1446,6 +1487,73 @@ def _apply_variance_cap(selected: list[dict], montant: int, cfg: dict,
             order[k % len(order)]["mise"] += 1
             moved -= 1
             k += 1
+
+
+# Part max du montant total dont le GAIN dépend d'UN SEUL cheval, tous paris
+# confondus. Deux paris qui misent chacun sur le même cheval (ex. Simple Gagnant
+# + Couplé Placé l'incluant) ne sont PAS diversifiés : si ce cheval déçoit ou est
+# disqualifié, les deux perdent ENSEMBLE. Le nombre de paris affiché peut donc
+# être un trompe-l'œil — ce plafond mesure le risque réel (par cheval), pas le
+# nombre de tickets.
+MAX_HORSE_EXPOSURE_FRAC = 0.70
+
+
+def _apply_correlation_cap(selected: list[dict], montant: int, min_stake: int,
+                           respect_montant: bool = False) -> None:
+    """Plafonne l'exposition cumulée à un seul cheval à `MAX_HORSE_EXPOSURE_FRAC`
+    × montant. Dernier passage (après variance cap) : transfère l'excédent des
+    paris impliquant le cheval sur-exposé vers des paris qui NE LE PARTAGENT PAS
+    (jamais vers un autre pari corrélé, ce qui ne ferait que déplacer le
+    problème). Ne peut réduire une mise sous `min_stake`."""
+    if len(selected) < 2:
+        return
+    ceil_amt = max(int(min_stake), int(montant * MAX_HORSE_EXPOSURE_FRAC))
+    guard = 0
+    while guard < 20:
+        guard += 1
+        exposure: dict[int, float] = {}
+        for c in selected:
+            for n in {int(h["numero"]) for h in c.get("chevaux", []) if h.get("numero") is not None}:
+                exposure[n] = exposure.get(n, 0.0) + c.get("mise", 0)
+        over = {n: e for n, e in exposure.items() if e > ceil_amt}
+        if not over:
+            return
+        worst = max(over, key=over.get)
+        involved = [c for c in selected
+                   if worst in {int(h["numero"]) for h in c.get("chevaux", [])
+                                if h.get("numero") is not None}]
+        if len(involved) < 2:
+            return  # un seul pari sur ce cheval : c'est sa taille propre, pas une corrélation
+        # Réduit en priorité le pari le MOINS convaincant (proba×rapport le plus faible),
+        # jamais sous le plancher (ni min_stake, ni le "_besoin" du contrat de gain — même
+        # garde que _apply_variance_cap : on ne défait pas la promesse ≥ gain_cible_mult).
+        involved.sort(key=lambda c: c.get("proba_gain", 0.0) * c.get("rapport_estime", 0.0))
+        weakest = involved[0]
+        floor_w = max(int(min_stake), int(weakest.get("_besoin", 0) or 0))
+        reduce_by = min(int(weakest["mise"]) - floor_w, int(exposure[worst] - ceil_amt) + 1)
+        if reduce_by <= 0:
+            return
+        weakest["mise"] -= reduce_by
+        # Redistribue vers les paris NE PARTAGEANT AUCUN cheval avec `worst`.
+        weakest_horses = {int(h["numero"]) for h in weakest.get("chevaux", [])
+                          if h.get("numero") is not None}
+        free = [c for c in selected if c is not weakest
+               and not ({int(h["numero"]) for h in c.get("chevaux", [])
+                        if h.get("numero") is not None} & weakest_horses)
+               and worst not in {int(h["numero"]) for h in c.get("chevaux", [])
+                                 if h.get("numero") is not None}]
+        moved = reduce_by
+        k = 0
+        while moved > 0 and free:
+            free[k % len(free)]["mise"] += 1
+            moved -= 1
+            k += 1
+        if moved > 0 and respect_montant:
+            # Aucun pari décorrélé pour absorber : le montant saisi doit rester
+            # ENTIÈREMENT joué (contrat manuel) → on rend l'excédent à `weakest`
+            # plutôt que de sous-jouer le montant demandé. Le plafond n'est donc
+            # pas garanti dans ce cas (peu de candidats), mais jamais le contrat.
+            weakest["mise"] += moved
 
 
 # Pourquoi ce TYPE de pari sert ce PROFIL — pédagogie de la méthode de jeu.
@@ -1769,12 +1877,23 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
 
     Un pari de la sélection figée introuvable parmi les candidats live (combo d'outsider
     rare régénéré différemment) GARDE son gain figé — jamais d'invention, jamais de crash.
-    Mute et retourne `plan`."""
+
+    Non-partant déclaré APRÈS le gel : un cheval de la sélection peut être scratché entre
+    le gel (T-10) et le départ. Ces chevaux sont exclus des candidats live (comme dans
+    `generer_plan`) ; un pari de la sélection figée qui l'inclut est marqué
+    `non_partant_detecte=True` plutôt que ré-estimé sur un cheval qui ne courra plus — le
+    remboursement réel se fait au règlement (`settle_pari`), ceci n'est qu'un signal
+    d'affichage pour ne pas montrer un gain live trompeur. Mute et retourne `plan`."""
     if not plan or not predictions:
         return plan
+    non_partants = {int(p["numero"]) for p in predictions
+                    if p.get("non_partant") and p.get("numero") is not None}
     try:
         from ml.combo_bets import enumerate_bet_candidates
-        cands = enumerate_bet_candidates(predictions, course_info)
+        # Mêmes chevaux exclus qu'à la génération : un non-partant ne doit jamais
+        # réapparaître dans un candidat live (combo_bets ne le filtre pas lui-même).
+        live_preds = [p for p in predictions if not p.get("non_partant")]
+        cands = enumerate_bet_candidates(live_preds, course_info)
     except Exception:
         return plan
     if not cands:
@@ -1789,7 +1908,17 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
         for p in niv.get("paris", []):
             mise = float(p.get("mise") or 0)
             m_niv += mise
-            key = (p.get("type"), frozenset(int(h["numero"]) for h in p.get("chevaux", [])))
+            pari_horses = {int(h["numero"]) for h in p.get("chevaux", [])
+                           if h.get("numero") is not None}
+            if pari_horses & non_partants:
+                # Cheval scratché après le gel : le gain live n'a pas de sens (le pari
+                # sera remboursé au règlement). On garde le gain/EV figés pour l'affichage
+                # historique du plan, mais on signale l'impact plutôt que de le masquer.
+                p["non_partant_detecte"] = True
+                ev_pondere += mise * float(p.get("ev_estime") or 0.0)
+                niv["montant"] = round(m_niv, 2)
+                continue
+            key = (p.get("type"), frozenset(pari_horses))
             c = look.get(key)
             if c:
                 rap = float(c["rapport_estime"])

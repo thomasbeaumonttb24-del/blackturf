@@ -40,7 +40,10 @@ async def _load(session, limit):
         SELECT c.course_id FROM courses c
         JOIN resultats r ON r.course_id = c.course_id
         WHERE c.statut = 'termine' AND r.classement IS NOT NULL
-          AND EXISTS (SELECT 1 FROM predictions p WHERE p.course_id = c.course_id)
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              WHERE p.course_id = c.course_id AND p.is_replayable = true
+          )
         ORDER BY c.date_heure DESC LIMIT :lim
     """), {"lim": limit})).fetchall()]
     data = []
@@ -48,12 +51,13 @@ async def _load(session, limit):
         rows = (await session.execute(text("""
             SELECT pa.numero, ch.nom, pr.proba_top3, pr.proba_top1,
                    COALESCE(pr.cote_figee, pa.cote_pmu), pa.non_partant
-            FROM predictions pr
+            FROM prediction_evaluation pr
             JOIN participations pa ON pa.participation_id = pr.participation_id
             JOIN chevaux ch ON ch.cheval_id = pa.cheval_id
             JOIN courses co ON co.course_id = pr.course_id
             WHERE pa.course_id = :c
               AND co.date_heure IS NOT NULL AND pr.created_at < co.date_heure
+              AND pr.is_replayable = true
             ORDER BY pr.rang_predit
         """), {"c": cid})).fetchall()
         if not rows:

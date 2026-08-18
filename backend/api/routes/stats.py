@@ -23,7 +23,7 @@ from db.redis_client import get_redis
 from db.models import (
     ModelVersion, Course, User, ValueBet, Participation,
     Resultat, Cheval, AdaptiveLearningState, DriftDetectorState,
-    BankrollEntry, Recommandation, Prediction, RaceLearningLog,
+    BankrollEntry, Recommandation, PredictionEvaluation, RaceLearningLog,
 )
 from services.course_resolution import STATUTS_NON_COURUES
 import redis.asyncio as aioredis
@@ -113,10 +113,10 @@ async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float
     courbe d'équité ET le ROI simulé 6 mois. is_real=False si < 10 paris."""
     since = datetime.now(timezone.utc) - timedelta(days=since_days)
     rows = (await db.execute(
-        select(ValueBet, Participation, Course, Resultat, Prediction)
+        select(ValueBet, Participation, Course, Resultat, PredictionEvaluation)
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
         .join(Course, Course.course_id == ValueBet.course_id)
-        .outerjoin(Prediction, Prediction.prediction_id == ValueBet.prediction_id)
+        .outerjoin(PredictionEvaluation, PredictionEvaluation.prediction_id == ValueBet.prediction_id)
         .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
         .where(
             ValueBet.niveau >= 3,
@@ -126,6 +126,9 @@ async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float
             # départ. Sinon = pari reconstruit a posteriori sur une course connue
             # (in-sample) → ROI gonflé.
             ValueBet.detecte_a < Course.date_heure,
+            PredictionEvaluation.created_at.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+            PredictionEvaluation.is_replayable.is_(True),
         )
         .order_by(Course.date_heure)
         .limit(500)
@@ -743,6 +746,14 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                                   AND gagnant_rang_predit <= 3)               AS top3,
                COUNT(*) FILTER (WHERE was_surprise)                           AS surprises
         FROM race_learning_log
+        WHERE EXISTS (
+            SELECT 1 FROM prediction_evaluation p
+            JOIN courses c ON c.course_id = p.course_id
+            WHERE p.course_id = race_learning_log.course_id
+              AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+              AND p.created_at < c.date_heure
+              AND p.is_replayable = true
+        )
     """))).first()
     nb_total = int(_glob.nb or 0)
     brier_moyen = round(float(_glob.brier), 4) if _glob.brier is not None else 0.0
@@ -775,6 +786,14 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                COUNT(*) FILTER (WHERE was_surprise)                           AS surprises
         FROM race_learning_log
         WHERE analyzed_at IS NOT NULL AND analyzed_at >= :since
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              JOIN courses c ON c.course_id = p.course_id
+              WHERE p.course_id = race_learning_log.course_id
+                AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+                AND p.is_replayable = true
+          )
         GROUP BY 1
     """), {"since": _since.replace(tzinfo=None)})).all()
     for r in _drows:
@@ -797,6 +816,14 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
                                   AND gagnant_rang_predit <= 3)               AS top3
         FROM race_learning_log
+        WHERE EXISTS (
+            SELECT 1 FROM prediction_evaluation p
+            JOIN courses c ON c.course_id = p.course_id
+            WHERE p.course_id = race_learning_log.course_id
+              AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+              AND p.created_at < c.date_heure
+              AND p.is_replayable = true
+        )
         GROUP BY 1
     """))).all()
     by_discipline = [
@@ -810,17 +837,21 @@ async def _compute_track_record(db: AsyncSession) -> dict:
 
     # ── 4. Meilleurs pronostics (gagnant prédit rang 1, cote > 5) ─
     q_best = (
-        select(Prediction, Participation, Cheval, Course, Resultat)
-        .join(Participation, Participation.participation_id == Prediction.participation_id)
+        select(PredictionEvaluation, Participation, Cheval, Course, Resultat)
+        .join(Participation, Participation.participation_id == PredictionEvaluation.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .join(Course, Course.course_id == Prediction.course_id)
-        .outerjoin(Resultat, Resultat.course_id == Prediction.course_id)
+        .join(Course, Course.course_id == PredictionEvaluation.course_id)
+        .outerjoin(Resultat, Resultat.course_id == PredictionEvaluation.course_id)
         .where(
-            Prediction.rang_predit == 1,
+            PredictionEvaluation.rang_predit == 1,
             Participation.cote_pmu >= 5.0,
             Course.statut == "termine",
+            PredictionEvaluation.created_at.is_not(None),
+            Course.date_heure.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+            PredictionEvaluation.is_replayable.is_(True),
         )
-        .order_by(Prediction.created_at.desc())
+        .order_by(PredictionEvaluation.created_at.desc())
         .limit(10)
     )
     best_rows = (await db.execute(q_best)).all()
@@ -850,8 +881,17 @@ async def _compute_track_record(db: AsyncSession) -> dict:
         select(ValueBet.niveau, Participation.numero, Participation.cote_pmu,
                Resultat.classement)
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
+        .join(Course, Course.course_id == ValueBet.course_id)
+        .join(PredictionEvaluation, PredictionEvaluation.prediction_id == ValueBet.prediction_id)
         .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
-        .where(ValueBet.actif == False)  # resolved bets only
+        .where(
+            ValueBet.actif == False,  # resolved bets only
+            Course.date_heure.is_not(None),
+            ValueBet.detecte_a < Course.date_heure,
+            PredictionEvaluation.created_at.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+            PredictionEvaluation.is_replayable.is_(True),
+        )
         .limit(2000)
     )
     vb_rows = (await db.execute(q_vbs)).all()
@@ -892,16 +932,23 @@ async def _compute_track_record(db: AsyncSession) -> dict:
     # ORDER BY created_at DESC LIMIT 2000 reste deterministe : aucun ex aequo sur
     # predictions.created_at (verifie : 2 100 horodatages distincts sur 2 100).
     q_fav = (
-        select(Prediction.proba_top1, Participation.numero, Participation.cote_pmu,
+        select(PredictionEvaluation.proba_top1, Participation.numero, Participation.cote_pmu,
                Cheval.nom.label("cheval_nom"), Course.course_id,
                Course.hippodrome_nom, Course.discipline, Course.date_heure,
                Resultat.classement)
-        .join(Participation, Participation.participation_id == Prediction.participation_id)
+        .join(Participation, Participation.participation_id == PredictionEvaluation.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .join(Course, Course.course_id == Prediction.course_id)
-        .join(Resultat, Resultat.course_id == Prediction.course_id)
-        .where(Prediction.rang_predit == 1, Course.statut == "termine")
-        .order_by(Prediction.created_at.desc())
+        .join(Course, Course.course_id == PredictionEvaluation.course_id)
+        .join(Resultat, Resultat.course_id == PredictionEvaluation.course_id)
+        .where(
+            PredictionEvaluation.rang_predit == 1,
+            Course.statut == "termine",
+            PredictionEvaluation.created_at.is_not(None),
+            Course.date_heure.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+            PredictionEvaluation.is_replayable.is_(True),
+        )
+        .order_by(PredictionEvaluation.created_at.desc())
         .limit(2000)
     )
     fav_rows = (await db.execute(q_fav)).all()
@@ -1014,9 +1061,10 @@ async def _compute_track_record(db: AsyncSession) -> dict:
         # interdit les ex aequo, donc ORDER BY time LIMIT 1 == (array_agg(...))[1].
         clv_row = (await db.execute(text("""
             WITH fav AS MATERIALIZED (
-                SELECT p.participation_id FROM predictions p
+                SELECT p.participation_id FROM prediction_evaluation p
                 JOIN courses c ON c.course_id = p.course_id
                 WHERE p.rang_predit = 1 AND c.statut = 'termine'
+                  AND p.is_replayable = true
             ),
             ch AS MATERIALIZED (
                 SELECT f.participation_id,
@@ -1292,3 +1340,41 @@ async def stats_palmares_gagnants(
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# Point 11 — Rentabilité FORWARD des plans réellement émis (admin)
+# ─────────────────────────────────────────────────────────────
+BET_PLAN_PERF_DIMENSIONS = (
+    "profil", "type_pari", "cote_band", "ev_band", "discipline", "hippodrome",
+    "peloton", "model_version", "snapshot_age", "bankroll", "combo",
+)
+
+
+@router.get("/stats/bet-plan-performance")
+async def stats_bet_plan_performance(
+    dimension: str = "type_pari",
+    days: Optional[int] = 90,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),   # ROI segmenté par plan = admin uniquement
+):
+    """Rentabilité FORWARD des plans de mise RÉELLEMENT émis (bet_plan_snapshots
+    réglés sur les vrais rapports PMU), jamais une reconstruction a posteriori.
+
+    `dimension` : une des colonnes de segmentation (profil, type_pari, cote_band,
+    ev_band, discipline, hippodrome, peloton, model_version, snapshot_age,
+    bankroll, combo). `days` : fenêtre glissante en jours (None = tout l'historique).
+    Un segment sous le seuil de fiabilité reste `status="observed"` — jamais
+    déclaré rentable ou perdant sur un petit échantillon.
+    """
+    from fastapi import HTTPException as _H
+    from ml.bet_plan_performance import (
+        DIMENSIONS, compute_forward_performance, evaluate_segment_gates,
+    )
+    if dimension not in DIMENSIONS:
+        raise _H(status_code=422,
+                 detail=f"dimension invalide (attendu: {', '.join(DIMENSIONS)})")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
+    perf = await compute_forward_performance(db, dimension, since=since)
+    perf["gates"] = evaluate_segment_gates(perf)
+    return perf

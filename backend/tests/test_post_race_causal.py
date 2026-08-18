@@ -46,6 +46,8 @@ async def test_analyze_race_genere_causal_tags(db):
     analyzer = PostRaceAnalyzer()
     rapport = await analyzer.analyze_race(db, "RC1", predictions, resultat)
 
+    assert rapport["gagnant_proba_ia"] == pytest.approx(0.25)
+    assert rapport["gagnant_proba_ia_pct"] == pytest.approx(25.0)
     assert "causal_tags" in rapport
     tags = {t["tag"] for t in rapport["causal_tags"]}
     # Gagnant venu de loin + favori hors top-3

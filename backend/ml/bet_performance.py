@@ -71,6 +71,20 @@ async def get_learned_type_weights(session: AsyncSession,
                                    profil: str | None = None,
                                    discipline: str | None = None,
                                    nb_partants: int | None = None) -> dict[str, float]:
+    """Poids appris par type, plafonnés par les gates automatiques (Point 11)."""
+    weights = await _get_learned_type_weights_raw(session, profil, discipline, nb_partants)
+    try:
+        from ml.bet_plan_performance import apply_type_gates
+        weights = await apply_type_gates(session, weights)
+    except Exception:
+        pass
+    return weights
+
+
+async def _get_learned_type_weights_raw(session: AsyncSession,
+                                        profil: str | None = None,
+                                        discipline: str | None = None,
+                                        nb_partants: int | None = None) -> dict[str, float]:
     """Poids de conviction APPRIS par type — c'est le cœur de l'auto-amélioration.
 
     Source PRIORITAIRE (si `profil` fourni et historique suffisant) : ROI réel des

@@ -200,7 +200,11 @@ class PostRaceAnalyzer:
             "log_id": log_id,
             "course_id": course_id,
             "gagnant_numero": gagnant_numero,
-            "gagnant_proba_ia": round(gagnant_proba_ia * 100, 1),
+            # Contrat machine : toute probabilité reste dans [0, 1]. Le pourcentage
+            # destiné à l'affichage porte un nom explicite pour éviter de contaminer
+            # les consommateurs statistiques (notamment le détecteur de dérive).
+            "gagnant_proba_ia": round(gagnant_proba_ia, 4),
+            "gagnant_proba_ia_pct": round(gagnant_proba_ia * 100, 1),
             "top3_precision": top3_precision,
             "brier_course": round(brier_course, 4),
             "log_loss_course": round(log_loss_course, 4),
@@ -246,14 +250,17 @@ class PostRaceAnalyzer:
         # Features "surprise indicators" — les signaux que le modèle n'a pas assez valorisé
         snapshot = winner.get("features_snapshot") or {}
         if not snapshot:
-            # Lire le snapshot des features depuis features_ml (pas predictions :
-            # cette table n'a pas de colonne features_snapshot → l'ancienne requête
-            # plantait et empoisonnait toute la transaction d'apprentissage).
+            # Lire uniquement le payload immuable réellement utilisé par le dernier
+            # prono pré-course. Le fallback mutable features_ml contaminerait
+            # l'apprentissage avec un état potentiellement recalculé après l'arrivée.
             try:
                 r = await session.execute(text("""
-                    SELECT fm.features FROM features_ml fm
-                    JOIN participations pa ON pa.participation_id = fm.participation_id
+                    SELECT pe.features
+                    FROM prediction_evaluation pe
+                    JOIN participations pa
+                      ON pa.participation_id = pe.participation_id
                     WHERE pa.course_id = :cid AND pa.numero = :num
+                      AND pe.is_replayable = true
                     LIMIT 1
                 """), {"cid": course_id, "num": gagnant_numero})
                 row = r.fetchone()

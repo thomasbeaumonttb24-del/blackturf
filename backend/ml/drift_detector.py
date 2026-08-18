@@ -78,6 +78,35 @@ SEVERITY_NONE: str = "none"
 SEVERITY_WARNING: str = "warning"
 SEVERITY_CRITICAL: str = "critical"
 
+
+def persisted_state_corruption_reasons(blob: dict[str, Any]) -> list[str]:
+    """Détecte les signatures connues de l'ancien câblage post-course cassé."""
+    reasons: list[str] = []
+
+    confidence_values = []
+    for item in blob.get("conf_gap_window") or []:
+        if isinstance(item, (list, tuple)) and item:
+            try:
+                confidence_values.append(float(item[0]))
+            except (TypeError, ValueError):
+                reasons.append("invalid_confidence_value")
+                break
+    if any(not math.isfinite(v) or not 0.0 <= v <= 1.0 for v in confidence_values):
+        reasons.append("confidence_outside_0_1")
+
+    brier_values = (blob.get("brier_adwin") or {}).get("window") or []
+    if len(brier_values) >= 50:
+        try:
+            parsed_brier = [float(v) for v in brier_values]
+        except (TypeError, ValueError):
+            reasons.append("invalid_brier_value")
+        else:
+            if all(math.isfinite(v) and v == 0.20 for v in parsed_brier):
+                reasons.append("constant_fallback_brier_0_20")
+
+    return reasons
+
+
 # Détecter une dérive sous ce nombre d'observations est peu fiable (bruit) :
 # en phase d'amorçage (peu de vraies courses), on ne déclare pas de dérive.
 DRIFT_WARMUP_MIN: int = 200
@@ -415,6 +444,9 @@ class DriftDetector:
         self._drift_events: list[dict[str, Any]] = []
         self._last_drift_type: Optional[str] = None
         self._last_drift_time: Optional[datetime] = None
+        # Sévérité de la DERNIÈRE mise à jour, distincte de l'historique du
+        # dernier événement. C'est cette valeur qui doit piloter l'état live DB.
+        self._current_severity: str = SEVERITY_NONE
 
     # ------------------------------------------------------------------
     # Public API
@@ -513,6 +545,8 @@ class DriftDetector:
             drift_detected = False
             self._last_drift_type = None  # garde save_state cohérent (severity=none)
 
+        self._current_severity = severity
+
         if drift_detected:
             drift_type = next(k for k, v in active_signals.items() if v)
             self._last_drift_type = drift_type
@@ -588,12 +622,14 @@ class DriftDetector:
             float(np.mean(self._surprise_window)) if self._surprise_window else 0.0
         )
 
-        # Derive overall status from recent events.
-        if self._drift_events:
-            last_severity = self._drift_events[-1]["severity"]
-            status = last_severity if last_severity != SEVERITY_NONE else "healthy"
-        else:
-            status = "healthy"
+        # Statut LIVE de la dernière observation. L'historique reste disponible
+        # dans recent_drift_events, mais ne doit pas maintenir le scheduler en
+        # critical après un retour à la normale.
+        status = (
+            self._current_severity
+            if self._current_severity != SEVERITY_NONE
+            else "healthy"
+        )
 
         return {
             "status": status,
@@ -651,6 +687,7 @@ class DriftDetector:
         # Preserve history; just clear active state.
         self._last_drift_type = None
         self._last_drift_time = None
+        self._current_severity = SEVERITY_NONE
 
     async def save_state(self, session: AsyncSession) -> None:
         """
@@ -672,6 +709,7 @@ class DriftDetector:
             "total_observations": self._total_observations,
             "drift_events": self._drift_events,
             "last_drift_type": self._last_drift_type,
+            "current_severity": self._current_severity,
             "last_drift_time": (
                 self._last_drift_time.isoformat() if self._last_drift_time else None
             ),
@@ -682,7 +720,6 @@ class DriftDetector:
         # state_json JSON, severity, n_updates, last_drift_at). Évite le mismatch ORM
         # (ancienne classe locale attendait une colonne `id` inexistante → cassait
         # le commit de la boucle d'apprentissage).
-        severity = SEVERITY_CRITICAL if self._last_drift_type else SEVERITY_NONE
         await session.execute(
             text("""
                 INSERT INTO drift_detector_state
@@ -697,7 +734,7 @@ class DriftDetector:
             """),
             {
                 "sj": json_blob,
-                "sev": severity,
+                "sev": self._current_severity,
                 "nu": int(self._total_observations),
                 "lda": self._last_drift_time,
             },
@@ -734,6 +771,14 @@ class DriftDetector:
         # Colonne JSON → asyncpg renvoie déjà un dict (ou une str selon le driver)
         blob = row[0] if isinstance(row[0], dict) else json.loads(row[0])
 
+        corruption_reasons = persisted_state_corruption_reasons(blob)
+        if corruption_reasons:
+            logger.warning(
+                "drift_detector_corrupted_state_rejected",
+                reasons=corruption_reasons,
+            )
+            return False
+
         self._brier_adwin = _ADWINWindow.from_dict(blob["brier_adwin"])
         self._surprise_ph = _PageHinkley.from_dict(blob["surprise_ph"])
         self._surprise_window = deque(
@@ -750,6 +795,16 @@ class DriftDetector:
         self._total_observations = blob["total_observations"]
         self._drift_events = blob["drift_events"]
         self._last_drift_type = blob["last_drift_type"]
+        persisted_severity = blob.get("current_severity", SEVERITY_NONE)
+        self._current_severity = (
+            persisted_severity
+            if persisted_severity in {
+                SEVERITY_NONE,
+                SEVERITY_WARNING,
+                SEVERITY_CRITICAL,
+            }
+            else SEVERITY_NONE
+        )
         self._last_drift_time = (
             datetime.fromisoformat(blob["last_drift_time"])
             if blob["last_drift_time"]

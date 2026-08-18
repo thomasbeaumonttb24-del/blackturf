@@ -37,8 +37,12 @@ async def compute_clv_monitor(session: AsyncSession) -> dict:
                  ROW_NUMBER() OVER (PARTITION BY l.course_id
                                     ORDER BY pr.proba_top1 DESC NULLS LAST) AS rk
           FROM cote_cloture_log l
-          JOIN predictions pr ON pr.participation_id = l.participation_id
+          JOIN prediction_evaluation pr ON pr.participation_id = l.participation_id
+          JOIN courses c ON c.course_id = pr.course_id
           WHERE l.cote_figee > 1 AND l.cote_cloture > 1
+            AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL
+            AND pr.created_at < c.date_heure
+            AND pr.is_replayable = true
         )
         SELECT
           count(*) FILTER (WHERE rk = 1)                                   AS n_top1,
@@ -63,10 +67,14 @@ async def compute_clv_monitor(session: AsyncSession) -> dict:
                  CASE WHEN (r.classement->0->>'numero')::int = l.numero THEN 1 ELSE 0 END AS win
           FROM cote_cloture_log l
           JOIN participations pa ON pa.participation_id = l.participation_id
-          JOIN predictions pr ON pr.participation_id = l.participation_id
+          JOIN prediction_evaluation pr ON pr.participation_id = l.participation_id
           JOIN resultats r ON r.course_id = l.course_id
+          JOIN courses c ON c.course_id = l.course_id
           WHERE l.cote_figee > 1 AND l.cote_cloture > 1 AND pa.cote_reference > 1
             AND jsonb_typeof(r.classement) = 'array' AND pr.rang_predit <= 3
+            AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL
+            AND pr.created_at < c.date_heure
+            AND pr.is_replayable = true
             AND pa.cote_reference / NULLIF(l.cote_figee, 0) - 1 < -0.05   -- cote a monté avant T-10
         )
         SELECT count(*) AS n, avg(win) AS winrate,

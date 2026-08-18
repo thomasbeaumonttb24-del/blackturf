@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from scripts.calibration_longshots import (
     bucket_label, fetch_rows, fetch_winners, compute_bucket_stats,
 )
+from ml.prediction_evaluation import MIN_LONGSHOT_REPLAYABLE_OBS
 
 log = structlog.get_logger(module="longshot_calibration")
 
@@ -37,9 +38,18 @@ async def compute_and_store(session: AsyncSession, cote_col: str = "cote_pmu") -
     (predictions.proba_top1 vs gagnants réels) et les persiste en DB.
     Retourne {bucket: facteur}. Bucket non fiable → 1.0.
     """
+    global _cached_factors
     rows = await fetch_rows(session, cote_col)
     winners = await fetch_winners(session)
     stats = compute_bucket_stats(rows, winners)
+    n_obs = sum(s["n"] for s in stats)
+    if n_obs < MIN_LONGSHOT_REPLAYABLE_OBS or not any(s["reliable"] for s in stats):
+        log.warning(
+            "longshot_calibration.skipped_insufficient_replayable_data",
+            n_obs=n_obs,
+            min_obs=MIN_LONGSHOT_REPLAYABLE_OBS,
+        )
+        return _cached_factors or {}
 
     factors: dict[str, float] = {}
     for s in stats:
@@ -57,7 +67,6 @@ async def compute_and_store(session: AsyncSession, cote_col: str = "cote_pmu") -
             updated_at TIMESTAMPTZ DEFAULT now()
         )
     """))
-    n_obs = sum(s["n"] for s in stats)
     await session.execute(text("""
         INSERT INTO longshot_calibration (id, factors, n_obs, updated_at)
         VALUES (1, CAST(:f AS JSONB), :n, now())
@@ -65,7 +74,6 @@ async def compute_and_store(session: AsyncSession, cote_col: str = "cote_pmu") -
     """), {"f": json.dumps(factors), "n": n_obs})
     await session.commit()
 
-    global _cached_factors
     _cached_factors = factors
     log.info("longshot_calibration.computed", factors=factors, n_obs=n_obs)
     return factors
