@@ -83,6 +83,16 @@ def _fetch(client: httpx.Client, url: str) -> Optional[BeautifulSoup]:
     if "Just a moment" in text or "cf-browser-verification" in text:
         log.warning("geny.cloudflare_block", url=url)
         return None
+    # BLOCAGE DÉGUISÉ EN SUCCÈS : Geny renvoie un HTTP **200** dont le corps est
+    # une page d'erreur (`dataLayer.push({event:'error_page', error_status:'403'})`
+    # + `<meta name="robots" content="noindex, nofollow">`). Le test sur
+    # `status_code` ne voyait donc rien, le parseur trouvait 0 course et le cycle
+    # se journalisait « ok » : la source est restée muette des semaines sans
+    # qu'aucune alerte ne parte. On refuse explicitement ce contenu.
+    if "'error_page'" in text or '"error_page"' in text:
+        log.warning("geny.soft_block", url=url,
+                    detail="HTTP 200 mais corps = page d'erreur (403 déguisé)")
+        return None
     return BeautifulSoup(text, "html.parser")
 
 

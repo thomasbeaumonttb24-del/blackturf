@@ -113,7 +113,11 @@ async def test_programme_du_jour_insere_a_minuit_ne_declenche_pas_de_fausse_aler
     qu'une fois par jour, donc à 22 h un système SAIN afficherait « dernière
     course créée il y a 22 h ». Le verdict doit porter sur les mises à jour de
     partants, pas sur la création de courses."""
-    await _course(db, "C5b", depart=MAINTENANT + timedelta(hours=3), statut="a_venir")
+    # Départ fixé à midi AUJOURD'HUI, indépendamment de l'heure d'exécution :
+    # avec « MAINTENANT + 3 h », un test lancé après 21 h UTC plaçait la course
+    # le LENDEMAIN et déclenchait à tort `programme_manquant`.
+    midi = MAINTENANT.replace(hour=12, minute=0, second=0, microsecond=0)
+    await _course(db, "C5b", depart=midi, statut="a_venir")
     await _partant(db, "C5b", 1, cote_pmu=3.0)
     await db.commit()
     # Course créée il y a 22 h (programme du matin), partant rafraîchi à l'instant.

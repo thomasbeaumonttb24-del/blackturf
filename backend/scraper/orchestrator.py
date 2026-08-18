@@ -195,6 +195,22 @@ class BlackTurfOrchestrator:
         #   moitié moins de requêtes = moins de risque de ban au démarrage).
         # SCRAPER_DISABLED_SOURCES   : CSV des sources à NE PAS scraper
         #   (ex. "racing_post,france_galop" pour les sites les plus protégés).
+        #
+        # Sources mises en sommeil le 18/08/2026 après vérification une par une
+        # depuis le conteneur — elles produisaient TOUTES 0 cote sur 7 jours :
+        #   geny     : geny.com répond « Accès refusé » y compris avec le
+        #              navigateur furtif (HTTP 200 dont le corps est une page
+        #              d'erreur 403). Seul un solve_cloudflare via scrapling y
+        #              accède, et scrapling n'est pas dans cette image.
+        #   betclic  : HTTP 403 « Accès refusé - Betclic », navigateur furtif inclus.
+        #   winamax  : la page /courses-hippiques répond 200 mais ne contient plus
+        #              aucun lien de course — la rubrique a disparu de cette URL.
+        #   unibet   : unibet.fr/turf redirige vers zeturf.fr ; la source est déjà
+        #              couverte par le daemon zeturf (cote_unibet, 73 % de
+        #              couverture). Le scraper retourne [] depuis 2026-06.
+        # Aucune donnée perdue : elles n'en fournissaient plus. Les réactiver
+        # demande de traiter le blocage (proxy résidentiel ou solve_cloudflare),
+        # pas de corriger un sélecteur.
         try:
             mult = float(os.environ.get("SCRAPER_INTERVAL_MULTIPLIER", "1.0"))
         except ValueError:
@@ -391,6 +407,7 @@ class BlackTurfOrchestrator:
         try:
             geny = GenyScraper(page)
             data = await geny.get_partants_du_jour()
+            n_cotes = 0
 
             # Enrichir les cotes Geny en DB
             async with AsyncSessionLocal() as session:
@@ -426,11 +443,27 @@ class BlackTurfOrchestrator:
                             .values(**vals)
                         )
                         await session.execute(stmt)
+                        n_cotes += 1
 
                 await session.commit()
                 duree = int((time.time() - t0) * 1000)
-                await log_scrape_result(session, "geny", "ok", duree_ms=duree)
+                # Compteurs RÉELS + statut honnête : le cycle se journalisait « ok »
+                # même quand Geny renvoyait sa page d'erreur en HTTP 200 (0 course
+                # extraite). La source est ainsi restée muette des semaines sans
+                # qu'aucune alerte ne parte.
+                await log_scrape_result(
+                    session, "geny",
+                    "ok" if n_cotes else "erreur",
+                    nb_courses=len(data),
+                    nb_partants=n_cotes,
+                    erreur=(None if n_cotes else
+                            "aucune cote extraite (source bloquée ou structure changée)"),
+                    duree_ms=duree,
+                )
                 await session.commit()
+            if not n_cotes:
+                # Alimente le backoff : inutile de marteler une source qui bloque.
+                self._failed_this_cycle.add("geny")
 
         except Exception as e:
             log.error("orchestrator.geny_error", error=str(e))
@@ -694,7 +727,15 @@ class BlackTurfOrchestrator:
         ]
 
         for source_name, ScraperClass in scrapers:
+            # Gating PAR BOOKMAKER : `_should_run` ne filtre que le groupe
+            # « bookmakers », si bien qu'un bookmaker mis dans
+            # SCRAPER_DISABLED_SOURCES continuait d'être ouvert, chargé et
+            # attendu à chaque cycle — pour rien, et en polluant scrape_log.
+            if source_name in self._disabled:
+                log.info("orchestrator.bookmaker_disabled", source=source_name)
+                continue
             page = await browser_context.new_page()
+            nb_source = 0
             try:
                 scraper = ScraperClass(page)
 
@@ -735,10 +776,23 @@ class BlackTurfOrchestrator:
                             session, cote_scrape, pid_row[0], real_course_id
                         )
                         nb_total += 1
+                        nb_source += 1
 
                     await session.commit()
+                    # Compteurs RÉELS : ils n'étaient jamais transmis, si bien que
+                    # scrape_log enregistrait 0 partant même pour un scrape réussi.
+                    # Un bookmaker bloqué (Betclic 403, Winamax sans contenu
+                    # hippique) apparaissait donc « ok » indéfiniment, et la panne
+                    # restait invisible côté back-office. `nb_extrait` distingue en
+                    # plus « rien récupéré du site » de « récupéré mais non
+                    # rattaché à une participation connue ».
                     await log_scrape_result(
-                        session, source_name, "ok",
+                        session, source_name,
+                        "ok" if nb_source else "erreur",
+                        nb_partants=nb_source,
+                        erreur=(None if nb_source else
+                                f"aucune cote enregistrée ({len(cotes_list)} extraite(s) "
+                                "du site, 0 rattachée à une participation)"),
                         duree_ms=int((time.time() - t0) * 1000),
                     )
                     await session.commit()
