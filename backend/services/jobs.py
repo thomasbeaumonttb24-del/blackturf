@@ -144,6 +144,64 @@ async def job_resultats_poll() -> None:
         log.error("jobs.resultats_poll.error", error=str(e))
 
 
+async def job_expire_stale_value_bets() -> None:
+    """
+    Filet de sécurité — toutes les 15 minutes : désactive les value bets dont la
+    course est passée depuis longtemps.
+
+    Bug constaté le 2026-08-17 : la page /value-bets affichait des paris datés de
+    juin. `ValueBet.actif` n'est posé à True qu'à la création et n'est JAMAIS remis
+    à False ailleurs dans le code — les endpoints (REST, WS, stats, assistant)
+    filtrent en plus sur `Course.statut IN ('a_venir','en_cours')`, mais ce statut
+    ne passe à 'termine' que si `save_resultat_to_db` reçoit un résultat PMU
+    (db_writer.py). Le polling résultats (`poll_resultats`, orchestrator.py) ne
+    regarde qu'une fenêtre glissante de 36h : une course sans résultat au-delà de
+    36h (piste étrangère non couverte par le PMU comme "PALERMO ARG", panne de
+    scraper, réunion annulée…) sort du périmètre pour toujours → son statut reste
+    'a_venir' à vie et ses value bets restent "actifs" indéfiniment.
+
+    Fenêtre de 6h : largement suffisant pour qu'une course PMU publie son arrivée ;
+    passé ce délai le pari n'a plus d'objet, résultat connu ou pas.
+    """
+    try:
+        from db.database import AsyncSessionLocal
+        from db.models import ValueBet, Course
+        from sqlalchemy import update, select
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        async with AsyncSessionLocal() as session:
+            stale_ids = select(Course.course_id).where(Course.date_heure < cutoff)
+            result = await session.execute(
+                update(ValueBet)
+                .where(ValueBet.actif == True, ValueBet.course_id.in_(stale_ids))
+                .values(actif=False)
+            )
+            await session.commit()
+            if result.rowcount:
+                log.info("jobs.expire_stale_value_bets.done", n=result.rowcount)
+    except Exception as e:
+        log.error("jobs.expire_stale_value_bets.error", error=str(e))
+
+
+async def job_resolve_courses_sans_resultat() -> None:
+    """1x/jour — clôture les courses passées restées sans résultat.
+
+    Complément STRUCTUREL du filet de sécurité `job_expire_stale_value_bets` : le
+    filet neutralise les value bets périmés mais laisse la course en 'a_venir' à
+    vie. Ici on va chercher le verdict du PMU au-delà de la fenêtre 36h de
+    `poll_resultats` : arrivée publiée en retard → 'termine', COURSE_ANNULEE →
+    'annule', rien après quelques jours → 'sans_resultat' + entrée system_errors.
+    Cf. services/course_resolution.py pour le détail de la cause racine.
+    """
+    try:
+        from services.course_resolution import resolve_courses_sans_resultat
+        cr = await resolve_courses_sans_resultat()
+        log.info("jobs.resolve_courses_sans_resultat.done", **cr)
+    except Exception as e:
+        log.error("jobs.resolve_courses_sans_resultat.error", error=str(e))
+
+
 async def job_vb_notify() -> None:
     """Toutes les 10 minutes — notifie nouveaux value bets non notifiés."""
     try:
@@ -220,17 +278,34 @@ def get_scheduler() -> AsyncIOScheduler:
 
 
 async def job_warm_caches() -> None:
-    """Pre-chauffe les caches Redis des pages publiques lentes (track-record :
-    la CLV agrege cotes_historique ~2s a froid). Tape l'API en interne pour que
-    l'endpoint recalcule et reecrive son cache -> l'utilisateur a toujours la
-    version chaude (~60ms), jamais le calcul froid."""
+    """Pre-chauffe les caches Redis des pages publiques lentes.
+
+    `/stats/track-record` coute ~29 s a froid (mesure prod 2026-08-18, et non ~2 s
+    comme le supposait la version precedente) : on appelle son rafraichissement EN
+    DIRECT plutot que par HTTP. L'ancienne version tapait l'endpoint, qui lui
+    renvoyait le cache encore chaud SANS rien reecrire -> le TTL n'etait jamais
+    prolonge, le cache expirait 1 h apres le dernier calcul froid a une heure
+    decorrelee de ce cron, et la page Palmares restait inutilisable (skeleton
+    infini) jusqu'au passage suivant.
+
+    Les autres pages sont rapides a froid (~0,4 s) : un simple GET suffit.
+    `palmares-gagnants` est garde par require_admin et repondait 401 ici — il ne
+    chauffait donc rien : on chauffe `palmares-public`, celui que la page utilise.
+    """
     import httpx
+    from api.routes.stats import refresh_track_record_cache
+
+    try:
+        reecrit = await refresh_track_record_cache()
+        log.info("jobs.warm_cache.track_record", reecrit=reecrit)
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.warm_cache.failed", url="track-record", err=str(e)[:120])
+
     urls = [
-        "http://api:8000/api/v1/stats/track-record",
-        "http://api:8000/api/v1/stats/palmares-gagnants",
+        "http://api:8000/api/v1/stats/palmares-public",
         "http://api:8000/api/v1/stats/profils",
     ]
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         for u in urls:
             try:
                 r = await client.get(u, headers={"Host": "blackturf.fr"})
@@ -286,6 +361,26 @@ def start_scheduler() -> None:
         id="vb_notify",
         replace_existing=True,
         misfire_grace_time=120,
+    )
+
+    # Filet de sécurité value bets périmés — toutes les 15 minutes
+    scheduler.add_job(
+        job_expire_stale_value_bets,
+        CronTrigger(minute="*/15"),
+        id="expire_stale_value_bets",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+
+    # Clôture des courses sans résultat — 05:15 UTC, après la fin de toutes les
+    # réunions de la veille et hors des heures de courses (requêtes PMU en trop
+    # petit nombre, sans concurrence avec le poll live).
+    scheduler.add_job(
+        job_resolve_courses_sans_resultat,
+        CronTrigger(hour=5, minute=15, timezone="UTC"),
+        id="resolve_courses_sans_resultat",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     # Meta-learner retrain — 03:00 UTC (after nightly retrain finishes)
