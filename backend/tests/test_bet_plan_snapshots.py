@@ -353,3 +353,28 @@ def test_canonical_json_serialise_les_sets_de_facon_deterministe():
     b = canonical_json({"types": {"2sur4", "Trio", "Couplé Placé"}})
     assert a == b                       # ordre d'insertion sans effet
     assert '"2sur4"' in a and '"Trio"' in a
+
+
+def test_les_valeurs_stockees_sont_du_json_pur_insérable():
+    """Le hash ne suffit pas : la valeur STOCKÉE doit passer `json.dumps` standard.
+
+    SQLAlchemy serialise les colonnes JSONB avec `json.dumps`, pas avec notre
+    serialiseur canonique. Un set qui passait le hash faisait donc echouer
+    l'INSERT ("Object of type set is not JSON serializable") — erreur avalee par
+    record_plan_snapshot, donc invisible.
+    """
+    import json as _json
+    from services.mise_calculator import _effective_config, _palier
+
+    values = _values(algo_config={
+        "profil": "equilibre",
+        "cfg": _effective_config("equilibre", 0.0),   # contient un set "types"
+        "palier": _palier(10),
+    })
+    # Doit passer le serialiseur STANDARD, celui qu'utilise reellement le driver.
+    _json.dumps(values["algo_config"])
+    _json.dumps(values["plan"])
+    _json.dumps(values["cotes_utilisees"])
+    # Et le set doit etre devenu une liste triee, pas avoir disparu.
+    assert isinstance(values["algo_config"]["cfg"]["types"], list)
+    assert values["algo_config"]["cfg"]["types"] == sorted(values["algo_config"]["cfg"]["types"])

@@ -124,9 +124,16 @@ def build_plan_snapshot_values(
     origin: str = "mise_plan",
 ) -> dict[str, Any]:
     """Construit la ligne figée : copie JSON autonome, hashée et datée."""
-    frozen_plan = strip_route_metadata(plan)
+    # Aller-retour par la sérialisation canonique : ce qui est STOCKÉ est
+    # exactement ce qui est HASHÉ, et le résultat est du JSON pur (sets convertis
+    # en listes triées, non-finis en null). Sans cela, la config réelle du moteur
+    # — qui contient un set de familles de paris — passait le hash mais faisait
+    # échouer l'insertion JSONB côté SQLAlchemy ("Object of type set is not JSON
+    # serializable"), erreur avalée par record_plan_snapshot : plus aucun plan
+    # journalisé, sans le moindre signal.
+    frozen_plan = json.loads(canonical_json(strip_route_metadata(plan)))
     cotes = {str(k): float(v) for k, v in (cotes_utilisees or {}).items() if v is not None}
-    config = dict(algo_config or {})
+    config = json.loads(canonical_json(dict(algo_config or {})))
     seen_at = _utc(emitted_at)
     start_at = _utc(course_start_at)
     assert seen_at is not None
