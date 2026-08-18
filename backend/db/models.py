@@ -316,6 +316,12 @@ class Participation(Base):
     cote_bet365: Mapped[float | None] = mapped_column(Float)              # via oddschecker (2026-07-03)
     cote_ladbrokes: Mapped[float | None] = mapped_column(Float)           # via oddschecker (LD, repli Coral)
     cote_betfair_exchange: Mapped[float | None] = mapped_column(Float)    # marché d'échange
+    # Heure de publication de la cote PAR LA SOURCE (PMU dernierRapportDirect
+    # .dateRapport). Distincte de `updated_at`, qui est l'heure du scrape : le PMU
+    # republie la même cote tant que rien ne bouge, donc un scrape récent ne prouve
+    # pas une cote fraîche. Sert à dater honnêtement la cote figée d'un pronostic
+    # et à détecter un flux de cotes gelé.
+    cote_pmu_datetime: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     mouvement_cote_pct: Mapped[float | None] = mapped_column(Float)       # % mouvement cote (ouverture→actuelle)
     cote_reference: Mapped[float | None] = mapped_column(Float)           # cote d'ouverture (dernierRapportReference)
     tendance_cote: Mapped[str | None] = mapped_column(String(2))          # "+" / "-" / "="

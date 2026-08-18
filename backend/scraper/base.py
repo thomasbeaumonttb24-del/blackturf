@@ -173,6 +173,13 @@ class PartantScrape:
     reduction_km: Optional[float] = None  # secondes/km
     # ── Données PMU enrichies (participants) ─────────────────────────────────
     cote_reference: Optional[float] = None      # dernierRapportReference (cote d'ouverture)
+    # Heure à laquelle la SOURCE a publié cette cote (PMU : dernierRapportDirect
+    # .dateRapport, epoch ms). À ne pas confondre avec l'heure du scrape : entre les
+    # deux il peut s'écouler plusieurs minutes, et une cote peut être RÉPÉTÉE à
+    # l'identique pendant des heures. Sans cet horodatage, impossible de distinguer
+    # « cote fraîche » de « cote figée depuis longtemps » — ni de dater honnêtement
+    # la cote figée d'un pronostic (cf. odds_observed_at, prediction_snapshots).
+    cote_pmu_datetime: Optional[datetime] = None
     mouvement_cote_pct: Optional[float] = None  # (direct - reference)/reference
     tendance_cote: Optional[str] = None         # "+" / "-" / "=" (indicateurTendance)
     tendance_force: Optional[float] = None       # nombreIndicateurTendance (ampleur)

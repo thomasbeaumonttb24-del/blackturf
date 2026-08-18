@@ -94,6 +94,7 @@ def build_snapshot_values(
     rang_predit: int,
     confidence_score: float | None,
     cote_figee: float | None,
+    odds_observed_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Construit une copie JSON autonome, hashée et temporellement qualifiée."""
     encoded = canonical_json(features)
@@ -123,9 +124,16 @@ def build_snapshot_values(
         "confidence_score": confidence_score,
         "cote_figee": cote_figee,
         "observed_at": seen_at,
-        # La cote incluse dans les features a été observée pendant ce calcul. On
-        # n'invente pas le timestamp propre à la source, qui n'est pas disponible.
-        "odds_observed_at": seen_at if cote_figee is not None else None,
+        # Heure à laquelle la SOURCE a publié cette cote, quand elle est connue
+        # (PMU dateRapport, cf. migration 0033). À défaut on retombe sur l'heure du
+        # calcul — c'est une borne SUPÉRIEURE honnête (la cote existait au plus tard
+        # à cet instant), jamais une date inventée. La distinction compte pour le
+        # CLV : une cote publiée 20 min avant le calcul n'a pas la même valeur
+        # informative qu'une cote publiée à la seconde.
+        "odds_observed_at": (
+            _utc(odds_observed_at) if odds_observed_at is not None
+            else (seen_at if cote_figee is not None else None)
+        ),
         "course_start_at": start_at,
         "is_pre_course": bool(start_at is not None and seen_at < start_at),
         "origin": "live",

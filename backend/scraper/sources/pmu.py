@@ -12,7 +12,7 @@ import re
 import asyncio
 import httpx
 import structlog
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
 from scraper.base import CourseScrape, PartantScrape, ResultatScrape, PoolPMUScrape, BaseScraper, human_delay, get_circuit_breaker
@@ -49,6 +49,28 @@ def _fmt_date_pmu(course_date=None) -> str:
     if isinstance(course_date, (int, float)):
         return datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
     return course_date.strftime("%d%m%Y")
+
+
+def _epoch_ms_to_dt(value) -> "datetime | None":
+    """Epoch millisecondes PMU → datetime UTC. None si absent ou aberrant.
+
+    Le PMU date ses rapports en ms depuis l'époque. On rejette les valeurs hors
+    d'une plage plausible (2000→2100) plutôt que de fabriquer une date en 1970 à
+    partir d'un champ vide : une date fausse serait pire que pas de date, elle
+    ferait passer une cote périmée pour fraîche.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        ms = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (946_684_800_000 <= ms <= 4_102_444_800_000):   # 2000-01-01 → 2100-01-01
+        return None
+    try:
+        return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _first_poids(p: dict):
@@ -633,6 +655,11 @@ class PmuScraper(BaseScraper):
             tendance = rd.get("indicateurTendance")  # "+" / "-" / "="
             tendance_force = rd.get("nombreIndicateurTendance")
             est_favori = rd.get("favoris")
+            # Heure de publication RÉELLE de la cote par le PMU (epoch ms). Le
+            # scrape peut avoir lieu bien après, et le PMU republie la même cote
+            # tant que rien ne bouge : sans cette date on ne peut ni dater
+            # honnêtement une cote figée, ni détecter un flux de cotes gelé.
+            cote_dt = _epoch_ms_to_dt(rd.get("dateRapport"))
 
             # robe / race : PMU peut renvoyer un dict {code, libelleCourt, libelleLong}
             def _libelle(v):
@@ -679,6 +706,7 @@ class PmuScraper(BaseScraper):
                 rang_pronostic_pmu=p.get("ordreArriveePronostic"),
                 # ── Enrichissements PMU ──
                 cote_reference=float(cote_ref) if cote_ref else None,
+                cote_pmu_datetime=cote_dt,
                 mouvement_cote_pct=mouvement_pct,
                 tendance_cote=tendance,
                 tendance_force=float(tendance_force) if isinstance(tendance_force, (int, float)) else None,

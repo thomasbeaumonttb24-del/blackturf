@@ -377,6 +377,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             musique=_t(partant.musique, 50),
             # ── Enrichissements PMU ──
             cote_reference=cote_ref_v,
+            cote_pmu_datetime=partant.cote_pmu_datetime,
             mouvement_cote_pct=partant.mouvement_cote_pct,
             tendance_cote=_t(partant.tendance_cote, 2),
             tendance_force=partant.tendance_force,
@@ -397,6 +398,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
                 "rang_pronostic_pmu": partant.rang_pronostic_pmu,
                 # le mouvement de cote évolue → réactualisé à chaque cycle
                 "cote_reference": cote_ref_v,
+                "cote_pmu_datetime": partant.cote_pmu_datetime,
                 "mouvement_cote_pct": partant.mouvement_cote_pct,
                 "tendance_cote": _t(partant.tendance_cote, 2),
                 "tendance_force": partant.tendance_force,

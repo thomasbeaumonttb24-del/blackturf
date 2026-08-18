@@ -260,6 +260,31 @@ async def job_notifications_retention() -> None:
         log.error("jobs.notifications_retention.error", error=str(e))
 
 
+async def job_data_quality_check() -> None:
+    """Toutes les heures — surveille la FRAÎCHEUR et la COUVERTURE des entrées.
+
+    Une panne d'alimentation est silencieuse : conteneurs « healthy », site en
+    ligne, endpoints à 200 — seules les cotes ne bougent plus. En production,
+    quatre journées entières (12→15/08/2026) sans une seule course en base ne
+    l'ont été qu'au bout de quatre jours, et la source `geny` est restée à 0 %
+    de couverture pendant des semaines pendant que son daemon publiait son
+    heartbeat sans faillir.
+
+    Les anomalies partent dans `system_errors` (lu par le back-office) : on rend
+    le trou VISIBLE, on ne corrige rien ici.
+    """
+    try:
+        from db.database import AsyncSessionLocal
+        from services.data_quality import verifier_et_alerter
+        async with AsyncSessionLocal() as session:
+            rapport = await verifier_et_alerter(session)
+        log.info("jobs.data_quality_check.done",
+                 statut=rapport["statut_global"],
+                 n_anomalies=len(rapport["anomalies"]))
+    except Exception as e:
+        log.error("jobs.data_quality_check.error", error=str(e))
+
+
 async def job_resolve_courses_sans_resultat() -> None:
     """1x/jour — clôture les courses passées restées sans résultat.
 
@@ -455,6 +480,17 @@ def start_scheduler() -> None:
         id="notifications_retention",
         replace_existing=True,
         misfire_grace_time=3600,
+    )
+
+    # Qualité des données d'entrée — toutes les heures à la minute 20 (décalé des
+    # tâches de la minute 0 : lecture d'agrégats, inutile d'ajouter de la charge au
+    # moment où le poll résultats et le warm cache travaillent).
+    scheduler.add_job(
+        job_data_quality_check,
+        CronTrigger(minute=20),
+        id="data_quality_check",
+        replace_existing=True,
+        misfire_grace_time=600,
     )
 
     # Clôture des courses sans résultat — 05:15 UTC, après la fin de toutes les

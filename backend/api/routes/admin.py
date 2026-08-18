@@ -1536,3 +1536,21 @@ async def ingest_betfair(payload: dict, request: Request, db: AsyncSession = Dep
         "matched_markets": matched_markets,
         "matched_runners": matched_runners,
     }
+
+
+# ─────────────────────────────────────────────
+# Qualité des données d'entrée (Point 13)
+# ─────────────────────────────────────────────
+@router.get("/data-quality")
+async def data_quality(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Fraîcheur, couverture par source, cotes figées, concordance partants.
+
+    Lecture seule. Répond à la question « les entrées du pronostic sont-elles
+    encore alimentées ? », invisible autrement : conteneurs healthy, site en
+    ligne, endpoints à 200 — et pourtant plus une cote qui bouge.
+    """
+    from services.data_quality import rapport_qualite
+    return await rapport_qualite(db)

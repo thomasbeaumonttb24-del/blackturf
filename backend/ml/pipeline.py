@@ -1570,6 +1570,23 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception:
             _field_overround = None
 
+        # Heure de publication de la cote PAR LE PMU, par participation (migration
+        # 0033). Lue à part plutôt qu'ajoutée aux features : c'est une métadonnée de
+        # provenance, pas un signal d'entraînement — elle n'a rien à faire dans le
+        # vecteur du modèle. Absente (lignes antérieures à 0033, ou colonne pas
+        # encore migrée) → le snapshot retombe sur l'heure du calcul.
+        _odds_dt_by_pid: dict[str, datetime] = {}
+        try:
+            _odds_rows = (await session.execute(text("""
+                SELECT participation_id, cote_pmu_datetime
+                FROM participations
+                WHERE course_id = :cid AND cote_pmu_datetime IS NOT NULL
+            """), {"cid": course_id})).all()
+            _odds_dt_by_pid = {r[0]: r[1] for r in _odds_rows}
+        except Exception as e:
+            await session.rollback()
+            log.debug("pipeline.odds_datetime_unavailable", err=str(e)[:120])
+
         predictions = []
         for i, feat in enumerate(features_list):
             pid = feat.get("participation_id")
@@ -1657,6 +1674,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 rang_predit=rang,
                 confidence_score=round(confidence * 100, 2),
                 cote_figee=feat.get("cote_pmu"),
+                odds_observed_at=_odds_dt_by_pid.get(pid),
             )
             await persist_snapshot_compat(session, snapshot_values)
 
