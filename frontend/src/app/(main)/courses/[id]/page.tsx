@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
-import { formatCote, formatEV, etoiles, formatDateTime, cn } from "@/lib/utils";
+import { formatCote, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   ConfidenceMeter, EVBadge, ELOBadge, RunningStyleBadge, MusiqueDisplay,
@@ -64,6 +64,7 @@ interface Partant {
   poids_prevu: number | null;
   numero_corde: number | null;
   gains_carriere: number | null;
+  gains_carriere_devise: string | null;   // ISO 4217 — devise locale de la réunion PMU
   nb_victoires: number | null;
   nb_courses: number | null;
   pere: string | null;
@@ -1857,9 +1858,12 @@ function PartantDetail({ partant }: { partant: Partant }) {
             </div>
             <span style={{ fontSize: 11, color: CX.gray400, fontFamily: CX.sg }}>{Math.round((partant.nb_victoires ?? 0) / partant.nb_courses * 100)}%</span>
           </div>
-          {partant.gains_carriere != null && partant.gains_carriere > 0 && (
+          {/* Le PMU renvoie les gains dans la devise LOCALE de la réunion (pesos à
+              San Isidro, HKD à Sha Tin…). Sans devise connue on n'affiche rien :
+              mieux vaut pas de chiffre qu'un montant dans une unité inventée. */}
+          {partant.gains_carriere != null && partant.gains_carriere > 0 && partant.gains_carriere_devise && (
             <div style={{ fontSize: 11, color: CX.gray400, marginTop: 6 }}>
-              Gains carrière : <b style={{ color: CX.gray700 }}>{partant.gains_carriere.toLocaleString("fr-FR")} €</b>
+              Gains carrière : <b style={{ color: CX.gray700 }}>{formatMontantDevise(partant.gains_carriere, partant.gains_carriere_devise)}</b>
             </div>
           )}
         </div>

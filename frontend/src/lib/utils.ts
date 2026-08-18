@@ -21,6 +21,37 @@ export function formatEuro(amount: number | null | undefined): string {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(amount);
 }
 
+/**
+ * Formate un montant dans sa devise réelle (code ISO 4217 fourni par l'API).
+ *
+ * Les gains de carrière viennent du PMU dans la devise LOCALE de la réunion :
+ * pesos argentins à San Isidro, HKD à Sha Tin, TRY à Veliefendi… Les afficher
+ * avec un « € » produisait des montants absurdes (jusqu'à 99 899 800 « € »).
+ *
+ * Sans devise connue on renvoie "—" : le projet interdit les chiffres inventés,
+ * et un montant sans unité fiable en est un.
+ */
+export function formatMontantDevise(
+  amount: number | null | undefined,
+  devise: string | null | undefined,
+): string {
+  if (amount === null || amount === undefined || !devise) return "—";
+  try {
+    return new Intl.NumberFormat("fr-FR", {
+      style: "currency",
+      currency: devise,
+      maximumFractionDigits: 0,
+      // « € » pour l'euro (symbole universel côté public français) mais le CODE ISO
+      // pour tout le reste : le symbole localisé du peso argentin est « $AR », trop
+      // cryptique sur une fiche cheval. « 26 642 000 ARS » ne laisse aucun doute.
+      currencyDisplay: devise === "EUR" ? "symbol" : "code",
+    }).format(amount);
+  } catch {
+    // Code devise non reconnu par Intl → repli lisible, jamais de symbole faux
+    return `${amount.toLocaleString("fr-FR")} ${devise}`;
+  }
+}
+
 export function formatDate(d: string | Date | null | undefined): string {
   if (!d) return "—";
   return new Intl.DateTimeFormat("fr-FR", {

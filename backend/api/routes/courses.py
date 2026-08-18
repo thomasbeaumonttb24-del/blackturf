@@ -23,6 +23,7 @@ from db.models import (
     AssociationJockeyEntraineur, PenetrometreLog, PerformanceCarriere,
 )
 from db.models import User
+from services.course_resolution import STATUTS_NON_COURUES
 from ml.portfolio import BetPortfolioEngine
 from ml.adaptive_learning import get_adaptive_learning
 from ml.monte_carlo import MonteCarloSimulator
@@ -101,6 +102,11 @@ class PartantOut(BaseModel):
     numero_corde: Optional[int] = None         # position au départ (plat)
     # Carrière
     gains_carriere: Optional[int] = None
+    # Devise ISO 4217 de `gains_carriere`. Le PMU renvoie les gains dans la devise
+    # LOCALE de la réunion (pesos à San Isidro, HKD à Sha Tin…) : sans cette info le
+    # montant est ininterprétable. None = devise indéterminée → l'UI n'affiche rien
+    # plutôt qu'un montant dans une unité inventée (cf. services/devises.py).
+    gains_carriere_devise: Optional[str] = None
     nb_victoires: Optional[int] = None
     nb_courses: Optional[int] = None
     # Généalogie
@@ -273,6 +279,10 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     except Exception as e:
         log.warning("courses.asso_map_failed", error=str(e))
 
+    # Devise des gains de carrière (le PMU stocke en devise locale de la réunion)
+    from services.devises import devises_gains_carriere
+    devise_map = await devises_gains_carriere(db, [ch.cheval_id for _, ch, *_ in rows])
+
     partants = []
     for p, ch, j, en, eq, pc, fm in rows:
         # Cotes disponibles
@@ -348,6 +358,7 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             numero_corde=p.numero_corde,
             # Carrière (PerformanceCarriere, 1:1 cheval) — stocké en centimes
             gains_carriere=int(pc.gains_carriere_total / 100) if pc and pc.gains_carriere_total else None,
+            gains_carriere_devise=devise_map.get(ch.cheval_id),
             nb_victoires=pc.nb_victoires_total if pc else None,
             nb_courses=pc.nb_courses_total if pc else None,
             # Généalogie
@@ -488,7 +499,11 @@ async def get_programme(
         select(Course, Reunion)
         .join(Reunion, Reunion.reunion_id == Course.reunion_id)
         .where(func.date(Course.date_heure) == target)
-        .where(Course.statut != "annule")   # masque les courses annulées / obsolètes
+        # Masque les courses NON COURUES : annulées par le PMU ('annule') et celles
+        # dont aucun résultat n'est jamais arrivé ('sans_resultat', posé par
+        # services/course_resolution.py). Avant le 2026-08-17 ces dernières restaient
+        # 'a_venir' à vie et polluaient le programme des jours passés.
+        .where(Course.statut.notin_(STATUTS_NON_COURUES))
         .order_by(Course.date_heure)
     )
     rows = (await db.execute(q)).all()
@@ -644,6 +659,7 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
             "en_cours": 15,    # 15s — pool + cotes live
             "termine":  3600,  # 1h  — données figées
             "annule":   86400, # 24h — figé définitivement
+            "sans_resultat": 86400,  # 24h — jamais résultée, figée (cf. course_resolution)
         }.get(course.statut, 30)
         await redis.setex(
             f"course_detail:{course_id}", ttl,
@@ -1948,6 +1964,10 @@ async def get_cheval(cheval_id: str, db: AsyncSession = Depends(get_db)):
     )
     perf = perf_res.scalar_one_or_none()
 
+    # Devise des gains stockés (PMU = devise locale de la dernière réunion courue)
+    from services.devises import devise_gains_carriere
+    gains_devise = await devise_gains_carriere(db, cheval_id)
+
     # Last 30 races
     hist_res = await db.execute(
         select(HistoriqueCourse)
@@ -2086,6 +2106,9 @@ async def get_cheval(cheval_id: str, db: AsyncSession = Depends(get_db)):
             "nb_places": perf.nb_places_total if perf else 0,
             "gains_total": int(perf.gains_carriere_total / 100) if perf and perf.gains_carriere_total else 0,
             "gains_annee_n": int(perf.gains_annee_n / 100) if perf and perf.gains_annee_n else 0,
+            # Devise ISO 4217 des deux montants ci-dessus (PMU = devise locale de la
+            # réunion). None → l'UI masque le montant (cf. services/devises.py).
+            "gains_devise": gains_devise,
             "nb_courses_annee": perf.nb_courses_annee if perf else 0,
             "nb_victoires_annee": perf.nb_victoires_annee if perf else 0,
             "meilleur_temps_all": perf.meilleur_temps_all if perf else None,
