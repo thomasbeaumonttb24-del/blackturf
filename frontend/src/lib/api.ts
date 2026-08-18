@@ -144,6 +144,10 @@ export const statsApi = {
   trackRecord: () => api.get("/stats/track-record"),
   profils: () => api.get("/stats/profils"),
   palmaresGagnants: () => api.get("/stats/palmares-gagnants"),
+  // Version PUBLIQUE du palmarès : `palmaresGagnants` est gardé par require_admin
+  // → 401 pour tout visiteur. À utiliser partout où la page est accessible sans
+  // compte (accueil, track-record), sinon la section reste vide pour les prospects.
+  palmaresPublic: () => api.get("/stats/palmares-public"),
 };
 
 export const notificationsApi = {

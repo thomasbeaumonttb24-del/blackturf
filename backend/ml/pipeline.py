@@ -637,6 +637,9 @@ async def _invalidate_stats_caches(course_id: str) -> None:
         keys = [
             "stats:public", "stats:equity-curve", "stats:ml-status",
             "stats:dashboard-summary",
+            # Palmarès public (page d'accueil) : « mis à jour à chaque fin de course »
+            # doit être vrai, sinon le bandeau live affiche jusqu'à 5 min de retard.
+            "stats:palmares-public",
             # NB: stats:track-record + stats:profils retires de la purge immediate
             # (recalcul froid ~2s). Geres par TTL 1h + job warm_caches /30min.
             f"course_detail:{course_id}", f"analyse:{course_id}",

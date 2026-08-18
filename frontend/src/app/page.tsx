@@ -2,7 +2,7 @@ import Link from "next/link";
 import {
   ArrowRight, TrendingUp, Zap, Shield, Trophy,
   Bell, Calculator, ChevronRight, Check, Target,
-  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search,
+  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
@@ -86,12 +86,15 @@ const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
     features: ["Programme du jour", "Cotes publiques", "1 pronostic/jour", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
-  { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux", badge: "Populaire",
+  { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux",
     features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Suivi du capital + statistiques", "Alertes push & e-mail", "Historique des résultats"],
-    cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: true },
-  { name: "Expert", price: "19€", period: "/mois", desc: "Pour les parieurs sérieux",
+    cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: false },
+  // Expert = plan mis en avant (aligné sur /tarifs, qui le marque « Recommandé »).
+  // CTA « Essayer 7 jours gratuit » comme Standard : depuis le 2026-08-17 l'essai de
+  // 7 jours s'applique AUSSI à Expert (cf. subscription_data dans stripe_routes.py).
+  { name: "Expert", price: "19€", period: "/mois", desc: "Pour les parieurs sérieux", badge: "Populaire",
     features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres", "Export des données"],
-    cta: "Passer Expert", href: "/inscription?plan=expert", popular: false },
+    cta: "Essayer 7 jours gratuit", href: "/inscription?plan=expert", popular: true },
 ];
 
 const DISC_LABEL: Record<string, string> = {
@@ -436,35 +439,61 @@ export default async function HomePage() {
             </ScrollReveal>
 
             <ScrollReveal direction="left">
+              {/* Reprend la présentation RÉELLE d'une carte de /value-bets (étoiles de
+                  niveau, libellé, espérance, meilleure cote + source) pour que l'aperçu
+                  corresponde à ce que l'abonné voit vraiment.
+                  Chiffres cohérents entre eux : cote 8,5 → proba marché 1/8,5 = 11,8 % ;
+                  proba modèle 15 % → espérance = 8,5 × 0,15 − 1 = +27,5 %. */}
               <div className="glass-card rounded-3xl p-6">
                 <div className="flex items-center justify-between mb-4">
                   <span className="eyebrow text-amber-700 text-[10px] font-bold"><Zap className="h-3 w-3" /> Pari de valeur détecté</span>
                   <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
-                <div className="flex items-center gap-3 rounded-2xl bg-amber-50 ring-1 ring-amber-200 px-4 py-3">
-                  <span className="num-display text-lg font-black text-brand-gold-deep">N°7</span>
-                  <div className="flex-1">
-                    <div className="font-semibold text-gray-900">Vent d'Est</div>
-                    <div className="text-[11px] text-gray-500">cote 8,5 · {EXAMPLE.hippo}</div>
+
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-50/50 p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <span className="flex gap-0.5 text-amber-600" aria-label="Niveau 3 sur 4 — Fort signal">
+                        {[0, 1, 2, 3].map((i) => (
+                          <Star key={i} className={`h-3 w-3 ${i < 3 ? "fill-current" : "opacity-20"}`} />
+                        ))}
+                      </span>
+                      <span className="block text-[9px] text-amber-700 mt-0.5">Fort signal</span>
+                    </div>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500 px-1.5 py-0 text-[9px] font-medium text-amber-700">
+                      <Zap className="h-2.5 w-2.5" /> Afflux marché
+                    </span>
                   </div>
-                  <span className="text-[11px] font-bold text-emerald-600">★★★</span>
+
+                  <div className="font-bold text-sm text-gray-900">Vent d&apos;Est <span className="font-mono font-normal text-gray-500">N°7</span></div>
+                  <div className="text-xs text-gray-500 mt-0.5">{EXAMPLE.hippo} · {EXAMPLE.disc}</div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-lg bg-white/70 p-2 text-center">
+                      <div className="text-[10px] text-gray-500">Espérance</div>
+                      <div className="num-display text-sm font-extrabold text-emerald-600">+27,5%</div>
+                    </div>
+                    <div className="rounded-lg bg-white/70 p-2 text-center">
+                      <div className="text-[10px] font-medium text-blue-600">PMU</div>
+                      <div className="num-display text-sm font-extrabold text-blue-600">8.5</div>
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-center">
                   <div className="rounded-xl bg-gray-50 p-3">
-                    <div className="num-display text-lg font-extrabold text-gray-900">19%</div>
+                    <div className="num-display text-lg font-extrabold text-gray-900">15%</div>
                     <div className="text-[10px] text-gray-500 mt-0.5">Proba modèle</div>
                   </div>
                   <div className="rounded-xl bg-gray-50 p-3">
-                    <div className="num-display text-lg font-extrabold text-gray-500">12%</div>
-                    <div className="text-[10px] text-gray-500 mt-0.5">Proba marché</div>
-                  </div>
-                  <div className="rounded-xl bg-emerald-50 ring-1 ring-emerald-100 p-3">
-                    <div className="num-display text-lg font-extrabold text-emerald-600">+14%</div>
-                    <div className="text-[10px] text-emerald-700/70 mt-0.5">Valeur (EV)</div>
+                    <div className="num-display text-lg font-extrabold text-gray-500">11,8%</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">Proba marché (1/cote)</div>
                   </div>
                 </div>
+
                 <p className="mt-4 text-xs text-gray-500 leading-relaxed">
-                  À 8,5, le marché lui donne ~12% de chances ; le modèle en voit 19%. La cote paie plus que le risque réel.
+                  À 8,5, le marché lui donne ~11,8% de chances ; le modèle en voit 15%.
+                  L&apos;espérance <span className="font-mono">(8,5 × 0,15) − 1 = +27,5%</span> : la cote paie plus que le risque réel.
                 </p>
               </div>
             </ScrollReveal>

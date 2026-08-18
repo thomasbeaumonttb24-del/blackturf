@@ -271,7 +271,25 @@ export default function TrackRecordPage() {
     updated_at?: string;
   }>(
     "palmares-gagnants",
-    () => statsApi.palmaresGagnants().then((r) => r.data),
+    // `palmaresGagnants` est gardé par require_admin → 401 pour un visiteur, et cette
+    // page est PUBLIQUE : sans repli, tout prospect voyait un palmarès vide. On tente
+    // d'abord la version admin (agrégats ROI/profil en plus), et on retombe sur la
+    // version publique sinon. Les blocs ROI se masquent d'eux-mêmes quand `profils`
+    // est absent — le ROI reste donc admin-only, conformément à la règle produit.
+    async () => {
+      try {
+        return (await statsApi.palmaresGagnants()).data;
+      } catch {
+        const pub = (await statsApi.palmaresPublic()).data;
+        return {
+          gagnants: pub.gagnants ?? [],
+          top_gains: pub.top_gains ?? [],
+          n: pub.nb_paris_gagnes ?? 0,
+          n_courses: pub.nb_courses_reglees ?? 0,
+          updated_at: pub.updated_at,
+        };
+      }
+    },
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
 
