@@ -79,7 +79,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log
+    # --proxy-headers : sans lui uvicorn ignore le X-Forwarded-Proto de nginx et
+    # construit ses redirections 307 en http:// — le navigateur, sur une page https,
+    # refuse de les suivre (contenu mixte) et la requête meurt en silence.
+    # `--forwarded-allow-ips=*` fait confiance aux en-têtes X-Forwarded-* de
+    # l'appelant : ce n'est acceptable que parce que le port 8000 est publié sur
+    # la LOOPBACK (`127.0.0.1:8000:8000`, docker-compose.yml) et que nginx est le
+    # seul ingress. Republier ce port sur 0.0.0.0 ouvrirait l'usurpation d'IP.
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log --proxy-headers --forwarded-allow-ips=*
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0

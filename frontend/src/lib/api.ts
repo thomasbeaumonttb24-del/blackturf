@@ -151,7 +151,12 @@ export const statsApi = {
 };
 
 export const notificationsApi = {
-  list: (page = 1, limit = 50) => api.get("/notifications", { params: { page, limit } }),
+  // `categorie` est filtrée par le SERVEUR (value_bet / resultat / systeme) : filtrer
+  // une page de 50 côté client affichait un onglet vide alors que la catégorie avait
+  // des dizaines d'entrées plus loin dans l'historique.
+  list: (page = 1, limit = 50, categorie?: string) =>
+    api.get("/notifications", { params: { page, limit, ...(categorie ? { categorie } : {}) } }),
+  countUnread: () => api.get("/notifications/count-unread"),
   markRead: (id: string) => api.put(`/notifications/${id}/lue`),
   markAllRead: () => api.delete("/notifications/all"),
   getPrefs: () => api.get("/notifications/prefs"),

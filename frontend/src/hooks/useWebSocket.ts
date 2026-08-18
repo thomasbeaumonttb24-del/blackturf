@@ -34,6 +34,18 @@ export function useWebSocket(path: string, enabled = true) {
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
+
+        // HEARTBEAT — le serveur envoie un ping toutes les 30 s et FERME la
+        // connexion s'il ne reçoit pas de pong dans les 45 s (ws.py, PONG_TIMEOUT).
+        // Le client ne répondait jamais : chaque canal (cotes live, paris de valeur,
+        // alertes) mourait au bout de ~45 s, se reconnectait avec backoff, puis
+        // abandonnait après 8 tentatives → « temps réel » silencieusement mort.
+        if (data?.type === "ping") {
+          try { ws.send(JSON.stringify({ type: "pong" })); } catch {}
+          return; // trame de service : ne pas la pousser dans les messages métier
+        }
+        if (data?.type === "pong") return;
+
         setMessages((prev) => [data, ...prev].slice(0, 100));
       } catch {}
     };
