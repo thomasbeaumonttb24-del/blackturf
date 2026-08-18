@@ -84,3 +84,6 @@ _orig_bak/
 cleanup_dups.sql
 # build cache, never version
 frontend/tsconfig.tsbuildinfo
+
+# Copies de sauvegarde du .env de production (contiennent des secrets reels)
+_backup_*_env_*
