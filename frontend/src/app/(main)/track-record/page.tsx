@@ -7,10 +7,10 @@ import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  Trophy, Star, Receipt, Coins, ArrowRight, ShieldCheck, BadgeCheck,
-  Clock3, Database, ExternalLink, LockKeyhole, BarChart3, RefreshCw,
-  CheckCircle2, CalendarDays, Target, Crown, ChevronDown, TrendingUp,
-  Dices, LineChart, Gauge, Sparkles, Users, Bell, Wallet, Brain, Minus,
+  Trophy, Star, Receipt, Coins, ArrowRight, ShieldCheck, Database,
+  ExternalLink, LockKeyhole, BarChart3, RefreshCw, CheckCircle2,
+  CalendarDays, Target, Crown, ChevronDown, TrendingUp, Dices,
+  LineChart, Gauge, Sparkles, Users, Bell, Wallet, Brain,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -216,35 +216,6 @@ function SectionHeading({ eyebrow, title, description, icon: Icon, align = "left
         <h2 className="mt-1 font-display text-xl font-bold tracking-tight text-foreground sm:text-2xl">{title}</h2>
         <p className={cn("mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground", align === "center" && "mx-auto")}>{description}</p>
       </div>
-    </div>
-  );
-}
-
-// ─── Tuile de chiffre clé ─────────────────────────────────────
-function KpiTile({ icon: Icon, label, value, sub, accent = false, footer }: {
-  icon: typeof Target;
-  label: string;
-  value: React.ReactNode;
-  sub?: string;
-  accent?: boolean;
-  footer?: React.ReactNode;
-}) {
-  return (
-    <div className={cn(
-      "flex h-full flex-col rounded-2xl border p-5 transition-shadow sm:p-6",
-      accent
-        ? "border-amber-200 bg-gradient-to-b from-amber-50/80 to-white shadow-[0_18px_45px_-40px_rgba(180,83,9,.7)]"
-        : "border-stone-200 bg-white shadow-[0_18px_45px_-42px_rgba(15,23,42,.55)]",
-    )}>
-      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        <Icon className={cn("h-3.5 w-3.5", accent ? "text-amber-700" : "text-stone-400")} aria-hidden="true" />
-        {label}
-      </div>
-      <div className={cn("mt-3 font-display text-3xl font-bold tabular-nums sm:text-4xl", accent ? "text-amber-800" : "text-slate-900")}>
-        {value}
-      </div>
-      {sub && <p className="mt-2 text-xs leading-5 text-muted-foreground">{sub}</p>}
-      {footer && <div className="mt-auto pt-4">{footer}</div>}
     </div>
   );
 }
@@ -514,6 +485,95 @@ function Faq({ q, children }: { q: string; children: React.ReactNode }) {
   );
 }
 
+// ─── Barre comparative « nous vs hasard » ─────────────────────
+// Deux barres sur la MÊME échelle 0-100 : sans le repère du hasard juste en
+// dessous, « 59,8 % » ne dit rien au lecteur — c'est l'écart qui informe.
+function ComparBar({ label, aide, nous, hasard, facteur }: {
+  label: string;
+  aide: string;
+  nous: number;
+  hasard: number | null;
+  facteur: number | null;
+}) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h3 className="text-sm font-semibold text-foreground">{label}</h3>
+        <p className="font-display text-2xl font-bold tabular-nums text-amber-800">{nf(nous, 1)} %</p>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{aide}</p>
+
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center gap-3">
+          <span className="w-24 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-amber-800">BlackTurf</span>
+          <div className="h-3 flex-1 overflow-hidden rounded-full bg-stone-100">
+            <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-600"
+              style={{ width: `${Math.min(nous, 100)}%` }} />
+          </div>
+          <span className="w-14 shrink-0 text-right text-xs font-semibold tabular-nums text-amber-800">{nf(nous, 1)} %</span>
+        </div>
+        {hasard != null && (
+          <div className="flex items-center gap-3">
+            <span className="w-24 shrink-0 text-[11px] font-medium uppercase tracking-wider text-slate-400">Hasard</span>
+            <div className="h-3 flex-1 overflow-hidden rounded-full bg-stone-100">
+              <div className="h-full rounded-full bg-slate-300" style={{ width: `${Math.min(hasard, 100)}%` }} />
+            </div>
+            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-slate-500">{nf(hasard, 1)} %</span>
+          </div>
+        )}
+      </div>
+
+      {facteur && (
+        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 ring-1 ring-amber-200">
+          <TrendingUp className="h-3 w-3" aria-hidden="true" /> {nf(facteur, 1)} fois mieux que le hasard
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Échelle de Brier ─────────────────────────────────────────
+// Un score de Brier nu n'évoque rien : on le place sur son échelle, entre la
+// prédiction parfaite (0) et le pile ou face (0,25).
+function BrierScale({ value }: { value: number }) {
+  const position = Math.max(0, Math.min(1, value / 0.25)) * 100;
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-stone-50/70 p-5">
+      <div className="flex items-baseline justify-between gap-4">
+        <h3 className="text-sm font-semibold text-foreground">Calibration des probabilités</h3>
+        <p className="font-display text-xl font-bold tabular-nums text-slate-900">{nf(value, 3)}</p>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        Score de Brier : l&apos;écart moyen entre la probabilité annoncée et ce qui s&apos;est réellement
+        produit. Une probabilité juste vaut autant qu&apos;un bon classement — c&apos;est elle qui décide
+        d&apos;une mise.
+      </p>
+      <div className="relative mt-6 h-2 rounded-full bg-gradient-to-r from-emerald-300 via-amber-300 to-rose-300">
+        <span
+          className="absolute -top-1 h-4 w-1 -translate-x-1/2 rounded-full bg-slate-900 ring-2 ring-white"
+          style={{ left: `${position}%` }}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="mt-2 flex justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span>0 · parfait</span>
+        <span>0,25 · pile ou face</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Cellule du bandeau de chiffres du hero ───────────────────
+function StatCell({ value, label, note }: { value: React.ReactNode; label: string; note?: string }) {
+  return (
+    <div className="px-5 py-6 sm:px-6 sm:py-7">
+      <p className="font-display text-3xl font-bold leading-none tabular-nums text-slate-900 sm:text-[2.1rem]">{value}</p>
+      <p className="mt-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">{label}</p>
+      {note && <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{note}</p>}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────
 export default function TrackRecordPage() {
   const [recentLimit, setRecentLimit] = useState(10);
@@ -614,166 +674,153 @@ export default function TrackRecordPage() {
   return (
     <div className="min-h-screen bg-[#FCFBF8]">
 
-      {/* ── Hero éditorial : preuve avant promesse ─────────────────────── */}
-      <header className="relative overflow-hidden border-b border-stone-200/80 bg-white">
-        {/* Photo d'ambiance très en retrait : elle habille, elle ne parle pas à la
-            place des chiffres (contraste du texte préservé sur mobile). */}
-        <div
-          className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-[0.07]"
-          style={{ backgroundImage: "url(/img/hero.webp)" }}
+      {/* ── Hero : bande photo pleine largeur + bandeau de chiffres ──────────
+          L'image n'est pas décorative : ce sont les stalles AVANT l'ouverture,
+          c'est-à-dire exactement l'instant que la page prouve — le pronostic est
+          figé avant que les portes s'ouvrent. */}
+      <header className="relative isolate overflow-hidden bg-slate-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/img/hero.webp"
+          alt=""
           aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover object-[center_38%]"
         />
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white via-white/85 to-white" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/92 to-slate-950/45" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-slate-950/70" aria-hidden="true" />
 
-        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-4 py-12 sm:px-6 sm:py-16 lg:grid-cols-[1.05fr_.95fr] lg:py-20">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-800">
-              <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> Palmarès vérifié
-            </div>
-            <h1 className="mt-6 max-w-3xl font-display text-4xl font-bold leading-[1.04] tracking-[-0.035em] text-slate-950 sm:text-5xl lg:text-6xl">
-              <CountUp value={g.nb_courses_analysees} /> courses analysées.<br />
-              <span className="text-amber-800">Chaque pronostic horodaté.</span>
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-slate-600 sm:text-lg">
-              Les pronostics sont figés avant le départ, puis réglés avec les rapports PMU officiels.
-              {depuis ? ` Tout ce que vous voyez ici est mesuré depuis le ${depuis}.` : ""} Des résultats, pas une promesse.
-            </p>
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-6 shadow-none">
-                <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-4 w-4" /></Link>
-              </Button>
-              <Button asChild variant="outline" size="lg" className="min-h-12 rounded-xl border-stone-300 bg-white px-6">
-                <a href="#preuves">Voir la méthode et les preuves</a>
-              </Button>
-            </div>
-            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
-              <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" /> Pronostics horodatés</span>
-              <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" /> Rapports officiels</span>
-              <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" /> Mise à jour continue</span>
-              <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" /> Sans carte bancaire</span>
-            </div>
+        <div className="relative mx-auto max-w-7xl px-4 pb-36 pt-14 sm:px-6 sm:pb-44 sm:pt-20 lg:pb-52 lg:pt-24">
+          <p className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-300">
+            <span className="h-px w-8 bg-amber-400/80" aria-hidden="true" />
+            Palmarès public
+          </p>
+
+          <h1 className="mt-7 max-w-4xl font-display text-[2.5rem] font-bold leading-[1.03] tracking-[-0.04em] text-white sm:text-6xl lg:text-[4.25rem]">
+            <CountUp value={g.nb_courses_analysees} /> courses passées au crible.
+            <span className="mt-2 block text-amber-300">Aucun pronostic écrit après l&apos;arrivée.</span>
+          </h1>
+
+          <p className="mt-7 max-w-xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
+            Chaque sélection est horodatée avant que les portes s&apos;ouvrent, puis confrontée aux
+            rapports PMU officiels. Vous lisez le relevé brut — y compris ce qui n&apos;a pas marché.
+          </p>
+
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-6 shadow-none">
+              <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-4 w-4" /></Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg" className="min-h-12 rounded-xl border border-white/25 bg-white/5 px-6 text-white hover:bg-white/10 hover:text-white">
+              <a href="#preuves">Voir la méthode</a>
+            </Button>
           </div>
 
-          <div className="relative overflow-hidden rounded-[2rem] bg-slate-950 p-6 text-white shadow-[0_24px_70px_-38px_rgba(15,23,42,.75)] sm:p-8">
-            <div className="absolute inset-0 opacity-15 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:24px_24px]" aria-hidden="true" />
-            <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-amber-500/20 blur-3xl" aria-hidden="true" />
-            <div className="relative">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300">Preuve en chiffres</p>
-              <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10">
-                <div className="bg-slate-950/90 p-5 sm:p-6">
-                  <p className="text-3xl font-bold tabular-nums sm:text-4xl"><CountUp value={g.accuracy_top3} decimals={1} suffix=" %" /></p>
-                  <p className="mt-2 text-xs leading-5 text-slate-400">
-                    Gagnant dans notre Top-3
-                    {hasard3 != null && <span className="mt-0.5 block text-slate-500">hasard : {nf(hasard3, 0)} %</span>}
-                  </p>
-                </div>
-                <div className="bg-slate-950/90 p-5 sm:p-6">
-                  <p className="text-3xl font-bold tabular-nums sm:text-4xl"><CountUp value={g.nb_courses_analysees} /></p>
-                  <p className="mt-2 text-xs leading-5 text-slate-400">
-                    Courses analysées
-                    {depuis && <span className="mt-0.5 block text-slate-500">depuis le {depuis}</span>}
-                  </p>
-                </div>
-                <div className="col-span-2 bg-slate-950/90 p-5 sm:p-6">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <p className="text-3xl font-bold tabular-nums text-emerald-300 sm:text-5xl">
-                        {!gagnantsData ? "—" : gainConnu
-                          ? <CountUpEuro value={gagnantsData.total_gain ?? 0} prefix="+" />
-                          : <CountUp value={nbGagnants} />}
-                      </p>
-                      <p className="mt-2 text-xs text-slate-400">
-                        {gainConnu ? "Gains encaissés documentés" : "Paris gagnés, réglés aux rapports PMU"}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xl font-bold tabular-nums">
-                        {gainConnu ? nf(nbGagnants) : nf(nbCoursesReglees)}
-                      </p>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        {gainConnu ? "paris gagnés" : "courses réglées"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <EchantillonNotice
-                nbCourses={g.nb_courses_analysees}
-                mesureDepuis={g.mesure_depuis}
-                variante="sombre"
-              />
-              {data.updated_at && <p className="mt-5 flex items-center gap-2 text-[11px] text-slate-400"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Actualisé le {new Date(data.updated_at).toLocaleDateString("fr-FR")} à {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>}
-            </div>
-          </div>
+          <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Horodaté avant le départ</span>
+            <span className="text-slate-600" aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Rapports PMU officiels</span>
+            <span className="text-slate-600" aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Essai sans carte bancaire</span>
+          </p>
         </div>
       </header>
 
+      {/* Bandeau de chiffres à cheval sur la photo : la preuve est lisible avant
+          tout scroll, sans réempiler une carte sombre par-dessus une photo sombre. */}
+      <div className="relative z-10 mx-auto -mt-24 max-w-6xl px-4 sm:-mt-28 sm:px-6">
+        <div className="grid grid-cols-2 divide-x divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_34px_70px_-45px_rgba(15,23,42,.6)] sm:grid-cols-4 sm:divide-y-0">
+          <StatCell
+            value={<CountUp value={g.accuracy_top3} decimals={1} suffix=" %" />}
+            label="Gagnant dans le Top-3"
+            note={hasard3 != null ? `Hasard : ${nf(hasard3, 0)} %` : undefined}
+          />
+          <StatCell
+            value={<CountUp value={g.accuracy_top1} decimals={1} suffix=" %" />}
+            label="Favori qui gagne"
+            note={hasard1 != null ? `Hasard : ${nf(hasard1, 1)} %` : undefined}
+          />
+          <StatCell
+            value={<CountUp value={g.nb_courses_analysees} />}
+            label="Courses analysées"
+            note={depuis ? `Depuis le ${depuis}` : undefined}
+          />
+          <StatCell
+            value={!gagnantsData ? "—" : gainConnu
+              ? <CountUpEuro value={gagnantsData.total_gain ?? 0} prefix="+" />
+              : <CountUp value={nbGagnants} />}
+            label={gainConnu ? "Gains encaissés" : "Paris gagnés"}
+            note={gainConnu ? `${nf(nbGagnants)} paris gagnés` : `Sur ${nf(nbCoursesReglees)} courses réglées`}
+          />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-start gap-1.5">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700" aria-hidden="true" />
+            Cohorte mesurée : toute course dont le pronostic existait avant le départ
+            {g.nb_courses_rejouables ? `, dont ${nf(g.nb_courses_rejouables)} rejouables à l'identique` : ""}.
+          </span>
+          {data.updated_at && (
+            <span className="inline-flex items-center gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              Actualisé à {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+        <EchantillonNotice nbCourses={g.nb_courses_analysees} mesureDepuis={g.mesure_depuis} />
+      </div>
+
       <main id="preuves" className="mx-auto max-w-7xl space-y-16 px-4 py-12 sm:px-6 sm:py-16 lg:space-y-24">
 
-        {/* ── Chiffres clés ─────────────────────────────────────────────── */}
-        <section aria-label="Chiffres clés" className="space-y-6">
-          <SectionHeading
-            eyebrow="Qualité du modèle"
-            title="Ce que l'algorithme fait, chiffré"
-            description="Quatre indicateurs mesurés sur toutes les courses pronostiquées avant le départ. Aucun n'est une promesse de gain : ils décrivent la qualité de l'analyse."
-            icon={Gauge}
-          />
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiTile
-              icon={Target}
-              label="Précision Top-3"
-              accent
-              value={<CountUp value={g.accuracy_top3} decimals={1} suffix=" %" />}
-              sub={hasard3 != null
-                ? `Le gagnant est dans nos 3 favoris. Un tirage au sort ferait ${nf(hasard3, 0)} % sur les mêmes courses.`
-                : "Le gagnant réel figure dans nos 3 favoris."}
-              footer={facteur3 ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
-                  <TrendingUp className="h-3 w-3" aria-hidden="true" /> ×{nf(facteur3, 1)} le hasard
-                </span>
-              ) : undefined}
+        {/* ── Nos résultats comparés au hasard ──────────────────────────── */}
+        <section aria-label="Nos résultats comparés au hasard" className="grid gap-10 lg:grid-cols-[1.1fr_.9fr] lg:gap-14">
+          <div>
+            <SectionHeading
+              eyebrow="Qualité du modèle"
+              title="Ce que valent vraiment ces pourcentages"
+              description="Un taux ne veut rien dire seul. Chaque mesure est ici confrontée à ce qu'un tirage au sort obtiendrait sur exactement les mêmes courses, avec le même nombre de partants."
+              icon={Gauge}
             />
-            <KpiTile
-              icon={Trophy}
-              label="Précision Top-1"
-              value={<CountUp value={g.accuracy_top1} decimals={1} suffix=" %" />}
-              sub={hasard1 != null
-                ? `Notre favori gagne la course. Au hasard : ${nf(hasard1, 1)} %.`
-                : "Notre favori numéro 1 gagne la course."}
-              footer={facteur1 ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                  <TrendingUp className="h-3 w-3" aria-hidden="true" /> ×{nf(facteur1, 1)} le hasard
-                </span>
-              ) : undefined}
-            />
-            <KpiTile
-              icon={Database}
-              label="Courses analysées"
-              value={<CountUp value={g.nb_courses_analysees} />}
-              sub={depuis ? `Toutes disciplines, depuis le ${depuis}. Champ moyen : ${g.nb_partants_moyen ? nf(g.nb_partants_moyen, 1) : "—"} partants.` : "Toutes disciplines confondues."}
-              footer={g.nb_courses_rejouables ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200">
-                  <LockKeyhole className="h-3 w-3" aria-hidden="true" /> dont {nf(g.nb_courses_rejouables)} rejouables à l&apos;identique
-                </span>
-              ) : undefined}
-            />
-            <KpiTile
-              icon={Brain}
-              label="Score de Brier"
-              value={<CountUp value={g.brier_moyen} decimals={3} />}
-              sub="Écart moyen entre nos probabilités et la réalité. Plus il est bas, mieux les probabilités sont calibrées."
-              footer={
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                  <Minus className="h-3 w-3" aria-hidden="true" /> 0 = parfait · 0,25 = pile ou face
-                </span>
-              }
-            />
+            <div className="mt-8 space-y-9">
+              <ComparBar
+                label="Le gagnant figure dans notre Top-3"
+                aide={`Sur ${nf(g.nb_courses_analysees)} courses réglées, champ moyen de ${g.nb_partants_moyen ? nf(g.nb_partants_moyen, 1) : "11"} partants.`}
+                nous={g.accuracy_top3}
+                hasard={hasard3}
+                facteur={facteur3}
+              />
+              <ComparBar
+                label="Notre favori gagne la course"
+                aide="Le cheval classé numéro 1 par l'algorithme franchit la ligne en tête."
+                nous={g.accuracy_top1}
+                hasard={hasard1}
+                facteur={facteur1}
+              />
+            </div>
           </div>
-          <p className="flex items-start gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-[11px] leading-5 text-muted-foreground">
-            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700" aria-hidden="true" />
-            La précision d&apos;analyse mesure la qualité du classement des chevaux. Ce n&apos;est ni un taux de gain,
-            ni une garantie de profit : jouer comporte un risque de perte.
-          </p>
+
+          <div className="space-y-4 lg:pt-4">
+            <BrierScale value={g.brier_moyen} />
+            <div className="rounded-2xl border border-stone-200 bg-white p-5">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ShieldCheck className="h-4 w-4 text-amber-700" aria-hidden="true" /> Ce que ces chiffres ne disent pas
+              </h3>
+              <ul className="mt-3 space-y-2.5 text-xs leading-5 text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                  Ce n&apos;est pas un taux de paris gagnants : un cheval bien classé ne fait pas gagner un
+                  Simple Gagnant, et le prélèvement PMU s&apos;applique à chaque mise.
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                  Ce n&apos;est pas une promesse : les performances passées ne préjugent pas des suivantes,
+                  et jouer comporte un risque de perte.
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+                  C&apos;est en revanche vérifiable course par course : chaque ligne du palmarès renvoie
+                  vers la course concernée et son rapport officiel.
+                </li>
+              </ul>
+            </div>
+          </div>
         </section>
 
         {/* ── Tendance 30 jours ─────────────────────────────────────────── */}
@@ -782,7 +829,7 @@ export default function TrackRecordPage() {
             <SectionHeading
               eyebrow="Régularité"
               title="Jour après jour, sur 30 jours"
-              description="La performance d'un jour ne prouve rien. Celle de trente jours consécutifs, si. Chaque point est la précision Top-3 mesurée sur les courses réglées ce jour-là."
+              description="Une bonne journée ne prouve rien — sur 40 courses, le hasard produit des écarts de 15 points. Ce qui compte, c'est que la ligne reste au-dessus du repère jour après jour."
               icon={LineChart}
             />
             <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,.5)]">
@@ -808,7 +855,7 @@ export default function TrackRecordPage() {
           <SectionHeading
             eyebrow="Par spécialité"
             title="La précision, discipline par discipline"
-            description="Le trot attelé, le plat, le monté et l'obstacle ne se jouent pas de la même façon. Voici le volume réellement analysé et la précision atteinte sur chacun."
+            description="Le trot et le galop ne se lisent pas avec les mêmes signaux : le plat ouvre des champs plus larges et plus incertains, le trot récompense la régularité. Voici, sans tri, le volume analysé et la précision atteinte sur chacun."
             icon={Sparkles}
           />
           {data.by_discipline.length === 0 ? (
@@ -829,52 +876,82 @@ export default function TrackRecordPage() {
           <SectionHeading
             eyebrow="Face au marché"
             title="Notre favori contre la cote des parieurs"
-            description="Un bon pronostic ne se contente pas de recopier la cote : il doit voir avant le marché. Ces trois mesures confrontent nos favoris à la réalité de l'arrivée et au mouvement des cotes."
+            description="Recopier la cote ne demande aucun modèle. Les questions utiles sont ailleurs : nos favoris tiennent-ils à l'arrivée, et le marché se déplace-t-il vers eux une fois que nous les avons désignés ?"
             icon={Users}
           />
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-3xl border border-stone-200 bg-white p-6">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori placé</p>
-              <p className="mt-3 font-display text-4xl font-bold tabular-nums text-emerald-700">
-                <CountUp value={g.favori_place_rate} decimals={1} suffix=" %" />
-              </p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Notre cheval numéro 1 termine dans les 3 premiers, sur {nf(g.nb_favoris_evalues)} courses confrontées à l&apos;arrivée officielle.
-              </p>
-            </div>
-            <div className="rounded-3xl border border-stone-200 bg-white p-6">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori gagnant</p>
-              <p className="mt-3 font-display text-4xl font-bold tabular-nums text-slate-900">
-                <CountUp value={g.favori_win_rate} decimals={1} suffix=" %" />
-              </p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Il gagne franchement la course. À comparer aux {hasard1 != null ? `${nf(hasard1, 1)} %` : "—"} d&apos;un choix au hasard sur le même champ.
-              </p>
-            </div>
-            <div className={cn("rounded-3xl border p-6", clv ? "border-amber-200 bg-gradient-to-b from-amber-50/80 to-white" : "border-stone-200 bg-white")}>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">Le marché nous suit</p>
-              {clv ? (
-                <>
-                  <p className="mt-3 font-display text-4xl font-bold tabular-nums text-amber-800">
-                    <CountUp value={clv.pct_beat_line} decimals={1} suffix=" %" />
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    Part de nos favoris dont la cote <strong className="font-semibold text-foreground">baisse</strong> entre notre pronostic
-                    et le départ : le marché se déplace vers notre pick. Mesuré sur {nf(clv.n)} courses.
-                  </p>
-                </>
-              ) : (
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  Indicateur en cours de constitution : il demande un historique complet de cotes, de notre pronostic jusqu&apos;au départ.
+          <div className="grid gap-4 lg:grid-cols-[.9fr_1.1fr] lg:gap-6">
+            <div className="relative min-h-[240px] overflow-hidden rounded-3xl bg-slate-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/img/duel.webp"
+                alt="Deux chevaux au coude à coude dans la ligne droite"
+                className="absolute inset-0 h-full w-full object-cover"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-transparent" aria-hidden="true" />
+              <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300">Closing line value</p>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-200">
+                  Quand la cote d&apos;un cheval baisse entre notre pronostic et le départ, c&apos;est le marché
+                  qui vient nous rejoindre. De tous les signaux, c&apos;est le plus difficile à maquiller.
                 </p>
-              )}
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-3xl border border-stone-200 bg-white p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori placé</p>
+                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-emerald-700">
+                  <CountUp value={g.favori_place_rate} decimals={1} suffix=" %" />
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Notre cheval numéro 1 termine dans les 3 premiers, sur {nf(g.nb_favoris_evalues)} courses
+                  confrontées à l&apos;arrivée officielle.
+                </p>
+              </div>
+              <div className="rounded-3xl border border-stone-200 bg-white p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori gagnant</p>
+                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-slate-900">
+                  <CountUp value={g.favori_win_rate} decimals={1} suffix=" %" />
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Il gagne franchement la course, contre {hasard1 != null ? `${nf(hasard1, 1)} %` : "—"} pour un
+                  choix au hasard sur le même champ.
+                </p>
+              </div>
+              <div className={cn("rounded-3xl border p-6 sm:col-span-2", clv ? "border-amber-200 bg-gradient-to-br from-amber-50/90 to-white" : "border-stone-200 bg-white")}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">Le marché se déplace vers nous</p>
+                {clv ? (
+                  <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-2">
+                    <p className="font-display text-4xl font-bold tabular-nums text-amber-800">
+                      <CountUp value={clv.pct_beat_line} decimals={1} suffix=" %" />
+                    </p>
+                    <p className="max-w-md text-sm leading-6 text-muted-foreground">
+                      de nos favoris voient leur cote <strong className="font-semibold text-foreground">baisser</strong> entre
+                      notre pronostic et le départ, sur {nf(clv.n)} courses mesurées.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                    Indicateur en cours de constitution : il exige l&apos;historique complet des cotes, de notre
+                    pronostic jusqu&apos;au départ.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </section>
 
         {/* ── TOTAL DES GAINS générés par l'algorithme, par profil ───────────── */}
         <section aria-label="Gains vérifiés" className="space-y-6">
-          <SectionHeading eyebrow="Vue d'ensemble" title="Les gains vérifiés" description="Une lecture consolidée des gains encaissés et de leur répartition par profil de risque." icon={Coins} />
+          <SectionHeading
+            eyebrow="Vue d'ensemble"
+            title="Les paris qui sont passés"
+            description={gainConnu
+              ? "Les gains encaissés, leur répartition par profil de risque, et le nombre de courses réglées qui sert de dénominateur."
+              : "Chaque pari gagnant listé ici a été émis avant le départ puis réglé au rapport officiel. Le nombre de courses réglées est affiché à côté : sans ce dénominateur, ne montrer que les gagnants serait un biais du survivant."}
+            icon={Coins}
+          />
         <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,.5)]">
           <CardContent className="p-5 sm:p-8">
             {gagnantsError ? (
@@ -989,14 +1066,17 @@ export default function TrackRecordPage() {
           <div className="grid gap-6 md:grid-cols-[.8fr_2.2fr] md:items-center">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">Traçabilité</p>
-              <h2 className="mt-2 font-display text-2xl font-bold tracking-tight">Comment un gain devient une preuve</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">Trois étapes simples, consultables course par course.</p>
+              <h2 className="mt-2 font-display text-2xl font-bold tracking-tight">Comment un pronostic devient une preuve</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Trois étapes, vérifiables course par course — c&apos;est ce qui sépare un palmarès d&apos;une
+                capture d&apos;écran.
+              </p>
             </div>
             <ol className="grid gap-3 sm:grid-cols-3">
               {[
-                { icon: LockKeyhole, n: "01", title: "Pronostic figé", text: "La sélection est horodatée avant le départ." },
-                { icon: Database, n: "02", title: "Rapport officiel", text: "Le résultat est réglé avec les données PMU." },
-                { icon: ExternalLink, n: "03", title: "Preuve consultable", text: "Chaque ligne renvoie vers la course concernée." },
+                { icon: LockKeyhole, n: "01", title: "Figé avant le départ", text: "La sélection, les cotes retenues et le plan de mise sont enregistrés et horodatés pendant que la course est encore à venir." },
+                { icon: Database, n: "02", title: "Réglé au rapport officiel", text: "À l'arrivée, le pari est réglé au rapport PMU publié — jamais à une cote choisie après coup." },
+                { icon: ExternalLink, n: "03", title: "Consultable une par une", text: "Chaque ligne renvoie vers sa course : partants, cotes, arrivée. Rien ne repose sur notre parole." },
               ].map((step) => (
                 <li key={step.n} className="rounded-2xl bg-stone-50 p-4">
                   <div className="flex items-center justify-between"><step.icon className="h-4 w-4 text-amber-800" aria-hidden="true" /><span className="font-display text-[10px] font-bold tracking-widest text-stone-400">{step.n}</span></div>
@@ -1065,7 +1145,7 @@ export default function TrackRecordPage() {
           <SectionHeading
             eyebrow="Passer à l'action"
             title="Le palmarès est public. Les pronostics du jour ne le sont pas."
-            description="Cette page montre ce que l'algorithme a fait hier. L'abonnement donne accès à ce qu'il annonce pour les courses de tout à l'heure."
+            description="Cette page montre ce que l'algorithme a fait sur les courses déjà courues. L'abonnement donne accès à ce qu'il annonce pour celles de tout à l'heure — avec le détail qui permet de décider soi-même."
             icon={Crown}
           />
           <div className="grid gap-4 lg:grid-cols-3">
@@ -1154,6 +1234,16 @@ export default function TrackRecordPage() {
               La part des courses où le cheval qui a gagné figurait parmi nos trois premiers choix.
               {hasard3 != null && ` Sur ces mêmes courses — ${g.nb_partants_moyen ? `${nf(g.nb_partants_moyen, 1)} partants en moyenne` : "champ réel"} — un tirage au sort atteindrait ${nf(hasard3, 0)} %.`}
               {" "}Ce n&apos;est pas un taux de paris gagnants : un cheval placé ne fait pas gagner un pari Simple Gagnant.
+            </Faq>
+            <Faq q="À quelle fréquence cette page est-elle mise à jour ?">
+              À chaque arrivée. Dès qu&apos;une course est réglée, son résultat entre dans les taux ci-dessus et
+              la course apparaît, gagnante ou perdante, dans l&apos;historique. Rien n&apos;est saisi à la main :
+              c&apos;est la même chaîne qui produit les pronostics et qui les note.
+            </Faq>
+            <Faq q="Pourquoi montrer des taux moyens plutôt que vos plus beaux coups ?">
+              Parce que n&apos;importe qui peut publier une capture d&apos;écran d&apos;un Trio à 450 contre 1 — nous en
+              avons, ils sont plus bas dans la page. Un gros gain isolé ne prouve rien sur la méthode ;
+              {" "}{nf(g.nb_courses_analysees)} courses mesurées, avec leur dénominateur et leurs échecs, si.
             </Faq>
           </div>
         </section>
