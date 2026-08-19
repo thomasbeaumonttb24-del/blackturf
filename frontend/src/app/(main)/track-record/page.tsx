@@ -681,13 +681,20 @@ export default function TrackRecordPage() {
       <header className="relative isolate overflow-hidden bg-slate-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/img/hero.webp"
+          src="/img/hero-1600.webp"
+          srcSet="/img/hero-640.webp 640w, /img/hero-1024.webp 1024w, /img/hero-1600.webp 1600w"
+          sizes="100vw"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-[center_38%]"
+          fetchPriority="high"
+          className="absolute inset-0 h-full w-full object-cover object-[center_42%]"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/92 to-slate-950/45" aria-hidden="true" />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-slate-950/70" aria-hidden="true" />
+        {/* Voile en deux passes : dégradé horizontal pour tenir le contraste du
+            texte à gauche (AA sur fond photo), voile vertical léger pour que la
+            photo reste LISIBLE à droite — un aplat uniforme la transformait en
+            texture grise et annulait l'intérêt de l'image. */}
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/85 to-slate-950/25" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/5 to-slate-950/55" aria-hidden="true" />
 
         <div className="relative mx-auto max-w-7xl px-4 pb-36 pt-14 sm:px-6 sm:pb-44 sm:pt-20 lg:pb-52 lg:pt-24">
           <p className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-300">
