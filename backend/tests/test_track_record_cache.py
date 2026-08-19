@@ -164,3 +164,22 @@ async def test_refresh_verrouille_les_recalculs_concurrents(monkeypatch):
 
     monkeypatch.setattr(stats_mod, "_compute_track_record", _interdit)
     assert await refresh_track_record_cache() is False
+
+
+# ── Honnêteté de la période mesurée ──────────────────────────────────────────
+async def test_le_track_record_expose_depuis_quand_il_mesure():
+    """Le read-model ne retient que la cohorte rejouable (snapshots pré-course,
+    démarrés le 18/08/2026) : sans cette date, la page publique affiche un taux
+    sans dire qu'il ne porte que sur quelques jours — c'est ce qui a fait passer
+    « 33,3 % sur 9 courses » pour un track record.
+
+    Vérification sur la SOURCE : `_compute_track_record` est écrit en SQL
+    PostgreSQL (FILTER, date_trunc) que le SQLite des tests ne sait pas exécuter.
+    """
+    import inspect
+    source = inspect.getsource(stats_mod._compute_track_record)
+    assert '"mesure_depuis": mesure_depuis' in source, (
+        "la période mesurée doit voyager avec les taux, pas être déduite par le front")
+    assert "MIN(c.date_heure)" in source and "p.is_replayable = true" in source, (
+        "la date doit venir de la cohorte RÉELLEMENT mesurée, pas de la première "
+        "course connue")

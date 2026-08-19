@@ -11,6 +11,7 @@ import {
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { statsApi } from "@/lib/api";
+import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -20,6 +21,9 @@ interface TrackRecord {
     accuracy_top3: number;
     brier_moyen: number;
     nb_courses_analysees: number;
+    // Date de la plus ancienne course mesurée (ISO) — le read-model ne retient que
+    // la cohorte rejouable, donc les taux ne portent que sur cette période.
+    mesure_depuis?: string | null;
     nb_surprises: number;
     favori_win_rate: number;
     favori_place_rate: number;
@@ -374,6 +378,11 @@ export default function TrackRecordPage() {
                   </div>
                 </div>
               </div>
+              <EchantillonNotice
+                nbCourses={g.nb_courses_analysees}
+                mesureDepuis={g.mesure_depuis}
+                variante="sombre"
+              />
               {data.updated_at && <p className="mt-5 flex items-center gap-2 text-[11px] text-slate-400"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Actualisé le {new Date(data.updated_at).toLocaleDateString("fr-FR")} à {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>}
             </div>
           </div>

@@ -756,6 +756,18 @@ async def _compute_track_record(db: AsyncSession) -> dict:
         )
     """))).first()
     nb_total = int(_glob.nb or 0)
+    # Depuis QUAND ces taux sont-ils mesurés ? Le read-model ne retient que la cohorte
+    # rejouable (snapshots pré-course), qui a commencé le 2026-08-18 : sans cette date,
+    # la page publique affiche un pourcentage sans dire qu'il porte sur quelques jours.
+    _depuis = (await db.execute(text("""
+        SELECT MIN(c.date_heure)
+        FROM prediction_evaluation p
+        JOIN courses c ON c.course_id = p.course_id
+        WHERE p.is_replayable = true
+          AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+          AND p.created_at < c.date_heure
+    """))).scalar()
+    mesure_depuis = _depuis.date().isoformat() if _depuis else None
     brier_moyen = round(float(_glob.brier), 4) if _glob.brier is not None else 0.0
     accuracy_top1 = round(int(_glob.top1 or 0) / nb_total * 100, 1) if nb_total else 0.0
     accuracy_top3 = round(int(_glob.top3 or 0) / nb_total * 100, 1) if nb_total else 0.0
@@ -1099,6 +1111,9 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             "accuracy_top3": accuracy_top3,
             "brier_moyen": brier_moyen,
             "nb_courses_analysees": nb_total,
+            # Date de la plus ancienne course de la cohorte mesurée (ISO) — sert à
+            # dire honnêtement sur quelle période portent les taux affichés.
+            "mesure_depuis": mesure_depuis,
             "nb_surprises": nb_surprises,
             "favori_win_rate": favori_win_rate,
             "favori_place_rate": favori_place_rate,

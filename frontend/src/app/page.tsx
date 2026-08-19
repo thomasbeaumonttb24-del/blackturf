@@ -12,6 +12,7 @@ import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
 import { LivePalmares } from "@/components/home/LivePalmares";
 import { HeroStats } from "@/components/home/HeroStats";
+import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
 
 // ─── Exemple de course (illustratif, tagué « Exemple » partout) ──────────────
 const EXAMPLE = { hippo: "Deauville", code: "R4 · C5", disc: "Plat · 1600m" };
@@ -111,6 +112,7 @@ interface TrackRecord {
   favori_place_rate: number | null;
   favori_win_rate: number | null;
   nb_courses: number | null;
+  mesure_depuis: string | null;
   by_discipline: Array<{ discipline: string; nb_courses: number; accuracy_top3: number }>;
   by_day: Array<{ jour: string; accuracy_top3: number; nb_predictions: number }>;
 }
@@ -130,6 +132,7 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
       favori_place_rate: numOf(g.favori_place_rate),
       favori_win_rate: numOf(g.favori_win_rate),
       nb_courses: numOf(g.nb_courses_analysees),
+      mesure_depuis: typeof g.mesure_depuis === "string" ? g.mesure_depuis : null,
       by_discipline: byDisc
         .filter((x: Record<string, unknown>) => numOf(x?.nb_courses) && (x.nb_courses as number) >= 10 && numOf(x?.accuracy_top3))
         .map((x: Record<string, unknown>) => ({ discipline: String(x.discipline ?? "autre"), nb_courses: x.nb_courses as number, accuracy_top3: x.accuracy_top3 as number }))
@@ -602,6 +605,11 @@ export default async function HomePage() {
               </ScrollReveal>
             ))}
           </div>
+
+          {/* Les taux ci-dessus ne portent que sur la cohorte rejouable (snapshots
+              pre-course). Tant qu'elle est petite, on le dit plutot que de laisser
+              lire un pourcentage comme un acquis. */}
+          <EchantillonNotice nbCourses={tr?.nb_courses} mesureDepuis={tr?.mesure_depuis} />
 
           <div className="grid lg:grid-cols-2 gap-4">
             {tr && tr.by_discipline.length > 0 && (
