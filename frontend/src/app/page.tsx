@@ -2,7 +2,7 @@ import Link from "next/link";
 import {
   ArrowRight, TrendingUp, Zap, Shield, Trophy,
   Bell, Calculator, ChevronRight, Check, Target,
-  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search, Star,
+  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search, Star, Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
@@ -113,8 +113,50 @@ interface TrackRecord {
   favori_win_rate: number | null;
   nb_courses: number | null;
   mesure_depuis: string | null;
+  hasard_top3: number | null;
+  hasard_top1: number | null;
   by_discipline: Array<{ discipline: string; nb_courses: number; accuracy_top3: number }>;
   by_day: Array<{ jour: string; accuracy_top3: number; nb_predictions: number }>;
+}
+
+// Questions qui bloquent réellement une inscription — la deuxième répond « non »
+// à « est-ce que je vais gagner ». Une FAQ qui ne dit que du bien ne rassure
+// personne, et le balisage FAQPage exige de toute façon le texte affiché.
+function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
+  const pc = (x: number | null, d = 1) => (x == null ? null : `${x.toFixed(d).replace(".", ",")} %`);
+  const top3 = pc(tr?.accuracy_top3 ?? null);
+  const hasard = pc(tr?.hasard_top3 ?? null, 0);
+  const nb = tr?.nb_courses ? tr.nb_courses.toLocaleString("fr-FR") : null;
+  return [
+    {
+      q: "Concrètement, que fait BlackTurf ?",
+      r: "Nous analysons chaque course du programme PMU avant le départ : plus de 80 critères par cheval (forme, terrain, distance, jockey, mouvements de cote…), une probabilité pour chaque partant, puis un plan de mise calculé selon votre budget et votre tolérance au risque. Vous gardez la main : vous pariez où vous voulez, et nous ne prenons aucune commission sur vos gains.",
+    },
+    {
+      q: "Est-ce que je vais gagner de l'argent ?",
+      r: `Personne ne peut vous le garantir, et nous ne le ferons pas : le pari hippique reste soumis au prélèvement de l'opérateur et au hasard. Ce que nous publions, c'est la qualité de l'analyse${top3 && hasard ? ` — le gagnant figure dans notre Top-3 sur ${top3} des courses, contre ${hasard} pour un tirage au sort` : ""}, et le détail de chaque pari réglé, gagnant comme perdant.`,
+    },
+    {
+      q: "Combien de temps ça me prend ?",
+      r: "Le temps de lire une fiche. Quand vous arrivez, la course est déjà analysée : vous choisissez la course, vous entrez votre mise, le plan s'affiche. Les alertes préviennent quand un pari de valeur apparaît — pas besoin de surveiller le programme toute la journée.",
+    },
+    {
+      q: "D'où viennent les données ?",
+      r: "Du programme officiel PMU (partants, cotes, arrivées, rapports), complété par plusieurs sources de cotes pour repérer les écarts de marché. Les résultats qui servent à noter nos pronostics sont les rapports PMU publiés — jamais une estimation maison.",
+    },
+    {
+      q: "Vos statistiques sont-elles vérifiables ?",
+      r: `Oui. Le palmarès est public : chaque pari gagné y figure avec sa course et son rapport officiel, à côté du nombre total de courses réglées — sans ce dénominateur, n'afficher que les gagnants n'aurait aucune valeur.${nb ? ` Les taux publiés portent sur ${nb} courses.` : ""}`,
+    },
+    {
+      q: "Sur quelles courses ça fonctionne ?",
+      r: "Sur toutes les disciplines du programme : trot attelé, trot monté, plat et obstacle. La précision n'est pas la même partout, c'est pourquoi nous la publions discipline par discipline plutôt que sous la forme d'un chiffre unique.",
+    },
+    {
+      q: "Puis-je annuler ?",
+      r: "À tout moment depuis votre compte, en deux clics. L'essai de 7 jours ne demande pas de carte bancaire et ne bascule pas en abonnement payant sans votre accord.",
+    },
+  ];
 }
 
 async function fetchTrackRecord(): Promise<TrackRecord | null> {
@@ -133,6 +175,8 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
       favori_win_rate: numOf(g.favori_win_rate),
       nb_courses: numOf(g.nb_courses_analysees),
       mesure_depuis: typeof g.mesure_depuis === "string" ? g.mesure_depuis : null,
+      hasard_top3: numOf(g.hasard_top3),
+      hasard_top1: numOf(g.hasard_top1),
       by_discipline: byDisc
         .filter((x: Record<string, unknown>) => numOf(x?.nb_courses) && (x.nb_courses as number) >= 10 && numOf(x?.accuracy_top3))
         .map((x: Record<string, unknown>) => ({ discipline: String(x.discipline ?? "autre"), nb_courses: x.nb_courses as number, accuracy_top3: x.accuracy_top3 as number }))
@@ -158,10 +202,22 @@ export default async function HomePage() {
   const [tr, coursesAnalysees] = await Promise.all([fetchTrackRecord(), fetchCoursesAnalysees()]);
   const fmtPct = (x: number | null, dec = 1) => (x == null ? "—" : `${x.toFixed(dec).replace(".", ",")}%`);
   const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString("fr-FR"));
+  const FAQ = buildFaq(tr);
+  // FAQPage : le balisage reprend mot pour mot les questions/réponses affichées.
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: FAQ.map((f) => ({
+      "@type": "Question",
+      name: f.q,
+      acceptedAnswer: { "@type": "Answer", text: f.r },
+    })),
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-brand-warm">
       <Navbar />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
 
       {/* ═══════════ HERO (image plein cadre + dynamisme, style palmarès) ═══════════ */}
       <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">
@@ -178,14 +234,15 @@ export default async function HomePage() {
 
         <div className="relative mx-auto max-w-5xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16 text-center">
           <h1 className="font-display text-[2.4rem] leading-[1.04] sm:text-[4.25rem] sm:leading-[1.02] font-extrabold tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)]">
-            Pariez sur le PMU{" "}
-            <span className="text-gradient-animated">avec méthode</span>, plus au hasard.
+            Chaque course du PMU,{" "}
+            <span className="text-gradient-animated">analysée avant le départ.</span>
           </h1>
 
           <p className="mt-6 text-base sm:text-lg text-white/85 leading-relaxed max-w-2xl mx-auto">
-            <span className="font-semibold text-white">BlackTurf analyse chaque course du PMU</span>, détecte les
-            paris où la cote sous-estime les vraies chances, puis calcule votre{" "}
-            <span className="font-semibold text-white">plan de mise</span> selon votre budget et votre profil de risque.
+            80 critères par cheval, une probabilité par partant, et un{" "}
+            <span className="font-semibold text-white">plan de mise</span> calculé sur votre budget.
+            Nos pronostics sont notés à l&apos;arrivée, aux rapports PMU officiels —{" "}
+            <span className="font-semibold text-white">tout le palmarès est public</span>.
           </p>
 
           <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
@@ -211,35 +268,183 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ═══════════ BANDE PILIERS + STATS (épurée) ═══════════ */}
-      <section className="bg-white border-b border-gray-100">
-        <div className="mx-auto max-w-6xl px-5 sm:px-6 lg:px-8 py-10 sm:py-12">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+      <LiveTicker />
+
+      {/* ═══════════ COMMENT ÇA MARCHE ═══════════ */}
+      <section className="py-24 bg-white">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="text-center mb-12">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-2">
+                <Zap className="h-3.5 w-3.5" /> Comment ça marche
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+                Le travail est déjà fait{" "}
+                <span className="text-gradient">quand vous arrivez</span>
+              </h2>
+              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+                Vous n&apos;avez ni base de données à monter, ni modèle à entraîner : trois gestes suffisent.
+              </p>
+            </div>
+          </ScrollReveal>
+          <div className="grid md:grid-cols-3 gap-6">
             {[
-              { icon: Search, t: "On analyse", d: "80 critères par cheval" },
-              { icon: Zap, t: "On détecte la valeur", d: "cote vs vraie chance" },
-              { icon: Wallet, t: "Vous misez malin", d: "un plan selon votre risque" },
-            ].map((p) => (
-              <div key={p.t} className="flex items-start gap-3">
-                <div className="icon-box h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.16)" }}>
-                  <p.icon className="h-5 w-5 text-brand-gold-deep" />
+              { step: "01", title: "Ouvrez la course", desc: "Tout le programme PMU du jour est déjà analysé : classement des partants, probabilité de chacun, score de confiance de la course." },
+              { step: "02", title: "Donnez votre budget", desc: "Vous entrez un montant, nous répartissons : une ligne sécurité, une ligne rendement, une ligne coup — selon votre profil de risque." },
+              { step: "03", title: "Pariez où vous voulez", desc: "Vous jouez chez votre opérateur. À l'arrivée, chaque pari est réglé au rapport officiel et votre capital est mis à jour." },
+            ].map((s, i) => (
+              <ScrollReveal key={s.step} delay={i * 100}>
+                <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
+                  <div className="glass-card tilt-card rounded-2xl p-7 h-full">
+                    <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
+                      style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
+                    <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
+                    <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm font-bold text-gray-900 leading-tight">{p.t}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{p.d}</div>
+              </ScrollReveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <div className="section-divider" />
+
+      {/* ═══════════ PREUVES RÉELLES (track-record) ═══════════ */}
+      <section className="py-24 bg-brand-warm">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="mb-12 text-center">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <Shield className="h-3.5 w-3.5" /> Performances vérifiables
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+                Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
+              </h2>
+              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+                Aucun pronostic n'est réécrit après la course. Voici la précision réelle de BlackTurf sur les
+                courses déjà réglées, et ce que ferait un tirage au sort sur les mêmes courses.
+              </p>
+            </div>
+          </ScrollReveal>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {[
+              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Précision Top-3", sub: "un de nos 3 favoris finit dans les 3", accent: true, icon: Target },
+              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers", icon: Shield },
+              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course", icon: Trophy },
+              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels", icon: Database },
+            ].map((m, i) => (
+              <ScrollReveal key={m.label} delay={i * 70}>
+                <div className="tilt-card relative overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
+                  <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300/60" />
+                  <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
+                  <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{m.sub}</p>
                 </div>
-              </div>
+              </ScrollReveal>
             ))}
           </div>
 
-          <p className="mt-7 pt-6 border-t border-gray-100 text-[11px] text-gray-500 text-center sm:text-left">
-            Chiffres réels, mesurés sur les arrivées PMU officielles.
+          {/* Les taux ci-dessus ne portent que sur la cohorte rejouable (snapshots
+              pre-course). Tant qu'elle est petite, on le dit plutot que de laisser
+              lire un pourcentage comme un acquis. */}
+          <EchantillonNotice nbCourses={tr?.nb_courses} mesureDepuis={tr?.mesure_depuis} />
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            {tr && tr.by_discipline.length > 0 && (
+              <ScrollReveal>
+                <div className="glass-card rounded-2xl p-6 h-full">
+                  <div className="flex items-center gap-2 mb-5">
+                    <BarChart3 className="h-4 w-4 text-brand-gold-deep" />
+                    <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 par discipline</h3>
+                  </div>
+                  <div className="space-y-4">
+                    {tr.by_discipline.map((d) => (
+                      <div key={d.discipline}>
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                          <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
+                          <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
+                            <span className="text-gray-500 font-normal ml-1.5">· {d.nb_courses} courses</span>
+                          </span>
+                        </div>
+                        <div className="relative h-3 rounded-full bg-gray-100 overflow-hidden">
+                          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(d.accuracy_top3, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }} />
+                          {/* repère 33% (hasard) */}
+                          {tr.hasard_top3 != null && (
+                            <div className="absolute top-0 bottom-0 w-px bg-gray-500/40" style={{ left: `${Math.min(tr.hasard_top3, 100)}%` }} />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-500">
+                    <span className="inline-block w-px h-3 bg-gray-400/60" />
+                    {tr.hasard_top3 != null
+                      ? `Repère « hasard » à ${tr.hasard_top3.toFixed(0)} % — l'espérance d'un tirage au sort sur ces mêmes courses. Au-delà, l'analyse fait mieux.`
+                      : "Au-delà du repère du hasard, l'analyse fait mieux."}
+                  </div>
+                </div>
+              </ScrollReveal>
+            )}
+
+            {tr && tr.by_day.length > 0 && (() => {
+              const avg = tr.by_day.reduce((s, d) => s + d.accuracy_top3, 0) / tr.by_day.length;
+              return (
+              <ScrollReveal delay={80}>
+                <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
+                  <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-emerald-600" />
+                      <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
+                    </div>
+                    <span className="text-[11px] text-gray-500">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
+                  </div>
+
+                  {/* Aire de chart à hauteur FIXE → barres % fiables */}
+                  <div className="relative h-44">
+                    {/* lignes repères */}
+                    {[25, 50, 75].map((g) => (
+                      <div key={g} className="absolute left-0 right-0 border-t border-dashed border-gray-100" style={{ bottom: `${g}%` }} />
+                    ))}
+                    {/* ligne moyenne */}
+                    <div className="absolute left-0 right-0 border-t border-dashed border-emerald-300" style={{ bottom: `${Math.min(avg, 100)}%` }}>
+                      <span className="absolute right-0 -top-3.5 text-[9px] font-semibold text-emerald-500 bg-white px-1">moyenne</span>
+                    </div>
+                    <div className="absolute inset-0 flex items-end justify-between gap-2.5">
+                      {tr.by_day.map((d) => (
+                        <div key={d.jour} className="group relative flex h-full flex-1 flex-col items-center justify-end">
+                          <span className="num-display text-[10px] font-bold text-gray-700 mb-1">{Math.round(d.accuracy_top3)}%</span>
+                          <div className="w-full max-w-[40px] rounded-t-lg bg-gradient-to-t from-amber-300 to-amber-500 shadow-sm transition-all duration-300 group-hover:from-amber-400 group-hover:to-amber-600"
+                            style={{ height: `${Math.max(4, Math.min(d.accuracy_top3, 100))}%` }}
+                            title={`${d.jour} · ${d.accuracy_top3.toFixed(1)}% · ${d.nb_predictions} pronostics`} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex justify-between gap-2.5">
+                    {tr.by_day.map((d) => (
+                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-500">{d.jour}</span>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-[11px] text-gray-500">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
+                </div>
+              </ScrollReveal>
+              );
+            })()}
+          </div>
+
+          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto leading-relaxed">
+            La précision d'analyse mesure la qualité du classement des chevaux. Ce n'est ni un taux de
+            gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
           </p>
         </div>
       </section>
 
-      <LiveTicker />
+      {/* ═══════════ PALMARÈS EN DIRECT (paris gagnés réels) ═══════════ */}
+      <LivePalmares />
+
+      <div className="section-divider" />
 
       {/* ═══════════ PRONOSTICS PAR PROFIL DE RISQUE (vrai outil) ═══════════ */}
       <section className="py-24 bg-white">
@@ -570,171 +775,6 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ═══════════ PREUVES RÉELLES (track-record) ═══════════ */}
-      <section className="py-24 bg-brand-warm">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-          <ScrollReveal>
-            <div className="mb-12 text-center">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
-                <Shield className="h-3.5 w-3.5" /> Performances vérifiables
-              </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
-                Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
-              </h2>
-              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
-                Chaque pronostic est confronté à l'arrivée officielle PMU. Voici la précision réelle de
-                BlackTurf, mesurée sur les courses déjà réglées — pas une simulation.
-              </p>
-            </div>
-          </ScrollReveal>
-
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {[
-              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Précision Top-3", sub: "un de nos 3 favoris finit dans les 3", accent: true, icon: Target },
-              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers", icon: Shield },
-              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course", icon: Trophy },
-              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels", icon: Database },
-            ].map((m, i) => (
-              <ScrollReveal key={m.label} delay={i * 70}>
-                <div className="tilt-card relative overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
-                  <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300/60" />
-                  <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
-                  <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{m.sub}</p>
-                </div>
-              </ScrollReveal>
-            ))}
-          </div>
-
-          {/* Les taux ci-dessus ne portent que sur la cohorte rejouable (snapshots
-              pre-course). Tant qu'elle est petite, on le dit plutot que de laisser
-              lire un pourcentage comme un acquis. */}
-          <EchantillonNotice nbCourses={tr?.nb_courses} mesureDepuis={tr?.mesure_depuis} />
-
-          <div className="grid lg:grid-cols-2 gap-4">
-            {tr && tr.by_discipline.length > 0 && (
-              <ScrollReveal>
-                <div className="glass-card rounded-2xl p-6 h-full">
-                  <div className="flex items-center gap-2 mb-5">
-                    <BarChart3 className="h-4 w-4 text-brand-gold-deep" />
-                    <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 par discipline</h3>
-                  </div>
-                  <div className="space-y-4">
-                    {tr.by_discipline.map((d) => (
-                      <div key={d.discipline}>
-                        <div className="flex items-center justify-between text-xs mb-1.5">
-                          <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
-                          <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
-                            <span className="text-gray-500 font-normal ml-1.5">· {d.nb_courses} courses</span>
-                          </span>
-                        </div>
-                        <div className="relative h-3 rounded-full bg-gray-100 overflow-hidden">
-                          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(d.accuracy_top3, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }} />
-                          {/* repère 33% (hasard) */}
-                          <div className="absolute top-0 bottom-0 w-px bg-gray-500/40" style={{ left: "33%" }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-500">
-                    <span className="inline-block w-px h-3 bg-gray-400/60" /> Repère « hasard » à 33 % · au-delà = l&apos;analyse fait mieux.
-                  </div>
-                </div>
-              </ScrollReveal>
-            )}
-
-            {tr && tr.by_day.length > 0 && (() => {
-              const avg = tr.by_day.reduce((s, d) => s + d.accuracy_top3, 0) / tr.by_day.length;
-              return (
-              <ScrollReveal delay={80}>
-                <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
-                  <div className="flex items-center justify-between mb-5">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-emerald-600" />
-                      <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
-                    </div>
-                    <span className="text-[11px] text-gray-500">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
-                  </div>
-
-                  {/* Aire de chart à hauteur FIXE → barres % fiables */}
-                  <div className="relative h-44">
-                    {/* lignes repères */}
-                    {[25, 50, 75].map((g) => (
-                      <div key={g} className="absolute left-0 right-0 border-t border-dashed border-gray-100" style={{ bottom: `${g}%` }} />
-                    ))}
-                    {/* ligne moyenne */}
-                    <div className="absolute left-0 right-0 border-t border-dashed border-emerald-300" style={{ bottom: `${Math.min(avg, 100)}%` }}>
-                      <span className="absolute right-0 -top-3.5 text-[9px] font-semibold text-emerald-500 bg-white px-1">moyenne</span>
-                    </div>
-                    <div className="absolute inset-0 flex items-end justify-between gap-2.5">
-                      {tr.by_day.map((d) => (
-                        <div key={d.jour} className="group relative flex h-full flex-1 flex-col items-center justify-end">
-                          <span className="num-display text-[10px] font-bold text-gray-700 mb-1">{Math.round(d.accuracy_top3)}%</span>
-                          <div className="w-full max-w-[40px] rounded-t-lg bg-gradient-to-t from-amber-300 to-amber-500 shadow-sm transition-all duration-300 group-hover:from-amber-400 group-hover:to-amber-600"
-                            style={{ height: `${Math.max(4, Math.min(d.accuracy_top3, 100))}%` }}
-                            title={`${d.jour} · ${d.accuracy_top3.toFixed(1)}% · ${d.nb_predictions} pronostics`} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="mt-2 flex justify-between gap-2.5">
-                    {tr.by_day.map((d) => (
-                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-500">{d.jour}</span>
-                    ))}
-                  </div>
-                  <p className="mt-4 text-[11px] text-gray-500">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
-                </div>
-              </ScrollReveal>
-              );
-            })()}
-          </div>
-
-          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto leading-relaxed">
-            La précision d'analyse mesure la qualité du classement des chevaux. Ce n'est ni un taux de
-            gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
-          </p>
-        </div>
-      </section>
-
-      {/* ═══════════ PALMARÈS EN DIRECT (paris gagnés réels) ═══════════ */}
-      <LivePalmares />
-
-      <div className="section-divider" />
-
-      {/* ═══════════ COMMENT ÇA MARCHE ═══════════ */}
-      <section className="py-24 bg-white">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <ScrollReveal>
-            <div className="text-center mb-12">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-2">
-                <Zap className="h-3.5 w-3.5" /> Comment ça marche
-              </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">3 gestes, moins de 10 secondes</h2>
-            </div>
-          </ScrollReveal>
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              { step: "01", title: "Choisissez votre course", desc: "Le programme PMU du jour, déjà analysé. Un score de confiance 0-100 par course." },
-              { step: "02", title: "Entrez votre mise", desc: "Indiquez le montant. Le plan se répartit : sécurité, rendement, coup — selon votre profil." },
-              { step: "03", title: "Pariez, puis suivez", desc: "BlackTurf règle les résultats réels et met votre rendement à jour, course après course." },
-            ].map((s, i) => (
-              <ScrollReveal key={s.step} delay={i * 100}>
-                <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
-                  <div className="glass-card tilt-card rounded-2xl p-7 h-full">
-                    <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
-                      style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
-                    <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
-                  </div>
-                </div>
-              </ScrollReveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="section-divider" />
-
       {/* ═══════════ CE QUE VOUS OBTENEZ ═══════════ */}
       <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -795,6 +835,92 @@ export default async function HomePage() {
 
       <div className="section-divider" />
 
+      {/* ═══════════ POUR QUI ═══════════ */}
+      <section className="py-24 bg-white">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="text-center mb-12">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <Users className="h-3.5 w-3.5" /> Pour qui
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+                Trois façons de jouer,{" "}
+                <span className="text-gradient">un outil pour chacune</span>
+              </h2>
+              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+                On ne vend pas le même produit au joueur du dimanche et à celui qui suit six réunions par jour.
+                Repérez-vous ci-dessous : la formule adaptée est indiquée.
+              </p>
+            </div>
+          </ScrollReveal>
+
+          <div className="grid md:grid-cols-3 gap-5">
+            {[
+              {
+                icon: Search,
+                titre: "Vous voulez d'abord vérifier",
+                profil: "Le sceptique — et il a raison de l'être",
+                points: [
+                  "Le palmarès complet est public, course par course",
+                  "Programme du jour et cotes accessibles sans payer",
+                  "1 pronostic par jour pour juger sur pièces",
+                ],
+                plan: "Découverte · 0€",
+                href: "/inscription",
+              },
+              {
+                icon: Calculator,
+                titre: "Vous jouez le week-end",
+                profil: "Deux ou trois réunions, un budget défini",
+                points: [
+                  "5 pronostics par jour, largement de quoi couvrir un samedi",
+                  "Le calculateur répartit votre mise au lieu de tout mettre sur un cheval",
+                  "Alertes quand un pari de valeur sort sur vos courses",
+                ],
+                plan: "Standard · 12€/mois",
+                href: "/inscription?plan=standard",
+                populaire: false,
+              },
+              {
+                icon: Zap,
+                titre: "Vous jouez sérieusement",
+                profil: "Tous les jours, avec un capital à faire tourner",
+                points: [
+                  "Pronostics illimités et paris de valeur en temps réel",
+                  "Créateur de stratégies : 30+ filtres, testés sur l'historique",
+                  "Suivi du capital réglé aux rapports officiels, export des données",
+                ],
+                plan: "Expert · 19€/mois",
+                href: "/inscription?plan=expert",
+                populaire: true,
+              },
+            ].map((p, i) => (
+              <ScrollReveal key={p.titre} delay={i * 90}>
+                <div className={`rounded-3xl h-full p-6 flex flex-col ${p.populaire ? "bg-white border-2 border-amber-300 shadow-md" : "bg-white border border-gray-200 shadow-sm tilt-card"}`}>
+                  <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center mb-4"
+                    style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.16)" }}>
+                    <p.icon className="h-5 w-5 text-brand-gold-deep" strokeWidth={2} />
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-gray-900 leading-snug">{p.titre}</h3>
+                  <p className="text-xs text-gray-500 mt-1">{p.profil}</p>
+                  <ul className="mt-4 space-y-2 flex-1">
+                    {p.points.map((pt) => (
+                      <li key={pt} className="flex items-start gap-2 text-[13px] text-gray-600 leading-snug">
+                        <Check className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-emerald-600" /> {pt}
+                      </li>
+                    ))}
+                  </ul>
+                  <Link href={p.href}
+                    className="press mt-5 inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-all hover:border-brand-gold/40 hover:bg-amber-50 hover:text-brand-gold-deep">
+                    {p.plan} <ChevronRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              </ScrollReveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ═══════════ PRICING ═══════════ */}
       <section className="py-24 bg-brand-warm" id="tarifs">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
@@ -803,8 +929,14 @@ export default async function HomePage() {
               <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
                 <Sparkles className="h-3.5 w-3.5" /> Tarifs
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-3">Simples et transparents</h2>
-              <p className="text-gray-500">7 jours d&apos;essai gratuit, sans carte bancaire.</p>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
+                Moins cher qu&apos;un{" "}
+                <span className="text-gradient">ticket perdu par semaine</span>
+              </h2>
+              <p className="text-gray-500 max-w-xl mx-auto">
+                7 jours d&apos;essai gratuit, sans carte bancaire. Le palmarès, lui, reste public — vous pouvez
+                juger avant de payer.
+              </p>
             </div>
           </ScrollReveal>
 
@@ -843,6 +975,48 @@ export default async function HomePage() {
           </div>
           <p className="text-center text-xs text-gray-500 mt-8">
             -20% avec l&apos;abonnement annuel · Paiement sécurisé Stripe · Annulation à tout moment
+          </p>
+        </div>
+      </section>
+
+      {/* ═══════════ FAQ (+ données structurées FAQPage) ═══════════
+          Les questions posées ici sont celles qui bloquent réellement une
+          inscription — y compris « est-ce que je vais gagner ? », à laquelle on
+          répond non. Le JSON-LD reprend EXACTEMENT le texte visible : Google
+          déclasse les FAQ dont le balisage ne correspond pas au contenu affiché. */}
+      <section className="py-24 bg-white">
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+          <ScrollReveal>
+            <div className="text-center mb-10">
+              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <Shield className="h-3.5 w-3.5" /> Questions fréquentes
+              </span>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+                Les réponses{" "}
+                <span className="text-gradient">sans détour</span>
+              </h2>
+            </div>
+          </ScrollReveal>
+
+          <div className="space-y-3">
+            {FAQ.map((f, i) => (
+              <ScrollReveal key={f.q} delay={i * 60}>
+                <details className="group rounded-2xl border border-gray-200 bg-white px-5 py-4 open:border-amber-300 open:bg-amber-50/30">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-gray-900 marker:content-none">
+                    {f.q}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-brand-gold-deep transition-transform group-open:rotate-90" />
+                  </summary>
+                  <p className="mt-3 text-sm leading-6 text-gray-600">{f.r}</p>
+                </details>
+              </ScrollReveal>
+            ))}
+          </div>
+
+          <p className="mt-8 text-center text-sm text-gray-500">
+            Une autre question ?{" "}
+            <Link href="/tarifs" className="font-semibold text-brand-gold-deep underline-offset-4 hover:underline">
+              Voir le détail des formules
+            </Link>
           </p>
         </div>
       </section>
