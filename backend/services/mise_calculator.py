@@ -483,6 +483,24 @@ def generer_plan(
         except Exception:
             pass
 
+    # TILT PAR TRANCHE DE RAPPORT — le signal le plus solide de nos données (19 972
+    # paris réglés) : le ROI réel décroît continûment avec le rapport visé. Simple
+    # Gagnant ×4-8 rend -1,7 % ; le même pari au-delà de ×15 rend -15,4 %. Simple
+    # Placé sous ×4 rend -7 % ; au-delà de ×4, -25 %. C'est le biais favori/outsider,
+    # mesuré chez nous.
+    #
+    # C'est un TILT de préférence entre candidats, pas une barrière : la tranche de
+    # rapport propre à chaque profil et la promesse d'un plan sur CHAQUE course
+    # restent intactes.
+    if rapport_calib:
+        try:
+            from ml.signal_performance import payout_bucket_multiplier
+            for c in cands:
+                c["_pb_mult"] = float(payout_bucket_multiplier(
+                    c.get("type_pari"), c.get("rapport_estime"), rapport_calib))
+        except Exception:
+            pass
+
     selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
                                   respect_montant=respect_montant, ev_band_perf=ev_band_perf)
     if not selected:
@@ -882,8 +900,14 @@ def _select_conviction(
 
     def conviction(c):
         """Classement selon l'OBJECTIF du profil (× ROI réel passé du type × signal ×
-        ROI réel de la bande d'EV)."""
-        rw = roi_w(c) * sig_factor(c) * evb(c)
+        ROI réel de la bande d'EV × ROI réel de la TRANCHE DE RAPPORT).
+
+        La tranche de rapport est, de loin, le facteur le mieux étayé : le ROI réel
+        y décroît continûment (Simple Gagnant −1,7 % en ×4-8 contre −15,4 % au-delà
+        de ×15, sur des milliers de paris). La bande d'EV, elle, ne trie rien.
+        """
+        rw = (roi_w(c) * sig_factor(c) * evb(c)
+              * float(c.get("_pb_mult", 1.0) or 1.0))
         if objectif == "proba":
             # PRUDENT : MAX de victoires DANS la contrainte ≥1.8× (le rapport_min 1.8 garantit
             # déjà le multiplicateur ; on ne touche PAS aux gains). On classe par PROBA de placé
@@ -1110,8 +1134,12 @@ def _select_conviction(
                 learned = max(0.10, min(2.0, roi_w(c)))
                 signal = max(0.50, min(2.0, sig_factor(c)))
                 band = max(0.50, min(1.60, evb(c)))
+                # Même tilt qu'en sélection normale : c'est justement sur ce chemin
+                # de secours, où toutes les gates ont échoué, qu'il faut éviter de
+                # retomber sur la tranche de rapport la moins rentable.
+                tranche = max(0.60, min(1.40, float(c.get("_pb_mult", 1.0) or 1.0)))
                 base = p if objectif == "proba" else p * min(r, 40.0)
-                return base * (1.0 + 2.0 * edge) * learned * signal * band
+                return base * (1.0 + 2.0 * edge) * learned * signal * band * tranche
 
             safe = max(pool, key=lambda c: (_fallback_score(c), c["proba_gain"]))
             safe["_roi_w"] = roi_w(safe)

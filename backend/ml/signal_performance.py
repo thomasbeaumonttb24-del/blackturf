@@ -575,6 +575,147 @@ def rapport_realization_factor(profil: str | None, type_pari: str | None,
     return float((g or {}).get("factor", 1.0) or 1.0)
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROI RÉEL PAR TRANCHE DE RAPPORT (mesuré le 2026-08-19 sur 19 972 paris réglés)
+# ─────────────────────────────────────────────────────────────────────────────
+# Le biais favori/outsider, dans NOS propres chiffres :
+#
+#   Simple Gagnant  ×4-8   -1,7 %   (1 458 paris, 10 324 €)
+#   Simple Gagnant  ×8-15  -8,2 %   (2 336 paris)
+#   Simple Gagnant  ≥×15  -15,4 %   (2 436 paris)
+#   Simple Placé    <×2    -6,2 %
+#   Simple Placé    ×2-4   -7,5 %
+#   Simple Placé    ×4-8  -25,0 %
+#
+# Monotone dans les deux types, sur de gros échantillons, et sans dépendre d'un
+# gros gain isolé : c'est le signal le plus solide dont nous disposions. La bande
+# d'EV, elle, ne trie RIEN (toutes les bandes entre -8 % et -13 % de ROI réel),
+# parce que sélectionner sur l'edge estimé revient à sélectionner sur l'erreur
+# d'estimation.
+#
+# On en fait un TILT, pas une barrière : le contrat produit (tranche de rapport
+# par profil, un plan sur chaque course) reste intact, seule la préférence entre
+# candidats d'une même course bouge.
+PB_BUCKETS = ((0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 15.0), (15.0, 1e9))
+PB_MIN_PARIS = 150          # sous ce volume, le ROI d'une tranche est du bruit
+PB_K_SHRINK = 200.0         # pseudo-observations shrinkant le multiplicateur vers 1.0
+PB_M_MIN, PB_M_MAX = 0.60, 1.40
+
+
+def _pb_key(rapport: float) -> str:
+    for lo, hi in PB_BUCKETS:
+        if lo <= rapport < hi:
+            return f"{lo:g}_{hi:g}"
+    return f"{PB_BUCKETS[-1][0]:g}_{PB_BUCKETS[-1][1]:g}"
+
+
+async def compute_payout_bucket_performance(session: AsyncSession) -> dict:
+    """ROI réel par (type de pari × tranche de rapport), depuis `profil_run_log`.
+
+    Le rapport retenu est celui ESTIMÉ au moment du conseil (gain_potentiel/mise),
+    pas le rapport réel : c'est la seule valeur connue à l'instant de la décision,
+    donc la seule sur laquelle on puisse arbitrer sans tricher.
+    """
+    rows = (await session.execute(text("""
+        SELECT r.plan, r.resultat
+        FROM profil_run_log r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE r.statut = 'settled' AND r.resultat IS NOT NULL AND r.plan IS NOT NULL
+          AND c.date_heure IS NOT NULL AND r.created_at < c.date_heure
+    """))).all()
+
+    agg: dict = {}
+    for plan, resultat in rows:
+        plan_d = plan if isinstance(plan, dict) else json.loads(plan)
+        res = resultat if isinstance(resultat, dict) else json.loads(resultat)
+        rapport_par_pari: dict = {}
+        for niv in plan_d.get("niveaux", []):
+            for pb in niv.get("paris", []):
+                mise = float(pb.get("mise") or 0)
+                if mise > 0:
+                    rapport_par_pari[_bet_key(pb.get("type"), pb.get("chevaux"))] = \
+                        float(pb.get("gain_potentiel") or 0) / mise
+        for pari in res.get("paris", []):
+            if pari.get("statut") == "rembourse":
+                continue
+            t = pari.get("type")
+            rapport = rapport_par_pari.get(_bet_key(t, pari.get("chevaux")))
+            if not t or not rapport or rapport <= 0:
+                continue
+            cle = (t, _pb_key(rapport))
+            a = agg.setdefault(cle, {"n": 0, "mise": 0.0, "gain": 0.0})
+            a["n"] += 1
+            a["mise"] += float(pari.get("mise") or 0)
+            a["gain"] += float(pari.get("gain") or 0)
+
+    out: dict = {"types": {}, "n_runs": len(rows)}
+    for (t, bucket), a in agg.items():
+        roi = ((a["gain"] - a["mise"]) / a["mise"]) if a["mise"] > 0 else None
+        if a["n"] >= PB_MIN_PARIS and roi is not None:
+            # ROI de -30 % → 0.70, ROI de 0 % → 1.0, borné puis shrinké.
+            brut = 1.0 + roi
+            w = a["n"] / (a["n"] + PB_K_SHRINK)
+            mult = max(PB_M_MIN, min(PB_M_MAX, 1.0 + (brut - 1.0) * w))
+        else:
+            mult = 1.0                       # échantillon insuffisant → neutre
+        out["types"].setdefault(t, {})[bucket] = {
+            "multiplier": round(mult, 3),
+            "n": a["n"],
+            "roi": round(roi * 100, 1) if roi is not None else None,
+        }
+    return out
+
+
+async def persist_payout_bucket_performance(session: AsyncSession, perf: dict) -> bool:
+    """Persiste la table. False = état PRÉSERVÉ (échantillon trop mince)."""
+    if int(perf.get("n_runs") or 0) < MIN_RAPPORT_CALIB_RUNS:
+        log.warning("payout_bucket.skipped_insufficient_data",
+                    n_runs=int(perf.get("n_runs") or 0))
+        return False
+    await session.execute(text("""
+        CREATE TABLE IF NOT EXISTS payout_bucket_performance (
+            id INT PRIMARY KEY DEFAULT 1,
+            data JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT payout_bucket_singleton CHECK (id = 1)
+        )
+    """))
+    await session.execute(text("""
+        INSERT INTO payout_bucket_performance (id, data, updated_at) VALUES (1, :d, now())
+        ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
+    """), {"d": json.dumps(perf)})
+    await session.commit()
+    return True
+
+
+async def load_payout_bucket_performance(session: AsyncSession) -> dict | None:
+    try:
+        r = (await session.execute(text(
+            "SELECT data FROM payout_bucket_performance WHERE id=1"))).first()
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
+def payout_bucket_multiplier(type_pari: str | None, rapport: float | None,
+                             perf: dict | None) -> float:
+    """Tilt de conviction selon le ROI historique de cette tranche de rapport.
+    1.0 (neutre) sans table, type inconnu ou échantillon insuffisant."""
+    if not perf or not type_pari or not rapport or rapport <= 0:
+        return 1.0
+    # La table voyage fusionnee dans `rapport_calibration` (deja charge et passe
+    # partout ou un plan se construit) : la router par un nouveau parametre aurait
+    # demande de modifier cinq appelants, dont un oubli aurait suffi a desactiver
+    # le tilt sans que rien ne le signale.
+    tables = perf.get("payout_buckets") or perf.get("types") or {}
+    t = tables.get(type_pari)
+    if not t:
+        return 1.0
+    e = t.get(_pb_key(float(rapport)))
+    return float((e or {}).get("multiplier", 1.0) or 1.0)
+
+
 def proba_realization_factor(type_pari: str | None, calib: dict | None) -> float:
     """Facteur annoncé→réel de la PROBABILITÉ d'un type de pari.
 

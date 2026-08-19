@@ -93,3 +93,55 @@ def test_la_correction_precede_la_selection():
     source = inspect.getsource(mise_calculator.generer_plan)
     assert source.index("proba_realization_factor") < source.index("_select_conviction"), (
         "la calibration doit s'appliquer avant la sélection des paris")
+
+
+# ── Tilt par tranche de rapport ──────────────────────────────────────────────
+def test_le_tilt_de_tranche_lit_la_table_fusionnee():
+    """La table voyage dans `rapport_calibration`, déjà chargée et transmise
+    partout où un plan se construit : un paramètre séparé aurait demandé de
+    modifier cinq appelants, dont un oubli aurait désactivé le tilt en silence."""
+    from ml.signal_performance import payout_bucket_multiplier
+
+    fusionnee = {"payout_buckets": {"Simple Gagnant": {"4_8": {"multiplier": 1.12}}}}
+    assert payout_bucket_multiplier("Simple Gagnant", 6.0, fusionnee) == 1.12
+
+    autonome = {"types": {"Simple Gagnant": {"4_8": {"multiplier": 1.12}}}}
+    assert payout_bucket_multiplier("Simple Gagnant", 6.0, autonome) == 1.12
+
+
+def test_tilt_neutre_sans_donnee():
+    from ml.signal_performance import payout_bucket_multiplier
+
+    assert payout_bucket_multiplier("Simple Gagnant", 6.0, None) == 1.0
+    assert payout_bucket_multiplier("Simple Gagnant", None, {"payout_buckets": {}}) == 1.0
+    assert payout_bucket_multiplier("Trio", 6.0, {"payout_buckets": {"Simple Gagnant": {}}}) == 1.0
+
+
+def test_les_tranches_couvrent_toute_l_echelle():
+    """Un rapport ne doit jamais tomber hors des tranches, sinon le tilt
+    disparaîtrait silencieusement pour toute une catégorie de paris."""
+    from ml.signal_performance import PB_BUCKETS, _pb_key
+
+    for rapport in (1.0, 1.9, 2.0, 3.9, 4.0, 7.9, 8.0, 14.9, 15.0, 500.0):
+        assert _pb_key(rapport), f"rapport {rapport} sans tranche"
+    assert PB_BUCKETS[0][0] == 0.0, "la première tranche doit partir de 0"
+
+
+def test_le_tilt_reste_borne():
+    """C'est une préférence entre candidats, pas une barrière : le contrat produit
+    (tranche de rapport par profil, un plan sur CHAQUE course) doit survivre."""
+    from ml.signal_performance import PB_M_MAX, PB_M_MIN
+
+    assert 0.5 <= PB_M_MIN < 1.0 < PB_M_MAX <= 1.5
+
+
+def test_le_tilt_est_applique_dans_les_deux_chemins_de_selection():
+    """Le chemin de secours sert quand toutes les gates ont échoué — c'est
+    précisément là qu'il ne faut pas retomber sur la pire tranche."""
+    import inspect
+
+    from services import mise_calculator
+
+    source = inspect.getsource(mise_calculator)
+    assert source.count('_pb_mult') >= 3, (
+        "le tilt doit être posé sur les candidats ET lu par les deux scoreurs")

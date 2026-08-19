@@ -947,9 +947,21 @@ async def _run_nightly_retraining_unlocked() -> None:
     # est écarté. C'est l'apprentissage qui fait respecter les tranches sur le réel.
     try:
         from ml.signal_performance import (
-            compute_rapport_calibration, persist_rapport_calibration)
+            compute_payout_bucket_performance, compute_rapport_calibration,
+            persist_rapport_calibration)
         async with AsyncSessionLocal() as rc_session:
             _rc = await compute_rapport_calibration(rc_session)
+            # ROI reel par tranche de rapport, FUSIONNE dans la meme table : elle est
+            # deja chargee et transmise partout ou un plan se construit. Un parametre
+            # separe aurait demande de toucher cinq appelants, dont un oubli aurait
+            # desactive le tilt en silence.
+            try:
+                _pb = await compute_payout_bucket_performance(rc_session)
+                _rc["payout_buckets"] = _pb.get("types") or {}
+                log.info("pipeline.payout_buckets_done",
+                         n_types=len(_rc["payout_buckets"]), n_runs=_pb.get("n_runs"))
+            except Exception as e:
+                log.warning("pipeline.payout_buckets_skip", err=str(e)[:140])
             _rc_persisted = await persist_rapport_calibration(rc_session, _rc)
             log.info(
                 "pipeline.rapport_calibration_done" if _rc_persisted
