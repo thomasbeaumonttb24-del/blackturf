@@ -1606,8 +1606,11 @@ async def supervision_rentabilite(
 ):
     """Rentabilité jour par jour : net, ROI, capital cumulé, drawdown vécu.
 
-    Mêmes gardes d'intégrité et même winsorisation que `/supervision/paris` —
-    les deux vues racontent donc forcément la même histoire.
+    Mêmes gardes d'intégrité que `/supervision/paris` (conseil émis avant le
+    départ, backfills exclus). En revanche les séries `net`/`cumul_net` portent
+    les gains RÉELS : winsoriser une courbe de capital vécu la rendait fausse
+    (le 19/07 affichait +280 € pour +4 306 € réellement encaissés). La lecture
+    plafonnée reste disponible dans les champs `*_winsor`.
     """
     from ml.bet_type_analytics import compute_profitability_timeline
     return await compute_profitability_timeline(db, days=days or None)
