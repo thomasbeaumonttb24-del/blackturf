@@ -399,3 +399,64 @@ export function CompteurDepart({ dateHeure, statut }: { dateHeure: string; statu
     </span>
   );
 }
+
+// ─── Lecture publique du marché ───────────────────────────────────────────────
+// Ce que la page peut montrer à un visiteur sans compte : la hiérarchie des
+// cotes, qui est une donnée publique. Elle ne remplace pas le pronostic — elle
+// montre précisément ce que le pronostic, lui, apporte en plus.
+export function MarcheSnapshotCard({
+  partants, nbPartants, connecte,
+}: {
+  partants: Array<{ numero: number; nom_cheval: string; cote_pmu: number | null; non_partant: boolean }>;
+  nbPartants: number;
+  connecte: boolean;
+}) {
+  const cotes = partants
+    .filter((p) => !p.non_partant && typeof p.cote_pmu === "number" && (p.cote_pmu as number) > 1)
+    .sort((a, b) => (a.cote_pmu as number) - (b.cote_pmu as number));
+  if (cotes.length < 3) return null;
+
+  const [fav, deux, trois] = cotes;
+  const ecart = (deux.cote_pmu as number) / (fav.cote_pmu as number);
+  const lecture =
+    ecart >= 1.8 ? { txt: "Favori net", detail: "le marché a désigné un favori très détaché" }
+    : ecart >= 1.25 ? { txt: "Favori marqué", detail: "un cheval se détache, sans écraser le lot" }
+    : { txt: "Course ouverte", detail: "les cotes de tête sont serrées : rien n'est joué" };
+
+  return (
+    <Card title="Ce que dit le marché" icon={TrendingUp} aside="cotes publiques">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{lecture.txt}</span>
+        <span className="text-xs text-muted-foreground">{lecture.detail}</span>
+      </div>
+
+      <ol className="mt-4 space-y-2">
+        {[fav, deux, trois].map((p, i) => (
+          <li key={p.numero} className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/60 px-3 py-2.5">
+            <span className="w-5 text-center font-display text-sm font-bold text-stone-400">{i + 1}</span>
+            <span className="font-mono text-xs text-muted-foreground">N°{p.numero}</span>
+            <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{p.nom_cheval}</span>
+            <span className="font-display text-sm font-bold tabular-nums text-slate-900">{nf(p.cote_pmu as number, 1)}</span>
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+        <p className="text-[13px] font-semibold text-amber-900">
+          La cote dit qui les parieurs préfèrent. Elle ne dit pas qui a le plus de chances.
+        </p>
+        <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
+          Sur les {nbPartants} partants de cette course, l&apos;algorithme calcule une probabilité par cheval
+          à partir de 80 critères — forme, terrain, jockey, vitesse, mouvements de cote — puis la compare
+          au prix du marché pour repérer les écarts exploitables.
+        </p>
+        <a
+          href={connecte ? "/tarifs" : "/inscription"}
+          className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+        >
+          {connecte ? "Débloquer le pronostic" : "Voir le pronostic — essai 7 jours gratuit"}
+        </a>
+      </div>
+    </Card>
+  );
+}

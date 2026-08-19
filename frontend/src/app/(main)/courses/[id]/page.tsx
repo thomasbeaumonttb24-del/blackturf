@@ -19,7 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import {
   ParisDisponiblesCard, ConfrontationsCard, PoolEvolutionCard, TempsPassageCard,
-  CompteurDepart,
+  CompteurDepart, MarcheSnapshotCard,
 } from "@/components/courses/insights";
 import { formatCote, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -2534,6 +2534,13 @@ export default function CoursePage() {
         {/* ═══ SYNTHÈSE — ce qu'il faut retenir, dans l'ordre de lecture ═══ */}
         {ongletActif === "synthese" && (
           <>
+            {(!predictions || predictions.length === 0) && (
+              <MarcheSnapshotCard
+                partants={course.partants}
+                nbPartants={course.nb_partants}
+                connecte={Boolean(user)}
+              />
+            )}
         {/* ── 4 STAT CARDS ── */}
         {predictions && predictions.length > 0 && (() => {
           const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];
@@ -3098,7 +3105,9 @@ export default function CoursePage() {
                   { label: "Discipline", val: course.discipline },
                   { label: "Distance", val: `${course.distance} m` },
                 ];
-                if (course.niveau_course) rows.push({ label: "Niveau", val: course.niveau_course.replace(/_/g, " ") });
+                const niveau = course.niveau_course?.replace(/_/g, " ").trim();
+                const niveauUtile = niveau && !(course.nom && niveau.toUpperCase().includes(course.nom.toUpperCase()));
+                if (niveauUtile) rows.push({ label: "Niveau", val: niveau! });
                 if (course.terrain_officiel) rows.push({ label: "Terrain", val: course.terrain_officiel });
                 if (course.penetrometre_desc && course.penetrometre_coef != null) rows.push({ label: "Pénétromètre", val: `${course.penetrometre_desc} (${course.penetrometre_coef})` });
                 if (course.meteo?.temperature != null) rows.push({ label: "Température", val: `${course.meteo.temperature}°C` });
@@ -3107,7 +3116,7 @@ export default function CoursePage() {
                 if (course.categorie_particularite) rows.push({ label: "Départ", val: course.categorie_particularite.replace(/_/g, " ").toLowerCase().replace(/^./, (ch) => ch.toUpperCase()) });
                 if (course.pool_total_eur != null && course.pool_total_eur > 0) rows.push({ label: "Masse des enjeux", val: `${course.pool_total_eur.toLocaleString("fr-FR")} €` });
                 if (course.avantage_couloir && course.avantage_couloir !== "neutre") rows.push({ label: "Avantage de couloir", val: course.avantage_couloir.replace(/_/g, " ") });
-                if (course.montant_offert_1er != null && course.montant_offert_1er > 0) rows.push({ label: "Au vainqueur", val: `${Math.round(course.montant_offert_1er / 100).toLocaleString("fr-FR")} €` });
+                if (course.montant_offert_1er != null && course.montant_offert_1er > 0) rows.push({ label: "Au vainqueur", val: `${Math.round(course.montant_offert_1er).toLocaleString("fr-FR")} €` });
                 if (course.nombre_declares_partants != null) rows.push({ label: "Déclarés partants", val: String(course.nombre_declares_partants) });
                 rows.push({ label: "Heure", val: formatDateTime(course.date_heure) });
                 return rows.map((r) => (
