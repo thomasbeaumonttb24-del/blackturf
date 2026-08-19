@@ -597,7 +597,13 @@ def rapport_realization_factor(profil: str | None, type_pari: str | None,
 # On en fait un TILT, pas une barrière : le contrat produit (tranche de rapport
 # par profil, un plan sur chaque course) reste intact, seule la préférence entre
 # candidats d'une même course bouge.
-PB_BUCKETS = ((0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 15.0), (15.0, 1e9))
+# La grille est fine AU-DESSUS de ×15 parce que c'est là que vit le profil
+# risqué (bande ×10 → ∞) et que l'écart y est le plus violent : ×15-30 rend
+# -14,6 %, ×30-60 -21,5 %, ≥×60 -64,7 %. Une tranche ≥×15 unique donnait le même
+# multiplicateur à un ×20 et à un ×200 — le tilt ne pouvait pas trier là où le
+# profil risqué joue justement tous ses paris.
+PB_BUCKETS = ((0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 15.0),
+              (15.0, 30.0), (30.0, 60.0), (60.0, 1e9))
 PB_MIN_PARIS = 150          # sous ce volume, le ROI d'une tranche est du bruit
 PB_K_SHRINK = 200.0         # pseudo-observations shrinkant le multiplicateur vers 1.0
 PB_M_MIN, PB_M_MAX = 0.60, 1.40

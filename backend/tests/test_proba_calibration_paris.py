@@ -168,3 +168,15 @@ def test_une_tranche_sans_gagnants_peut_etre_penalisee_mais_pas_favorisee():
     source = inspect.getsource(signal_performance.compute_payout_bucket_performance)
     assert 'if mult > 1.0 and a["n_wins"] < PB_MIN_WINS_POUR_FAVORISER' in source
     assert "min(gain, PB_GAIN_CAP * mise)" in source
+
+
+def test_la_grille_distingue_les_gros_rapports_entre_eux():
+    """Le profil risqué joue la bande ×10 → ∞ : une tranche ≥×15 unique donnait le
+    MÊME multiplicateur à un ×20 et à un ×200, alors que le ROI réel passe de
+    −14,6 % à −64,7 %. Sans cette finesse, le tilt ne trie rien là où ce profil
+    engage la totalité de ses paris."""
+    from ml.signal_performance import _pb_key
+
+    assert _pb_key(20.0) != _pb_key(45.0) != _pb_key(200.0)
+    assert _pb_key(20.0) == _pb_key(29.9)
+    assert _pb_key(120.0) == _pb_key(5000.0), "la dernière tranche doit tout absorber"

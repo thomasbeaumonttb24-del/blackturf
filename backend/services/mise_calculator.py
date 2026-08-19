@@ -544,9 +544,56 @@ def generer_plan(
         min_keep = 2 if (len(selected) >= 2 and not _solo_confident(selected[0])) else 1
         _allocate_kelly(selected, montant, palier, cfg, respect_montant=respect_montant,
                         min_keep=min_keep)  # remplit "mise"
+        # DISCIPLINE DE MISE — on ne joue pas la même somme sur une course où
+        # l'argent revient et sur une course où il ne revient pas. Contrefactuel
+        # mesuré sur 19 996 paris réglés : tout jouer rend −16,0 % ; concentrer sur
+        # Simple Gagnant ×4-15 + Placé <×4 rend −6,1 % ; sur Simple Gagnant ×4-8
+        # seul, −1,9 %. Le plan reste servi sur CHAQUE course : c'est la somme
+        # engagée qui s'ajuste, le reliquat part en réserve (montant_reserve).
+        #
+        # Jamais appliqué quand l'utilisateur a SAISI un montant : il a demandé à
+        # jouer cette somme-là, on la déploie en entier.
+        _appliquer_discipline_mise(selected, montant, palier, cfg)
     ecartes = _paris_ecartes(cands, selected, cfg)
     return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
                           facteurs_chevaux=facteurs_chevaux, ecartes=ecartes)
+
+
+# Qualité mesurée d'une cellule (type × tranche de rapport), telle qu'apprise par
+# `payout_bucket_multiplier` : 1.0 = tranche neutre, 0.60 = tranche qui a
+# historiquement rendu le moins. On engage la mise pleine sur une cellule saine et
+# on descend jusqu'à ce plancher sur les pires — sans jamais tomber à zéro, sinon
+# le plan disparaîtrait.
+DISCIPLINE_RATIO_PLANCHER = 0.40
+
+
+def _appliquer_discipline_mise(selected: list[dict], montant: int,
+                               palier: dict, cfg: dict) -> None:
+    """Réduit la somme engagée quand les paris retenus tombent dans des tranches
+    de rapport historiquement peu rentables. Modifie `selected` sur place."""
+    if not selected:
+        return
+    plancher = max(MISE_PLANCHER,
+                   round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
+    for c in selected:
+        avant = float(c.get("mise") or 0)
+        if avant <= 0:
+            continue
+        # Ratio PAR PARI, sur sa propre cellule : un ticket sain ne doit pas être
+        # rogné parce qu'un petit ticket annexe tombe dans une mauvaise tranche.
+        # C'est aussi ce qui déplace le MÉLANGE de l'argent vers les bonnes
+        # cellules, et pas seulement le total engagé.
+        qualite = float(c.get("_pb_mult", 1.0) or 1.0)
+        if qualite >= 1.0:
+            continue
+        # 0.60 (pire tranche mesurée) → 40 % de la mise ; 1.00 (neutre) → mise pleine.
+        ratio = (DISCIPLINE_RATIO_PLANCHER
+                 + (qualite - 0.60) * (1.0 - DISCIPLINE_RATIO_PLANCHER) / 0.40)
+        ratio = max(DISCIPLINE_RATIO_PLANCHER, min(1.0, ratio))
+        if ratio >= 0.995:
+            continue
+        c["mise"] = max(plancher, int(round(avant * ratio)))
+        c["_discipline_ratio"] = round(ratio, 2)
 
 
 def _dutch_coef(bets: list[dict]) -> float:
@@ -1708,6 +1755,24 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict],
         raisons.append(f"Cette bande d'EV est historiquement RENTABLE (mise renforcée ×{evb:.2f}).")
     elif evb <= 0.95:
         raisons.append(f"Cette bande d'EV a un ROI réel faible/négatif — mise allégée ×{evb:.2f} (anti zone toxique).")
+    # 5 bis. Tranche de RAPPORT : le facteur le mieux étayé de tout le système
+    # (le ROI réel y décroît continûment). On le dit, sinon la mise réduite paraît
+    # arbitraire à l'utilisateur.
+    pbm = float(c.get("_pb_mult", 1.0) or 1.0)
+    if pbm >= 1.005:
+        raisons.append(
+            f"Cette tranche de rapport est celle qui a le mieux payé historiquement "
+            f"(conviction renforcée ×{pbm:.2f}).")
+    elif pbm <= 0.95:
+        raisons.append(
+            f"Tranche de rapport historiquement peu rentable — conviction réduite "
+            f"×{pbm:.2f} (le ROI réel baisse à mesure que le rapport visé monte).")
+    ratio_disc = c.get("_discipline_ratio")
+    if ratio_disc and float(ratio_disc) < 1.0:
+        raisons.append(
+            f"Discipline de mise : sur ce type de course l'argent est historiquement "
+            f"mal rendu — somme engagée ramenée à {int(float(ratio_disc)*100)} % du plan, "
+            "le reste reste en réserve.")
     # 6. Contrat de gain vs mise TOTALE (allocation spread) : la mise du ticket a été
     # dimensionnée pour que, gagnant, il rende ≥ la cible du profil sur le PLAN entier.
     mise = float(c.get("mise", 0) or 0)

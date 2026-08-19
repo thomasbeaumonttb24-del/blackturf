@@ -85,3 +85,17 @@ def test_on_n_ecrit_que_des_colonnes_qui_existent():
     sql = inspect.getsource(compute_and_save_acteur_stats)
     assert '("stats_entraineurs", "entraineur_id", False)' in sql
     assert '("stats_jockeys", "jockey_id", True)' in sql
+
+
+def test_un_scraper_muet_n_ecrase_pas_le_roi_calcule():
+    """Turfoo ne publie pas de ROI (et renvoie 403 depuis le VPS) : le code posait
+    quand même `roi_global = stats.get("roi", 0.0)`, donc 0.0 par-dessus le ROI
+    calculé sur nos propres règlements. La feature serait retombée à plat au
+    prochain passage du scraper, sans le moindre signal."""
+    source = inspect.getsource(
+        __import__("scraper.orchestrator", fromlist=["x"])
+    )
+    assert 'roi_global=stats.get("roi", 0.0)' not in source, (
+        "un ROI absent ne doit jamais devenir un ROI de 0")
+    assert '"roi_global": stats.get("roi", 0.0)' not in source
+    assert "_maj_roi" in source, "l'écriture du ROI doit rester conditionnelle"
