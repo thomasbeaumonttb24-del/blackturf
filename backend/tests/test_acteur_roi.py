@@ -68,3 +68,20 @@ def test_une_seule_source_pour_le_calcul():
     assert "compute_and_save_acteur_stats" in source
     assert "INSERT INTO" not in source, (
         "le script doit déléguer, pas réimplémenter la requête")
+
+
+def test_on_n_ecrit_que_des_colonnes_qui_existent():
+    """Les deux tables ne sont PAS symétriques : un entraîneur n'a pas de montes,
+    et `stats_entraineurs` ne porte pas la colonne. Une requête unique pour les
+    deux échoue en `UndefinedColumnError` — vécu au premier déploiement, la
+    transaction entière étant perdue, jockeys compris."""
+    from db.models import StatsEntraineur, StatsJockey
+
+    assert hasattr(StatsJockey, "montes_30j")
+    assert not hasattr(StatsEntraineur, "montes_30j"), (
+        "si la colonne est ajoutée côté entraîneurs, activer le drapeau dans "
+        "compute_and_save_acteur_stats")
+
+    sql = inspect.getsource(compute_and_save_acteur_stats)
+    assert '("stats_entraineurs", "entraineur_id", False)' in sql
+    assert '("stats_jockeys", "jockey_id", True)' in sql

@@ -1152,33 +1152,44 @@ async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -
           AND c.date_heure > now() - (:mois || ' months')::interval
         GROUP BY p.{a} HAVING count(*) >= :minc
     """
+    # `montes_30j` n'existe que côté jockeys : un entraîneur n'a pas de montes, et
+    # sa table ne porte pas la colonne. On construit donc l'upsert par table plutôt
+    # que d'écrire une requête qui échoue sur l'une des deux.
     upsert = """
         INSERT INTO {t} (stat_id, {a}, saison, victoires_saison,
                          taux_victoire_global, taux_place_global,
-                         roi_global, montes_30j)
-        VALUES (gen_random_uuid(), :aid, :saison, :wins, :tv, :tp, :roi, :m30)
+                         roi_global{col_m30})
+        VALUES (gen_random_uuid(), :aid, :saison, :wins, :tv, :tp, :roi{val_m30})
         ON CONFLICT ({a}, saison) DO UPDATE SET
             victoires_saison = EXCLUDED.victoires_saison,
             taux_victoire_global = EXCLUDED.taux_victoire_global,
             taux_place_global = EXCLUDED.taux_place_global,
-            roi_global = EXCLUDED.roi_global,
-            montes_30j = EXCLUDED.montes_30j,
+            roi_global = EXCLUDED.roi_global,{set_m30}
             updated_at = now()
     """
     counts = []
-    for table, acteur in (("stats_jockeys", "jockey_id"), ("stats_entraineurs", "entraineur_id")):
+    for table, acteur, avec_montes in (("stats_jockeys", "jockey_id", True),
+                                       ("stats_entraineurs", "entraineur_id", False)):
         rows = (await session.execute(text(agg.format(a=acteur)),
                                       {"mois": str(mois), "minc": MIN_COURSES_ACTEUR})).fetchall()
+        sql_upsert = upsert.format(
+            t=table, a=acteur,
+            col_m30=", montes_30j" if avec_montes else "",
+            val_m30=", :m30" if avec_montes else "",
+            set_m30="\n            montes_30j = EXCLUDED.montes_30j," if avec_montes else "",
+        )
         n = 0
         for aid, rides, wins, places, gains, montes_30j in rows:
             if not rides:
                 continue
-            await session.execute(text(upsert.format(t=table, a=acteur)), {
+            params = {
                 "aid": aid, "saison": saison, "wins": int(wins),
                 "tv": round(wins / rides, 4), "tp": round(places / rides, 4),
                 "roi": roi_acteur(gains, rides),
-                "m30": int(montes_30j or 0),
-            })
+            }
+            if avec_montes:
+                params["m30"] = int(montes_30j or 0)
+            await session.execute(text(sql_upsert), params)
             n += 1
         counts.append(n)
     log.info("db_writer.acteur_stats_computed", jockeys=counts[0], entraineurs=counts[1])
