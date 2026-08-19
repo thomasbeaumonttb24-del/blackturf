@@ -207,4 +207,13 @@ export const adminApi = {
     api.get("/learning-signals", { baseURL: `${API_URL}/admin/api` }),
   learningConvergence: () =>
     api.get("/learning-convergence", { baseURL: `${API_URL}/admin/api` }),
+  // Supervision IA — chiffres réels par type de pari, rentabilité, modèle
+  supervisionParis: (days = 90) =>
+    api.get("/supervision/paris", { baseURL: `${API_URL}/admin/api`, params: { days } }),
+  supervisionRentabilite: (days = 90) =>
+    api.get("/supervision/rentabilite", { baseURL: `${API_URL}/admin/api`, params: { days } }),
+  supervisionAlgoEvolution: (limit = 60) =>
+    api.get("/supervision/algo-evolution", { baseURL: `${API_URL}/admin/api`, params: { limit } }),
+  supervisionPulse: () =>
+    api.get("/supervision/pulse", { baseURL: `${API_URL}/admin/api` }),
 };

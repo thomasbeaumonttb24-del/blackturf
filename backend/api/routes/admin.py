@@ -1554,3 +1554,61 @@ async def data_quality(
     """
     from services.data_quality import rapport_qualite
     return await rapport_qualite(db)
+
+
+# ─────────────────────────────────────────────
+# Supervision IA — chiffres par type de pari, rentabilité, trajectoire du modèle
+# ─────────────────────────────────────────────
+@router.get("/supervision/paris")
+async def supervision_paris(
+    days: Optional[int] = Query(default=90, ge=0, le=730),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Chiffres RÉELS par type de pari (Simple Gagnant, Couplé, Trio, Multi…).
+
+    Mesuré sur les conseils réellement émis avant le départ et réglés sur les
+    rapports PMU. ROI brut ET winsorisé à 50× la mise, IC 90 %, test de
+    robustesse (ROI sans les 1/5/20 plus gros gains) : un segment n'est déclaré
+    rentable qu'avec ≥150 gagnants ET un IC entièrement positif.
+    `days=0` = tout l'historique.
+    """
+    from ml.bet_type_analytics import compute_bet_type_analytics
+    return await compute_bet_type_analytics(db, days=days or None)
+
+
+@router.get("/supervision/rentabilite")
+async def supervision_rentabilite(
+    days: Optional[int] = Query(default=90, ge=0, le=730),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Rentabilité jour par jour : net, ROI, capital cumulé, drawdown vécu.
+
+    Mêmes gardes d'intégrité et même winsorisation que `/supervision/paris` —
+    les deux vues racontent donc forcément la même histoire.
+    """
+    from ml.bet_type_analytics import compute_profitability_timeline
+    return await compute_profitability_timeline(db, days=days or None)
+
+
+@router.get("/supervision/algo-evolution")
+async def supervision_algo_evolution(
+    limit: int = Query(default=60, ge=5, le=300),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Trajectoire du modèle version par version (AUC, Brier, walk-forward)."""
+    from ml.bet_type_analytics import compute_algo_evolution
+    return await compute_algo_evolution(db, limit=limit)
+
+
+@router.get("/supervision/pulse")
+async def supervision_pulse(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Battement de cœur : ce qui bouge aujourd'hui (courses, conseils réglés,
+    apprentissage, fraîcheur des sources). Appelé toutes les 15 s par la page."""
+    from ml.bet_type_analytics import compute_pulse
+    return await compute_pulse(db)
