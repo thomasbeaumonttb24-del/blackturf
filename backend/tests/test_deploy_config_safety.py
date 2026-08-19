@@ -44,6 +44,24 @@ def _publications_du_port_api(texte: str) -> list[str]:
             for m in re.finditer(r"^\s*-\s*(\S*8000\S*)\s*$", bloc.group(1), re.M)]
 
 
+def _descripteurs_presents() -> list[pathlib.Path]:
+    """Fichiers de déploiement lisibles depuis ce contexte d'exécution.
+
+    L'image de prod ne contient QUE `/app` : ni les compose, ni le Dockerfile
+    (le gate ne monte que `tests/`). `_commandes_uvicorn()` renvoyait alors une
+    liste vide et le test échouait sur « aucune commande uvicorn trouvée » —
+    un rouge permanent qui ne signalait aucun défaut de configuration et qui
+    finissait par masquer les vrais (constaté le 2026-08-19).
+
+    Pour exercer VRAIMENT l'invariant depuis l'image, monter les descripteurs :
+        -e BLACKTURF_BACKEND_DIR=/app \\
+        -v /opt/blackturf/docker-compose.yml:/docker-compose.yml:ro \\
+        -v /opt/blackturf/docker-compose.prod.yml:/docker-compose.prod.yml:ro \\
+        -v /opt/blackturf/backend/Dockerfile:/backend/Dockerfile:ro
+    """
+    return [p for p in (COMPOSE_BASE, COMPOSE_PROD, DOCKERFILE) if p.exists()]
+
+
 def _commandes_uvicorn() -> list[str]:
     commandes: list[str] = []
     for chemin in (COMPOSE_BASE, COMPOSE_PROD):
@@ -78,6 +96,8 @@ def test_uvicorn_honore_les_entetes_du_reverse_proxy():
     redirections 307 en http://. Depuis une page https le navigateur refuse de
     les suivre (contenu mixte) : la requête meurt sans erreur visible — c'est ce
     qui vidait le centre de notifications."""
+    if not _descripteurs_presents():
+        pytest.skip("compose et Dockerfile absents de ce contexte (image sans le dépôt)")
     commandes = _commandes_uvicorn()
     assert commandes, "aucune commande uvicorn trouvée"
     for cmd in commandes:

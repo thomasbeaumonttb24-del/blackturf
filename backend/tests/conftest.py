@@ -22,6 +22,29 @@ from api.main import app              # noqa: E402
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
+# Variables d'environnement de PRODUCTION qui changent le VERDICT d'un test sans
+# rien changer au code testé. La suite est exécutée dans l'image de prod, avec le
+# `.env` de prod : `SCRAPER_DISABLED_SOURCES` y liste 8 sources volontairement
+# éteintes, et `sante_scrapers()` renvoyait donc `disabled` / `silent_disabled`
+# là où les tests attendaient `ok_but_empty` / `silent` — 4 échecs qui n'étaient
+# le symptôme d'aucun bug (constaté le 2026-08-19, gate à 5 rouges).
+# Un test qui dépend d'une de ces variables doit la poser LUI-MÊME
+# (`monkeypatch.setenv`), ce que font déjà test_data_quality et
+# test_orchestrator_*. On neutralise donc l'ambiant, jamais l'explicite.
+ENV_AMBIANTES_NEUTRALISEES = (
+    "SCRAPER_DISABLED_SOURCES",
+    "SCRAPER_INTERVAL_MULTIPLIER",
+)
+
+
+@pytest.fixture(autouse=True)
+def _env_ambiant_neutralise(monkeypatch):
+    """Retire l'environnement de prod qui fausse les tests. Autouse : la règle ne
+    vaut rien si chaque test doit penser à l'appliquer. `monkeypatch` restaure
+    tout après le test, donc l'ambiant reste intact pour le reste du processus."""
+    for nom in ENV_AMBIANTES_NEUTRALISEES:
+        monkeypatch.delenv(nom, raising=False)
+
 
 @pytest_asyncio.fixture
 async def engine():
