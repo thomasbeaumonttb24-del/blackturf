@@ -300,6 +300,19 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             mouvement = round(
                 (p.cote_betclic_ouverture - p.cote_betclic) / p.cote_betclic_ouverture * 100, 1
             )  # positif = cote a baissé (argent dessus)
+        elif p.mouvement_cote_pct is not None:
+            # REPLI SUR LE MOUVEMENT NATIF PMU. Betclic n'est pas scrapé (aucune
+            # source gratuite), donc la branche ci-dessus ne s'active JAMAIS et la
+            # colonne « MVT » restait vide pour la totalité des partants — alors que
+            # le scraper enregistre depuis toujours l'écart entre la cote de
+            # référence (ouverture) et la cote directe, pour CHAQUE cheval.
+            #
+            # Deux conversions nécessaires : la valeur stockée est une FRACTION
+            # ((direct − référence) / référence) et non un pourcentage, et son signe
+            # est INVERSE de celui attendu ici — en base, positif = la cote monte
+            # (le cheval est délaissé) ; à l'affichage, positif = la cote baisse
+            # (l'argent arrive dessus).
+            mouvement = round(-float(p.mouvement_cote_pct) * 100, 1)
 
         # Association jockey × entraîneur
         asso = asso_map.get((p.jockey_id, p.entraineur_id)) if p.jockey_id and p.entraineur_id else None
