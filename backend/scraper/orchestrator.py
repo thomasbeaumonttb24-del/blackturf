@@ -635,6 +635,16 @@ class BlackTurfOrchestrator:
 
                 saison = dt.now().year
 
+                # Le ROI scrape n'ECRASE le ROI calcule que s'il vaut vraiment
+                # quelque chose. Turfoo ne le publie pas (et 403 depuis le VPS) :
+                # `stats.get("roi", 0.0)` ecrivait donc 0.0 par-dessus le ROI
+                # calcule sur nos propres reglements, remettant la feature a plat.
+                def _maj_roi(stats: dict, colonnes: dict) -> dict:
+                    roi = stats.get("roi")
+                    if isinstance(roi, (int, float)) and roi:
+                        colonnes["roi_global"] = float(roi)
+                    return colonnes
+
                 # Jockeys du jour
                 result = await session.execute(
                     sa_select(Jockey.jockey_id, Jockey.nom).distinct()
@@ -652,18 +662,17 @@ class BlackTurfOrchestrator:
                         victoires_saison=stats.get("victoires_saison", 0),
                         taux_victoire_global=stats.get("taux_victoire", 0.0),
                         taux_place_global=stats.get("taux_place", 0.0),
-                        roi_global=stats.get("roi", 0.0),
                         taux_par_distance=stats.get("stats_par_distance"),
                         taux_par_hippodrome=stats.get("stats_par_hippodrome"),
                         taux_par_terrain=stats.get("stats_par_terrain"),
+                        **_maj_roi(stats, {}),
                     ).on_conflict_do_update(
                         constraint="stats_jockeys_jockey_id_saison_key",
-                        set_={
+                        set_=_maj_roi(stats, {
                             "victoires_saison": stats.get("victoires_saison", 0),
                             "taux_victoire_global": stats.get("taux_victoire", 0.0),
-                            "roi_global": stats.get("roi", 0.0),
                             "updated_at": datetime.now(),
-                        },
+                        }),
                     )
                     await session.execute(stmt)
 
@@ -684,17 +693,16 @@ class BlackTurfOrchestrator:
                         victoires_saison=stats.get("victoires_saison", 0),
                         taux_victoire_global=stats.get("taux_victoire", 0.0),
                         taux_place_global=stats.get("taux_place", 0.0),
-                        roi_global=stats.get("roi", 0.0),
                         taux_par_distance=stats.get("stats_par_distance"),
                         taux_par_hippodrome=stats.get("stats_par_hippodrome"),
+                        **_maj_roi(stats, {}),
                     ).on_conflict_do_update(
                         constraint="stats_entraineurs_entraineur_id_saison_key",
-                        set_={
+                        set_=_maj_roi(stats, {
                             "victoires_saison": stats.get("victoires_saison", 0),
                             "taux_victoire_global": stats.get("taux_victoire", 0.0),
-                            "roi_global": stats.get("roi", 0.0),
                             "updated_at": datetime.now(),
-                        },
+                        }),
                     )
                     await session.execute(stmt)
 
