@@ -681,8 +681,8 @@ export default function TrackRecordPage() {
       <header className="relative isolate overflow-hidden bg-slate-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/img/hero-1600.webp"
-          srcSet="/img/hero-640.webp 640w, /img/hero-1024.webp 1024w, /img/hero-1600.webp 1600w"
+          src="/img/palmares-hero-1600.webp"
+          srcSet="/img/palmares-hero-640.webp 640w, /img/palmares-hero-1024.webp 1024w, /img/palmares-hero-1600.webp 1600w"
           sizes="100vw"
           alt=""
           aria-hidden="true"
@@ -703,13 +703,13 @@ export default function TrackRecordPage() {
           </p>
 
           <h1 className="mt-7 max-w-4xl font-display text-[2.5rem] font-bold leading-[1.03] tracking-[-0.04em] text-white sm:text-6xl lg:text-[4.25rem]">
-            <CountUp value={g.nb_courses_analysees} /> courses passées au crible.
-            <span className="mt-2 block text-amber-300">Aucun pronostic écrit après l&apos;arrivée.</span>
+            <CountUp value={g.nb_courses_analysees} /> courses analysées.
+            <span className="mt-2 block text-amber-300">Tous les résultats sont publics.</span>
           </h1>
 
           <p className="mt-7 max-w-xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
-            Chaque sélection est horodatée avant que les portes s&apos;ouvrent, puis confrontée aux
-            rapports PMU officiels. Vous lisez le relevé brut — y compris ce qui n&apos;a pas marché.
+            On note chaque pronostic à l&apos;arrivée, aux rapports PMU officiels.
+            Les bons comme les mauvais.
           </p>
 
           <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -776,178 +776,67 @@ export default function TrackRecordPage() {
 
       <main id="preuves" className="mx-auto max-w-7xl space-y-16 px-4 py-12 sm:px-6 sm:py-16 lg:space-y-24">
 
-        {/* ── Nos résultats comparés au hasard ──────────────────────────── */}
-        <section aria-label="Nos résultats comparés au hasard" className="grid gap-10 lg:grid-cols-[1.1fr_.9fr] lg:gap-14">
-          <div>
-            <SectionHeading
-              eyebrow="Qualité du modèle"
-              title="Ce que valent vraiment ces pourcentages"
-              description="Un taux ne veut rien dire seul. Chaque mesure est ici confrontée à ce qu'un tirage au sort obtiendrait sur exactement les mêmes courses, avec le même nombre de partants."
-              icon={Gauge}
-            />
-            <div className="mt-8 space-y-9">
-              <ComparBar
-                label="Le gagnant figure dans notre Top-3"
-                aide={`Sur ${nf(g.nb_courses_analysees)} courses réglées, champ moyen de ${g.nb_partants_moyen ? nf(g.nb_partants_moyen, 1) : "11"} partants.`}
-                nous={g.accuracy_top3}
-                hasard={hasard3}
-                facteur={facteur3}
-              />
-              <ComparBar
-                label="Notre favori gagne la course"
-                aide="Le cheval classé numéro 1 par l'algorithme franchit la ligne en tête."
-                nous={g.accuracy_top1}
-                hasard={hasard1}
-                facteur={facteur1}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4 lg:pt-4">
-            <BrierScale value={g.brier_moyen} />
-            <div className="rounded-2xl border border-stone-200 bg-white p-5">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <ShieldCheck className="h-4 w-4 text-amber-700" aria-hidden="true" /> Ce que ces chiffres ne disent pas
-              </h3>
-              <ul className="mt-3 space-y-2.5 text-xs leading-5 text-muted-foreground">
-                <li className="flex gap-2">
-                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-                  Ce n&apos;est pas un taux de paris gagnants : un cheval bien classé ne fait pas gagner un
-                  Simple Gagnant, et le prélèvement PMU s&apos;applique à chaque mise.
-                </li>
-                <li className="flex gap-2">
-                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-                  Ce n&apos;est pas une promesse : les performances passées ne préjugent pas des suivantes,
-                  et jouer comporte un risque de perte.
-                </li>
-                <li className="flex gap-2">
-                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
-                  C&apos;est en revanche vérifiable course par course : chaque ligne du palmarès renvoie
-                  vers la course concernée et son rapport officiel.
-                </li>
-              </ul>
-            </div>
-          </div>
+        {/* ── 50 derniers paris gagnés (tous profils) ───────────────────────── */}
+        <section aria-label="Derniers paris gagnés" className="space-y-6">
+          <SectionHeading
+            eyebrow="En direct"
+            title="Les derniers paris gagnés"
+            description="Les 50 plus récents, tous profils confondus. Cliquez une course : vous voyez le pari, la mise, le rapport officiel."
+            icon={Receipt}
+          />
+        <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-none">
+          <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-stone-100 p-4 sm:px-6">
+            <p className="inline-flex items-center gap-2 text-xs font-medium text-emerald-800"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Données actualisées</p>
+            <p className="text-xs text-muted-foreground">Mise de référence : 10€ / course</p>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6">
+            {!gagnantsData ? (
+              <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
+            ) : gagnantsData.gagnants.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Les paris gagnants apparaîtront ici dès les prochaines arrivées (l&apos;historique se construit en temps réel).
+              </div>
+            ) : (
+              <>
+                <BetsTable bets={gagnantsData.gagnants.slice(0, recentLimit)} />
+                {recentLimit < Math.min(50, gagnantsData.gagnants.length) && (
+                  <div className="mt-5 flex justify-center">
+                    <Button onClick={() => setRecentLimit((n) => Math.min(n + 10, 50))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
+                      Afficher 10 résultats supplémentaires <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                <p className="mt-5 border-t border-stone-100 pt-4 text-[11px] text-muted-foreground">
+                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total ·
+                  {Math.min(recentLimit, gagnantsData.gagnants.length)} résultat{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""} affiché{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""}.
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
         </section>
 
-        {/* ── Tendance 30 jours ─────────────────────────────────────────── */}
-        {tendance.points.length > 0 && (
-          <section aria-label="Tendance sur 30 jours" className="space-y-6">
+        {/* ── 30 meilleurs gains ────────────────────────────────────────────── */}
+        {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
+          <section aria-label="Plus gros gains" className="space-y-6">
             <SectionHeading
-              eyebrow="Régularité"
-              title="Jour après jour, sur 30 jours"
-              description="Une bonne journée ne prouve rien — sur 40 courses, le hasard produit des écarts de 15 points. Ce qui compte, c'est que la ligne reste au-dessus du repère jour après jour."
-              icon={LineChart}
+              eyebrow="Records"
+              title="Les plus gros gains"
+              description="Nos 30 meilleurs coups, réglés aux rapports officiels. Chacun était figé avant le départ."
+              icon={Star}
             />
-            <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,.5)]">
-              <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0 border-b border-stone-100 p-4 sm:px-6">
-                <p className="inline-flex items-center gap-2 text-xs font-medium text-emerald-800">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> {nf(tendance.totalCourses)} courses sur {tendance.jours} jours mesurés
-                </p>
-                <p className="text-xs text-muted-foreground">Moyenne pondérée : <span className="font-bold tabular-nums text-foreground">{nf(tendance.moyenne, 1)} %</span></p>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-6">
-                <TendanceChart data={tendance.points} moyenne={tendance.moyenne} hasard={hasard3} />
-                <p className="mt-4 border-t border-stone-100 pt-4 text-[11px] leading-5 text-muted-foreground">
-                  Les journées sans course mesurée (interruption de collecte) apparaissent en trou plutôt qu&apos;à
-                  zéro : afficher 0 % laisserait croire à un échec du modèle là où il n&apos;y a simplement pas de donnée.
-                </p>
-              </CardContent>
-            </Card>
+          <Card className="overflow-hidden rounded-3xl border-amber-200 bg-white shadow-none">
+            <CardContent className="p-4 sm:p-6">
+              <BetsTable bets={gagnantsData.top_gains.slice(0, recordsLimit)} ranked />
+              {recordsLimit < gagnantsData.top_gains.length && (
+                <div className="mt-5 flex justify-center">
+                  <Button onClick={() => setRecordsLimit((n) => Math.min(n + 10, 30))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">Afficher plus de records <ChevronDown className="h-4 w-4" /></Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
           </section>
         )}
-
-        {/* ── Précision par discipline ──────────────────────────────────── */}
-        <section aria-label="Précision par discipline" className="space-y-6">
-          <SectionHeading
-            eyebrow="Par spécialité"
-            title="La précision, discipline par discipline"
-            description="Le trot et le galop ne se lisent pas avec les mêmes signaux : le plat ouvre des champs plus larges et plus incertains, le trot récompense la régularité. Voici, sans tri, le volume analysé et la précision atteinte sur chacun."
-            icon={Sparkles}
-          />
-          {data.by_discipline.length === 0 ? (
-            <Card className="rounded-3xl border-stone-200 bg-white shadow-none">
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">Aucune donnée pour le moment</CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {data.by_discipline.map((d) => (
-                <DisciplineCard key={d.discipline} d={d} maxCourses={maxCourses} hasard={hasard3} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* ── Le favori IA face au marché ───────────────────────────────── */}
-        <section aria-label="Le favori de l'algorithme face au marché" className="space-y-6">
-          <SectionHeading
-            eyebrow="Face au marché"
-            title="Notre favori contre la cote des parieurs"
-            description="Recopier la cote ne demande aucun modèle. Les questions utiles sont ailleurs : nos favoris tiennent-ils à l'arrivée, et le marché se déplace-t-il vers eux une fois que nous les avons désignés ?"
-            icon={Users}
-          />
-          <div className="grid gap-4 lg:grid-cols-[.9fr_1.1fr] lg:gap-6">
-            <div className="relative min-h-[240px] overflow-hidden rounded-3xl bg-slate-900">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/img/duel.webp"
-                alt="Deux chevaux au coude à coude dans la ligne droite"
-                className="absolute inset-0 h-full w-full object-cover"
-                loading="lazy"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-transparent" aria-hidden="true" />
-              <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300">Closing line value</p>
-                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-200">
-                  Quand la cote d&apos;un cheval baisse entre notre pronostic et le départ, c&apos;est le marché
-                  qui vient nous rejoindre. De tous les signaux, c&apos;est le plus difficile à maquiller.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-3xl border border-stone-200 bg-white p-6">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori placé</p>
-                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-emerald-700">
-                  <CountUp value={g.favori_place_rate} decimals={1} suffix=" %" />
-                </p>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Notre cheval numéro 1 termine dans les 3 premiers, sur {nf(g.nb_favoris_evalues)} courses
-                  confrontées à l&apos;arrivée officielle.
-                </p>
-              </div>
-              <div className="rounded-3xl border border-stone-200 bg-white p-6">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori gagnant</p>
-                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-slate-900">
-                  <CountUp value={g.favori_win_rate} decimals={1} suffix=" %" />
-                </p>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Il gagne franchement la course, contre {hasard1 != null ? `${nf(hasard1, 1)} %` : "—"} pour un
-                  choix au hasard sur le même champ.
-                </p>
-              </div>
-              <div className={cn("rounded-3xl border p-6 sm:col-span-2", clv ? "border-amber-200 bg-gradient-to-br from-amber-50/90 to-white" : "border-stone-200 bg-white")}>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">Le marché se déplace vers nous</p>
-                {clv ? (
-                  <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-2">
-                    <p className="font-display text-4xl font-bold tabular-nums text-amber-800">
-                      <CountUp value={clv.pct_beat_line} decimals={1} suffix=" %" />
-                    </p>
-                    <p className="max-w-md text-sm leading-6 text-muted-foreground">
-                      de nos favoris voient leur cote <strong className="font-semibold text-foreground">baisser</strong> entre
-                      notre pronostic et le départ, sur {nf(clv.n)} courses mesurées.
-                    </p>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                    Indicateur en cours de constitution : il exige l&apos;historique complet des cotes, de notre
-                    pronostic jusqu&apos;au départ.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
 
         {/* ── TOTAL DES GAINS générés par l'algorithme, par profil ───────────── */}
         <section aria-label="Gains vérifiés" className="space-y-6">
@@ -955,8 +844,8 @@ export default function TrackRecordPage() {
             eyebrow="Vue d'ensemble"
             title="Les paris qui sont passés"
             description={gainConnu
-              ? "Les gains encaissés, leur répartition par profil de risque, et le nombre de courses réglées qui sert de dénominateur."
-              : "Chaque pari gagnant listé ici a été émis avant le départ puis réglé au rapport officiel. Le nombre de courses réglées est affiché à côté : sans ce dénominateur, ne montrer que les gagnants serait un biais du survivant."}
+              ? "Les gains encaissés, profil par profil, avec le nombre de courses réglées en face."
+              : "Le total des paris gagnés — et, juste à côté, le nombre de courses réglées. Sans ce second chiffre, n'afficher que les gagnants serait malhonnête."}
             icon={Coins}
           />
         <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,.5)]">
@@ -1095,64 +984,185 @@ export default function TrackRecordPage() {
           </div>
         </section>
 
-        {/* ── 50 derniers paris gagnés (tous profils) ───────────────────────── */}
-        <section aria-label="Derniers paris gagnés" className="space-y-6">
-          <SectionHeading eyebrow="Historique en direct" title="Les derniers paris gagnés" description="Les 50 résultats les plus récents, tous profils confondus. Ouvrez une course pour contrôler le détail." icon={Receipt} />
-        <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-none">
-          <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-stone-100 p-4 sm:px-6">
-            <p className="inline-flex items-center gap-2 text-xs font-medium text-emerald-800"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Données actualisées</p>
-            <p className="text-xs text-muted-foreground">Mise de référence : 10€ / course</p>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-6">
-            {!gagnantsData ? (
-              <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
-            ) : gagnantsData.gagnants.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Les paris gagnants apparaîtront ici dès les prochaines arrivées (l&apos;historique se construit en temps réel).
-              </div>
-            ) : (
-              <>
-                <BetsTable bets={gagnantsData.gagnants.slice(0, recentLimit)} />
-                {recentLimit < Math.min(50, gagnantsData.gagnants.length) && (
-                  <div className="mt-5 flex justify-center">
-                    <Button onClick={() => setRecentLimit((n) => Math.min(n + 10, 50))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
-                      Afficher 10 résultats supplémentaires <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  </div>
-                )}
-                <p className="mt-5 border-t border-stone-100 pt-4 text-[11px] text-muted-foreground">
-                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total ·
-                  {Math.min(recentLimit, gagnantsData.gagnants.length)} résultat{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""} affiché{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""}.
-                </p>
-              </>
-            )}
-          </CardContent>
-        </Card>
+        {/* ── Nos résultats comparés au hasard ──────────────────────────── */}
+        <section aria-label="Nos résultats comparés au hasard" className="grid gap-10 lg:grid-cols-[1.1fr_.9fr] lg:gap-14">
+          <div>
+            <SectionHeading
+              eyebrow="Qualité du modèle"
+              title="Ce que valent vraiment ces pourcentages"
+              description="Un pourcentage seul ne veut rien dire. On le compare donc à ce que ferait un tirage au sort sur les mêmes courses."
+              icon={Gauge}
+            />
+            <div className="mt-8 space-y-9">
+              <ComparBar
+                label="Le gagnant figure dans notre Top-3"
+                aide={`Sur ${nf(g.nb_courses_analysees)} courses réglées, champ moyen de ${g.nb_partants_moyen ? nf(g.nb_partants_moyen, 1) : "11"} partants.`}
+                nous={g.accuracy_top3}
+                hasard={hasard3}
+                facteur={facteur3}
+              />
+              <ComparBar
+                label="Notre favori gagne la course"
+                aide="Le cheval classé numéro 1 par l'algorithme franchit la ligne en tête."
+                nous={g.accuracy_top1}
+                hasard={hasard1}
+                facteur={facteur1}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4 lg:pt-4">
+            <BrierScale value={g.brier_moyen} />
+            <div className="rounded-2xl border border-stone-200 bg-white p-5">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ShieldCheck className="h-4 w-4 text-amber-700" aria-hidden="true" /> Ce que ces chiffres ne disent pas
+              </h3>
+              <ul className="mt-3 space-y-2.5 text-xs leading-5 text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                  Ce n&apos;est pas un taux de paris gagnants : un cheval bien classé ne fait pas gagner un
+                  Simple Gagnant, et le prélèvement PMU s&apos;applique à chaque mise.
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                  Ce n&apos;est pas une promesse : les performances passées ne préjugent pas des suivantes,
+                  et jouer comporte un risque de perte.
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+                  C&apos;est en revanche vérifiable course par course : chaque ligne du palmarès renvoie
+                  vers la course concernée et son rapport officiel.
+                </li>
+              </ul>
+            </div>
+          </div>
         </section>
 
-        {/* ── 30 meilleurs gains ────────────────────────────────────────────── */}
-        {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
-          <section aria-label="Plus gros gains" className="space-y-6">
-            <SectionHeading eyebrow="Records" title="Les plus gros gains" description="Les 30 meilleures performances nettes enregistrées et réglées aux rapports officiels." icon={Star} />
-          <Card className="overflow-hidden rounded-3xl border-amber-200 bg-white shadow-none">
-            <CardContent className="p-4 sm:p-6">
-              <BetsTable bets={gagnantsData.top_gains.slice(0, recordsLimit)} ranked />
-              {recordsLimit < gagnantsData.top_gains.length && (
-                <div className="mt-5 flex justify-center">
-                  <Button onClick={() => setRecordsLimit((n) => Math.min(n + 10, 30))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">Afficher plus de records <ChevronDown className="h-4 w-4" /></Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        {/* ── Tendance 30 jours ─────────────────────────────────────────── */}
+        {tendance.points.length > 0 && (
+          <section aria-label="Tendance sur 30 jours" className="space-y-6">
+            <SectionHeading
+              eyebrow="Régularité"
+              title="Jour après jour, sur 30 jours"
+              description="Une bonne journée ne prouve rien. Ce qui compte, c'est que la courbe reste au-dessus du hasard, jour après jour."
+              icon={LineChart}
+            />
+            <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,.5)]">
+              <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0 border-b border-stone-100 p-4 sm:px-6">
+                <p className="inline-flex items-center gap-2 text-xs font-medium text-emerald-800">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> {nf(tendance.totalCourses)} courses sur {tendance.jours} jours mesurés
+                </p>
+                <p className="text-xs text-muted-foreground">Moyenne pondérée : <span className="font-bold tabular-nums text-foreground">{nf(tendance.moyenne, 1)} %</span></p>
+              </CardHeader>
+              <CardContent className="p-3 sm:p-6">
+                <TendanceChart data={tendance.points} moyenne={tendance.moyenne} hasard={hasard3} />
+                <p className="mt-4 border-t border-stone-100 pt-4 text-[11px] leading-5 text-muted-foreground">
+                  Les journées sans course mesurée (interruption de collecte) apparaissent en trou plutôt qu&apos;à
+                  zéro : afficher 0 % laisserait croire à un échec du modèle là où il n&apos;y a simplement pas de donnée.
+                </p>
+              </CardContent>
+            </Card>
           </section>
         )}
+
+        {/* ── Précision par discipline ──────────────────────────────────── */}
+        <section aria-label="Précision par discipline" className="space-y-6">
+          <SectionHeading
+            eyebrow="Par spécialité"
+            title="La précision, discipline par discipline"
+            description="Le trot et le galop ne se lisent pas pareil. Voici, sans tri, ce que l'algorithme donne sur chacun."
+            icon={Sparkles}
+          />
+          {data.by_discipline.length === 0 ? (
+            <Card className="rounded-3xl border-stone-200 bg-white shadow-none">
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">Aucune donnée pour le moment</CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {data.by_discipline.map((d) => (
+                <DisciplineCard key={d.discipline} d={d} maxCourses={maxCourses} hasard={hasard3} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── Le favori IA face au marché ───────────────────────────────── */}
+        <section aria-label="Le favori de l'algorithme face au marché" className="space-y-6">
+          <SectionHeading
+            eyebrow="Face au marché"
+            title="Notre favori contre la cote des parieurs"
+            description="Recopier la cote, tout le monde sait faire. La vraie question : nos favoris tiennent-ils à l'arrivée, et le marché nous suit-il ?"
+            icon={Users}
+          />
+          <div className="grid gap-4 lg:grid-cols-[.9fr_1.1fr] lg:gap-6">
+            <div className="relative min-h-[240px] overflow-hidden rounded-3xl bg-slate-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/img/palmares-duel.webp"
+                alt="Trois chevaux au coude à coude dans la ligne droite"
+                className="absolute inset-0 h-full w-full object-cover"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-transparent" aria-hidden="true" />
+              <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300">Closing line value</p>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-200">
+                  Quand la cote d&apos;un cheval baisse entre notre pronostic et le départ, c&apos;est le marché
+                  qui vient nous rejoindre. De tous les signaux, c&apos;est le plus difficile à maquiller.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-3xl border border-stone-200 bg-white p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori placé</p>
+                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-emerald-700">
+                  <CountUp value={g.favori_place_rate} decimals={1} suffix=" %" />
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Notre cheval numéro 1 termine dans les 3 premiers, sur {nf(g.nb_favoris_evalues)} courses
+                  confrontées à l&apos;arrivée officielle.
+                </p>
+              </div>
+              <div className="rounded-3xl border border-stone-200 bg-white p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori gagnant</p>
+                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-slate-900">
+                  <CountUp value={g.favori_win_rate} decimals={1} suffix=" %" />
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Il gagne franchement la course, contre {hasard1 != null ? `${nf(hasard1, 1)} %` : "—"} pour un
+                  choix au hasard sur le même champ.
+                </p>
+              </div>
+              <div className={cn("rounded-3xl border p-6 sm:col-span-2", clv ? "border-amber-200 bg-gradient-to-br from-amber-50/90 to-white" : "border-stone-200 bg-white")}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">Le marché se déplace vers nous</p>
+                {clv ? (
+                  <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-2">
+                    <p className="font-display text-4xl font-bold tabular-nums text-amber-800">
+                      <CountUp value={clv.pct_beat_line} decimals={1} suffix=" %" />
+                    </p>
+                    <p className="max-w-md text-sm leading-6 text-muted-foreground">
+                      de nos favoris voient leur cote <strong className="font-semibold text-foreground">baisser</strong> entre
+                      notre pronostic et le départ, sur {nf(clv.n)} courses mesurées.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                    Indicateur en cours de constitution : il exige l&apos;historique complet des cotes, de notre
+                    pronostic jusqu&apos;au départ.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
 
         {/* ── Ce que débloque l'abonnement ──────────────────────────────── */}
         <section aria-label="Ce que débloque l'abonnement" className="space-y-6">
           <SectionHeading
             eyebrow="Passer à l'action"
             title="Le palmarès est public. Les pronostics du jour ne le sont pas."
-            description="Cette page montre ce que l'algorithme a fait sur les courses déjà courues. L'abonnement donne accès à ce qu'il annonce pour celles de tout à l'heure — avec le détail qui permet de décider soi-même."
+            description="Ici, vous voyez ce qui s'est déjà joué. L'abonnement donne les pronostics des courses de tout à l'heure."
             icon={Crown}
           />
           <div className="grid gap-4 lg:grid-cols-3">
@@ -1184,7 +1194,7 @@ export default function TrackRecordPage() {
         <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-6 py-10 text-white sm:px-10 sm:py-14" aria-labelledby="cta-pro-title">
           <div
             className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-20"
-            style={{ backgroundImage: "url(/img/cta.webp)" }}
+            style={{ backgroundImage: "url(/img/palmares-gagnant.webp)" }}
             aria-hidden="true"
           />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/95 to-slate-950/70" aria-hidden="true" />
