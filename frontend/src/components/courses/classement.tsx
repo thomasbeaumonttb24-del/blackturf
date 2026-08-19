@@ -84,7 +84,6 @@ export function ClassementAlgo({
   onLegende: () => void;
 }) {
   const lignes = [...predictions].sort((a, b) => a.rang_predit - b.rang_predit);
-  const aResultat = positionsReelles && Object.keys(positionsReelles).length > 0;
   const aCoteJuste = lignes.some((p) => p.cote_juste != null);
 
   return (
@@ -218,15 +217,13 @@ export function ClassementAlgo({
                   <span
                     className={cn(
                       "hidden text-right font-display text-[13px] tabular-nums sm:block",
-                      p.cote_juste != null && marche != null && marche > p.cote_juste
-                        ? "font-bold text-emerald-700"   // le marché paie plus que le risque estimé
-                        : "text-slate-500",
+                      p.value_bet && !absent ? "font-bold text-emerald-700" : "text-slate-500",
                     )}
                     title={
                       p.cote_juste != null && marche != null
                         ? marche > p.cote_juste
-                          ? "Le marché paie au-dessus de la cote juste du modèle"
-                          : "Le marché paie en dessous de la cote juste du modèle"
+                          ? `Cote juste du modèle : ${cote(p.cote_juste)}. Le marché paie ${cote(marche)}${p.value_bet ? " — écart retenu comme pari de valeur." : ", écart jugé insuffisant par le modèle."}`
+                          : `Cote juste du modèle : ${cote(p.cote_juste)}. Le marché paie moins (${cote(marche)}) : le prix ne couvre pas le risque.`
                         : undefined
                     }
                   >
@@ -269,7 +266,7 @@ export function ClassementAlgo({
           <span><span className="text-emerald-700">▲</span> atout</span>
           <span><span className="text-rose-700">▼</span> réserve</span>
           <span><span className="text-amber-700">●</span> à surveiller</span>
-          {aCoteJuste && <span><span className="font-semibold text-emerald-700">cote juste en vert</span> : le marché paie plus que le risque estimé</span>}
+          {aCoteJuste && <span><span className="font-semibold text-emerald-700">cote juste en vert</span> : pari de valeur retenu par le modèle</span>}
         </div>
         <p className="mt-1.5 text-[10.5px] leading-4 text-muted-foreground">
           Probabilités issues du modèle à 80+ critères (forme, ELO, association jockey/entraîneur, distance,
