@@ -8,6 +8,7 @@ import {
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
   MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil, Tv,
   HelpCircle, X, ShieldCheck, Gauge, Flame, LockKeyhole, Radio, WalletCards,
+  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
@@ -16,6 +17,10 @@ import { Button } from "@/components/ui/button";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
+import {
+  ParisDisponiblesCard, ConfrontationsCard, PoolEvolutionCard, TempsPassageCard,
+  CompteurDepart,
+} from "@/components/courses/insights";
 import { formatCote, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -2082,10 +2087,10 @@ export default function CoursePage() {
   const [triggeringPred, setTriggeringPred] = useState(false);
   const [expandedPartant, setExpandedPartant] = useState<string | null>(null);
   const [showGlossaire, setShowGlossaire] = useState(false);
-  // Bascule « À venir / Résultats » : présentation uniquement. La disponibilité
-  // des résultats reste pilotée par le statut réel (les 2 jeux de données
-  // coexistent une fois la course terminée). Null = suit le statut par défaut.
-  const [viewMode, setViewMode] = useState<"live" | "resultats" | null>(null);
+  // Onglet affiché. Null = on suit le statut de la course (résultats si courue,
+  // synthèse sinon) ; dès que le visiteur choisit, son choix prime.
+  type Onglet = "synthese" | "partants" | "marche" | "plan" | "resultats";
+  const [onglet, setOnglet] = useState<Onglet | null>(null);
   const [analysis, setAnalysis] = useState<{
     narrative: string;
     market_signals: Array<{ numero: number; nom: string; signal: string; detail: string; score: number }>;
@@ -2331,6 +2336,22 @@ export default function CoursePage() {
     ? { label: "Terminée", fg: CX.gray500, bg: CX.surf5, bd: CX.bd3, dot: CX.gray400 }
     : { label: "À venir", fg: CX.gold, bg: CX.goldBg, bd: CX.goldBd, dot: "#F59E0B" };
 
+  // Onglets : « Résultats » n'apparaît qu'une fois l'arrivée disponible, et
+  // devient l'onglet par défaut — quand la course est courue, c'est ce que le
+  // visiteur vient voir.
+  const ONGLETS = [
+    { cle: "synthese" as const, label: "Synthèse", icone: Sparkles, pastille: null as number | null },
+    { cle: "partants" as const, label: "Partants", icone: Users, pastille: course.nb_partants },
+    { cle: "marche" as const, label: "Marché", icone: TrendingUp, pastille: null as number | null },
+    { cle: "plan" as const, label: "Plan de mise", icone: Calculator, pastille: null as number | null },
+    ...(course.statut === "termine"
+      ? [{ cle: "resultats" as const, label: "Résultats", icone: Trophy, pastille: null as number | null }]
+      : []),
+  ];
+  const ongletParDefaut = course.statut === "termine" ? "resultats" : "synthese";
+  const ongletActif = ONGLETS.some((o) => o.cle === onglet) ? onglet! : ongletParDefaut;
+
+
   return (
     <div style={{ minHeight: "100vh", background: CX_PAGE_BG }}>
       <style dangerouslySetInnerHTML={{ __html: CX_STYLE }} />
@@ -2340,99 +2361,108 @@ export default function CoursePage() {
         <ArrowLeft className="h-4 w-4" /> Programme
       </Link>
 
-      {/* ── HERO ── */}
-      <div className="cx-hero cx-fade" style={{ position: "relative", overflow: "hidden", borderRadius: 26, border: "1px solid rgba(245,158,11,.18)", background: "linear-gradient(180deg,#FFFBF0 0%,#FFFFFF 100%)", padding: "26px 28px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,.04),0 16px 44px -22px rgba(180,83,9,.18)" }}>
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(55% 60% at 10% 6%,rgba(245,158,11,.10),transparent 62%),radial-gradient(50% 55% at 96% 18%,rgba(217,119,6,.07),transparent 60%)" }} />
-        <span aria-hidden style={{ position: "absolute", right: 30, bottom: 22, width: 250, height: 132, opacity: 0.1, background: "linear-gradient(120deg,#0E7C66,#0B5E4E)", WebkitMask: `url(${disc.url}) right bottom/contain no-repeat`, mask: `url(${disc.url}) right bottom/contain no-repeat`, pointerEvents: "none" }} />
-        <div style={{ position: "relative", display: "flex", flexWrap: "wrap", gap: 16, justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="cx-badges" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9, marginBottom: 12 }}>
+      {/* ── EN-TÊTE DE COURSE ────────────────────────────────────────────────
+          Version allégée : identité de la course, état, temps restant, accès au
+          direct. Le détail technique (pénétromètre, pluie, dotation, conditions
+          officielles) vit dans la fiche technique de l'onglet Synthèse — l'avoir
+          en en-tête noyait l'essentiel sous huit pastilles grises. */}
+      <header className="cx-fade relative mb-5 overflow-hidden rounded-3xl border border-amber-500/15 bg-gradient-to-b from-[#FFFBF0] to-white p-5 shadow-[0_1px_3px_rgba(0,0,0,.04),0_16px_44px_-26px_rgba(180,83,9,.18)] sm:p-7">
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-4 right-6 hidden h-28 w-52 opacity-[0.09] sm:block"
+          style={{
+            background: disc.color,
+            WebkitMask: `url(${disc.url}) right bottom/contain no-repeat`,
+            mask: `url(${disc.url}) right bottom/contain no-repeat`,
+          }}
+        />
+
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            {/* Identité : réunion/course, label du pari phare, état */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
               {(() => {
                 const m = course.course_id.match(/R(\d+)C(\d+)$/);
                 const r = course.numero_reunion ?? (m ? Number(m[1]) : null);
                 const c = course.numero ?? (m ? Number(m[2]) : null);
                 return r && c ? (
-                  <span style={{ fontFamily: CX.sg, fontSize: 13, fontWeight: 700, color: "#FFFFFF", background: CX.ink, borderRadius: 9, padding: "5px 11px", letterSpacing: "-.01em" }}>
-                    R{r}<span style={{ opacity: 0.45, margin: "0 3px" }}>·</span>C{c}
+                  <span className="rounded-lg bg-slate-900 px-2.5 py-1 font-display text-[13px] font-bold tracking-tight text-white">
+                    R{r}<span className="mx-0.5 opacity-45">·</span>C{c}
                   </span>
                 ) : null;
               })()}
               {course.est_quinte && (
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.gold, background: "linear-gradient(135deg,#FEF3C7,#FDE68A)", border: `1px solid ${CX.goldBd2}`, borderRadius: 999, padding: "4px 11px" }}>Quinté+</span>
+                <span className="rounded-full border border-amber-300 bg-gradient-to-br from-amber-100 to-amber-200 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-800">Quinté+</span>
               )}
-              {course.est_quarte && (
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.gold, background: "linear-gradient(135deg,#FEF3C7,#FDE68A)", border: `1px solid ${CX.goldBd2}`, borderRadius: 999, padding: "4px 11px" }}>Quarté+</span>
+              {course.est_quarte && !course.est_quinte && (
+                <span className="rounded-full border border-amber-300 bg-gradient-to-br from-amber-100 to-amber-200 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-800">Quarté+</span>
               )}
-              {course.est_tierce && (
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Tiercé</span>
+              {course.est_tierce && !course.est_quarte && !course.est_quinte && (
+                <span className="rounded-full border border-stone-200 bg-stone-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-600">Tiercé</span>
               )}
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: statutMeta.fg, background: statutMeta.bg, border: `1px solid ${statutMeta.bd}`, borderRadius: 999, padding: "4px 11px" }}>
-                {course.statut !== "termine" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: statutMeta.dot, animation: "cxDotPulse 1.8s ease-in-out infinite" }} />}
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide"
+                style={{ color: statutMeta.fg, background: statutMeta.bg, border: `1px solid ${statutMeta.bd}` }}
+              >
+                {course.statut !== "termine" && (
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: statutMeta.dot, animation: "cxDotPulse 1.8s ease-in-out infinite" }} />
+                )}
                 {statutMeta.label}
               </span>
+              <CompteurDepart dateHeure={course.date_heure} statut={course.statut} />
               {course.statut === "a_venir" && course.prono_fige && (
-                <span title="À moins de 10 min du départ, le pronostic est figé. Les cotes affichées continuent d'évoluer." style={{ fontSize: 10.5, fontWeight: 600, color: CX.gray500, background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 999, padding: "4px 10px" }}>🔒 Pronostic figé</span>
+                <span
+                  title="À moins de 10 minutes du départ, la sélection est figée : elle ne peut plus changer. Les cotes, elles, continuent de bouger."
+                  className="inline-flex cursor-help items-center gap-1.5 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600"
+                >
+                  <LockKeyhole className="h-3 w-3" aria-hidden="true" /> Pronostic figé
+                </span>
               )}
               {wsConnected && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: CX.em }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.emLight, animation: "cxDotPulse 1.4s ease-in-out infinite" }} /> En direct
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-600">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" style={{ animation: "cxDotPulse 1.4s ease-in-out infinite" }} />
+                  Cotes en direct
                 </span>
               )}
             </div>
-            <h1 className="cx-h1" style={{ margin: 0, fontFamily: CX.sg, fontSize: 30, fontWeight: 700, letterSpacing: "-.02em", lineHeight: 1.08, color: CX.ink2 }}>
+
+            <h1 className="cx-h1 font-display text-[26px] font-bold leading-[1.1] tracking-tight text-slate-800 sm:text-[30px]">
               {course.nom || `Course ${course.course_id.match(/R\d+C\d+$/)?.[0] ?? course.course_id}`}
             </h1>
-            <div className="cx-meta" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "7px 15px", marginTop: 13, fontSize: 13.5, color: CX.gray500 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                <span style={{ width: 18, height: 14, background: disc.color, WebkitMask: `url(${disc.url}) center/contain no-repeat`, mask: `url(${disc.url}) center/contain no-repeat` }} />
-                <span style={{ fontWeight: 600, color: disc.color }}>{course.discipline}</span>
+
+            {/* Une seule ligne de contexte : ce qu'on lit avant de parier */}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13.5px] text-slate-500">
+              <span className="inline-flex items-center gap-2">
+                <span
+                  className="inline-block h-3.5 w-[18px]"
+                  style={{ background: disc.color, WebkitMask: `url(${disc.url}) center/contain no-repeat`, mask: `url(${disc.url}) center/contain no-repeat` }}
+                  aria-hidden="true"
+                />
+                <span className="font-semibold" style={{ color: disc.color }}>{course.discipline}</span>
               </span>
-              <span style={{ color: "#E5E1D5" }}>|</span><span>{course.hippodrome_nom}</span>
-              <span style={{ color: "#E5E1D5" }}>|</span><span>{course.distance} m</span>
-              <span style={{ color: "#E5E1D5" }}>|</span><span>{course.nb_partants} partants</span>
-              <span style={{ color: "#E5E1D5" }}>|</span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Clock className="h-3.5 w-3.5" style={{ color: CX.gray400 }} /> {formatDateTime(course.date_heure)}</span>
-              {course.niveau_course && (<><span style={{ color: "#E5E1D5" }}>|</span><span>{course.niveau_course.replace(/_/g, " ")}</span></>)}
-              {course.meteo?.temperature != null && (<><span style={{ color: "#E5E1D5" }}>|</span><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Cloud className="h-3.5 w-3.5" style={{ color: CX.gray400 }} /> {course.meteo.temperature}°C</span></>)}
-            </div>
-            {/* Rangée de badges pills (or : dotation/gagnant ; reste gris neutre) */}
-            <div className="cx-badges" style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 14 }}>
+              <span className="text-stone-300" aria-hidden="true">|</span>
+              <span>{course.hippodrome_nom}</span>
+              <span className="text-stone-300" aria-hidden="true">|</span>
+              <span className="tabular-nums">{course.distance} m</span>
+              <span className="text-stone-300" aria-hidden="true">|</span>
+              <span className="tabular-nums">{course.nb_partants} partants</span>
+              <span className="text-stone-300" aria-hidden="true">|</span>
+              <span className="inline-flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 text-stone-400" aria-hidden="true" /> {formatDateTime(course.date_heure)}
+              </span>
               {course.allocation ? (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.goldDeep, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "4px 11px" }}>
-                  <Trophy className="h-3 w-3" style={{ color: CX.gold }} /> {Math.round(course.allocation / 100).toLocaleString("fr-FR")} € de dotation
-                </span>
+                <>
+                  <span className="text-stone-300" aria-hidden="true">|</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Trophy className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
+                    <span className="tabular-nums">{Math.round(course.allocation / 100).toLocaleString("fr-FR")} €</span>
+                  </span>
+                </>
               ) : null}
-              {course.montant_offert_1er != null && course.montant_offert_1er > 0 && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "4px 11px" }}>🥇 {course.montant_offert_1er.toLocaleString("fr-FR")} € au gagnant</span>
-              )}
-              {course.pool_total_eur != null && course.pool_total_eur > 0 && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Enjeux {(course.pool_total_eur / 1_000_000).toFixed(2)} M€</span>
-              )}
-              {course.penetrometre_coef != null && course.penetrometre_desc && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Terrain {course.penetrometre_desc} ({course.penetrometre_coef})</span>
-              )}
-              {course.avantage_couloir && course.avantage_couloir !== "neutre" && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Avantage {course.avantage_couloir === "interieur" ? "intérieur" : "extérieur"}</span>
-              )}
-              {course.meteo?.pluie_24h != null && course.meteo.pluie_24h > 0 && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px" }}>Pluie 24h {course.meteo.pluie_24h} mm</span>
-              )}
-              {course.categorie_particularite && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: CX.gray500, background: CX.surf4, border: `1px solid ${CX.bd3}`, borderRadius: 999, padding: "4px 11px", textTransform: "capitalize" }}>{course.categorie_particularite.replace(/_/g, " ").toLowerCase()}</span>
-              )}
             </div>
-            {/* Conditions de course (texte officiel PMU) */}
-            {course.conditions_texte && (
-              <details style={{ marginTop: 12 }}>
-                <summary style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: CX.gray500, listStyle: "none" }}>
-                  <FileText className="h-3.5 w-3.5" /> Conditions de la course
-                </summary>
-                <p style={{ margin: "9px 0 0", fontSize: 12.5, lineHeight: 1.55, color: CX.gray500, background: CX.surf3, border: `1px solid ${CX.bd2}`, borderRadius: 12, padding: "11px 13px" }}>{course.conditions_texte}</p>
-              </details>
-            )}
           </div>
 
-          {/* ── BOUTON DIRECT TV (lien sortant Equidia, page course = live/replay vidéo) ── */}
+          {/* ── ACCÈS AU DIRECT (Equidia — la vidéo n'est pas chez nous) ── */}
           {(() => {
             const m = course.course_id.match(/R(\d+)C(\d+)$/);
             const r = course.numero_reunion ?? (m ? Number(m[1]) : null);
@@ -2448,71 +2478,61 @@ export default function CoursePage() {
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Regarder la course en direct sur Equidia (ouvre un nouvel onglet)"
-                className="cx-hbtn"
-                style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 7, background: live ? "#DC2626" : CX.ink, color: "#FFFFFF", fontSize: 13.5, fontWeight: 700, padding: "10px 16px", borderRadius: 12, textDecoration: "none" }}
+                title="Regarder la course sur Equidia (ouvre un nouvel onglet)"
+                className={cn(
+                  "cx-hbtn inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition-colors",
+                  live
+                    ? "bg-rose-600 text-white hover:bg-rose-700"
+                    : "border border-stone-200 bg-white text-slate-700 hover:border-amber-300 hover:text-amber-800",
+                )}
               >
-                {live && <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFFFFF", animation: "cxDotPulse 1.4s ease-in-out infinite" }} />}
-                <Tv className="h-4 w-4" />
+                {live && <span className="h-2 w-2 rounded-full bg-white" style={{ animation: "cxDotPulse 1.2s ease-in-out infinite" }} />}
+                <Tv className="h-4 w-4" aria-hidden="true" />
                 {live ? "Direct" : "Voir la course"}
               </a>
             );
           })()}
         </div>
-      </div>
+      </header>
 
-      {/* ── BASCULE DE VUE : À venir / Résultats ── */}
-      {(() => {
-        const isTermine = course.statut === "termine";
-        const showResults = viewMode === "resultats" || (viewMode === null && isTermine);
-        // Onglet « Résultats » proposé dès que la course est terminée.
-        const tabs: Array<{ key: "live" | "resultats"; label: string; dot: string }> = [
-          { key: "live", label: "À venir", dot: "#F59E0B" },
-          ...(isTermine ? [{ key: "resultats" as const, label: "Résultats", dot: CX.em }] : []),
-        ];
-        return (
+      {/* ── NAVIGATION PAR ONGLETS ─────────────────────────────────────────────
+          La fiche porte plus d'information qu'un écran ne peut en absorber :
+          80 critères par cheval, le marché, le plan de mise, l'arrivée. Tout
+          empiler sur une colonne unique donnait une page qu'on parcourt sans la
+          lire. Un sujet par onglet ; le reste est à un clic, pas à trois écrans
+          de défilement. */}
+      <nav aria-label="Sections de la course" className="cx-tabs sticky top-14 z-20 -mx-5 mb-6 flex gap-1 overflow-x-auto border-b border-stone-200/70 bg-[#FFFDF6]/95 px-5 py-2 backdrop-blur sm:top-16">
+        {ONGLETS.map((o) => {
+          const actif = o.cle === ongletActif;
+          return (
+            <button
+              key={o.cle}
+              type="button"
+              onClick={() => setOnglet(o.cle)}
+              aria-current={actif ? "page" : undefined}
+              className={`relative whitespace-nowrap rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-colors sm:px-4 ${
+                actif ? "bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,.10)]" : "text-slate-500 hover:bg-white/60 hover:text-slate-700"
+              }`}
+            >
+              <span className="inline-flex items-center gap-2">
+                <o.icone className={`h-3.5 w-3.5 ${actif ? "text-amber-700" : "text-slate-400"}`} aria-hidden="true" />
+                {o.label}
+                {o.pastille != null && (
+                  <span className={`rounded-full px-1.5 py-px text-[10px] font-bold tabular-nums ${actif ? "bg-amber-100 text-amber-900" : "bg-stone-100 text-slate-500"}`}>
+                    {o.pastille}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <div key={ongletActif} className="cx-fade" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+        {/* ═══ SYNTHÈSE — ce qu'il faut retenir, dans l'ordre de lecture ═══ */}
+        {ongletActif === "synthese" && (
           <>
-            {isTermine && (
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: CX.surf5, border: `1px solid ${CX.bd3}`, borderRadius: 14, padding: 4, marginBottom: 20 }}>
-                {tabs.map((t) => {
-                  const active = (t.key === "resultats") === showResults;
-                  return (
-                    <button key={t.key} onClick={() => setViewMode(t.key)}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 7, border: "none", cursor: "pointer", borderRadius: 10, padding: "8px 16px", fontSize: 13.5, fontWeight: 600, fontFamily: "'Inter',sans-serif", transition: "all .16s", background: active ? "#FFFFFF" : "transparent", color: active ? CX.ink : "#8A8471", boxShadow: active ? "0 1px 3px rgba(0,0,0,.12)" : "none" }}>
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: active ? t.dot : "#C9C2AE" }} />{t.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ═══════════ VUE RÉSULTATS ═══════════ */}
-            {showResults && (
-              <div className="cx-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {resultats && (
-                  <ResultatsSection resultats={resultats} partants={course.partants} />
-                )}
-                {resultats && predictions && predictions.length > 0 && (
-                  <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
-                )}
-                {resultats && favoriTeaser && user && ["free", "decouverte"].includes(user.plan) && (
-                  <FavoriTeaserCard teaser={favoriTeaser} />
-                )}
-                {predictions && predictions.length > 0 && (
-                  <BilanMiseSection courseId={id} />
-                )}
-                {!resultats && (
-                  <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "24px 20px", textAlign: "center", color: CX.gray500, fontSize: 13 }}>
-                    <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" style={{ color: CX.gray400 }} />
-                    Arrivée officielle en cours de publication…
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ═══════════ VUE À VENIR ═══════════ */}
-            {!showResults && (
-            <>
         {/* ── 4 STAT CARDS ── */}
         {predictions && predictions.length > 0 && (() => {
           const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];
@@ -2583,367 +2603,6 @@ export default function CoursePage() {
           </div>
         )}
 
-      <div className="cx-main" style={{ display: "grid", gridTemplateColumns: "1.9fr 1fr", gap: 22, alignItems: "start" }}>
-        {/* ── LEFT: Partants + Chart ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
-
-          {/* Tableau partants */}
-          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 12px" }}>
-              <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>Partants</h2>
-              <span className="hidden sm:inline" style={{ fontSize: 12, color: CX.gray400 }}>
-                — cliquez une ligne pour le détail
-              </span>
-            </div>
-            {/* ── En-tête colonnes (grille design) ── */}
-            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
-              <span style={{ textAlign: "center" }}>N°</span>
-              <span>Cheval</span>
-              <span style={{ textAlign: "right" }}>Cote</span>
-              <span className="cx-algo" style={{ textAlign: "right" }}>Algo</span>
-              <span style={{ textAlign: "right" }}>Proba</span>
-              <span />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {[...course.partants]
-                // Non-partants conservés mais relégués en bas (indiqués, hors prono).
-                .sort((a, b) => Number(!!a.non_partant) - Number(!!b.non_partant))
-                .map((partant) => {
-                  const pred = predictions?.find((p) => p.participation_id === partant.participation_id);
-                  const liveCote = liveCoteMap[partant.numero];
-                  const cote = liveCote ?? partant.cote_pmu;
-                  const rang = pred?.rang_predit;
-                  const coteMoved = !!(liveCote && partant.cote_pmu && liveCote < partant.cote_pmu);
-                  const isExp = expandedPartant === partant.participation_id;
-                  const np = !!partant.non_partant;
-                  // Espérance pour TOUS : cote × proba victoire − 1 (gain moyen pour 1€).
-                  const evAll = !pred?.value_bet && pred && cote && cote > 1 && pred.proba_top1 > 0 ? cote * pred.proba_top1 - 1 : null;
-                  const reposCol = partant.jours_depuis_derniere == null ? CX.gray400
-                    : partant.jours_depuis_derniere >= 14 && partant.jours_depuis_derniere <= 35 ? CX.em
-                    : partant.jours_depuis_derniere > 60 ? "#C2410C" : CX.gray400;
-                  return (
-                    <div key={partant.participation_id} style={{ borderTop: `1px solid ${CX.bd4}`, opacity: np ? 0.55 : 1 }}>
-                      <div
-                        onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
-                        className="cx-prow"
-                        style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
-                      >
-                        {/* N° + badge rang */}
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                          {rang != null && rang <= 3 && (
-                            <span style={{ fontFamily: CX.sg, fontSize: 10, fontWeight: 800, color: rang === 1 ? CX.gold : CX.gray400, lineHeight: 1, marginBottom: 3 }}>#{rang}</span>
-                          )}
-                          <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 9, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, background: rang === 1 ? CX.goldBg : CX.surf3, color: rang === 1 ? CX.goldDeep : CX.gray700, border: `1px solid ${rang === 1 ? CX.goldBd : CX.bd1}` }}>
-                            {partant.numero}
-                          </span>
-                        </div>
-
-                        {/* Cheval : nom + badges + méta */}
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                            <span style={{ fontWeight: 700, fontSize: 14.5, color: np ? CX.gray400 : CX.ink2, textDecoration: np ? "line-through" : "none" }}>{partant.nom_cheval}</span>
-                            {np && (
-                              <span title="Cheval déclaré non-partant — retiré du pronostic" style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: "#71717A", background: "#E4E4E7", border: "1px solid #C4C4CC", borderRadius: 5, padding: "1px 5px" }}>Non partant</span>
-                            )}
-                            {partant.running_style && !np && <RunningStyleBadge style={partant.running_style} />}
-                            {partant.changement_jockey && (
-                              <span title="Changement de jockey vs dernière course" style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 700, color: "#C2410C", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 5, padding: "1px 5px" }}>⟳ Jockey</span>
-                            )}
-                            {(partant.jockey_suspendu || partant.entraineur_suspendu) && (
-                              <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} style={{ fontSize: 9, fontWeight: 700, color: CX.redDeep, background: CX.redBg, border: `1px solid ${CX.redBd}`, borderRadius: 5, padding: "1px 5px" }}>
-                                {partant.jockey_suspendu ? "J. susp." : "E. susp."}
-                              </span>
-                            )}
-                            {pred?.value_bet && (
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: CX.emDeep, background: CX.emBg, border: `1px solid ${CX.emBd}`, borderRadius: 999, padding: "1px 7px" }}>
-                                ★ +{Math.round(pred.value_bet.ev_max * 100)}%
-                              </span>
-                            )}
-                            {evAll != null && evAll >= 0.05 && (
-                              <span style={{ fontSize: 9, fontWeight: 700, color: CX.emDeep, borderRadius: 999, padding: "1px 2px" }}>+{Math.round(evAll * 100)}%</span>
-                            )}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: 11.5, color: CX.gray400 }}>
-                            {partant.jockey && (
-                              <span style={{ textDecoration: partant.jockey_suspendu ? "line-through" : "none" }}>{partant.jockey}</span>
-                            )}
-                            {partant.entraineur && (
-                              <span className="cx-hide-m" style={{ color: "#C9C2AE", textDecoration: partant.entraineur_suspendu ? "line-through" : "none" }}>· {partant.entraineur}</span>
-                            )}
-                            {partant.age != null && <><span style={{ color: "#E5E1D5" }}>·</span><span>{partant.age}a{partant.sexe ? ` ${partant.sexe}` : ""}</span></>}
-                            {partant.jours_depuis_derniere != null && (
-                              <><span style={{ color: "#E5E1D5" }}>·</span><span style={{ color: reposCol, fontWeight: reposCol === CX.gray400 ? 400 : 600 }}>{partant.jours_depuis_derniere}j repos</span></>
-                            )}
-                            {partant.premier_deferre && <span style={{ color: CX.gold, fontWeight: 600 }}>· ★ Déferré</span>}
-                            {partant.premieres_oeilleres && <span className="cx-hide-m" style={{ color: CX.gold, fontWeight: 600 }}>· ★ Œillères</span>}
-                            {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 5 && (
-                              <span className="cx-hide-m" style={{ color: CX.gold, fontWeight: 600 }}>· Duo {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}%</span>
-                            )}
-                            {partant.musique && (
-                              <><span className="cx-hide-m" style={{ color: "#E5E1D5" }}>·</span><span className="cx-hide-m" style={{ fontFamily: CX.sg, letterSpacing: ".02em", color: CX.muted }}>{partant.musique}</span></>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Cote */}
-                        <div style={{ textAlign: "right" }}>
-                          {np ? (
-                            <span style={{ fontFamily: CX.sg, fontSize: 12, color: CX.gray400 }}>NP</span>
-                          ) : (
-                            <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: coteMoved ? CX.em : CX.ink2 }}>
-                              {formatCote(cote)}
-                              {liveCote != null && <span style={{ color: CX.em, fontSize: 11 }}> ↓</span>}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Algo (cote juste) */}
-                        <div className="cx-algo" style={{ textAlign: "right", fontFamily: CX.sg, fontSize: 12.5, color: CX.gray400 }}>
-                          {pred?.cote_juste ? formatCote(pred.cote_juste) : "—"}
-                        </div>
-
-                        {/* Proba */}
-                        <div style={{ textAlign: "right" }}>
-                          {pred ? (
-                            <>
-                              <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: rang === 1 ? CX.gold : CX.ink2 }}>{(pred.proba_top1 * 100).toFixed(0)}%</div>
-                              <div style={{ fontSize: 10, color: CX.gray400, marginTop: 1 }}>{(pred.proba_top3 * 100).toFixed(0)}% t3</div>
-                            </>
-                          ) : (
-                            <span style={{ color: CX.gray400 }}>—</span>
-                          )}
-                        </div>
-
-                        {/* Chevron */}
-                        <ChevronDown style={{ height: 14, width: 14, flexShrink: 0, color: "#D1D5DB", transform: isExp ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
-                      </div>
-
-                      {/* Détail déplié */}
-                      {isExp && (
-                        <div style={{ padding: "2px 18px 16px 18px", background: CX.surf2 }}>
-                          <PartantDetail partant={partant} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-
-          {/* Graphique cotes historique */}
-          {/* ── Narrative IA (Analyse BlackTurf) ── */}
-          {analysis?.narrative && (
-            <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-              <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
-                <Brain className="h-[17px] w-[17px]" style={{ color: CX.gold }} />
-                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Analyse BlackTurf</h3>
-                {analysis.field_confidence > 0 && (
-                  <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
-                    Confiance {Math.round(analysis.field_confidence * 100)}%
-                  </span>
-                )}
-              </div>
-              {(() => {
-                // Présentation structurée : chaque ligne « Label : contenu » devient une
-                // entrée avec icône + label coloré. Ligne d'en-tête course (redondante,
-                // déjà affichée plus haut) ignorée. Si l'analyse est en prose libre (Claude),
-                // repli sur un simple paragraphe.
-                const META: Record<string, { Icon: typeof Brain; cls: string }> = {
-                  "Lecture": { Icon: Activity, cls: "text-violet-500" },
-                  "Favori IA": { Icon: Star, cls: "text-brand-gold" },
-                  "Atouts": { Icon: CheckCircle2, cls: "text-emerald-500" },
-                  "Également en vue": { Icon: Users, cls: "text-blue-500" },
-                  "Outsiders à valeur": { Icon: TrendingUp, cls: "text-emerald-600" },
-                  "Conclusion": { Icon: Target, cls: "text-violet-600" },
-                  "À surveiller": { Icon: AlertTriangle, cls: "text-amber-500" },
-                };
-                const lines = analysis.narrative.split("\n").map((l) => l.trim()).filter(Boolean);
-                const rows = lines
-                  .map((line) => {
-                    const m = line.match(/^([^:—]+?)\s*[:—]\s*(.+)$/);
-                    if (!m) return null;
-                    const label = m[1].trim();
-                    const meta = META[label];
-                    if (!meta) return null;
-                    return { label, rest: m[2].trim(), meta };
-                  })
-                  .filter(Boolean) as { label: string; rest: string; meta: { Icon: typeof Brain; cls: string } }[];
-                if (!rows.length) {
-                  return <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{analysis.narrative}</p>;
-                }
-                // Résumé : Favori IA + Conclusion visibles d'emblée ; le reste (Lecture,
-                // Atouts, Également en vue, Outsiders à valeur, À surveiller) replié —
-                // désencombre la carte, texte détaillé toujours accessible en 1 clic.
-                const resumeRows = rows.filter((r) => r.label === "Favori IA" || r.label === "Conclusion");
-                const detailRows = rows.filter((r) => r.label !== "Favori IA" && r.label !== "Conclusion");
-                const Row = ({ label, rest }: { label: string; rest: string }) => {
-                  const concl = label === "Conclusion";
-                  return (
-                    <div className="flex gap-2.5" style={concl ? { marginTop: 4, borderRadius: 12, background: "rgba(245,158,11,.05)", padding: "9px 11px" } : { padding: "1px 0" }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.goldMuted, marginTop: 8, flexShrink: 0 }} />
-                      <p className="text-[13.5px] leading-relaxed" style={{ color: CX.gray600 }}>
-                        <span style={{ fontWeight: 700, color: CX.ink2 }}>{label}</span> {rest}
-                      </p>
-                    </div>
-                  );
-                };
-                return (
-                  <div className="flex flex-col" style={{ gap: 10 }}>
-                    {resumeRows.map((r, i) => <Row key={i} {...r} />)}
-                    {detailRows.length > 0 && (
-                      <details className="group">
-                        <summary className="select-none flex items-center gap-1.5" style={{ cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: CX.gold, listStyle: "none", padding: "2px 0" }}>
-                          Voir l&apos;analyse complète
-                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-                        </summary>
-                        <div className="flex flex-col" style={{ gap: 10, marginTop: 8 }}>
-                          {detailRows.map((r, i) => <Row key={i} {...r} />)}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Chevaux à surveiller (signaux marché / argent pro) */}
-              {analysis.market_signals?.length > 0 && (
-                <div style={{ marginTop: 12, paddingTop: 11, borderTop: `1px solid ${CX.bd2}` }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: CX.gray400, marginBottom: 7 }}>👁️ Chevaux à surveiller</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {analysis.market_signals.map((s, i) => (
-                      <span key={i} style={{ fontSize: 11, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "3px 10px" }}>
-                        N°{s.numero} {s.nom} — {s.signal}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <p className="pt-1" style={{ fontSize: 10, color: CX.gray400 }}>
-                Les paris à jouer sont dans le plan de mise.
-              </p>
-            </div>
-          )}
-
-          {/* ── Course à outsider (carte or/crème) ── */}
-          {analysis?.detection_outsider?.course_a_outsider && (
-            <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.22)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 60%)", padding: "18px 20px" }}>
-              <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
-                <Zap className="h-4 w-4" style={{ color: CX.gold }} />
-                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.goldDeep }}>Course à outsider détectée</h3>
-                <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
-                  Score {Math.round(analysis.detection_outsider.score * 100)}/100
-                </span>
-              </div>
-              {analysis.detection_outsider.signaux.length > 0 && (
-                <ul style={{ margin: "0 0 12px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
-                  {analysis.detection_outsider.signaux.map((s, i) => (
-                    <li key={i} style={{ fontSize: 12, color: CX.gray500 }}>· {s}</li>
-                  ))}
-                </ul>
-              )}
-              <div className="cx-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {analysis.detection_outsider.candidats.map((c) => {
-                  const hasDetail = !!(c.justification || (c.facteurs_positifs && c.facteurs_positifs.length > 0) || (c.points_vigilance && c.points_vigilance.length > 0));
-                  return (
-                  <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "13px 14px" }} className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span style={{ fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}>N°{c.numero} {c.nom}</span>
-                      <span style={{ fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
-                    </div>
-                    {/* Chiffres clés : valeur modèle vs marché */}
-                    <div className="flex flex-wrap gap-1 text-[10px]">
-                      <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>
-                        Modèle {Math.round(c.proba_modele * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
-                      </span>
-                      {c.ratio_valeur != null && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: CX.emDeep, background: CX.emBg, borderRadius: 5, padding: "2px 7px" }}>
-                          ×{c.ratio_valeur} valeur
-                        </span>
-                      )}
-                      {c.verdict && (
-                        <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>{c.verdict}</span>
-                      )}
-                    </div>
-                    {hasDetail && (
-                      <details className="group" style={{ marginTop: 2 }}>
-                        <summary className="select-none flex items-center gap-1" style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 600, color: CX.gold, listStyle: "none" }}>
-                          Voir le détail
-                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-                        </summary>
-                        <div style={{ marginTop: 6 }} className="space-y-1.5">
-                          {c.justification && (
-                            <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: CX.gray600 }}>{c.justification}</p>
-                          )}
-                          {/* Facteurs qui appuient le choix */}
-                          {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
-                            <ul className="space-y-0.5">
-                              {c.facteurs_positifs.slice(0, 4).map((f, i) => (
-                                <li key={i} className="text-[10.5px] text-emerald-800 flex gap-1">
-                                  <span className="flex-shrink-0">✓</span>
-                                  <span><b>{f.label}</b>{f.detail ? ` — ${f.detail}` : ""}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          {/* Points de vigilance (honnêteté : un outsider garde des risques) */}
-                          {c.points_vigilance && c.points_vigilance.length > 0 && (
-                            <ul className="space-y-0.5">
-                              {c.points_vigilance.map((v, i) => (
-                                <li key={i} className="text-[10.5px] text-amber-700 flex gap-1">
-                                  <span className="flex-shrink-0">⚠</span><span>{v}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                  );
-                })}
-              </div>
-              <p style={{ margin: "11px 0 0", fontSize: 10.5, color: CX.muted }}>
-                Grosse cote = risque élevé, réservé aux profils offensifs.
-              </p>
-            </div>
-          )}
-
-          {/* Bloc « Chevaux à éviter » supprimé définitivement (décision produit). */}
-
-          {/* ── Comparaison multi-bookmakers (repliable — désencombre) ── */}
-          {course.partants.some((p) => p.cote_geny || p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_bet365 || p.cote_ladbrokes || p.cote_betfair_exchange) && (
-            <details className="group" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
-              <summary className="cursor-pointer select-none" style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px", listStyle: "none" }}>
-                <BarChart2 className="h-4 w-4" style={{ color: CX.gray500 }} />
-                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comparaison des cotes</h3>
-                <span style={{ fontSize: 11.5, color: CX.gray400 }}>
-                  {(() => {
-                    // Même logique que ComparaisonCotes : sources avec ≥ 1 cote publiée.
-                    const keys = ["cote_pmu", "cote_geny", "cote_winamax", "cote_betclic", "cote_unibet", "cote_bet365", "cote_ladbrokes", "cote_betfair_exchange"] as const;
-                    const actifs = course.partants.filter((p) => !p.non_partant);
-                    const nb = keys.filter((k) => actifs.some((p) => p[k] != null)).length;
-                    return nb;
-                  })()} sources · vert = meilleure cote
-                </span>
-                <ChevronDown className="ml-auto transition-transform group-open:rotate-180 h-4 w-4" style={{ color: CX.gray400 }} />
-              </summary>
-              <ComparaisonCotes partants={course.partants} />
-            </details>
-          )}
-
-          {/* ── Pronostics presse ── */}
-          {course.pronostics_presse?.length > 0 && (
-            <PronosticsPresse pronostics={course.pronostics_presse} />
-          )}
-
-          {course.statut !== "termine" && (
-            <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} />
-          )}
-
-        </div>
-
-        {/* ── RIGHT SIDEBAR ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
           {/* Classement algo */}
           <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "17px 20px 6px" }}>
@@ -3252,9 +2911,416 @@ export default function CoursePage() {
               </div>
             </div>
           )}
+          {/* Graphique cotes historique */}
+          {/* ── Narrative IA (Analyse BlackTurf) ── */}
+          {analysis?.narrative && (
+            <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+              <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
+                <Brain className="h-[17px] w-[17px]" style={{ color: CX.gold }} />
+                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Analyse BlackTurf</h3>
+                {analysis.field_confidence > 0 && (
+                  <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
+                    Confiance {Math.round(analysis.field_confidence * 100)}%
+                  </span>
+                )}
+              </div>
+              {(() => {
+                // Présentation structurée : chaque ligne « Label : contenu » devient une
+                // entrée avec icône + label coloré. Ligne d'en-tête course (redondante,
+                // déjà affichée plus haut) ignorée. Si l'analyse est en prose libre (Claude),
+                // repli sur un simple paragraphe.
+                const META: Record<string, { Icon: typeof Brain; cls: string }> = {
+                  "Lecture": { Icon: Activity, cls: "text-violet-500" },
+                  "Favori IA": { Icon: Star, cls: "text-brand-gold" },
+                  "Atouts": { Icon: CheckCircle2, cls: "text-emerald-500" },
+                  "Également en vue": { Icon: Users, cls: "text-blue-500" },
+                  "Outsiders à valeur": { Icon: TrendingUp, cls: "text-emerald-600" },
+                  "Conclusion": { Icon: Target, cls: "text-violet-600" },
+                  "À surveiller": { Icon: AlertTriangle, cls: "text-amber-500" },
+                };
+                const lines = analysis.narrative.split("\n").map((l) => l.trim()).filter(Boolean);
+                const rows = lines
+                  .map((line) => {
+                    const m = line.match(/^([^:—]+?)\s*[:—]\s*(.+)$/);
+                    if (!m) return null;
+                    const label = m[1].trim();
+                    const meta = META[label];
+                    if (!meta) return null;
+                    return { label, rest: m[2].trim(), meta };
+                  })
+                  .filter(Boolean) as { label: string; rest: string; meta: { Icon: typeof Brain; cls: string } }[];
+                if (!rows.length) {
+                  return <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{analysis.narrative}</p>;
+                }
+                // Résumé : Favori IA + Conclusion visibles d'emblée ; le reste (Lecture,
+                // Atouts, Également en vue, Outsiders à valeur, À surveiller) replié —
+                // désencombre la carte, texte détaillé toujours accessible en 1 clic.
+                const resumeRows = rows.filter((r) => r.label === "Favori IA" || r.label === "Conclusion");
+                const detailRows = rows.filter((r) => r.label !== "Favori IA" && r.label !== "Conclusion");
+                const Row = ({ label, rest }: { label: string; rest: string }) => {
+                  const concl = label === "Conclusion";
+                  return (
+                    <div className="flex gap-2.5" style={concl ? { marginTop: 4, borderRadius: 12, background: "rgba(245,158,11,.05)", padding: "9px 11px" } : { padding: "1px 0" }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: CX.goldMuted, marginTop: 8, flexShrink: 0 }} />
+                      <p className="text-[13.5px] leading-relaxed" style={{ color: CX.gray600 }}>
+                        <span style={{ fontWeight: 700, color: CX.ink2 }}>{label}</span> {rest}
+                      </p>
+                    </div>
+                  );
+                };
+                return (
+                  <div className="flex flex-col" style={{ gap: 10 }}>
+                    {resumeRows.map((r, i) => <Row key={i} {...r} />)}
+                    {detailRows.length > 0 && (
+                      <details className="group">
+                        <summary className="select-none flex items-center gap-1.5" style={{ cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: CX.gold, listStyle: "none", padding: "2px 0" }}>
+                          Voir l&apos;analyse complète
+                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div className="flex flex-col" style={{ gap: 10, marginTop: 8 }}>
+                          {detailRows.map((r, i) => <Row key={i} {...r} />)}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                );
+              })()}
 
-          {/* Calculateur de mise — sticky au scroll (desktop uniquement, cf. .cx-sticky-mise) */}
-          <div className="cx-sticky-mise" style={{ position: "sticky", top: 84, zIndex: 10, alignSelf: "start" }}>
+              {/* Chevaux à surveiller (signaux marché / argent pro) */}
+              {analysis.market_signals?.length > 0 && (
+                <div style={{ marginTop: 12, paddingTop: 11, borderTop: `1px solid ${CX.bd2}` }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: CX.gray400, marginBottom: 7 }}>👁️ Chevaux à surveiller</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {analysis.market_signals.map((s, i) => (
+                      <span key={i} style={{ fontSize: 11, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "3px 10px" }}>
+                        N°{s.numero} {s.nom} — {s.signal}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="pt-1" style={{ fontSize: 10, color: CX.gray400 }}>
+                Les paris à jouer sont dans le plan de mise.
+              </p>
+            </div>
+          )}
+          {/* ── Course à outsider (carte or/crème) ── */}
+          {analysis?.detection_outsider?.course_a_outsider && (
+            <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.22)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 60%)", padding: "18px 20px" }}>
+              <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
+                <Zap className="h-4 w-4" style={{ color: CX.gold }} />
+                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.goldDeep }}>Course à outsider détectée</h3>
+                <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
+                  Score {Math.round(analysis.detection_outsider.score * 100)}/100
+                </span>
+              </div>
+              {analysis.detection_outsider.signaux.length > 0 && (
+                <ul style={{ margin: "0 0 12px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {analysis.detection_outsider.signaux.map((s, i) => (
+                    <li key={i} style={{ fontSize: 12, color: CX.gray500 }}>· {s}</li>
+                  ))}
+                </ul>
+              )}
+              <div className="cx-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {analysis.detection_outsider.candidats.map((c) => {
+                  const hasDetail = !!(c.justification || (c.facteurs_positifs && c.facteurs_positifs.length > 0) || (c.points_vigilance && c.points_vigilance.length > 0));
+                  return (
+                  <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "13px 14px" }} className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}>N°{c.numero} {c.nom}</span>
+                      <span style={{ fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
+                    </div>
+                    {/* Chiffres clés : valeur modèle vs marché */}
+                    <div className="flex flex-wrap gap-1 text-[10px]">
+                      <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>
+                        Modèle {Math.round(c.proba_modele * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
+                      </span>
+                      {c.ratio_valeur != null && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: CX.emDeep, background: CX.emBg, borderRadius: 5, padding: "2px 7px" }}>
+                          ×{c.ratio_valeur} valeur
+                        </span>
+                      )}
+                      {c.verdict && (
+                        <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>{c.verdict}</span>
+                      )}
+                    </div>
+                    {hasDetail && (
+                      <details className="group" style={{ marginTop: 2 }}>
+                        <summary className="select-none flex items-center gap-1" style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 600, color: CX.gold, listStyle: "none" }}>
+                          Voir le détail
+                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div style={{ marginTop: 6 }} className="space-y-1.5">
+                          {c.justification && (
+                            <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: CX.gray600 }}>{c.justification}</p>
+                          )}
+                          {/* Facteurs qui appuient le choix */}
+                          {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
+                            <ul className="space-y-0.5">
+                              {c.facteurs_positifs.slice(0, 4).map((f, i) => (
+                                <li key={i} className="text-[10.5px] text-emerald-800 flex gap-1">
+                                  <span className="flex-shrink-0">✓</span>
+                                  <span><b>{f.label}</b>{f.detail ? ` — ${f.detail}` : ""}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {/* Points de vigilance (honnêteté : un outsider garde des risques) */}
+                          {c.points_vigilance && c.points_vigilance.length > 0 && (
+                            <ul className="space-y-0.5">
+                              {c.points_vigilance.map((v, i) => (
+                                <li key={i} className="text-[10.5px] text-amber-700 flex gap-1">
+                                  <span className="flex-shrink-0">⚠</span><span>{v}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                  );
+                })}
+              </div>
+              <p style={{ margin: "11px 0 0", fontSize: 10.5, color: CX.muted }}>
+                Grosse cote = risque élevé, réservé aux profils offensifs.
+              </p>
+            </div>
+          )}
+
+          {/* Infos course */}
+          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <h3 style={{ margin: "0 0 12px", fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2 }}>Infos course</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {(() => {
+                const rows: Array<{ label: string; val: string }> = [
+                  { label: "Discipline", val: course.discipline },
+                  { label: "Distance", val: `${course.distance} m` },
+                ];
+                if (course.niveau_course) rows.push({ label: "Niveau", val: course.niveau_course.replace(/_/g, " ") });
+                if (course.terrain_officiel) rows.push({ label: "Terrain", val: course.terrain_officiel });
+                if (course.penetrometre_desc && course.penetrometre_coef != null) rows.push({ label: "Pénétromètre", val: `${course.penetrometre_desc} (${course.penetrometre_coef})` });
+                if (course.meteo?.temperature != null) rows.push({ label: "Température", val: `${course.meteo.temperature}°C` });
+                if (course.meteo?.pluie_24h != null && course.meteo.pluie_24h > 0) rows.push({ label: "Pluie 24h", val: `${course.meteo.pluie_24h} mm` });
+                if (course.allocation) rows.push({ label: "Dotation", val: `${Math.round(course.allocation / 100).toLocaleString("fr-FR")} €` });
+                if (course.categorie_particularite) rows.push({ label: "Départ", val: course.categorie_particularite.replace(/_/g, " ").toLowerCase().replace(/^./, (ch) => ch.toUpperCase()) });
+                if (course.pool_total_eur != null && course.pool_total_eur > 0) rows.push({ label: "Masse des enjeux", val: `${course.pool_total_eur.toLocaleString("fr-FR")} €` });
+                if (course.avantage_couloir && course.avantage_couloir !== "neutre") rows.push({ label: "Avantage de couloir", val: course.avantage_couloir.replace(/_/g, " ") });
+                if (course.montant_offert_1er != null && course.montant_offert_1er > 0) rows.push({ label: "Au vainqueur", val: `${Math.round(course.montant_offert_1er / 100).toLocaleString("fr-FR")} €` });
+                if (course.nombre_declares_partants != null) rows.push({ label: "Déclarés partants", val: String(course.nombre_declares_partants) });
+                rows.push({ label: "Heure", val: formatDateTime(course.date_heure) });
+                return rows.map((r) => (
+                  <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13 }}>
+                    <span style={{ color: CX.gray400 }}>{r.label}</span>
+                    <span style={{ fontWeight: 600, color: CX.gray700 }}>{r.val}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+            {course.conditions_texte && (
+              <details style={{ marginTop: 14 }}>
+                <summary style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: CX.gray500 }}>
+                  <FileText className="h-3.5 w-3.5" aria-hidden="true" /> Conditions officielles de la course
+                </summary>
+                <p style={{ margin: "9px 0 0", fontSize: 12.5, lineHeight: 1.55, color: CX.gray500, background: CX.surf3, border: `1px solid ${CX.bd1}`, borderRadius: 12, padding: "10px 12px" }}>
+                  {course.conditions_texte}
+                </p>
+              </details>
+            )}
+          </div>
+          </>
+        )}
+
+        {/* ═══ PARTANTS — le champ en détail ═══ */}
+        {ongletActif === "partants" && (
+          <>
+          {/* Tableau partants */}
+          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 12px" }}>
+              <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>Partants</h2>
+              <span className="hidden sm:inline" style={{ fontSize: 12, color: CX.gray400 }}>
+                — cliquez une ligne pour le détail
+              </span>
+            </div>
+            {/* ── En-tête colonnes (grille design) ── */}
+            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
+              <span style={{ textAlign: "center" }}>N°</span>
+              <span>Cheval</span>
+              <span style={{ textAlign: "right" }}>Cote</span>
+              <span className="cx-algo" style={{ textAlign: "right" }}>Algo</span>
+              <span style={{ textAlign: "right" }}>Proba</span>
+              <span />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {[...course.partants]
+                // Non-partants conservés mais relégués en bas (indiqués, hors prono).
+                .sort((a, b) => Number(!!a.non_partant) - Number(!!b.non_partant))
+                .map((partant) => {
+                  const pred = predictions?.find((p) => p.participation_id === partant.participation_id);
+                  const liveCote = liveCoteMap[partant.numero];
+                  const cote = liveCote ?? partant.cote_pmu;
+                  const rang = pred?.rang_predit;
+                  const coteMoved = !!(liveCote && partant.cote_pmu && liveCote < partant.cote_pmu);
+                  const isExp = expandedPartant === partant.participation_id;
+                  const np = !!partant.non_partant;
+                  // Espérance pour TOUS : cote × proba victoire − 1 (gain moyen pour 1€).
+                  const evAll = !pred?.value_bet && pred && cote && cote > 1 && pred.proba_top1 > 0 ? cote * pred.proba_top1 - 1 : null;
+                  const reposCol = partant.jours_depuis_derniere == null ? CX.gray400
+                    : partant.jours_depuis_derniere >= 14 && partant.jours_depuis_derniere <= 35 ? CX.em
+                    : partant.jours_depuis_derniere > 60 ? "#C2410C" : CX.gray400;
+                  return (
+                    <div key={partant.participation_id} style={{ borderTop: `1px solid ${CX.bd4}`, opacity: np ? 0.55 : 1 }}>
+                      <div
+                        onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
+                        className="cx-prow"
+                        style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
+                      >
+                        {/* N° + badge rang */}
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          {rang != null && rang <= 3 && (
+                            <span style={{ fontFamily: CX.sg, fontSize: 10, fontWeight: 800, color: rang === 1 ? CX.gold : CX.gray400, lineHeight: 1, marginBottom: 3 }}>#{rang}</span>
+                          )}
+                          <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 9, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, background: rang === 1 ? CX.goldBg : CX.surf3, color: rang === 1 ? CX.goldDeep : CX.gray700, border: `1px solid ${rang === 1 ? CX.goldBd : CX.bd1}` }}>
+                            {partant.numero}
+                          </span>
+                        </div>
+
+                        {/* Cheval : nom + badges + méta */}
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <span style={{ fontWeight: 700, fontSize: 14.5, color: np ? CX.gray400 : CX.ink2, textDecoration: np ? "line-through" : "none" }}>{partant.nom_cheval}</span>
+                            {np && (
+                              <span title="Cheval déclaré non-partant — retiré du pronostic" style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: "#71717A", background: "#E4E4E7", border: "1px solid #C4C4CC", borderRadius: 5, padding: "1px 5px" }}>Non partant</span>
+                            )}
+                            {partant.running_style && !np && <RunningStyleBadge style={partant.running_style} />}
+                            {partant.changement_jockey && (
+                              <span title="Changement de jockey vs dernière course" style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 700, color: "#C2410C", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 5, padding: "1px 5px" }}>⟳ Jockey</span>
+                            )}
+                            {(partant.jockey_suspendu || partant.entraineur_suspendu) && (
+                              <span title={partant.jockey_suspendu ? "Jockey suspendu" : "Entraîneur suspendu"} style={{ fontSize: 9, fontWeight: 700, color: CX.redDeep, background: CX.redBg, border: `1px solid ${CX.redBd}`, borderRadius: 5, padding: "1px 5px" }}>
+                                {partant.jockey_suspendu ? "J. susp." : "E. susp."}
+                              </span>
+                            )}
+                            {pred?.value_bet && (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: CX.emDeep, background: CX.emBg, border: `1px solid ${CX.emBd}`, borderRadius: 999, padding: "1px 7px" }}>
+                                ★ +{Math.round(pred.value_bet.ev_max * 100)}%
+                              </span>
+                            )}
+                            {evAll != null && evAll >= 0.05 && (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: CX.emDeep, borderRadius: 999, padding: "1px 2px" }}>+{Math.round(evAll * 100)}%</span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: 11.5, color: CX.gray400 }}>
+                            {partant.jockey && (
+                              <span style={{ textDecoration: partant.jockey_suspendu ? "line-through" : "none" }}>{partant.jockey}</span>
+                            )}
+                            {partant.entraineur && (
+                              <span className="cx-hide-m" style={{ color: "#C9C2AE", textDecoration: partant.entraineur_suspendu ? "line-through" : "none" }}>· {partant.entraineur}</span>
+                            )}
+                            {partant.age != null && <><span style={{ color: "#E5E1D5" }}>·</span><span>{partant.age}a{partant.sexe ? ` ${partant.sexe}` : ""}</span></>}
+                            {partant.jours_depuis_derniere != null && (
+                              <><span style={{ color: "#E5E1D5" }}>·</span><span style={{ color: reposCol, fontWeight: reposCol === CX.gray400 ? 400 : 600 }}>{partant.jours_depuis_derniere}j repos</span></>
+                            )}
+                            {partant.premier_deferre && <span style={{ color: CX.gold, fontWeight: 600 }}>· ★ Déferré</span>}
+                            {partant.premieres_oeilleres && <span className="cx-hide-m" style={{ color: CX.gold, fontWeight: 600 }}>· ★ Œillères</span>}
+                            {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 5 && (
+                              <span className="cx-hide-m" style={{ color: CX.gold, fontWeight: 600 }}>· Duo {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}%</span>
+                            )}
+                            {partant.musique && (
+                              <><span className="cx-hide-m" style={{ color: "#E5E1D5" }}>·</span><span className="cx-hide-m" style={{ fontFamily: CX.sg, letterSpacing: ".02em", color: CX.muted }}>{partant.musique}</span></>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Cote */}
+                        <div style={{ textAlign: "right" }}>
+                          {np ? (
+                            <span style={{ fontFamily: CX.sg, fontSize: 12, color: CX.gray400 }}>NP</span>
+                          ) : (
+                            <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: coteMoved ? CX.em : CX.ink2 }}>
+                              {formatCote(cote)}
+                              {liveCote != null && <span style={{ color: CX.em, fontSize: 11 }}> ↓</span>}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Algo (cote juste) */}
+                        <div className="cx-algo" style={{ textAlign: "right", fontFamily: CX.sg, fontSize: 12.5, color: CX.gray400 }}>
+                          {pred?.cote_juste ? formatCote(pred.cote_juste) : "—"}
+                        </div>
+
+                        {/* Proba */}
+                        <div style={{ textAlign: "right" }}>
+                          {pred ? (
+                            <>
+                              <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: rang === 1 ? CX.gold : CX.ink2 }}>{(pred.proba_top1 * 100).toFixed(0)}%</div>
+                              <div style={{ fontSize: 10, color: CX.gray400, marginTop: 1 }}>{(pred.proba_top3 * 100).toFixed(0)}% t3</div>
+                            </>
+                          ) : (
+                            <span style={{ color: CX.gray400 }}>—</span>
+                          )}
+                        </div>
+
+                        {/* Chevron */}
+                        <ChevronDown style={{ height: 14, width: 14, flexShrink: 0, color: "#D1D5DB", transform: isExp ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+                      </div>
+
+                      {/* Détail déplié */}
+                      {isExp && (
+                        <div style={{ padding: "2px 18px 16px 18px", background: CX.surf2 }}>
+                          <PartantDetail partant={partant} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+            <ConfrontationsCard courseId={id} />
+          {/* ── Pronostics presse ── */}
+          {course.pronostics_presse?.length > 0 && (
+            <PronosticsPresse pronostics={course.pronostics_presse} />
+          )}
+          </>
+        )}
+
+        {/* ═══ MARCHÉ — les cotes, l'argent, les formules jouables ═══ */}
+        {ongletActif === "marche" && (
+          <>
+          {course.statut !== "termine" && (
+            <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} />
+          )}
+
+          {/* ── Comparaison multi-bookmakers (repliable — désencombre) ── */}
+          {course.partants.some((p) => p.cote_geny || p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_bet365 || p.cote_ladbrokes || p.cote_betfair_exchange) && (
+            <details className="group" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
+              <summary className="cursor-pointer select-none" style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px", listStyle: "none" }}>
+                <BarChart2 className="h-4 w-4" style={{ color: CX.gray500 }} />
+                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comparaison des cotes</h3>
+                <span style={{ fontSize: 11.5, color: CX.gray400 }}>
+                  {(() => {
+                    // Même logique que ComparaisonCotes : sources avec ≥ 1 cote publiée.
+                    const keys = ["cote_pmu", "cote_geny", "cote_winamax", "cote_betclic", "cote_unibet", "cote_bet365", "cote_ladbrokes", "cote_betfair_exchange"] as const;
+                    const actifs = course.partants.filter((p) => !p.non_partant);
+                    const nb = keys.filter((k) => actifs.some((p) => p[k] != null)).length;
+                    return nb;
+                  })()} sources · vert = meilleure cote
+                </span>
+                <ChevronDown className="ml-auto transition-transform group-open:rotate-180 h-4 w-4" style={{ color: CX.gray400 }} />
+              </summary>
+              <ComparaisonCotes partants={course.partants} />
+            </details>
+          )}
+            <ParisDisponiblesCard courseId={id} />
+            <PoolEvolutionCard courseId={id} poolTotalEur={course.pool_total_eur} />
+          </>
+        )}
+
+        {/* ═══ PLAN DE MISE — pleine largeur, c'est l'outil, pas un encart ═══ */}
+        {ongletActif === "plan" && (
+          <div className="cx-plan-wide">
+          {/* Calculateur de mise — pleine largeur dans son onglet */}
+          <div>
           <div style={{ borderRadius: 22, border: `1px solid ${CX.bd3}`, background: CX.surf2, overflow: "hidden", boxShadow: "0 14px 32px -24px rgba(17,24,39,.28)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 22px 16px" }}>
               <span style={{ width: 34, height: 34, borderRadius: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", color: CX.goldDeep, background: CX.goldBg, border: `1px solid ${CX.goldBd}` }}>
@@ -3276,40 +3342,35 @@ export default function CoursePage() {
             </div>
           </div>
           </div>
-
-          {/* Infos course */}
-          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <h3 style={{ margin: "0 0 12px", fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2 }}>Infos course</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              {(() => {
-                const rows: Array<{ label: string; val: string }> = [
-                  { label: "Discipline", val: course.discipline },
-                  { label: "Distance", val: `${course.distance} m` },
-                ];
-                if (course.niveau_course) rows.push({ label: "Niveau", val: course.niveau_course.replace(/_/g, " ") });
-                if (course.terrain_officiel) rows.push({ label: "Terrain", val: course.terrain_officiel });
-                if (course.penetrometre_desc && course.penetrometre_coef != null) rows.push({ label: "Pénétromètre", val: `${course.penetrometre_desc} (${course.penetrometre_coef})` });
-                if (course.meteo?.temperature != null) rows.push({ label: "Température", val: `${course.meteo.temperature}°C` });
-                if (course.meteo?.pluie_24h != null && course.meteo.pluie_24h > 0) rows.push({ label: "Pluie 24h", val: `${course.meteo.pluie_24h} mm` });
-                if (course.allocation) rows.push({ label: "Dotation", val: `${Math.round(course.allocation / 100).toLocaleString("fr-FR")} €` });
-                if (course.categorie_particularite) rows.push({ label: "Départ", val: course.categorie_particularite.replace(/_/g, " ").toLowerCase().replace(/^./, (ch) => ch.toUpperCase()) });
-                rows.push({ label: "Heure", val: formatDateTime(course.date_heure) });
-                return rows.map((r) => (
-                  <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13 }}>
-                    <span style={{ color: CX.gray400 }}>{r.label}</span>
-                    <span style={{ fontWeight: 600, color: CX.gray700 }}>{r.val}</span>
-                  </div>
-                ));
-              })()}
-            </div>
           </div>
-        </div>
-      </div>
-            </>
-            )}
+        )}
+
+        {/* ═══ RÉSULTATS ═══ */}
+        {ongletActif === "resultats" && (
+          <>
+                {resultats && (
+                  <ResultatsSection resultats={resultats} partants={course.partants} />
+                )}
+                {resultats && predictions && predictions.length > 0 && (
+                  <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
+                )}
+                {resultats && favoriTeaser && user && ["free", "decouverte"].includes(user.plan) && (
+                  <FavoriTeaserCard teaser={favoriTeaser} />
+                )}
+                {predictions && predictions.length > 0 && (
+                  <BilanMiseSection courseId={id} />
+                )}
+                {!resultats && (
+                  <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "24px 20px", textAlign: "center", color: CX.gray500, fontSize: 13 }}>
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" style={{ color: CX.gray400 }} />
+                    Arrivée officielle en cours de publication…
+                  </div>
+                )}
+            {resultats && <TempsPassageCard courseId={id} />}
           </>
-        );
-      })()}
+        )}
+      </div>
+
       </div>
     </div>
   );
