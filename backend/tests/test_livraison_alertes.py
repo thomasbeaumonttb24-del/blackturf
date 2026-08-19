@@ -120,3 +120,51 @@ async def test_le_resultat_reste_utilisable_comme_un_booleen():
         pass
     else:
         raise AssertionError("un envoi réussi doit être vrai")
+
+
+# ── Tâches de fond mortes en silence ─────────────────────────────────────────
+async def test_les_taches_en_echec_remontent_au_rapport(db: AsyncSession, monkeypatch):
+    """517 échecs de `post_course_sync` s'étaient accumulés dans la
+    `FailedJobRegistry` depuis juin sans que rien ne le signale : un job RQ qui
+    meurt n'écrit ni log applicatif, ni ligne au back-office."""
+    from services import data_quality
+
+    monkeypatch.setattr(data_quality, "sante_files_taches", lambda heures=24: {
+        "fenetre_heures": 24, "disponible": True,
+        "files": {"default": {"echecs_total": 517, "echecs_recents": 12}},
+    })
+
+    rapport = await data_quality.rapport_qualite(db)
+
+    anomalie = next(a for a in rapport["anomalies"]
+                    if a["code"] == "taches_de_fond_en_echec")
+    assert "12" in anomalie["message"] and "517" in anomalie["message"]
+
+
+async def test_le_passif_historique_seul_ne_declenche_rien(db: AsyncSession, monkeypatch):
+    """Le registre garde les échecs pour toujours : alerter sur le cumul ferait
+    crier la surveillance en permanence pour des pannes déjà réglées."""
+    from services import data_quality
+
+    monkeypatch.setattr(data_quality, "sante_files_taches", lambda heures=24: {
+        "fenetre_heures": 24, "disponible": True,
+        "files": {"default": {"echecs_total": 517, "echecs_recents": 0}},
+    })
+
+    rapport = await data_quality.rapport_qualite(db)
+
+    assert not [a for a in rapport["anomalies"] if a["code"] == "taches_de_fond_en_echec"]
+
+
+async def test_sans_rq_la_surveillance_ne_juge_pas(monkeypatch):
+    """Conteneur allégé ou Redis injoignable : on ne fabrique pas un faux verdict."""
+    from services import data_quality
+
+    def _redis_casse(*_a, **_k):
+        raise RuntimeError("redis injoignable")
+
+    monkeypatch.setattr("redis.Redis.from_url", _redis_casse)
+    out = data_quality.sante_files_taches()
+
+    assert out["disponible"] is False
+    assert out["files"] == {}

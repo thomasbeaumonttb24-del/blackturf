@@ -82,6 +82,10 @@ MIN_RUNS_POUR_JUGER_SCRAPER = 20
 MIN_ENVOIS_POUR_JUGER_CANAL = 5
 SEUIL_TAUX_ECHEC_ENVOI = 0.30
 
+# Tâches de fond : en dessous de 5 échecs sur la fenêtre, c'est le bruit normal
+# d'un OOM isolé ou d'une course mal formée. Au-delà, quelque chose est cassé.
+SEUIL_ECHECS_TACHES_RECENTS = 5
+
 
 def _as_dt(valeur) -> datetime | None:
     """Normalise une colonne DateTime lue par ``text()``, en UTC.
@@ -452,6 +456,54 @@ async def livraison_alertes(session: AsyncSession, heures: int = 24) -> dict:
     return {"fenetre_heures": heures, "canaux": canaux}
 
 
+def sante_files_taches(heures: int = 24) -> dict:
+    """Tâches de fond mortes en silence.
+
+    Un job RQ qui échoue atterrit dans la `FailedJobRegistry` et n'en sort jamais :
+    ni log applicatif, ni trace au back-office. En production, 517 échecs de
+    `post_course_sync` (apprentissage post-course) et 33 de `retrain_if_needed`
+    s'y étaient accumulés depuis juin sans que personne le sache — l'essentiel
+    tué par le OOM killer.
+
+    On ne remonte que les échecs RÉCENTS : le passif historique n'est pas une
+    alerte, ce serait du bruit permanent.
+    """
+    from datetime import datetime as _dt
+
+    resultat: dict = {"fenetre_heures": heures, "files": {}, "disponible": False}
+    try:
+        from redis import Redis
+        from rq.job import Job
+        from rq.registry import FailedJobRegistry
+    except Exception:
+        return resultat  # rq absent (tests, conteneur allégé) : on ne juge pas
+
+    try:
+        from api.config import get_settings
+        connexion = Redis.from_url(get_settings().redis_url)
+        limite = _dt.utcnow() - timedelta(hours=int(heures))
+        for nom in ("default", "ml"):
+            registre = FailedJobRegistry(nom, connection=connexion)
+            identifiants = registre.get_job_ids()
+            recents = 0
+            for jid in identifiants:
+                try:
+                    job = Job.fetch(jid, connection=connexion)
+                except Exception:
+                    continue
+                fin = job.ended_at
+                if fin is not None and fin.replace(tzinfo=None) > limite:
+                    recents += 1
+            resultat["files"][nom] = {
+                "echecs_total": len(identifiants),
+                "echecs_recents": recents,
+            }
+        resultat["disponible"] = True
+    except Exception as e:  # noqa: BLE001
+        log.warning("data_quality.files_taches_indisponible", err=str(e)[:120])
+    return resultat
+
+
 async def rapport_qualite(session: AsyncSession) -> dict:
     """Rapport complet + liste des anomalies à signaler."""
     couverture = await couverture_sources(session)
@@ -461,8 +513,19 @@ async def rapport_qualite(session: AsyncSession) -> dict:
     incompletes = await courses_non_pronosticables(session)
     scrapers = await sante_scrapers(session)
     livraison = await livraison_alertes(session)
+    files = sante_files_taches()
 
     anomalies: list[dict] = []
+
+    for file, info in files.get("files", {}).items():
+        if info["echecs_recents"] >= SEUIL_ECHECS_TACHES_RECENTS:
+            anomalies.append({
+                "code": "taches_de_fond_en_echec",
+                "gravite": "warning",
+                "message": (f"File '{file}' : {info['echecs_recents']} tâches en échec "
+                            f"en {files['fenetre_heures']} h "
+                            f"({info['echecs_total']} au total dans le registre)"),
+            })
 
     for canal, info in livraison["canaux"].items():
         if info["statut"] == "failing":
@@ -565,6 +628,7 @@ async def rapport_qualite(session: AsyncSession) -> dict:
         "courses_incompletes": incompletes,
         "sante_scrapers": scrapers,
         "livraison_alertes": livraison,
+        "files_taches": files,
         "anomalies": anomalies,
         "statut_global": ("critical" if any(a["gravite"] == "critical" for a in anomalies)
                           else "warning" if anomalies else "ok"),
