@@ -281,8 +281,9 @@ export default function SupervisionIAPage() {
 
         <p className="pb-6 text-center text-[10px] text-gray-400">
           Source : conseils de mise réellement émis avant le départ, réglés sur les rapports PMU
-          publiés. Runs reconstruits a posteriori exclus. Gains plafonnés à 50× la mise pour
-          l&apos;ensemble des ROI affichés.
+          publiés. Runs reconstruits a posteriori exclus. Les ROI qui servent de VERDICT sont
+          calculés gains plafonnés à 50× la mise ; les courbes de capital et les résultats par
+          jour montrent les gains réellement encaissés, la version plafonnée en pointillés.
         </p>
       </div>
     </div>

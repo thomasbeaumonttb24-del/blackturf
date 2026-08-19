@@ -124,11 +124,11 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
           icon={<Coins className="h-3.5 w-3.5 text-gray-300" />}
         />
         <StatTile
-          label="Résultat net"
-          value={signedEur(g.net_winsorise)}
-          valueClass={tone(g.net_winsorise)}
-          sub={`brut ${signedEur(g.net)}`}
-          hint="Net winsorisé : les gains supérieurs à 50× la mise sont plafonnés."
+          label="Résultat net réel"
+          value={signedEur(g.net)}
+          valueClass={tone(g.net)}
+          sub={`${signedEur(g.net_winsorise)} plafonné`}
+          hint="Argent réellement encaissé. La version plafonnée (gains coupés à 50× la mise) sert aux verdicts, pas au comptage."
         />
         <StatTile
           label="ROI winsorisé"
@@ -437,7 +437,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                 <th className="px-2 py-2 text-right font-semibold">Gagnants</th>
                 <th className="px-2 py-2 text-right font-semibold">Réussite</th>
                 <th className="px-2 py-2 text-right font-semibold">Engagé</th>
-                <th className="px-2 py-2 text-right font-semibold">Net</th>
+                <th className="px-2 py-2 text-right font-semibold">Net réel</th>
                 <th className="px-2 py-2 text-right font-semibold">ROI brut</th>
                 <th className="px-2 py-2 text-right font-semibold">ROI winsorisé</th>
                 <th className="w-24 px-2 py-2 text-left font-semibold">Polarité</th>

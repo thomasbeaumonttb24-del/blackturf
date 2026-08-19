@@ -35,9 +35,11 @@ function constats(paris?: ParisPayload, renta?: RentabilitePayload, algo?: AlgoE
   const out: string[] = [];
   if (paris?.global?.roi_pct != null && paris.global.n_paris) {
     out.push(
-      `Sur ${num(paris.global.n_paris)} paris réglés (${num(paris.global.n_courses)} courses), le rendement ` +
-      `winsorisé est de ${signedPct(paris.global.roi_pct)} — soit ${signedEur(paris.global.net_winsorise)} ` +
-      `pour ${eur(paris.global.mise)} engagés.`
+      `Sur ${num(paris.global.n_paris)} paris réglés (${num(paris.global.n_courses)} courses), ` +
+      `${signedEur(paris.global.net)} ont réellement été encaissés pour ${eur(paris.global.mise)} engagés ` +
+      `(${signedPct(paris.global.roi_brut_pct)}). Une fois les gains plafonnés à 50× la mise — la lecture ` +
+      `qui sert de verdict parce qu'un rapport isolé ne prouve rien — le rendement est de ` +
+      `${signedPct(paris.global.roi_pct)}, soit ${signedEur(paris.global.net_winsorise)}.`
     );
   }
   const fiables = (paris?.types ?? []).filter((t) => t.verdict !== "insuffisant");
