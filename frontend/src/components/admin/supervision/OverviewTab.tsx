@@ -105,11 +105,12 @@ export default function OverviewTab({
           icon={<Layers className="h-3.5 w-3.5 text-gray-300" />}
         />
         <StatTile
-          label="Capital"
+          label="Capital réel"
           value={signedEur(r?.net_total)}
           valueClass={tone(r?.net_total)}
-          sub={`${eur(r?.mise_totale)} engagés`}
+          sub={`${eur(r?.mise_totale)} engagés · ${signedEur(r?.net_total_winsor)} plafonné`}
           icon={<CircleDollarSign className="h-3.5 w-3.5 text-gray-300" />}
+          hint="Gains réellement encaissés, sans plafond — le ROI winsorisé de la tuile voisine coupe les rapports extrêmes pour rendre un verdict."
         />
         <StatTile
           label="ROI winsorisé"
@@ -157,7 +158,7 @@ export default function OverviewTab({
         <Section
           className="xl:col-span-2"
           title="Capital cumulé"
-          desc="Résultat net additionné jour après jour sur les conseils réellement émis."
+          desc="Résultat net additionné jour après jour sur les conseils réellement émis, gains réels sans plafond."
           right={
             <button onClick={() => onGoTo("rentabilite")} className="flex items-center gap-1 text-[11px] font-medium text-amber-600 hover:text-amber-700">
               Détail <ArrowUpRight className="h-3 w-3" />

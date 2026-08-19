@@ -7,6 +7,11 @@
  * ROI glissant. Deux graphiques distincts plutôt qu'un double axe : superposer
  * un capital en euros et un ROI en pourcentage sur une même échelle laisse
  * choisir la pente qu'on veut montrer.
+ *
+ * Chaque courbe est tracée sur les gains RÉELS (trait plein) avec la variante
+ * winsorisée à 50× la mise en pointillés. Afficher uniquement la winsorisée
+ * mentait : le 19/07 (+4 306 € réels, un rapport à 4 526 €) apparaissait à
+ * +280 €, et 4 jours bénéficiaires étaient dessinés en rouge.
  */
 
 import {
@@ -50,52 +55,58 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
     const row: Record<string, number | string> = { label: jourCourt(j) };
     for (const p of profils) {
       const pt = data.cumul_par_profil[p].find((x) => x.jour === j);
+      // Gains réels uniquement : six courbes (réel + plafonné × 3 profils) sur
+      // une même échelle ne se lisent plus. Le couple réel/plafonné est déjà
+      // exposé sur le capital global, où l'écart se lit.
       if (pt) row[p] = pt.cumul;
     }
     return row;
   });
+  const cap = data.gain_cap_mise;
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatTile
-          label="Résultat net"
+          label="Résultat net réel"
           value={signedEur(r.net_total)}
           valueClass={tone(r.net_total)}
           sub={`sur ${eur(r.mise_totale)} engagés`}
+          hint={`Gains réellement encaissés, sans plafond. Plafonnés à ${cap}× la mise : ${signedEur(r.net_total_winsor)}.`}
         />
         <StatTile
-          label="ROI"
+          label="ROI réel"
           value={signedPct(r.roi_pct)}
           valueClass={tone(r.roi_pct)}
-          sub={`${num(r.n_jours)} jours de courses`}
-          hint="Gains plafonnés à 50× la mise, comme partout sur cette page."
+          sub={`${signedPct(r.roi_winsor_pct)} plafonné · ${num(r.n_jours)} jours`}
+          hint={`Le ROI plafonné à ${cap}× la mise coupe les rapports extrêmes : c'est la lecture prudente qui sert de verdict, pas l'argent réellement compté. L'écart entre les deux EST l'information.`}
         />
         <StatTile
           label="Jours positifs"
           value={pct(r.taux_jours_positifs_pct)}
-          sub={`${num(r.jours_positifs)} / ${num(r.n_jours)} jours`}
+          sub={`${num(r.jours_positifs)} / ${num(r.n_jours)} jours · ${num(r.jours_positifs_winsor)} plafonné`}
           icon={<CalendarDays className="h-3.5 w-3.5 text-gray-300" />}
+          hint="Compté sur les gains réels : un jour où un gros rapport est tombé est un jour gagnant, même si le plafond le ramènerait sous zéro."
         />
         <StatTile
           label="Pire perte cumulée"
           value={eur(r.drawdown_max)}
           valueClass="text-red-600"
-          sub="depuis le plus haut du capital"
+          sub={`depuis le plus haut · ${eur(r.drawdown_max_winsor)} plafonné`}
           icon={<TrendingDown className="h-3.5 w-3.5 text-gray-300" />}
-          hint="Drawdown maximum : ce qu'un suiveur aurait vu fondre au pire moment."
+          hint="Drawdown maximum : ce qu'un suiveur aurait vu fondre au pire moment, gains réels compris."
         />
         <StatTile
           label="Série perdante"
           value={`${num(r.serie_perdante_max_jours)} j`}
-          sub="plus longue suite de jours négatifs"
+          sub={`plus longue suite négative · ${num(r.serie_perdante_max_jours_winsor)} j plafonné`}
         />
       </div>
 
       {/* Capital cumulé */}
       <Section
         title="Capital cumulé"
-        desc="Somme des résultats nets jour après jour, dans l'ordre réel des courses. C'est la courbe que vivrait quelqu'un qui suivrait tous les conseils."
+        desc={`Somme des résultats nets jour après jour, dans l'ordre réel des courses. Trait plein : les gains réellement encaissés — c'est la courbe qu'a vécue quelqu'un qui aurait suivi tous les conseils. Pointillés : la même série avec les gains coupés à ${cap}× la mise.`}
       >
         <ResponsiveContainer width="100%" height={260}>
           <AreaChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
@@ -113,22 +124,31 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
             />
             <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="3 3" />
             <Tooltip content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />} />
+            <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
             <Area
-              type="monotone" dataKey="cumul_net" name="Capital cumulé"
+              type="monotone" dataKey="cumul_net" name="Capital réel"
               stroke={DIVERGING_NEG} strokeWidth={2} fill="url(#capitalNeg)" isAnimationActive={false}
+            />
+            <Line
+              type="monotone" dataKey="cumul_net_winsor" name={`Plafonné à ${cap}× la mise`}
+              stroke="#9CA3AF" strokeWidth={1.5} strokeDasharray="4 3" dot={false} isAnimationActive={false}
             />
           </AreaChart>
         </ResponsiveContainer>
         <Note>
           Une pente qui descend régulièrement n&apos;est pas un accident de parcours : c&apos;est le
           prélèvement PMU qui n&apos;est pas encore battu. C&apos;est précisément le chiffre que cette
-          page existe pour rendre indiscutable.
+          page existe pour rendre indiscutable. L&apos;écart entre les deux traits est la part du
+          résultat qui tient à quelques rapports extrêmes — réels, mais non reproductibles.
         </Note>
       </Section>
 
       {/* Résultat quotidien + ROI glissant : deux échelles, deux graphiques */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <Section title="Résultat par jour" desc="Barres vertes = jour bénéficiaire, rouges = jour perdant.">
+        <Section
+          title="Résultat par jour"
+          desc="Barres vertes = jour bénéficiaire, rouges = jour perdant. Gains réels, sans plafond."
+        >
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid {...GRID} />
@@ -155,6 +175,11 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
                   {r.meilleur_jour ? jourCourt(r.meilleur_jour.jour) : ""}
                 </span>
               </div>
+              {r.meilleur_jour && r.meilleur_jour.net_winsor !== r.meilleur_jour.net && (
+                <div className="mt-0.5 text-emerald-600/70">
+                  {signedEur(r.meilleur_jour.net_winsor, 2)} une fois plafonné
+                </div>
+              )}
             </div>
             <div className="rounded-lg bg-red-50 p-2">
               <div className="text-red-700">Pire jour</div>
@@ -179,9 +204,14 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v} %`} width={48} />
               <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="3 3" label={{ value: "équilibre", fontSize: 9, fill: "#9CA3AF", position: "right" }} />
               <Tooltip content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />} />
+              <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
               <Line
-                type="monotone" dataKey="roi_glissant_pct" name="ROI 14 jours"
+                type="monotone" dataKey="roi_glissant_pct" name="ROI 14 jours (réel)"
                 stroke="#3B82F6" strokeWidth={2} dot={false} connectNulls isAnimationActive={false}
+              />
+              <Line
+                type="monotone" dataKey="roi_glissant_winsor_pct" name="plafonné"
+                stroke="#9CA3AF" strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -196,7 +226,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
       {profils.length > 0 && (
         <Section
           title="Capital cumulé par profil"
-          desc="Prudent, Modéré, Risqué : trois politiques de mise sur les mêmes pronostics. L'écart entre les courbes mesure ce que le profil ajoute, pas ce que le modèle prédit."
+          desc="Prudent, Modéré, Risqué : trois politiques de mise sur les mêmes pronostics, gains réels. L'écart entre les courbes mesure ce que le profil ajoute, pas ce que le modèle prédit."
         >
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={cumulChart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>

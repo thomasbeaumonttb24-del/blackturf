@@ -12,10 +12,13 @@ Sans ces gardes, un ROI est contaminé par la connaissance du résultat.
 Trois règles gouvernent chaque chiffre publié ici — elles viennent toutes de
 mesures faites sur cette base, pas d'un principe théorique :
 
-1. **Winsorisation à 50× la mise** (``PB_GAIN_CAP``). Sans elle, le Trio affiche
-   +84 % de ROI sur 1 305 paris… dont 24 gagnants et un unique rapport à 4 526 €.
-   Winsorisé, le même Trio tombe à -46 %. Le chiffre brut reste exposé à côté :
-   l'écart entre les deux EST l'information.
+1. **Winsorisation à 50× la mise** (``PB_GAIN_CAP``) pour tout ROI qui sert de
+   VERDICT. Sans elle, le Trio affiche +84 % de ROI sur 1 305 paris… dont 24
+   gagnants et un unique rapport à 4 526 €. Winsorisé, le même Trio tombe à
+   -46 %. Le chiffre brut reste exposé à côté : l'écart entre les deux EST
+   l'information. En revanche, **une courbe de capital vécu n'est jamais
+   winsorisée** : l'argent réellement encaissé un jour donné n'a pas de plafond
+   (cf. ``compute_profitability_timeline``, qui renvoie les deux séries).
 2. **La fiabilité se compte en GAGNANTS, pas en paris** (``PB_MIN_WINS…``).
    836 paris à 4 % de réussite (~33 gagnants) ne valent pas 2 208 paris à 37 %
    (~815 gagnants). Aucun segment n'est déclaré rentable sous 150 gagnants.
@@ -335,7 +338,23 @@ async def compute_bet_type_analytics(
 async def compute_profitability_timeline(
     session: AsyncSession, days: Optional[int] = 90,
 ) -> dict:
-    """Rentabilité jour par jour : net, ROI, capital cumulé, drawdown vécu."""
+    """Rentabilité jour par jour : net, ROI, capital cumulé, drawdown vécu.
+
+    Deux séries sont renvoyées CÔTE À CÔTE, jamais l'une à la place de l'autre :
+
+    - ``net`` / ``cumul_net`` / ``roi_pct`` : les gains RÉELLEMENT encaissés,
+      sans plafond. C'est ce qu'a vécu quelqu'un qui a suivi les conseils — le
+      19/07 vaut +4 306 € parce qu'un rapport à 4 526 € est réellement tombé.
+    - ``*_winsor`` : les mêmes jours avec les gains coupés à ``PB_GAIN_CAP`` ×
+      la mise. Lecture prudente, utile pour juger une stratégie sans laisser un
+      coup unique décider du verdict.
+
+    Winsoriser la courbe « capital vécu » la rendait fausse dans les deux sens :
+    elle écrasait les gros jours gagnants (+4 306 € affichés +280 €) et
+    retournait 4 jours bénéficiaires en jours perdants. Le plafond reste partout
+    où un ROI sert de VERDICT (``_agg``, poids de profil), jamais sur l'argent
+    réellement compté.
+    """
     since = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
     bets = await _load_bets(session, since)
 
@@ -346,34 +365,44 @@ async def compute_profitability_timeline(
             continue
         key = b["jour"].isoformat()
         cell = par_jour.setdefault(key, {
-            "jour": key, "mise": 0.0, "retour": 0.0, "n_paris": 0,
-            "n_gagnants": 0, "courses": set(),
+            "jour": key, "mise": 0.0, "retour": 0.0, "retour_winsor": 0.0,
+            "n_paris": 0, "n_gagnants": 0, "courses": set(),
         })
         gain_w = min(b["gain"], PB_GAIN_CAP * b["mise"])
         cell["mise"] += b["mise"]
-        cell["retour"] += gain_w
+        cell["retour"] += b["gain"]
+        cell["retour_winsor"] += gain_w
         cell["n_paris"] += 1
         cell["n_gagnants"] += 1 if b["gagne"] else 0
         cell["courses"].add(b["course_id"])
 
-        pcell = par_jour_profil.setdefault(b["profil"], {}).setdefault(key, {"mise": 0.0, "retour": 0.0})
+        pcell = par_jour_profil.setdefault(b["profil"], {}).setdefault(
+            key, {"mise": 0.0, "retour": 0.0, "retour_winsor": 0.0})
         pcell["mise"] += b["mise"]
-        pcell["retour"] += gain_w
+        pcell["retour"] += b["gain"]
+        pcell["retour_winsor"] += gain_w
 
     jours = sorted(par_jour)
     cumul = 0.0
+    cumul_w = 0.0
     serie = []
     for j in jours:
         c = par_jour[j]
         net = c["retour"] - c["mise"]
+        net_w = c["retour_winsor"] - c["mise"]
         cumul += net
+        cumul_w += net_w
         serie.append({
             "jour": j,
             "mise": round(c["mise"], 2),
             "retour": round(c["retour"], 2),
+            "retour_winsor": round(c["retour_winsor"], 2),
             "net": round(net, 2),
+            "net_winsor": round(net_w, 2),
             "roi_pct": _roi(c["mise"], c["retour"]),
+            "roi_winsor_pct": _roi(c["mise"], c["retour_winsor"]),
             "cumul_net": round(cumul, 2),
+            "cumul_net_winsor": round(cumul_w, 2),
             "n_paris": c["n_paris"],
             "n_gagnants": c["n_gagnants"],
             "n_courses": len(c["courses"]),
@@ -387,26 +416,35 @@ async def compute_profitability_timeline(
     for i, row in enumerate(serie):
         if i + 1 < FEN:
             row["roi_glissant_pct"] = None
+            row["roi_glissant_winsor_pct"] = None
             continue
         window = serie[i - FEN + 1: i + 1]
         m = sum(w["mise"] for w in window)
-        r = sum(w["retour"] for w in window)
-        row["roi_glissant_pct"] = _roi(m, r)
+        row["roi_glissant_pct"] = _roi(m, sum(w["retour"] for w in window))
+        row["roi_glissant_winsor_pct"] = _roi(m, sum(w["retour_winsor"] for w in window))
 
     nets = [row["net"] for row in serie]
+    nets_w = [row["net_winsor"] for row in serie]
     drawdown, streak = _drawdown_and_streak(nets) if nets else (None, None)
+    drawdown_w, streak_w = _drawdown_and_streak(nets_w) if nets_w else (None, None)
 
     cumul_profil: dict[str, list[dict]] = {}
     for profil, jours_p in par_jour_profil.items():
         run = 0.0
+        run_w = 0.0
         label = PROFIL_LABELS.get(profil, profil)
         for j in sorted(jours_p):
             run += jours_p[j]["retour"] - jours_p[j]["mise"]
-            cumul_profil.setdefault(label, []).append({"jour": j, "cumul": round(run, 2)})
+            run_w += jours_p[j]["retour_winsor"] - jours_p[j]["mise"]
+            cumul_profil.setdefault(label, []).append({
+                "jour": j, "cumul": round(run, 2), "cumul_winsor": round(run_w, 2),
+            })
 
     meilleur = max(serie, key=lambda r: r["net"]) if serie else None
     pire = min(serie, key=lambda r: r["net"]) if serie else None
     jours_positifs = sum(1 for r in serie if r["net"] > 0)
+    jours_positifs_w = sum(1 for r in serie if r["net_winsor"] > 0)
+    mise_totale = sum(r["mise"] for r in serie)
 
     return {
         "fenetre_jours": days,
@@ -417,12 +455,17 @@ async def compute_profitability_timeline(
         "resume": {
             "n_jours": len(serie),
             "jours_positifs": jours_positifs,
+            "jours_positifs_winsor": jours_positifs_w,
             "taux_jours_positifs_pct": round(jours_positifs / len(serie) * 100, 1) if serie else None,
-            "mise_totale": round(sum(r["mise"] for r in serie), 2),
+            "mise_totale": round(mise_totale, 2),
             "net_total": round(sum(r["net"] for r in serie), 2),
-            "roi_pct": _roi(sum(r["mise"] for r in serie), sum(r["retour"] for r in serie)),
+            "net_total_winsor": round(sum(r["net_winsor"] for r in serie), 2),
+            "roi_pct": _roi(mise_totale, sum(r["retour"] for r in serie)),
+            "roi_winsor_pct": _roi(mise_totale, sum(r["retour_winsor"] for r in serie)),
             "drawdown_max": drawdown,
+            "drawdown_max_winsor": drawdown_w,
             "serie_perdante_max_jours": streak,
+            "serie_perdante_max_jours_winsor": streak_w,
             "meilleur_jour": meilleur,
             "pire_jour": pire,
         },

@@ -72,17 +72,24 @@ export interface ParisPayload {
   serie_hebdo: SerieHebdoRow[];
 }
 
+/** `net`/`cumul_net`/`roi_pct` = gains réels encaissés (aucun plafond).
+ *  `*_winsor` = mêmes jours, gains coupés à `gain_cap_mise` × la mise. */
 export interface JourRow {
   jour: string;
   mise: number;
   retour: number;
+  retour_winsor: number;
   net: number;
+  net_winsor: number;
   roi_pct: number | null;
+  roi_winsor_pct: number | null;
   cumul_net: number;
+  cumul_net_winsor: number;
   n_paris: number;
   n_gagnants: number;
   n_courses: number;
   roi_glissant_pct?: number | null;
+  roi_glissant_winsor_pct?: number | null;
 }
 
 export interface RentabilitePayload {
@@ -90,16 +97,21 @@ export interface RentabilitePayload {
   generated_at: string;
   gain_cap_mise: number;
   serie: JourRow[];
-  cumul_par_profil: Record<string, Array<{ jour: string; cumul: number }>>;
+  cumul_par_profil: Record<string, Array<{ jour: string; cumul: number; cumul_winsor: number }>>;
   resume: {
     n_jours: number;
     jours_positifs: number;
+    jours_positifs_winsor: number;
     taux_jours_positifs_pct: number | null;
     mise_totale: number;
     net_total: number;
+    net_total_winsor: number;
     roi_pct: number | null;
+    roi_winsor_pct: number | null;
     drawdown_max: number | null;
+    drawdown_max_winsor: number | null;
     serie_perdante_max_jours: number | null;
+    serie_perdante_max_jours_winsor: number | null;
     meilleur_jour: JourRow | null;
     pire_jour: JourRow | null;
   };

@@ -164,3 +164,65 @@ def test_la_robustesse_ne_retire_jamais_de_perdants():
 
     assert [p["retires"] for p in points] == [1]
     assert points[0]["roi_pct"] < _agg(bets)["roi_pct"]
+
+
+# ── Courbe de capital : les gains réels ne sont JAMAIS plafonnés ─────────────
+def _bet_jour(jour, mise: float, gain: float, *, course: str = "c1") -> dict:
+    b = _bet(mise, gain, course=course)
+    b["jour"] = jour
+    return b
+
+
+@pytest.mark.asyncio
+async def test_la_courbe_de_capital_montre_les_gains_reels(monkeypatch):
+    """Le 19/07 a réellement rapporté +4 306 € : la courbe vécue doit le dire.
+
+    Winsoriser cette courbe-là affichait +280 € et retournait même des jours
+    bénéficiaires en jours perdants — un mensonge dans les deux sens.
+    """
+    from datetime import date
+
+    import ml.bet_type_analytics as mod
+
+    j1, j2 = date(2026, 7, 19), date(2026, 7, 20)
+    bets = [
+        _bet_jour(j1, 3.0, 4526.0, course="cjackpot"),
+        *[_bet_jour(j1, 3.0, 0.0, course=f"a{i}") for i in range(10)],
+        *[_bet_jour(j2, 3.0, 0.0, course=f"b{i}") for i in range(10)],
+    ]
+
+    async def _fake_load(session, since):
+        return bets
+
+    monkeypatch.setattr(mod, "_load_bets", _fake_load)
+    out = await mod.compute_profitability_timeline(None, days=90)
+
+    jour1 = out["serie"][0]
+    assert jour1["net"] == pytest.approx(4526.0 - 33.0)          # réel
+    assert jour1["net_winsor"] == pytest.approx(3 * 50 - 33.0)   # plafonné à 50× la mise
+    assert out["resume"]["meilleur_jour"]["jour"] == "2026-07-19"
+    assert out["resume"]["net_total"] > out["resume"]["net_total_winsor"]
+    # Un jour réellement gagnant reste compté gagnant.
+    assert out["resume"]["jours_positifs"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sans_gain_extreme_les_deux_series_coincident(monkeypatch):
+    """Le plafond ne doit rien changer tant qu'aucun rapport ne le dépasse."""
+    from datetime import date
+
+    import ml.bet_type_analytics as mod
+
+    bets = [
+        _bet_jour(date(2026, 7, 19), 3.0, 9.0, course="c1"),
+        _bet_jour(date(2026, 7, 19), 3.0, 0.0, course="c2"),
+    ]
+
+    async def _fake_load(session, since):
+        return bets
+
+    monkeypatch.setattr(mod, "_load_bets", _fake_load)
+    out = await mod.compute_profitability_timeline(None, days=90)
+
+    assert out["serie"][0]["net"] == out["serie"][0]["net_winsor"]
+    assert out["resume"]["net_total"] == out["resume"]["net_total_winsor"]
