@@ -1476,9 +1476,16 @@ async def get_bilan_pronostic(
     course_id: str,
     montant: float = 20.0,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _rl: None = Depends(rate_limit_public),
 ):
     """
+    PUBLIC (2026-08-19) : le bilan ne porte que sur une course TERMINÉE — il ne
+    révèle donc aucun pronostic exploitable, et c'est justement l'argument de
+    vente pour un visiteur non abonné (« voilà ce que le plan de mise aurait
+    donné »). Le verrou statut == 'termine' plus bas reste la garantie anti-fuite.
+    Rate-limité par IP comme les autres routes publiques (le front re-poll toutes
+    les 15 s tant qu'un rapport PMU manque).
+
     Bilan RÉTROSPECTIF d'une course TERMINÉE : applique le plan de mise (20€ par
     défaut) généré sur les pronostics réels, le règle contre le résultat officiel
     (rapports PMU réels) et indique si le pronostic était bon (net, ROI, comparaison

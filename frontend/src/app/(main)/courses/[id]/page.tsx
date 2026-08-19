@@ -1483,7 +1483,10 @@ const PROFIL_TAB_META: Record<string, { emoji: string; label: string }> = {
   agressif: { emoji: "🔥", label: "Risqué" },
 };
 
-function BilanMiseSection({ courseId }: { courseId: string }) {
+// `paywall` = visiteur anonyme ou plan Découverte/Free : le bilan lui est montré
+// (course terminée ⇒ rien d'exploitable ne fuite) et se termine par un CTA — c'est
+// exactement « ce que vous auriez fait en suivant les plans de mise du site ».
+function BilanMiseSection({ courseId, paywall = false }: { courseId: string; paywall?: boolean }) {
   const [data, setData] = useState<BilanResp | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [sel, setSel] = useState<"conservateur" | "equilibre" | "agressif">("equilibre");
@@ -1491,11 +1494,16 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
   useEffect(() => {
     let alive = true;
     let iv: ReturnType<typeof setInterval> | null = null;
+    // Le composant est désormais monté sur TOUTE course terminée (plus seulement
+    // quand des prédictions sont chargées côté client) : une course sans pronostic
+    // enregistré renverrait 404 à l'infini. On borne donc les échecs consécutifs.
+    let echecs = 0;
     const load = () =>
       api.get(`/courses/${courseId}/bilan-pronostic?montant=10`, { tolere401: true })
         .then((r) => {
           if (!alive) return;
           const d = r.data as BilanResp;
+          echecs = 0;
           setData(d);
           setState("ok");
           // On NE stoppe le polling QUE lorsque TOUT est réglé. Tant qu'un pari attend
@@ -1512,7 +1520,11 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
           // 404 = arrivee PMU pas encore publiee (course juste terminee) → on
           // retentera. On ne fige pas en "error" pour laisser le retry afficher
           // le bilan des qu'il est disponible.
-          if (alive) setState((prev) => (prev === "ok" ? prev : "loading"));
+          if (!alive) return;
+          setState((prev) => (prev === "ok" ? prev : "loading"));
+          // Course sans pronostic / sans rapport publiable : au bout de ~5 min on
+          // arrête, inutile de marteler l'API (l'endpoint est public maintenant).
+          if (++echecs >= 20 && iv) { clearInterval(iv); iv = null; }
         });
     load();
     iv = setInterval(load, 15000); // re-fetch jusqu'à ce que tous les rapports soient publiés
@@ -1665,6 +1677,68 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
           ? "Plan figé avant le départ, réglé aux rapports PMU réels. Jouez responsable."
           : "Simulation rétrospective réglée aux rapports PMU réels. Jouez responsable."}
       </p>
+
+      {/* ── CTA non abonné ───────────────────────────────────────────────────
+          Ce que le visiteur vient de lire, c'est le plan qu'il n'a PAS pu suivre.
+          On le dit tel quel, avec le meilleur profil du jour — gagnant OU perdant :
+          jamais de gain promis, la course sert d'exemple, pas d'argument de rendement. */}
+      {paywall && (() => {
+        const regles = profils.filter((b) => b.verdict !== "en_attente");
+        const best = regles.length
+          ? regles.reduce((a, b) => (b.bilan.net > a.bilan.net ? b : a))
+          : null;
+        return (
+          <div className="mt-4 rounded-xl border border-amber-300/60 bg-white/70 p-3.5">
+            <p className="mb-1 text-[13px] font-semibold" style={{ color: CX.ink2 }}>
+              Ce plan ne vous a pas été montré avant le départ.
+            </p>
+            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+              {best && best.bilan.net > 0 ? (
+                <>
+                  Sur cette course, le profil <strong>{best.profil_label}</strong> ressort à{" "}
+                  <strong className="text-emerald-600 tabular-nums">
+                    +{best.bilan.net.toFixed(2)}€
+                  </strong>{" "}
+                  pour {data.montant}€ misés. Une course ne fait pas un rendement —
+                  le détail course par course est dans le palmarès public.
+                </>
+              ) : best ? (
+                <>
+                  Sur cette course, le meilleur profil (<strong>{best.profil_label}</strong>)
+                  finit à{" "}
+                  <strong className="text-rose-600 tabular-nums">
+                    {best.bilan.net.toFixed(2)}€
+                  </strong>{" "}
+                  pour {data.montant}€ misés. On affiche les plans perdants comme les
+                  gagnants : c&apos;est le même bilan que celui du palmarès public.
+                </>
+              ) : (
+                <>
+                  Le règlement de ce plan attend encore des rapports PMU. Les bilans
+                  complets, course par course, sont dans le palmarès public.
+                </>
+              )}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <CheckoutButton
+                plan="standard"
+                periodicite="monthly"
+                label="Recevoir les plans avant le départ — 12€/mois"
+                variant="brand"
+                size="default"
+                className="w-auto"
+              />
+              <Link
+                href="/track-record"
+                className="text-xs font-medium underline underline-offset-2"
+                style={{ color: CX.gray500 }}
+              >
+                Voir le palmarès complet
+              </Link>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3345,9 +3419,17 @@ export default function CoursePage() {
                 {resultats && favoriTeaser && user && ["free", "decouverte"].includes(user.plan) && (
                   <FavoriTeaserCard teaser={favoriTeaser} />
                 )}
-                {predictions && predictions.length > 0 && (
-                  <BilanMiseSection courseId={id} />
-                )}
+                {/* Bilan du plan — montré À TOUS, y compris visiteur anonyme et
+                    plan Découverte (décision 2026-08-19) : la course est terminée,
+                    donc aucun pronostic exploitable n'est révélé, et c'est la seule
+                    façon pour un non-abonné de voir ce que les plans de mise du site
+                    auraient donné. La condition portait sur `predictions`, jamais
+                    chargées pour ces plans → le bloc leur était invisible. Le
+                    composant s'auto-masque si le bilan n'est pas disponible. */}
+                <BilanMiseSection
+                  courseId={id}
+                  paywall={!user || ["free", "decouverte"].includes(user.plan)}
+                />
                 {!resultats && (
                   <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "24px 20px", textAlign: "center", color: CX.gray500, fontSize: 13 }}>
                     <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" style={{ color: CX.gray400 }} />
