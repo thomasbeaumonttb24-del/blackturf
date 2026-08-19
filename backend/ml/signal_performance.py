@@ -605,12 +605,22 @@ def rapport_realization_factor(profil: str | None, type_pari: str | None,
 PB_BUCKETS = ((0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 15.0),
               (15.0, 30.0), (30.0, 60.0), (60.0, 1e9))
 PB_MIN_PARIS = 150          # sous ce volume, le ROI d'une tranche est du bruit
-# Le shrink porte sur le nombre de GAGNANTS, pas de paris. La fiabilité d'un ROI
-# vient des gains encaissés : Simple Placé ×2-4 aligne 2 208 paris dont ~815
-# gagnants, son -6,7 % est solide ; Couplé Gagnant ×15-30 aligne 836 paris mais
-# ~33 gagnants, et son +10,9 % s'effondre à -38,8 % dès qu'on retire 20 gains.
-# Compter les paris traitait ces deux mesures comme également sûres.
-PB_K_SHRINK = 60.0          # pseudo-GAGNANTS shrinkant le multiplicateur vers 1.0
+# L'incertitude n'est PAS symétrique, et c'est le point clé.
+#
+# Affirmer qu'une tranche est BONNE repose sur des gains rares et gros : la preuve
+# tient donc au nombre de GAGNANTS. Couplé Gagnant ×15-30 affichait +10,9 % sur
+# 836 paris mais ~33 gagnants — retirer ses 20 meilleurs gains le ramène à -38,8 %.
+#
+# Affirmer qu'une tranche est MAUVAISE ne demande pas de gagnants : 1 849 paris
+# qui rendent -66 % établissent la perte, quel que soit le nombre de gains. Le
+# doute ne porte que sur la queue haute, jamais sur le fait que l'argent n'est
+# pas revenu.
+#
+# On shrinke donc le HAUT sur les gagnants et le BAS sur les paris. Une première
+# version, shrinkée uniformément sur les gagnants, ramenait Trio ≥×60 (-62,9 %) à
+# un tilt de 0,952 : la pire tranche mesurée devenait presque neutre.
+PB_K_SHRINK_GAGNANTS = 60.0   # pseudo-gagnants — pour FAVORISER une tranche
+PB_K_SHRINK_PARIS = 200.0     # pseudo-paris — pour PÉNALISER une tranche
 PB_M_MIN, PB_M_MAX = 0.60, 1.40
 # WINSORISATION — sans elle, un unique gain aberrant commande la tranche entière.
 # Vécu au premier calcul : le Trio ≥×15 affichait +106 % de ROI et décrochait le
@@ -689,7 +699,10 @@ async def compute_payout_bucket_performance(session: AsyncSession) -> dict:
         if a["n"] >= PB_MIN_PARIS and roi is not None:
             # ROI de -30 % → 0.70, ROI de 0 % → 1.0, borné puis shrinké.
             brut = 1.0 + roi
-            w = a["n_wins"] / (a["n_wins"] + PB_K_SHRINK)
+            if brut >= 1.0:
+                w = a["n_wins"] / (a["n_wins"] + PB_K_SHRINK_GAGNANTS)
+            else:
+                w = a["n"] / (a["n"] + PB_K_SHRINK_PARIS)
             mult = max(PB_M_MIN, min(PB_M_MAX, 1.0 + (brut - 1.0) * w))
             if mult > 1.0 and a["n_wins"] < PB_MIN_WINS_POUR_FAVORISER:
                 mult = 1.0                   # trop peu de gagnants pour encourager

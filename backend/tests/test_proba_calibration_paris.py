@@ -193,7 +193,26 @@ def test_la_fiabilite_se_compte_en_gagnants_pas_en_paris():
     from ml import signal_performance
 
     source = inspect.getsource(signal_performance.compute_payout_bucket_performance)
-    assert 'w = a["n_wins"] / (a["n_wins"] + PB_K_SHRINK)' in source, (
-        "le shrink doit porter sur les gagnants, pas sur les paris")
+    assert 'PB_K_SHRINK_GAGNANTS' in source and 'PB_K_SHRINK_PARIS' in source, (
+        "le shrink doit etre asymetrique : gagnants pour favoriser, paris pour penaliser")
     assert signal_performance.PB_MIN_WINS_POUR_FAVORISER >= 100, (
         "favoriser une tranche demande une centaine de gagnants au moins")
+
+
+def test_l_incertitude_n_est_pas_symetrique():
+    """Affirmer qu'une tranche est BONNE repose sur des gains rares et gros — la
+    preuve tient au nombre de gagnants. Affirmer qu'elle est MAUVAISE n'en demande
+    aucun : 1 849 paris qui rendent −66 % établissent la perte. Une version
+    shrinkée uniformément sur les gagnants ramenait Trio ≥×60 (−62,9 %) à un tilt
+    de 0,952 — la pire tranche mesurée devenait presque neutre."""
+    import inspect
+
+    from ml import signal_performance
+
+    source = inspect.getsource(signal_performance.compute_payout_bucket_performance)
+    assert 'if brut >= 1.0:' in source
+    assert 'a["n_wins"] / (a["n_wins"] + PB_K_SHRINK_GAGNANTS)' in source
+    assert 'a["n"] / (a["n"] + PB_K_SHRINK_PARIS)' in source
+    assert (signal_performance.PB_K_SHRINK_PARIS
+            > signal_performance.PB_K_SHRINK_GAGNANTS), (
+        "pénaliser demande plus d'observations qu'il n'en faut de gagnants pour favoriser")
