@@ -141,11 +141,17 @@ async def get_predictions(
         autorise, quota_restant = True, -1
 
     # Charger prédictions + partants
+    # Les non-partants sont EXCLUS du pronostic. La ligne `predictions` d'un cheval
+    # déclaré non-partant n'est plus supprimée (sa suppression faisait échouer toute
+    # la sauvegarde de la course, cf. db_writer) : c'est donc ici, à la lecture,
+    # qu'on l'écarte — sinon la page afficherait une probabilité et un rang périmés
+    # sur un cheval qui ne court pas.
     q = (
         select(Prediction, Participation, Cheval)
         .join(Participation, Participation.participation_id == Prediction.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .where(Prediction.course_id == course_id)
+        .where(and_(Prediction.course_id == course_id,
+                    Participation.non_partant == False))  # noqa: E712
         .order_by(Prediction.rang_predit)
     )
     rows = (await db.execute(q)).all()

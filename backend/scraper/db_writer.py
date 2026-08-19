@@ -440,14 +440,22 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
 
     # ── NON-PARTANTS : nettoyage des pronos périmés ──
     # Un cheval qui vient d'être déclaré non-partant ne doit plus apparaître dans le
-    # pronostic : on supprime sa prédiction et on désactive son value bet. Le prono
-    # du champ restant sera RÉGÉNÉRÉ par l'appelant (predict_course), même dans les
-    # 10 dernières minutes (exception au gel T-10 — uniquement sur forfait).
+    # pronostic : on désactive son value bet, et c'est `participations.non_partant`
+    # — posé juste au-dessus, dans CETTE transaction — qui fait autorité pour les
+    # lecteurs. Le prono du champ restant est RÉGÉNÉRÉ par l'appelant
+    # (predict_course), même dans les 10 dernières minutes (exception au gel T-10 —
+    # uniquement sur forfait).
+    #
+    # On ne SUPPRIME plus la ligne `predictions` correspondante. Elle est référencée
+    # par `prediction_snapshots` (journal append-only, migration 0029) et par
+    # `value_bets`, dont les clés étrangères sont en NO ACTION : le DELETE était
+    # refusé et faisait échouer la sauvegarde de la course ENTIÈRE — cotes, statut
+    # non-partant et résultats compris (constaté en production le 2026-08-19, toutes
+    # les courses déjà snapshotées étaient figées). Supprimer le journal n'est pas
+    # une option : un trigger BEFORE DELETE OR UPDATE l'interdit, et c'est lui qui
+    # garantit la rejouabilité des cohortes d'apprentissage.
     scratch_course: Optional[str] = None
     if newly_scratched_pids:
-        await session.execute(text(
-            "DELETE FROM predictions WHERE participation_id = ANY(:pids)"),
-            {"pids": newly_scratched_pids})
         await session.execute(text(
             "UPDATE value_bets SET actif = false WHERE participation_id = ANY(:pids)"),
             {"pids": newly_scratched_pids})

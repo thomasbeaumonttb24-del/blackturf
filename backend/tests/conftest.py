@@ -46,7 +46,10 @@ async def engine():
                            ORDER BY ps.observed_at DESC, ps.snapshot_id DESC
                        ) AS snapshot_rank
                 FROM prediction_snapshots ps
+                LEFT JOIN participations pa_snap
+                  ON pa_snap.participation_id = ps.participation_id
                 WHERE ps.is_pre_course = 1 AND ps.is_replayable = 1
+                  AND COALESCE(pa_snap.non_partant, 0) = 0
             ),
             latest_snapshot AS (
                 SELECT
@@ -72,10 +75,13 @@ async def engine():
                 NULL AS feature_schema_hash, 'legacy_mutable_row' AS source_origin,
                 0 AS is_snapshot, 0 AS is_replayable
             FROM predictions p
+            LEFT JOIN participations pa_legacy
+              ON pa_legacy.participation_id = p.participation_id
             WHERE NOT EXISTS (
                 SELECT 1 FROM latest_snapshot s
                 WHERE s.participation_id = p.participation_id
             )
+              AND COALESCE(pa_legacy.non_partant, 0) = 0
         """)
     yield eng
     await eng.dispose()
