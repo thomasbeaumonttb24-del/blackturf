@@ -180,3 +180,20 @@ def test_la_grille_distingue_les_gros_rapports_entre_eux():
     assert _pb_key(20.0) != _pb_key(45.0) != _pb_key(200.0)
     assert _pb_key(20.0) == _pb_key(29.9)
     assert _pb_key(120.0) == _pb_key(5000.0), "la dernière tranche doit tout absorber"
+
+
+def test_la_fiabilite_se_compte_en_gagnants_pas_en_paris():
+    """Vérifié sur la production : Couplé Gagnant ×15-30 affichait +10,9 % sur
+    836 paris, mais ~33 gagnants seulement — retirer ses 20 meilleurs gains le
+    ramène à −38,8 %. Simple Placé ×2-4 aligne 2 208 paris et ~815 gagnants, et
+    son −6,7 % ne bouge pas. Shrinker sur le nombre de PARIS traitait ces deux
+    mesures comme également sûres."""
+    import inspect
+
+    from ml import signal_performance
+
+    source = inspect.getsource(signal_performance.compute_payout_bucket_performance)
+    assert 'w = a["n_wins"] / (a["n_wins"] + PB_K_SHRINK)' in source, (
+        "le shrink doit porter sur les gagnants, pas sur les paris")
+    assert signal_performance.PB_MIN_WINS_POUR_FAVORISER >= 100, (
+        "favoriser une tranche demande une centaine de gagnants au moins")

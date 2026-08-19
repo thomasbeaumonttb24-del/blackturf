@@ -605,7 +605,12 @@ def rapport_realization_factor(profil: str | None, type_pari: str | None,
 PB_BUCKETS = ((0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 15.0),
               (15.0, 30.0), (30.0, 60.0), (60.0, 1e9))
 PB_MIN_PARIS = 150          # sous ce volume, le ROI d'une tranche est du bruit
-PB_K_SHRINK = 200.0         # pseudo-observations shrinkant le multiplicateur vers 1.0
+# Le shrink porte sur le nombre de GAGNANTS, pas de paris. La fiabilité d'un ROI
+# vient des gains encaissés : Simple Placé ×2-4 aligne 2 208 paris dont ~815
+# gagnants, son -6,7 % est solide ; Couplé Gagnant ×15-30 aligne 836 paris mais
+# ~33 gagnants, et son +10,9 % s'effondre à -38,8 % dès qu'on retire 20 gains.
+# Compter les paris traitait ces deux mesures comme également sûres.
+PB_K_SHRINK = 60.0          # pseudo-GAGNANTS shrinkant le multiplicateur vers 1.0
 PB_M_MIN, PB_M_MAX = 0.60, 1.40
 # WINSORISATION — sans elle, un unique gain aberrant commande la tranche entière.
 # Vécu au premier calcul : le Trio ≥×15 affichait +106 % de ROI et décrochait le
@@ -616,9 +621,15 @@ PB_M_MIN, PB_M_MAX = 0.60, 1.40
 PB_GAIN_CAP = 50.0
 # Un multiplicateur SUPÉRIEUR à 1 pousse à jouer davantage cette tranche : on ne
 # l'accorde qu'avec assez de gagnants pour que le ROI ne soit pas l'histoire de
-# deux ou trois paris. En dessous, la tranche peut être pénalisée (le manque de
+# quelques coups. En dessous, la tranche peut être pénalisée (le manque de
 # gagnants est en soi une information) mais jamais favorisée.
-PB_MIN_WINS_POUR_FAVORISER = 25
+#
+# Seuil relevé à 150 après vérification : Couplé Gagnant ×15-30 affichait +10,9 %
+# sur 836 paris — mais retirer ses 20 meilleurs gains le ramène à -38,8 %. Une
+# cellule à faible taux de réussite ne prouve RIEN de positif à cette échelle ;
+# seules les cellules à forte fréquence (Simple Placé ~37 %, Simple Gagnant ~16 %)
+# accumulent assez de gagnants pour qu'un ROI proche de zéro soit crédible.
+PB_MIN_WINS_POUR_FAVORISER = 150
 
 
 def _pb_key(rapport: float) -> str:
@@ -678,7 +689,7 @@ async def compute_payout_bucket_performance(session: AsyncSession) -> dict:
         if a["n"] >= PB_MIN_PARIS and roi is not None:
             # ROI de -30 % → 0.70, ROI de 0 % → 1.0, borné puis shrinké.
             brut = 1.0 + roi
-            w = a["n"] / (a["n"] + PB_K_SHRINK)
+            w = a["n_wins"] / (a["n_wins"] + PB_K_SHRINK)
             mult = max(PB_M_MIN, min(PB_M_MAX, 1.0 + (brut - 1.0) * w))
             if mult > 1.0 and a["n_wins"] < PB_MIN_WINS_POUR_FAVORISER:
                 mult = 1.0                   # trop peu de gagnants pour encourager
