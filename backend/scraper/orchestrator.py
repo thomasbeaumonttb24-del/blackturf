@@ -25,6 +25,7 @@ import structlog
 from datetime import datetime
 
 from api.config import get_settings
+from services.temps_courses import jour_courses
 from db.database import AsyncSessionLocal
 from scraper.base import make_stealth_browser
 from scraper.sources.pmu import PmuScraper
@@ -1048,8 +1049,9 @@ class BlackTurfOrchestrator:
         try:
             from sqlalchemy import text as sa_text
             async with AsyncSessionLocal() as session:
-                from datetime import date as dt_date
-                today = dt_date.today()
+                # Journée PARISIENNE : en UTC, l'enrichissement des partants du
+                # jour ne démarrait qu'à 02 h heure française (cf. temps_courses).
+                today = jour_courses()
 
                 # Query SQL directe pour éviter le problème de cast SQLAlchemy
                 result = await session.execute(sa_text("""

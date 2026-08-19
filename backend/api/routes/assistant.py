@@ -21,6 +21,7 @@ from api.model_metrics import real_model_metrics
 from api.routes.auth import get_current_user, require_verified_email
 from api.middleware.rate_limit import rate_limit_assistant
 from db.database import get_db
+from services.temps_courses import jour_courses
 from db.models import (
     User, Course, Prediction, ValueBet, Participation, Cheval,
     ModelVersion, BankrollEntry, RaceLearningLog
@@ -109,7 +110,7 @@ async def _execute_tool(
         if tool_name == "get_programme_today":
             q = (
                 select(Course)
-                .where(func.date(Course.date_heure) == date.today())
+                .where(func.date(Course.date_heure) == jour_courses())
                 .order_by(Course.date_heure)
                 .limit(20)
             )
@@ -265,7 +266,7 @@ async def _resolve_course_id(db: AsyncSession, r: int, c: int) -> Optional[str]:
     q = (
         select(Course.course_id)
         .where(
-            func.date(Course.date_heure) == date.today(),
+            func.date(Course.date_heure) == jour_courses(),
             Course.course_id.ilike(f"%{suffix}"),
         )
         .order_by(desc(Course.date_heure))
@@ -574,7 +575,7 @@ async def get_suggestions(
     # Vérifier s'il y a des courses aujourd'hui
     nb_courses = (await db.execute(
         select(func.count(Course.course_id)).where(
-            func.date(Course.date_heure) == date.today()
+            func.date(Course.date_heure) == jour_courses()
         )
     )).scalar() or 0
 
