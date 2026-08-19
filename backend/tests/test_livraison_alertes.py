@@ -81,3 +81,42 @@ async def test_le_rapport_qualite_remonte_le_canal_casse(db: AsyncSession):
     assert rapport["statut_global"] == "critical"
     anomalie = next(a for a in rapport["anomalies"] if a["code"] == "canal_envoi_casse")
     assert "30" in anomalie["message"] and "100" in anomalie["message"]
+
+
+# ── La RAISON de l'échec doit être enregistrée ───────────────────────────────
+async def test_un_envoi_rate_dit_pourquoi(monkeypatch):
+    """115 860 échecs ont été journalisés entre juin et août 2026 avec une colonne
+    `erreur` vide : diagnostiquer imposait de relire les logs conteneur, effacés
+    à chaque redémarrage. Un échec doit porter sa cause."""
+    from services import alerts
+
+    monkeypatch.setattr(alerts.settings, "resend_api_key", "", raising=False)
+    resultat = await alerts.send_email(to="x@y.z", subject="s", html="<p>h</p>")
+
+    assert not resultat, "sans clé d'API, l'envoi ne peut pas réussir"
+    assert resultat.erreur and "RESEND_API_KEY" in resultat.erreur
+
+
+async def test_le_push_sans_cles_vapid_dit_pourquoi(monkeypatch):
+    """Cas réel : 22 345 tentatives, 22 345 échecs, aucune trace — les clés VAPID
+    n'ont jamais été posées en production."""
+    from services import alerts
+
+    monkeypatch.setattr(alerts.settings, "vapid_private_key", "", raising=False)
+    resultat = await alerts.send_web_push({"endpoint": "https://push/x"}, "t", "c")
+
+    assert not resultat
+    assert resultat.erreur and "VAPID" in resultat.erreur
+
+
+async def test_le_resultat_reste_utilisable_comme_un_booleen():
+    """Les appelants existants écrivent `if ok:` — le changement de type ne doit
+    rien casser."""
+    from services.alerts import ResultatEnvoi
+
+    assert bool(ResultatEnvoi(True)) is True
+    assert bool(ResultatEnvoi(False, "raison")) is False
+    if ResultatEnvoi(True):
+        pass
+    else:
+        raise AssertionError("un envoi réussi doit être vrai")

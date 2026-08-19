@@ -5,6 +5,7 @@ Email (Resend) + Web Push (VAPID) + In-app (WebSocket via Redis).
 import json
 import uuid
 import structlog
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -85,16 +86,38 @@ def _abonnement_push(user: User) -> Optional[dict]:
 # ─────────────────────────────────────────────
 # Email (Resend)
 # ─────────────────────────────────────────────
+@dataclass(frozen=True)
+class ResultatEnvoi:
+    """Issue d'un envoi, avec sa RAISON d'échec.
+
+    Les expéditeurs ne renvoyaient qu'un booléen : la colonne `alertes_log.erreur`
+    est donc restée vide sur 115 860 échecs (juin-août 2026), et diagnostiquer la
+    panne demandait de relire les logs conteneur — effacés à chaque redémarrage.
+    Cet objet reste utilisable comme un booléen (`if ok:`) pour ne rien casser
+    chez les appelants, mais transporte de quoi comprendre.
+    """
+    ok: bool
+    erreur: Optional[str] = None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def _raison(resultat) -> Optional[str]:
+    """Raison d'échec d'un envoi, quel que soit le type renvoyé."""
+    return getattr(resultat, "erreur", None)
+
+
 async def send_email(
     to: str,
     subject: str,
     html: str,
     text: Optional[str] = None,
-) -> bool:
+) -> ResultatEnvoi:
     """Envoie un email via Resend API."""
     if not settings.resend_api_key:
         log.warning("alerts.email.no_api_key")
-        return False
+        return ResultatEnvoi(False, "RESEND_API_KEY absente")
 
     payload = {
         "from": f"{settings.email_from_name} <{settings.email_from}>",
@@ -113,10 +136,10 @@ async def send_email(
                 headers={"Authorization": f"Bearer {settings.resend_api_key}"},
             )
             resp.raise_for_status()
-            return True
+            return ResultatEnvoi(True)
     except Exception as e:
         log.error("alerts.email.failed", to=to, error=str(e))
-        return False
+        return ResultatEnvoi(False, f"{type(e).__name__}: {e}"[:400])
 
 
 def _digest_email_html(courses: list[dict], unsubscribe_url: str) -> str:
@@ -172,10 +195,14 @@ def _digest_email_html(courses: list[dict], unsubscribe_url: str) -> str:
 # ─────────────────────────────────────────────
 # Web Push (VAPID)
 # ─────────────────────────────────────────────
-async def send_web_push(subscription: dict, title: str, body: str, data: Optional[dict] = None) -> bool:
+async def send_web_push(subscription: dict, title: str, body: str,
+                        data: Optional[dict] = None) -> ResultatEnvoi:
     """Envoie une notification Web Push via pywebpush."""
     if not settings.vapid_private_key:
-        return False
+        # Cas réel : 22 345 tentatives, 22 345 échecs, aucune trace — les clés
+        # VAPID n'ont jamais été posées en production.
+        log.warning("alerts.push.no_vapid_key")
+        return ResultatEnvoi(False, "VAPID_PRIVATE_KEY absente")
 
     try:
         from pywebpush import webpush, WebPushException
@@ -186,10 +213,10 @@ async def send_web_push(subscription: dict, title: str, body: str, data: Optiona
             vapid_private_key=settings.vapid_private_key,
             vapid_claims={"sub": settings.vapid_subject},
         )
-        return True
+        return ResultatEnvoi(True)
     except Exception as e:
         log.error("alerts.push.failed", error=str(e))
-        return False
+        return ResultatEnvoi(False, f"{type(e).__name__}: {e}"[:400])
 
 
 # ─────────────────────────────────────────────
@@ -314,7 +341,8 @@ async def notify_value_bets(
                     body=f"{noms}{suffixe}",
                     data=payload,
                 )
-                await _log_alerte(session, user.user_id, "value_bet_digest", "push", payload, ok_push)
+                await _log_alerte(session, user.user_id, "value_bet_digest", "push", payload,
+                                  ok_push, _raison(ok_push))
 
     await session.commit()
     log.info("alerts.notify_value_bets", nb_users=len(users),
@@ -422,7 +450,8 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
         abo = _abonnement_push(user)
         if abo:
             ok_push = await send_web_push(abo, title=titre, body=corps, data=payload)
-            await _log_alerte(session, user.user_id, type_alerte, "push", payload, ok_push)
+            await _log_alerte(session, user.user_id, type_alerte, "push", payload,
+                                  ok_push, _raison(ok_push))
 
     # ── 1. Paris personnels réglés ────────────────────────────
     entries = (await session.execute(
@@ -750,7 +779,8 @@ async def send_weekly_best_value_bet(session: AsyncSession):
         # est rendu par utilisateur, pas mutualisé.
         html = _weekly_best_vb_email_html(best, _unsubscribe_url(user.user_id))
         ok_email = await send_email(to=user.email, subject=subject, html=html)
-        await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best, ok_email)
+        await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best,
+                          ok_email, _raison(ok_email))
 
         if user.push_subscription:
             ok_push = await send_web_push(
@@ -759,7 +789,8 @@ async def send_weekly_best_value_bet(session: AsyncSession):
                 body=f"{best['nom_cheval']} gagnant à {best.get('cote', '?')} — rapport officiel pour 10€ : {best.get('gain_reference_10e', '?')}€ (mise incluse)",
                 data=best,
             )
-            await _log_alerte(session, user.user_id, "weekly_best_vb", "push", best, ok_push)
+            await _log_alerte(session, user.user_id, "weekly_best_vb", "push", best,
+                              ok_push, _raison(ok_push))
 
     await session.commit()
     log.info("alerts.weekly_best_vb", nb_users=len(users), course_id=best["course_id"], cheval=best["nom_cheval"])
@@ -839,7 +870,8 @@ async def send_morning_digest(session: AsyncSession):
             subject=f"🏇 BlackTurf — {len(courses_list)} value bets aujourd'hui",
             html=html,
         )
-        await _log_alerte(session, user.user_id, "digest_matin", "email", {"nb_vb": len(courses_list)}, ok)
+        await _log_alerte(session, user.user_id, "digest_matin", "email",
+                          {"nb_vb": len(courses_list)}, ok, _raison(ok))
 
     await session.commit()
     log.info("alerts.morning_digest", nb_users=len(users), nb_vb=len(courses_list))
