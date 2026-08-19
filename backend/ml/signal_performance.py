@@ -377,6 +377,21 @@ RC_K_SHRINK = 12.0          # pseudo-gagnants shrinkant le facteur vers 1.0 (ant
 RC_MIN_WINS = 8             # nb de gagnants min (avec estimé connu) avant d'appliquer un facteur
 RC_F_MIN, RC_F_MAX = 0.40, 1.30   # bornes du facteur (correction prudente)
 
+# ── Calibration des PROBABILITÉS de pari (mesurée le 2026-08-19) ────────────
+# Le modèle annonce systématiquement plus souvent qu'il ne réalise, et l'écart
+# grandit avec le nombre de chevaux à trouver : Simple Gagnant ×1,22 (10,9 %
+# annoncés, 8,9 % réels), Simple Placé ×1,23, Couplé Gagnant ×1,34, Couplé Placé
+# ×1,46, Trio ×2,26 — sur 19 968 paris réglés. L'EV en hérite : EV = p × rapport
+# − 1, donc une proba gonflée de 22 % transforme un vrai −10 % en un +10 % affiché.
+# C'est la cause première du ROI négatif, et la raison pour laquelle les bandes
+# d'EV ne classaient rien (toutes entre −8 % et −9 % de ROI réel).
+PC_MIN_PARIS = 200          # paris réglés minimum sur le type avant de corriger
+PC_K_SHRINK = 150.0         # pseudo-observations shrinkant le facteur vers 1.0
+# On ne corrige QUE vers le bas au-delà de 1.0 : gonfler une probabilité déjà
+# optimiste fabriquerait de faux value bets. Plancher à 0.5 (une proba divisée
+# par deux est déjà une correction massive).
+PC_F_MIN, PC_F_MAX = 0.50, 1.05
+
 
 def _bet_key(type_pari, chevaux) -> tuple:
     """Clé d'un pari = (type, numéros triés) pour matcher plan figé ⋈ bilan réglé."""
@@ -411,12 +426,16 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
         res = resultat if isinstance(resultat, dict) else json.loads(resultat)
         # rapport ESTIMÉ par pari, reconstruit depuis le plan figé (gain_potentiel/mise)
         est: dict = {}
+        proba_annoncee: dict = {}
         for niv in plan_d.get("niveaux", []):
             for p in niv.get("paris", []):
                 mise = float(p.get("mise") or 0)
+                cle = _bet_key(p.get("type"), p.get("chevaux"))
                 if mise > 0:
-                    est[_bet_key(p.get("type"), p.get("chevaux"))] = \
-                        float(p.get("gain_potentiel") or 0) / mise
+                    est[cle] = float(p.get("gain_potentiel") or 0) / mise
+                pr = p.get("probabilite")
+                if isinstance(pr, (int, float)) and 0.0 < float(pr) <= 1.0:
+                    proba_annoncee[cle] = float(pr)
         pa = agg.setdefault(profil, {})
         for p in res.get("paris", []):
             if p.get("statut") == "rembourse":
@@ -425,9 +444,16 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
             if not t:
                 continue
             ta = pa.setdefault(t, {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
-                                   "n": 0, "mise": 0.0, "gain": 0.0})
+                                   "n": 0, "mise": 0.0, "gain": 0.0,
+                                   "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0})
             ta["n"] += 1
             ta["mise"] += float(p.get("mise") or 0)
+            pr = proba_annoncee.get(_bet_key(t, p.get("chevaux")))
+            if pr is not None:
+                ta["n_proba"] += 1
+                ta["sum_proba"] += pr
+                if p.get("statut") == "gagne":
+                    ta["n_gagne_proba"] += 1
             if p.get("statut") == "gagne" and p.get("rapport_reel"):
                 re_ = est.get(_bet_key(t, p.get("chevaux")))
                 ta["gain"] += float(p.get("gain") or 0)
@@ -443,9 +469,29 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
             return float(max(RC_F_MIN, min(RC_F_MAX, 1.0 + (raw - 1.0) * w)))
         return 1.0                                            # échantillon insuffisant → neutre
 
+    def _proba_factor(a: dict) -> float:
+        """Fréquence RÉELLE / probabilité ANNONCÉE, shrinkée et bornée."""
+        n = a.get("n_proba", 0)
+        somme = a.get("sum_proba", 0.0)
+        if n < PC_MIN_PARIS or somme <= 0:
+            return 1.0                                        # jamais de correction à l'aveugle
+        annoncee = somme / n
+        reelle = a.get("n_gagne_proba", 0) / n
+        if annoncee <= 0:
+            return 1.0
+        brut = reelle / annoncee
+        w = n / (n + PC_K_SHRINK)                             # shrink vers 1.0 (anti petit n)
+        return float(max(PC_F_MIN, min(PC_F_MAX, 1.0 + (brut - 1.0) * w)))
+
     def _entry(a: dict) -> dict:
         return {
             "factor": round(_factor(a), 3),
+            "proba_factor": round(_proba_factor(a), 3),
+            "n_proba": a.get("n_proba", 0),
+            "proba_annoncee": (round(a["sum_proba"] / a["n_proba"], 4)
+                               if a.get("n_proba") else None),
+            "proba_reelle": (round(a["n_gagne_proba"] / a["n_proba"], 4)
+                             if a.get("n_proba") else None),
             "n_win": a["n_win"], "n": a["n"],
             "real_mean": round(a["sum_real"] / a["n_win"], 2) if a["n_win"] else None,
             "est_mean": round(a["sum_est"] / a["n_win"], 2) if a["n_win"] else None,
@@ -464,7 +510,8 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
         for t, a in types.items():
             po[t] = _entry(a)
             g = glob.setdefault(t, {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
-                                    "n": 0, "mise": 0.0, "gain": 0.0})
+                                    "n": 0, "mise": 0.0, "gain": 0.0,
+                                    "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0})
             for k in g:
                 g[k] += a[k]
         out["profils"][profil] = po
@@ -526,6 +573,20 @@ def rapport_realization_factor(profil: str | None, type_pari: str | None,
         return f
     g = (calib.get("global") or {}).get(type_pari)
     return float((g or {}).get("factor", 1.0) or 1.0)
+
+
+def proba_realization_factor(type_pari: str | None, calib: dict | None) -> float:
+    """Facteur annoncé→réel de la PROBABILITÉ d'un type de pari.
+
+    Lu sur le POOL GLOBAL uniquement : la fréquence à laquelle un Couplé tombe ne
+    dépend pas du profil qui le joue, et découper par profil diviserait
+    l'échantillon sans rien apprendre de plus. 1.0 (neutre) si la table manque ou
+    si l'échantillon est trop mince — jamais de correction inventée.
+    """
+    if not calib or not type_pari:
+        return 1.0
+    g = (calib.get("global") or {}).get(type_pari)
+    return float((g or {}).get("proba_factor", 1.0) or 1.0)
 
 
 def signal_multiplier(features: dict, perf: dict | None, profil: str | None = None) -> float:

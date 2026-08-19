@@ -461,6 +461,28 @@ def generer_plan(
         except Exception:
             pass
 
+    # CALIBRATION de la PROBABILITÉ, mesurée le 2026-08-19 sur 19 968 paris réglés :
+    # le modèle annonce systématiquement plus souvent qu'il ne réalise (Simple
+    # Gagnant 10,9 % annoncés → 8,9 % réels, Trio 5,3 % → 2,4 %). Comme
+    # EV = proba × rapport − 1, une proba gonflée de 22 % affiche +10 % là où le
+    # réel est −10 % : c'est ce qui rendait les bandes d'EV incapables de trier
+    # (toutes à −8/−9 % de ROI réel) et le ROI global négatif.
+    #
+    # On corrige la proba AVANT l'EV et AVANT les gates, pour que tout l'aval —
+    # sélection, dimensionnement, tranche de rapport — travaille sur une
+    # probabilité qui tient devant les résultats.
+    if rapport_calib:
+        try:
+            from ml.signal_performance import proba_realization_factor
+            for c in cands:
+                fp = proba_realization_factor(c.get("type_pari"), rapport_calib)
+                if fp and fp != 1.0:
+                    c["proba_gain"] = round(float(c["proba_gain"]) * fp, 4)
+                    c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
+                    c["_proba_cal_f"] = round(float(fp), 3)
+        except Exception:
+            pass
+
     selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
                                   respect_montant=respect_montant, ev_band_perf=ev_band_perf)
     if not selected:
