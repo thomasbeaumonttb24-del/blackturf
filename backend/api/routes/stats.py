@@ -1383,8 +1383,12 @@ async def stats_palmares_public(
 
     data = await _palmares_rows(db)
     result = {
-        "top_gains": data["top_gains"][:10],
-        "gagnants": data["gagnants"][:10],
+        # Volumes alignés sur ce que la page track-record sait dérouler via ses
+        # boutons « voir plus » (50 récents / 30 records). Avec l'ancien cap à 10,
+        # un visiteur anonyme recevait exactement 10 lignes : le bouton, conditionné
+        # à `limite < longueur`, ne s'affichait jamais et la liste semblait close.
+        "top_gains": data["top_gains"][:30],
+        "gagnants": data["gagnants"][:50],
         "nb_paris_gagnes": data["n"],
         "nb_courses_gagnantes": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
