@@ -734,7 +734,27 @@ async def refresh_track_record_cache() -> bool:
 
 async def _compute_track_record(db: AsyncSession) -> dict:
     """Calcul complet du track record (~29 s en prod). Ne jamais appeler depuis une
-    requête utilisateur tant qu'une version en cache existe (cf. `track_record`)."""
+    requête utilisateur tant qu'une version en cache existe (cf. `track_record`).
+
+    COHORTE MESURÉE — une course compte dans les taux publiés si, et seulement si,
+    sa prédiction existait AVANT le départ (`p.created_at < c.date_heure`) : c'est
+    la garde anti-backfill, la même que celle du palmarès des gains.
+
+    `is_replayable` n'est VOLONTAIREMENT pas exigé (retiré le 19/08). Ce drapeau
+    (migration 0030) distingue le snapshot immuable — rejouable en backtest — de la
+    ligne `predictions` héritée, mutable : c'est une propriété de REJOUABILITÉ, pas
+    d'intégrité temporelle. L'exiger réduisait le palmarès PUBLIC aux courses
+    postérieures au 18/08 — 44 courses, dont 4 en monté — alors que 3 627 courses
+    pré-course sont mesurées depuis le 06/06 : la page annonçait « 19 courses
+    analysées » en attelé pour 1 598 réelles.
+
+    Pourquoi la cohorte longue n'est pas contaminée : `race_learning_log` est écrit
+    JUSTE APRÈS l'arrivée à partir des prédictions du moment (le cycle de prédiction
+    s'arrête à T-10 min), donc une mutation ultérieure d'une ligne `predictions` ne
+    peut pas réécrire un rang déjà journalisé. Contrôle en base le 19/08 : la cohorte
+    héritée mesure 55-66 % de Top-3 et 31,9 % de favoris gagnants, contre 62-75 % et
+    34,8 % pour la cohorte rejouable — l'historique long est PLUS SÉVÈRE, pas gonflé.
+    Le compte strict reste publié à part (`global.nb_courses_rejouables`)."""
     # ── 1. Précision globale depuis race_learning_log ─────────
     # Agrégats en SQL (PAS de chargement de toute la table en mémoire : elle grossit
     # d'une ligne par course analysée → des dizaines de milliers de lignes = page lente).
@@ -744,7 +764,16 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                COUNT(*) FILTER (WHERE gagnant_rang_predit = 1)                AS top1,
                COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
                                   AND gagnant_rang_predit <= 3)               AS top3,
-               COUNT(*) FILTER (WHERE was_surprise)                           AS surprises
+               COUNT(*) FILTER (WHERE was_surprise)                           AS surprises,
+               -- Repère « hasard » CALCULÉ, jamais posé à la main : espérance d'un
+               -- tirage au sort sur le champ réel de chaque course (3 chevaux sur
+               -- nb_partants pour le Top-3, 1 sur nb_partants pour le Top-1). Sans
+               -- lui, « 59,8 % » ne dit pas au lecteur ce qu'il bat.
+               AVG(CASE WHEN nb_partants > 0
+                        THEN LEAST(3.0, nb_partants::numeric) / nb_partants END)  AS hasard3,
+               AVG(CASE WHEN nb_partants > 0
+                        THEN 1.0 / nb_partants END)                              AS hasard1,
+               AVG(nb_partants)                                                  AS partants
         FROM race_learning_log
         WHERE EXISTS (
             SELECT 1 FROM prediction_evaluation p
@@ -752,7 +781,6 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             WHERE p.course_id = race_learning_log.course_id
               AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
               AND p.created_at < c.date_heure
-              AND p.is_replayable = true
         )
     """))).first()
     nb_total = int(_glob.nb or 0)
@@ -761,17 +789,38 @@ async def _compute_track_record(db: AsyncSession) -> dict:
     # la page publique affiche un pourcentage sans dire qu'il porte sur quelques jours.
     _depuis = (await db.execute(text("""
         SELECT MIN(c.date_heure)
-        FROM prediction_evaluation p
-        JOIN courses c ON c.course_id = p.course_id
-        WHERE p.is_replayable = true
-          AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
-          AND p.created_at < c.date_heure
+        FROM race_learning_log r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE c.date_heure IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              WHERE p.course_id = r.course_id
+                AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+          )
     """))).scalar()
     mesure_depuis = _depuis.date().isoformat() if _depuis else None
+    # Sous-ensemble STRICT : courses dont le pronostic est figé dans un snapshot
+    # immuable (rejouable à l'identique en backtest). Publié à côté du compte
+    # mesuré pour que « vérifiable » garde un chiffre, sans amputer l'historique.
+    nb_rejouables = int((await db.execute(text("""
+        SELECT COUNT(*) FROM race_learning_log r
+        WHERE EXISTS (
+            SELECT 1 FROM prediction_evaluation p
+            JOIN courses c ON c.course_id = p.course_id
+            WHERE p.course_id = r.course_id
+              AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+              AND p.created_at < c.date_heure
+              AND p.is_replayable = true
+        )
+    """))).scalar() or 0)
     brier_moyen = round(float(_glob.brier), 4) if _glob.brier is not None else 0.0
     accuracy_top1 = round(int(_glob.top1 or 0) / nb_total * 100, 1) if nb_total else 0.0
     accuracy_top3 = round(int(_glob.top3 or 0) / nb_total * 100, 1) if nb_total else 0.0
     nb_surprises = int(_glob.surprises or 0)
+    hasard_top3 = round(float(_glob.hasard3) * 100, 1) if _glob.hasard3 is not None else None
+    hasard_top1 = round(float(_glob.hasard1) * 100, 1) if _glob.hasard1 is not None else None
+    partants_moyen = round(float(_glob.partants), 1) if _glob.partants is not None else None
 
     # ── 2. Par jour (7 derniers jours, fuseau Europe/Paris) ──
     # Coupure de journée à minuit heure française (pas UTC) → group by date FR en SQL.
@@ -804,7 +853,6 @@ async def _compute_track_record(db: AsyncSession) -> dict:
               WHERE p.course_id = race_learning_log.course_id
                 AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
                 AND p.created_at < c.date_heure
-                AND p.is_replayable = true
           )
         GROUP BY 1
     """), {"since": _since.replace(tzinfo=None)})).all()
@@ -826,7 +874,9 @@ async def _compute_track_record(db: AsyncSession) -> dict:
         SELECT COALESCE(NULLIF(discipline, ''), 'Autre')                      AS d,
                COUNT(*)                                                       AS nb,
                COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
-                                  AND gagnant_rang_predit <= 3)               AS top3
+                                  AND gagnant_rang_predit <= 3)               AS top3,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit = 1)                AS top1,
+               AVG(brier_score)                                               AS brier
         FROM race_learning_log
         WHERE EXISTS (
             SELECT 1 FROM prediction_evaluation p
@@ -834,7 +884,6 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             WHERE p.course_id = race_learning_log.course_id
               AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
               AND p.created_at < c.date_heure
-              AND p.is_replayable = true
         )
         GROUP BY 1
     """))).all()
@@ -843,8 +892,46 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             "discipline": r.d,
             "nb_courses": int(r.nb or 0),
             "accuracy_top3": round(int(r.top3 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+            "accuracy_top1": round(int(r.top1 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+            "brier_moyen": round(float(r.brier), 4) if r.brier is not None else None,
         }
         for r in _disc
+    ]
+    by_discipline.sort(key=lambda d: d["nb_courses"], reverse=True)
+
+    # ── 3b. Tendance 30 jours ─────────────────────────────────
+    # `by_day` reste sur 7 jours (l'accueil l'affiche en 7 barres) ; la page palmarès
+    # a besoin d'une série assez longue pour qu'une tendance soit lisible. Les jours
+    # SANS course mesurée sont absents du tableau — le front les affiche en trou
+    # plutôt qu'en 0 %, qui se lirait comme un échec du modèle.
+    _since30 = datetime.now(timezone.utc) - timedelta(days=31)
+    _t30 = (await db.execute(text("""
+        SELECT (analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Paris')::date AS jour,
+               COUNT(*)                                                       AS nb,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
+                                  AND gagnant_rang_predit <= 3)               AS top3,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit = 1)                AS top1
+        FROM race_learning_log
+        WHERE analyzed_at IS NOT NULL AND analyzed_at >= :since
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              JOIN courses c ON c.course_id = p.course_id
+              WHERE p.course_id = race_learning_log.course_id
+                AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+          )
+        GROUP BY 1
+        ORDER BY 1
+    """), {"since": _since30.replace(tzinfo=None)})).all()
+    tendance_30j = [
+        {
+            "date": r.jour.isoformat(),
+            "jour": r.jour.strftime("%d/%m"),
+            "nb_predictions": int(r.nb or 0),
+            "accuracy_top3": round(int(r.top3 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+            "accuracy_top1": round(int(r.top1 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+        }
+        for r in _t30
     ]
 
     # ── 4. Meilleurs pronostics (gagnant prédit rang 1, cote > 5) ─
@@ -861,7 +948,6 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             PredictionEvaluation.created_at.is_not(None),
             Course.date_heure.is_not(None),
             PredictionEvaluation.created_at < Course.date_heure,
-            PredictionEvaluation.is_replayable.is_(True),
         )
         .order_by(PredictionEvaluation.created_at.desc())
         .limit(10)
@@ -902,7 +988,6 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             ValueBet.detecte_a < Course.date_heure,
             PredictionEvaluation.created_at.is_not(None),
             PredictionEvaluation.created_at < Course.date_heure,
-            PredictionEvaluation.is_replayable.is_(True),
         )
         .limit(2000)
     )
@@ -958,7 +1043,6 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             PredictionEvaluation.created_at.is_not(None),
             Course.date_heure.is_not(None),
             PredictionEvaluation.created_at < Course.date_heure,
-            PredictionEvaluation.is_replayable.is_(True),
         )
         .order_by(PredictionEvaluation.created_at.desc())
         .limit(2000)
@@ -1076,7 +1160,8 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                 SELECT p.participation_id FROM prediction_evaluation p
                 JOIN courses c ON c.course_id = p.course_id
                 WHERE p.rang_predit = 1 AND c.statut = 'termine'
-                  AND p.is_replayable = true
+                  AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                  AND p.created_at < c.date_heure
             ),
             ch AS MATERIALIZED (
                 SELECT f.participation_id,
@@ -1111,10 +1196,17 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             "accuracy_top3": accuracy_top3,
             "brier_moyen": brier_moyen,
             "nb_courses_analysees": nb_total,
+            # Sous-ensemble rejouable à l'identique (snapshots immuables) : sert la
+            # mention « vérifiable » sans réduire l'historique mesuré à ce sous-ensemble.
+            "nb_courses_rejouables": nb_rejouables,
             # Date de la plus ancienne course de la cohorte mesurée (ISO) — sert à
             # dire honnêtement sur quelle période portent les taux affichés.
             "mesure_depuis": mesure_depuis,
             "nb_surprises": nb_surprises,
+            # Référence : ce que rapporterait un tirage au sort sur les mêmes courses.
+            "hasard_top3": hasard_top3,
+            "hasard_top1": hasard_top1,
+            "nb_partants_moyen": partants_moyen,
             "favori_win_rate": favori_win_rate,
             "favori_place_rate": favori_place_rate,
             "nb_favoris_evalues": fav_total,
@@ -1125,6 +1217,7 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             "favori_net": net_fav,
         },
         "by_day": daily_list,
+        "tendance_30j": tendance_30j,
         "by_discipline": by_discipline,
         "best_pronostics": best_pronostics,
         "derniers_pronostics": derniers_pronostics,
