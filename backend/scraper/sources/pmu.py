@@ -15,6 +15,7 @@ import structlog
 from datetime import datetime, date, timezone
 from typing import Optional
 
+from services.temps_courses import jour_courses
 from scraper.base import CourseScrape, PartantScrape, ResultatScrape, PoolPMUScrape, BaseScraper, human_delay, get_circuit_breaker
 
 log = structlog.get_logger(source="pmu")
@@ -40,12 +41,12 @@ def _fmt_date_pmu(course_date=None) -> str:
     epoch ms (heureDepart PMU), date/datetime. Tolérant : sert juste à bâtir l'URL.
     """
     if course_date is None:
-        return date.today().strftime("%d%m%Y")
+        return jour_courses().strftime("%d%m%Y")
     if isinstance(course_date, str):
         return (course_date if (len(course_date) == 8 and course_date.isdigit())
-                else date.today().strftime("%d%m%Y"))
+                else jour_courses().strftime("%d%m%Y"))
     if isinstance(course_date, bool):  # garde-fou : bool est un int en Python
-        return date.today().strftime("%d%m%Y")
+        return jour_courses().strftime("%d%m%Y")
     if isinstance(course_date, (int, float)):
         return datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
     return course_date.strftime("%d%m%Y")
@@ -199,7 +200,7 @@ class PmuScraper(BaseScraper):
         target_date : date|datetime|str(ddmmyyyy). Défaut = aujourd'hui. Permet le
         BACKFILL historique (programme + arrivées d'une date passée)."""
         if target_date is None:
-            today_str = date.today().strftime("%d%m%Y")
+            today_str = jour_courses().strftime("%d%m%Y")
         elif isinstance(target_date, str) and len(target_date) == 8 and target_date.isdigit():
             today_str = target_date
         else:
@@ -330,7 +331,7 @@ class PmuScraper(BaseScraper):
         BACKFILL : le programme d'une date passée renvoie participants=[] en inline,
         mais l'endpoint /participants dédié les contient."""
         if course_date is None:
-            d = date.today().strftime("%d%m%Y")
+            d = jour_courses().strftime("%d%m%Y")
         elif isinstance(course_date, str) and len(course_date) == 8 and course_date.isdigit():
             d = course_date
         else:
@@ -356,7 +357,7 @@ class PmuScraper(BaseScraper):
             {date_ms, hippodrome, discipline, distance, allocation, nb_partants,
              position, ecart, reduction_km, jockey, adversaires:[noms]}, ...]}]
         """
-        d = date.today().strftime("%d%m%Y")
+        d = jour_courses().strftime("%d%m%Y")
         url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/performances-detaillees/pretty"
         await human_delay(0.3, 0.8)
         data = await self._fetch_json(url)
@@ -560,7 +561,7 @@ class PmuScraper(BaseScraper):
         Récupère les cotes en temps réel.
         Retourne {numero_partant: cote}.
         """
-        d = date.today().strftime("%d%m%Y")
+        d = jour_courses().strftime("%d%m%Y")
         url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/participants?specialisation=INTERNET"
         data = await self._fetch_json(url)
         if not data:
@@ -584,7 +585,7 @@ class PmuScraper(BaseScraper):
         """
         from scraper.base import PoolPMUScrape
         c_num = int(course_id.split("C")[-1]) if "C" in str(course_id) else 1
-        d = date.today().strftime("%d%m%Y")
+        d = jour_courses().strftime("%d%m%Y")
         # Endpoint masse-enjeu : liste de {typePari, totalEnjeu (centimes)}.
         url = f"{BASE}/programme/{d}/R{reunion_id}/C{c_num}/masse-enjeu"
         data = await self._fetch_json(url)

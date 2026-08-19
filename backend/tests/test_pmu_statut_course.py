@@ -130,5 +130,8 @@ def test_fmt_date_pmu_datetime():
 
 
 def test_fmt_date_pmu_iso_retombe_sur_aujourdhui():
-    from datetime import date
-    assert _fmt_date_pmu("2026-06-23") == date.today().strftime("%d%m%Y")
+    """« Aujourd'hui » = la journée de courses PARISIENNE, pas la date UTC du
+    conteneur : ce test comparait à `date.today()` et passait en local (machine
+    à Paris) tout en échouant dans l'image de prod (UTC) entre minuit et 2 h."""
+    from services.temps_courses import jour_courses
+    assert _fmt_date_pmu("2026-06-23") == jour_courses().strftime("%d%m%Y")

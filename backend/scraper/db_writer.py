@@ -19,6 +19,7 @@ from db.models import (
     PenetrometreLog, TempsPassage, PronosticPresse,
     AssociationJockeyEntraineur, StatsJockey, StatsEntraineur,
 )
+from services.temps_courses import jour_courses
 from scraper.base import (
     CourseScrape, PartantScrape, ResultatScrape,
     CoteBookmakerScrape, PoolPMUScrape, SuspensionScrape,
@@ -133,9 +134,23 @@ async def upsert_hippodrome(session: AsyncSession, nom: str, pays: str | None = 
     return result.scalar_one()
 
 
+def _jour_de_la_course(course: CourseScrape) -> date:
+    """Jour de la réunion, lu sur le course_id (`ddmmyyyyRxCy`) plutôt que sur
+    l'horloge : le backfill écrit des journées passées, et `date.today()` en UTC
+    se trompe de jour entre minuit et 2 h à Paris. Repli sur la journée de courses
+    parisienne si le préfixe est absent (identifiant legacy sans date)."""
+    prefixe = str(course.course_id)[:8]
+    if prefixe.isdigit():
+        try:
+            return datetime.strptime(prefixe, "%d%m%Y").date()
+        except ValueError:
+            pass
+    return jour_courses()
+
+
 async def upsert_reunion(session: AsyncSession, course: CourseScrape, hippodrome_id: str) -> None:
     """Upsert réunion."""
-    date_obj = date.today()
+    date_obj = _jour_de_la_course(course)
     stmt = pg_insert(Reunion).values(
         reunion_id=course.reunion_id,
         date=date_obj,

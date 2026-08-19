@@ -24,6 +24,7 @@ from db.models import (
 )
 from db.models import User
 from services.course_resolution import STATUTS_NON_COURUES
+from services.temps_courses import jour_courses
 from ml.portfolio import BetPortfolioEngine
 from ml.adaptive_learning import get_adaptive_learning
 from ml.monte_carlo import MonteCarloSimulator
@@ -494,9 +495,14 @@ async def get_programme(
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(rate_limit_public),
 ):
-    """Programme du jour (ou date fournie). Public. Cache Redis 120s."""
+    """Programme du jour (ou date fournie). Public. Cache Redis 120s.
+
+    Sans paramètre, « le jour » est le jour civil à PARIS : le conteneur tourne
+    en UTC, donc `date.today()` renvoyait la veille entre minuit et 2 h du matin
+    — soit un programme vide au moment précis où la journée vient de changer.
+    """
     import json
-    target = jour or date.today()
+    target = jour or jour_courses()
 
     try:
         redis = await get_redis()
@@ -561,10 +567,18 @@ async def get_programme(
         reunions=list(reunions_dict.values()),
     )
 
-    # Stocker en cache — TTL plus court si c'est aujourd'hui (données live)
+    # Stocker en cache — TTL plus court si c'est aujourd'hui (données live).
+    # Une journée VIDE n'est jamais mise en cache une heure : « vide » veut dire
+    # « pas encore importée » bien plus souvent que « pas de courses ce jour-là ».
+    # Vécu le 2026-08-20 : le programme du jour était déjà en base (37 courses)
+    # mais l'API a continué à répondre 0 pendant une heure, parce qu'une requête
+    # antérieure de quelques minutes avait figé le vide.
     try:
         redis = await get_redis()
-        ttl = 60 if target == date.today() else 3600   # 1 min live, 1h passé
+        if not rows or target == jour_courses():
+            ttl = 60          # jour courant, ou journée encore vide : on re-regarde vite
+        else:
+            ttl = 3600        # journée passée et servie : elle ne bougera plus
         await redis.setex(cache_key, ttl, json.dumps(result.model_dump(), default=str))
     except Exception as e:
         log.debug("courses.programme_cache_write_failed", error=str(e))
