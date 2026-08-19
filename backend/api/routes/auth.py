@@ -8,7 +8,7 @@ import structlog
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -27,7 +27,91 @@ log = structlog.get_logger()
 
 router = APIRouter()
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+# auto_error=False : l'absence d'en-tête Authorization n'est plus une erreur, on
+# retombe sur le cookie httpOnly (cf. _access_token).
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+# ─────────────────────────────────────────────
+# Cookies de session
+# ─────────────────────────────────────────────
+# Les jetons vivaient dans localStorage : lisibles par n'importe quel script de la
+# page, donc exfiltrables par une seule XSS — et le refresh vaut 7 jours. On les
+# pose désormais en cookies httpOnly, invisibles pour JavaScript.
+#
+# SameSite=Lax suffit contre le CSRF ici : le navigateur n'envoie pas ces cookies
+# sur une requête POST/PUT/DELETE déclenchée depuis un AUTRE site. blackturf.fr et
+# api.blackturf.fr partagent le même site déclarable (blackturf.fr), donc le
+# front continue de les envoyer normalement.
+ACCESS_COOKIE = "access_token"
+REFRESH_COOKIE = "refresh_token"
+# Témoin LISIBLE par le front (aucune valeur secrète : juste "1"). Les cookies de
+# session étant httpOnly, le navigateur ne peut plus savoir s'il a une session ;
+# sans ce témoin, chaque visiteur anonyme déclencherait un /auth/me en 401 à
+# chaque chargement de page.
+SESSION_HINT_COOKIE = "bt_session"
+# Le cookie de refresh n'est utile QUE sur les routes d'authentification : le
+# restreindre réduit d'autant sa surface d'exposition.
+REFRESH_COOKIE_PATH = "/api/v1/auth"
+
+
+def _cookie_secure() -> bool:
+    """`Secure` en production seulement — sinon le dev en http:// perdrait le cookie."""
+    return settings.environment == "production"
+
+
+def _hint_cookie_domain() -> Optional[str]:
+    """Domaine parent partagé par le front et l'API, en production uniquement.
+
+    En local (localhost, ports différents) un attribut Domain casserait le cookie ;
+    on le laisse alors lié à l'hôte.
+    """
+    if settings.environment != "production":
+        return None
+    hote = settings.api_url.split("//")[-1].split("/")[0].split(":")[0]
+    morceaux = hote.split(".")
+    return "." + ".".join(morceaux[-2:]) if len(morceaux) >= 2 else None
+
+
+def _set_auth_cookies(response: Response, tokens: "TokenResponse") -> None:
+    response.set_cookie(
+        ACCESS_COOKIE, tokens.access_token,
+        max_age=settings.access_token_expire_minutes * 60,
+        httponly=True, secure=_cookie_secure(), samesite="lax", path="/",
+    )
+    response.set_cookie(
+        REFRESH_COOKIE, tokens.refresh_token,
+        max_age=settings.refresh_token_expire_days * 86400,
+        httponly=True, secure=_cookie_secure(), samesite="lax",
+        path=REFRESH_COOKIE_PATH,
+    )
+    # Le témoin est posé sur le DOMAINE PARENT : le front tourne sur blackturf.fr
+    # et ne verrait jamais un cookie limité à api.blackturf.fr. Les jetons, eux,
+    # restent volontairement liés au seul hôte de l'API — un sous-domaine compromis
+    # ne doit pas les recevoir.
+    response.set_cookie(
+        SESSION_HINT_COOKIE, "1",
+        max_age=settings.refresh_token_expire_days * 86400,
+        httponly=False, secure=_cookie_secure(), samesite="lax", path="/",
+        domain=_hint_cookie_domain(),
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(ACCESS_COOKIE, path="/")
+    response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
+    response.delete_cookie(SESSION_HINT_COOKIE, path="/", domain=_hint_cookie_domain())
+
+
+async def _access_token(
+    request: Request,
+    header_token: Optional[str] = Depends(oauth2_scheme),
+) -> Optional[str]:
+    """Jeton d'accès, depuis l'en-tête Authorization ou le cookie httpOnly.
+
+    L'en-tête reste accepté : il sert aux clients non navigateur (scripts, tests)
+    et laisse les sessions déjà ouvertes fonctionner le temps qu'elles basculent.
+    """
+    return header_token or request.cookies.get(ACCESS_COOKIE)
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
@@ -114,7 +198,7 @@ def create_tokens(user_id: str, plan: str) -> TokenResponse:
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token: Optional[str] = Depends(_access_token),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     credentials_exc = HTTPException(
@@ -122,6 +206,8 @@ async def get_current_user(
         detail="Token invalide ou expiré",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if not token:
+        raise credentials_exc
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
         if payload.get("type") != "access":
@@ -155,7 +241,8 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
 # Routes
 # ─────────────────────────────────────────────
 @router.post("/register", response_model=TokenResponse)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db),
+async def register(body: RegisterRequest, response: Response,
+                   db: AsyncSession = Depends(get_db),
                    _rl: None = Depends(rate_limit_auth)):
     result = await db.execute(select(User).where(User.email == body.email))
     if result.scalar_one_or_none():
@@ -197,11 +284,14 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db),
     except Exception as e:
         log.warning("auth.register.verify_email_failed", error=str(e))
 
-    return create_tokens(user.user_id, user.plan)
+    tokens = create_tokens(user.user_id, user.plan)
+    _set_auth_cookies(response, tokens)
+    return tokens
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    response: Response,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(rate_limit_auth),
@@ -215,13 +305,34 @@ async def login(
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     log.info("auth.login", user_id=user.user_id)
-    return create_tokens(user.user_id, user.plan)
+    tokens = create_tokens(user.user_id, user.plan)
+    _set_auth_cookies(response, tokens)
+    return tokens
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    """Efface les cookies de session. Le front ne peut pas le faire lui-même :
+    des cookies httpOnly sont, par construction, hors de portée de JavaScript."""
+    _clear_auth_cookies(response)
+    return {"ok": True}
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh(
+    request: Request,
+    response: Response,
+    body: Optional[RefreshRequest] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    # Le jeton vient du cookie httpOnly ; le corps reste accepté pour les clients
+    # non navigateur ET pour la bascule des sessions encore stockées côté client,
+    # qui échangent ainsi leur ancien jeton contre des cookies.
+    refresh_token = (body.refresh_token if body else None) or request.cookies.get(REFRESH_COOKIE)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Token de rafraîchissement absent")
     try:
-        payload = jwt.decode(body.refresh_token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(refresh_token, settings.secret_key, algorithms=[settings.jwt_algorithm])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Token invalide")
         user_id = payload.get("sub")
@@ -238,7 +349,9 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Utilisateur introuvable")
-    return create_tokens(user.user_id, user.plan)
+    tokens = create_tokens(user.user_id, user.plan)
+    _set_auth_cookies(response, tokens)
+    return tokens
 
 
 async def _refresh_revoked(user_id: Optional[str], iat) -> bool:
@@ -265,7 +378,8 @@ async def _refresh_revoked(user_id: Optional[str], iat) -> bool:
 
 
 @router.post("/google", response_model=TokenResponse)
-async def google_oauth(body: GoogleCallbackRequest, db: AsyncSession = Depends(get_db)):
+async def google_oauth(body: GoogleCallbackRequest, response: Response,
+                       db: AsyncSession = Depends(get_db)):
     """Échange un code Google OAuth contre des tokens BlackTurf."""
     google_client_id = getattr(settings, "google_client_id", "")
     google_client_secret = getattr(settings, "google_client_secret", "")
@@ -332,7 +446,9 @@ async def google_oauth(body: GoogleCallbackRequest, db: AsyncSession = Depends(g
     await db.commit()
     await db.refresh(user)
     log.info("auth.google", user_id=user.user_id, email=user.email)
-    return create_tokens(user.user_id, user.plan)
+    tokens = create_tokens(user.user_id, user.plan)
+    _set_auth_cookies(response, tokens)
+    return tokens
 
 
 @router.get("/me", response_model=UserMeResponse)

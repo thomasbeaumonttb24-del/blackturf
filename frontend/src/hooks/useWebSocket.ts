@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getAccessToken } from "@/lib/auth";
+import { hasSessionHint } from "@/lib/auth";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
 
@@ -15,20 +15,19 @@ export function useWebSocket(path: string, enabled = true) {
 
   const connect = useCallback(() => {
     if (!enabled || closingRef.current) return;
-    const token = getAccessToken();
-    if (!token) return;
+    // Pas de session ouverte → inutile d'ouvrir une socket qui sera fermée en 4401.
+    if (!hasSessionHint()) return;
 
-    // Token NON exposé dans l'URL (les query strings finissent dans les access logs
-    // des proxies = fuite de credential). Envoyé en 1er message après ouverture.
+    // Le jeton n'est plus accessible en JavaScript (cookie httpOnly) : le navigateur
+    // l'envoie de lui-même dans la poignée de main, comme pour toute requête vers
+    // l'API. Rien ne transite donc par l'URL (les query strings finissent dans les
+    // access logs des proxies = fuite de credential) ni par un message applicatif.
     const url = `${WS_URL}${path}`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => {
       attemptRef.current = 0; // connexion OK → reset du backoff
-      try {
-        ws.send(JSON.stringify({ type: "auth", token }));
-      } catch {}
       setConnected(true);
     };
     ws.onmessage = (e) => {

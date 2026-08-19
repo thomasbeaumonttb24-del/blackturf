@@ -2,55 +2,61 @@ import axios from "axios";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// `withCredentials` : la session vit dans des cookies httpOnly posés par l'API.
+// Sans ce drapeau, axios ne les enverrait pas (l'API est sur un sous-domaine) et
+// chaque requête partirait anonyme.
 export const api = axios.create({
   baseURL: `${API_URL}/api/v1`,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true,
   timeout: 15000, // sans timeout, une requête peut pendre indéfiniment (spinner infini)
 });
 
 // Refresh partagé (single-flight) : si N requêtes tombent en 401 en même temps,
 // on ne déclenche qu'UN seul POST /auth/refresh, sinon cascade de refresh concurrents
 // qui invalident le refresh token et déconnectent l'utilisateur.
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<void> | null = null;
 
-// Attach JWT from localStorage (client-side only)
+/** Échange le cookie de refresh contre un nouveau cookie d'accès. */
+export function refreshSession(legacyRefreshToken?: string): Promise<void> {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post(
+        `${API_URL}/api/v1/auth/refresh`,
+        // Corps envoyé UNIQUEMENT pour convertir une session d'avant les cookies.
+        legacyRefreshToken ? { refresh_token: legacyRefreshToken } : undefined,
+        { withCredentials: true },
+      )
+      .then(() => undefined)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
 if (typeof window !== "undefined") {
-  api.interceptors.request.use((config) => {
-    const token = localStorage.getItem("access_token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  });
-
-  // Auto-refresh on 401 (single-flight + flag _retry anti-boucle)
+  // Auto-refresh on 401 (single-flight + flag _retry anti-boucle). Plus aucun jeton
+  // n'est manipulé ici : le cookie renvoyé par /auth/refresh suffit, et la requête
+  // rejouée le porte automatiquement.
   api.interceptors.response.use(
     (r) => r,
     async (error) => {
       const original = error.config as (typeof error.config & { _retry?: boolean }) | undefined;
-      if (error.response?.status === 401 && original && !original._retry) {
-        const refresh = localStorage.getItem("refresh_token");
-        if (refresh) {
-          original._retry = true; // ne ré-essaie qu'une fois (évite la boucle si re-401)
-          try {
-            if (!refreshPromise) {
-              refreshPromise = axios
-                .post(`${API_URL}/api/v1/auth/refresh`, { refresh_token: refresh })
-                .then((res) => {
-                  const { access_token } = res.data;
-                  localStorage.setItem("access_token", access_token);
-                  return access_token as string;
-                })
-                .finally(() => {
-                  refreshPromise = null;
-                });
-            }
-            const access_token = await refreshPromise;
-            original.headers.Authorization = `Bearer ${access_token}`;
-            return api(original);
-          } catch {
-            localStorage.removeItem("access_token");
-            localStorage.removeItem("refresh_token");
+      const url: string = original?.url ?? "";
+      // Ne jamais tenter de rafraîchir la session sur les routes d'authentification
+      // elles-mêmes : un mot de passe refusé (401 sur /auth/login) ne doit pas
+      // déclencher un refresh puis une redirection.
+      const estRouteAuth = url.includes("/auth/login") || url.includes("/auth/refresh");
+      if (error.response?.status === 401 && original && !original._retry && !estRouteAuth) {
+        original._retry = true; // ne ré-essaie qu'une fois (évite la boucle si re-401)
+        try {
+          await refreshSession();
+          return api(original);
+        } catch {
+          // Session morte : on nettoie le profil affiché et on renvoie au login.
+          localStorage.removeItem("user");
+          if (!window.location.pathname.startsWith("/login")) {
             window.location.href = "/login";
           }
         }
@@ -69,6 +75,8 @@ export const authApi = {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     }),
   me: () => api.get("/auth/me"),
+  // Seule l'API peut effacer un cookie httpOnly.
+  logout: () => api.post("/auth/logout"),
   updateMe: (data: Record<string, unknown>) => api.patch("/auth/me", data),
   savePushSub: (sub: object) => api.put("/auth/push-subscription", sub),
 };

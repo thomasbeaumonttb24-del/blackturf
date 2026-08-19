@@ -6,7 +6,7 @@ import { Send, Loader2, Bot, User, Zap, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useRequireAuth } from "@/hooks/useAuth";
-import { getAccessToken } from "@/lib/auth";
+
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import useSWR from "swr";
@@ -75,13 +75,12 @@ export default function AssistantPage() {
     ].map((m) => ({ role: m.role, content: m.content }));
 
     try {
-      const token = getAccessToken();
+      // `credentials: "include"` : le flux SSE passe par fetch() et non par axios,
+      // il faut donc lui demander explicitement d'envoyer le cookie de session.
       const response = await fetch(`${API_URL}/api/v1/assistant/chat`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ messages: history, stream: true }),
       });
 

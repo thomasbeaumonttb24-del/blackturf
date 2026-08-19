@@ -114,7 +114,17 @@ async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None
       des proxies = fuite de credential).
     - Voie LEGACY (dépréciée) : token en query string — conservée le temps qu'un
       ancien front en cache se reconnecte. À retirer une fois le front à jour partout.
+
+    Depuis le passage aux cookies httpOnly, le jeton n'est plus lisible en
+    JavaScript : le navigateur l'envoie de lui-même dans la poignée de main WS
+    (même site), c'est donc la voie NORMALE désormais — les deux autres ne servent
+    plus qu'aux clients non navigateur et aux onglets pas encore rechargés.
     """
+    cookie_token = websocket.cookies.get("access_token")
+    if cookie_token:
+        user_id = await _get_user_from_token(cookie_token)
+        if user_id:
+            return user_id
     if token_query:
         return await _get_user_from_token(token_query)
     try:

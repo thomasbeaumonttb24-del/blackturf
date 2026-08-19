@@ -62,6 +62,11 @@ def _make_ws():
     ws = AsyncMock()
     ws.accept = AsyncMock(return_value=None)
     ws.receive_text = AsyncMock(side_effect=asyncio.TimeoutError)
+    # `cookies` est un vrai dict sur un WebSocket Starlette. Sans cette ligne,
+    # AsyncMock en fabrique une coroutine et l'authentification par cookie
+    # (voie normale depuis le passage aux cookies httpOnly) reçoit un objet
+    # illisible au lieu d'une absence de cookie.
+    ws.cookies = {}
 
     ws.sent = []
     async def _send_json(payload):
@@ -95,6 +100,23 @@ def _token_for(user_id: str) -> str:
     from datetime import timedelta
     from api.routes.auth import _create_token
     return _create_token({"sub": user_id, "type": "access"}, timedelta(minutes=30))
+
+
+@pytest.mark.asyncio
+async def test_le_cookie_authentifie_la_socket(db, monkeypatch):
+    """Le jeton n'est plus lisible en JavaScript : le front ne peut donc plus
+    l'envoyer ni en query string ni en premier message. C'est le navigateur qui
+    joint le cookie à la poignée de main."""
+    _patch_session_factory(monkeypatch, db)
+    user_id = await _create_user(db, "free")
+    ws = _make_ws()
+    ws.cookies = {"access_token": _token_for(user_id)}
+
+    await ws_value_bets(ws, token="")
+
+    # Plan gratuit → refus 4403 : la socket a bien été AUTHENTIFIÉE par le cookie
+    # (sans cela le refus serait 4401, faute d'identité).
+    assert ws.closed_with == [4403]
 
 
 # ─────────────────────────────────────────────
