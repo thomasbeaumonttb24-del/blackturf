@@ -1,5 +1,22 @@
 import axios from "axios";
 
+declare module "axios" {
+  export interface AxiosRequestConfig {
+    /**
+     * Requête dont un 401 est un cas NORMAL : la page appelle un endpoint réservé
+     * puis retombe d'elle-même sur une version publique. L'intercepteur ne doit
+     * alors ni tenter un refresh, ni renvoyer au login.
+     *
+     * Bug corrigé le 19/08/2026 : sur /track-record, un visiteur anonyme recevait
+     * un 401 de `/stats/palmares-gagnants` (admin) → refresh impossible →
+     * redirection vers /login. La page publique la plus vendeuse du site était
+     * donc invisible pour tout prospect non connecté, et son repli public
+     * (`palmaresPublic`) n'était jamais atteint.
+     */
+    tolere401?: boolean;
+  }
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // `withCredentials` : la session vit dans des cookies httpOnly posés par l'API.
@@ -48,7 +65,10 @@ if (typeof window !== "undefined") {
       // elles-mêmes : un mot de passe refusé (401 sur /auth/login) ne doit pas
       // déclencher un refresh puis une redirection.
       const estRouteAuth = url.includes("/auth/login") || url.includes("/auth/refresh");
-      if (error.response?.status === 401 && original && !original._retry && !estRouteAuth) {
+      // Un 401 attendu (endpoint réservé + repli public côté page) est rendu tel
+      // quel à l'appelant : ni refresh, ni redirection.
+      if (error.response?.status === 401 && original && !original._retry
+          && !estRouteAuth && !original.tolere401) {
         original._retry = true; // ne ré-essaie qu'une fois (évite la boucle si re-401)
         try {
           await refreshSession();
@@ -151,7 +171,10 @@ export const statsApi = {
   perfPersonnelle: () => api.get("/stats/perf-personnelle"),
   trackRecord: () => api.get("/stats/track-record"),
   profils: () => api.get("/stats/profils"),
-  palmaresGagnants: () => api.get("/stats/palmares-gagnants"),
+  // Réservé à l'admin : le 401 renvoyé à un visiteur est ATTENDU, l'appelant
+  // enchaîne sur `palmaresPublic`. D'où `tolere401` — sans lui, l'intercepteur
+  // éjectait vers /login tout prospect ouvrant la page palmarès.
+  palmaresGagnants: () => api.get("/stats/palmares-gagnants", { tolere401: true }),
   // Version PUBLIQUE du palmarès : `palmaresGagnants` est gardé par require_admin
   // → 401 pour tout visiteur. À utiliser partout où la page est accessible sans
   // compte (accueil, track-record), sinon la section reste vide pour les prospects.
