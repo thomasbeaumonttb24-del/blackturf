@@ -340,6 +340,7 @@ function TendanceChart({ data, moyenne, hasard }: { data: PointTendance[]; moyen
             strokeWidth={2}
             fill="url(#tendanceFill)"
             connectNulls={false}
+            isAnimationActive={false}
             dot={false}
             activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }}
           />
@@ -457,7 +458,7 @@ function DisciplineCard({ d, maxCourses, hasard }: {
           </div>
         </div>
         <div className="text-right">
-          <span className={cn("block font-display text-2xl font-bold tabular-nums",
+          <span className={cn("block whitespace-nowrap font-display text-2xl font-bold tabular-nums",
             d.accuracy_top3 >= 55 ? "text-emerald-700" : d.accuracy_top3 >= 40 ? "text-amber-700" : "text-slate-600")}>
             {nf(d.accuracy_top3, 1)} %
           </span>
@@ -594,6 +595,12 @@ export default function TrackRecordPage() {
   }
 
   const g = data.global;
+  // `total_gain` n'existe que sur la version admin du palmarès (règle produit :
+  // les montants agrégés ne sont pas publics). Sans ce garde-fou, un visiteur lisait
+  // « Total réglé aux rapports officiels : +0 € ».
+  const gainConnu = typeof gagnantsData?.total_gain === "number" && (gagnantsData?.total_gain ?? 0) > 0;
+  const nbGagnants = gagnantsData?.n ?? 0;
+  const nbCoursesReglees = gagnantsData?.n_courses ?? 0;
   const hasard3 = g.hasard_top3 ?? null;
   const hasard1 = g.hasard_top1 ?? null;
   const facteur3 = hasard3 && hasard3 > 0 ? g.accuracy_top3 / hasard3 : null;
@@ -671,13 +678,21 @@ export default function TrackRecordPage() {
                   <div className="flex items-end justify-between gap-4">
                     <div>
                       <p className="text-3xl font-bold tabular-nums text-emerald-300 sm:text-5xl">
-                        {gagnantsData ? <CountUpEuro value={gagnantsData.total_gain ?? 0} prefix="+" /> : "—"}
+                        {!gagnantsData ? "—" : gainConnu
+                          ? <CountUpEuro value={gagnantsData.total_gain ?? 0} prefix="+" />
+                          : <CountUp value={nbGagnants} />}
                       </p>
-                      <p className="mt-2 text-xs text-slate-400">Gains encaissés documentés</p>
+                      <p className="mt-2 text-xs text-slate-400">
+                        {gainConnu ? "Gains encaissés documentés" : "Paris gagnés, réglés aux rapports PMU"}
+                      </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xl font-bold tabular-nums">{gagnantsData?.n.toLocaleString("fr-FR") ?? "—"}</p>
-                      <p className="mt-1 text-[11px] text-slate-400">paris gagnés</p>
+                      <p className="text-xl font-bold tabular-nums">
+                        {gainConnu ? nf(nbGagnants) : nf(nbCoursesReglees)}
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        {gainConnu ? "paris gagnés" : "courses réglées"}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -873,17 +888,22 @@ export default function TrackRecordPage() {
                   <div className="flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
                     <div>
                       <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-800 sm:justify-start">
-                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Total réglé aux rapports officiels
+                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        {gainConnu ? "Total réglé aux rapports officiels" : "Paris gagnants réglés aux rapports officiels"}
                       </div>
-                      <CountUpEuro
-                        value={gagnantsData.total_gain ?? 0}
-                        prefix="+"
-                        className="mt-3 block text-4xl font-bold leading-none tabular-nums text-emerald-800 sm:text-6xl"
-                      />
+                      {gainConnu ? (
+                        <CountUpEuro
+                          value={gagnantsData.total_gain ?? 0}
+                          prefix="+"
+                          className="mt-3 block text-4xl font-bold leading-none tabular-nums text-emerald-800 sm:text-6xl"
+                        />
+                      ) : (
+                        <CountUp value={nbGagnants} className="mt-3 block text-4xl font-bold leading-none tabular-nums text-emerald-800 sm:text-6xl" />
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-6 text-center sm:text-right">
-                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{gagnantsData.n.toLocaleString("fr-FR")}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Paris gagnés</div></div>
-                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{(gagnantsData.n_courses ?? 0).toLocaleString("fr-FR")}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Courses réglées</div></div>
+                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{nf(nbGagnants)}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Paris gagnés</div></div>
+                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{nf(nbCoursesReglees)}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Courses réglées</div></div>
                     </div>
                   </div>
                 </div>
