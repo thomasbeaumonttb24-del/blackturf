@@ -799,13 +799,25 @@ export default function TrackRecordPage() {
             ) : (
               <>
                 <BetsTable bets={gagnantsData.gagnants.slice(0, recentLimit)} />
-                {recentLimit < Math.min(50, gagnantsData.gagnants.length) && (
-                  <div className="mt-5 flex justify-center">
-                    <Button onClick={() => setRecentLimit((n) => Math.min(n + 10, 50))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
-                      Afficher 10 résultats supplémentaires <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  </div>
-                )}
+                {(() => {
+                  const dispo = Math.min(50, gagnantsData.gagnants.length);
+                  const reste = dispo - recentLimit;
+                  return (
+                    <div className="mt-5 flex flex-wrap justify-center gap-3">
+                      {reste > 0 && (
+                        <Button onClick={() => setRecentLimit((n) => Math.min(n + 10, 50))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
+                          Voir plus de paris <span className="text-muted-foreground">({Math.min(10, reste)} de plus)</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {recentLimit > 10 && (
+                        <Button onClick={() => setRecentLimit(10)} variant="ghost" className="min-h-11 rounded-xl text-muted-foreground">
+                          Réduire <ChevronDown className="h-4 w-4 rotate-180" />
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })()}
                 <p className="mt-5 border-t border-stone-100 pt-4 text-[11px] text-muted-foreground">
                   {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total ·
                   {Math.min(recentLimit, gagnantsData.gagnants.length)} résultat{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""} affiché{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""}.
@@ -828,11 +840,28 @@ export default function TrackRecordPage() {
           <Card className="overflow-hidden rounded-3xl border-amber-200 bg-white shadow-none">
             <CardContent className="p-4 sm:p-6">
               <BetsTable bets={gagnantsData.top_gains.slice(0, recordsLimit)} ranked />
-              {recordsLimit < gagnantsData.top_gains.length && (
-                <div className="mt-5 flex justify-center">
-                  <Button onClick={() => setRecordsLimit((n) => Math.min(n + 10, 30))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">Afficher plus de records <ChevronDown className="h-4 w-4" /></Button>
-                </div>
-              )}
+              {(() => {
+                const dispo = Math.min(30, gagnantsData.top_gains!.length);
+                const reste = dispo - recordsLimit;
+                return (
+                  <div className="mt-5 flex flex-wrap justify-center gap-3">
+                    {reste > 0 && (
+                      <Button onClick={() => setRecordsLimit((n) => Math.min(n + 10, 30))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
+                        Voir plus de records <span className="text-muted-foreground">({Math.min(10, reste)} de plus)</span>
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {recordsLimit > 10 && (
+                      <Button onClick={() => setRecordsLimit(10)} variant="ghost" className="min-h-11 rounded-xl text-muted-foreground">
+                        Réduire <ChevronDown className="h-4 w-4 rotate-180" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })()}
+              <p className="mt-5 border-t border-stone-100 pt-4 text-[11px] text-muted-foreground">
+                {Math.min(recordsLimit, gagnantsData.top_gains!.length)} record{Math.min(recordsLimit, gagnantsData.top_gains!.length) > 1 ? "s" : ""} affiché{Math.min(recordsLimit, gagnantsData.top_gains!.length) > 1 ? "s" : ""} sur {Math.min(30, gagnantsData.top_gains!.length)}.
+              </p>
             </CardContent>
           </Card>
           </section>

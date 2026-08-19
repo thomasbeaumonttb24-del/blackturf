@@ -253,7 +253,7 @@ const DISCIPLINE_MASK: Record<string, { file: string; color: string }> = {
 function discMask(discipline: string): { url: string; color: string } {
   const k = discipline ? discipline.charAt(0).toUpperCase() + discipline.slice(1).toLowerCase() : "";
   const m = DISCIPLINE_MASK[k] ?? { file: "attele", color: "#0E7C66" };
-  return { url: `/img/disciplines/${m.file}-m.png`, color: m.color };
+  return { url: `/img/disciplines/${m.file}-v2.png`, color: m.color };
 }
 
 // Feuille de style injectée (keyframes + responsive du .dc.html).
