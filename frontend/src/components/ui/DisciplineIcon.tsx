@@ -28,16 +28,32 @@ export function disciplineMeta(d: string) {
   return DISCIPLINE_META[k] ?? { color: "#6B7280", bg: "bg-gray-100", ring: "ring-gray-200", short: k };
 }
 
-/* Logos cheval par discipline (PNG dans /public/img/disciplines). */
+/* Silhouettes détourées par discipline (masques transparents). */
 const DISCIPLINE_IMG: Record<string, string> = {
-  Plat:      "/img/disciplines/plat.png",
-  "Attelé":  "/img/disciplines/attele.png",
-  Monté:     "/img/disciplines/monte.png",
-  Obstacle:  "/img/disciplines/obstacle.png",
-  Haies:     "/img/disciplines/obstacle.png",
-  Steeple:   "/img/disciplines/obstacle.png",
-  Cross:     "/img/disciplines/obstacle.png",
+  Plat:      "/img/disciplines/plat-m.png",
+  "Attelé":  "/img/disciplines/attele-m.png",
+  Monté:     "/img/disciplines/monte-m.png",
+  Obstacle:  "/img/disciplines/obstacle-m.png",
+  Haies:     "/img/disciplines/obstacle-m.png",
+  Steeple:   "/img/disciplines/obstacle-m.png",
+  Cross:     "/img/disciplines/obstacle-m.png",
 };
+
+/** Silhouette teintée : le PNG sert de masque, la couleur vient de la discipline. */
+function Silhouette({ url, color, className }: { url: string; color: string; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={className}
+      style={{
+        display: "inline-block",
+        background: color,
+        WebkitMask: `url(${url}) center/contain no-repeat`,
+        mask: `url(${url}) center/contain no-repeat`,
+      }}
+    />
+  );
+}
 
 /* ── Glyphes SVG (viewBox 0 0 32 24), trait = currentColor ── */
 function Glyph({ discipline }: { discipline: string }) {
@@ -161,8 +177,7 @@ export function DisciplineIcon({
       aria-label={discipline}
     >
       {img ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={img} alt={discipline} className="h-full w-full object-contain" loading="lazy" />
+        <Silhouette url={img} color={m.color} className="h-full w-full" />
       ) : (
         <Glyph discipline={k} />
       )}
@@ -190,6 +205,5 @@ export function DisciplineImg({ discipline, className }: { discipline: string; c
       </span>
     );
   }
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={img} alt={discipline} className={cn("object-contain align-middle", className)} loading="lazy" />;
+  return <Silhouette url={img} color={disciplineMeta(discipline).color} className={cn("align-middle", className)} />;
 }
