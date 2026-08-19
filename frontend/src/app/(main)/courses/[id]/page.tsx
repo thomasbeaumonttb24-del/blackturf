@@ -21,6 +21,9 @@ import {
   ParisDisponiblesCard, ConfrontationsCard, PoolEvolutionCard, TempsPassageCard,
   CompteurDepart, MarcheSnapshotCard,
 } from "@/components/courses/insights";
+import {
+  ClassementAlgo, ClassementVerrouille, type ClassementSignal,
+} from "@/components/courses/classement";
 import { formatCote, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -138,7 +141,13 @@ interface CourseData {
   categorie_particularite: string | null;
   montant_offert_1er: number | null;
   nombre_declares_partants: number | null;
-  meteo: { terrain_officiel: string | null; temperature: number | null; pluie_24h: number | null } | null;
+  meteo: {
+    terrain_officiel: string | null;
+    temperature: number | null;
+    pluie_24h: number | null;
+    vent_vitesse?: number | null;
+    humidite?: number | null;
+  } | null;
   pronostics_presse: Array<{
     source: string;
     journaliste: string | null;
@@ -2197,6 +2206,9 @@ export default function CoursePage() {
     poll();
     const iv = setInterval(poll, 5000);
     return () => { alive = false; clearInterval(iv); };
+    // `course` est recréé à chaque poll de statut (60 s) : le lister relancerait
+    // l'intervalle en boucle. Seul `course.statut` change utilement.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user, course?.statut]);
 
   // Chargement + rafraîchissement auto du statut. Sans poll, une fiche ouverte
@@ -2289,6 +2301,8 @@ export default function CoursePage() {
       .then((res) => { if (!cancelled) setFavoriTeaser(res.data); })
       .catch(() => {}); // pas grave si indisponible — simple bloc marketing
     return () => { cancelled = true; };
+    // Même raison : on suit le statut, pas l'objet course entier.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user, course?.statut]);
 
   async function handleTriggerPred() {
@@ -2425,7 +2439,13 @@ export default function CoursePage() {
                   title="À moins de 10 minutes du départ, la sélection est figée : elle ne peut plus changer. Les cotes, elles, continuent de bouger."
                   className="inline-flex cursor-help items-center gap-1.5 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600"
                 >
-                  <LockKeyhole className="h-3 w-3" aria-hidden="true" /> Pronostic figé
+                  <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+                  Pronostic figé
+                  {course.prono_fige_a && (
+                    <span className="font-normal tabular-nums text-slate-500">
+                      à {new Date(course.prono_fige_a).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  )}
                 </span>
               )}
               {wsConnected && (
@@ -2625,159 +2645,80 @@ export default function CoursePage() {
           </div>
         )}
 
-          {/* Classement algo */}
-          {user && (
-          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "17px 20px 6px" }}>
-              <Brain className="h-4 w-4" style={{ color: CX.goldAmber }} />
-              <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Classement algo</h3>
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 9 }}>
-                <button
-                  type="button"
-                  onClick={() => setShowGlossaire(true)}
-                  aria-label="Comment lire l'analyse"
-                  className="inline-flex items-center gap-1 transition-colors hover:opacity-80"
-                  style={{ border: `1px solid ${CX.bd3}`, background: "#FFFFFF", color: CX.gray500, borderRadius: 999, padding: "3px 9px", fontSize: 10, fontWeight: 600, cursor: "pointer" }}
-                >
-                  <HelpCircle className="h-3 w-3" />
-                  Légende
-                </button>
-                <span className="hidden lg:inline" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".04em", color: CX.muted }}>Gagnant · Top-3</span>
-              </div>
+          {/* ── Classement de l'algorithme ────────────────────────────────────
+              Table extraite dans components/courses/classement.tsx : elle vit
+              maintenant en pleine largeur, et chaque colonne correspond à un
+              champ réellement renvoyé par l'API (aucune valeur reconstituée). */}
+          {user && (["free", "decouverte"].includes(user.plan) ? (
+            <ClassementVerrouille
+              titre="Le classement de l'algorithme"
+              texte="Probabilité de victoire et de place pour chaque partant, cote juste, signaux retenus contre le cheval comme en sa faveur. Inclus dès la formule Standard."
+              action={
+                <Button variant="brand" size="sm" asChild>
+                  <Link href="/tarifs">Passer Standard — 12€/mois</Link>
+                </Button>
+              }
+            />
+          ) : loadingPred ? (
+            <div className="flex justify-center rounded-2xl border border-stone-200 bg-white py-10">
+              <Loader2 className="h-5 w-5 animate-spin text-stone-400" />
             </div>
-            <div style={{ padding: "2px 12px 10px" }}>
-              {!user ? (
-                <div style={{ textAlign: "center", padding: "16px 8px" }}>
-                  <p style={{ fontSize: 13, color: CX.gray500, marginBottom: 12 }}>Connectez-vous pour voir les prédictions</p>
-                  <Button variant="brand" size="sm" asChild>
-                    <Link href={`/login?redirect=/courses/${id}`}>Connexion</Link>
+          ) : !predictions || predictions.length === 0 ? (
+            <ClassementVerrouille
+              titre={course.statut === "termine" ? "Course non analysée" : "Analyse pas encore lancée"}
+              texte={
+                course.statut === "termine"
+                  ? "Cette course — souvent une réunion étrangère — n'a pas été couverte par le modèle. Nous préférons le dire plutôt que d'afficher un classement vide."
+                  : "Le modèle n'a pas encore produit de classement pour cette course."
+              }
+              action={
+                course.statut === "termine" ? null : (
+                  <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
+                    {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse"}
                   </Button>
-                </div>
-              ) : ["free", "decouverte"].includes(user.plan) ? (
-                <div style={{ textAlign: "center", padding: "16px 8px" }}>
-                  <TrendingUp className="h-8 w-8 mx-auto mb-2" style={{ color: CX.gray400 }} />
-                  <p style={{ fontSize: 13, color: CX.gray500, marginBottom: 12 }}>Disponible dès le plan Standard</p>
-                  <Button variant="brand" size="sm" asChild>
-                    <Link href="/tarifs">Passer Standard — 12€/mois</Link>
-                  </Button>
-                </div>
-              ) : loadingPred ? (
-                <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}>
-                  <Loader2 className="h-5 w-5 animate-spin" style={{ color: CX.gray400 }} />
-                </div>
-              ) : !predictions ? (
-                course.statut === "termine" ? (
-                  <div style={{ textAlign: "center", padding: "16px 8px" }}>
-                    <Brain className="h-8 w-8 mx-auto mb-2" style={{ color: CX.gray400 }} />
-                    <p style={{ fontSize: 13, fontWeight: 500, color: CX.gray500 }}>Course non analysée par l&apos;algorithme</p>
-                    <p style={{ fontSize: 12, color: CX.gray400, marginTop: 4 }}>
-                      Cette course (souvent étrangère) n&apos;a pas été couverte par le modèle.
-                    </p>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: "center", padding: "16px 8px" }}>
-                    <Brain className="h-8 w-8 mx-auto mb-2" style={{ color: CX.gray400 }} />
-                    <p style={{ fontSize: 13, color: CX.gray500, marginBottom: 12 }}>Aucune analyse disponible</p>
-                    <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
-                      {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse"}
-                    </Button>
-                  </div>
                 )
-              ) : (
-                <div>
-                  {/* Classement complet (scroll si beaucoup de partants) */}
-                  <div style={{ display: "flex", flexDirection: "column", maxHeight: "28rem", overflowY: "auto" }} className="pr-0.5">
-                    {[...predictions].sort((a, b) => a.rang_predit - b.rang_predit).map((p) => {
-                      const isFav = p.rang_predit === 1;
-                      const badgeBg = isFav ? "#FEF6E7" : p.rang_predit <= 3 ? CX.surf5 : "transparent";
-                      const badgeFg = isFav ? CX.gold : p.rang_predit <= 3 ? CX.ink2 : CX.gray400;
-                      const badgeRing = isFav ? CX.goldBd : p.rang_predit <= 3 ? CX.bd3 : "transparent";
-                      const barColor = isFav ? "#F59E0B" : p.rang_predit <= 3 ? "#9CA3AF" : "#D1D5DB";
-                      return (
-                      <div key={p.prediction_id} className="hover:bg-[#FAF7EF]" style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 6px", borderRadius: 10, transition: "background .15s" }}>
-                        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 8, fontFamily: CX.sg, fontWeight: 700, fontSize: 12, flexShrink: 0, marginTop: 1, background: badgeBg, color: badgeFg, border: `1px solid ${badgeRing}` }}>
-                          {p.rang_predit}
-                        </span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div className="flex items-center gap-1.5">
-                            <p style={{ fontSize: 13, fontWeight: 600, color: CX.ink2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", margin: 0 }}>N°{p.numero} {p.nom_cheval}</p>
-                            {p.value_bet && <EVBadge ev={p.value_bet.ev_max} />}
-                          </div>
-                          {p.proba_top1_low != null && p.proba_top1_high != null && (
-                            <div style={{ fontSize: 9, color: CX.muted, marginTop: 1 }} className="tabular-nums">
-                              intervalle {(p.proba_top1_low * 100).toFixed(0)}–{(p.proba_top1_high * 100).toFixed(0)}%
-                            </div>
-                          )}
-                          {/* Barre de conviction du modèle (proba de victoire) — repère visuel honnête */}
-                          <div style={{ marginTop: 5, height: 4, maxWidth: 130, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
-                            <div
-                              style={{ height: "100%", borderRadius: 999, background: barColor, transformOrigin: "left", animation: "cxBarGrow .6s cubic-bezier(.16,1,.3,1) both", width: `${Math.max(Math.min(p.proba_top1 * 100, 100), 3)}%` }}
-                            />
-                          </div>
-                          {/* Signaux ÉQUILIBRÉS : atouts (vert), réserves (rose), vigilance (ambre) —
-                              tout dérivé de l'analyse réelle, plus jamais que du positif sur un cheval faible. */}
-                          {(() => {
-                            const exp = analysis?.predictions?.find((ap) => ap.numero === p.numero)?.explanation;
-                            const sig = exp?.signaux ?? [];
-                            const clean = (s: string) => s.replace(/^[^A-Za-zÀ-ÿ0-9]+/, "").trim();
-                            // Aucune règle de quota : on affiche les signaux les plus pertinents
-                            // de l'analyse (déjà triés par pertinence côté backend), quel que soit
-                            // leur sens. Que du négatif → que du négatif ; que du positif → que du
-                            // positif ; mixte → mixte. Cap haut à 4 pour ne pas surcharger.
-                            let chips = sig.slice(0, 2);
-                            if (!chips.length) {
-                              // Repli (analyse en cache d'avant la mise à jour) : facteurs positifs seuls.
-                              const fac = exp?.facteurs_positifs ?? [];
-                              chips = fac.slice(0, 2).map((f) => ({ label: f.label, detail: f.detail, sens: "positif" as const, score: f.score }));
-                            }
-                            chips = chips.filter((c) => clean(c.label));
-                            if (!chips.length) return null;
-                            const chipStyle = (sens: string) =>
-                              sens === "positif" ? { fg: CX.emDeep, bg: CX.emBg, arrow: "▲" } :
-                              sens === "negatif" ? { fg: CX.redDeep, bg: CX.redBg, arrow: "▼" } :
-                              { fg: CX.gold, bg: CX.goldBg, arrow: "●" };
-                            return (
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 5 }}>
-                                {chips.map((c, i) => {
-                                  const cs = chipStyle(c.sens);
-                                  return (
-                                  <span
-                                    key={i}
-                                    title={c.detail || undefined}
-                                    style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 600, borderRadius: 4, padding: "1px 5px", color: cs.fg, background: cs.bg, cursor: "default" }}
-                                  >
-                                    {cs.arrow} {clean(c.label)}
-                                  </span>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                        {/* Deux chiffres clairs alignés : victoire (gras) + placé */}
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 13, color: CX.ink2 }}>{(p.proba_top1 * 100).toFixed(0)}%</div>
-                          <div style={{ fontSize: 10, color: CX.gray400 }}>{(p.proba_top3 * 100).toFixed(0)}%</div>
-                        </div>
-                      </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ padding: "10px 6px 0", marginTop: 4, borderTop: `1px solid ${CX.bd4}` }}>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 9.5, color: CX.gray400, marginBottom: 5 }}>
-                      <span><span style={{ color: CX.emDeep }}>▲</span> atout</span>
-                      <span><span style={{ color: CX.redDeep }}>▼</span> réserve</span>
-                      <span><span style={{ color: CX.gold }}>●</span> à surveiller</span>
-                    </div>
-                    <p style={{ margin: 0, fontSize: 10, color: CX.gray400, lineHeight: 1.5 }}>
-                      Modèle à <b style={{ color: CX.gray600 }}>80+ critères</b> (forme, ELO, J/E, distance, terrain…). Aide à la décision.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-          )}
+              }
+            />
+          ) : (
+            <ClassementAlgo
+              predictions={predictions}
+              signauxParNumero={(() => {
+                // Signaux STRICTEMENT issus de l'analyse : si le backend n'en
+                // renvoie pas pour un cheval, la ligne n'en affiche aucun.
+                const map: Record<number, ClassementSignal[]> = {};
+                for (const ap of analysis?.predictions ?? []) {
+                  const sig = ap.explanation?.signaux;
+                  if (sig && sig.length) {
+                    map[ap.numero] = sig.map((s) => ({
+                      label: s.label, detail: s.detail, sens: s.sens, score: s.score,
+                    }));
+                    continue;
+                  }
+                  // Repli pour une analyse mise en cache avant l'ajout des signaux :
+                  // on reprend facteurs positifs ET négatifs, jamais les seuls positifs.
+                  const pos = (ap.explanation?.facteurs_positifs ?? []).map((f) => ({
+                    label: f.label, detail: f.detail, sens: "positif" as const, score: f.score,
+                  }));
+                  const neg = (ap.explanation?.facteurs_negatifs ?? []).map((f) => ({
+                    label: f.label, detail: f.detail, sens: "negatif" as const, score: f.score,
+                  }));
+                  const melange = [...pos, ...neg].sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+                  if (melange.length) map[ap.numero] = melange;
+                }
+                return map;
+              })()}
+              positionsReelles={(() => {
+                const map: Record<number, number> = {};
+                for (const c of resultats?.classement ?? []) {
+                  if (c.position != null) map[c.numero] = c.position;
+                }
+                return map;
+              })()}
+              coteLive={liveCoteMap}
+              nonPartants={new Set(course.partants.filter((p) => p.non_partant).map((p) => p.numero))}
+              onLegende={() => setShowGlossaire(true)}
+            />
+          ))}
 
           {/* ── Modale LÉGENDE : explique les signaux sans encombrer la carte ── */}
           {showGlossaire && (
@@ -3125,12 +3066,25 @@ export default function CoursePage() {
                 const niveauUtile = niveau && !(course.nom && niveau.toUpperCase().includes(course.nom.toUpperCase()));
                 if (niveauUtile) rows.push({ label: "Niveau", val: niveau! });
                 if (course.terrain_officiel) rows.push({ label: "Terrain", val: course.terrain_officiel });
-                if (course.penetrometre_desc && course.penetrometre_coef != null) rows.push({ label: "Pénétromètre", val: `${course.penetrometre_desc} (${course.penetrometre_coef})` });
-                if (course.meteo?.temperature != null) rows.push({ label: "Température", val: `${course.meteo.temperature}°C` });
+                if (course.penetrometre_coef != null || course.penetrometre_desc) {
+                  const pen = [course.penetrometre_desc, course.penetrometre_coef != null ? `${course.penetrometre_coef}` : null]
+                    .filter(Boolean).join(" · ");
+                  rows.push({ label: "Pénétromètre", val: pen });
+                }
+                if (course.meteo?.temperature != null) rows.push({ label: "Température", val: `${course.meteo.temperature.toFixed(1).replace(".", ",")} °C` });
+                if (course.meteo?.vent_vitesse != null && course.meteo.vent_vitesse > 0) rows.push({ label: "Vent", val: `${Math.round(course.meteo.vent_vitesse)} km/h` });
+                if (course.meteo?.humidite != null) rows.push({ label: "Humidité", val: `${Math.round(course.meteo.humidite)} %` });
                 if (course.meteo?.pluie_24h != null && course.meteo.pluie_24h > 0) rows.push({ label: "Pluie 24h", val: `${course.meteo.pluie_24h} mm` });
                 if (course.allocation) rows.push({ label: "Dotation", val: `${Math.round(course.allocation / 100).toLocaleString("fr-FR")} €` });
                 if (course.categorie_particularite) rows.push({ label: "Départ", val: course.categorie_particularite.replace(/_/g, " ").toLowerCase().replace(/^./, (ch) => ch.toUpperCase()) });
                 if (course.pool_total_eur != null && course.pool_total_eur > 0) rows.push({ label: "Masse des enjeux", val: `${course.pool_total_eur.toLocaleString("fr-FR")} €` });
+                if (course.pool_gagnant_eur != null && course.pool_gagnant_eur > 0) {
+                  const evo = course.pool_gagnant_evolution;
+                  rows.push({
+                    label: "dont Simple Gagnant",
+                    val: `${course.pool_gagnant_eur.toLocaleString("fr-FR")} €${evo != null && Math.abs(evo) >= 1 ? ` (${evo > 0 ? "+" : ""}${Math.round(evo)} %)` : ""}`,
+                  });
+                }
                 if (course.avantage_couloir && course.avantage_couloir !== "neutre") rows.push({ label: "Avantage de couloir", val: course.avantage_couloir.replace(/_/g, " ") });
                 if (course.montant_offert_1er != null && course.montant_offert_1er > 0) rows.push({ label: "Au vainqueur", val: `${Math.round(course.montant_offert_1er).toLocaleString("fr-FR")} €` });
                 if (course.nombre_declares_partants != null) rows.push({ label: "Déclarés partants", val: String(course.nombre_declares_partants) });
