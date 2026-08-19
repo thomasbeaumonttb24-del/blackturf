@@ -3169,12 +3169,16 @@ export default function CoursePage() {
               </span>
             </div>
             {/* ── En-tête colonnes (grille design) ── */}
-            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
+            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 54px 60px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
               <span style={{ textAlign: "center" }}>N°</span>
               <span>Cheval</span>
               <span style={{ textAlign: "right" }}>Cote</span>
-              <span className="cx-algo" style={{ textAlign: "right" }}>Algo</span>
-              <span style={{ textAlign: "right" }}>Proba</span>
+              {predictions && predictions.length > 0 && (
+                <>
+                  <span className="cx-algo" style={{ textAlign: "right" }}>Algo</span>
+                  <span style={{ textAlign: "right" }}>Proba</span>
+                </>
+              )}
               <span />
             </div>
             <div style={{ display: "flex", flexDirection: "column" }}>
@@ -3199,7 +3203,7 @@ export default function CoursePage() {
                       <div
                         onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
                         className="cx-prow"
-                        style={{ display: "grid", gridTemplateColumns: "44px 1fr 58px 54px 60px 24px", gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
+                        style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 54px 60px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
                       >
                         {/* N° + badge rang */}
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -3270,12 +3274,15 @@ export default function CoursePage() {
                           )}
                         </div>
 
-                        {/* Algo (cote juste) */}
+                        {/* Algo + proba : colonnes masquées tant qu'aucune prédiction
+                            n'est chargée — deux colonnes de tirets n'apprennent rien. */}
+                        {predictions && predictions.length > 0 && (
                         <div className="cx-algo" style={{ textAlign: "right", fontFamily: CX.sg, fontSize: 12.5, color: CX.gray400 }}>
                           {pred?.cote_juste ? formatCote(pred.cote_juste) : "—"}
                         </div>
+                        )}
 
-                        {/* Proba */}
+                        {predictions && predictions.length > 0 && (
                         <div style={{ textAlign: "right" }}>
                           {pred ? (
                             <>
@@ -3286,6 +3293,7 @@ export default function CoursePage() {
                             <span style={{ color: CX.gray400 }}>—</span>
                           )}
                         </div>
+                        )}
 
                         {/* Chevron */}
                         <ChevronDown style={{ height: 14, width: 14, flexShrink: 0, color: "#D1D5DB", transform: isExp ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
@@ -3317,9 +3325,9 @@ export default function CoursePage() {
             <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} />
           )}
 
-          {/* ── Comparaison multi-bookmakers (repliable — désencombre) ── */}
+          {/* ── Comparaison multi-bookmakers — ouverte : c'est le contenu principal de l'onglet Marché ── */}
           {course.partants.some((p) => p.cote_geny || p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_bet365 || p.cote_ladbrokes || p.cote_betfair_exchange) && (
-            <details className="group" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
+            <details className="group" open style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
               <summary className="cursor-pointer select-none" style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px", listStyle: "none" }}>
                 <BarChart2 className="h-4 w-4" style={{ color: CX.gray500 }} />
                 <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comparaison des cotes</h3>
