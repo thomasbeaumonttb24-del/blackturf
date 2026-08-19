@@ -6,7 +6,8 @@
  * Chaque chiffre vient de `ml/bet_type_analytics.py`, donc de conseils
  * réellement émis avant le départ et réglés sur les rapports PMU. Trois
  * conventions sont assumées à l'écran plutôt que cachées :
- *   · le ROI affiché est WINSORISÉ à 50× la mise (le brut reste à côté) ;
+ *   · un MONTANT en euros est toujours l'argent réellement encaissé ; seuls les
+ *     ROI qui servent de verdict sont WINSORISÉS à 50× la mise (brut à côté) ;
  *   · un verdict exige 150 gagnants, pas 150 paris ;
  *   · le test de robustesse montre ce que devient le ROI sans les plus gros gains.
  */
@@ -78,7 +79,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
     type: t.type,
     mise: t.mise ?? 0,
     part: t.part_mise_pct ?? 0,
-    net: t.net_winsorise ?? 0,
+    net: t.net ?? 0,
   }));
 
   const robust = actif?.robustesse ?? [];
@@ -249,8 +250,8 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
             ))}
           </div>
           <Note>
-            Barre = part de la mise totale ({eur(data.global.mise)} engagés). Chiffre de droite = résultat
-            net winsorisé du type.
+            Barre = part de la mise totale ({eur(data.global.mise)} engagés). Chiffre de droite =
+            résultat net réellement encaissé sur le type.
           </Note>
         </Section>
 
@@ -459,8 +460,8 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                   <td className="px-2 py-2 text-right tabular-nums text-gray-600">{num(t.n_gagnants)}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-gray-600">{pct(t.hit_rate)}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-gray-600">{eur(t.mise)}</td>
-                  <td className={`px-2 py-2 text-right font-mono font-bold tabular-nums ${tone(t.net_winsorise)}`}>
-                    {signedEur(t.net_winsorise)}
+                  <td className={`px-2 py-2 text-right font-mono font-bold tabular-nums ${tone(t.net)}`}>
+                    {signedEur(t.net)}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-gray-400">
                     {signedPct(t.roi_brut_pct)}
