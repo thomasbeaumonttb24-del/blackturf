@@ -112,26 +112,27 @@ function Stat({ value, suffix, decimals }: Item) {
 }
 
 export function HeroStats({ fallback }: { fallback?: HeroStatsFallback }) {
-  // Live : track-record (précision + favori placé) + public (courses analysées).
+  // SOURCE UNIQUE : le track record. Les trois chiffres du hero doivent être les
+  // mêmes que ceux du palmarès, sinon le visiteur qui clique voit d'autres valeurs
+  // et n'a plus aucune raison de croire les premières.
+  //
+  // Le compteur venait de `/stats/public`, qui compte toutes les courses TERMINÉES
+  // en base (18 357), pronostiquées ou non — affiché « courses analysées » à côté
+  // d'une précision mesurée sur 3 630, il gonflait l'échantillon apparent.
   const { data: tr } = useSWR(
     "hero-track-record",
     () => statsApi.trackRecord().then((r) => r.data),
-    { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
-  );
-  const { data: pub } = useSWR(
-    "hero-public",
-    () => statsApi.public().then((r) => r.data),
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
 
   const g = tr?.global ?? {};
   const accuracy = numOf(g.accuracy_top3) ?? fallback?.accuracy_top3 ?? null;
   const favori = numOf(g.favori_place_rate) ?? fallback?.favori_place_rate ?? null;
-  const courses = numOf(pub?.nb_courses_analysees) ?? fallback?.courses_analysees ?? null;
+  const courses = numOf(g.nb_courses_analysees) ?? fallback?.courses_analysees ?? null;
 
   const items: Item[] = [
     { value: accuracy, suffix: "%", decimals: 1, label: "Précision Top-3", cls: "text-amber-300" },
-    { value: courses, suffix: "+", decimals: 0, label: "Courses analysées", cls: "text-white" },
+    { value: courses, suffix: "", decimals: 0, label: "Courses analysées et notées", cls: "text-white" },
     { value: favori, suffix: "%", decimals: 1, label: "Favori placé", cls: "text-emerald-300" },
   ];
 

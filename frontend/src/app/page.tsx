@@ -188,18 +188,8 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
   } catch { return null; }
 }
 
-async function fetchCoursesAnalysees(): Promise<number | null> {
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  try {
-    const res = await fetch(`${base}/api/v1/stats/public`, { next: { revalidate: 3600 } });
-    if (!res.ok) return null;
-    const d = await res.json();
-    return numOf(d?.nb_courses_analysees);
-  } catch { return null; }
-}
-
 export default async function HomePage() {
-  const [tr, coursesAnalysees] = await Promise.all([fetchTrackRecord(), fetchCoursesAnalysees()]);
+  const tr = await fetchTrackRecord();
   const fmtPct = (x: number | null, dec = 1) => (x == null ? "—" : `${x.toFixed(dec).replace(".", ",")}%`);
   const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString("fr-FR"));
   const FAQ = buildFaq(tr);
@@ -262,7 +252,7 @@ export default async function HomePage() {
             fallback={{
               accuracy_top3: tr?.accuracy_top3 ?? null,
               favori_place_rate: tr?.favori_place_rate ?? null,
-              courses_analysees: coursesAnalysees ?? null,
+              courses_analysees: tr?.nb_courses ?? null,
             }}
           />
         </div>
@@ -271,7 +261,7 @@ export default async function HomePage() {
       <LiveTicker />
 
       {/* ═══════════ COMMENT ÇA MARCHE ═══════════ */}
-      <section className="py-24 bg-white">
+      <section id="fonctionnement" className="py-24 bg-white scroll-mt-20">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
@@ -311,7 +301,7 @@ export default async function HomePage() {
       <div className="section-divider" />
 
       {/* ═══════════ PREUVES RÉELLES (track-record) ═══════════ */}
-      <section className="py-24 bg-brand-warm">
+      <section id="preuves" className="py-24 bg-brand-warm scroll-mt-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="mb-12 text-center">
@@ -447,7 +437,7 @@ export default async function HomePage() {
       <div className="section-divider" />
 
       {/* ═══════════ PRONOSTICS PAR PROFIL DE RISQUE (vrai outil) ═══════════ */}
-      <section className="py-24 bg-white">
+      <section id="produit" className="py-24 bg-white scroll-mt-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
@@ -836,7 +826,7 @@ export default async function HomePage() {
       <div className="section-divider" />
 
       {/* ═══════════ POUR QUI ═══════════ */}
-      <section className="py-24 bg-white">
+      <section id="pour-qui" className="py-24 bg-white scroll-mt-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
@@ -922,7 +912,7 @@ export default async function HomePage() {
       </section>
 
       {/* ═══════════ PRICING ═══════════ */}
-      <section className="py-24 bg-brand-warm" id="tarifs">
+      <section id="tarifs" className="py-24 bg-brand-warm scroll-mt-20">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
@@ -984,7 +974,7 @@ export default async function HomePage() {
           inscription — y compris « est-ce que je vais gagner ? », à laquelle on
           répond non. Le JSON-LD reprend EXACTEMENT le texte visible : Google
           déclasse les FAQ dont le balisage ne correspond pas au contenu affiché. */}
-      <section className="py-24 bg-white">
+      <section id="faq" className="py-24 bg-white scroll-mt-20">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-10">
