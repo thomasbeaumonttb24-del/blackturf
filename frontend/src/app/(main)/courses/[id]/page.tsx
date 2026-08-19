@@ -1340,69 +1340,6 @@ function PronosticVerdictSection({ predictions, classement }: {
   );
 }
 
-// ─── Comparaison post-course pour Free/Découverte (funnel, décision 2026-08-16) ───
-// Free n'a JAMAIS accès aux pronostics, avant OU après la course. Ce bloc montre,
-// une fois la course terminée, ce que l'IA avait repéré — factuel uniquement (donnée
-// servie par un endpoint dédié gated côté backend sur statut 'termine', jamais de
-// fuite pré-course). Affiché aussi bien si le favori a gagné que s'il a perdu :
-// honnêteté du produit avant tout, jamais de chiffre inventé.
-function FavoriTeaserCard({ teaser }: {
-  teaser: {
-    disponible: boolean;
-    numero: number | null;
-    nom_cheval: string | null;
-    a_gagne: boolean | null;
-    position_reelle: number | null;
-    cote_depart: number | null;
-    gain_reference_10e: number | null;
-  };
-}) {
-  if (!teaser.disponible) return null;
-  return (
-    <div className="cx-fade" style={{
-      borderRadius: 20,
-      border: teaser.a_gagne ? "1px solid rgba(16,185,129,.35)" : `1px solid ${CX.bd1}`,
-      background: teaser.a_gagne ? "linear-gradient(135deg,rgba(16,185,129,.09),transparent 70%)" : CX.surf1,
-      padding: "18px 20px",
-    }}>
-      <h2 style={{ margin: "0 0 10px", fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2, display: "flex", alignItems: "center", gap: 8 }}>
-        {teaser.a_gagne ? "🎯" : "📊"} Le favori de l&apos;IA sur cette course
-      </h2>
-      {teaser.a_gagne ? (
-        <>
-          <p style={{ margin: "0 0 6px", fontSize: 14, color: CX.ink2 }}>
-            <strong>N°{teaser.numero} {teaser.nom_cheval}</strong>, favori de l&apos;algorithme,
-            a gagné{teaser.cote_depart ? <> à la cote {formatCote(teaser.cote_depart)}</> : null}.
-          </p>
-          {teaser.gain_reference_10e != null && (
-            <p style={{ margin: "0 0 12px", fontSize: 13, color: CX.gray500 }}>
-              Un pari Simple Gagnant de 10€ sur ce cheval aurait rapporté{" "}
-              <strong style={{ color: CX.em }}>{teaser.gain_reference_10e.toFixed(2)}€</strong>.
-            </p>
-          )}
-        </>
-      ) : (
-        <p style={{ margin: "0 0 12px", fontSize: 13, color: CX.gray500 }}>
-          Le favori de l&apos;algorithme — N°{teaser.numero} {teaser.nom_cheval}
-          {teaser.cote_depart ? <>, coté {formatCote(teaser.cote_depart)}</> : null} — a terminé{" "}
-          {teaser.position_reelle}e cette fois, pas gagnant.
-        </p>
-      )}
-      <p style={{ margin: "0 0 14px", fontSize: 12, color: CX.gray400 }}>
-        En plan Découverte, ce pronostic ne vous a pas été montré avant le départ.
-        Passez à Standard pour voir le classement complet de l&apos;IA sur chaque course, avant qu&apos;elle ne parte.
-      </p>
-      <CheckoutButton
-        plan="standard"
-        periodicite="monthly"
-        label="Voir les pronostics — 12€/mois"
-        variant="brand"
-        className="w-auto"
-      />
-    </div>
-  );
-}
-
 // ─── Bilan du plan de mise 20€ (course terminée) ───────────────────────────────
 // Rejoue le plan de mise (20€) sur les pronostics réels et le règle contre le
 // résultat officiel (rapports PMU réels). Indique si le pari serait passé + le gain.
@@ -2352,32 +2289,6 @@ export default function CoursePage() {
     iv = setInterval(load, 30000); // stoppé dès que l'arrivée est récupérée
     return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [id, course, resultats]);
-
-  // Comparaison post-course favori IA (funnel Free, décision 2026-08-16) : Free/
-  // Découverte n'a jamais accès aux prédictions (paywall), même une fois la course
-  // terminée — cet appel dédié récupère UNIQUEMENT le favori + résultat réel
-  // (jamais de rang/proba pré-course, endpoint gated côté backend sur statut
-  // 'termine'). Chargé uniquement pour ces plans, sur course déjà terminée.
-  const [favoriTeaser, setFavoriTeaser] = useState<{
-    disponible: boolean;
-    numero: number | null;
-    nom_cheval: string | null;
-    a_gagne: boolean | null;
-    position_reelle: number | null;
-    cote_depart: number | null;
-    gain_reference_10e: number | null;
-  } | null>(null);
-  useEffect(() => {
-    if (!user || !["free", "decouverte"].includes(user.plan)) return;
-    if (!course || course.statut !== "termine") return;
-    let cancelled = false;
-    api.get(`/courses/${id}/favori-ia-resultat`, { tolere401: true })
-      .then((res) => { if (!cancelled) setFavoriTeaser(res.data); })
-      .catch(() => {}); // pas grave si indisponible — simple bloc marketing
-    return () => { cancelled = true; };
-    // Même raison : on suit le statut, pas l'objet course entier.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, user, course?.statut]);
 
   async function handleTriggerPred() {
     setTriggeringPred(true);
@@ -3416,9 +3327,10 @@ export default function CoursePage() {
                 {resultats && predictions && predictions.length > 0 && (
                   <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
                 )}
-                {resultats && favoriTeaser && user && ["free", "decouverte"].includes(user.plan) && (
-                  <FavoriTeaserCard teaser={favoriTeaser} />
-                )}
+                {/* Le teaser « favori de l'IA » (funnel Free, 16/08) a été retiré le
+                    20/08 : le bilan du plan ci-dessous, désormais visible par tous,
+                    dit la même chose en mieux (3 profils, paris réels, rapports PMU)
+                    et portait un second CTA redondant. */}
                 {/* Bilan du plan — montré À TOUS, y compris visiteur anonyme et
                     plan Découverte (décision 2026-08-19) : la course est terminée,
                     donc aucun pronostic exploitable n'est révélé, et c'est la seule
