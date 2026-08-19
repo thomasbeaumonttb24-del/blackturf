@@ -111,9 +111,24 @@ def test_pas_dintervalle_sous_le_minimum_dobservations():
 
 
 def test_lintervalle_se_resserre_quand_lechantillon_grandit():
-    petit = _ic90([0.5, -1.0] * (MIN_PARIS_IC // 2))
-    grand = _ic90([0.5, -1.0] * 2000)
+    petit = _ic90([0.5, -1.0] * (MIN_PARIS_IC // 2), [1.0] * MIN_PARIS_IC)
+    grand = _ic90([0.5, -1.0] * 2000, [1.0] * 4000)
     assert (petit[1] - petit[0]) > (grand[1] - grand[0])
+
+
+def test_lintervalle_entoure_le_roi_publie_meme_avec_des_mises_inegales():
+    """Le ROI publié pondère par la mise ; son intervalle doit en faire autant.
+
+    Sans cette pondération, la prod affichait un ROI de -15,96 % encadré par un
+    IC [-26,56 % ; -17,59 %] — le chiffre publié tombait hors de son propre
+    intervalle. Ici : de gros paris qui perdent peu, de petits qui perdent tout.
+    """
+    bets = [_bet(20.0, 19.0, course=f"g{i}") for i in range(100)]   # -5 % sur 20 €
+    bets += [_bet(1.0, 0.0, course=f"p{i}") for i in range(100)]    # -100 % sur 1 €
+
+    m = _agg(bets)
+    lo, hi = m["ic90_roi_pct"]
+    assert lo <= m["roi_pct"] <= hi
 
 
 # ── Robustesse ───────────────────────────────────────────────────────────────

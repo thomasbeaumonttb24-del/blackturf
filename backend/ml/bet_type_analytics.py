@@ -125,8 +125,15 @@ MIN_PARIS_IC = 30
 Z90 = 1.645
 
 
-def _ic90(ratios: list[float]) -> Optional[list[float]]:
-    """IC 90 % du ROI moyen, en %, par approximation normale de la moyenne.
+def _ic90(nets: list[float], mises: list[float]) -> Optional[list[float]]:
+    """IC 90 % du ROI PUBLIÉ, en %, par la variance de l'estimateur de ratio.
+
+    Le ROI affiché est ``Σnet / Σmise`` : il pondère chaque pari par sa mise. Un
+    intervalle bâti sur la moyenne NON pondérée des rendements ne décrit pas ce
+    chiffre-là — sur la fenêtre 90 j de prod, il donnait [-26,6 % ; -17,6 %]
+    autour d'un ROI publié de -15,96 %, soit un point estimé HORS de son propre
+    intervalle. On utilise donc la variance de l'estimateur de ratio :
+    ``Var(net - R·mise) / (n · mise_moyenne²)``.
 
     Les rendements sont DÉJÀ winsorisés à 50× la mise quand ils arrivent ici :
     la queue qui invaliderait le TCL a donc été coupée en amont, et un bootstrap
@@ -134,13 +141,17 @@ def _ic90(ratios: list[float]) -> Optional[list[float]]:
     identique à la deuxième décimale. Le coût comptait : cette page se
     rafraîchit toute seule.
     """
-    n = len(ratios)
+    n = len(nets)
     if n < MIN_PARIS_IC:
         return None
-    moyenne = sum(ratios) / n
-    ecart = statistics.pstdev(ratios)
-    marge = Z90 * ecart / (n ** 0.5)
-    return [round((moyenne - marge) * 100, 2), round((moyenne + marge) * 100, 2)]
+    total_mise = sum(mises)
+    if total_mise <= 0:
+        return None
+    ratio = sum(nets) / total_mise
+    mise_moy = total_mise / n
+    residus = [net - ratio * mise for net, mise in zip(nets, mises)]
+    marge = Z90 * statistics.pstdev(residus) / (n ** 0.5) / mise_moy
+    return [round((ratio - marge) * 100, 2), round((ratio + marge) * 100, 2)]
 
 
 def _robustness(bets: list[dict]) -> list[dict]:
@@ -179,9 +190,9 @@ def _agg(bets: list[dict]) -> dict:
     retour_w = sum(min(b["gain"], PB_GAIN_CAP * b["mise"]) for b in bets)
     n_wins = sum(1 for b in bets if b["gagne"])
 
-    # IC 90 % sur le ROI, calculé sur les rendements winsorisés pari par pari.
-    ratios = [(min(b["gain"], PB_GAIN_CAP * b["mise"]) - b["mise"]) / b["mise"] for b in bets]
-    ic90 = _ic90(ratios)
+    # IC 90 % du ROI winsorisé publié — même pondération par la mise que lui.
+    nets_w = [min(b["gain"], PB_GAIN_CAP * b["mise"]) - b["mise"] for b in bets]
+    ic90 = _ic90(nets_w, [b["mise"] for b in bets])
 
     roi_w = _roi(mise, retour_w)
     if n_wins < MIN_WINS_VERDICT or ic90 is None:
