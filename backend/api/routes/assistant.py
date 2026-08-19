@@ -18,7 +18,7 @@ import anthropic
 
 from api.config import get_settings
 from api.model_metrics import real_model_metrics
-from api.routes.auth import get_current_user
+from api.routes.auth import get_current_user, require_verified_email
 from api.middleware.rate_limit import rate_limit_assistant
 from db.database import get_db
 from db.models import (
@@ -447,7 +447,9 @@ class ChatRequest(BaseModel):
 async def chat(
     body: ChatRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    # Chaque échange coûte des jetons facturés : on ne l'ouvre pas à une adresse
+    # que personne n'a confirmée.
+    user: User = Depends(require_verified_email),
     _rl: None = Depends(rate_limit_assistant),
 ):
     """Chat avec l'IA hippique. Plan Expert uniquement."""

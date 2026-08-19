@@ -37,7 +37,9 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
       const response = (error as { response?: { data?: { detail?: string }; status?: number } })?.response;
       const detail = response?.data?.detail;
       toast.error(detail || "Impossible d'ouvrir le paiement sécurisé");
-      if (response?.status === 409) {
+      // 409 = compte déjà abonné ; 403 = adresse e-mail pas encore confirmée.
+      // Dans les deux cas la suite se joue sur le profil (bouton « Renvoyer »).
+      if (response?.status === 409 || response?.status === 403) {
         router.push("/profil");
       }
       setLoading(false);

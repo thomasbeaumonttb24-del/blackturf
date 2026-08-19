@@ -67,9 +67,12 @@ def test_abonnement_push_absent_si_pas_dendpoint():
 
 # ─── Filtrage du lot value bets par utilisateur ────────────────
 
-async def _user(db, *, plan="expert", prefs=None) -> User:
+async def _user(db, *, plan="expert", prefs=None, email_verified=True) -> User:
+    # Adresse confirmée par défaut : depuis services/email_verification, un envoi
+    # n'atteint plus une adresse que personne n'a confirmée.
     u = User(user_id=str(uuid.uuid4()), email=f"{uuid.uuid4().hex[:8]}@t.fr",
              hashed_password="x", plan=plan, is_active=True,
+             email_verified=email_verified,
              push_subscription=({"prefs": prefs} if prefs else None))
     db.add(u)
     await db.commit()

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
 from api.config import get_settings
-from api.routes.auth import get_current_user
+from api.routes.auth import get_current_user, require_verified_email
 from db.database import get_db
 from db.models import User, Subscription
 
@@ -65,7 +65,9 @@ class CheckoutRequest(BaseModel):
 async def create_checkout(
     body: CheckoutRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    # Adresse confirmée exigée : sans elle, l'essai gratuit se multiplie à volonté,
+    # une adresse bidon par compte.
+    user: User = Depends(require_verified_email),
 ):
     """Crée une session Stripe Checkout et retourne l'URL de paiement."""
     price_key = f"{body.plan}_{body.periodicite}"

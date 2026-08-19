@@ -15,6 +15,7 @@ import httpx
 
 from api.config import get_settings
 from db.models import User, AlerteLog
+from services.email_verification import clause_email_utilisable
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -501,6 +502,10 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
         _select(User).where(
             User.plan.in_(["starter", "standard", "expert"]),
             User.is_active == True,  # noqa: E712
+            # Jamais vers une adresse que personne n'a confirmée : chaque rebond
+            # abîme la délivrabilité de TOUS les envois, y compris ceux des vrais
+            # abonnés.
+            clause_email_utilisable(),
         )
     )).scalars().all()
 
@@ -731,6 +736,7 @@ async def send_weekly_best_value_bet(session: AsyncSession):
             User.plan.in_(["free", "decouverte"]),
             User.is_active == True,
             User.marketing_opt_out_at.is_(None),
+            clause_email_utilisable(),
         )
     )
     users = users_res.scalars().all()
@@ -807,6 +813,7 @@ async def send_morning_digest(session: AsyncSession):
             User.plan.in_(["starter", "standard", "expert"]),
             User.is_active == True,
             User.marketing_opt_out_at.is_(None),
+            clause_email_utilisable(),
         )
     )
     users = users_res.scalars().all()

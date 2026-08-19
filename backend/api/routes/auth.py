@@ -237,6 +237,24 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+async def require_verified_email(user: User = Depends(get_current_user)) -> User:
+    """Réserve aux adresses confirmées ce qui coûte de l'argent ou de la réputation
+    d'envoi : ouverture d'un essai Stripe, appels au modèle de langage.
+
+    Les comptes créés avant la mise en service de la règle sont dispensés
+    (cf. services.email_verification) — on ne ferme pas la porte derrière eux.
+    """
+    from services.email_verification import email_confirme
+
+    if not email_confirme(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Confirmez votre adresse e-mail pour continuer. Le lien vous a été "
+                   "envoyé à l'inscription ; vous pouvez le renvoyer depuis votre profil.",
+        )
+    return user
+
+
 # ─────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────
@@ -518,6 +536,10 @@ async def update_me(
 async def resend_verification(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    # Un bouton « Renvoyer » est désormais affiché à tout compte non confirmé :
+    # sans quota, il devient un robinet à e-mails (quota Resend, et une adresse
+    # de tiers saisie par erreur se ferait matraquer).
+    _rl: None = Depends(rate_limit_auth),
 ):
     """Renvoie l'email de vérification."""
     if user.email_verified:

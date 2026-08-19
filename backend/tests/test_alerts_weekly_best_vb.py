@@ -80,13 +80,18 @@ async def _seed_value_bet(
     await db.commit()
 
 
-async def _make_user(db: AsyncSession, plan: str, *, push: bool = False) -> User:
+async def _make_user(db: AsyncSession, plan: str, *, push: bool = False,
+                     email_verified: bool = True) -> User:
+    # `email_verified=True` par défaut : depuis services/email_verification, un
+    # envoi n'atteint plus une adresse que personne n'a confirmée. Un destinataire
+    # de test représente un vrai destinataire.
     u = User(
         user_id=str(uuid.uuid4()),
         email=f"{plan}_{uuid.uuid4().hex[:6]}@blackturf.fr",
         hashed_password=_hash("Passw0rd!"),
         plan=plan,
         is_active=True,
+        email_verified=email_verified,
         push_subscription={"endpoint": "https://push.test/x"} if push else None,
     )
     db.add(u)
@@ -237,6 +242,24 @@ async def test_envoi_exclut_les_desabonnes(db: AsyncSession, monkeypatch):
     sent_to = {call.kwargs["to"] for call in mock_email.await_args_list}
     assert abonne.email in sent_to
     assert desabonne.email not in sent_to
+
+
+async def test_envoi_exclut_les_adresses_non_confirmees(db: AsyncSession, monkeypatch):
+    """C'est dans les comptes gratuits que vivent les adresses bidon : chaque
+    rebond abîme la délivrabilité de TOUS les envois, y compris ceux des abonnés
+    payants. On n'écrit donc qu'aux adresses confirmées."""
+    await _seed_value_bet(db, "V11", ev=0.30, rapport_sg=5.0)
+    mock_email = AsyncMock(return_value=True)
+    monkeypatch.setattr("services.alerts.send_email", mock_email)
+
+    confirme = await _make_user(db, "free")
+    non_confirme = await _make_user(db, "free", email_verified=False)
+
+    await send_weekly_best_value_bet(db)
+
+    sent_to = {call.kwargs["to"] for call in mock_email.await_args_list}
+    assert confirme.email in sent_to
+    assert non_confirme.email not in sent_to
 
 
 async def test_endpoint_desabonnement_pose_l_opt_out(client, db: AsyncSession):
