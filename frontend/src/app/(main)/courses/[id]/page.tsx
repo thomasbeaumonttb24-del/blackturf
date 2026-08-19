@@ -1483,7 +1483,7 @@ function BilanMiseSection({ courseId }: { courseId: string }) {
     let alive = true;
     let iv: ReturnType<typeof setInterval> | null = null;
     const load = () =>
-      api.get(`/courses/${courseId}/bilan-pronostic?montant=10`)
+      api.get(`/courses/${courseId}/bilan-pronostic?montant=10`, { tolere401: true })
         .then((r) => {
           if (!alive) return;
           const d = r.data as BilanResp;
@@ -1911,7 +1911,7 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
     for (const p of partants) pidToNum[p.participation_id] = p.numero;
 
     // 1) Base : historique des cotes déjà enregistrées (granularité scraper)
-    api.get(`/courses/${courseId}/cotes-historique`)
+    api.get(`/courses/${courseId}/cotes-historique`, { tolere401: true })
       .then((res) => {
         if (!alive) return;
         const map: Record<string, Record<string, number>> = {};
@@ -1928,7 +1928,7 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
 
     // 2) Live : cotes PMU en direct toutes les 5 s, append en continu
     const poll = () => {
-      api.get(`/courses/${courseId}/cotes-live`)
+      api.get(`/courses/${courseId}/cotes-live`, { tolere401: true })
         .then((res) => {
           if (!alive) return;
           const cotes: Array<{ numero: number; cote: number }> = res.data?.cotes ?? [];
@@ -2171,10 +2171,11 @@ export default function CoursePage() {
   // sur la cote stockée périmée). Garantit : table = marché = estimatif, tout corrélé.
   const [liveCoteHttp, setLiveCoteHttp] = useState<Record<number, number>>({});
   useEffect(() => {
+    if (!user) return;   // endpoint réservé : inutile de marteler un 401
     if (!course || !["a_venir", "en_cours"].includes(course.statut)) return;
     let alive = true;
     const poll = () =>
-      api.get(`/courses/${id}/cotes-live`)
+      api.get(`/courses/${id}/cotes-live`, { tolere401: true })
         .then((res) => {
           if (!alive) return;
           const cotes: Array<{ numero: number; cote: number }> = res.data?.cotes ?? [];
@@ -2187,7 +2188,7 @@ export default function CoursePage() {
     poll();
     const iv = setInterval(poll, 5000);
     return () => { alive = false; clearInterval(iv); };
-  }, [id, course?.statut]);
+  }, [id, user, course?.statut]);
 
   // Chargement + rafraîchissement auto du statut. Sans poll, une fiche ouverte
   // en "À venir"/"En cours" ne passait JAMAIS à "Terminée" sans recharger (fetch
@@ -2225,7 +2226,7 @@ export default function CoursePage() {
   // = transparence "le modèle analyse bien plus que la cote").
   useEffect(() => {
     if (!user || ["free", "decouverte"].includes(user.plan) || !course) return;
-    api.get(`/courses/${id}/analyse`)
+    api.get(`/courses/${id}/analyse`, { tolere401: true })
       .then((res) => setAnalysis(res.data))
       .catch(() => {}); // fail silently
     // Deps volontairement SANS l'objet `course` : il est recréé par le poll
@@ -2275,7 +2276,7 @@ export default function CoursePage() {
     if (!user || !["free", "decouverte"].includes(user.plan)) return;
     if (!course || course.statut !== "termine") return;
     let cancelled = false;
-    api.get(`/courses/${id}/favori-ia-resultat`)
+    api.get(`/courses/${id}/favori-ia-resultat`, { tolere401: true })
       .then((res) => { if (!cancelled) setFavoriTeaser(res.data); })
       .catch(() => {}); // pas grave si indisponible — simple bloc marketing
     return () => { cancelled = true; };
