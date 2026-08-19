@@ -1089,6 +1089,29 @@ async def resolve_presse_course_id(
     return row[0] if row else None
 
 
+# Volume minimal pour publier un taux de victoire/place. En dessous, le taux est
+# trop bruité pour valoir mieux que le défaut.
+MIN_COURSES_ACTEUR = 10
+# Le ROI demande BEAUCOUP plus de volume que le taux de victoire : une seule
+# victoire à 30/1 déplace le ROI de +300 points sur 10 montes. En dessous de ce
+# seuil, on n'écrit PAS de ROI (NULL → la feature retombe sur 0, neutre) plutôt
+# que de nourrir le modèle avec du bruit présenté comme un signal.
+MIN_COURSES_ROI = 40
+
+
+def roi_acteur(gains, rides) -> float | None:
+    """ROI d'un euro joué « Gagnant » sur CHAQUE monte de cet acteur.
+
+    Convention identique au track record : rapports PMU base 1 €, mise de 1 € par
+    partant. Renvoie None sous le seuil de fiabilité — un ROI sur dix montes ne
+    mesure que la chance.
+    """
+    rides = int(rides or 0)
+    if rides < MIN_COURSES_ROI:
+        return None
+    return round((float(gains or 0.0) - rides) / rides, 4)
+
+
 async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -> tuple[int, int]:
     """Calcule taux victoire/place GLOBAUX jockey & entraîneur depuis NOS résultats
     (participations ⋈ resultats.classement) et upsert dans stats_jockeys /
@@ -1100,14 +1123,26 @@ async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -
     jockey/entraîneur absente de l'évaluation. On la calcule sur l'arrivée
     officielle (aucune donnée inventée). Tourne dans le cycle associations (hebdo).
     """
-    MIN_COURSES = 10
     saison = datetime.now().year
+    # `montes_30j` compte les montes des 30 derniers jours DANS la fenêtre agrégée :
+    # une activité récente nulle distingue un jockey en pause d'un jockey en pleine
+    # saison, à taux de victoire égal.
     agg = """
         SELECT p.{a} AS aid, count(*) AS rides,
                count(*) FILTER (WHERE (e->>'position') ~ '^[0-9]+$'
                                       AND (e->>'position')::int = 1) AS wins,
                count(*) FILTER (WHERE (e->>'position') ~ '^[0-9]+$'
-                                      AND (e->>'position')::int <= 3) AS places
+                                      AND (e->>'position')::int <= 3) AS places,
+               SUM(CASE WHEN (e->>'position') ~ '^[0-9]+$'
+                         AND (e->>'position')::int = 1
+                        THEN COALESCE(
+                            CASE WHEN r.rapports->>'simple_gagnant' ~ '^[0-9]+(\\.[0-9]+)?$'
+                                 THEN (r.rapports->>'simple_gagnant')::float END,
+                            CASE WHEN r.rapports->>'e_simple_gagnant' ~ '^[0-9]+(\\.[0-9]+)?$'
+                                 THEN (r.rapports->>'e_simple_gagnant')::float END,
+                            0)
+                        ELSE 0 END) AS gains,
+               count(*) FILTER (WHERE c.date_heure > now() - interval '30 days') AS montes_30j
         FROM participations p
         JOIN courses c   ON c.course_id = p.course_id
         JOIN resultats r ON r.course_id = p.course_id
@@ -1119,25 +1154,30 @@ async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -
     """
     upsert = """
         INSERT INTO {t} (stat_id, {a}, saison, victoires_saison,
-                         taux_victoire_global, taux_place_global)
-        VALUES (gen_random_uuid(), :aid, :saison, :wins, :tv, :tp)
+                         taux_victoire_global, taux_place_global,
+                         roi_global, montes_30j)
+        VALUES (gen_random_uuid(), :aid, :saison, :wins, :tv, :tp, :roi, :m30)
         ON CONFLICT ({a}, saison) DO UPDATE SET
             victoires_saison = EXCLUDED.victoires_saison,
             taux_victoire_global = EXCLUDED.taux_victoire_global,
             taux_place_global = EXCLUDED.taux_place_global,
+            roi_global = EXCLUDED.roi_global,
+            montes_30j = EXCLUDED.montes_30j,
             updated_at = now()
     """
     counts = []
     for table, acteur in (("stats_jockeys", "jockey_id"), ("stats_entraineurs", "entraineur_id")):
         rows = (await session.execute(text(agg.format(a=acteur)),
-                                      {"mois": str(mois), "minc": MIN_COURSES})).fetchall()
+                                      {"mois": str(mois), "minc": MIN_COURSES_ACTEUR})).fetchall()
         n = 0
-        for aid, rides, wins, places in rows:
+        for aid, rides, wins, places, gains, montes_30j in rows:
             if not rides:
                 continue
             await session.execute(text(upsert.format(t=table, a=acteur)), {
                 "aid": aid, "saison": saison, "wins": int(wins),
                 "tv": round(wins / rides, 4), "tp": round(places / rides, 4),
+                "roi": roi_acteur(gains, rides),
+                "m30": int(montes_30j or 0),
             })
             n += 1
         counts.append(n)
