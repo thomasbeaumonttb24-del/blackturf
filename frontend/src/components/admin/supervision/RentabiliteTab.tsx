@@ -15,7 +15,7 @@
  */
 
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart,
+  Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart,
   ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { CalendarDays, TrendingDown } from "lucide-react";
@@ -109,7 +109,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
         desc={`Somme des résultats nets jour après jour, dans l'ordre réel des courses. Trait plein : les gains réellement encaissés — c'est la courbe qu'a vécue quelqu'un qui aurait suivi tous les conseils. Pointillés : la même série avec les gains coupés à ${cap}× la mise.`}
       >
         <ResponsiveContainer width="100%" height={260}>
-          <AreaChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <ComposedChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="capitalNeg" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={DIVERGING_NEG} stopOpacity={0.05} />
@@ -133,7 +133,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               type="monotone" dataKey="cumul_net_winsor" name={`Plafonné à ${cap}× la mise`}
               stroke="#9CA3AF" strokeWidth={1.5} strokeDasharray="4 3" dot={false} isAnimationActive={false}
             />
-          </AreaChart>
+          </ComposedChart>
         </ResponsiveContainer>
         <Note>
           Une pente qui descend régulièrement n&apos;est pas un accident de parcours : c&apos;est le
