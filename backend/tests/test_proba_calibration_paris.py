@@ -145,3 +145,26 @@ def test_le_tilt_est_applique_dans_les_deux_chemins_de_selection():
     source = inspect.getsource(mise_calculator)
     assert source.count('_pb_mult') >= 3, (
         "le tilt doit être posé sur les candidats ET lu par les deux scoreurs")
+
+
+def test_un_gain_aberrant_ne_commande_pas_une_tranche():
+    """Vécu au premier calcul en production : le Trio ≥×15 affichait +106 % de ROI
+    et décrochait le tilt MAXIMAL grâce à UN rapport à 4 526 €. Retirer ce seul
+    pari fait tomber la tranche à −21 % : le système aurait été poussé vers le
+    billet de loterie par un coup de chance."""
+    from ml.signal_performance import PB_GAIN_CAP, PB_MIN_WINS_POUR_FAVORISER
+
+    assert PB_GAIN_CAP <= 100, "un gain doit être plafonné avant d'entrer dans le ROI"
+    assert PB_MIN_WINS_POUR_FAVORISER >= 20, (
+        "encourager une tranche demande assez de gagnants, pas seulement de paris")
+
+
+def test_une_tranche_sans_gagnants_peut_etre_penalisee_mais_pas_favorisee():
+    """Le manque de gagnants est une information ; l'excès de chance n'en est pas."""
+    import inspect
+
+    from ml import signal_performance
+
+    source = inspect.getsource(signal_performance.compute_payout_bucket_performance)
+    assert 'if mult > 1.0 and a["n_wins"] < PB_MIN_WINS_POUR_FAVORISER' in source
+    assert "min(gain, PB_GAIN_CAP * mise)" in source

@@ -601,6 +601,18 @@ PB_BUCKETS = ((0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 15.0), (15.0, 1e9))
 PB_MIN_PARIS = 150          # sous ce volume, le ROI d'une tranche est du bruit
 PB_K_SHRINK = 200.0         # pseudo-observations shrinkant le multiplicateur vers 1.0
 PB_M_MIN, PB_M_MAX = 0.60, 1.40
+# WINSORISATION — sans elle, un unique gain aberrant commande la tranche entière.
+# Vécu au premier calcul : le Trio ≥×15 affichait +106 % de ROI et décrochait le
+# tilt MAXIMAL (1,40) grâce à UN rapport à 4 526 € ; retirer ce seul pari fait
+# tomber la tranche à −21 %. Le système aurait donc été poussé vers le billet de
+# loterie par un coup de chance. On plafonne chaque gain à 50× la mise (même
+# convention que le ROI winsorisé des poids de profil).
+PB_GAIN_CAP = 50.0
+# Un multiplicateur SUPÉRIEUR à 1 pousse à jouer davantage cette tranche : on ne
+# l'accorde qu'avec assez de gagnants pour que le ROI ne soit pas l'histoire de
+# deux ou trois paris. En dessous, la tranche peut être pénalisée (le manque de
+# gagnants est en soi une information) mais jamais favorisée.
+PB_MIN_WINS_POUR_FAVORISER = 25
 
 
 def _pb_key(rapport: float) -> str:
@@ -644,10 +656,15 @@ async def compute_payout_bucket_performance(session: AsyncSession) -> dict:
             if not t or not rapport or rapport <= 0:
                 continue
             cle = (t, _pb_key(rapport))
-            a = agg.setdefault(cle, {"n": 0, "mise": 0.0, "gain": 0.0})
+            a = agg.setdefault(cle, {"n": 0, "mise": 0.0, "gain": 0.0, "n_wins": 0})
+            mise = float(pari.get("mise") or 0)
+            gain = float(pari.get("gain") or 0)
             a["n"] += 1
-            a["mise"] += float(pari.get("mise") or 0)
-            a["gain"] += float(pari.get("gain") or 0)
+            a["mise"] += mise
+            # Gain plafonné : une tranche ne doit pas être jugée sur un coup isolé.
+            a["gain"] += min(gain, PB_GAIN_CAP * mise) if mise > 0 else gain
+            if gain > 0:
+                a["n_wins"] += 1
 
     out: dict = {"types": {}, "n_runs": len(rows)}
     for (t, bucket), a in agg.items():
@@ -657,12 +674,15 @@ async def compute_payout_bucket_performance(session: AsyncSession) -> dict:
             brut = 1.0 + roi
             w = a["n"] / (a["n"] + PB_K_SHRINK)
             mult = max(PB_M_MIN, min(PB_M_MAX, 1.0 + (brut - 1.0) * w))
+            if mult > 1.0 and a["n_wins"] < PB_MIN_WINS_POUR_FAVORISER:
+                mult = 1.0                   # trop peu de gagnants pour encourager
         else:
             mult = 1.0                       # échantillon insuffisant → neutre
         out["types"].setdefault(t, {})[bucket] = {
             "multiplier": round(mult, 3),
             "n": a["n"],
-            "roi": round(roi * 100, 1) if roi is not None else None,
+            "n_wins": a["n_wins"],
+            "roi_winsorise": round(roi * 100, 1) if roi is not None else None,
         }
     return out
 
