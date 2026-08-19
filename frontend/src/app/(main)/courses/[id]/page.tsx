@@ -2091,6 +2091,15 @@ export default function CoursePage() {
   // synthèse sinon) ; dès que le visiteur choisit, son choix prime.
   type Onglet = "synthese" | "partants" | "marche" | "plan" | "resultats";
   const [onglet, setOnglet] = useState<Onglet | null>(null);
+  useEffect(() => {
+    const lire = () => {
+      const h = window.location.hash.replace("#", "");
+      if (["synthese", "partants", "marche", "plan", "resultats"].includes(h)) setOnglet(h as Onglet);
+    };
+    lire();
+    window.addEventListener("hashchange", lire);
+    return () => window.removeEventListener("hashchange", lire);
+  }, []);
   const [analysis, setAnalysis] = useState<{
     narrative: string;
     market_signals: Array<{ numero: number; nom: string; signal: string; detail: string; score: number }>;
@@ -2509,7 +2518,12 @@ export default function CoursePage() {
             <button
               key={o.cle}
               type="button"
-              onClick={() => setOnglet(o.cle)}
+              onClick={() => {
+                setOnglet(o.cle);
+                // replaceState : changer d'onglet ne doit pas empiler une entrée
+                // d'historique par clic, mais l'URL doit rester partageable.
+                if (typeof window !== "undefined") window.history.replaceState(null, "", `#${o.cle}`);
+              }}
               aria-current={actif ? "page" : undefined}
               className={`relative whitespace-nowrap rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-colors sm:px-4 ${
                 actif ? "bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,.10)]" : "text-slate-500 hover:bg-white/60 hover:text-slate-700"
@@ -2612,6 +2626,7 @@ export default function CoursePage() {
         )}
 
           {/* Classement algo */}
+          {user && (
           <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "17px 20px 6px" }}>
               <Brain className="h-4 w-4" style={{ color: CX.goldAmber }} />
@@ -2762,6 +2777,7 @@ export default function CoursePage() {
               )}
             </div>
           </div>
+          )}
 
           {/* ── Modale LÉGENDE : explique les signaux sans encombrer la carte ── */}
           {showGlossaire && (
