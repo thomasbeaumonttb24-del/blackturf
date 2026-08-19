@@ -94,6 +94,13 @@ services:
       # « scraper muet » une source volontairement mise en sommeil.
       - SCRAPER_DISABLED_SOURCES=${SCRAPER_DISABLED_SOURCES:-}
       - SECRET_KEY=${SECRET_KEY}
+      # Duree de vie des jetons. ABSENTE de ce bloc jusqu'au 19/08 : le .env
+      # declarait ACCESS_TOKEN_EXPIRE_MINUTES=60 mais la variable n'atteignait
+      # jamais le conteneur, qui retombait sur le defaut du code (720 min). Un
+      # jeton d'acces vivait donc 12 h au lieu de l'heure configuree, et rien ne
+      # le signalait puisque la valeur voulue etait bien dans .env.
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
       - BETFAIR_INGEST_TOKEN=${BETFAIR_INGEST_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}

@@ -218,6 +218,15 @@ async def get_current_user(
     except JWTError:
         raise credentials_exc
 
+    # RÉVOCATION des jetons d'ACCÈS. Elle n'était vérifiée qu'au refresh, au motif
+    # documenté que « l'access token expire en 15 min » — or il vit 60 min (et
+    # vivait 12 h tant que la variable n'atteignait pas le conteneur). Un jeton
+    # émis avant un reset de mot de passe restait donc valable une heure entière
+    # après ce reset : exactement ce que le reset est censé couper.
+    # Coût : un GET Redis par requête authentifiée, fail-open comme au refresh.
+    if await _refresh_revoked(user_id, payload.get("iat")):
+        raise credentials_exc
+
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
@@ -358,8 +367,9 @@ async def refresh(
         raise HTTPException(status_code=401, detail="Token expiré")
 
     # RÉVOCATION : un refresh token émis AVANT le dernier reset de mot de passe est
-    # rejeté (un token volé ne survit pas au reset). Vérifié seulement ici (refresh
-    # est rare) et pas à chaque requête (perf) — l'access token expire en 15 min.
+    # rejeté (un token volé ne survit pas au reset). Le même contrôle s'applique
+    # désormais aussi aux jetons d'accès, dans `get_current_user` : les laisser
+    # passer laissait survivre une session révoquée pendant toute leur durée de vie.
     if await _refresh_revoked(user_id, payload.get("iat")):
         raise HTTPException(status_code=401, detail="Session expirée, reconnectez-vous")
 
@@ -373,20 +383,21 @@ async def refresh(
 
 
 async def _refresh_revoked(user_id: Optional[str], iat) -> bool:
-    """True si le token (émis à `iat`) précède le dernier reset de mot de passe."""
+    """True si le token (émis à `iat`) précède le dernier reset de mot de passe.
+
+    Utilise le client Redis PARTAGÉ (`db.redis_client`) et non une connexion
+    ouverte puis fermée à chaque appel : acceptable tant que seul le refresh
+    appelait cette fonction, intenable depuis que chaque requête authentifiée la
+    traverse — c'était une poignée de main TCP par requête.
+    """
     if not user_id or iat is None:
         return False
-    import redis.asyncio as aioredis
-    r = aioredis.from_url(settings.redis_url)
+    from db.redis_client import get_redis
     try:
+        r = await get_redis()
         ts = await r.get(f"pwd_reset_at:{user_id}")
     except Exception:
-        return False  # fail-open : panne Redis ne bloque pas le refresh légitime
-    finally:
-        try:
-            await r.aclose()
-        except Exception:
-            pass
+        return False  # fail-open : panne Redis ne bloque pas une session légitime
     if not ts:
         return False
     try:
