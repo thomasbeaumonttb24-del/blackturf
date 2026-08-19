@@ -2511,7 +2511,7 @@ export default function CoursePage() {
           empiler sur une colonne unique donnait une page qu'on parcourt sans la
           lire. Un sujet par onglet ; le reste est à un clic, pas à trois écrans
           de défilement. */}
-      <nav aria-label="Sections de la course" className="cx-tabs sticky top-14 z-20 -mx-5 mb-6 flex gap-1 overflow-x-auto border-b border-stone-200/70 bg-[#FFFDF6]/95 px-5 py-2 backdrop-blur sm:top-16">
+      <nav aria-label="Sections de la course" className="cx-tabs sticky top-14 z-20 -mx-5 mb-6 flex gap-1 overflow-x-auto scroll-px-5 border-b border-stone-200/70 bg-[#FFFDF6]/95 px-5 py-2 backdrop-blur [scrollbar-width:none] sm:top-16 [&::-webkit-scrollbar]:hidden">
         {ONGLETS.map((o) => {
           const actif = o.cle === ongletActif;
           return (
@@ -2525,7 +2525,7 @@ export default function CoursePage() {
                 if (typeof window !== "undefined") window.history.replaceState(null, "", `#${o.cle}`);
               }}
               aria-current={actif ? "page" : undefined}
-              className={`relative whitespace-nowrap rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-colors sm:px-4 ${
+              className={`relative shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-[13px] font-semibold transition-colors sm:px-4 sm:text-[13.5px] ${
                 actif ? "bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,.10)]" : "text-slate-500 hover:bg-white/60 hover:text-slate-700"
               }`}
             >
