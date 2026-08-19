@@ -15,7 +15,7 @@
  *      affiché vient du serveur, donc un flux mort vieillit à l'écran.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Brain, Pause, Play, RefreshCw } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -55,6 +55,9 @@ export default function SupervisionIAPage() {
   const [histLimit, setHistLimit] = useState(30);
   const [lastSync, setLastSync] = useState<number>(() => Date.now());
   const [now, setNow] = useState<number>(() => Date.now());
+  // Horodatage du dernier règlement effectivement intégré aux agrégats : sert
+  // à afficher « à jour jusqu'à la course de HH:MM », pas juste « en direct ».
+  const [derniereCourseIntegree, setDerniereCourseIntegree] = useState<string | null>(null);
 
   // Horloge locale : c'est elle qui fait vieillir l'ancienneté affichée quand
   // un rafraîchissement cesse d'aboutir, au lieu de figer un « à l'instant ».
@@ -73,13 +76,15 @@ export default function SupervisionIAPage() {
     { refreshInterval: every(15_000), onSuccess: onSync, keepPreviousData: true }
   );
 
-  // ── Agrégats lourds (60 s) ──────────────────────────────────
-  const { data: paris, isLoading: loadingParis } = useSWR<ParisPayload>(
+  // ── Agrégats lourds ─────────────────────────────────────────
+  // Le sondage lent (60 s) n'est qu'un filet de sécurité : le vrai déclencheur
+  // est le règlement d'une course, détecté par le battement de cœur ci-dessus.
+  const { data: paris, isLoading: loadingParis, mutate: mutParis } = useSWR<ParisPayload>(
     isAdmin ? ["sup-paris", days] : null,
     () => adminApi.supervisionParis(days).then((r) => r.data),
     { refreshInterval: every(60_000), keepPreviousData: true }
   );
-  const { data: renta } = useSWR<RentabilitePayload>(
+  const { data: renta, mutate: mutRenta } = useSWR<RentabilitePayload>(
     isAdmin ? ["sup-renta", days] : null,
     () => adminApi.supervisionRentabilite(days).then((r) => r.data),
     { refreshInterval: every(60_000), keepPreviousData: true }
@@ -91,7 +96,7 @@ export default function SupervisionIAPage() {
   );
 
   // ── Moteur d'apprentissage ──────────────────────────────────
-  const { data: alState } = useSWR(
+  const { data: alState, mutate: mutAlState } = useSWR(
     isAdmin ? "sup-al-state" : null,
     () => adminApi.alState().then((r) => r.data),
     { refreshInterval: every(30_000), keepPreviousData: true }
@@ -101,12 +106,12 @@ export default function SupervisionIAPage() {
     () => statsApi.mlStatus().then((r) => r.data),
     { refreshInterval: every(60_000), keepPreviousData: true }
   );
-  const { data: learning } = useSWR(
+  const { data: learning, mutate: mutLearning } = useSWR(
     isAdmin ? "sup-learning" : null,
     () => adminApi.learningSignals().then((r) => r.data),
     { refreshInterval: every(60_000), keepPreviousData: true }
   );
-  const { data: converge } = useSWR(
+  const { data: converge, mutate: mutConverge } = useSWR(
     isAdmin ? "sup-converge" : null,
     () => adminApi.learningConvergence().then((r) => r.data),
     { refreshInterval: every(120_000), keepPreviousData: true }
@@ -116,7 +121,7 @@ export default function SupervisionIAPage() {
     () => adminApi.calibrationQuality().then((r) => r.data),
     { refreshInterval: every(300_000), keepPreviousData: true }
   );
-  const { data: history, isLoading: loadingHistory } = useSWR(
+  const { data: history, isLoading: loadingHistory, mutate: mutHistory } = useSWR(
     isAdmin ? ["sup-history", histLimit] : null,
     () => adminApi.alHistory(histLimit).then((r) => r.data),
     { refreshInterval: every(60_000), keepPreviousData: true }
@@ -126,6 +131,32 @@ export default function SupervisionIAPage() {
     () => adminApi.biasMatrix().then((r) => r.data),
     { refreshInterval: every(300_000), keepPreviousData: true }
   );
+
+  // ── Recalcul déclenché par le règlement d'une course ────────
+  // Sans ça, un ROI pouvait rester 60 s en retard sur la dernière course
+  // arrivée. Le battement de cœur porte l'horodatage du dernier règlement :
+  // dès qu'il change, tout ce qui en dépend est refetché immédiatement.
+  const dernierReglement = pulse?.conseils_du_jour?.dernier_reglement ?? null;
+  const derniereAnalyse = pulse?.apprentissage?.derniere_analyse ?? null;
+  const vuReglement = useRef<string | null>(null);
+  const vuAnalyse = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!dernierReglement) return;
+    if (vuReglement.current === null) { vuReglement.current = dernierReglement; return; }
+    if (vuReglement.current === dernierReglement) return;
+    vuReglement.current = dernierReglement;
+    setDerniereCourseIntegree(dernierReglement);
+    void Promise.all([mutParis(), mutRenta(), mutLearning(), mutConverge()]);
+  }, [dernierReglement, mutParis, mutRenta, mutLearning, mutConverge]);
+
+  useEffect(() => {
+    if (!derniereAnalyse) return;
+    if (vuAnalyse.current === null) { vuAnalyse.current = derniereAnalyse; return; }
+    if (vuAnalyse.current === derniereAnalyse) return;
+    vuAnalyse.current = derniereAnalyse;
+    void Promise.all([mutAlState(), mutHistory()]);
+  }, [derniereAnalyse, mutAlState, mutHistory]);
 
   // Garde d'accès APRÈS tous les hooks (Rules of Hooks).
   if (!isAdmin) {
@@ -194,7 +225,12 @@ export default function SupervisionIAPage() {
         </header>
 
         {/* Bandeau live */}
-        <LiveBar pulse={pulse} live={live} secondsSince={secondsSince} />
+        <LiveBar
+          pulse={pulse}
+          live={live}
+          secondsSince={secondsSince}
+          derniereCourseIntegree={derniereCourseIntegree}
+        />
 
         {/* Onglets */}
         <nav className="flex gap-1 overflow-x-auto rounded-xl border border-gray-100 bg-white p-1 shadow-sm">

@@ -27,6 +27,16 @@ import {
 import type { ParisPayload, TypeRow } from "./types";
 
 const ROI_MAX_BAR = 60; // échelle des barres de polarité du tableau
+// Rampe séquentielle mono-teinte (ambre de marque), du plus au moins engagé.
+const MISE_RAMP = ["#B45309", "#D97706", "#F59E0B", "#FBBF24", "#FCD34D",
+                   "#FDE68A", "#FEF08A", "#FEF3C7", "#FEF9E7", "#FFFBEB"];
+// Sous ce nombre de paris dans la semaine, le ROI hebdomadaire d'un type est du
+// bruit pur : un seul rapport le fait passer de -100 % à +600 %. La série est
+// alors coupée (trou) au lieu d'écraser l'échelle des types à fort volume.
+const MIN_PARIS_SEMAINE = 30;
+// Un croisement profil × type sous ce nombre de gagnants n'est pas colorié :
+// un « +140 % » sur 7 gagnants ne doit pas se lire comme une bonne nouvelle.
+const MIN_GAGNANTS_CELLULE = 150;
 
 export default function ParisTab({ data }: { data?: ParisPayload }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -48,6 +58,8 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
   }
 
   const g = data.global;
+  // Trié du meilleur au pire, donc de haut en bas : l'œil descend la liste dans
+  // l'ordre du classement, sans avoir à relire les valeurs.
   const roiChart = types
     .filter((t) => t.n_paris >= 20)
     .map((t) => ({
@@ -57,6 +69,10 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
       fiable: t.verdict !== "insuffisant",
     }))
     .sort((a, b) => b.roi - a.roi);
+  // L'axe part toujours de 0 : sans ça, une série entièrement négative se lit
+  // comme si le zéro était au bord droit du graphique.
+  const roiMin = Math.min(0, ...roiChart.map((r) => r.roi));
+  const roiMax = Math.max(0, ...roiChart.map((r) => r.roi));
 
   const miseChart = types.slice(0, 10).map((t) => ({
     type: t.type,
@@ -76,7 +92,20 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
   ];
 
   const serieKeys = data.types_series ?? [];
-  const serie = data.serie_hebdo ?? [];
+  // Une semaine à moins de 30 paris sur un type est mise à null : la ligne
+  // s'interrompt au lieu de faire un pic de +600 % qui aplatit tout le reste.
+  const serie = (data.serie_hebdo ?? []).map((row) => {
+    const clean: Record<string, number | string | null> = { semaine: row.semaine, debut: row.debut };
+    for (const k of serieKeys) {
+      const n = row[`n::${k}`];
+      clean[`roi::${k}`] = typeof n === "number" && n >= MIN_PARIS_SEMAINE ? row[`roi::${k}`] : null;
+      clean[`n::${k}`] = n ?? null;
+    }
+    return clean;
+  });
+  const semainesTronquees = (data.serie_hebdo ?? []).reduce((acc, row) => acc + serieKeys.filter(
+    (k) => typeof row[`n::${k}`] === "number" && (row[`n::${k}`] as number) < MIN_PARIS_SEMAINE
+  ).length, 0);
 
   return (
     <div className="space-y-5">
@@ -134,35 +163,39 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
         {roiChart.length === 0 ? (
           <Empty>Aucun type n&apos;atteint 20 paris réglés sur la fenêtre.</Empty>
         ) : (
-          <ResponsiveContainer width="100%" height={Math.max(220, roiChart.length * 34)}>
-            <BarChart data={roiChart} layout="vertical" margin={{ left: 4, right: 56, top: 4, bottom: 4 }}>
+          <ResponsiveContainer width="100%" height={Math.max(220, roiChart.length * 30)}>
+            <BarChart data={roiChart} layout="vertical" margin={{ left: 4, right: 52, top: 4, bottom: 4 }}>
               <CartesianGrid {...GRID} horizontal={false} vertical />
               <XAxis
                 type="number" tick={axisTick} axisLine={axisLine} tickLine={tickLine}
-                tickFormatter={(v) => `${v} %`} domain={["dataMin - 10", "dataMax + 10"]}
+                tickFormatter={(v) => `${v} %`}
+                domain={[Math.floor((roiMin - 8) / 10) * 10, Math.ceil((roiMax + 8) / 10) * 10]}
               />
               <YAxis
-                type="category" dataKey="type" width={112}
-                tick={{ fontSize: 11, fill: "#6B7280", fontWeight: 500 }}
+                type="category" dataKey="type" width={132} interval={0}
+                tick={{ fontSize: 10, fill: "#6B7280", fontWeight: 500 }}
                 axisLine={axisLine} tickLine={tickLine}
               />
-              <ReferenceLine x={0} stroke="#9CA3AF" strokeWidth={1} />
+              <ReferenceLine x={0} stroke="#6B7280" strokeWidth={1.5} />
               <Tooltip
                 cursor={{ fill: "rgba(148,163,184,0.08)" }}
                 content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />}
               />
-              <Bar dataKey="roi" name="ROI winsorisé" radius={[0, 4, 4, 0]} barSize={16}>
+              <Bar dataKey="roi" name="ROI winsorisé" radius={[0, 3, 3, 0]} barSize={13} isAnimationActive={false}>
                 {roiChart.map((r) => (
                   <Cell
                     key={r.type}
                     fill={r.roi >= 0 ? DIVERGING_POS : DIVERGING_NEG}
-                    fillOpacity={r.fiable ? 1 : 0.42}
+                    fillOpacity={r.fiable ? 1 : 0.35}
                   />
                 ))}
+                {/* Étiquette du côté OPPOSÉ à la barre : sur une série négative,
+                    `position="right"` collerait tous les nombres sur l'axe zéro. */}
                 <LabelList
-                  dataKey="roi" position="right"
+                  dataKey="roi"
+                  position="left"
                   formatter={(v: number) => signedPct(v, 0)}
-                  style={{ fontSize: 11, fontWeight: 700, fill: "#374151" }}
+                  style={{ fontSize: 10, fontWeight: 700, fill: "#374151" }}
                 />
               </Bar>
             </BarChart>
@@ -195,11 +228,14 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
               <div key={m.type} className="flex items-center gap-3 text-xs">
                 <span className="w-28 shrink-0 truncate font-medium text-gray-700">{m.type}</span>
                 <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                  {/* Une part de mise est une GRANDEUR, pas une identité : une
+                      seule teinte qui s'éclaircit, jamais un arc-en-ciel qui
+                      suggérerait des catégories différentes. */}
                   <div
                     className="h-full rounded-full"
                     style={{
                       width: `${Math.max(m.part, 1)}%`,
-                      background: CHART_PALETTE[i % CHART_PALETTE.length],
+                      background: MISE_RAMP[Math.min(i, MISE_RAMP.length - 1)],
                     }}
                   />
                 </div>
@@ -237,7 +273,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
             <Empty>Trop peu de paris sur ce type pour retirer quoi que ce soit.</Empty>
           ) : (
             <ResponsiveContainer width="100%" height={190}>
-              <BarChart data={robustChart} margin={{ top: 16, right: 8, left: -8, bottom: 0 }}>
+              <BarChart data={robustChart} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
                 <YAxis
@@ -249,7 +285,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                   cursor={{ fill: "rgba(148,163,184,0.08)" }}
                   content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />}
                 />
-                <Bar dataKey="roi" name="ROI" radius={[4, 4, 0, 0]} barSize={44}>
+                <Bar dataKey="roi" name="ROI" radius={[4, 4, 0, 0]} barSize={44} isAnimationActive={false}>
                   {robustChart.map((r, i) => (
                     <Cell key={i} fill={(r.roi ?? 0) >= 0 ? DIVERGING_POS : DIVERGING_NEG} />
                   ))}
@@ -349,7 +385,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
         ) : (
           <>
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={serie} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
+              <LineChart data={serie} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="semaine" tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
                 <YAxis
@@ -372,15 +408,16 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                     stroke={CHART_PALETTE[i % CHART_PALETTE.length]}
                     strokeWidth={2}
                     dot={{ r: 2.5 }}
-                    connectNulls={false}
+                    connectNulls={false} isAnimationActive={false}
                   />
                 ))}
               </LineChart>
             </ResponsiveContainer>
             <Note>
-              Chaque point agrège tous les paris de ce type sur la semaine. Sur une semaine, un
-              type à faible fréquence peut afficher −100 % ou +200 % sans que cela dise quoi que ce
-              soit : lire la tendance, pas le point.
+              Chaque point agrège tous les paris de ce type sur la semaine, et n&apos;est tracé
+              qu&apos;à partir de {MIN_PARIS_SEMAINE} paris — en dessous, un seul rapport ferait
+              passer la courbe de −100 % à +600 %.
+              {semainesTronquees > 0 && ` ${semainesTronquees} point${semainesTronquees > 1 ? "s ont" : " a"} été retiré${semainesTronquees > 1 ? "s" : ""} pour cette raison : la ligne s'interrompt, elle n'est jamais lissée par-dessus.`}
             </Note>
           </>
         )}
@@ -491,13 +528,16 @@ function MatriceProfil({ data }: { data: ParisPayload }) {
                   if (!c) {
                     return <td key={t} className="px-2 py-2.5 text-right text-gray-300">—</td>;
                   }
+                  // Sous le seuil de gagnants, la cellule reste en gris : la
+                  // couleur est un verdict, et il n'y en a pas à ce volume.
+                  const solide = c.n_gagnants >= MIN_GAGNANTS_CELLULE;
                   return (
                     <td key={t} className="px-2 py-2.5 text-right">
-                      <div className={`font-mono text-xs font-bold tabular-nums ${tone(c.roi_pct)}`}>
+                      <div className={`font-mono text-xs font-bold tabular-nums ${solide ? tone(c.roi_pct) : "text-gray-400"}`}>
                         {signedPct(c.roi_pct, 0)}
                       </div>
                       <div className="text-[10px] tabular-nums text-gray-400">
-                        {num(c.n_paris)} paris · {num(c.n_gagnants)} g.
+                        {num(c.n_paris)} paris · {num(c.n_gagnants)} gagn.
                       </div>
                     </td>
                   );
@@ -508,8 +548,9 @@ function MatriceProfil({ data }: { data: ParisPayload }) {
         </table>
       </div>
       <Note>
-        <ArrowDownRight className="inline h-3 w-3" /> Une cellule à moins de 150 gagnants ne prouve
-        rien, même si son ROI est positif : elle est là pour être suivie, pas pour décider.
+        <ArrowDownRight className="inline h-3 w-3" /> Les cellules en gris comptent moins de{" "}
+        {MIN_GAGNANTS_CELLULE} gagnants : leur ROI est affiché pour être suivi, jamais coloré, même
+        largement positif. Une cellule vide = ce profil n&apos;a jamais joué ce type.
       </Note>
     </Section>
   );

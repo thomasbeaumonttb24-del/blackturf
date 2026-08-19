@@ -1001,8 +1001,17 @@ async def get_adaptive_learning_history(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """
-    Retourne l'historique d'apprentissage des dernières courses.
+    """Historique d'apprentissage des dernières courses analysées.
+
+    ``gagnant_rang_predit`` vaut 99 quand le gagnant réel ne figurait PAS dans le
+    top-3 du modèle (sentinelle posée par ``post_race_analyzer``) : ce n'est pas
+    une 99e place, et l'affichage doit le traduire, jamais le montrer tel quel.
+
+    ``adaptive_updates`` n'a jamais été alimenté (0 ligne sur 3 692 en
+    production) : la colonne « Δ température » qu'il servait à remplir est donc
+    retirée plutôt que d'afficher un tiret permanent. ``nb_partants`` la
+    remplace — un Brier de 0,30 dans un champ de 16 ne vaut pas le même dans un
+    champ de 6.
     """
     result = await db.execute(text("""
         SELECT
@@ -1015,7 +1024,7 @@ async def get_adaptive_learning_history(
             rll.gagnant_proba_ia,
             rll.gagnant_rang_predit,
             rll.feature_autopsy,
-            rll.adaptive_updates,
+            rll.nb_partants,
             rll.analyzed_at
         FROM race_learning_log rll
         LEFT JOIN courses c ON rll.course_id = c.course_id
@@ -1034,8 +1043,9 @@ async def get_adaptive_learning_history(
             "was_surprise": r[5],
             "gagnant_proba_ia": round(float(r[6]), 3) if r[6] else None,
             "gagnant_rang_predit": r[7],
+            "hors_top3": r[7] == 99,
             "signaux_manques": list((r[8] or {}).keys()),
-            "temperature_update": (r[9] or {}).get("temperature"),
+            "nb_partants": r[9],
             "analyzed_at": r[10],
         }
         for r in rows
@@ -1047,9 +1057,16 @@ async def get_bias_matrix(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """
-    Retourne la matrice de biais par contexte (discipline × terrain × hippodrome).
-    Triée par correction_factor pour voir les biais les plus forts.
+    """Matrice de biais par contexte (discipline × terrain × hippodrome).
+
+    ``correction_factor`` est BINAIRE, pas continu : ``post_race_analyzer`` écrit
+    -0,05 quand un contexte dépasse 55 % de surprises sur au moins 8 courses,
+    0,0 sinon. Il n'est jamais positif — l'afficher comme un curseur à deux sens
+    laisserait croire l'inverse.
+
+    Il n'est par ailleurs LU à l'inférence que si ``nb_courses >= 8``
+    (``get_bias_correction``) : ``correction_appliquee`` dit lequel des contextes
+    listés pèse réellement sur un pronostic aujourd'hui.
     """
     result = await db.execute(text("""
         SELECT
@@ -1081,6 +1098,10 @@ async def get_bias_matrix(
             "taux_surprise": round(r[5] / r[4], 3) if r[4] > 0 else 0,
             "brier_moyen": round(float(r[6]), 4) if r[6] else None,
             "correction_factor": round(float(r[7]), 4) if r[7] else 0.0,
+            # Seuil de lecture à l'inférence (get_bias_correction) : sous 8
+            # courses, la correction est stockée mais jamais appliquée.
+            "correction_appliquee": bool(r[7]) and (r[4] or 0) >= 8,
+            "seuil_courses": 8,
             "favori_win_rate": round(float(r[8]), 3) if r[8] else None,
             "updated_at": r[9],
         }

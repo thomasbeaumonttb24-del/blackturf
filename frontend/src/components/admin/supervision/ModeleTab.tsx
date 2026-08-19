@@ -27,6 +27,9 @@ interface ConvergencePayload {
   edge_histo?: Array<{ date: string; win_filtre: number | null; win_baseline: number | null; roi: number | null; edge_ok: boolean }>;
 }
 
+// Sous ce nombre d'observations, l'écart annoncé/réel d'une tranche est du bruit.
+const MIN_OBS_BIN = 30;
+
 function delta(v: number | null | undefined, digits = 4, higherIsBetter = true) {
   if (v == null || !isFinite(v)) return <span className="text-gray-400">—</span>;
   const good = higherIsBetter ? v > 0 : v < 0;
@@ -103,7 +106,7 @@ export default function ModeleTab({
           <Empty>Moins de deux versions non synthétiques enregistrées.</Empty>
         ) : (
           <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={versions} margin={{ top: 8, right: 12, left: -6, bottom: 0 }}>
+            <LineChart data={versions} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
               <CartesianGrid {...GRID} />
               <XAxis
                 dataKey="version" tick={axisTick} axisLine={axisLine} tickLine={tickLine}
@@ -116,8 +119,8 @@ export default function ModeleTab({
                 content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} labelFormatter={(l) => `Version v${l}`} />}
               />
               <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-              <Line type="monotone" dataKey="auc_roc" name="AUC entraînement" stroke="#F59E0B" strokeWidth={2} dot={false} connectNulls />
-              <Line type="monotone" dataKey="walk_forward_auc" name="AUC walk-forward" stroke="#3B82F6" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="auc_roc" name="AUC entraînement" stroke="#F59E0B" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+              <Line type="monotone" dataKey="walk_forward_auc" name="AUC walk-forward" stroke="#3B82F6" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -137,12 +140,12 @@ export default function ModeleTab({
             <Empty>Pas assez de versions.</Empty>
           ) : (
             <ResponsiveContainer width="100%" height={210}>
-              <LineChart data={versions} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
+              <LineChart data={versions} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="version" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={26} tickFormatter={(v) => `v${v}`} />
                 <YAxis domain={["dataMin - 0.01", "dataMax + 0.01"]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={48} tickFormatter={(v) => v.toFixed(3)} />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} labelFormatter={(l) => `Version v${l}`} />} />
-                <Line type="monotone" dataKey="brier" name="Brier" stroke="#8B5CF6" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="brier" name="Brier" stroke="#8B5CF6" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -156,7 +159,7 @@ export default function ModeleTab({
             <Empty>Aucun réentraînement sur 30 jours.</Empty>
           ) : (
             <ResponsiveContainer width="100%" height={210}>
-              <BarChart data={algo.cadence_30j} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+              <BarChart data={algo.cadence_30j} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis
                   dataKey="jour" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={20}
@@ -164,7 +167,7 @@ export default function ModeleTab({
                 />
                 <YAxis allowDecimals={false} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={32} />
                 <Tooltip cursor={{ fill: "rgba(148,163,184,0.08)" }} content={<ChartTooltip valueFormatter={(v) => `${v} version${v > 1 ? "s" : ""}`} />} />
-                <Bar dataKey="n" name="Versions entraînées" fill="#10B981" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="n" name="Versions entraînées" fill="#10B981" radius={[3, 3, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -179,14 +182,14 @@ export default function ModeleTab({
             desc="Part des courses où le gagnant réel figurait dans les 3 (ou en 1re position) du classement prédit. Mesuré sur les courses terminées."
           >
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={semaines} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
+              <LineChart data={semaines} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="semaine" tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
-                <YAxis domain={[0, 100]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={40} tickFormatter={(v) => `${v} %`} />
+                <YAxis domain={[0, 100]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={46} tickFormatter={(v) => `${v} %`} />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => pct(v)} />} />
                 <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                <Line type="monotone" dataKey="precision_top3" name="Gagnant dans le top 3" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 2.5 }} connectNulls />
-                <Line type="monotone" dataKey="precision_top1" name="Gagnant en tête" stroke="#EC4899" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                <Line type="monotone" dataKey="precision_top3" name="Gagnant dans le top 3" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 2.5 }} connectNulls isAnimationActive={false} />
+                <Line type="monotone" dataKey="precision_top1" name="Gagnant en tête" stroke="#EC4899" strokeWidth={2} dot={{ r: 2 }} connectNulls isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Section>
@@ -196,13 +199,13 @@ export default function ModeleTab({
             desc="Plus bas = probabilités mieux calibrées. Graphique séparé : l'erreur et la précision ne se lisent pas sur la même échelle."
           >
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={semaines} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
+              <LineChart data={semaines} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="semaine" tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
                 <YAxis domain={[0, 0.4]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={44} tickFormatter={(v) => v.toFixed(2)} />
                 <ReferenceLine y={0.18} stroke="#10B981" strokeDasharray="4 4" label={{ value: "cible 0,18", fontSize: 9, fill: "#10B981", position: "right" }} />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} />} />
-                <Line type="monotone" dataKey="brier" name="Erreur Brier" stroke="#3B82F6" strokeWidth={2.5} dot={{ r: 2.5 }} connectNulls />
+                <Line type="monotone" dataKey="brier" name="Erreur Brier" stroke="#3B82F6" strokeWidth={2.5} dot={{ r: 2.5 }} connectNulls isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Section>
@@ -228,8 +231,11 @@ export default function ModeleTab({
           <div className="mt-4 space-y-1.5">
             {(calib.bins ?? []).filter((b) => b.n > 0).map((b, i) => {
               const ecart = (b.freq_reelle - b.proba_moy) * 100;
+              // Une tranche à 9 observations produit un écart de ±22 % par pur
+              // hasard : le chiffre reste affiché, l'écart n'est pas colorié.
+              const solide = b.n >= MIN_OBS_BIN;
               return (
-                <div key={i} className="flex items-center gap-3 text-[11px]">
+                <div key={i} className={`flex items-center gap-3 text-[11px] ${solide ? "" : "opacity-55"}`}>
                   <span className="w-16 shrink-0 tabular-nums text-gray-400">
                     {Math.round(b.lo * 100)}–{Math.round(b.hi * 100)} %
                   </span>
@@ -243,10 +249,15 @@ export default function ModeleTab({
                       <span className="text-[10px] text-gray-400">réel {pct(b.freq_reelle * 100, 0)}</span>
                     </div>
                   </div>
-                  <span className={`w-16 shrink-0 text-right font-mono font-bold tabular-nums ${Math.abs(ecart) < 3 ? "text-gray-400" : ecart > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  <span className={`w-16 shrink-0 text-right font-mono font-bold tabular-nums ${!solide || Math.abs(ecart) < 3 ? "text-gray-400" : ecart > 0 ? "text-emerald-600" : "text-red-600"}`}>
                     {signedPct(ecart, 0)}
                   </span>
-                  <span className="w-14 shrink-0 text-right tabular-nums text-gray-300">{num(b.n)}</span>
+                  <span
+                    className="w-20 shrink-0 text-right tabular-nums text-gray-300"
+                    title={solide ? `${b.n} observations` : `${b.n} observations — sous ${MIN_OBS_BIN}, l'écart n'est pas interprétable`}
+                  >
+                    {num(b.n)}{!solide && <span className="ml-1 text-amber-500">·peu</span>}
+                  </span>
                 </div>
               );
             })}
@@ -254,6 +265,8 @@ export default function ModeleTab({
           <Note>
             Bleu = probabilité annoncée par le modèle, ambre = fréquence réellement observée sur les
             courses terminées. Un écart positif signifie que le modèle sous-estime cette tranche.
+            Les lignes estompées comptent moins de {MIN_OBS_BIN} observations : leur écart est du
+            bruit d&apos;échantillonnage, pas un défaut de calibration.
           </Note>
         </Section>
       )}

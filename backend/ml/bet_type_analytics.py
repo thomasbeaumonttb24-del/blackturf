@@ -380,9 +380,15 @@ async def compute_profitability_timeline(
         })
 
     # ROI glissant 14 jours : lisse le bruit quotidien sans masquer une tendance.
+    # Tant que la fenêtre n'est pas PLEINE, aucune valeur n'est publiée : sinon
+    # le premier point est le ROI d'une seule journée, affiché sur une courbe qui
+    # annonce quatorze — un +8 % de départ qui n'a jamais existé.
     FEN = 14
     for i, row in enumerate(serie):
-        window = serie[max(0, i - FEN + 1): i + 1]
+        if i + 1 < FEN:
+            row["roi_glissant_pct"] = None
+            continue
+        window = serie[i - FEN + 1: i + 1]
         m = sum(w["mise"] for w in window)
         r = sum(w["retour"] for w in window)
         row["roi_glissant_pct"] = _roi(m, r)

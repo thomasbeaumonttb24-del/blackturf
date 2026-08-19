@@ -50,11 +50,13 @@ function Cell({
 }
 
 export default function LiveBar({
-  pulse, live, secondsSince,
+  pulse, live, secondsSince, derniereCourseIntegree,
 }: {
   pulse?: PulsePayload;
   live: boolean;
   secondsSince: number;
+  /** Règlement de course qui a déclenché le dernier recalcul des agrégats. */
+  derniereCourseIntegree?: string | null;
 }) {
   const c = pulse?.courses_du_jour;
   const k = pulse?.conseils_du_jour;
@@ -79,6 +81,12 @@ export default function LiveBar({
         <span className="text-[11px] text-gray-400">
           · données du serveur, actualisées {secondsSince < 5 ? "à l'instant" : `il y a ${secondsSince} s`}
         </span>
+        {derniereCourseIntegree && (
+          <span className="ml-auto rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+            recalculé après la course de{" "}
+            {new Date(derniereCourseIntegree).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-2 divide-x divide-y divide-gray-50 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">

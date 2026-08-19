@@ -98,7 +98,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
         desc="Somme des résultats nets jour après jour, dans l'ordre réel des courses. C'est la courbe que vivrait quelqu'un qui suivrait tous les conseils."
       >
         <ResponsiveContainer width="100%" height={260}>
-          <AreaChart data={chart} margin={{ top: 8, right: 12, left: -4, bottom: 0 }}>
+          <AreaChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="capitalNeg" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={DIVERGING_NEG} stopOpacity={0.05} />
@@ -115,7 +115,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
             <Tooltip content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />} />
             <Area
               type="monotone" dataKey="cumul_net" name="Capital cumulé"
-              stroke={DIVERGING_NEG} strokeWidth={2} fill="url(#capitalNeg)"
+              stroke={DIVERGING_NEG} strokeWidth={2} fill="url(#capitalNeg)" isAnimationActive={false}
             />
           </AreaChart>
         </ResponsiveContainer>
@@ -130,7 +130,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <Section title="Résultat par jour" desc="Barres vertes = jour bénéficiaire, rouges = jour perdant.">
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={chart} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+            <BarChart data={chart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid {...GRID} />
               <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v} €`} width={56} />
@@ -139,7 +139,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
                 cursor={{ fill: "rgba(148,163,184,0.08)" }}
                 content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />}
               />
-              <Bar dataKey="net" name="Résultat du jour" radius={[2, 2, 0, 0]}>
+              <Bar dataKey="net" name="Résultat du jour" radius={[2, 2, 0, 0]} isAnimationActive={false}>
                 {chart.map((c) => (
                   <Cell key={c.jour} fill={c.net >= 0 ? DIVERGING_POS : DIVERGING_NEG} />
                 ))}
@@ -173,7 +173,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
           desc="Rendement des 14 derniers jours de courses, recalculé chaque jour. Lisse le bruit quotidien sans masquer une dérive."
         >
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={chart} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+            <LineChart data={chart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid {...GRID} />
               <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v} %`} width={48} />
@@ -181,7 +181,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <Tooltip content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />} />
               <Line
                 type="monotone" dataKey="roi_glissant_pct" name="ROI 14 jours"
-                stroke="#3B82F6" strokeWidth={2} dot={false} connectNulls
+                stroke="#3B82F6" strokeWidth={2} dot={false} connectNulls isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -199,7 +199,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
           desc="Prudent, Modéré, Risqué : trois politiques de mise sur les mêmes pronostics. L'écart entre les courbes mesure ce que le profil ajoute, pas ce que le modèle prédit."
         >
           <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={cumulChart} margin={{ top: 8, right: 12, left: -4, bottom: 0 }}>
+            <LineChart data={cumulChart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
               <CartesianGrid {...GRID} />
               <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${Math.round(v)} €`} width={64} />
@@ -209,7 +209,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               {profils.map((p) => (
                 <Line
                   key={p} type="monotone" dataKey={p} name={p}
-                  stroke={PROFIL_COLORS[p] ?? "#6B7280"} strokeWidth={2} dot={false} connectNulls
+                  stroke={PROFIL_COLORS[p] ?? "#6B7280"} strokeWidth={2} dot={false} connectNulls isAnimationActive={false}
                 />
               ))}
             </LineChart>

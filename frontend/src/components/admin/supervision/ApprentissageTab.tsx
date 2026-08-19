@@ -23,17 +23,22 @@ import {
   num, pct, signedPct, tone,
 } from "./kit";
 
-interface Feature { name: string; weight: number }
+/** Dérive d'un groupe de features : poids courant vs poids par défaut du groupe.
+ *  Les poids ne gravitent PAS autour de 0 — chaque groupe a son propre défaut
+ *  (cotes 1,2 · equip 0,6 · elo 1,0…). Comparer un poids à 0 n'a aucun sens ;
+ *  seule la dérive par rapport au défaut du groupe en a un. */
+interface FeatureDrift { groupe: string; poids_actuel: number; poids_défaut: number; drift: number }
 interface HistoryEntry {
   log_id: string; hippodrome?: string; discipline?: string;
   brier_score?: number; was_surprise?: boolean;
   gagnant_proba_ia?: number; gagnant_rang_predit?: number;
-  temperature_update?: number; analyzed_at: string;
+  hors_top3?: boolean; nb_partants?: number; analyzed_at: string;
 }
 interface BiasRow {
   contexte: string; discipline?: string; terrain?: string; hippodrome?: string;
   nb_courses: number; taux_surprise: number; brier_moyen?: number;
-  correction_factor: number; favori_win_rate?: number;
+  correction_factor: number; correction_appliquee?: boolean; seuil_courses?: number;
+  favori_win_rate?: number;
 }
 
 const SEVERITY: Record<string, { label: string; cls: string; aide: string }> = {
@@ -53,6 +58,12 @@ const SEVERITY: Record<string, { label: string; cls: string; aide: string }> = {
     aide: "Aucune rupture détectée sur la fenêtre glissante.",
   },
 };
+
+/** 99 = sentinelle « gagnant hors du top-3 prédit » posée par post_race_analyzer,
+ *  pas une 99e place. L'afficher tel quel serait un chiffre inventé. */
+function hors3(h: HistoryEntry): boolean {
+  return h.hors_top3 === true || h.gagnant_rang_predit === 99 || (h.gagnant_rang_predit ?? 0) > 3;
+}
 
 function TemperatureGauge({ temp }: { temp?: number | null }) {
   const t = typeof temp === "number" && isFinite(temp) ? temp : 1.0;
@@ -87,9 +98,18 @@ export default function ApprentissageTab({
 }) {
   const [showBiasAll, setShowBiasAll] = useState(false);
 
-  const al = alState?.adaptive_learning ?? mlStatus?.adaptive_learning ?? {};
+  // `/adaptive-learning/state` renvoie l'état à PLAT (temperature, brier_ema,
+  // n_races_processed…), pas sous une clé `adaptive_learning`. Le repli sur
+  // `ml-status` ne sert donc que si l'appel admin échoue — et il est mis en
+  // cache 5 min côté serveur, donc jamais le « direct » qu'on veut afficher.
+  const alDirect = alState?.temperature != null ? alState : null;
+  const alFallback = mlStatus?.adaptive_learning ?? {};
+  const temperature = alDirect?.temperature ?? alFallback.temperature;
+  const brierEma = alDirect?.brier_ema ?? alFallback.brier_ema;
+  const nRaces = alDirect?.n_races_processed ?? alFallback.n_races;
+
   const dd = alState?.drift_detector ?? mlStatus?.drift_detector ?? {};
-  const topFeatures: Feature[] = al.top_features ?? [];
+  const drifts: FeatureDrift[] = alState?.top_feature_drifts ?? [];
   const sev = SEVERITY[dd.severity ?? "none"] ?? SEVERITY.none;
   const calibration = alState?.calibration;
 
@@ -130,10 +150,10 @@ export default function ApprentissageTab({
             <Thermometer className="h-4 w-4 text-amber-500" />
             <span className="text-sm font-bold text-gray-900">Température de calibration</span>
           </div>
-          <TemperatureGauge temp={al.temperature ?? 1.0} />
+          <TemperatureGauge temp={temperature ?? 1.0} />
           <div className="mt-2 flex justify-between text-[11px] text-gray-400">
-            <span>{num(al.n_races)} courses analysées</span>
-            <span>Brier EMA {al.brier_ema?.toFixed(3) ?? "—"}</span>
+            <span>{num(nRaces)} courses analysées</span>
+            <span>Brier EMA {typeof brierEma === "number" ? brierEma.toFixed(3) : "—"}</span>
           </div>
         </div>
 
@@ -174,12 +194,26 @@ export default function ApprentissageTab({
             </span>
           }
         >
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile label="Réussite filtrée" value={pct((learning.edge.win_filtre ?? 0) * 100)} sub={`${num(learning.edge.n_filt)} paris retenus`} valueClass="text-emerald-600" />
-            <StatTile label="Réussite sans filtre" value={pct((learning.edge.win_baseline ?? 0) * 100)} sub="en jouant tout" />
-            <StatTile label="ROI plafonné" value={signedPct(learning.edge.roi_plafonne)} valueClass={tone(learning.edge.roi_plafonne)} sub="gains extrêmes bornés" />
-            <StatTile label="Courses de test" value={num(learning.edge.n_test)} sub={learning.edge.mesure_le ? `mesuré le ${new Date(learning.edge.mesure_le).toLocaleDateString("fr-FR")}` : "—"} />
-          </div>
+          {(() => {
+            // Sous seuil, ces chiffres restent affichés mais en gris : les
+            // colorer en vert ferait passer pour un résultat ce que la ligne
+            // d'avertissement juste dessous qualifie de bruit.
+            const solide = learning.edge.enough_filt !== false;
+            const gris = "text-gray-500";
+            return (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatTile label="Réussite filtrée" value={pct((learning.edge.win_filtre ?? 0) * 100)}
+                  sub={`${num(learning.edge.n_filt)} paris retenus`}
+                  valueClass={solide ? "text-emerald-600" : gris} />
+                <StatTile label="Réussite sans filtre" value={pct((learning.edge.win_baseline ?? 0) * 100)} sub="en jouant tout" />
+                <StatTile label="ROI plafonné" value={signedPct(learning.edge.roi_plafonne)}
+                  valueClass={solide ? tone(learning.edge.roi_plafonne) : gris}
+                  sub={solide ? "gains extrêmes bornés" : "non concluant à ce volume"} />
+                <StatTile label="Courses de test" value={num(learning.edge.n_test)}
+                  sub={learning.edge.mesure_le ? `mesuré le ${new Date(learning.edge.mesure_le).toLocaleDateString("fr-FR")}` : "—"} />
+              </div>
+            );
+          })()}
           {learning.edge.enough_filt === false && (
             <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800">
               <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
@@ -298,15 +332,16 @@ export default function ApprentissageTab({
             <Empty>{loadingHistory ? "Chargement…" : "Aucune course analysée."}</Empty>
           ) : (
             <ResponsiveContainer width="100%" height={210}>
-              <LineChart data={histPoints} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+              <LineChart data={histPoints} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="date" hide />
                 <YAxis domain={[0, 0.5]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={40} tickFormatter={(v) => v.toFixed(2)} />
-                <ReferenceLine y={0.25} stroke="#EF4444" strokeDasharray="4 4" label={{ value: "seuil critique", fontSize: 9, fill: "#EF4444", position: "insideTopRight" }} />
-                <ReferenceLine y={0.18} stroke="#10B981" strokeDasharray="4 4" label={{ value: "cible", fontSize: 9, fill: "#10B981", position: "insideBottomRight" }} />
+                <ReferenceLine y={0.25} stroke="#EF4444" strokeDasharray="4 4" label={{ value: "seuil critique 0,25", fontSize: 9, fill: "#EF4444", position: "insideTopLeft" }} />
+                <ReferenceLine y={0.18} stroke="#10B981" strokeDasharray="4 4" label={{ value: "cible 0,18", fontSize: 9, fill: "#10B981", position: "insideBottomLeft" }} />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} />} />
                 <Line
                   type="monotone" dataKey="brier" name="Brier" stroke="#3B82F6" strokeWidth={1.5}
+                  isAnimationActive={false}
                   dot={(props: any) => {
                     const { cx, cy, payload, index } = props;
                     if (cx == null || cy == null || !payload) return <g key={index} />;
@@ -324,27 +359,54 @@ export default function ApprentissageTab({
         </Section>
 
         <Section
-          title="Poids adaptatifs des features"
-          desc="Ajustement appris en ligne, en plus des poids figés du modèle. Vert = la feature est renforcée, rouge = elle est atténuée."
+          title="Dérive des poids de features"
+          desc="Écart entre le poids appris en ligne et le poids par défaut du groupe. Vert = le groupe a été renforcé par l'apprentissage, rouge = atténué. Zéro = le moteur n'a rien changé."
         >
-          {topFeatures.length === 0 ? (
-            <Empty>Poids non disponibles — le tilt attend son volume minimal de courses.</Empty>
+          {drifts.length === 0 ? (
+            <Empty>Aucune dérive enregistrée — le tilt attend son volume minimal de courses.</Empty>
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(210, topFeatures.length * 22)}>
-              <BarChart data={topFeatures} layout="vertical" margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
-                <CartesianGrid {...GRID} horizontal={false} vertical />
-                <XAxis type="number" tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => v.toFixed(2)} />
-                <YAxis type="category" dataKey="name" width={116} tick={{ fontSize: 10, fill: "#6B7280" }} axisLine={axisLine} tickLine={tickLine} />
-                <ReferenceLine x={0} stroke="#9CA3AF" />
-                <Tooltip cursor={{ fill: "rgba(148,163,184,0.08)" }} content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} />} />
-                <Bar dataKey="weight" name="Poids adaptatif" radius={[0, 3, 3, 0]} barSize={11}>
-                  {topFeatures.map((f, i) => (
-                    <Cell key={i} fill={f.weight > 0 ? DIVERGING_POS : DIVERGING_NEG} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={Math.max(190, drifts.length * 34)}>
+                <BarChart data={drifts} layout="vertical" margin={{ left: 4, right: 44, top: 4, bottom: 4 }}>
+                  <CartesianGrid {...GRID} horizontal={false} vertical />
+                  <XAxis
+                    type="number" tick={axisTick} axisLine={axisLine} tickLine={tickLine}
+                    tickFormatter={(v) => (v > 0 ? "+" : "") + v.toFixed(1)}
+                  />
+                  <YAxis
+                    type="category" dataKey="groupe" width={116} interval={0}
+                    tick={{ fontSize: 10, fill: "#6B7280" }} axisLine={axisLine} tickLine={tickLine}
+                  />
+                  <ReferenceLine x={0} stroke="#9CA3AF" strokeWidth={1} />
+                  <Tooltip
+                    cursor={{ fill: "rgba(148,163,184,0.08)" }}
+                    content={<ChartTooltip valueFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(3)}`} />}
+                  />
+                  <Bar dataKey="drift" name="Dérive vs défaut" radius={[0, 3, 3, 0]} barSize={14} isAnimationActive={false}>
+                    {drifts.map((f, i) => (
+                      <Cell key={i} fill={f.drift >= 0 ? DIVERGING_POS : DIVERGING_NEG} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="mt-2 space-y-0.5">
+                {drifts.map((f) => (
+                  <div key={f.groupe} className="flex items-center gap-2 text-[10px] text-gray-400">
+                    <span className="w-28 shrink-0 truncate">{f.groupe}</span>
+                    <span className="tabular-nums">
+                      poids <b className="text-gray-700">{f.poids_actuel.toFixed(3)}</b> · défaut {f.poids_défaut.toFixed(2)}
+                      {f.poids_actuel >= 1.98 && <span className="ml-1 text-amber-600">· plafond 2,00 atteint</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
+          <Note>
+            Chaque groupe a son propre poids par défaut (cotes 1,20 · elo 1,00 · équipement 0,60) :
+            c&apos;est l&apos;écart à CE défaut qui est tracé, pas le poids brut. Le moteur borne les
+            poids à 2,00.
+          </Note>
         </Section>
       </div>
 
@@ -378,7 +440,7 @@ export default function ApprentissageTab({
                   <th className="px-2 py-2 text-right font-semibold">Courses</th>
                   <th className="px-2 py-2 text-right font-semibold">Surprises</th>
                   <th className="px-2 py-2 text-right font-semibold">Brier moyen</th>
-                  <th className="px-2 py-2 text-right font-semibold">Correction</th>
+                  <th className="py-2 pl-2 text-left font-semibold">Correction</th>
                 </tr>
               </thead>
               <tbody>
@@ -392,8 +454,20 @@ export default function ApprentissageTab({
                     <td className="px-2 py-2 text-right tabular-nums text-gray-600">{num(row.nb_courses)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-amber-600">{pct((row.taux_surprise ?? 0) * 100)}</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-600">{row.brier_moyen?.toFixed(4) ?? "—"}</td>
-                    <td className={`px-2 py-2 text-right font-mono font-bold tabular-nums ${Math.abs(row.correction_factor ?? 0) > 0.08 ? ((row.correction_factor ?? 0) > 0 ? "text-red-600" : "text-blue-600") : "text-gray-400"}`}>
-                      {(row.correction_factor ?? 0) > 0 ? "+" : ""}{(row.correction_factor ?? 0).toFixed(4)}
+                    <td className="py-2 pl-2">
+                      {!row.correction_factor ? (
+                        <span className="text-[10px] text-gray-400">aucune</span>
+                      ) : row.correction_appliquee ?? row.nb_courses >= (row.seuil_courses ?? 8) ? (
+                        <span className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700"
+                          title="Confiance réduite de 0,05 sur ce contexte, appliquée à chaque pronostic">
+                          confiance −0,05
+                        </span>
+                      ) : (
+                        <span className="whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-500"
+                          title={`Détectée, mais lue à l'inférence seulement à partir de ${row.seuil_courses ?? 8} courses`}>
+                          en attente ({row.nb_courses}/{row.seuil_courses ?? 8})
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -402,8 +476,10 @@ export default function ApprentissageTab({
           </div>
         )}
         <Note>
-          Correction positive = le contexte produit plus de surprises que prévu, les probabilités y
-          sont aplaties. Correction négative = le favori y tient mieux qu&apos;ailleurs.
+          La correction est binaire, jamais graduée : −0,05 de confiance dès qu&apos;un contexte
+          dépasse 55 % de surprises sur au moins 8 courses, rien sinon. Elle n&apos;est jamais
+          positive — un contexte où le favori tient mieux que la moyenne n&apos;est pas récompensé,
+          seulement les contextes anormalement surprenants sont pénalisés.
         </Note>
       </Section>
 
@@ -425,9 +501,9 @@ export default function ApprentissageTab({
                   <th className="px-2 py-2 text-left font-semibold">Hippodrome</th>
                   <th className="px-2 py-2 text-left font-semibold">Discipline</th>
                   <th className="px-2 py-2 text-right font-semibold">Brier</th>
+                  <th className="px-2 py-2 text-right font-semibold">Partants</th>
                   <th className="px-2 py-2 text-right font-semibold">Proba du gagnant</th>
-                  <th className="px-2 py-2 text-right font-semibold">Rang prédit</th>
-                  <th className="px-2 py-2 text-right font-semibold">Δ température</th>
+                  <th className="px-2 py-2 text-right font-semibold">Gagnant réel</th>
                 </tr>
               </thead>
               <tbody>
@@ -441,19 +517,23 @@ export default function ApprentissageTab({
                     <td className={`px-2 py-2 text-right font-mono tabular-nums ${(h.brier_score ?? 0) > 0.25 ? "text-red-600" : (h.brier_score ?? 0) < 0.18 ? "text-emerald-600" : "text-gray-700"}`}>
                       {h.brier_score?.toFixed(4) ?? "—"}
                     </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-gray-500">
+                      {h.nb_partants ?? "—"}
+                    </td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-600">
                       {h.gagnant_proba_ia != null ? pct(h.gagnant_proba_ia * 100) : "—"}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      {h.gagnant_rang_predit != null ? (
-                        <span className={`font-bold ${h.gagnant_rang_predit === 1 ? "text-emerald-600" : h.gagnant_rang_predit <= 3 ? "text-amber-600" : "text-gray-400"}`}>
-                          #{h.gagnant_rang_predit}
+                      {h.gagnant_rang_predit == null ? "—" : hors3(h) ? (
+                        <span className="text-gray-400" title="Le gagnant réel n'était pas dans les 3 premiers du classement prédit">
+                          hors top 3
                         </span>
-                      ) : "—"}
+                      ) : (
+                        <span className={`font-bold ${h.gagnant_rang_predit === 1 ? "text-emerald-600" : "text-amber-600"}`}>
+                          {h.gagnant_rang_predit}<sup>{h.gagnant_rang_predit === 1 ? "er" : "e"}</sup> prédit
+                        </span>
+                      )}
                       {h.was_surprise && <span className="ml-1 text-red-500" title="Course classée surprise">⚡</span>}
-                    </td>
-                    <td className={`px-2 py-2 text-right font-mono tabular-nums ${(h.temperature_update ?? 0) > 0 ? "text-red-600" : (h.temperature_update ?? 0) < 0 ? "text-emerald-600" : "text-gray-400"}`}>
-                      {h.temperature_update != null ? `${h.temperature_update > 0 ? "+" : ""}${h.temperature_update.toFixed(4)}` : "—"}
                     </td>
                   </tr>
                 ))}

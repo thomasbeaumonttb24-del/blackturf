@@ -12,30 +12,34 @@ import * as React from "react";
 import { Info } from "lucide-react";
 
 // ─── formats ─────────────────────────────────────────────────
+// Espace fine insécable : règle typographique française devant % et €, et
+// surtout garantie qu'une étiquette de graphique ne se coupe jamais en
+// « −8 » / « % » sur deux lignes faute de place.
+const NB = " ";
 export const nf = new Intl.NumberFormat("fr-FR");
 
 export function eur(v: number | null | undefined, digits = 0): string {
   if (v == null || !isFinite(v)) return "—";
   return `${v < 0 ? "−" : ""}${new Intl.NumberFormat("fr-FR", {
     minimumFractionDigits: digits, maximumFractionDigits: digits,
-  }).format(Math.abs(v))} €`;
+  }).format(Math.abs(v))}${NB}€`;
 }
 
 export function signedEur(v: number | null | undefined, digits = 0): string {
   if (v == null || !isFinite(v)) return "—";
   return `${v > 0 ? "+" : v < 0 ? "−" : ""}${new Intl.NumberFormat("fr-FR", {
     minimumFractionDigits: digits, maximumFractionDigits: digits,
-  }).format(Math.abs(v))} €`;
+  }).format(Math.abs(v))}${NB}€`;
 }
 
 export function pct(v: number | null | undefined, digits = 1): string {
   if (v == null || !isFinite(v)) return "—";
-  return `${nfd(v, digits)} %`;
+  return `${nfd(v, digits)}${NB}%`;
 }
 
 export function signedPct(v: number | null | undefined, digits = 1): string {
   if (v == null || !isFinite(v)) return "—";
-  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${nfd(Math.abs(v), digits)} %`;
+  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${nfd(Math.abs(v), digits)}${NB}%`;
 }
 
 function nfd(v: number, digits: number) {
