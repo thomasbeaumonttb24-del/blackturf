@@ -74,6 +74,14 @@ FENETRE_AVANT_DEPART_H = 6
 # (un scraper lancé il y a dix minutes n'a pas encore fait ses preuves).
 MIN_RUNS_POUR_JUGER_SCRAPER = 20
 
+# Livraison des alertes : en dessous de 5 envois sur la fenêtre, un échec isolé ne
+# prouve rien (un utilisateur au push expiré, une adresse en rebond ponctuel). Au
+# delà de 30 % d'échecs, ce n'est plus un destinataire qui pose problème, c'est le
+# canal — c'est l'ordre de grandeur observé lors de la panne Resend de juin-août
+# 2026, où le taux était de 100 %.
+MIN_ENVOIS_POUR_JUGER_CANAL = 5
+SEUIL_TAUX_ECHEC_ENVOI = 0.30
+
 
 def _as_dt(valeur) -> datetime | None:
     """Normalise une colonne DateTime lue par ``text()``, en UTC.
@@ -401,6 +409,49 @@ async def sante_scrapers(session: AsyncSession, jours: int = 2) -> dict:
             "sources_desactivees": sorted(desactivees)}
 
 
+async def livraison_alertes(session: AsyncSession, heures: int = 24) -> dict:
+    """Les alertes envoyées arrivent-elles VRAIMENT ?
+
+    `alertes_log.envoye` dit si le fournisseur a accepté le message. Personne ne
+    le lisait : entre le 07/06 et le 01/08/2026, le digest du matin a échoué
+    **253 fois d'affilée** (clé Resend invalide) sans qu'aucun signal ne remonte —
+    le job tournait proprement, les logs disaient « done », et aucun abonné ne
+    recevait rien. Un canal peut être mort pendant deux mois sans que rien ne
+    l'indique : on le mesure ici.
+
+    Statuts par canal : `ok`, `insufficient_data` (trop peu d'envois pour juger),
+    `degraded` (des échecs, mais minoritaires), `failing` (canal cassé).
+    """
+    maintenant = datetime.now(timezone.utc)
+    lignes = (await session.execute(text("""
+        SELECT canal,
+               count(*) AS n_total,
+               SUM(CASE WHEN envoye THEN 0 ELSE 1 END) AS n_echecs
+        FROM alertes_log
+        WHERE created_at > :depuis
+        GROUP BY canal
+    """), {"depuis": maintenant - timedelta(hours=int(heures))})).all()
+
+    canaux: dict[str, dict] = {}
+    for canal, n_total, n_echecs in lignes:
+        n_total = int(n_total or 0)
+        n_echecs = int(n_echecs or 0)
+        taux = (n_echecs / n_total) if n_total else 0.0
+        if n_total < MIN_ENVOIS_POUR_JUGER_CANAL:
+            statut = "insufficient_data"
+        elif taux >= SEUIL_TAUX_ECHEC_ENVOI:
+            statut = "failing"
+        elif n_echecs:
+            statut = "degraded"
+        else:
+            statut = "ok"
+        canaux[str(canal)] = {
+            "n_total": n_total, "n_echecs": n_echecs,
+            "taux_echec": round(taux, 3), "statut": statut,
+        }
+    return {"fenetre_heures": heures, "canaux": canaux}
+
+
 async def rapport_qualite(session: AsyncSession) -> dict:
     """Rapport complet + liste des anomalies à signaler."""
     couverture = await couverture_sources(session)
@@ -409,8 +460,27 @@ async def rapport_qualite(session: AsyncSession) -> dict:
     concordance = await concordance_partants(session)
     incompletes = await courses_non_pronosticables(session)
     scrapers = await sante_scrapers(session)
+    livraison = await livraison_alertes(session)
 
     anomalies: list[dict] = []
+
+    for canal, info in livraison["canaux"].items():
+        if info["statut"] == "failing":
+            anomalies.append({
+                "code": "canal_envoi_casse",
+                "gravite": "critical",
+                "message": (f"Canal '{canal}' : {info['n_echecs']} envois en échec sur "
+                            f"{info['n_total']} en {livraison['fenetre_heures']} h "
+                            f"({info['taux_echec']:.0%}) — les destinataires ne "
+                            "reçoivent rien"),
+            })
+        elif info["statut"] == "degraded":
+            anomalies.append({
+                "code": "canal_envoi_degrade",
+                "gravite": "warning",
+                "message": (f"Canal '{canal}' : {info['n_echecs']} envois en échec sur "
+                            f"{info['n_total']} en {livraison['fenetre_heures']} h"),
+            })
 
     for nom, info in scrapers["sources"].items():
         if info["statut"] == "ok_but_empty":
@@ -494,6 +564,7 @@ async def rapport_qualite(session: AsyncSession) -> dict:
         "concordance": concordance,
         "courses_incompletes": incompletes,
         "sante_scrapers": scrapers,
+        "livraison_alertes": livraison,
         "anomalies": anomalies,
         "statut_global": ("critical" if any(a["gravite"] == "critical" for a in anomalies)
                           else "warning" if anomalies else "ok"),
