@@ -165,10 +165,6 @@ interface PariRec {
   probabilite: number;
   description: string;
   raisons?: string[];          // justification complète du pari (backend)
-  // Ticket de COUVERTURE : petite mise ajoutée pour multiplier les chances de toucher
-  // sur la course. Il ne porte PAS le multiplicateur du profil sur la mise totale —
-  // il faut le dire à l'écran, sinon la promesse ×4/×10 paraît fausse.
-  couverture?: boolean;
 }
 
 interface PariEcarte {
@@ -402,24 +398,9 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                 <div key={i} style={{ padding: "13px 14px", borderTop: i ? `1px solid ${CX.bd4}` : "none" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "start", gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 12.5, fontWeight: 700, color: CX.ink2 }}>{p.type}</span>
-                        {p.couverture && (
-                          <span
-                            title="Petite mise ajoutée pour multiplier les chances de toucher sur cette course. Ce ticket ne vise pas le multiplicateur du profil."
-                            style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: .3, textTransform: "uppercase", color: CX.gray600, background: CX.surf3, border: `1px solid ${CX.bd4}`, borderRadius: 999, padding: "1px 7px" }}
-                          >
-                            Couverture
-                          </span>
-                        )}
-                      </div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: CX.ink2 }}>{p.type}</div>
                       <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map(c => `N°${c.numero}`).join(" + ")}</div>
                       <div style={{ marginTop: 3, fontSize: 10.5, color: CX.gray500 }}>Probabilité estimée {(p.probabilite * 100).toFixed(0)}%</div>
-                      {p.couverture && (
-                        <div style={{ marginTop: 3, fontSize: 10.5, color: CX.gray500 }}>
-                          Chance supplémentaire — ne vise pas le multiplicateur du profil.
-                        </div>
-                      )}
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{p.mise.toFixed(2)}€</div>
@@ -1363,7 +1344,7 @@ function PronosticVerdictSection({ predictions, classement }: {
 // Rejoue le plan de mise (20€) sur les pronostics réels et le règle contre le
 // résultat officiel (rapports PMU réels). Indique si le pari serait passé + le gain.
 interface BilanData {
-  paris: Array<{ type: string; niveau: string; chevaux: { numero: number; nom: string }[]; mise: number; gagne: boolean; statut: "gagne" | "perdu" | "en_attente"; rapport_reel: number | null; gain: number | null; note: string | null; couverture?: boolean }>;
+  paris: Array<{ type: string; niveau: string; chevaux: { numero: number; nom: string }[]; mise: number; gagne: boolean; statut: "gagne" | "perdu" | "en_attente"; rapport_reel: number | null; gain: number | null; note: string | null }>;
   nb_paris: number; nb_gagnes: number; nb_en_attente: number; total_mise: number; total_gain: number; net: number; roi: number; en_attente: boolean; provisoire: boolean;
 }
 interface BilanProfil {
@@ -1406,17 +1387,7 @@ function BilanDetail({ bilan }: { bilan: BilanData }) {
         <tbody>
           {bilan.paris.map((p, i) => (
             <tr key={i} className="border-b border-border/40">
-              <td className="py-1 pr-2 font-medium">
-                {p.type}
-                {p.couverture && (
-                  <span
-                    className="ml-1.5 align-middle rounded-full border px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-muted-foreground"
-                    title="Pari de couverture : petite mise ajoutée pour multiplier les chances de toucher sur cette course."
-                  >
-                    Couv.
-                  </span>
-                )}
-              </td>
+              <td className="py-1 pr-2 font-medium">{p.type}</td>
               <td className="py-1 pr-2 text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</td>
               <td className="py-1 pr-2 text-right tabular-nums">{p.mise.toFixed(0)}€</td>
               <td className="py-1 pr-2 text-right tabular-nums">

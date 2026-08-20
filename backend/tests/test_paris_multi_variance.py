@@ -131,14 +131,11 @@ class TestVarianceCap:
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert len(paris) >= 2, f"1 seul ticket risqué : {paris}"
         assert sum(p["mise"] for p in paris) == 10          # tout le montant joué
-        # Le contrat ×10 vs mise TOTALE porte sur les tickets PRINCIPAUX. Les tickets de
-        # COUVERTURE (petites mises ajoutées pour multiplier les chances de toucher) ne le
-        # portent pas et sont explicitement marqués comme tels.
-        principaux = [p for p in paris if not p["couverture"]]
-        assert principaux, "plan sans aucun ticket principal"
+        # Le contrat ×10 vs mise TOTALE porte sur TOUS les tickets, sans exception
+        # (décision produit 2026-08-20), y compris les tickets d'appoint à 2€.
         for p in paris:
             assert p["mise"] >= 2
-        for p in principaux:
+        for p in paris:
             assert p["gain_potentiel"] >= 10 * 10 * 0.95, (
                 f"{p['type']} gain {p['gain_potentiel']} < ×10 du plan (10€ → ≥100€)"
             )
@@ -151,23 +148,22 @@ class TestVarianceCap:
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert paris, "plan modéré vide"
         assert sum(p["mise"] for p in paris) == 10
-        principaux = [p for p in paris if not p["couverture"]]
-        assert principaux, "plan sans aucun ticket principal"
         for p in paris:
             assert p["mise"] >= 2
-        for p in principaux:
+        for p in paris:
             assert p["gain_potentiel"] >= 4 * 10 * 0.95, (
                 f"{p['type']} gain {p['gain_potentiel']} < ×4 du plan (10€ → ≥40€)"
             )
 
 
-# ── Tickets de COUVERTURE (2026-08-20) ───────────────────────────────────────
-class TestCouverture:
-    """Depuis la calibration des rapports et des probabilités (19/08), le contrat
-    « ×g de la mise TOTALE » ne finançait plus qu'UN ticket par course (mesuré en
-    base : 1,55 → 1,00 pari/plan en modéré). Une seule chance de toucher par course.
-    On finance désormais des tickets de COUVERTURE sur le reliquat : le contrat reste
-    tenu par les tickets principaux, la couverture ajoute des chances."""
+# ── Tickets d'APPOINT (2026-08-20) ───────────────────────────────────────────
+class TestTicketsAppoint:
+    """Le reliquat du plan finance des paris D'APPOINT à la mise plancher.
+
+    Décision produit du 2026-08-20 : la tranche du profil se mesure sur la MISE
+    TOTALE du plan, SANS EXCEPTION — un ticket d'appoint porte donc exactement le
+    même contrat que les autres. À 2€ de mise sur un plan de 10€, cela impose un
+    rapport ≥ cible/2, d'où « peu de tickets, mais tous dans la tranche »."""
 
     COURSE = {
         "nb_partants": 12,
@@ -175,17 +171,21 @@ class TestCouverture:
                               "E_COUPLE_PLACE", "E_COUPLE_ORDRE", "E_TRIO", "E_2SUR4"],
     }
 
-    @pytest.mark.parametrize("profil,cible", [("equilibre", 4.0), ("agressif", 10.0)])
-    def test_contrat_tenu_par_les_principaux(self, profil, cible):
-        d = plan_to_dict(generer_plan(10, profil, _field(8), self.COURSE,
-                                      respect_montant=True))
-        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        principaux = [p for p in paris if not p["couverture"]]
-        assert principaux
-        if "tranche de gain habituelle" in d["resume_ia"]:
-            pytest.skip("filet hors-bande : le contrat est explicitement non garanti")
-        for p in principaux:
-            assert p["gain_potentiel"] >= cible * 10 * 0.95
+    @pytest.mark.parametrize("profil,cible", [
+        ("conservateur", 1.8), ("equilibre", 4.0), ("agressif", 10.0)])
+    def test_contrat_tenu_par_tous_les_tickets(self, profil, cible):
+        """AUCUN ticket affiché ne sort de la tranche, quelle que soit sa mise."""
+        for montant in (10, 20, 50):
+            d = plan_to_dict(generer_plan(montant, profil, _field(8), self.COURSE,
+                                          respect_montant=True))
+            paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+            assert paris
+            if "tranche de gain habituelle" in d["resume_ia"]:
+                continue        # filet hors-bande : le contrat est explicitement non garanti
+            for p in paris:
+                assert p["gain_potentiel"] >= cible * montant * 0.95, (
+                    f"{profil}/{montant}€ : {p['type']} rend {p['gain_potentiel']}€ "
+                    f"= ×{p['gain_potentiel']/montant:.1f} < ×{cible} de la mise totale")
 
     @pytest.mark.parametrize("profil", ["conservateur", "equilibre", "agressif"])
     def test_montant_integralement_joue_et_plancher(self, profil):
@@ -195,46 +195,9 @@ class TestCouverture:
         assert sum(p["mise"] for p in paris) == 10      # aucune réserve fantôme
         assert all(p["mise"] >= 2 for p in paris)       # plancher produit « jamais 1€ »
 
-    def test_couverture_annoncee_dans_le_resume(self):
-        """Si un ticket de couverture est financé, le résumé le DIT — sinon le joueur
-        croit que tous les tickets visent le multiplicateur du profil."""
-        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
-                                      respect_montant=True))
-        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        couv = [p for p in paris if p["couverture"]]
-        assert couv, "aucune couverture financée sur ce champ (le test perdrait son objet)"
-        assert "COUVERTURE" in d["resume_ia"]
-        for p in couv:
-            assert any("COUVERTURE" in r for r in p["raisons"]), (
-                "un ticket de couverture doit s'annoncer dans ses raisons")
-
-    @pytest.mark.parametrize("profil", ["equilibre", "agressif"])
-    def test_plan_pas_reduit_a_une_mise_unique(self, profil):
-        """SYMPTÔME D'ORIGINE (20/08) : « il n'y a plus que des mises de 10€ » — un seul
-        ticket absorbait tout le plan. Sans quasi-certitude, modéré et risqué doivent
-        proposer plusieurs paris DISTINCTS. (Les mises peuvent être égales quand deux
-        tickets contractuels ont le même besoin — c'est légitime ; ce qui ne l'est pas,
-        c'est de tout mettre sur un seul ticket.)"""
-        d = plan_to_dict(generer_plan(10, profil, _field(8), self.COURSE,
-                                      respect_montant=True))
-        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        assert len(paris) >= 2, f"{profil} : plan réduit à un ticket unique : {paris}"
-        cles = {(p["type"], frozenset(c["numero"] for c in p["chevaux"])) for p in paris}
-        assert len(cles) == len(paris), f"{profil} : paris non distincts"
-
-    def test_couverture_financee_quand_le_contrat_ne_tient_qu_un_ticket(self):
-        """Quand le contrat ×g ne finance qu'UN ticket et que le modèle n'est pas sûr,
-        la réserve de couverture doit produire au moins un pari supplémentaire."""
-        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
-                                      respect_montant=True))
-        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        assert any(p["couverture"] for p in paris)
-        assert len({p["mise"] for p in paris}) >= 2, "mises toutes identiques"
-
     def test_quasi_certitude_reste_sur_un_seul_ticket(self):
-        """Demande user : « si confiant d'un cheval, jouer un seul ; sinon plusieurs ».
-        Le NOMBRE de paris suit l'analyse de la course. Quand le meilleur pari est une
-        quasi-certitude (_solo_confident), on ne dilue pas en couverture."""
+        """« Si confiant d'un cheval, jouer un seul ; sinon plusieurs » : le NOMBRE de
+        paris suit l'analyse. Sur une quasi-certitude (_solo_confident), pas d'appoint."""
         ecrase = [(0.62, 1.5), (0.12, 7.0), (0.09, 10.0), (0.06, 15.0),
                   (0.05, 20.0), (0.03, 30.0), (0.02, 45.0), (0.01, 70.0)]
         champ = [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
@@ -245,30 +208,11 @@ class TestCouverture:
                                       respect_montant=True))
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert len(paris) == 1, f"mise diluée sur une quasi-certitude : {paris}"
-        assert not paris[0]["couverture"]
         assert paris[0]["mise"] == 10, "la mise entière doit aller sur le pari sûr"
 
-    def test_course_ouverte_diversifie(self):
-        """Contrepartie du test précédent : sans quasi-certitude, modéré et risqué
-        proposent PLUSIEURS paris différents."""
-        ouvert = [(0.16, 5.5), (0.15, 6.0), (0.14, 6.5), (0.13, 7.0),
-                  (0.12, 8.0), (0.11, 9.0), (0.10, 11.0), (0.09, 13.0)]
-        champ = [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
-                  "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
-                  "cote_pmu": c, "non_partant": False}
-                 for i, (p, c) in enumerate(ouvert)]
-        for profil in ("equilibre", "agressif"):
-            d = plan_to_dict(generer_plan(10, profil, champ, self.COURSE,
-                                          respect_montant=True))
-            paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-            assert len(paris) >= 2, f"{profil} : 1 seul pari sur une course ouverte"
-            cles = {(p["type"], frozenset(c["numero"] for c in p["chevaux"]))
-                    for p in paris}
-            assert len(cles) == len(paris), f"{profil} : paris non distincts"
-
-    def test_couverture_suit_le_champ_de_la_course(self):
-        """Le nb de tickets de couverture depend du CHAMP : un grand champ est plus
-        incertain et offre plus de combinaisons jouables, un champ reduit non."""
+    def test_appoint_suit_le_champ_de_la_course(self):
+        """Le nb de tickets d'appoint dépend du CHAMP : un grand champ est plus
+        incertain et offre plus de combinaisons jouables, un champ réduit non."""
         from services.mise_calculator import _couverture_max
         assert _couverture_max(7) == 2
         assert _couverture_max(8) == 2
@@ -277,10 +221,9 @@ class TestCouverture:
         assert _couverture_max(18) == 4
         assert _couverture_max(None) == 3        # info absente → valeur médiane
 
-    def test_couverture_alterne_frequence_et_gros_lot(self):
-        """« Plus de paris à petite mise qui peuvent gagner beaucoup » : la couverture
-        alterne le pari le plus PROBABLE et celui au plus gros RAPPORT, au lieu de
-        financer trois variantes du même pari."""
+    def test_appoint_alterne_frequence_et_gros_lot(self):
+        """L'ordre de financement alterne le pari le plus PROBABLE et celui au plus gros
+        RAPPORT, au lieu de financer trois variantes du même pari."""
         from services.mise_calculator import _ordre_couverture
         a = {"proba_gain": 0.30, "rapport_estime": 5.0}    # le plus probable
         b = {"proba_gain": 0.05, "rapport_estime": 60.0}   # le plus gros rapport
@@ -291,7 +234,8 @@ class TestCouverture:
         assert len(ordre) == 3 and len({id(x) for x in ordre}) == 3
 
     def test_risque_grand_champ_propose_plusieurs_paris(self):
-        """Demande user : en risqué, viser 3 paris voire plus quand le champ le permet."""
+        """En risqué la cible ×10 est atteignable à 2€ dès un rapport ≥50 : le grand
+        champ fournit ces rapports, donc plusieurs tickets DANS la tranche."""
         rows = [(0.16, 5.5), (0.14, 6.5), (0.12, 8.0), (0.10, 11.0), (0.09, 13.0),
                 (0.08, 15.0), (0.07, 18.0), (0.06, 22.0), (0.05, 28.0), (0.04, 35.0),
                 (0.04, 42.0), (0.03, 55.0), (0.03, 70.0), (0.02, 90.0)]
@@ -305,37 +249,28 @@ class TestCouverture:
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert len(paris) >= 3, f"grand champ risqué : seulement {len(paris)} pari(s)"
         assert sum(p["mise"] for p in paris) == 10
+        for p in paris:
+            assert p["gain_potentiel"] >= 10 * 10 * 0.95, (
+                f"{p['type']} rend {p['gain_potentiel']}€ < ×10 du plan")
 
-    def test_couverture_ne_duplique_pas_un_pari_principal(self):
-        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
+    def test_pas_de_pari_duplique(self):
+        d = plan_to_dict(generer_plan(20, "agressif", _field(8), self.COURSE,
                                       respect_montant=True))
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         vus = set()
         for p in paris:
             cle = (p["type"], frozenset(c["numero"] for c in p["chevaux"]))
-            assert cle not in vus, f"pari dupliqué en couverture : {cle}"
+            assert cle not in vus, f"pari dupliqué : {cle}"
             vus.add(cle)
 
     def test_jamais_deux_simple_place(self):
         """Règle produit : un Simple Placé paie moins que la mise totale → deux tickets
-        dont un seul passe = perdant. La couverture ne doit pas la contourner."""
+        dont un seul passe = perdant. L'appoint ne doit pas la contourner."""
         for profil in ("conservateur", "equilibre"):
             d = plan_to_dict(generer_plan(10, profil, _field(8), self.COURSE,
                                           respect_montant=True))
             paris = [p for niv in d["niveaux"] for p in niv["paris"]]
             assert sum(1 for p in paris if p["type"] == "Simple Placé") <= 1
-
-    def test_couverture_reste_au_plancher_les_mises_different(self):
-        """Le reliquat grossit les tickets CONTRACTUELS, pas la couverture : c'est ce
-        qui produit des mises visiblement différentes dans le plan."""
-        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
-                                      respect_montant=True))
-        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        couv = [p for p in paris if p["couverture"]]
-        principaux = [p for p in paris if not p["couverture"]]
-        assert couv and principaux
-        assert all(p["mise"] == 2 for p in couv), "la couverture reste au plancher 2€"
-        assert max(p["mise"] for p in principaux) > min(p["mise"] for p in couv)
 
 
 # ── Cap modèle/marché des probas chevaux (combos) — audit ROI 2026-07-02 ─────

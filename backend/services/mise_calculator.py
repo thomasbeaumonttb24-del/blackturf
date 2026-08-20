@@ -59,10 +59,6 @@ class PariRec:
     description: str
     ev_estime: float = 0.0
     raisons: list[str] = field(default_factory=list)   # justification complète du pari
-    # Ticket de COUVERTURE : financé sur le reliquat pour augmenter les chances qu'un
-    # pari passe sur la course. Il NE porte PAS la promesse « ×N de la MISE TOTALE » du
-    # profil (le/les tickets principaux la portent) — l'UI et les raisons le DISENT.
-    couverture: bool = False
 
 
 @dataclass
@@ -685,11 +681,12 @@ def _allocate_dutch(selected: list[dict], montant: float, cfg: dict) -> None:
 # SEUL ticket sur ~97 % des courses (mesuré : 1,55 → 1,00 pari/plan en modéré).
 # Une seule chance de toucher par course = le joueur ne rejoue pas.
 #
-# On garde le contrat INTACT sur les tickets qui le portent, et on emploie le
-# RELIQUAT — l'argent qui ne faisait sinon que grossir ces mêmes tickets — à financer
-# des paris SUPPLÉMENTAIRES au plancher de mise. Ils ne portent pas la promesse ×g du
-# plan, sont marqués `_couverture` et l'UI comme les justifications le DISENT. Leur
-# seul rôle : augmenter la probabilité qu'au moins un pari passe sur la course.
+# On emploie donc le RELIQUAT — l'argent qui ne faisait sinon que grossir les mêmes
+# tickets — à financer des paris D'APPOINT au plancher de mise. Décision produit du
+# 2026-08-20 : ils portent EXACTEMENT le même contrat que les autres (≥ ×g de la MISE
+# TOTALE), la tranche du profil se mesurant sur la mise totale SANS EXCEPTION. À 2€ de
+# mise, cela impose un rapport ≥ cible/2 : peu de tickets qualifient, mais tous sont
+# dans la tranche annoncée.
 # Nombre de tickets de couverture visé selon le CHAMP de la course. Plus il y a de
 # partants, plus l'issue est incertaine et plus il y a de combinaisons PMU réellement
 # jouables : couvrir davantage y a du sens. À l'inverse, sur un champ réduit les
@@ -766,17 +763,26 @@ def _couvre_deja(b: dict, deja: list[dict]) -> bool:
 def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
                          montant: int, cfg: dict,
                          pool: Optional[list[dict]] = None,
-                         cov_max: int = 3) -> int:
-    """Finance jusqu'à COUVERTURE_MAX paris supplémentaires sur le reliquat. Ajoute les
-    tickets retenus à `kept` (marqués `_couverture`) et renvoie le reliquat restant.
-    Aucun pari inventé ni hors profil : ils sortent de `selected` ou de `pool`, deux
-    listes qui ont déjà passé TOUTES les gates du profil (type autorisé, bande de
-    rapport, cote, probabilité, EV) — ils étaient simplement moins convaincants.
+                         cov_max: int = 3, cible: float = 0.0) -> int:
+    """Finance des paris D'APPOINT sur le reliquat : petite mise, GROS rapport.
+
+    Ils tiennent EXACTEMENT le même contrat que les autres tickets du plan — gagnants,
+    ils rendent ≥ `cible` (= gain_cible_mult × la MISE TOTALE du plan). Décision produit
+    du 2026-08-20 : la tranche du profil se mesure sur la mise totale, SANS EXCEPTION.
+    Un ticket qui n'atteint pas la cible à la mise plancher n'est donc pas financé —
+    mieux vaut un plan plus court qu'un ticket hors tranche.
+
+    La contrepartie est mécanique : à 2€ de mise sur un plan de 10€, il faut un rapport
+    ≥ cible/2 (×20 en modéré, ×50 en risqué). Seuls de très gros rapports qualifient,
+    d'où « peu de tickets, mais tous dans la tranche ».
 
     Mise = MISE_PLANCHER (2€) et non le plancher du PALIER : ce dernier existe pour
-    « tuer le saupoudrage » sur les tickets qui portent le contrat de gain ; un ticket de
-    couverture est justement l'inverse — une petite mise assumée qui achète une chance de
-    toucher en plus. Le plancher produit « jamais 1€ » reste respecté."""
+    « tuer le saupoudrage », or ici la mise est minimale précisément parce que le rapport
+    visé est élevé. Le plancher produit « jamais 1€ » reste respecté.
+
+    Aucun pari inventé ni hors profil : ils sortent de `selected` ou de `pool`, deux
+    listes qui ont déjà passé TOUTES les gates du profil (type autorisé, bande de
+    rapport, cote, probabilité, EV) — ils étaient simplement moins convaincants."""
     if not kept:
         return reste
     mise_cov = MISE_PLANCHER
@@ -802,6 +808,10 @@ def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
             break
         if _is_high_variance(b) and mise_cov > cap_hv:
             continue                      # plafond de variance : ticket non finançable
+        # CONTRAT DE GAIN, sans exception : à la mise plancher, le ticket doit rendre
+        # ≥ la cible du profil sur la MISE TOTALE du plan.
+        if cible > 0 and mise_cov * float(b.get("rapport_estime") or 0.0) < cible:
+            continue
         if _couvre_deja(b, kept):
             continue                      # ne couvre rien de nouveau → inutile
         # RÈGLE PRODUIT : le Simple Placé n'est JAMAIS éclaté en plusieurs tickets (il
@@ -811,7 +821,7 @@ def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
                 and any(k.get("type_pari") == "Simple Placé" for k in kept)):
             continue
         b["mise"] = mise_cov
-        b["_couverture"] = True
+        b["_besoin"] = mise_cov
         kept.append(b)
         reste -= mise_cov
         ajoutes += 1
@@ -965,7 +975,7 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # augmenter le nombre de chances de toucher sur la course, pas le gain d'un ticket.
     if not solo:
         reste = _financer_couverture(kept, selected, reste, M, cfg, pool=pool,
-                                     cov_max=cov_max)
+                                     cov_max=cov_max, cible=cible)
     # Reliquat ∝ conviction — les mises ne font que MONTER (gain ≥ cible préservé). Le
     # plancher de bande (×g du total) est STRICT (dimensionnement `besoin`). Le PLAFOND de
     # bande (gain ≤ gmax×total) borne le reliquat : on ne charge pas un ticket au-delà de sa
@@ -973,12 +983,12 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # de tickets pour absorber la totalité. Le filet final conserve l'invariant produit
     # « montant saisi = montant joué » même sur une course atypique.
     if reste > 0:
-        # Le reliquat grossit les tickets CONTRACTUELS (ceux qui portent la promesse
-        # ×g du plan) ; les tickets de couverture restent au plancher, c'est ce qui rend
-        # les mises visiblement DIFFÉRENTES et garde la promesse sur le ticket principal.
-        # Si tous les contractuels sont au plafond de bande, la boucle de secours plus
-        # bas peut encore charger la couverture (invariant « montant saisi = joué »).
-        cibles = [b for b in kept if not b.get("_couverture")] or kept
+        # Le reliquat grossit en priorité les tickets dimensionnés par la conviction ;
+        # les tickets d'appoint restent au plancher (leur rapport est déjà très élevé,
+        # les charger les ferait sortir par le HAUT de la tranche). Si tout est au
+        # plafond, la boucle de secours plus bas absorbe le reste — l'invariant
+        # « montant saisi = montant joué » prime.
+        cibles = [b for b in kept if b.get("mise") != MISE_PLANCHER] or kept
         ws = [_w(b) for b in cibles]
         tw = sum(ws) or 1.0
         add = _largest_remainder([reste * w / tw for w in ws], reste)
@@ -1981,16 +1991,6 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict],
     # 6. Contrat de gain vs mise TOTALE (allocation spread) : la mise du ticket a été
     # dimensionnée pour que, gagnant, il rende ≥ la cible du profil sur le PLAN entier.
     mise = float(c.get("mise", 0) or 0)
-    # 6 bis. TICKET DE COUVERTURE : il ne porte pas ce contrat — on le dit franchement,
-    # avec son vrai multiplicateur, plutôt que de laisser croire au ×N du profil.
-    if c.get("_couverture"):
-        gain_c = mise * float(c.get("rapport_estime", 0.0) or 0.0)
-        txt = (f"Pari de COUVERTURE ({mise:.0f}€) : il ne porte pas le multiplicateur du "
-               f"profil sur la mise totale")
-        if gain_c > 0:
-            txt += (f" — gagnant, il rend ~{gain_c:.0f}€"
-                    + (f" (×{gain_c / float(montant):.1f} de la mise totale)" if montant else ""))
-        raisons.append(txt + ". Il est là pour AJOUTER une chance de toucher sur cette course.")
     if montant and mise > 0 and c.get("_besoin"):
         gain_est = mise * float(c.get("rapport_estime", 0.0) or 0.0)
         if gain_est > 0:
@@ -2081,7 +2081,6 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             description=c["texte_explication"],
             ev_estime=c["ev"],
             raisons=_raisons_pari(c, profil, facteurs_chevaux, montant=montant),
-            couverture=bool(c.get("_couverture")),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
         ev_pondere += mise * c["ev"]            # espérance de profit net (€)
@@ -2100,7 +2099,6 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
 
     montant_joue = sum(c["mise"] for c in selected)
     nb_paris = len(selected)
-    nb_couv = sum(1 for c in selected if c.get("_couverture"))
     nb_val = sum(1 for c in selected if c.get("edge", 0.0) > 0)
     esp = round(ev_pondere, 2)
     mode = _mode_label(heat)
@@ -2133,20 +2131,6 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
     # Note honnête : on a dû sortir de la tranche de gain habituelle du profil pour que la
     # course soit quand même jouée (aucun pari dans la bande). Le multiplicateur visé n'est
     # pas garanti ici — on le DIT (aucune donnée inventée, ce sont de vrais paris PMU).
-    # COUVERTURE : on ne laisse pas croire que ces tickets portent le multiplicateur du
-    # profil. On dit ce qu'ils sont — des chances de toucher en plus, à petite mise.
-    if nb_couv:
-        _g = PROFIL_CONFIG.get(profil, PROFIL_CONFIG["equilibre"]).get("gain_cible_mult")
-        _n_pr = nb_paris - nb_couv
-        resume += (
-            f" Dont {nb_couv} pari{'s' if nb_couv > 1 else ''} de COUVERTURE à petite mise : "
-            f"{'ils augmentent' if nb_couv > 1 else 'il augmente'} les chances de toucher sur "
-            f"cette course, mais ne "
-            f"{'portent' if nb_couv > 1 else 'porte'} pas le multiplicateur du profil"
-            + (f" (×{_g:g} de la mise totale), assuré par "
-               f"{'les ' + str(_n_pr) + ' paris principaux' if _n_pr > 1 else 'le pari principal'}."
-               if _g else ".")
-        )
     if any(b.get("_hors_bande") for b in selected):
         resume += (" Note : aucun pari ne tombait dans la tranche de gain habituelle du "
                    "profil sur cette course — on a retenu le meilleur pari disponible pour "
@@ -2319,7 +2303,6 @@ def plan_to_dict(plan: MisePlan) -> dict:
                         "description": p.description,
                         "ev_estime": p.ev_estime,
                         "raisons": p.raisons,
-                        "couverture": p.couverture,
                     }
                     for p in n.paris
                 ],
