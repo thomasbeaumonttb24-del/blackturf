@@ -253,6 +253,49 @@ class TestTicketsAppoint:
             assert p["gain_potentiel"] >= 10 * 10 * 0.95, (
                 f"{p['type']} rend {p['gain_potentiel']}€ < ×10 du plan")
 
+    def test_plafond_de_rang_suit_le_classement(self):
+        """Le plan doit se correler au CLASSEMENT de l'IA (demande user 2026-08-20).
+
+        Mesure sur 459 courses reglees : le vrai gagnant est dans le top-3 predit 61,7 %
+        du temps, dans le top-8 95,9 %. Jouer un cheval au-dela, c'est parier contre le
+        modele qui produit le pronostic."""
+        from services.mise_calculator import _rang_max_effectif, PROFIL_CONFIG
+        # bornes par profil, du plus strict au plus large
+        assert PROFIL_CONFIG["conservateur"]["rang_max"] == 5
+        assert PROFIL_CONFIG["equilibre"]["rang_max"] == 6
+        assert PROFIL_CONFIG["agressif"]["rang_max"] == 8
+        # champ large : c'est le plafond du profil qui borne
+        assert _rang_max_effectif(8, 20) == 8
+        # champ reduit : le rang 8 serait le dernier cheval -> le champ borne
+        assert _rang_max_effectif(8, 8) == 5
+        assert _rang_max_effectif(8, 9) == 6
+        # plancher 4 : un champ minuscule ne doit pas tuer tout pari combine
+        assert _rang_max_effectif(8, 4) == 4
+        assert _rang_max_effectif(None, 12) is None
+
+    def test_aucun_cheval_hors_du_classement(self):
+        """Aucun cheval joue ne doit sortir du plafond de rang du profil (marge de deux
+        crans pour les paris PLACE : se placer est bien plus frequent que gagner)."""
+        from services.mise_calculator import (
+            _rang_max_effectif, PROFIL_CONFIG, RANG_MAX_BONUS_PLACE)
+        champ = _field(8)
+        rang = {int(p["numero"]): i for i, p in enumerate(
+            sorted(champ, key=lambda x: float(x["proba_top1"]), reverse=True), start=1)}
+        for profil in ("conservateur", "equilibre", "agressif"):
+            d = plan_to_dict(generer_plan(10, profil, champ, self.COURSE,
+                                          respect_montant=True))
+            paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+            if "tranche de gain habituelle" in d["resume_ia"]:
+                continue          # filet hors-bande : gates explicitement relachees
+            plafond = _rang_max_effectif(PROFIL_CONFIG[profil]["rang_max"],
+                                         self.COURSE["nb_partants"])
+            for pa in paris:
+                marge = RANG_MAX_BONUS_PLACE if "Placé" in pa["type"] else 0
+                for h in pa["chevaux"]:
+                    assert rang[int(h["numero"])] <= plafond + marge, (
+                        f"{profil}/{pa['type']} joue le rang "
+                        f"{rang[int(h['numero'])]} > plafond {plafond + marge}")
+
     def test_pas_de_pari_duplique(self):
         d = plan_to_dict(generer_plan(20, "agressif", _field(8), self.COURSE,
                                       respect_montant=True))

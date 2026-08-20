@@ -154,6 +154,47 @@ def _palier(montant: int) -> dict:
 #     • RISQUÉ   : gros rapport, au moins ×10            → rapport_min = 10.
 #   Les bandes se chevauchent volontairement : le profil module aussi probabilité,
 #   type de pari et allocation. Le « pourquoi » reste justifié par le gain du ticket.
+# ─────────────────────────────────────────────────────────────
+# PLAFOND DE RANG PRÉDIT — le plan doit se corréler au classement de l'IA
+# ─────────────────────────────────────────────────────────────
+# Le classement est le composant le plus fiable du système. Mesuré sur 459 courses
+# réglées (14 jours) : le n°1 prédit gagne 27,0 % et se place 55,3 % ; le vrai gagnant
+# est dans le top-3 prédit 61,7 % du temps, dans le top-5 81,3 %, dans le top-8 95,9 %.
+#
+# Or les plans ne le suivaient pas : seulement 47 % des chevaux joués en RISQUÉ tombaient
+# dans le top-3 prédit, et 17,8 % au rang 8 ou au-delà — là où le classement dit que le
+# gagnant ne sort que 4 % du temps. En cause, l'objectif "gain" du risqué, qui multiplie
+# la probabilité par le rapport et écrase donc le classement.
+#
+# `rang_max` borne le rang prédit du PIRE cheval d'un pari. Les bornes suivent les
+# cumulés ci-dessus : le prudent reste dans le top-5 (81 % des gagnants), le modéré dans
+# le top-6 (87 %), le risqué dans le top-8 (96 %) — au-delà, on ne joue plus un outsider,
+# on joue contre son propre modèle. Les paris de type PLACÉ sont exemptés d'un cran
+# (RANG_MAX_BONUS_PLACE) : un cheval du milieu de tableau se place bien plus souvent
+# qu'il ne gagne.
+RANG_MAX_BONUS_PLACE = 2
+# Le plafond absolu ne suffit pas : dans un champ de 8 partants, le rang 8 EST le dernier
+# cheval — le jouer, c'est parier contre son propre classement. Le plafond est donc aussi
+# borné par une fraction du CHAMP. 0.60 : on ne descend jamais sous les 60 % supérieurs
+# du classement, quel que soit le profil.
+RANG_MAX_FRACTION_CHAMP = 0.60
+
+
+def _rang_max_effectif(rang_max_profil, nb_partants) -> Optional[int]:
+    """Plafond de rang prédit réellement appliqué = le plus contraignant entre le plafond
+    du profil et les 60 % supérieurs du champ (plancher 4, sinon les petits champs ne
+    laisseraient plus aucun pari combiné)."""
+    if rang_max_profil is None:
+        return None
+    r = int(rang_max_profil)
+    if nb_partants:
+        try:
+            r = min(r, max(4, math.ceil(float(nb_partants) * RANG_MAX_FRACTION_CHAMP)))
+        except (TypeError, ValueError):
+            pass
+    return r
+
+
 PROFIL_CONFIG = {
     # PRUDENT — privilégie le PLACÉ : Simple Placé, Duo Placé (Couplé Placé), 2/4.
     # Cote des chevaux COURTE (cote_max 9) = gain quasi assuré, MAIS on exige un
@@ -187,6 +228,8 @@ PROFIL_CONFIG = {
         "types": {"Simple Placé", "Simple Gagnant", "Couplé Placé", "2sur4",
                   "Multi en 6", "Multi en 7"},
         "objectif": "proba",
+        # top-5 prédit = 81,3 % des vrais gagnants (mesure du 2026-08-20).
+        "rang_max": 5,
         "var_cap": 1.0,
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
@@ -233,6 +276,8 @@ PROFIL_CONFIG = {
                   "Couplé Ordre", "2sur4", "Trio",
                   "Multi en 5", "Multi en 6", "Multi en 7"},
         "objectif": "ev",
+        # top-6 prédit = 86,9 % des vrais gagnants (mesure du 2026-08-20).
+        "rang_max": 6,
         # var_cap 0.30 : un pari haute-variance (Trio/2sur4-jackpot) ne prend JAMAIS plus de
         # 30% du budget → force ≥2 tickets décorrélés (Trio capé). Anti « tout sur un Trio ».
         "var_cap": 0.30,
@@ -278,6 +323,10 @@ PROFIL_CONFIG = {
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre",
                   "Multi en 4", "Multi en 5", "Pick5"},
         "objectif": "gain",
+        # top-8 prédit = 95,9 % des vrais gagnants (mesure du 2026-08-20). Au-delà, le
+        # « gros rapport » n'est plus un outsider à valeur : c'est un pari contre le
+        # classement, et c'est ce qui remplissait 17,8 % des tickets risqués.
+        "rang_max": 8,
         # var_cap 0.35 (resserré de 0.45) : le risqué reste 100% gros rapport, MAIS jamais
         # plus de 35% du budget sur un seul ticket → la mise s'étale sur ≥3 gros-rapports
         # DÉCORRÉLÉS (demande user : « plus de mises différentes en risqué », fini le
@@ -338,6 +387,10 @@ def _effective_config(profil: str, heat: float) -> dict:
         # Plafond de mise sur UN pari haute-variance (fraction du montant) — garde-fou
         # anti « tout sur un Trio ». Contrat produit → NON modulé par le heat.
         "var_cap": base.get("var_cap", 1.0),
+        # Plafond de rang prédit — corrélation au classement de l'IA. Contrat produit
+        # (le classement ne devient pas moins fiable quand le modèle est « chaud »)
+        # → NON modulé par le heat.
+        "rang_max": base.get("rang_max"),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -435,9 +488,25 @@ def generer_plan(
             except (TypeError, ValueError):
                 pass
 
+    # RANG PRÉDIT par cheval = ordre de proba_top1 décroissante (même classement que
+    # celui affiché à l'utilisateur). Chaque candidat porte le rang de son PIRE cheval :
+    # c'est lui qui détermine si le pari suit le classement ou le contredit.
+    _rang_par_num: dict[int, int] = {}
+    for _i, _p in enumerate(sorted(preds, key=lambda x: float(x.get("proba_top1") or 0.0),
+                                   reverse=True), start=1):
+        try:
+            _rang_par_num[int(_p["numero"])] = _i
+        except (TypeError, ValueError, KeyError):
+            continue
+
     cands = enumerate_bet_candidates(preds, course_info)
     if not cands:
         return _plan_vide(montant, profil)
+    for c in cands:
+        _rgs = [_rang_par_num.get(int(h["numero"])) for h in c.get("chevaux", [])
+                if h.get("numero") is not None]
+        _rgs = [r for r in _rgs if r]
+        c["_rang_max"] = max(_rgs) if _rgs else None
     if ci_width_by_num:
         for c in cands:
             c["_ci_width"] = max(
@@ -504,6 +573,12 @@ def generer_plan(
     # pool_couverture : candidats validés par les gates du profil mais écartés de la
     # sélection (conviction plus faible). Vivier des tickets de COUVERTURE.
     pool_couverture: list[dict] = []
+    # Plafond de rang appliqué à CETTE course : le profil borne le rang, le champ le
+    # borne encore (cf. _rang_max_effectif).
+    cfg = dict(cfg)
+    cfg["rang_max"] = _rang_max_effectif(cfg.get("rang_max"),
+                                         (course_info or {}).get("nb_partants"))
+
     selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
                                   respect_montant=respect_montant, ev_band_perf=ev_band_perf,
                                   pool_out=pool_couverture)
@@ -1120,6 +1195,7 @@ def _select_conviction(
     # QUE si, même au plancher de mise, le gain dépasse la bande : rap > rapport_max × M / min_stake.
     rapport_max_eff = (rapport_max * montant / max(min_stake, 1)) if rapport_max is not None else None
     min_proba = cfg["min_proba"]
+    rang_max_eff = cfg.get("rang_max")
     ev_min = cfg["ev_min"]
     allowed_types = cfg.get("types")                         # None = toutes
     objectif = cfg.get("objectif", "ev")
@@ -1237,6 +1313,14 @@ def _select_conviction(
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
+        # CORRÉLATION AU CLASSEMENT (demande user 2026-08-20) : le classement de l'IA est
+        # sa partie la plus fiable. Un pari dont un cheval sort du top `rang_max` prédit
+        # va contre le modèle qui le produit. Les paris de type PLACÉ ont deux crans de
+        # marge (se placer est bien plus fréquent que gagner).
+        if rang_max_eff is not None and c.get("_rang_max") is not None:
+            _plafond = rang_max_eff + (RANG_MAX_BONUS_PLACE if "Placé" in c["type_pari"] else 0)
+            if int(c["_rang_max"]) > _plafond:
+                return False
         # GATE DOMINANCE du SIMPLE GAGNANT : le gagnant sec n'entre dans un profil que si
         # le cheval a la proba de victoire requise (prudent 0.34 = domine la course ;
         # modéré 0.11 = chance réelle ; risqué 0 = pas de gate). La bande de rapport fait
