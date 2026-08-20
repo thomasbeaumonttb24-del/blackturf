@@ -131,8 +131,14 @@ class TestVarianceCap:
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert len(paris) >= 2, f"1 seul ticket risqué : {paris}"
         assert sum(p["mise"] for p in paris) == 10          # tout le montant joué
+        # Le contrat ×10 vs mise TOTALE porte sur les tickets PRINCIPAUX. Les tickets de
+        # COUVERTURE (petites mises ajoutées pour multiplier les chances de toucher) ne le
+        # portent pas et sont explicitement marqués comme tels.
+        principaux = [p for p in paris if not p["couverture"]]
+        assert principaux, "plan sans aucun ticket principal"
         for p in paris:
             assert p["mise"] >= 2
+        for p in principaux:
             assert p["gain_potentiel"] >= 10 * 10 * 0.95, (
                 f"{p['type']} gain {p['gain_potentiel']} < ×10 du plan (10€ → ≥100€)"
             )
@@ -145,11 +151,104 @@ class TestVarianceCap:
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert paris, "plan modéré vide"
         assert sum(p["mise"] for p in paris) == 10
+        principaux = [p for p in paris if not p["couverture"]]
+        assert principaux, "plan sans aucun ticket principal"
         for p in paris:
             assert p["mise"] >= 2
+        for p in principaux:
             assert p["gain_potentiel"] >= 4 * 10 * 0.95, (
                 f"{p['type']} gain {p['gain_potentiel']} < ×4 du plan (10€ → ≥40€)"
             )
+
+
+# ── Tickets de COUVERTURE (2026-08-20) ───────────────────────────────────────
+class TestCouverture:
+    """Depuis la calibration des rapports et des probabilités (19/08), le contrat
+    « ×g de la mise TOTALE » ne finançait plus qu'UN ticket par course (mesuré en
+    base : 1,55 → 1,00 pari/plan en modéré). Une seule chance de toucher par course.
+    On finance désormais des tickets de COUVERTURE sur le reliquat : le contrat reste
+    tenu par les tickets principaux, la couverture ajoute des chances."""
+
+    COURSE = {
+        "nb_partants": 12,
+        "paris_disponibles": ["E_SIMPLE_GAGNANT", "E_SIMPLE_PLACE", "E_COUPLE_GAGNANT",
+                              "E_COUPLE_PLACE", "E_COUPLE_ORDRE", "E_TRIO", "E_2SUR4"],
+    }
+
+    @pytest.mark.parametrize("profil,cible", [("equilibre", 4.0), ("agressif", 10.0)])
+    def test_contrat_tenu_par_les_principaux(self, profil, cible):
+        d = plan_to_dict(generer_plan(10, profil, _field(8), self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        principaux = [p for p in paris if not p["couverture"]]
+        assert principaux
+        if "tranche de gain habituelle" in d["resume_ia"]:
+            pytest.skip("filet hors-bande : le contrat est explicitement non garanti")
+        for p in principaux:
+            assert p["gain_potentiel"] >= cible * 10 * 0.95
+
+    @pytest.mark.parametrize("profil", ["conservateur", "equilibre", "agressif"])
+    def test_montant_integralement_joue_et_plancher(self, profil):
+        d = plan_to_dict(generer_plan(10, profil, _field(8), self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        assert sum(p["mise"] for p in paris) == 10      # aucune réserve fantôme
+        assert all(p["mise"] >= 2 for p in paris)       # plancher produit « jamais 1€ »
+
+    def test_couverture_annoncee_dans_le_resume(self):
+        """Si un ticket de couverture est financé, le résumé le DIT — sinon le joueur
+        croit que tous les tickets visent le multiplicateur du profil."""
+        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        couv = [p for p in paris if p["couverture"]]
+        assert couv, "aucune couverture financée sur ce champ (le test perdrait son objet)"
+        assert "COUVERTURE" in d["resume_ia"]
+        for p in couv:
+            assert any("COUVERTURE" in r for r in p["raisons"]), (
+                "un ticket de couverture doit s'annoncer dans ses raisons")
+
+    def test_plan_a_ticket_unique_recoit_de_la_couverture(self):
+        """SYMPTÔME D'ORIGINE (20/08) : « il n'y a plus que des mises de 10€ » — un seul
+        ticket qui absorbe tout le plan. Quand le contrat ×g ne finance qu'un ticket, la
+        réserve de couverture doit produire au moins un pari supplémentaire."""
+        d = plan_to_dict(generer_plan(10, "conservateur", _field(8), self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        assert len(paris) >= 2, f"plan encore réduit à un ticket unique : {paris}"
+        assert any(p["couverture"] for p in paris)
+        assert len({p["mise"] for p in paris}) >= 2, "mises toutes identiques"
+
+    def test_couverture_ne_duplique_pas_un_pari_principal(self):
+        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        vus = set()
+        for p in paris:
+            cle = (p["type"], frozenset(c["numero"] for c in p["chevaux"]))
+            assert cle not in vus, f"pari dupliqué en couverture : {cle}"
+            vus.add(cle)
+
+    def test_jamais_deux_simple_place(self):
+        """Règle produit : un Simple Placé paie moins que la mise totale → deux tickets
+        dont un seul passe = perdant. La couverture ne doit pas la contourner."""
+        for profil in ("conservateur", "equilibre"):
+            d = plan_to_dict(generer_plan(10, profil, _field(8), self.COURSE,
+                                          respect_montant=True))
+            paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+            assert sum(1 for p in paris if p["type"] == "Simple Placé") <= 1
+
+    def test_couverture_reste_au_plancher_les_mises_different(self):
+        """Le reliquat grossit les tickets CONTRACTUELS, pas la couverture : c'est ce
+        qui produit des mises visiblement différentes dans le plan."""
+        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        couv = [p for p in paris if p["couverture"]]
+        principaux = [p for p in paris if not p["couverture"]]
+        assert couv and principaux
+        assert all(p["mise"] == 2 for p in couv), "la couverture reste au plancher 2€"
+        assert max(p["mise"] for p in principaux) > min(p["mise"] for p in couv)
 
 
 # ── Cap modèle/marché des probas chevaux (combos) — audit ROI 2026-07-02 ─────

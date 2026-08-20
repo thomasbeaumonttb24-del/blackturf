@@ -422,6 +422,10 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
                 "gain": gain,
                 "rapport_approximatif": res["rapport_approximatif"],
                 "note": res["note"],
+                # Ticket de couverture : reporté tel quel dans le bilan pour que le
+                # joueur retrouve à l'arrivée la nature du pari qu'on lui a proposé
+                # (petite mise « chance en plus », pas le multiplicateur du profil).
+                "couverture": bool(pari.get("couverture")),
             })
 
     total_mise = round(total_mise, 2)

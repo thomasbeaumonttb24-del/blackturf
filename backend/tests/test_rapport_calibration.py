@@ -46,14 +46,18 @@ def _rapports_selectionnes(plan_d):
     return out
 
 
-def _gains_vs_total(plan_d):
+def _gains_vs_total(plan_d, avec_couverture=False):
     """Multiple de GAIN / MISE TOTALE de chaque ticket = gain_potentiel / montant_total.
-    C'est la grandeur de la BANDE produit (demande user 2026-07-13), pas le rapport du ticket."""
+    C'est la grandeur de la BANDE produit (demande user 2026-07-13), pas le rapport du ticket.
+
+    Les tickets de COUVERTURE (2026-08-20) sont exclus par défaut : ils ne portent PAS la
+    bande du profil, ce sont des petites mises assumées qui achètent une chance de toucher
+    en plus. Ils sont marqués `couverture` dans le plan et annoncés comme tels à l'écran."""
     total = plan_d["montant_total"] or 1
     out = []
     for niv in plan_d["niveaux"]:
         for p in niv["paris"]:
-            if p["mise"] > 0:
+            if p["mise"] > 0 and (avec_couverture or not p.get("couverture")):
                 out.append((p["type"], p["gain_potentiel"] / total))
     return out
 
@@ -146,7 +150,11 @@ class TestTranchesRespectees:
                                          respect_montant=True))
         paris = [p for niv in plan["niveaux"] for p in niv["paris"]]
         assert paris, "plan vide inattendu"
-        for p in paris:
+        # Les tickets de COUVERTURE ne portent pas ce contrat (ils sont marqués et
+        # annoncés comme tels) — le contrat porte sur les tickets PRINCIPAUX.
+        principaux = [p for p in paris if not p.get("couverture")]
+        assert principaux, "plan sans aucun ticket principal"
+        for p in principaux:
             assert p["gain_potentiel"] >= mult * montant * 0.95, (
                 f"{profil}/{p['type']} gain {p['gain_potentiel']}€ "
                 f"< ×{mult} du plan ({montant}€, {len(paris)} tickets)"
