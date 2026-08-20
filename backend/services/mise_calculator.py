@@ -1006,9 +1006,9 @@ def _solo_confident(c: dict) -> bool:
     p = float(c.get("proba_gain", 0.0) or 0.0)
     edge = float(c.get("edge", 0.0) or 0.0)
     sig = float(c.get("_sig", 1.0) or 1.0)
-    return (p >= 0.42
-            or (p >= 0.32 and edge > 0.0)
-            or (p >= 0.26 and edge > 0.02 and sig >= 1.10))
+    return (p >= 0.55
+            or (p >= 0.45 and edge > 0.0)
+            or (p >= 0.38 and edge > 0.02 and sig >= 1.10))
 
 
 def _bet_cote_max(c: dict) -> float:
