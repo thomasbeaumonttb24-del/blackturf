@@ -882,7 +882,12 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # du budget AVANT de dimensionner le ticket principal, pour financer des paris de
     # couverture. On ne le fait PAS si le contrat finance déjà ≥2 tickets : un ticket
     # contractuel (multiplicateur du profil tenu) vaut mieux qu'un ticket de couverture.
-    if len(kept) <= 1 and (len(selected) > 1 or pool):
+    # QUASI-CERTITUDE : quand le modèle est vraiment sûr d'un pari, on ne dilue pas —
+    # toute la mise part dessus, sans réserve ni couverture (demande user : « si confiant
+    # d'un cheval jouer un seul, sinon proposer plusieurs »). Le nombre de paris est donc
+    # piloté par l'ANALYSE de la course, pas par un cap fixe.
+    solo = bool(selected) and _solo_confident(selected[0])
+    if not solo and len(kept) <= 1 and (len(selected) > 1 or pool):
         res = min(COUVERTURE_MAX * MISE_PLANCHER, int(M * COUVERTURE_PART))
         while res >= MISE_PLANCHER:
             k2, r2, _ = _best_diversified(cible, M - res)
@@ -906,7 +911,8 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # COUVERTURE : le reliquat finance d'ABORD des paris SUPPLÉMENTAIRES (cf.
     # _financer_couverture) avant de grossir les tickets contractuels. Objectif =
     # augmenter le nombre de chances de toucher sur la course, pas le gain d'un ticket.
-    reste = _financer_couverture(kept, selected, reste, M, cfg, pool=pool)
+    if not solo:
+        reste = _financer_couverture(kept, selected, reste, M, cfg, pool=pool)
     # Reliquat ∝ conviction — les mises ne font que MONTER (gain ≥ cible préservé). Le
     # plancher de bande (×g du total) est STRICT (dimensionnement `besoin`). Le PLAFOND de
     # bande (gain ≤ gmax×total) borne le reliquat : on ne charge pas un ticket au-delà de sa

@@ -208,16 +208,63 @@ class TestCouverture:
             assert any("COUVERTURE" in r for r in p["raisons"]), (
                 "un ticket de couverture doit s'annoncer dans ses raisons")
 
-    def test_plan_a_ticket_unique_recoit_de_la_couverture(self):
+    @pytest.mark.parametrize("profil", ["equilibre", "agressif"])
+    def test_plan_pas_reduit_a_une_mise_unique(self, profil):
         """SYMPTÔME D'ORIGINE (20/08) : « il n'y a plus que des mises de 10€ » — un seul
-        ticket qui absorbe tout le plan. Quand le contrat ×g ne finance qu'un ticket, la
-        réserve de couverture doit produire au moins un pari supplémentaire."""
-        d = plan_to_dict(generer_plan(10, "conservateur", _field(8), self.COURSE,
+        ticket absorbait tout le plan. Sans quasi-certitude, modéré et risqué doivent
+        proposer plusieurs paris DISTINCTS. (Les mises peuvent être égales quand deux
+        tickets contractuels ont le même besoin — c'est légitime ; ce qui ne l'est pas,
+        c'est de tout mettre sur un seul ticket.)"""
+        d = plan_to_dict(generer_plan(10, profil, _field(8), self.COURSE,
                                       respect_montant=True))
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        assert len(paris) >= 2, f"plan encore réduit à un ticket unique : {paris}"
+        assert len(paris) >= 2, f"{profil} : plan réduit à un ticket unique : {paris}"
+        cles = {(p["type"], frozenset(c["numero"] for c in p["chevaux"])) for p in paris}
+        assert len(cles) == len(paris), f"{profil} : paris non distincts"
+
+    def test_couverture_financee_quand_le_contrat_ne_tient_qu_un_ticket(self):
+        """Quand le contrat ×g ne finance qu'UN ticket et que le modèle n'est pas sûr,
+        la réserve de couverture doit produire au moins un pari supplémentaire."""
+        d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert any(p["couverture"] for p in paris)
         assert len({p["mise"] for p in paris}) >= 2, "mises toutes identiques"
+
+    def test_quasi_certitude_reste_sur_un_seul_ticket(self):
+        """Demande user : « si confiant d'un cheval, jouer un seul ; sinon plusieurs ».
+        Le NOMBRE de paris suit l'analyse de la course. Quand le meilleur pari est une
+        quasi-certitude (_solo_confident), on ne dilue pas en couverture."""
+        ecrase = [(0.62, 1.5), (0.12, 7.0), (0.09, 10.0), (0.06, 15.0),
+                  (0.05, 20.0), (0.03, 30.0), (0.02, 45.0), (0.01, 70.0)]
+        champ = [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
+                  "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
+                  "cote_pmu": c, "non_partant": False}
+                 for i, (p, c) in enumerate(ecrase)]
+        d = plan_to_dict(generer_plan(10, "conservateur", champ, self.COURSE,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        assert len(paris) == 1, f"mise diluée sur une quasi-certitude : {paris}"
+        assert not paris[0]["couverture"]
+        assert paris[0]["mise"] == 10, "la mise entière doit aller sur le pari sûr"
+
+    def test_course_ouverte_diversifie(self):
+        """Contrepartie du test précédent : sans quasi-certitude, modéré et risqué
+        proposent PLUSIEURS paris différents."""
+        ouvert = [(0.16, 5.5), (0.15, 6.0), (0.14, 6.5), (0.13, 7.0),
+                  (0.12, 8.0), (0.11, 9.0), (0.10, 11.0), (0.09, 13.0)]
+        champ = [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
+                  "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
+                  "cote_pmu": c, "non_partant": False}
+                 for i, (p, c) in enumerate(ouvert)]
+        for profil in ("equilibre", "agressif"):
+            d = plan_to_dict(generer_plan(10, profil, champ, self.COURSE,
+                                          respect_montant=True))
+            paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+            assert len(paris) >= 2, f"{profil} : 1 seul pari sur une course ouverte"
+            cles = {(p["type"], frozenset(c["numero"] for c in p["chevaux"]))
+                    for p in paris}
+            assert len(cles) == len(paris), f"{profil} : paris non distincts"
 
     def test_couverture_ne_duplique_pas_un_pari_principal(self):
         d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
