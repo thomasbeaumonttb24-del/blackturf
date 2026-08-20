@@ -14,6 +14,9 @@ function AbonnementSuccesContent() {
   const { refreshUser } = useAuth();
   const [loading, setLoading] = useState(true);
   const plan = searchParams.get("plan") || "standard";
+  // `change=1` : changement de formule sur l'abonnement existant, pas une
+  // première souscription — dire « Bienvenue » serait faux.
+  const changementDeFormule = searchParams.get("change") === "1";
 
   useEffect(() => {
     // Refresh user pour mettre à jour le plan après paiement Stripe
@@ -48,10 +51,17 @@ function AbonnementSuccesContent() {
 
             <div>
               <h1 className="text-3xl font-extrabold mb-2">
-                Bienvenue sur BlackTurf{" "}
+                {changementDeFormule ? "Vous êtes maintenant en " : "Bienvenue sur BlackTurf "}
                 <span className="text-gradient">{planLabel}</span> !
               </h1>
               <p className="text-muted-foreground">{planDesc}</p>
+              {changementDeFormule && (
+                <p className="text-muted-foreground text-sm mt-2">
+                  Votre abonnement a été modifié — aucun second abonnement n&apos;a été
+                  créé. La différence de prix est ajustée au prorata sur votre
+                  prochaine facture.
+                </p>
+              )}
             </div>
 
             <Card className="border-brand-gold/20 bg-brand-gold/5">

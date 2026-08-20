@@ -825,6 +825,12 @@ class User(Base):
     plan: Mapped[str] = mapped_column(String(10), default="free")  # free/standard/expert (legacy: starter/pro)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(100), unique=True)
 
+    # Essai gratuit : une seule fois par compte. NULL = jamais utilisé. Renseignée
+    # par le webhook dès qu'un abonnement assorti d'un essai devient trialing/active.
+    # Stripe ne déduplique PAS les essais par client : sans ce champ, un compte
+    # rouvrait un checkout et repartait pour 7 jours, indéfiniment.
+    essai_utilise_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Push notifications
     push_subscription: Mapped[dict | None] = mapped_column(JSON)
 

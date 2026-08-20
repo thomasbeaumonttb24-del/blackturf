@@ -273,7 +273,7 @@ export default function TarifsPage() {
       {/* CTA */}
       <div className="mt-12 sm:mt-16 text-center p-6 sm:p-8 rounded-2xl gradient-hero border border-brand-gold/20">
         <h2 className="text-xl sm:text-2xl font-bold mb-3">Prêt à parier plus intelligemment ?</h2>
-        <p className="text-muted-foreground mb-6">7 jours d&apos;essai gratuit. Sans carte bancaire.</p>
+        <p className="text-muted-foreground mb-6">7 jours d&apos;essai gratuit. Carte requise, aucun prélèvement avant la fin de l&apos;essai.</p>
         <CheckoutButton
           plan="standard"
           periodicite="monthly"

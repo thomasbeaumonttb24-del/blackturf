@@ -154,7 +154,7 @@ function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
     },
     {
       q: "Puis-je annuler ?",
-      r: "À tout moment depuis votre compte, en deux clics. L'essai de 7 jours ne demande pas de carte bancaire et ne bascule pas en abonnement payant sans votre accord.",
+      r: "À tout moment depuis votre compte, en deux clics. L'essai de 7 jours demande une carte, mais rien n'est prélevé avant son terme : annulez avant la fin et vous ne payez rien.",
     },
   ];
 }
@@ -245,7 +245,7 @@ export default async function HomePage() {
               <Link href="/programme">Voir le programme du jour</Link>
             </Button>
           </div>
-          <p className="mt-5 text-[11px] text-white/55">7 jours gratuits · sans carte bancaire · annulation à tout moment</p>
+          <p className="mt-5 text-[11px] text-white/55">7 jours gratuits · aucun prélèvement avant la fin de l&apos;essai · annulation à tout moment</p>
 
           {/* Stats clés — cartes verre + count-up (live, mêmes chiffres que le palmarès) */}
           <HeroStats
@@ -924,7 +924,7 @@ export default async function HomePage() {
                 <span className="text-gradient">ticket perdu par semaine</span>
               </h2>
               <p className="text-gray-500 max-w-xl mx-auto">
-                7 jours d&apos;essai gratuit, sans carte bancaire. Le palmarès, lui, reste public — vous pouvez
+                7 jours d&apos;essai gratuit, sans prélèvement avant son terme. Le palmarès, lui, reste public — vous pouvez
                 juger avant de payer.
               </p>
             </div>
@@ -1029,12 +1029,12 @@ export default async function HomePage() {
             </h2>
             <p className="text-gray-200/90 text-lg mb-10 max-w-xl mx-auto">
               Des analyses chiffrées et vérifiées sur les vrais résultats du PMU. Essayez BlackTurf
-              7 jours, sans engagement et sans carte bancaire.
+              7 jours, sans engagement : annulez avant la fin de l&apos;essai et rien ne vous est prélevé.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="xl" asChild
                 className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-900/40">
-                <Link href="/inscription">Essai gratuit 7 jours — sans CB <ArrowRight className="h-5 w-5 ml-1" /></Link>
+                <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
               </Button>
               <Button variant="outline" size="xl" asChild
                 className="press border-white/30 bg-white/5 text-white hover:bg-white/15 hover:border-white/50">

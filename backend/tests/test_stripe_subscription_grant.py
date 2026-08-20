@@ -91,11 +91,14 @@ async def test_active_subscription_grants_plan(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_checkout_tient_la_promesse_essai_sans_carte(db, monkeypatch):
-    """« 7 jours d'essai sans carte bancaire » est promis sur l'accueil, sur /tarifs
-    et dans les CGU. Le défaut Stripe (`payment_method_collection="always"`) réclame
-    la carte malgré l'essai → la session DOIT passer `if_required`, et prévoir
-    l'absence de moyen de paiement à la fin de l'essai."""
+async def test_checkout_ouvre_bien_un_essai_de_7_jours(db, monkeypatch):
+    """L'essai de 7 jours est promis sur l'accueil, sur /tarifs et dans les CGU :
+    la session Checkout doit réellement le porter.
+
+    La carte est exigée depuis le 2026-08-20 (`always`). L'ancien `if_required`
+    — « essai sans carte » — laissait passer des essais qu'aucun moyen de paiement
+    ne pouvait convertir ; le détail du nouveau contrat est couvert par
+    test_stripe_essai_et_changement_plan.py."""
     import api.routes.stripe_routes as sr
 
     captured = {}
@@ -114,7 +117,7 @@ async def test_checkout_tient_la_promesse_essai_sans_carte(db, monkeypatch):
 
     await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, user)
 
-    assert captured["payment_method_collection"] == "if_required"
+    assert captured["payment_method_collection"] == "always"
     assert captured["subscription_data"]["trial_period_days"] == 7
     assert (captured["subscription_data"]["trial_settings"]["end_behavior"]
             ["missing_payment_method"]) == "cancel"

@@ -58,7 +58,7 @@ export default function CguPage() {
         <h2 className="text-lg font-semibold">5. Abonnements et paiements</h2>
         <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
           <li>Les abonnements sont gérés via Stripe (paiement sécurisé PCI-DSS).</li>
-          <li>L'essai gratuit de 7 jours est disponible sans CB pour les plans Standard et Expert.</li>
+          <li>L'essai gratuit de 7 jours est disponible pour les plans Standard et Expert, une seule fois par compte. L'enregistrement d'une carte bancaire est requis pour l'ouvrir ; aucun montant n'est prélevé avant son terme, et l'abonnement peut être résilié à tout moment pendant l'essai sans être facturé.</li>
           <li>Résiliation possible à tout moment via le portail Stripe, sans pénalité.</li>
           <li>Remboursement : au cas par cas sur demande à contact@blackturf.fr.</li>
         </ul>

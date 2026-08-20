@@ -726,7 +726,7 @@ export default function TrackRecordPage() {
             <span className="text-slate-600" aria-hidden="true">·</span>
             <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Rapports PMU officiels</span>
             <span className="text-slate-600" aria-hidden="true">·</span>
-            <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Essai sans carte bancaire</span>
+            <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Aucun prélèvement pendant l&apos;essai</span>
           </p>
         </div>
       </header>
@@ -1234,7 +1234,7 @@ export default function TrackRecordPage() {
               <h2 id="cta-pro-title" className="mt-4 max-w-2xl font-display text-3xl font-bold tracking-tight sm:text-4xl">Passez des résultats aux décisions.</h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
                 Retrouvez les analyses complètes, les probabilités et les plans de mise qui ont produit ce palmarès.
-                7 jours d&apos;essai, sans carte bancaire. Les performances passées ne garantissent pas les résultats futurs.
+                7 jours d&apos;essai : carte requise, aucun prélèvement avant la fin de l&apos;essai, annulable à tout moment. Les performances passées ne garantissent pas les résultats futurs.
               </p>
               <ul className="mt-6 grid gap-2 text-sm text-slate-200 sm:grid-cols-3">
                 <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-300" aria-hidden="true" /> Pronostics complets</li>
