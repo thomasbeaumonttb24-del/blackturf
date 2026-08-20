@@ -135,3 +135,46 @@ def test_html_echappe_le_contenu_des_logs(mod):
                      ["<script>alert(1)</script>"])
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+# ── Nuit du 19→20/08/2026 : v511 déployé à 02:02:38, worker tué à 02:04:11 ──
+# Le mail annonçait « le retrain a été tué par manque de mémoire » et « le modèle
+# ne peut pas progresser », alors que le nouveau modèle était en production : le
+# verdict OOM primait inconditionnellement sur la promotion.
+
+LOGS_PROMU_PUIS_OOM = """
+2026-08-20 02:00:03 [info] pipeline.nightly_retrain.start
+2026-08-20 02:00:14 [info] pipeline.rss stage=nightly.dataset_fetched rss_mb=2410.5
+2026-08-20 02:02:38 [info] pipeline.retrain.deployed version=511 wf_auc=0.75
+02:04:11 Moving job to FailedJobRegistry (Work-horse terminated unexpectedly; waitpid returned 9 (signal 9); )
+"""
+
+
+def test_deploiement_suivi_dun_oom_nest_pas_un_echec_de_retrain(mod):
+    """Un OOM APRÈS la promotion ne doit pas être rapporté comme « pas de modèle ».
+
+    Le modèle est en production ; seules les analyses post-retrain ont sauté.
+    Confondre les deux envoie le diagnostic dans le mur : on cherche à réduire la
+    fenêtre d'entraînement alors que l'entraînement, lui, a parfaitement abouti.
+    """
+    analyse = mod._analyser_logs(LOGS_PROMU_PUIS_OOM)
+    assert analyse["statut"] == "promu_puis_oom"
+    assert analyse["statut"] in mod.VERDICTS
+
+
+def test_oom_sans_deploiement_reste_un_oom(mod):
+    logs = LOGS_PROMU_PUIS_OOM.replace(
+        "pipeline.retrain.deployed version=511 wf_auc=0.75",
+        "pipeline.retrain.dataset_ready n=41893")
+    assert mod._analyser_logs(logs)["statut"] == "oom"
+
+
+def test_pic_rss_extrait_des_logs(mod):
+    """Sans pic mémoire tracé, un signal 9 nu ne dit pas si le retrain avait
+    débordé ou s'il a été désigné victime d'une pression venue d'ailleurs."""
+    assert mod._analyser_logs(LOGS_PROMU_PUIS_OOM)["rss_pic_mb"] == 2410.5
+
+
+def test_pic_rss_absent_vaut_zero(mod):
+    logs = "2026-08-20 02:00:03 [info] pipeline.nightly_retrain.start"
+    assert mod._analyser_logs(logs)["rss_pic_mb"] == 0.0

@@ -341,7 +341,7 @@ async def settle_catchup_plans(session, days: int = 14) -> dict:
             JOIN courses c ON c.course_id = s.course_id
             JOIN resultats r ON r.course_id = s.course_id
             WHERE s.is_pre_course = true
-              AND c.date_heure > now() - (:days || ' days')::interval
+              AND c.date_heure > now() - make_interval(days => :days)
               AND NOT EXISTS (
                   SELECT 1 FROM bet_plan_settlements t
                   WHERE t.plan_snapshot_id = s.plan_snapshot_id

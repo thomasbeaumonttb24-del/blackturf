@@ -1,0 +1,12 @@
+[Unit]
+Description=Libere la RAM des daemons de cotes avant le retrain nocturne
+
+[Timer]
+# 01:40 UTC. Sur 60 jours de programme, AUCUNE course n'a lieu entre 23 h et
+# 06 h UTC : cet arret ne coute aucune cote. Il rend ~2,1 Go au retrain de 02:00
+# et purge du meme coup la fuite camoufox de la journee.
+OnCalendar=*-*-* 01:40:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

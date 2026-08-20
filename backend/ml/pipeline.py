@@ -48,6 +48,54 @@ settings = get_settings()
 MIN_DEPLOYABLE_AUC = 0.52
 
 
+# ─────────────────────────────
+# Empreinte mémoire du retrain
+# ─────────────────────────────
+# Le VPS a 7,6 Gio de RAM partagés entre Postgres, l'API, le scraper et trois
+# daemons de cotes hors Docker. Le retrain nocturne est de loin le plus gros
+# consommateur : tant qu'on ne le mesure pas, un OOM-kill ne dit pas OÙ ça a
+# débordé (nuit du 19→20/08/2026 : signal 9 nu, aucune trace de pic).
+def _rss_mb() -> float:
+    """RSS du process courant en Mio. 0.0 si /proc est indisponible."""
+    try:
+        import resource
+        with open("/proc/self/statm") as fh:
+            pages = int(fh.read().split()[1])
+        return round(pages * resource.getpagesize() / (1024 * 1024), 1)
+    except Exception:
+        return 0.0
+
+
+def _log_rss(stage: str, **extra) -> None:
+    log.info("pipeline.rss", stage=stage, rss_mb=_rss_mb(), **extra)
+
+
+def _release_memory(stage: str) -> None:
+    """Collecte Python PUIS rend les arènes libérées au noyau.
+
+    ``gc.collect()`` ne fait que rendre la mémoire à l'allocateur de la libc :
+    le RSS du process ne bouge pas. Mesuré en production, le worker restait à
+    4,9 Gio de RSS anonyme quatre-vingt-dix secondes APRÈS la fin de
+    l'entraînement, pendant `compute_signal_performance` — c'est cette empreinte
+    fantôme qui a fait de lui la plus grosse victime désignée de l'OOM global.
+    ``malloc_trim(0)`` rend effectivement les pages libres au système.
+
+    Best-effort : absence de glibc (musl/Alpine) ou symbole manquant = no-op.
+    """
+    import gc
+    gc.collect()
+    before = _rss_mb()
+    trimmed = False
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+        trimmed = True
+    except Exception:
+        pass
+    log.info("pipeline.rss.released", stage=stage, rss_before_mb=before,
+             rss_after_mb=_rss_mb(), malloc_trim=trimmed)
+
+
 def _extract_brier_course(analysis_result: dict) -> float:
     """Retourne le Brier post-course réel destiné au détecteur de dérive.
 
@@ -816,6 +864,13 @@ async def _run_nightly_retraining_unlocked() -> None:
     """
     log.info("pipeline.nightly_retrain.start")
     await _do_retraining(mois=settings.retrain_history_months, label="nightly")
+    # L'ensemble entraîné et le dataset meurent en sortant de `_do_retraining`,
+    # mais la libc garde leurs arènes : le worker restait à 4,9 Gio de RSS
+    # pendant TOUTE la série d'analyses ci-dessous, alors qu'elles ne pèsent que
+    # quelques centaines de Mio. C'est cette empreinte fantôme qui l'a fait
+    # désigner comme victime de l'OOM global du 20/08/2026 (tué à 02:04, soit
+    # 93 s après avoir déployé v511 avec succès).
+    _release_memory("nightly.after_training")
     # Recalcule la calibration longshots sur toutes les données réelles à jour
     try:
         from ml.longshot_calibration import compute_and_store
@@ -1035,7 +1090,9 @@ async def _do_retraining(mois: int, label: str) -> None:
     t0 = datetime.now()
     async with AsyncSessionLocal() as session:
         # Construire le dataset
+        _log_rss(f"{label}.start")
         features_rows, resultats_dict = await _build_training_dataset_from_db(session, mois)
+        _log_rss(f"{label}.dataset_fetched", n_rows=len(features_rows))
         # Seuil abaissé à 300 : amorçage sur vraies courses (le synthétique sert de
         # prior tant qu'on a peu de données réelles ; il sera remplacé dès qu'on a
         # un vrai modèle, cf. override est_synthetique ci-dessous).
@@ -1053,13 +1110,16 @@ async def _do_retraining(mois: int, label: str) -> None:
 
         # Libérer la liste brute (144k dicts × 173 clés ≈ 2-3 Go) : inutile une fois X
         # construit. Réduit le pic RAM (serveur 8 Go → OOM à la phase promotion sinon).
-        import gc
         del features_rows, resultats_dict
-        gc.collect()
+        # Rendu au NOYAU, pas seulement à la libc : sans malloc_trim ces gigas
+        # restent comptés dans le RSS et désignent le worker comme victime de
+        # l'OOM global bien après la fin du calcul.
+        _release_memory(f"{label}.dataset_freed")
 
         # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
         model = BlackTurfEnsemble()
         metrics = model.train(X, y, y_win)
+        _log_rss(f"{label}.trained")
         # Hold-out temporel (MÊME découpage que train()) conservé pour l'arbitrage
         # champion/challenger. ~20% des lignes en float32 = quelques dizaines de Mo :
         # négligeable face aux Go du dataset complet qu'on libère juste après.
@@ -1070,7 +1130,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         # → on libère avant la phase métriques/edge_monitor pour ne pas cumuler le pic RAM.
         n_train_rows = len(X)
         del X, y, y_win, _hm
-        gc.collect()
+        _release_memory(f"{label}.matrices_freed")
 
         # Récupérer le modèle actif EN BASE pour une comparaison HONNÊTE.
         current_mv = (await session.execute(
@@ -1130,7 +1190,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         # Arbitrage champion/challenger sur un hold-out commun (cf. _head_to_head_auc).
         _h2h = await _head_to_head_auc(session, model, X_hold, y_hold, current_mv)
         del X_hold, y_hold
-        gc.collect()
+        _release_memory(f"{label}.holdout_freed")
         _h2h_delta = _h2h["delta"] if _h2h else None
 
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
@@ -2093,8 +2153,14 @@ async def _build_training_dataset_from_db(
         if _AF.train_prerace_only else ""
     )
 
-    # Récupérer les features sauvegardées avec leurs labels
-    result = await session.execute(text(f"""
+    # Récupérer les features sauvegardées avec leurs labels.
+    #
+    # `session.stream()` et NON `session.execute()` : ce dernier fait remonter
+    # TOUT le résultat dans un buffer asyncpg avant la première ligne Python
+    # (~42 000 lignes portant chacune un JSONB de 173 clés). Le curseur serveur
+    # laisse Postgres garder le gros du résultat de son côté et ne matérialise
+    # qu'une partition à la fois.
+    result = await session.stream(text(f"""
         SELECT
             fm.features,
             h.position_arrivee,
@@ -2112,18 +2178,37 @@ async def _build_training_dataset_from_db(
         ORDER BY c.date_heure
     """), {"date_limite": date_limite})
 
-    rows = result.fetchall()
-    features_list = []
+    # `fetchall()` matérialisait TOUT le résultat (~42 000 lignes × un JSONB de
+    # 173 clés) puis la boucle en construisait une SECONDE copie via `dict()` :
+    # les deux vivaient simultanément, doublant le pic pour rien. On consomme
+    # désormais le curseur par blocs et on relâche chaque bloc au fur et à mesure,
+    # ce qui plafonne le surcoût à un bloc au lieu du dataset entier.
+    features_list: list[dict] = []
     resultats_dict: dict[str, dict] = {}
 
-    for feat_json, position, cheval_id, course_id in rows:
-        feat = dict(feat_json)
-        feat["cheval_id"] = cheval_id
-        features_list.append(feat)
+    async for partition in result.partitions(2000):
+        for feat_json, position, cheval_id, course_id in partition:
+            # asyncpg décode déjà le JSONB en dict neuf, propre à cette ligne :
+            # le `dict(feat_json)` d'origine en faisait une SECONDE copie qui
+            # cohabitait avec la première jusqu'à la fin de la boucle. On garde
+            # la conversion en secours pour le codec SQLite des tests, qui rend
+            # une chaîne.
+            if isinstance(feat_json, dict):
+                feat = feat_json
+            elif isinstance(feat_json, str):
+                import json as _json
+                feat = _json.loads(feat_json)
+            else:
+                feat = dict(feat_json)
+            feat["cheval_id"] = cheval_id
+            features_list.append(feat)
 
-        if course_id not in resultats_dict:
-            resultats_dict[course_id] = {}
-        resultats_dict[course_id][cheval_id] = int(position)
+            if course_id not in resultats_dict:
+                resultats_dict[course_id] = {}
+            resultats_dict[course_id][cheval_id] = int(position)
+        # La partition consommée doit mourir ici, sinon le curseur serveur ne
+        # sert à rien : on aurait juste déplacé le buffer du driver vers Python.
+        del partition
 
     return features_list, resultats_dict
 

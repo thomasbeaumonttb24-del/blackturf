@@ -1,0 +1,8 @@
+[Unit]
+Description=BlackTurf - relance des daemons de cotes apres le retrain
+
+[Service]
+Type=oneshot
+# Relance INCONDITIONNELLE : meme si le retrain a debordé, les cotes doivent
+# repartir. La premiere course de la journee est a 06:00 UTC au plus tot.
+ExecStart=/bin/systemctl start zeturf-odds.service genybet-odds.service oddschecker-odds.service

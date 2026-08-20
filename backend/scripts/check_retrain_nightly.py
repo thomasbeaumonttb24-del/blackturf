@@ -32,6 +32,8 @@ WORKER_CONTAINER = os.getenv("BT_WORKER_CONTAINER", "blackturf_worker")
 PATTERNS = (
     "nightly_retrain.start", "retrain.deployed", "retrain.rollback",
     "h2h.measured", "signal 9", "MemoryError",
+    # Empreinte mémoire par étape : sans elle, un OOM ne dit pas OÙ ça a débordé.
+    "pipeline.rss",
 )
 
 
@@ -62,6 +64,26 @@ def _worker_logs(since_hours: int = 12) -> str:
         return f"__LOGS_INDISPONIBLES__ {e}"
 
 
+def _pic_rss(logs: str) -> float:
+    """Plus haut `rss_mb=` tracé par le pipeline sur la fenêtre. 0.0 si absent.
+
+    Le signal 9 d'un OOM-kill n'écrit rien : sans cette mesure, il est impossible
+    de dire après coup si le retrain avait débordé ou s'il a été désigné victime
+    d'une pression venue d'ailleurs (le 20/08/2026, c'était le second cas).
+    """
+    pic = 0.0
+    for ligne in logs.splitlines():
+        if "rss_mb=" not in ligne:
+            continue
+        for mot in ligne.split():
+            if mot.startswith("rss_mb="):
+                try:
+                    pic = max(pic, float(mot.split("=", 1)[1]))
+                except ValueError:
+                    pass
+    return pic
+
+
 def _analyser_logs(logs: str) -> dict:
     """Extrait ce qui s'est passé cette nuit. Fonction pure → testable."""
     if logs.startswith("__LOGS_INDISPONIBLES__"):
@@ -75,7 +97,14 @@ def _analyser_logs(logs: str) -> dict:
     a_deploye = any("retrain.deployed" in l for l in lignes)
     a_rollback = any("retrain.rollback" in l for l in lignes)
 
-    if a_oom:
+    # L'OOM ne l'emporte PLUS inconditionnellement sur la promotion. La nuit du
+    # 19→20/08/2026, v511 a été déployé à 02:02:38 et le worker tué à 02:04:11 :
+    # le modèle était bel et bien en production, mais le mail annonçait « le
+    # retrain a été tué par manque de mémoire / le modèle ne peut pas
+    # progresser ». Verdict faux, et diagnostic envoyé dans le mur.
+    if a_oom and a_deploye:
+        statut = "promu_puis_oom"
+    elif a_oom:
         statut = "oom"
     elif a_deploye:
         statut = "promu"
@@ -85,7 +114,8 @@ def _analyser_logs(logs: str) -> dict:
         statut = "incomplet"   # démarré mais ni promu ni rejeté ni OOM
     else:
         statut = "absent"      # le job n'a même pas démarré
-    return {"statut": statut, "detail": "", "lignes": lignes[-12:]}
+    return {"statut": statut, "detail": "", "lignes": lignes[-12:],
+            "rss_pic_mb": _pic_rss(logs)}
 
 
 VERDICTS = {
@@ -95,6 +125,13 @@ VERDICTS = {
                "Le modèle actif reste en place. Normal ponctuellement ; si ça se "
                "répète chaque nuit, le gate de promotion est peut-être encore trop "
                "strict — relancer scripts/check_h2h_champion.py pour comparer."),
+    "promu_puis_oom": (
+        "⚠️", "Modèle promu, mais le worker a été tué avant la fin des analyses",
+        "Le nouveau modèle EST en production — l'apprentissage du modèle a "
+        "abouti. Ce qui a sauté, ce sont les étapes d'après (calibrations, ROI "
+        "par signal, poids appris), qui repartiront demain. Vérifier `rss_mb` "
+        "ci-dessous : si le pic reste bas, la pression mémoire venait d'ailleurs "
+        "que du retrain (typiquement les daemons de cotes hors Docker)."),
     "oom": ("🔴", "Le retrain a été tué par manque de mémoire (OOM)",
             "Le modèle ne peut pas progresser. Action : réduire la fenêtre de "
             "données d'entraînement ou BT_TRAIN_NJOBS, ou augmenter la limite "
@@ -137,9 +174,22 @@ async def _etat_modele() -> dict:
         }
 
 
-def _html(verdict: tuple, modele: dict, lignes: list[str]) -> str:
+def _html(verdict: tuple, modele: dict, lignes: list[str],
+          rss_pic_mb: float = 0.0) -> str:
     icone, titre, action = verdict
     couleur = {"✅": "#16a34a", "⚠️": "#d97706", "🔴": "#dc2626", "❓": "#6b7280"}[icone]
+    # Pic mémoire du retrain. Le VPS a 7,6 Gio partagés : au-delà d'environ
+    # 3,5 Gio le retrain devient le plus gros RSS de la machine et donc la cible
+    # naturelle de l'OOM killer, même quand la pression vient d'ailleurs.
+    if rss_pic_mb <= 0:
+        ligne_rss = ""
+    else:
+        _seuil = "#dc2626" if rss_pic_mb > 3500 else "#666"
+        ligne_rss = (
+            f'<tr><td style="padding:4px 12px 4px 0;color:#666;">Pic mémoire retrain</td>'
+            f'<td style="color:{_seuil};">{rss_pic_mb:.0f} Mo</td></tr>'
+        )
+
     if modele.get("version") is None:
         bloc_modele = "<p>Aucun modèle actif en base.</p>"
     else:
@@ -151,6 +201,7 @@ def _html(verdict: tuple, modele: dict, lignes: list[str]) -> str:
       <tr><td style="padding:4px 12px 4px 0;color:#666;">Ancienneté</td><td>{modele['age_jours']} jour(s){alerte_age}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#666;">Walk-forward AUC</td><td>{modele['wf_auc'] if modele['wf_auc'] is not None else '—'}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#666;">Courses réglées (24 h)</td><td>{modele['courses_24h']}</td></tr>
+      {ligne_rss}
     </table>"""
 
     # Les lignes de log sont du contenu non maîtrisé qui atterrit dans du HTML :
@@ -188,13 +239,14 @@ async def main(dry_run: bool = False) -> None:
 
     icone, titre, _ = verdict
     sujet = f"{icone} BlackTurf retrain — {titre}"
-    corps = _html(verdict, modele, lignes)
+    corps = _html(verdict, modele, lignes, analyse.get("rss_pic_mb", 0.0))
 
     if dry_run:
         print(f"SUJET : {sujet}")
         print(f"STATUT : {analyse['statut']}")
         print(f"MODELE : {modele}")
         print(f"LIGNES : {len(lignes)}")
+        print(f"PIC RSS : {analyse.get('rss_pic_mb', 0.0)} Mo")
         return
 
     from services.alerts import send_email
