@@ -148,6 +148,17 @@ class BlackTurfEnsemble:
         self.brier_score: float = 1.0
         self.precision_top3: float = 0.0
         self.roi_simule: float = 0.0
+        # ── Métriques de CLASSEMENT (ml/ranking_metrics) ──────────────────────
+        # `auc_roc` / `walk_forward_auc` sont des AUC POOLÉES : elles mélangent la
+        # variance inter-course et le classement intra-course, et flattent un
+        # simple lecteur de cote. Celles-ci mesurent ce que le produit fait
+        # vraiment — ordonner les partants D'UNE course — et, surtout, comparent
+        # le résultat à la référence qu'il faut battre pour exister : la cote.
+        # None = mesure impossible, jamais 0.5 (qui se lirait « à égalité »).
+        self.rank_auc: Optional[float] = None            # hold-out, intra-course
+        self.market_rank_auc: Optional[float] = None     # même hold-out, ORDER BY cote
+        self.wf_rank_auc: Optional[float] = None         # moyenne des folds walk-forward
+        self.wf_market_rank_auc: Optional[float] = None  # marché sur les mêmes folds
         self.feature_importance: dict = {}
         self.shap_importance: dict = {}
         self.trained_at: Optional[datetime] = None
@@ -322,6 +333,16 @@ class BlackTurfEnsemble:
         _wf_groups = X["course_id"] if (_AF.group_split and "course_id" in X.columns) else None
         wf_scores = self._walk_forward_validation(X_feat, y, groups=_wf_groups)
         log.info("model.walk_forward", scores=[round(s, 4) for s in wf_scores], mean=round(float(np.mean(wf_scores)), 4))
+        if self.wf_rank_auc is not None:
+            _d = (self.wf_rank_auc - self.wf_market_rank_auc
+                  if self.wf_market_rank_auc is not None else None)
+            log.info(
+                "model.walk_forward_rank",
+                rank_auc=round(self.wf_rank_auc, 4),
+                market_rank_auc=round(self.wf_market_rank_auc, 4) if self.wf_market_rank_auc is not None else None,
+                delta_market=round(_d, 4) if _d is not None else None,
+                bat_le_marche=(_d > 0) if _d is not None else None,
+            )
 
         # ── Métriques finales ──────────────────────────────
         # course_id est une colonne META (retirée de X_feat) → on la repasse alignée sur
@@ -330,6 +351,16 @@ class BlackTurfEnsemble:
         metrics = self._evaluate(X_test, y_test, _test_cid)
         metrics["walk_forward_auc"] = float(np.mean(wf_scores))
         metrics["walk_forward_variance"] = float(np.var(wf_scores))
+        # Classement intra-course moyenné sur les folds walk-forward, et la même
+        # mesure pour un simple `ORDER BY cote_pmu`. C'est ce couple, et non l'AUC
+        # poolée, qui dit si ce modèle mérite d'être promu (cf. _should_deploy).
+        metrics["wf_rank_auc"] = self.wf_rank_auc
+        metrics["wf_market_rank_auc"] = self.wf_market_rank_auc
+        metrics["wf_rank_delta_market"] = (
+            self.wf_rank_auc - self.wf_market_rank_auc
+            if (self.wf_rank_auc is not None and self.wf_market_rank_auc is not None)
+            else None
+        )
 
         self.auc_roc = metrics["auc_roc"]
         self.brier_score = metrics["brier_score"]
@@ -579,9 +610,20 @@ class BlackTurfEnsemble:
         sont découpées sur des COURSES entières — aucun cheval d'une course ne tombe
         à cheval sur train/test (sinon AUC walk-forward gonflé = gate de déploiement
         trop laxiste, cf. audit edge). Sans groups → découpage positionnel historique.
+
+        Renvoie les AUC POOLÉES par fold, conservées pour la continuité historique
+        de `walk_forward_auc`. En parallèle, et c'est la nouveauté qui compte, les
+        AUC de CLASSEMENT intra-course du modèle ET DU MARCHÉ sont accumulées dans
+        `self.wf_rank_auc` / `self.wf_market_rank_auc` : mesurées sur exactement les
+        mêmes folds, elles disent si le modèle apporte quoi que ce soit par rapport
+        à un simple `ORDER BY cote_pmu`. Voir ml/ranking_metrics.
         """
+        from ml.ranking_metrics import extract_cotes, rank_auc_report
+
         n = len(X)
         scores = []
+        rank_scores: list[float] = []
+        market_scores: list[float] = []
 
         def _eval(tr_mask, te_mask) -> None:
             X_tr, y_tr = X[tr_mask], y[tr_mask]
@@ -597,7 +639,25 @@ class BlackTurfEnsemble:
                 p = quick_xgb.predict_proba(X_te)[:, 1]
                 scores.append(float(roc_auc_score(y_te, p)))
             except Exception:
+                return
+            # Le classement se mesure PAR COURSE : sans course_id, aucun regroupement
+            # possible et la mesure serait un faux ami de plus.
+            if groups is None:
+                return
+            try:
+                g_te = groups[te_mask]
+                rep = rank_auc_report(y_te, p, g_te, cotes=extract_cotes(X_te))
+                rank_scores.append(rep["rank_auc"])
+                if rep["market_rank_auc"] is not None:
+                    market_scores.append(rep["market_rank_auc"])
+            except Exception:
                 pass
+
+        def _publier() -> None:
+            """Moyenne des folds. None quand la mesure n'a pas pu être faite —
+            jamais 0.5, qui se lirait comme « à égalité avec le marché »."""
+            self.wf_rank_auc = float(np.mean(rank_scores)) if rank_scores else None
+            self.wf_market_rank_auc = float(np.mean(market_scores)) if market_scores else None
 
         if groups is not None:
             g = groups.to_numpy() if hasattr(groups, "to_numpy") else np.asarray(groups)
@@ -615,6 +675,7 @@ class BlackTurfEnsemble:
                 tr_mask = np.isin(g, courses_ordered[:tr_end])
                 te_mask = np.isin(g, courses_ordered[tr_end:te_end])
                 _eval(tr_mask, te_mask)
+            _publier()
             return scores if scores else [0.5]
 
         # Découpage positionnel historique (flag off)
@@ -629,6 +690,7 @@ class BlackTurfEnsemble:
             te_mask = np.zeros(n, dtype=bool); te_mask[train_end:test_end] = True
             _eval(tr_mask, te_mask)
 
+        _publier()
         return scores if scores else [0.5]
 
     def _evaluate(self, X_test: pd.DataFrame, y_test: pd.Series,
@@ -645,11 +707,29 @@ class BlackTurfEnsemble:
         # ROI simulé value bets (EV > 0.05)
         roi = self._simulate_roi(X_test, y_test, probas)
 
+        # ── Classement intra-course, et la cote sur le MÊME hold-out ──────────
+        # `auc` ci-dessus est poolée : elle ne dit pas si le modèle sait ordonner
+        # une course. Ces deux valeurs le disent, et leur écart dit s'il apporte
+        # quelque chose que la cote ne dit pas déjà.
+        from ml.ranking_metrics import extract_cotes, rank_auc_report
+        rapport = {"rank_auc": None, "market_rank_auc": None, "delta_market": None}
+        if course_ids is not None:
+            try:
+                rapport = rank_auc_report(
+                    y_test, probas, course_ids, cotes=extract_cotes(X_test))
+            except Exception as e:
+                log.warning("model.rank_metrics_failed", err=str(e)[:160])
+        self.rank_auc = rapport["rank_auc"]
+        self.market_rank_auc = rapport["market_rank_auc"]
+
         return {
             "auc_roc": auc,
             "brier_score": brier,
             "precision_top3": prec_top3,
             "roi_simule": roi,
+            "rank_auc": rapport["rank_auc"],
+            "market_rank_auc": rapport["market_rank_auc"],
+            "rank_delta_market": rapport["delta_market"],
         }
 
     def _compute_precision_top3(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray,

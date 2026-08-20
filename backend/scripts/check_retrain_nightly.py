@@ -183,6 +183,13 @@ async def _etat_modele() -> dict:
             "age_jours": age,
             "wf_auc": round(mv.walk_forward_auc, 4) if mv.walk_forward_auc else None,
             "courses_24h": int(nb),
+            # Le couple qui dit si le modèle mérite d'exister (migration 0035).
+            # None sur les versions antérieures au 20/08/2026, jamais 0.0.
+            "rank_auc": round(mv.rank_auc, 4) if mv.rank_auc is not None else None,
+            "market_rank_auc": (round(mv.market_rank_auc, 4)
+                                if mv.market_rank_auc is not None else None),
+            "rank_delta_market": (round(mv.rank_delta_market, 4)
+                                  if mv.rank_delta_market is not None else None),
         }
 
 
@@ -201,6 +208,38 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
             f'<tr><td style="padding:4px 12px 4px 0;color:#666;">Pic mémoire retrain</td>'
             f'<td style="color:{_seuil};">{rss_pic_mb:.0f} Mo</td></tr>'
         )
+
+    # ── Verdict de CLASSEMENT ────────────────────────────────────────────────
+    # L'AUC affichée jusqu'ici est POOLÉE : elle mélange la variance inter-course
+    # et le classement intra-course, et flatte un modèle qui se contente de relire
+    # la cote. Ce bloc affiche la seule comparaison qui dit si le modèle mérite
+    # d'exister — son classement contre un simple `ORDER BY cote_pmu`.
+    _delta = modele.get("rank_delta_market")
+    if modele.get("rank_auc") is None:
+        bloc_classement = (
+            "<p style='color:#666;font-size:13px;'>Classement intra-course pas "
+            "encore mesuré sur ce modèle (antérieur au 20/08/2026).</p>")
+    else:
+        _bat = _delta is not None and _delta > 0
+        _coul = "#16a34a" if _bat else "#dc2626"
+        _verdict = ("bat la cote" if _bat
+                    else "SOUS la cote — le classement affiché ferait mieux sans modèle"
+                    if _delta is not None else "référence marché non mesurable")
+        _dtxt = f"{_delta:+.4f}" if _delta is not None else "—"
+        _mtxt = (f"{modele['market_rank_auc']:.4f}"
+                 if modele.get("market_rank_auc") is not None else "—")
+        bloc_classement = f"""
+    <h3 style="font-size:14px;margin-top:24px;">Classement intra-course</h3>
+    <table style="border-collapse:collapse;font-size:14px;">
+      <tr><td style="padding:4px 12px 4px 0;color:#666;">Modèle</td><td><b>{modele['rank_auc']:.4f}</b></td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#666;">Cote seule (ORDER BY cote_pmu)</td><td>{_mtxt}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#666;">Écart</td>
+          <td style="color:{_coul};font-weight:bold;">{_dtxt} — {_verdict}</td></tr>
+    </table>
+    <p style="color:#666;font-size:12px;margin-top:6px;">
+      0,5 = hasard. Mesuré sur les folds walk-forward, chaque course pesant pareil.
+      Ne se compare pas à l'AUC poolée ci-dessus.
+    </p>"""
 
     if modele.get("version") is None:
         bloc_modele = "<p>Aucun modèle actif en base.</p>"
@@ -233,6 +272,7 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
     <b>À faire :</b> {action}
   </div>
   {bloc_modele}
+  {bloc_classement}
   <h3 style="font-size:14px;margin-top:24px;">Extrait des logs</h3>
   {logs}
   <p style="color:#999;font-size:11px;margin-top:24px;">

@@ -942,6 +942,17 @@ class ModelVersion(Base):
     est_synthetique: Mapped[bool] = mapped_column(Boolean, default=False)  # prior cold-start
     walk_forward_auc: Mapped[float | None] = mapped_column(Float)
     walk_forward_variance: Mapped[float | None] = mapped_column(Float)
+    # ── Classement intra-course (migration 0035) ──────────────────────────────
+    # `auc_roc` et `walk_forward_auc` sont POOLÉES : elles mélangent la variance
+    # inter-course et le classement intra-course, et flattent un simple lecteur de
+    # cote. Ces trois-ci mesurent ce que le produit fait — ordonner les partants
+    # d'UNE course — et le confrontent à la référence qu'il faut battre pour
+    # exister. `rank_delta_market` négatif = le produit ferait mieux avec un
+    # `ORDER BY cote_pmu`. NULL = non mesuré (versions antérieures au 20/08/2026),
+    # jamais 0.0 qui se lirait « à égalité avec le marché ».
+    rank_auc: Mapped[float | None] = mapped_column(Float)
+    market_rank_auc: Mapped[float | None] = mapped_column(Float)
+    rank_delta_market: Mapped[float | None] = mapped_column(Float)
     feature_importance: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

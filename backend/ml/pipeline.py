@@ -139,6 +139,9 @@ def _should_deploy(
     betting_edge_ok: bool = True,
     h2h_delta: Optional[float] = None,
     h2h_tolerance: float = 0.002,
+    market_gate_enabled: bool = False,
+    rank_delta_market: Optional[float] = None,
+    market_gate_margin: float = 0.0,
 ) -> bool:
     """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
 
@@ -166,11 +169,38 @@ def _should_deploy(
     edge durablement négatif (audit -52%) figerait le modèle À VIE — exactement le blocage
     du 2026-06-19 (wf 0.8165>0.8141 rejeté à tort en `worse_wf`).
 
+    FLAG market_gate : `rank_delta_market` = AUC de classement intra-course du
+    challenger MOINS celle d'un simple `ORDER BY cote_pmu`, sur le même hold-out.
+    Négatif, le produit ferait mieux sans modèle. Ce gate court-circuite TOUT, y
+    compris un remplacement structurel : promouvoir un modèle sous la cote au motif
+    que l'actif est synthétique reviendrait à remplacer un mauvais classeur par un
+    autre. Défaut OFF, le temps que l'entraînement sur le résidu du marché rende le
+    delta positif (cf. ml/algo_flags.market_gate).
+
     Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
     saut de données massif, OU mérite de ranking (tolérance régression).
+
+    NOTE sur `h2h_delta` : depuis le diagnostic du 2026-08-20 il porte sur l'AUC de
+    CLASSEMENT intra-course, plus sur l'AUC poolée. La poolée mélangeait variance
+    inter-course et classement, et flattait un simple lecteur de cote.
     """
     if new_wf < min_auc:
         return False
+
+    # GATE MARCHÉ (FLAG market_gate, défaut OFF) — le classement du challenger
+    # bat-il un simple `ORDER BY cote_pmu` sur le même hold-out ?
+    #
+    # C'est la question que rien ne posait : le gate ne confrontait le challenger
+    # qu'au champion précédent, si bien que 513 versions ont pu se succéder sous
+    # le niveau de la cote sans qu'aucune alerte ne se déclenche.
+    #
+    # `rank_delta_market is None` = mesure impossible (pas de cote sur le hold-out).
+    # On NE bloque PAS : une absence de mesure n'est pas une preuve d'échec, et
+    # bloquer dessus figerait le modèle sur une panne de données.
+    if market_gate_enabled and rank_delta_market is not None:
+        if rank_delta_market < market_gate_margin:
+            return False
+
     # Remplacement STRUCTUREL de l'actif : actif synthetique / absent / non fiable
     # (trop peu de courses) / saut de donnees massif (nouveau modele entraine sur
     # >=1.5x plus de donnees). Ces cas justifient la promotion independamment du
@@ -276,13 +306,25 @@ async def _head_to_head_auc(
     import gc
     from sklearn.metrics import roc_auc_score
 
+    from ml.ranking_metrics import extract_cotes, within_race_auc
+
+    _groupes = X_oos["course_id"]
+    _cotes = extract_cotes(X_oos)
+
+    def _mesures(probas) -> tuple[float, float]:
+        """(AUC poolée, AUC de classement intra-course) sur le hold-out commun."""
+        return (
+            float(roc_auc_score(y_oos, probas)),
+            float(within_race_auc(y_oos, probas, _groupes)),
+        )
+
     try:
         champion = BlackTurfEnsemble.load_current()
         if champion is None:
             return None
         # predict_proba reindexe sur ses propres feature_names → tolère une dérive
         # du schéma de features entre les deux générations.
-        auc_champion = float(roc_auc_score(y_oos, champion.predict_proba(X_oos)))
+        auc_champion, rank_champion = _mesures(champion.predict_proba(X_oos))
     except Exception as e:
         log.warning("pipeline.h2h.champion_scoring_failed", err=str(e)[:160])
         return None
@@ -291,20 +333,48 @@ async def _head_to_head_auc(
         gc.collect()
 
     try:
-        auc_challenger = float(roc_auc_score(y_oos, challenger.predict_proba(X_oos)))
+        auc_challenger, rank_challenger = _mesures(challenger.predict_proba(X_oos))
     except Exception as e:
         log.warning("pipeline.h2h.challenger_scoring_failed", err=str(e)[:160])
         return None
 
-    delta = auc_challenger - auc_champion
-    n_courses = int(X_oos["course_id"].nunique())
+    # Le MARCHÉ passe le même examen, sur le même échantillon. C'est la référence
+    # qui manquait : sans elle, champion et challenger peuvent se succéder
+    # indéfiniment sous le niveau d'un simple `ORDER BY cote_pmu` — ce qui s'est
+    # produit sur 513 versions (diagnostic 2026-08-20).
+    rank_marche = None
+    if _cotes is not None:
+        try:
+            from ml.ranking_metrics import market_scores_from_cotes
+            _ms = market_scores_from_cotes(_cotes)
+            if _ms is not None:
+                rank_marche = float(within_race_auc(y_oos, _ms, _groupes))
+        except Exception as e:
+            log.warning("pipeline.h2h.market_scoring_failed", err=str(e)[:160])
+
+    # `delta` reste l'arbitre champion/challenger, mais il porte désormais sur le
+    # CLASSEMENT et non sur l'AUC poolée : c'est le classement que le produit
+    # affiche. L'AUC poolée est conservée pour la continuité du diagnostic.
+    delta = rank_challenger - rank_champion
+    delta_marche = (rank_challenger - rank_marche) if rank_marche is not None else None
+    n_courses = int(_groupes.nunique())
     log.info("pipeline.h2h.measured",
-             auc_challenger=round(auc_challenger, 4), auc_champion=round(auc_champion, 4),
-             delta=round(delta, 4), n_rows=n_rows, n_courses=n_courses)
+             rank_challenger=round(rank_challenger, 4), rank_champion=round(rank_champion, 4),
+             rank_marche=round(rank_marche, 4) if rank_marche is not None else None,
+             delta=round(delta, 4),
+             delta_marche=round(delta_marche, 4) if delta_marche is not None else None,
+             bat_le_marche=(delta_marche > 0) if delta_marche is not None else None,
+             auc_challenger_poolee=round(auc_challenger, 4),
+             auc_champion_poolee=round(auc_champion, 4),
+             n_rows=n_rows, n_courses=n_courses)
     return {
         "auc_challenger": auc_challenger,
         "auc_champion": auc_champion,
+        "rank_challenger": rank_challenger,
+        "rank_champion": rank_champion,
+        "rank_marche": rank_marche,
         "delta": delta,
+        "delta_marche": delta_marche,
         "n_rows": n_rows,
         "n_courses": n_courses,
     }
@@ -1193,6 +1263,26 @@ async def _do_retraining(mois: int, label: str) -> None:
         _release_memory(f"{label}.holdout_freed")
         _h2h_delta = _h2h["delta"] if _h2h else None
 
+        # ── Écart au MARCHÉ (diagnostic 2026-08-20) ───────────────────────────
+        # Source préférée : le head-to-head, qui l'a mesuré sur l'échantillon
+        # hors-échantillon commun aux deux modèles. Repli : les folds walk-forward,
+        # disponibles même quand le h2h renonce faute de courses postérieures au
+        # champion (`h2h.sample_too_small`, le cas courant en régime normal).
+        _rank_delta_market = (_h2h or {}).get("delta_marche")
+        _rank_source = "h2h"
+        if _rank_delta_market is None:
+            _rank_delta_market = metrics.get("wf_rank_delta_market")
+            _rank_source = "walk_forward"
+        log.info(
+            "pipeline.retrain.rank_vs_marche",
+            delta_marche=round(_rank_delta_market, 4) if _rank_delta_market is not None else None,
+            source=_rank_source,
+            rank_auc=round(metrics["wf_rank_auc"], 4) if metrics.get("wf_rank_auc") is not None else None,
+            market_rank_auc=round(metrics["wf_market_rank_auc"], 4) if metrics.get("wf_market_rank_auc") is not None else None,
+            gate_actif=_AF.market_gate,
+            bat_le_marche=(_rank_delta_market > 0) if _rank_delta_market is not None else None,
+        )
+
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
         if _should_deploy(
             new_wf, current_wf,
@@ -1203,6 +1293,9 @@ async def _do_retraining(mois: int, label: str) -> None:
             roi_gate_enabled=_AF.roi_deploy_gate,
             betting_edge_ok=_betting_edge_ok,
             h2h_delta=_h2h_delta,
+            market_gate_enabled=_AF.market_gate,
+            rank_delta_market=_rank_delta_market,
+            market_gate_margin=_AF.market_gate_margin,
         ):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
@@ -1218,6 +1311,11 @@ async def _do_retraining(mois: int, label: str) -> None:
                 roi_simule=metrics["roi_simule"],
                 walk_forward_auc=metrics.get("walk_forward_auc"),
                 walk_forward_variance=metrics.get("walk_forward_variance"),
+                # Le couple qui dit si ce modèle mérite d'exister : son classement
+                # intra-course, celui de la cote sur les mêmes folds, et l'écart.
+                rank_auc=metrics.get("wf_rank_auc"),
+                market_rank_auc=metrics.get("wf_market_rank_auc"),
+                rank_delta_market=_rank_delta_market,
                 nb_courses_train=n_train_rows,
                 est_actif=True,
                 est_synthetique=False,  # entraîné sur de vraies courses
