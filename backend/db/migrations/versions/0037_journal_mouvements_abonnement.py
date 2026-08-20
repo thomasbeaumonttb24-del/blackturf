@@ -57,6 +57,12 @@ def upgrade() -> None:
     op.create_index("ix_subscription_events_user_date",
                     "subscription_events", ["user_id", "created_at"])
 
+    # ATTENTION : pas de « : » dans les littéraux SQL de `op.execute`.
+    # SQLAlchemy y lit un paramètre lié — `':amorce'` a fait échouer cette
+    # migration en production avec « A value is required for bind parameter
+    # 'amorce' », alors que le même SQL passait sous psql (qui n'interprète
+    # aucun bind). Le suffixe n'a d'autre rôle que de rendre l'identifiant
+    # déterministe et distinct de tout UUID réel.
     # Amorçage depuis l'état courant : sans lui le suivi admin s'ouvre vide alors
     # que des abonnements existent déjà. On ne peut reconstituer que l'ouverture
     # (date de création connue) — les résiliations passées ne sont pas datées
@@ -67,7 +73,7 @@ def upgrade() -> None:
             event_id, user_id, email, type, plan, stripe_subscription_id,
             essai_fin, periode_fin, pendant_essai, detail, created_at)
         SELECT
-            md5(s.sub_id || ':amorce')::uuid::text,
+            md5(s.sub_id || '-amorce')::uuid::text,
             s.user_id,
             u.email,
             CASE WHEN s.essai_fin IS NOT NULL THEN 'essai_ouvert' ELSE 'abonnement_actif' END,
