@@ -46,13 +46,15 @@ ENUM_INTERVAL = 300     # s — ré-énumération index + sweep des courses en f
 WINDOW_H = 3            # h — ne visite que les courses partant dans < WINDOW_H
 MATCH_MIN = 7           # ± minutes heure oddschecker (UK) ↔ BlackTurf (UTC)
 PAGE_WAIT_MS = 5000
-# Énumérations vides consécutives avant de recréer la page. La session Camoufox
-# vit aussi longtemps que le process : figée (bannière de consentement,
-# redirection géo, session expirée), elle ne se répare jamais seule et le daemon
-# tourne « sainement » en ne ramenant rien — constaté 18/08/2026, `enum=0`
-# pendant des heures alors qu'une session neuve énumérait 129 courses. 3 cycles
-# = 15 min : assez pour ne pas recréer sur un simple creux nocturne.
-ENUM_VIDES_AVANT_RECREATION = 3
+# La session Camoufox ne survit PAS à un cycle : dès qu'elle a servi à lire des
+# pages de course, la ré-énumération de l'index ne ramène plus rien. Mesuré dans
+# le journal du 20/08/2026 : après chaque page neuve, `enum oddschecker=180`,
+# puis `enum=0` sur les trois cycles suivants, indéfiniment — soit 3 cycles
+# perdus sur 4 et une couverture bet365/ladbrokes/betfair tombée à 0,7 %, alors
+# que le daemon se portait « bien » (process vivant, aucune exception).
+# On ouvre donc une session NEUVE à chaque cycle : `browser.new_page()` crée un
+# contexte isolé (cookies, consentement, redirection géo repartent à zéro) et le
+# `page.close()` du `finally` le referme — pas d'accumulation mémoire.
 LONDON = ZoneInfo("Europe/London")
 
 _run = True
@@ -277,12 +279,16 @@ def main():
     # couvert, pas seulement les hangs à l'intérieur de la boucle `while _run`.
     _cycle_started_at = time.time()
     with Camoufox(headless=True, geoip=True) as browser:
-        page = browser.new_page()
-        enum_vides = 0
         while _run:
             _cycle_started_at = time.time()
             t0 = time.time()
+            page = None
+            cotes_du_cycle = 0
             try:
+                # Session NEUVE à chaque cycle : réutiliser la page fige
+                # l'énumération de l'index dès la première course lue (cf. note
+                # en tête de fichier).
+                page = browser.new_page()
                 bt = load_blackturf()
                 races = enum_races(page)
                 now = datetime.now(timezone.utc)
@@ -294,28 +300,6 @@ def main():
                     if cid:
                         visit.append((cid, r))
                 log("enum", oddschecker=len(races), blackturf=len(bt), fenetre=len(visit))
-
-                # AUTO-RÉPARATION D'UNE SESSION FIGÉE (constaté le 18/08/2026 :
-                # `enum oddschecker=0` pendant des heures, alors qu'une session
-                # NEUVE énumérait 129 courses au même instant). La page Camoufox
-                # est ouverte une seule fois pour toute la vie du process : une
-                # bannière de consentement, une redirection géo ou une session
-                # expirée la fige définitivement, et le daemon ne s'en remet
-                # jamais — il continue de tourner « sainement » en ne ramenant
-                # rien. On recrée la page après plusieurs énumérations vides
-                # d'affilée. Le seuil évite de recréer pour une nuit sans course.
-                if races:
-                    enum_vides = 0
-                else:
-                    enum_vides += 1
-                    if enum_vides >= ENUM_VIDES_AVANT_RECREATION:
-                        log("session.recreate", enum_vides=enum_vides)
-                        try:
-                            page.close()
-                        except Exception as e:
-                            log("session.close_error", err=str(e)[:90])
-                        page = browser.new_page()
-                        enum_vides = 0
                 for cid, r in visit:
                     try:
                         odds_by_nom = read_race(page, r["url"])
@@ -335,12 +319,23 @@ def main():
                                 matches.append((pid, "cote_ladbrokes", "ladbrokes", ld))
                         if matches:
                             n = write_odds(cid, matches)
+                            cotes_du_cycle += n
                             log("wrote", race=f"{r['slug']}/{r['hhmm']}", course=cid, cotes=n)
                     except Exception as e:
                         log("race.error", url=r["url"][-40:], err=str(e)[:100])
+                # Bilan de PRODUCTIVITÉ, pas de simple survie : cette ligne
+                # distingue « rien à faire » de « tourne à vide ».
+                log("cycle", courses=len(visit), cotes=cotes_du_cycle,
+                    sec=int(time.time() - t0))
             except Exception as e:
                 log("cycle.error", err=str(e)[:140])
                 _exit_si_driver_mort(e)
+            finally:
+                if page is not None:
+                    try:
+                        page.close()
+                    except Exception as e:
+                        log("session.close_error", err=str(e)[:90])
             # attente jusqu'au prochain cycle (interruptible)
             elapsed = time.time() - t0
             for _ in range(int(max(5.0, ENUM_INTERVAL - elapsed))):

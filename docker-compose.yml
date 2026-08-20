@@ -4,6 +4,14 @@ services:
   db:
     image: timescale/timescaledb:latest-pg16
     container_name: blackturf_db
+    # /dev/shm : Docker plafonne à 64 Mo par défaut, et PostgreSQL y alloue la
+    # mémoire partagée DYNAMIQUE de ses workers parallèles (~8 Mo par segment).
+    # Sous 64 Mo, tout plan parallèle sur une grosse table meurt en
+    # « could not resize shared memory segment : No space left on device » —
+    # panne constatée le 20/08/2026 : /admin/api/dashboard en 500 (transaction
+    # avortée) et 9 `post_course_sync` en échec par jour. 256 Mo = 4x l'usage
+    # observé, et reste très en dessous du plafond mémoire du conteneur.
+    shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-blackturf}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blackturf_secret}

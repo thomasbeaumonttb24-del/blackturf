@@ -212,3 +212,39 @@ async def test_sans_modele(db):
     assert out["roi_simule"] is None
     assert out["precision_top3"] is None
     assert out["nb_courses_evaluees"] == 0
+
+
+# ─── Sonde en échec : la transaction doit être désempoisonnée ──────────
+
+class _SessionQuiEchoue:
+    """Session dont CHAQUE requête échoue, et qui compte ses rollbacks."""
+
+    def __init__(self):
+        self.rollbacks = 0
+
+    async def execute(self, *_a, **_k):
+        raise RuntimeError("could not resize shared memory segment")
+
+    async def rollback(self):
+        self.rollbacks += 1
+
+
+@pytest.mark.asyncio
+async def test_sonde_en_echec_annule_la_transaction():
+    """Une sonde ratée ne doit pas faire tomber les requêtes SUIVANTES.
+
+    PostgreSQL marque la transaction entière comme avortée dès qu'une requête
+    échoue. Sans rollback, l'appelant se prenait « current transaction is
+    aborted » sur un simple `count(courses)` — le 500 de /admin/api/dashboard du
+    20/08/2026, dont la cause réelle (un /dev/shm de 64 Mo côté PostgreSQL) était
+    avalée quatre appels plus haut.
+    """
+    session = _SessionQuiEchoue()
+
+    out = await real_model_metrics(session, None)
+
+    assert session.rollbacks >= 1
+    # Échec FERMÉ : aucune métrique inventée à partir d'une sonde morte.
+    assert out["nb_courses_evaluees"] == 0
+    assert out["precision_top3"] is None
+    assert out["roi_reel"] is None

@@ -84,6 +84,13 @@ CYCLE_TIMEOUT_S = int(os.getenv("BT_SCRAPER_CYCLE_TIMEOUT", "1200"))  # 20 min
 WATCHDOG_GRACE_S = int(os.getenv("BT_SCRAPER_WATCHDOG_GRACE", "120"))
 HEARTBEAT_PATH = os.getenv("BT_SCRAPER_HEARTBEAT", "/app/data/scraper_heartbeat")
 
+# Durée de conservation d'un job post-course RATÉ dans la FailedJobRegistry de RQ.
+# Le défaut de RQ est UN AN : la file de production en avait accumulé 527 depuis
+# juin 2026, dont les causes (libgomp manquant, dtypes XGBoost) étaient corrigées
+# depuis longtemps — mais leur seul décompte continuait de nourrir l'alerte
+# qualité. 7 jours : assez pour diagnostiquer, trop court pour devenir un passif.
+POST_COURSE_FAILURE_TTL_S = 7 * 24 * 3600
+
 # Monotonic du début du cycle en cours ; None = aucun cycle en vol.
 _cycle_started_at: float | None = None
 
@@ -1327,11 +1334,23 @@ class BlackTurfOrchestrator:
                         if await self._commit_unit(_w):
                             ok_n += 1
                             log.info("orchestrator.resultat_polled", course_id=course.course_id)
-                            # Déclencher le pipeline post-course via RQ
-                            from rq import Queue
+                            # Déclencher le pipeline post-course via RQ.
+                            # `retry` : un échec de post_course_sync est le plus
+                            # souvent TRANSITOIRE (base momentanément indisponible,
+                            # worker tué par le OOM killer) ; sans réessai, la
+                            # course perd définitivement son apprentissage.
+                            # `failure_ttl` : sans lui, RQ garde les jobs ratés un
+                            # AN dans la FailedJobRegistry — 527 entrées empilées
+                            # depuis juin en production, dont le décompte polluait
+                            # chaque alerte qualité bien après correction des causes.
+                            from rq import Queue, Retry
                             import redis
                             rq = Queue(connection=redis.from_url(settings.redis_url))
-                            rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
+                            rq.enqueue(
+                                "ml.pipeline.post_course_sync", course.course_id,
+                                retry=Retry(max=2, interval=[120, 600]),
+                                failure_ttl=POST_COURSE_FAILURE_TTL_S,
+                            )
                         continue
 
                     # Pas d'arrivée : course ANNULÉE ? Le PMU ne publiera JAMAIS

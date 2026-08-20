@@ -453,3 +453,22 @@ async def test_source_muette_non_desactivee_alerte_toujours(db, monkeypatch):
 
     out = await dq.couverture_sources(db)
     assert out["sources"]["geny"]["statut"] == "silent"
+
+
+@pytest.mark.asyncio
+async def test_course_lointaine_sans_cote_nest_pas_une_anomalie(db):
+    """Le PMU ne price pas une course six heures à l'avance : ne pas crier.
+
+    Mesuré en production le 20/08/2026 sur 105 courses : la première cote PMU
+    apparaît au plus tôt 3,65 h avant le départ (médiane 12,6 h). Alerter sur une
+    fenêtre de 6 h produisait donc une alerte quotidienne sur des courses
+    parfaitement normales — aucune n'a fini sans cote.
+    """
+    await _course(db, "CD", depart=MAINTENANT + timedelta(hours=4), statut="a_venir")
+    for n in range(1, 6):
+        await _partant(db, "CD", n, cote_pmu=None)
+    await db.commit()
+
+    out = await dq.courses_non_pronosticables(db)
+    assert out["n_a_venir"] == 0
+    assert out["n_sans_aucune_cote"] == 0

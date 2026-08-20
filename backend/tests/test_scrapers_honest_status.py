@@ -126,39 +126,39 @@ def test_le_parseur_geny_lit_une_vraie_page():
 ODDSCHECKER = (BACKEND / "scraper/oddschecker_odds_daemon.py").read_text(encoding="utf-8")
 
 
-def test_le_daemon_oddschecker_recree_sa_page_apres_enumerations_vides():
-    """La page Camoufox vivait aussi longtemps que le process : une session figée
-    (bannière de consentement, redirection géo, session expirée) ne se réparait
-    jamais. Constaté le 18/08/2026 : `enum oddschecker=0` pendant des heures
-    alors qu'une session NEUVE énumérait 129 courses au même instant — le
-    redémarrage du service a immédiatement rétabli `enum=121`."""
+def test_le_daemon_oddschecker_ouvre_une_session_neuve_a_chaque_cycle():
+    """Réparer la session APRÈS coup ne suffisait pas : elle meurt à chaque cycle.
+
+    Journal de production du 20/08/2026 : après chaque page neuve,
+    `enum oddschecker=180`, puis `enum=0` sur les trois cycles suivants, en
+    boucle — la page qui a servi à lire des courses ne sait plus énumérer
+    l'index. Le daemon tournait « sainement » (process vivant, zéro exception)
+    en perdant 3 cycles sur 4, d'où bet365/ladbrokes/betfair à 0,7 % de
+    couverture. La page est donc ouverte DANS la boucle, pas avant elle.
+    """
+    lignes = ODDSCHECKER.splitlines()
+    debut = next(i for i, l in enumerate(lignes) if l.strip() == "while _run:")
+    corps = "\n".join(lignes[debut:])
+    avant = "\n".join(lignes[:debut])
+
+    assert "page = browser.new_page()" in corps, "session ouverte dans la boucle"
+    assert "page = browser.new_page()" not in avant, \
+        "une page ouverte avant la boucle survivrait à tous les cycles"
+
+
+def test_la_session_du_daemon_oddschecker_est_refermee_a_chaque_cycle():
+    """Un contexte Camoufox par cycle non refermé = fuite mémoire garantie sur un
+    process qui tourne des semaines (pic déjà mesuré à 1,2 Go)."""
     normalise = " ".join(ODDSCHECKER.split())
-    assert "ENUM_VIDES_AVANT_RECREATION" in normalise
-    assert "session.recreate" in normalise
-    assert "page = browser.new_page()" in normalise
+    assert "finally: if page is not None:" in normalise
+    assert "page.close()" in normalise
 
 
-def test_le_compteur_d_enumerations_vides_est_remis_a_zero_sur_succes():
-    """Sans remise à zéro, trois cycles vides ESPACÉS dans le temps finiraient par
-    déclencher une recréation inutile."""
+def test_le_daemon_oddschecker_journalise_sa_productivite():
+    """« Le daemon tourne » n'est pas « le daemon produit ». Sans le nombre de
+    cotes écrites par cycle, un daemon qui tourne à vide reste indétectable."""
     normalise = " ".join(ODDSCHECKER.split())
-    assert "if races: enum_vides = 0" in normalise
-
-
-def test_le_seuil_de_recreation_laisse_passer_un_creux_normal():
-    """3 cycles de 5 min = 15 min : une nuit sans course ne doit pas recréer la
-    page en boucle."""
-    from importlib.util import module_from_spec, spec_from_file_location
-    import sys, types
-
-    # Le daemon importe camoufox (absent de l'image de test) : on lit la
-    # constante sans exécuter le module.
-    for ligne in ODDSCHECKER.splitlines():
-        if ligne.startswith("ENUM_VIDES_AVANT_RECREATION"):
-            valeur = int(ligne.split("=")[1].split("#")[0].strip())
-            assert 2 <= valeur <= 6, "seuil trop agressif ou trop laxiste"
-            return
-    raise AssertionError("ENUM_VIDES_AVANT_RECREATION introuvable")
+    assert 'log("cycle", courses=len(visit), cotes=cotes_du_cycle' in normalise
 
 
 ZETURF = (BACKEND / "scraper/zeturf_live_daemon.py").read_text(encoding="utf-8")

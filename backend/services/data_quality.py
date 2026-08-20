@@ -70,6 +70,16 @@ SEUIL_FRAICHEUR_SCRAPE_H = 3
 SEUIL_COTE_FIGEE_MIN = 45
 # Fenêtre avant le départ où l'on exige des cotes fraîches.
 FENETRE_AVANT_DEPART_H = 6
+# Fenêtre avant le départ où l'ABSENCE TOTALE de cote PMU est anormale. Bien plus
+# courte que la précédente : le PMU ne price pas une course six heures à l'avance.
+# Mesuré en production le 20/08/2026 sur 105 courses (première cote observée dans
+# `cotes_historique` vs heure de départ) : médiane 12,6 h d'avance, 10e centile
+# 5,9 h, et surtout MINIMUM 3,65 h. Alerter à 6 h revenait donc à crier
+# quotidiennement sur des courses parfaitement normales, simplement pas encore
+# ouvertes aux paris — aucune course des 3 derniers jours n'a fini sans cote PMU.
+# 2 h laisse la marge du pire cas observé tout en gardant l'alerte utile : à ce
+# stade, une course sans la moindre cote n'est réellement pas pronosticable.
+FENETRE_COURSE_SANS_COTE_H = 2
 # En dessous, le nombre d'exécutions d'un scraper ne permet pas de conclure
 # (un scraper lancé il y a dix minutes n'a pas encore fait ses preuves).
 MIN_RUNS_POUR_JUGER_SCRAPER = 20
@@ -333,7 +343,12 @@ async def concordance_partants(session: AsyncSession, jours: int = 2) -> dict:
 
 
 async def courses_non_pronosticables(session: AsyncSession) -> dict:
-    """Courses à venir dont aucun partant n'a de cote PMU : pas d'EV possible."""
+    """Courses à venir dont aucun partant n'a de cote PMU : pas d'EV possible.
+
+    Fenêtre `FENETRE_COURSE_SANS_COTE_H` et non `FENETRE_AVANT_DEPART_H` : une
+    course sans cote six heures avant son départ n'est pas une panne, c'est le
+    fonctionnement normal du PMU (cf. la mesure documentée sur la constante).
+    """
     maintenant = datetime.now(timezone.utc)
     row = (await session.execute(text("""
         SELECT count(*) AS n_a_venir,
@@ -346,11 +361,11 @@ async def courses_non_pronosticables(session: AsyncSession) -> dict:
         WHERE c.statut = 'a_venir'
           AND c.date_heure >= :maintenant AND c.date_heure <= :horizon
     """), {"maintenant": maintenant,
-           "horizon": maintenant + timedelta(hours=FENETRE_AVANT_DEPART_H)})).first()
+           "horizon": maintenant + timedelta(hours=FENETRE_COURSE_SANS_COTE_H)})).first()
     return {
         "n_a_venir": int(row[0] or 0) if row else 0,
         "n_sans_aucune_cote": int(row[1] or 0) if row else 0,
-        "fenetre_h": FENETRE_AVANT_DEPART_H,
+        "fenetre_h": FENETRE_COURSE_SANS_COTE_H,
     }
 
 
@@ -616,7 +631,7 @@ async def rapport_qualite(session: AsyncSession) -> dict:
             "code": "courses_non_pronosticables",
             "gravite": "warning",
             "message": (f"{incompletes['n_sans_aucune_cote']} course(s) partant sous "
-                        f"{FENETRE_AVANT_DEPART_H} h sans aucune cote PMU"),
+                        f"{incompletes['fenetre_h']} h sans aucune cote PMU"),
         })
 
     return {

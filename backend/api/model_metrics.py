@@ -11,9 +11,13 @@ valeurs aberrantes.
 
 Pattern d'origine : assistant.py get_model_metrics (commit b9121ca).
 """
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from db.database import desempoisonner
 from db.models import ModelVersion
+
+log = structlog.get_logger(module="model_metrics")
 
 # ROI simulé considéré crédible uniquement dans cette plage (fraction, pas %).
 ROI_MIN_PLAUSIBLE = -0.5   # -50%
@@ -113,14 +117,22 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
         rll_top3 = (await db.execute(_text(
             f"SELECT count(*) {_guard} AND rll.gagnant_rang_predit <= 3"
         ))).scalar() or 0
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        # La transaction est AVORTÉE côté PostgreSQL : sans rollback, toutes les
+        # requêtes suivantes de l'appelant échouent en cascade (cf.
+        # `desempoisonner`). On échoue fermé (0 observation) ET on trace : une
+        # sonde muette a caché deux mois de pannes /dev/shm.
+        await desempoisonner(db)
+        log.warning("model_metrics.rll_indisponible", err=str(e)[:200])
         rll_total = 0
         rll_top3 = 0
 
     try:
         from ml.prediction_evaluation import evaluation_coverage
         prediction_data_quality = await evaluation_coverage(db)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        await desempoisonner(db)
+        log.warning("model_metrics.coverage_indisponible", err=str(e)[:200])
         prediction_data_quality = {
             "n_total": 0, "n_replayable": 0, "n_legacy": 0,
             "coverage_pct": 0.0, "courses_total": 0,
@@ -152,7 +164,9 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
             "WHERE statut = 'settled' AND roi_reel IS NOT NULL"))).scalar()
         if _r is not None:
             roi_reel = round(float(_r), 4)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        await desempoisonner(db)
+        log.warning("model_metrics.roi_reel_indisponible", err=str(e)[:200])
         roi_reel = None
 
     return {

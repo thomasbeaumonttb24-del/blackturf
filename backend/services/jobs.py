@@ -14,6 +14,13 @@ _DRIFT_RETRAIN_TRIGGER_KEY = "ml:drift_retrain_trigger_cooldown"
 _DRIFT_RETRAIN_TRIGGER_TTL_S = 6 * 3600
 
 
+# Conservation d'un job ML RATÉ dans la FailedJobRegistry. Le défaut de RQ est un
+# AN : les 35 `retrain_if_needed` tués par le OOM killer depuis juin 2026 y étaient
+# encore, à gonfler le décompte d'une alerte dont la cause était traitée. 7 jours
+# suffisent au diagnostic sans constituer un passif permanent.
+ML_FAILURE_TTL_S = 7 * 24 * 3600
+
+
 def _enqueue_drift_retrain_once(redis_client, queue):
     """Déduplique les demandes horaires de retrain tant que le drift reste critique."""
     claimed = redis_client.set(
@@ -28,6 +35,7 @@ def _enqueue_drift_retrain_once(redis_client, queue):
         return queue.enqueue(
             "ml.pipeline.run_incremental_retraining_sync",
             result_ttl=86400,
+            failure_ttl=ML_FAILURE_TTL_S,
         )
     except Exception:
         # L'enqueue n'a pas eu lieu : rendre immédiatement le droit de réessayer.
@@ -78,7 +86,8 @@ async def job_retrain_trigger() -> None:
 
         r = sync_redis.from_url(settings.redis_url)
         q = Queue("ml", connection=r, default_timeout=3600)
-        job = q.enqueue("ml.pipeline.retrain_if_needed", result_ttl=86400)
+        job = q.enqueue("ml.pipeline.retrain_if_needed", result_ttl=86400,
+                        failure_ttl=ML_FAILURE_TTL_S)
         log.info("jobs.retrain.enqueued", job_id=job.id)
     except Exception as e:
         log.error("jobs.retrain.error", error=str(e))

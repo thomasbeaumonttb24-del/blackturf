@@ -133,3 +133,28 @@ def test_les_variables_lues_par_le_code_atteignent_les_conteneurs():
             "les e-mails de supervision des abonnements partiraient sur la "
             "valeur par défaut du code."
         )
+
+
+def test_le_service_db_declare_un_dev_shm_suffisant():
+    """Docker plafonne /dev/shm à 64 Mo : PostgreSQL y meurt en silence.
+
+    La mémoire partagée DYNAMIQUE des workers parallèles de PostgreSQL est
+    allouée dans /dev/shm (~8 Mo par segment). Sous le défaut Docker, tout plan
+    parallèle sur une grosse table échoue en « could not resize shared memory
+    segment : No space left on device » — et comme l'échec avorte la transaction
+    entière, l'erreur remontée à l'utilisateur porte sur une requête ANODINE
+    exécutée ensuite. Panne du 20/08/2026 : /admin/api/dashboard en 500 et
+    9 `post_course_sync` perdus par jour, pour un réglage absent d'un fichier.
+    """
+    fichiers = [p for p in (COMPOSE_BASE, COMPOSE_PROD) if p.exists()]
+    if not fichiers:
+        pytest.skip("aucun compose lisible dans ce contexte de test")
+    for chemin in fichiers:
+        bloc = re.search(r"^  db:\n(.*?)(?=^  \S)", _lire(chemin), re.S | re.M)
+        assert bloc, f"service `db` introuvable dans {chemin.name}"
+        m = re.search(r"^\s*shm_size:\s*(\d+)\s*(m|mb|g|gb)\s*$",
+                      bloc.group(1), re.M | re.I)
+        assert m, (f"{chemin.name} : le service `db` ne déclare pas `shm_size` — "
+                   "PostgreSQL retombe sur les 64 Mo par défaut de Docker")
+        mo = int(m.group(1)) * (1024 if m.group(2).lower() in ("g", "gb") else 1)
+        assert mo >= 128, f"{chemin.name} : shm_size={mo} Mo, trop juste"
