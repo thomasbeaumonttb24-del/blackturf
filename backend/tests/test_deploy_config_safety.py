@@ -113,3 +113,23 @@ def test_toute_confiance_aux_entetes_transferes_est_justifiee():
     assert not exposees, (
         "--forwarded-allow-ips=* combiné à un port publié publiquement "
         f"{exposees} : usurpation de X-Forwarded-For possible.")
+
+
+def test_les_variables_lues_par_le_code_atteignent_les_conteneurs():
+    """Une variable absente du bloc `environment:` n'atteint JAMAIS le conteneur.
+
+    Le compose ne transmet QUE ce qu'il énumère : `.env` sert à résoudre
+    `${...}`, pas à peupler l'environnement du conteneur. La violation est
+    parfaitement silencieuse — le réglage prend sa valeur par défaut et personne
+    n'en sait rien. C'est ce qui avait fait vivre les jetons d'accès 12 h au lieu
+    de 60 min, et ce qui aurait envoyé les notifications d'abonnement sur
+    `admin@blackturf.fr`, une adresse que personne ne lit, alors que `.env`
+    portait la bonne (2026-08-20).
+    """
+    for chemin in (COMPOSE_BASE, COMPOSE_PROD):
+        texte = _lire(chemin)
+        assert "ADMIN_EMAIL=${ADMIN_EMAIL}" in texte, (
+            f"{chemin.name} : ADMIN_EMAIL n'est transmis à aucun conteneur — "
+            "les e-mails de supervision des abonnements partiraient sur la "
+            "valeur par défaut du code."
+        )
