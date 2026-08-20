@@ -37,6 +37,8 @@ import numpy as np
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ml.models import _N_JOBS
+
 log = structlog.get_logger(module="meta_learner")
 
 # ── Constantes ──────────────────────────────────────────────────────────────
@@ -456,7 +458,11 @@ class MetaLearner:
             scale_pos_weight=scale_pos_weight,
             random_state=42,
             verbose=-1,
-            n_jobs=-1,
+            # Aligné sur BT_TRAIN_NJOBS comme ml/models.py. `-1` prenait tous
+            # les cœurs, et chaque thread LightGBM porte ses propres tampons :
+            # sur ce VPS 4 vCPU / 7,6 Gio partagés, le gain de temps ne vaut pas
+            # le pic. Ce job tourne à 03:00, juste après le retrain nocturne.
+            n_jobs=_N_JOBS,
         )
 
         try:
