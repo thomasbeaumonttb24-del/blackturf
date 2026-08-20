@@ -98,7 +98,15 @@ async def get_learned_type_weights(session: AsyncSession,
 # sans detruire l'identite du profil. On ne reanime que les MOINS MAUVAIS, classes par
 # ROI reel mesure.
 PLANCHER_TYPE_REANIME = 0.25
-MIN_TYPES_PAR_PROFIL = 3
+# 4 et non 3 : a 3, le MODERE ne gardait que Simple Place, Couple Place et Simple
+# Gagnant — trois types a FAIBLE rapport. Or sa bande x4-15 mesuree sur la mise totale
+# exige de gros rapports pour financer plusieurs tickets (besoin = ceil(cible/rapport)).
+# Le 4e type reanime est le Couple Ordre : un duo, donc de vrais gros rapports.
+# Mesure du 2026-08-20 sur 144 courses (plan 10 EUR) : 47,2 % -> 45,1 % de plans a un
+# seul pari, pour 0,3 point de ROI mesure. Aller plus loin (6 types = + Couple Gagnant,
+# 8 = + Trio) gagne 0,15 ticket mais fait passer le ROI moyen des types joues de
+# -20,6 % a -33,0 % : ce compromis-la n'est PAS pris ici.
+MIN_TYPES_PAR_PROFIL = 4
 # Un type n'est compté comme « encore jouable » que s'il a un vrai historique de paris.
 # Sans ce filtre, le profil MODÉRÉ paraissait servi par Multi en 5/6/7 et Mini Multi
 # (4 à 18 paris joués en tout, contre 612 pour le Couplé Placé) : des paris que le PMU
