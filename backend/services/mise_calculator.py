@@ -541,7 +541,8 @@ def generer_plan(
             _min_stake_eff = max(MISE_PLANCHER,
                                  round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
             _allocate_spread(selected, montant, cfg, _min_stake_eff,
-                             pool=pool_couverture)
+                             pool=pool_couverture,
+                             nb_partants=(course_info or {}).get("nb_partants"))
         else:
             # PRUDENT : RESPECT STRICT DE LA TRANCHE DE COEFFICIENT (×1.8-4) SUR LA MISE
             # COMPLÈTE par DUTCHING : chaque gagnant unique rend le même total = coef ×
@@ -689,11 +690,53 @@ def _allocate_dutch(selected: list[dict], montant: float, cfg: dict) -> None:
 # des paris SUPPLÉMENTAIRES au plancher de mise. Ils ne portent pas la promesse ×g du
 # plan, sont marqués `_couverture` et l'UI comme les justifications le DISENT. Leur
 # seul rôle : augmenter la probabilité qu'au moins un pari passe sur la course.
-COUVERTURE_MAX = 3
+# Nombre de tickets de couverture visé selon le CHAMP de la course. Plus il y a de
+# partants, plus l'issue est incertaine et plus il y a de combinaisons PMU réellement
+# jouables : couvrir davantage y a du sens. À l'inverse, sur un champ réduit les
+# combinaisons se ressemblent toutes — les multiplier n'ajoute pas de chances, ça
+# ne fait que diviser la mise.
+COUVERTURE_PAR_CHAMP = ((8, 2), (13, 3), (10 ** 9, 4))
 # Part du budget mise de côté pour la couverture QUAND le contrat ne finance qu'un seul
-# ticket. 0.40 : sur un plan de 10€ le principal garde 6€ (assez pour tenir la cible sur
-# la quasi-totalité des rapports de bande) et 2 paris de couverture à 2€ s'ajoutent.
-COUVERTURE_PART = 0.40
+# ticket. Bornée à 0.60 : le ticket principal doit garder de quoi tenir la cible de gain
+# du profil, sinon on troque la promesse contre du saupoudrage.
+COUVERTURE_PART_MAX = 0.60
+
+
+def _couverture_max(nb_partants: Optional[int]) -> int:
+    """Nb max de tickets de couverture selon le nombre de partants (None → valeur
+    médiane : on n'invente pas un grand champ quand l'info manque)."""
+    if not nb_partants:
+        return 3
+    for seuil, n in COUVERTURE_PAR_CHAMP:
+        if int(nb_partants) <= seuil:
+            return n
+    return COUVERTURE_PAR_CHAMP[-1][1]
+
+
+def _ordre_couverture(restants: list[dict]) -> list[dict]:
+    """Ordre de financement de la couverture : on ALTERNE deux logiques au lieu d'en
+    empiler une seule.
+
+      • FRÉQUENCE — le pari le plus probable : il fait monter les chances de toucher.
+      • GROS LOT  — le plus gros rapport : petite mise qui peut rapporter beaucoup,
+        « ça élargit le champ des possibles » (demande user 2026-08-20).
+
+    Trois tickets de couverture triés par la seule probabilité finissent par être trois
+    variantes du même pari ; alterner donne un vrai éventail. Tous les candidats ont déjà
+    passé les gates du profil, donc le « gros lot » reste dans la bande du profil."""
+    par_freq = sorted(restants, key=lambda b: (float(b.get("proba_gain") or 0.0),
+                                               float(b.get("rapport_estime") or 0.0)),
+                      reverse=True)
+    par_gain = sorted(restants, key=lambda b: (float(b.get("rapport_estime") or 0.0),
+                                               float(b.get("proba_gain") or 0.0)),
+                      reverse=True)
+    ordre, vus = [], set()
+    for i in range(max(len(par_freq), len(par_gain))):
+        for source in (par_freq, par_gain):
+            if i < len(source) and id(source[i]) not in vus:
+                vus.add(id(source[i]))
+                ordre.append(source[i])
+    return ordre
 
 
 def _chevaux_set(b: dict) -> frozenset:
@@ -722,7 +765,8 @@ def _couvre_deja(b: dict, deja: list[dict]) -> bool:
 
 def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
                          montant: int, cfg: dict,
-                         pool: Optional[list[dict]] = None) -> int:
+                         pool: Optional[list[dict]] = None,
+                         cov_max: int = 3) -> int:
     """Finance jusqu'à COUVERTURE_MAX paris supplémentaires sur le reliquat. Ajoute les
     tickets retenus à `kept` (marqués `_couverture`) et renvoie le reliquat restant.
     Aucun pari inventé ni hors profil : ils sortent de `selected` ou de `pool`, deux
@@ -751,13 +795,10 @@ def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
         return reste
     var_cap = float(cfg.get("var_cap", 1.0) or 1.0)
     cap_hv = max(mise_cov, int(montant * var_cap)) if var_cap < 1.0 else montant
-    # La couverture sert le TAUX DE RÉUSSITE : on classe par probabilité de toucher
-    # décroissante (et non par gain). À proba égale, le meilleur rapport.
-    restants.sort(key=lambda b: (float(b.get("proba_gain") or 0.0),
-                                 float(b.get("rapport_estime") or 0.0)), reverse=True)
+    restants = _ordre_couverture(restants)
     ajoutes = 0
     for b in restants:
-        if ajoutes >= COUVERTURE_MAX or reste < mise_cov:
+        if ajoutes >= cov_max or reste < mise_cov:
             break
         if _is_high_variance(b) and mise_cov > cap_hv:
             continue                      # plafond de variance : ticket non finançable
@@ -778,7 +819,8 @@ def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
 
 
 def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake: int,
-                     pool: Optional[list[dict]] = None) -> None:
+                     pool: Optional[list[dict]] = None,
+                     nb_partants: Optional[int] = None) -> None:
     """Allocation « SPREAD » (modéré/risqué, calculateur manuel & pronos figés).
 
     CONTRAT DE GAIN vs MISE TOTALE (demande user 2026-07-02) : chaque ticket GAGNANT
@@ -887,8 +929,18 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # d'un cheval jouer un seul, sinon proposer plusieurs »). Le nombre de paris est donc
     # piloté par l'ANALYSE de la course, pas par un cap fixe.
     solo = bool(selected) and _solo_confident(selected[0])
-    if not solo and len(kept) <= 1 and (len(selected) > 1 or pool):
-        res = min(COUVERTURE_MAX * MISE_PLANCHER, int(M * COUVERTURE_PART))
+    # Le nombre de tickets de couverture suit le CHAMP de la course : 2 sur un champ
+    # réduit (≤8), 3 jusqu'à 13, 4 au-delà. Un grand champ = issue plus incertaine et
+    # plus de combinaisons PMU réellement jouables → couvrir davantage a du sens.
+    cov_max = _couverture_max(nb_partants)
+    # RÉSERVE DE COUVERTURE — systématique, pas seulement quand le contrat ne finance
+    # qu'un ticket. Dimensionné sur le budget ENTIER, le contrat ×g est glouton : deux
+    # tickets contractuels à 4€ et 6€ absorbent un plan de 10€ et il ne reste rien pour
+    # élargir l'éventail. On met donc la part de couverture de côté AVANT de dimensionner
+    # les tickets contractuels, et on la rend par paliers de 2€ tant qu'aucun ticket
+    # contractuel n'entre dans le budget restant — la promesse ×g passe avant le nombre.
+    if not solo and (len(selected) > 1 or pool):
+        res = min(cov_max * MISE_PLANCHER, int(M * COUVERTURE_PART_MAX))
         while res >= MISE_PLANCHER:
             k2, r2, _ = _best_diversified(cible, M - res)
             if k2:
@@ -912,7 +964,8 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # _financer_couverture) avant de grossir les tickets contractuels. Objectif =
     # augmenter le nombre de chances de toucher sur la course, pas le gain d'un ticket.
     if not solo:
-        reste = _financer_couverture(kept, selected, reste, M, cfg, pool=pool)
+        reste = _financer_couverture(kept, selected, reste, M, cfg, pool=pool,
+                                     cov_max=cov_max)
     # Reliquat ∝ conviction — les mises ne font que MONTER (gain ≥ cible préservé). Le
     # plancher de bande (×g du total) est STRICT (dimensionnement `besoin`). Le PLAFOND de
     # bande (gain ≤ gmax×total) borne le reliquat : on ne charge pas un ticket au-delà de sa

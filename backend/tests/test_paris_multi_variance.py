@@ -266,6 +266,46 @@ class TestCouverture:
                     for p in paris}
             assert len(cles) == len(paris), f"{profil} : paris non distincts"
 
+    def test_couverture_suit_le_champ_de_la_course(self):
+        """Le nb de tickets de couverture depend du CHAMP : un grand champ est plus
+        incertain et offre plus de combinaisons jouables, un champ reduit non."""
+        from services.mise_calculator import _couverture_max
+        assert _couverture_max(7) == 2
+        assert _couverture_max(8) == 2
+        assert _couverture_max(9) == 3
+        assert _couverture_max(13) == 3
+        assert _couverture_max(18) == 4
+        assert _couverture_max(None) == 3        # info absente → valeur médiane
+
+    def test_couverture_alterne_frequence_et_gros_lot(self):
+        """« Plus de paris à petite mise qui peuvent gagner beaucoup » : la couverture
+        alterne le pari le plus PROBABLE et celui au plus gros RAPPORT, au lieu de
+        financer trois variantes du même pari."""
+        from services.mise_calculator import _ordre_couverture
+        a = {"proba_gain": 0.30, "rapport_estime": 5.0}    # le plus probable
+        b = {"proba_gain": 0.05, "rapport_estime": 60.0}   # le plus gros rapport
+        c = {"proba_gain": 0.20, "rapport_estime": 8.0}
+        ordre = _ordre_couverture([c, a, b])
+        assert ordre[0] is a and ordre[1] is b, [
+            (x["proba_gain"], x["rapport_estime"]) for x in ordre]
+        assert len(ordre) == 3 and len({id(x) for x in ordre}) == 3
+
+    def test_risque_grand_champ_propose_plusieurs_paris(self):
+        """Demande user : en risqué, viser 3 paris voire plus quand le champ le permet."""
+        rows = [(0.16, 5.5), (0.14, 6.5), (0.12, 8.0), (0.10, 11.0), (0.09, 13.0),
+                (0.08, 15.0), (0.07, 18.0), (0.06, 22.0), (0.05, 28.0), (0.04, 35.0),
+                (0.04, 42.0), (0.03, 55.0), (0.03, 70.0), (0.02, 90.0)]
+        champ = [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
+                  "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
+                  "cote_pmu": c, "non_partant": False}
+                 for i, (p, c) in enumerate(rows)]
+        course = dict(self.COURSE, nb_partants=len(rows))
+        d = plan_to_dict(generer_plan(10, "agressif", champ, course,
+                                      respect_montant=True))
+        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+        assert len(paris) >= 3, f"grand champ risqué : seulement {len(paris)} pari(s)"
+        assert sum(p["mise"] for p in paris) == 10
+
     def test_couverture_ne_duplique_pas_un_pari_principal(self):
         d = plan_to_dict(generer_plan(20, "equilibre", _field(8), self.COURSE,
                                       respect_montant=True))
