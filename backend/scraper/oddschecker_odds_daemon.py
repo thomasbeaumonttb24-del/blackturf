@@ -46,15 +46,21 @@ ENUM_INTERVAL = 300     # s — ré-énumération index + sweep des courses en f
 WINDOW_H = 3            # h — ne visite que les courses partant dans < WINDOW_H
 MATCH_MIN = 7           # ± minutes heure oddschecker (UK) ↔ BlackTurf (UTC)
 PAGE_WAIT_MS = 5000
-# La session Camoufox ne survit PAS à un cycle : dès qu'elle a servi à lire des
-# pages de course, la ré-énumération de l'index ne ramène plus rien. Mesuré dans
-# le journal du 20/08/2026 : après chaque page neuve, `enum oddschecker=180`,
-# puis `enum=0` sur les trois cycles suivants, indéfiniment — soit 3 cycles
-# perdus sur 4 et une couverture bet365/ladbrokes/betfair tombée à 0,7 %, alors
-# que le daemon se portait « bien » (process vivant, aucune exception).
-# On ouvre donc une session NEUVE à chaque cycle : `browser.new_page()` crée un
-# contexte isolé (cookies, consentement, redirection géo repartent à zéro) et le
-# `page.close()` du `finally` le referme — pas d'accumulation mémoire.
+# `enum oddschecker=0` ne veut pas dire « pas de course » : c'est un CHALLENGE
+# CLOUDFLARE, servi en HTTP 200 sous le titre « Just a moment… ». Mesuré le
+# 20/08/2026 sur la production :
+#   - premier contexte d'un navigateur neuf : passe, 156 courses énumérées ;
+#   - tout contexte SUIVANT (donc tout `browser.new_page()`, qui en crée un) :
+#     challengé, et l'attente n'y change rien — 60 s de patience ne le résolvent
+#     jamais ;
+#   - le MÊME contexte, lui, enchaîne index → course → index → autre page sans
+#     broncher : il porte le cookie `cf_clearance` obtenu au premier passage.
+# Conclusion : on garde UN contexte pour toute la vie du process, et quand la
+# clearance finit par expirer, aucune réparation interne n'est possible — seul un
+# navigateur NEUF en obtient une autre. On sort donc du process et systemd
+# relance (même remède que pour un driver mort, cf. `_exit_si_driver_mort`).
+# 2 cycles = 10 min de silence avant de payer un redémarrage.
+CHALLENGES_AVANT_REDEMARRAGE = 2
 LONDON = ZoneInfo("Europe/London")
 
 _run = True
@@ -269,6 +275,15 @@ def match_course(bt: dict, slug: str, dt_utc: datetime):
     return None
 
 # ─── Boucle principale ──────────────────────────────────────────────────────
+def _dormir(t0: float) -> None:
+    """Attend le prochain cycle, en restant interruptible par SIGTERM."""
+    elapsed = time.time() - t0
+    for _ in range(int(max(5.0, ENUM_INTERVAL - elapsed))):
+        if not _run:
+            break
+        time.sleep(1)
+
+
 def main():
     global _cycle_started_at
     log("oddschecker_daemon.start", enum=ENUM_INTERVAL, window_h=WINDOW_H,
@@ -279,19 +294,42 @@ def main():
     # couvert, pas seulement les hangs à l'intérieur de la boucle `while _run`.
     _cycle_started_at = time.time()
     with Camoufox(headless=True, geoip=True) as browser:
+        # UN SEUL contexte pour tout le process : c'est lui qui porte la
+        # clearance Cloudflare (cf. note en tête de fichier).
+        page = browser.new_page()
+        challenges = 0
         while _run:
             _cycle_started_at = time.time()
             t0 = time.time()
-            page = None
             cotes_du_cycle = 0
             try:
-                # Session NEUVE à chaque cycle : réutiliser la page fige
-                # l'énumération de l'index dès la première course lue (cf. note
-                # en tête de fichier).
-                page = browser.new_page()
                 bt = load_blackturf()
-                races = enum_races(page)
                 now = datetime.now(timezone.utc)
+                # Fenêtre calculée sur NOTRE base avant toute requête sortante :
+                # sans course à coter, on ne réveille pas Cloudflare pour rien
+                # (et on ne consomme pas de redémarrage la nuit).
+                attendues = [c for c in bt.values() if c["dt_obj"] and
+                             timedelta(minutes=-10) <= (c["dt_obj"] - now) <= timedelta(hours=WINDOW_H)]
+                if not attendues:
+                    log("cycle", courses=0, cotes=0, veille=True,
+                        sec=int(time.time() - t0))
+                    _dormir(t0)
+                    continue
+
+                races = enum_races(page)
+                if not races:
+                    # Index vide alors que NOUS attendons des courses : c'est le
+                    # challenge, pas un creux de programme.
+                    challenges += 1
+                    log("cloudflare.challenge", n=challenges,
+                        attendues=len(attendues), titre=str(page.title())[:40])
+                    if challenges >= CHALLENGES_AVANT_REDEMARRAGE:
+                        log("cloudflare.exit", n=challenges)
+                        os._exit(1)   # systemd relance : navigateur neuf = clearance neuve
+                    _dormir(t0)
+                    continue
+                challenges = 0
+
                 visit = []
                 for r in races:
                     if not (timedelta(minutes=-10) <= (r["dt_utc"] - now) <= timedelta(hours=WINDOW_H)):
@@ -330,18 +368,7 @@ def main():
             except Exception as e:
                 log("cycle.error", err=str(e)[:140])
                 _exit_si_driver_mort(e)
-            finally:
-                if page is not None:
-                    try:
-                        page.close()
-                    except Exception as e:
-                        log("session.close_error", err=str(e)[:90])
-            # attente jusqu'au prochain cycle (interruptible)
-            elapsed = time.time() - t0
-            for _ in range(int(max(5.0, ENUM_INTERVAL - elapsed))):
-                if not _run:
-                    break
-                time.sleep(1)
+            _dormir(t0)
     log("oddschecker_daemon.stop")
 
 if __name__ == "__main__":

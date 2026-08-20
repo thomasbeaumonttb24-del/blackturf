@@ -126,32 +126,44 @@ def test_le_parseur_geny_lit_une_vraie_page():
 ODDSCHECKER = (BACKEND / "scraper/oddschecker_odds_daemon.py").read_text(encoding="utf-8")
 
 
-def test_le_daemon_oddschecker_ouvre_une_session_neuve_a_chaque_cycle():
-    """Réparer la session APRÈS coup ne suffisait pas : elle meurt à chaque cycle.
+def test_le_daemon_oddschecker_garde_un_seul_contexte():
+    """`enum=0` était un CHALLENGE CLOUDFLARE, pas une session figée.
 
-    Journal de production du 20/08/2026 : après chaque page neuve,
-    `enum oddschecker=180`, puis `enum=0` sur les trois cycles suivants, en
-    boucle — la page qui a servi à lire des courses ne sait plus énumérer
-    l'index. Le daemon tournait « sainement » (process vivant, zéro exception)
-    en perdant 3 cycles sur 4, d'où bet365/ladbrokes/betfair à 0,7 % de
-    couverture. La page est donc ouverte DANS la boucle, pas avant elle.
+    Mesuré sur la production le 20/08/2026 : le premier contexte d'un navigateur
+    neuf énumère 156 courses ; tout contexte SUIVANT — donc tout
+    `browser.new_page()`, qui en crée un — reçoit « Just a moment… » en HTTP 200,
+    que 60 s d'attente ne résolvent jamais. Le MÊME contexte, lui, enchaîne
+    index → course → index sans broncher : il porte le cookie `cf_clearance`
+    obtenu au premier passage. Ouvrir une page par cycle condamnait donc le
+    daemon à être challengé en permanence.
     """
     lignes = ODDSCHECKER.splitlines()
     debut = next(i for i, l in enumerate(lignes) if l.strip() == "while _run:")
     corps = "\n".join(lignes[debut:])
-    avant = "\n".join(lignes[:debut])
 
-    assert "page = browser.new_page()" in corps, "session ouverte dans la boucle"
-    assert "page = browser.new_page()" not in avant, \
-        "une page ouverte avant la boucle survivrait à tous les cycles"
+    assert "page = browser.new_page()" in "\n".join(lignes[:debut]), \
+        "le contexte doit être ouvert AVANT la boucle et vivre tout le process"
+    assert "browser.new_page()" not in corps, \
+        "une page par cycle = un contexte sans cf_clearance = challenge garanti"
 
 
-def test_la_session_du_daemon_oddschecker_est_refermee_a_chaque_cycle():
-    """Un contexte Camoufox par cycle non refermé = fuite mémoire garantie sur un
-    process qui tourne des semaines (pic déjà mesuré à 1,2 Go)."""
+def test_un_challenge_cloudflare_persistant_fait_redemarrer_le_daemon():
+    """Aucune réparation interne n'existe : seul un navigateur NEUF obtient une
+    nouvelle clearance. Le process doit donc sortir pour que systemd relance —
+    même remède que pour un driver Playwright mort."""
     normalise = " ".join(ODDSCHECKER.split())
-    assert "finally: if page is not None:" in normalise
-    assert "page.close()" in normalise
+    assert "CHALLENGES_AVANT_REDEMARRAGE" in normalise
+    assert 'log("cloudflare.exit"' in normalise
+    assert "os._exit(1)" in normalise
+
+
+def test_le_daemon_oddschecker_ne_sollicite_pas_le_site_sans_course_a_coter():
+    """La fenêtre se calcule sur NOTRE base avant toute requête sortante : sans
+    course à coter, réveiller Cloudflare ne peut que coûter une clearance (et un
+    redémarrage) pour rien."""
+    normalise = " ".join(ODDSCHECKER.split())
+    assert "if not attendues:" in normalise
+    assert "veille=True" in normalise
 
 
 def test_le_daemon_oddschecker_journalise_sa_productivite():
