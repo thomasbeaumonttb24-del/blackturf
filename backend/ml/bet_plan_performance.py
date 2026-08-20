@@ -481,10 +481,16 @@ async def load_segment_gates(session: AsyncSession, dimension: str) -> dict[str,
     migration 0032) ou vide — jamais une erreur qui casserait l'appelant."""
     try:
         rows = (await session.execute(text("""
-            SELECT segment_key, status, factor, reason
+            SELECT segment_key, status, factor, reason, roi_pct, n_paris
             FROM bet_plan_segment_gates WHERE dimension = :dim
         """), {"dim": dimension})).all()
-        return {r[0]: {"status": r[1], "factor": float(r[2]), "reason": r[3]} for r in rows}
+        return {r[0]: {"status": r[1], "factor": float(r[2]), "reason": r[3],
+                       # roi_pct sert à CLASSER les types quand il faut en réanimer
+                       # (cf. bet_performance._garantir_catalogue_profil) : sans lui on
+                       # ne saurait pas lequel est le moins mauvais.
+                       "roi_pct": (float(r[4]) if r[4] is not None else None),
+                       "n_paris": (int(r[5]) if r[5] is not None else None)}
+                for r in rows}
     except Exception:
         try:
             await session.rollback()

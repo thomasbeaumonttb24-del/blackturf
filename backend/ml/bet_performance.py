@@ -78,7 +78,87 @@ async def get_learned_type_weights(session: AsyncSession,
         weights = await apply_type_gates(session, weights)
     except Exception:
         pass
+    if profil:
+        try:
+            weights = await _garantir_catalogue_profil(session, profil, weights)
+        except Exception:
+            pass
     return weights
+
+
+# Un poids ≤ 0.001 est un gate DUR dans mise_calculator : le type n'est plus jamais
+# propose. Le seuil de suspension est ABSOLU (-20 % de ROI) alors que le prelevement
+# PMU vaut deja ~20 % : presque tous les types finissent donc sous la barre. Mesure du
+# 2026-08-20 : sur les 13 types autorises au profil RISQUE, les 13 etaient suspendus —
+# le profil n'avait plus AUCUN pari eligible et retombait sur le filet « une course =
+# un pari de secours » a chaque course (2 plans gagnants sur 46 dans la journee).
+#
+# Garde-fou : un profil conserve TOUJOURS ses meilleurs types, a conviction fortement
+# reduite. Le signal d'apprentissage est preserve (mise plus petite, conviction basse)
+# sans detruire l'identite du profil. On ne reanime que les MOINS MAUVAIS, classes par
+# ROI reel mesure.
+PLANCHER_TYPE_REANIME = 0.25
+MIN_TYPES_PAR_PROFIL = 3
+# Un type n'est compté comme « encore jouable » que s'il a un vrai historique de paris.
+# Sans ce filtre, le profil MODÉRÉ paraissait servi par Multi en 5/6/7 et Mini Multi
+# (4 à 18 paris joués en tout, contre 612 pour le Couplé Placé) : des paris que le PMU
+# n'offre presque jamais. Le catalogue semblait plein et le plan restait vide.
+MIN_PARIS_TYPE_COURANT = 50
+
+
+async def _garantir_catalogue_profil(session: AsyncSession, profil: str,
+                                     weights: dict[str, float]) -> dict[str, float]:
+    """Empêche les gates d'éteindre TOUT le catalogue d'un profil.
+
+    Si moins de `MIN_TYPES_PAR_PROFIL` types autorisés par le profil survivent, on
+    réanime les moins mauvais (meilleur ROI mesuré d'abord) au poids plancher. Ne
+    touche à rien quand le profil a déjà de quoi jouer.
+    """
+    if not weights:
+        return weights
+    from services.mise_calculator import PROFIL_CONFIG
+    autorises = (PROFIL_CONFIG.get(profil) or {}).get("types")
+    candidats = [t for t in weights if autorises is None or t in autorises]
+    if not candidats:
+        return weights
+
+    from ml.bet_plan_performance import load_segment_gates
+    gates = await load_segment_gates(session, "type_pari")
+
+    def _courant(t: str) -> bool:
+        """Type réellement offert par le PMU, jugé sur son historique de paris joués."""
+        n = (gates.get(t) or {}).get("n_paris")
+        return n is not None and int(n) >= MIN_PARIS_TYPE_COURANT
+
+    vivants = [t for t in candidats if weights[t] > 0.001 and _courant(t)]
+    manquants = MIN_TYPES_PAR_PROFIL - len(vivants)
+    if manquants <= 0:
+        return weights
+
+    def _rang(t: str) -> tuple[int, float]:
+        """Classe d'abord les types dont le ROI est MESURÉ, du moins mauvais au pire.
+
+        Tenter l'inverse (« pas de mesure = pas de preuve qu'il est mauvais ») réanimait
+        des paris quasi jamais offerts par le PMU (Pick5, Multi en 4) au lieu des paris
+        de travail du profil : le catalogue restait vide en pratique. Un type mesuré à
+        −25 % qu'on peut jouer sur chaque course vaut mieux qu'un type inconnu absent
+        de 95 % des programmes.
+        """
+        g = gates.get(t) or {}
+        r = g.get("roi_pct")
+        return (1, float(r)) if r is not None else (0, 0.0)
+
+    morts = sorted((t for t in candidats if weights[t] <= 0.001), key=_rang, reverse=True)
+    if not morts:
+        return weights
+    out = dict(weights)
+    reanimes = []
+    for t in morts[:manquants]:
+        out[t] = PLANCHER_TYPE_REANIME
+        reanimes.append(t)
+    log.info("bet_performance.catalogue_reanime", profil=profil,
+             types=reanimes, restants_vivants=len(vivants))
+    return out
 
 
 async def _get_learned_type_weights_raw(session: AsyncSession,

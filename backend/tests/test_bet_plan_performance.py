@@ -177,11 +177,15 @@ class _FakeGateSession:
         params = params or {}
         if "INSERT INTO bet_plan_segment_gates" in sql:
             self.rows[(params["dim"], params["key"])] = (
-                params["status"], params["factor"], params["reason"])
+                params["status"], params["factor"], params["reason"],
+                params.get("roi"), params.get("n"))
             return None
         if "SELECT segment_key, status, factor, reason" in sql:
+            # roi_pct et n_paris sont lus depuis 2026-08-20 : ils servent à classer les
+            # types quand un profil doit en réanimer (garde-fou de catalogue).
             dim = params["dim"]
-            matches = [(k[1], v[0], v[1], v[2]) for k, v in self.rows.items() if k[0] == dim]
+            matches = [(k[1], v[0], v[1], v[2], v[3], v[4])
+                       for k, v in self.rows.items() if k[0] == dim]
             return _Result(matches)
         raise AssertionError(f"requête inattendue: {sql[:80]}")
 
