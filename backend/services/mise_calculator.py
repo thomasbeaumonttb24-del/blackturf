@@ -763,22 +763,20 @@ def _couvre_deja(b: dict, deja: list[dict]) -> bool:
 def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
                          montant: int, cfg: dict,
                          pool: Optional[list[dict]] = None,
-                         cov_max: int = 3, cible: float = 0.0) -> int:
-    """Finance des paris D'APPOINT sur le reliquat : petite mise, GROS rapport.
+                         cov_max: int = 3, cible: float = 0.0,
+                         besoin_fn=None, cap_fn=None) -> int:
+    """Finance des paris D'APPOINT sur le reliquat, DIMENSIONNÉS COMME LES AUTRES.
 
-    Ils tiennent EXACTEMENT le même contrat que les autres tickets du plan — gagnants,
-    ils rendent ≥ `cible` (= gain_cible_mult × la MISE TOTALE du plan). Décision produit
-    du 2026-08-20 : la tranche du profil se mesure sur la mise totale, SANS EXCEPTION.
-    Un ticket qui n'atteint pas la cible à la mise plancher n'est donc pas financé —
-    mieux vaut un plan plus court qu'un ticket hors tranche.
+    Chaque ticket reçoit `besoin = ceil(cible / rapport)` — exactement la règle des
+    tickets principaux — et non la mise plancher. C'est ce qui sépare un plan à ticket
+    unique d'un plan fourni : au plancher de 2€, atteindre la cible exigeait un rapport
+    ≥ cible/2 (×20 en modéré, ×50 en risqué) que presque aucun candidat n'offre.
+    Dimensionné au besoin, un rapport ×8 en modéré coûte 5€ et un rapport ×25 en risqué
+    coûte 4€ — la tranche du profil restant tenue par construction (mise × rapport ≥ cible).
 
-    La contrepartie est mécanique : à 2€ de mise sur un plan de 10€, il faut un rapport
-    ≥ cible/2 (×20 en modéré, ×50 en risqué). Seuls de très gros rapports qualifient,
-    d'où « peu de tickets, mais tous dans la tranche ».
-
-    Mise = MISE_PLANCHER (2€) et non le plancher du PALIER : ce dernier existe pour
-    « tuer le saupoudrage », or ici la mise est minimale précisément parce que le rapport
-    visé est élevé. Le plancher produit « jamais 1€ » reste respecté.
+    Les mises obtenues couvrent donc naturellement les fourchettes voulues (demande user
+    2026-08-20) : 2 à 8€ en risqué, 5 à 10€ en modéré, la mise entière quand un seul
+    pari domine.
 
     Aucun pari inventé ni hors profil : ils sortent de `selected` ou de `pool`, deux
     listes qui ont déjà passé TOUTES les gates du profil (type autorisé, bande de
@@ -801,16 +799,23 @@ def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
         return reste
     var_cap = float(cfg.get("var_cap", 1.0) or 1.0)
     cap_hv = max(mise_cov, int(montant * var_cap)) if var_cap < 1.0 else montant
+
+    def _besoin_defaut(b):
+        r = max(float(b.get("rapport_estime") or 1.0), 1.01)
+        return max(mise_cov, math.ceil(cible / r)) if cible > 0 else mise_cov
+
+    besoin = besoin_fn or _besoin_defaut
+    plafond = cap_fn or (lambda b: cap_hv if _is_high_variance(b) else montant)
+
     restants = _ordre_couverture(restants)
     ajoutes = 0
     for b in restants:
         if ajoutes >= cov_max or reste < mise_cov:
             break
-        if _is_high_variance(b) and mise_cov > cap_hv:
-            continue                      # plafond de variance : ticket non finançable
-        # CONTRAT DE GAIN, sans exception : à la mise plancher, le ticket doit rendre
-        # ≥ la cible du profil sur la MISE TOTALE du plan.
-        if cible > 0 and mise_cov * float(b.get("rapport_estime") or 0.0) < cible:
+        n = besoin(b)
+        # Le budget restant doit couvrir le besoin CONTRACTUEL du ticket : c'est ce qui
+        # garantit mise × rapport ≥ cible, donc la tranche du profil, sans exception.
+        if n > reste or n > plafond(b):
             continue
         if _couvre_deja(b, kept):
             continue                      # ne couvre rien de nouveau → inutile
@@ -820,10 +825,10 @@ def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
         if (b.get("type_pari") == "Simple Placé"
                 and any(k.get("type_pari") == "Simple Placé" for k in kept)):
             continue
-        b["mise"] = mise_cov
-        b["_besoin"] = mise_cov
+        b["mise"] = n
+        b["_besoin"] = n
         kept.append(b)
-        reste -= mise_cov
+        reste -= n
         ajoutes += 1
     return reste
 
@@ -975,7 +980,9 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # augmenter le nombre de chances de toucher sur la course, pas le gain d'un ticket.
     if not solo:
         reste = _financer_couverture(kept, selected, reste, M, cfg, pool=pool,
-                                     cov_max=cov_max, cible=cible)
+                                     cov_max=cov_max, cible=cible,
+                                     besoin_fn=lambda b: _besoin(b, cible),
+                                     cap_fn=_cap)
     # Reliquat ∝ conviction — les mises ne font que MONTER (gain ≥ cible préservé). Le
     # plancher de bande (×g du total) est STRICT (dimensionnement `besoin`). Le PLAFOND de
     # bande (gain ≤ gmax×total) borne le reliquat : on ne charge pas un ticket au-delà de sa
@@ -983,12 +990,11 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # de tickets pour absorber la totalité. Le filet final conserve l'invariant produit
     # « montant saisi = montant joué » même sur une course atypique.
     if reste > 0:
-        # Le reliquat grossit en priorité les tickets dimensionnés par la conviction ;
-        # les tickets d'appoint restent au plancher (leur rapport est déjà très élevé,
-        # les charger les ferait sortir par le HAUT de la tranche). Si tout est au
-        # plafond, la boucle de secours plus bas absorbe le reste — l'invariant
-        # « montant saisi = montant joué » prime.
-        cibles = [b for b in kept if b.get("mise") != MISE_PLANCHER] or kept
+        # Tous les tickets sont dimensionnés par le même besoin contractuel : le reliquat
+        # (ce qui reste quand plus aucun ticket supplémentaire n'entre dans le budget) se
+        # répartit sur l'ensemble, proportionnellement à la conviction, borné par le
+        # plafond haut de bande.
+        cibles = kept
         ws = [_w(b) for b in cibles]
         tw = sum(ws) or 1.0
         add = _largest_remainder([reste * w / tw for w in ws], reste)
