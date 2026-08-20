@@ -178,3 +178,22 @@ def test_pic_rss_extrait_des_logs(mod):
 def test_pic_rss_absent_vaut_zero(mod):
     logs = "2026-08-20 02:00:03 [info] pipeline.nightly_retrain.start"
     assert mod._analyser_logs(logs)["rss_pic_mb"] == 0.0
+
+
+# ── « Aucun retrain » alors qu'un modèle neuf est actif ─────────────────────
+# `docker logs` ne remonte pas au-delà de l'instance courante du conteneur : un
+# déploiement entre le retrain et le rapport de 05:00 efface les traces. Le
+# rapport annonçait alors « aucun retrain n'a démarré cette nuit » avec un
+# modèle créé le jour même en base — une alerte qui contredit l'état réel.
+
+def test_promotion_en_base_prime_sur_des_logs_absents(mod):
+    assert mod._promu_recemment({"version": 513, "age_jours": 0}) is True
+
+
+def test_modele_fige_depuis_plusieurs_jours_reste_une_vraie_alerte(mod):
+    """Le cas que ce rapport existe pour attraper : 48 jours sans retrain."""
+    assert mod._promu_recemment({"version": 470, "age_jours": 48}) is False
+
+
+def test_aucun_modele_en_base_nest_pas_une_promotion(mod):
+    assert mod._promu_recemment({"version": None}) is False

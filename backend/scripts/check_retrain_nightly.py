@@ -139,6 +139,12 @@ VERDICTS = {
     "incomplet": ("⚠️", "Le retrain a démarré mais ne s'est pas terminé",
                   "Ni promotion, ni rejet, ni OOM détecté. Vérifier les logs du "
                   "worker et la file RQ (FailedJobRegistry)."),
+    "promu_logs_absents": (
+        "✅", "Un modèle a été promu cette nuit (logs du worker introuvables)",
+        "La base fait foi : un nouveau modèle y a été enregistré sur la fenêtre. "
+        "Les logs manquent simplement parce que le conteneur worker a été "
+        "recréé depuis (déploiement) — `docker logs` ne remonte pas au-delà de "
+        "l'instance courante. Rien à faire."),
     "absent": ("🔴", "Aucun retrain n'a démarré cette nuit",
                "Le job planifié 02:00 UTC ne s'est pas déclenché. Vérifier que le "
                "conteneur scheduler tourne et que le job est bien enregistré."),
@@ -146,6 +152,12 @@ VERDICTS = {
                 "Le script n'a pas pu interroger Docker. Vérifier les droits ou "
                 "que le conteneur worker existe."),
 }
+
+
+def _promu_recemment(modele: dict, fenetre_jours: int = 1) -> bool:
+    """Un modèle a-t-il été promu sur la fenêtre couverte par le rapport ?"""
+    age = modele.get("age_jours")
+    return modele.get("version") is not None and age is not None and age <= fenetre_jours
 
 
 async def _etat_modele() -> dict:
@@ -234,6 +246,15 @@ async def main(dry_run: bool = False) -> None:
     logs = _worker_logs()
     analyse = _analyser_logs(logs)
     modele = await _etat_modele()
+    # La BASE prime sur les logs quand les deux se contredisent. `docker logs`
+    # ne couvre que l'instance courante du conteneur : un déploiement entre le
+    # retrain et le rapport efface les traces et faisait annoncer « aucun
+    # retrain n'a démarré » alors qu'un modèle tout neuf était actif. C'est le
+    # même travers que le verdict OOM qui primait sur la promotion : une alerte
+    # qui contredit l'état réel du système fait perdre plus de temps qu'elle
+    # n'en fait gagner.
+    if analyse["statut"] == "absent" and _promu_recemment(modele):
+        analyse["statut"] = "promu_logs_absents"
     verdict = VERDICTS[analyse["statut"]]
     lignes = analyse["lignes"] or ([analyse["detail"]] if analyse["detail"] else [])
 
