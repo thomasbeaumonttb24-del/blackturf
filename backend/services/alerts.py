@@ -3,6 +3,7 @@ Service d'alertes — BlackTurf.
 Email (Resend) + Web Push (VAPID) + In-app (WebSocket via Redis).
 """
 import json
+import os
 import uuid
 import structlog
 from dataclasses import dataclass
@@ -115,9 +116,26 @@ async def send_email(
     text: Optional[str] = None,
 ) -> ResultatEnvoi:
     """Envoie un email via Resend API."""
+    # Un test ne doit JAMAIS envoyer de vrai e-mail. `backend/.env` porte une
+    # `RESEND_API_KEY` valide, que pydantic charge aussi sous pytest : la suite
+    # d'abonnements a expédié des dizaines de messages réels à l'exploitant, au
+    # nom de comptes fictifs (`6d121afe@blackturf.fr`, `sub_courant`…) — constaté
+    # le 2026-08-20.
+    #
+    # Le garde-fou s'appuie sur `PYTEST_CURRENT_TEST`, posé par pytest pour chaque
+    # test, et NON sur `ENVIRONMENT` : la suite tourne aussi dans l'image de prod
+    # avec le `.env` de prod, où `ENVIRONMENT` vaut "production" (cf. le
+    # neutraliseur d'ambiant dans conftest).
+    # L'absence de clé se diagnostique AVANT le blocage de test : sinon un envoi
+    # mal configuré rendrait « bloqué sous pytest » au lieu de sa vraie cause, et
+    # l'invariant qui exige qu'un échec porte sa raison tomberait.
     if not settings.resend_api_key:
         log.warning("alerts.email.no_api_key")
         return ResultatEnvoi(False, "RESEND_API_KEY absente")
+
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        log.info("alerts.email.bloque_en_test", to=to, subject=subject[:80])
+        return ResultatEnvoi(False, "envoi bloqué sous pytest")
 
     payload = {
         "from": f"{settings.email_from_name} <{settings.email_from}>",
