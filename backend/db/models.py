@@ -869,6 +869,48 @@ class Subscription(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class SubscriptionEvent(Base):
+    """Journal APPEND-ONLY des mouvements d'abonnement.
+
+    `subscriptions` ne garde que l'ÉTAT COURANT : une ligne écrasée à chaque
+    webhook ne dit pas si le client a résilié avant ou après la fin de son essai,
+    ni quand la carte est arrivée. Ce journal conserve chaque mouvement tel qu'il
+    s'est produit — c'est lui qui alimente le suivi admin et les notifications.
+
+    `email` est dénormalisé volontairement : le journal doit rester lisible même
+    si le compte est supprimé (RGPD : purger l'utilisateur n'efface pas l'historique
+    comptable, qui se conserve).
+    """
+    __tablename__ = "subscription_events"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), index=True)
+    email: Mapped[str | None] = mapped_column(String(255))
+
+    # essai_ouvert / carte_ajoutee / abonnement_actif / changement_plan /
+    # resiliation_demandee / resilie / essai_bientot_fini / paiement_echoue /
+    # essai_termine_sans_carte
+    type: Mapped[str] = mapped_column(String(40), index=True)
+
+    plan: Mapped[str | None] = mapped_column(String(10))
+    plan_precedent: Mapped[str | None] = mapped_column(String(10))
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(100), index=True)
+
+    montant_cents: Mapped[int | None] = mapped_column(Integer)
+    essai_fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    periode_fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Vrai si le mouvement s'est produit AVANT la fin de l'essai : c'est la
+    # question que pose l'exploitant devant une résiliation.
+    pendant_essai: Mapped[bool | None] = mapped_column(Boolean)
+
+    detail: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_subscription_events_user_date", "user_id", "created_at"),
+    )
+
+
 # ─────────────────────────────────────────────
 # Bankroll
 # ─────────────────────────────────────────────

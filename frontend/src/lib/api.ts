@@ -239,4 +239,7 @@ export const adminApi = {
     api.get("/supervision/algo-evolution", { baseURL: `${API_URL}/admin/api`, params: { limit } }),
   supervisionPulse: () =>
     api.get("/supervision/pulse", { baseURL: `${API_URL}/admin/api` }),
+  // Suivi des abonnements : essais en cours, carte manquante, journal des mouvements.
+  abonnements: () =>
+    api.get("/abonnements", { baseURL: `${API_URL}/admin/api` }),
 };

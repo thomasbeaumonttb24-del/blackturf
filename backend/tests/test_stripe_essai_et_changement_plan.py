@@ -302,3 +302,158 @@ async def test_periode_lue_sur_larticle_quand_absente_de_labonnement(db, monkeyp
     abo = res.scalar_one()
     assert abo.periode_debut is not None
     assert abo.periode_fin is not None
+
+
+# ─────────────────────────────────────────────
+# 6. Essai sans carte : aucun accès tant que la carte n'est pas là
+# ─────────────────────────────────────────────
+def _sans_carte(monkeypatch):
+    """Aucun moyen de paiement, où que Stripe le cherche."""
+    monkeypatch.setattr(sr.stripe.Customer, "retrieve",
+                        lambda cid: {"invoice_settings": {}})
+    monkeypatch.setattr(sr.stripe.PaymentMethod, "list",
+                        lambda **kw: {"data": []})
+
+
+@pytest.mark.asyncio
+async def test_essai_sans_carte_nouvre_aucun_acces(db, monkeypatch):
+    monkeypatch.setattr(sr, "PLAN_FROM_PRICE", {"price_test_standard": "standard"})
+    _sans_carte(monkeypatch)
+    user = await _user(db)
+
+    await sr._handle_subscription_created(
+        _sub_stripe("trialing", sub_id="sub_bloque",
+                    trial_end=int(time.time()) + 7 * 86400), db)
+
+    await db.refresh(user)
+    assert user.plan == "free"
+    # L'essai est tout de même consommé : il a bien été ouvert.
+    assert user.essai_utilise_at is not None
+
+    from sqlalchemy import select
+    abo = (await db.execute(select(Subscription).where(
+        Subscription.stripe_subscription_id == "sub_bloque"))).scalar_one()
+    assert abo.statut == sr.STATUT_SANS_CARTE
+
+
+@pytest.mark.asyncio
+async def test_essai_avec_carte_ouvre_lacces(db, monkeypatch):
+    monkeypatch.setattr(sr, "PLAN_FROM_PRICE", {"price_test_standard": "standard"})
+    user = await _user(db)
+
+    sub = _sub_stripe("trialing", trial_end=int(time.time()) + 7 * 86400)
+    sub["default_payment_method"] = "pm_test"
+    await sr._handle_subscription_created(sub, db)
+
+    await db.refresh(user)
+    assert user.plan == "standard"
+
+
+@pytest.mark.asyncio
+async def test_carte_ajoutee_debloque_lacces(db, monkeypatch):
+    """Stripe n'émet PAS `subscription.updated` quand une carte est attachée au
+    client : sans traitement dédié, l'abonné qui régularise resterait bloqué."""
+    user = await _user(db, plan="free")
+    abo = await _abo(db, user, plan="expert", statut=sr.STATUT_SANS_CARTE,
+                     stripe_id="sub_bloque",
+                     essai_fin=datetime.now(timezone.utc) + timedelta(days=5))
+
+    sub = _sub_stripe("trialing", price_id="price_test_expert", sub_id="sub_bloque")
+    sub["default_payment_method"] = "pm_test"
+    monkeypatch.setattr(sr.stripe.Subscription, "retrieve", lambda sid: sub)
+
+    await sr._handle_moyen_paiement_ajoute({"customer": "cus_test"}, db)
+
+    await db.refresh(user)
+    await db.refresh(abo)
+    assert abo.statut == "active"
+    assert user.plan == "expert"
+
+
+@pytest.mark.asyncio
+async def test_essai_bloque_ne_compte_pas_pour_lacces(db, monkeypatch):
+    """`_plan_effectif` ne doit jamais accorder un plan sur un essai sans carte."""
+    user = await _user(db, plan="free")
+    await _abo(db, user, plan="expert", statut=sr.STATUT_SANS_CARTE, stripe_id="sub_x")
+
+    assert await sr._plan_effectif(user.user_id, db) == "free"
+
+
+@pytest.mark.asyncio
+async def test_essai_bloque_empeche_douvrir_un_second_abonnement(db, monkeypatch):
+    """Bloqué ne veut pas dire libre : il ne doit pas pouvoir repartir sur un
+    nouvel abonnement pour contourner le blocage."""
+    _capture_checkout(monkeypatch)
+    user = await _user(db, plan="free")
+    await _abo(db, user, plan="standard", statut=sr.STATUT_SANS_CARTE, stripe_id="sub_y")
+
+    with pytest.raises(HTTPException) as exc:
+        await sr.create_checkout(
+            sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, user)
+    assert exc.value.status_code == 409
+
+
+# ─────────────────────────────────────────────
+# 7. Journal des mouvements
+# ─────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_ouverture_dessai_est_journalisee(db, monkeypatch):
+    from db.models import SubscriptionEvent
+    from sqlalchemy import select
+
+    monkeypatch.setattr(sr, "PLAN_FROM_PRICE", {"price_test_standard": "standard"})
+    _sans_carte(monkeypatch)
+    user = await _user(db)
+
+    await sr._handle_subscription_created(
+        _sub_stripe("trialing", trial_end=int(time.time()) + 7 * 86400), db)
+
+    events = (await db.execute(select(SubscriptionEvent))).scalars().all()
+    assert [e.type for e in events] == ["essai_sans_carte"]
+    assert events[0].email == user.email
+    assert events[0].pendant_essai is True
+
+
+@pytest.mark.asyncio
+async def test_essai_perdu_et_resiliation_ne_sont_pas_le_meme_mouvement(db, monkeypatch):
+    """Un essai qui meurt faute de carte n'est pas un client qui part : les
+    confondre fausserait le churn."""
+    from db.models import SubscriptionEvent
+    from sqlalchemy import select
+
+    user = await _user(db, plan="free")
+    await _abo(db, user, plan="standard", statut=sr.STATUT_SANS_CARTE, stripe_id="sub_perdu")
+    await sr._handle_subscription_deleted({"id": "sub_perdu", "customer": "cus_test"}, db)
+
+    autre = await _user(db, plan="expert", email="paye@blackturf.fr",
+                        stripe_customer_id="cus_paye")
+    await _abo(db, autre, plan="expert", statut="active", stripe_id="sub_paye")
+    await sr._handle_subscription_deleted({"id": "sub_paye", "customer": "cus_paye"}, db)
+
+    types = {e.email: e.type for e in
+             (await db.execute(select(SubscriptionEvent))).scalars().all()}
+    assert types[user.email] == "essai_termine_sans_carte"
+    assert types["paye@blackturf.fr"] == "resilie"
+
+
+# ─────────────────────────────────────────────
+# 8. Le blocage doit être EXPLIQUÉ à l'abonné
+# ─────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_auth_me_signale_lessai_bloque(client, db, auth_headers):
+    """Bloquer sans le dire produit un abonné qui croit à une panne. `/auth/me`
+    porte donc le signal qui déclenche le bandeau « enregistrez votre carte »."""
+    from sqlalchemy import select
+
+    avant = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert avant.json()["essai_bloque_sans_carte"] is False
+
+    user = (await db.execute(
+        select(User).where(User.email == "test@blackturf.fr"))).scalar_one()
+    fin = datetime.now(timezone.utc) + timedelta(days=5)
+    await _abo(db, user, plan="expert", statut=sr.STATUT_SANS_CARTE,
+               stripe_id="sub_bloque_me", essai_fin=fin)
+
+    apres = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
+    assert apres["essai_bloque_sans_carte"] is True
+    assert apres["essai_fin"] is not None

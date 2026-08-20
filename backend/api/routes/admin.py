@@ -20,6 +20,7 @@ from db.models import (
     User, Subscription, ModelVersion, ScrapeLog,
     Course, Prediction, ValueBet, AlerteLog,
     AdaptiveLearningState, DriftDetectorState, BankrollEntry,
+    SubscriptionEvent,
 )
 from ml.adaptive_learning import get_adaptive_learning
 from ml.drift_detector import get_drift_detector
@@ -1218,9 +1219,12 @@ async def revenue_stats(
     since_30d = now - timedelta(days=30)
     since_12m = now - timedelta(days=365)
 
-    # Prix par plan (centimes → euros mapping)
-    PLAN_PRICE_MONTHLY = {"standard": 9.90, "expert": 19.90, "starter": 9.90}
+    # Prix mensuels RÉELS. Les valeurs précédentes (9,90 / 19,90) ne
+    # correspondaient à aucun price Stripe : la production facture 12,00 € et
+    # 19,00 €, le MRR affiché était donc faux d'environ 20 % (2026-08-20).
+    PLAN_PRICE_MONTHLY = {k: v / 100 for k, v in PRIX_MENSUEL_CENTS.items()}
 
+    # `essai_sans_carte` est volontairement exclu : un essai bloqué ne rapporte rien.
     active_subs = (await db.execute(
         select(Subscription).where(Subscription.statut == "active")
     )).scalars().all()
@@ -1272,6 +1276,158 @@ async def revenue_stats(
         "canceled_30d": canceled_30d,
         "churn_rate_pct": churn_rate,
         "plan_breakdown": plan_breakdown,
+        "computed_at": now.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────
+# Abonnements — suivi des essais et des mouvements
+# ─────────────────────────────────────────────
+# Prix mensuels réels, en CENTIMES, tels que Stripe les facture. Ne sert que de
+# repli : le montant exact vient du journal, qui le tient du price Stripe. La
+# table de `/admin/revenue` annonçait 9,90 € et 19,90 € alors que les prix en
+# production sont 12,00 € et 19,00 € — le MRR était faux de ~20 %.
+PRIX_MENSUEL_CENTS = {"standard": 1200, "expert": 1900, "starter": 1200, "pro": 1900}
+
+# Doit rester aligné sur `stripe_routes.STATUTS_ACCES` / `STATUT_SANS_CARTE`.
+STATUTS_ACCES_ADMIN = ("active", "past_due", "cancel_at_period_end")
+STATUT_SANS_CARTE_ADMIN = "essai_sans_carte"
+
+
+@router.get("/abonnements")
+async def abonnements(
+    limite_mouvements: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Suivi complet des abonnements : qui est en essai, jusqu'à quand, avec ou
+    sans carte, et le journal de tous les mouvements.
+
+    `subscriptions` ne porte que l'état courant : il ne dit pas si un client a
+    résilié AVANT la fin de son essai. C'est `subscription_events` (journal
+    append-only, migration 0037) qui répond, et les deux sont renvoyés ensemble.
+    """
+    now = datetime.now(timezone.utc)
+    depuis_30j = now - timedelta(days=30)
+
+    vivants = ("active", "trialing", "past_due", "cancel_at_period_end",
+               STATUT_SANS_CARTE_ADMIN)
+    lignes = (await db.execute(
+        select(Subscription, User)
+        .join(User, User.user_id == Subscription.user_id)
+        .where(Subscription.statut.in_(vivants))
+        .order_by(desc(Subscription.created_at))
+    )).all()
+
+    # Dernier montant connu par abonnement : le journal tient le prix RÉEL lu sur
+    # le price Stripe, plus fiable qu'une table codée en dur.
+    montants: dict[str, int] = {}
+    for sid, montant in (await db.execute(
+        select(SubscriptionEvent.stripe_subscription_id,
+               func.max(SubscriptionEvent.montant_cents))
+        .where(SubscriptionEvent.montant_cents.isnot(None))
+        .group_by(SubscriptionEvent.stripe_subscription_id)
+    )).all():
+        if sid:
+            montants[sid] = montant
+
+    abonnes = []
+    mrr_cents = 0
+    en_essai = essai_sans_carte = payants = fin_essai_3j = 0
+    for sub, user in lignes:
+        essai_fin = sub.essai_fin
+        if essai_fin is not None and essai_fin.tzinfo is None:
+            essai_fin = essai_fin.replace(tzinfo=timezone.utc)
+        en_cours_dessai = essai_fin is not None and essai_fin > now
+        jours_restants = round((essai_fin - now).total_seconds() / 86400, 1) if en_cours_dessai else None
+        sans_carte = sub.statut == STATUT_SANS_CARTE_ADMIN
+        montant = montants.get(sub.stripe_subscription_id) or PRIX_MENSUEL_CENTS.get(sub.plan, 0)
+
+        if sans_carte:
+            essai_sans_carte += 1
+        elif en_cours_dessai:
+            en_essai += 1
+        elif sub.statut in STATUTS_ACCES_ADMIN:
+            payants += 1
+            # Un abonnement annuel ne rapporte pas douze fois son prix chaque mois.
+            mrr_cents += montant / 12 if sub.periodicite == "annual" else montant
+        if en_cours_dessai and jours_restants is not None and jours_restants <= 3:
+            fin_essai_3j += 1
+
+        abonnes.append({
+            "user_id": user.user_id,
+            "email": user.email,
+            "plan": sub.plan,
+            "plan_compte": user.plan,
+            "periodicite": sub.periodicite,
+            "statut": sub.statut,
+            "carte_enregistree": not sans_carte,
+            "acces_ouvert": sub.statut in STATUTS_ACCES_ADMIN,
+            "en_essai": en_cours_dessai,
+            "essai_fin": essai_fin,
+            "jours_essai_restants": jours_restants,
+            "periode_fin": sub.periode_fin,
+            "montant_cents": montant,
+            "stripe_subscription_id": sub.stripe_subscription_id,
+            "depuis": sub.created_at,
+        })
+
+    mouvements = (await db.execute(
+        select(SubscriptionEvent)
+        .order_by(desc(SubscriptionEvent.created_at))
+        .limit(limite_mouvements)
+    )).scalars().all()
+
+    # Résiliations et essais perdus des 30 derniers jours : deux choses
+    # différentes, que confondre fausserait le churn. Un essai qui meurt faute de
+    # carte n'est pas un client qui part, c'est un prospect qui n'a jamais converti.
+    async def _compte(type_: str) -> int:
+        return (await db.execute(
+            select(func.count(SubscriptionEvent.event_id)).where(
+                and_(SubscriptionEvent.type == type_,
+                     SubscriptionEvent.created_at >= depuis_30j)
+            )
+        )).scalar() or 0
+
+    resiliations_30j = await _compte("resilie")
+    essais_perdus_30j = await _compte("essai_termine_sans_carte")
+    essais_ouverts_30j = await _compte("essai_ouvert") + await _compte("essai_sans_carte")
+    resiliations_pendant_essai_30j = (await db.execute(
+        select(func.count(SubscriptionEvent.event_id)).where(
+            and_(SubscriptionEvent.type.in_(("resilie", "resiliation_demandee")),
+                 SubscriptionEvent.pendant_essai.is_(True),
+                 SubscriptionEvent.created_at >= depuis_30j)
+        )
+    )).scalar() or 0
+
+    return {
+        "resume": {
+            "en_essai_avec_carte": en_essai,
+            "en_essai_sans_carte": essai_sans_carte,
+            "abonnes_payants": payants,
+            "fin_essai_sous_3j": fin_essai_3j,
+            "mrr": round(mrr_cents / 100, 2),
+            "arr": round(mrr_cents * 12 / 100, 2),
+            "essais_ouverts_30j": essais_ouverts_30j,
+            "essais_perdus_30j": essais_perdus_30j,
+            "resiliations_30j": resiliations_30j,
+            "resiliations_pendant_essai_30j": resiliations_pendant_essai_30j,
+        },
+        "abonnes": abonnes,
+        "mouvements": [
+            {
+                "event_id": m.event_id,
+                "type": m.type,
+                "email": m.email,
+                "plan": m.plan,
+                "plan_precedent": m.plan_precedent,
+                "montant_cents": m.montant_cents,
+                "essai_fin": m.essai_fin,
+                "pendant_essai": m.pendant_essai,
+                "created_at": m.created_at,
+            }
+            for m in mouvements
+        ],
         "computed_at": now.isoformat(),
     }
 

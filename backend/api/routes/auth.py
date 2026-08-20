@@ -164,6 +164,11 @@ class UserMeResponse(BaseModel):
     is_admin: bool = False
     bankroll_initiale: Optional[float]
     created_at: datetime
+    # Essai ouvert mais bloqué faute de carte enregistrée. Sans ce signal, le
+    # compte se retrouve en `free` sans la moindre explication — l'utilisateur
+    # croit à une panne et écrit au support au lieu d'aller régulariser.
+    essai_bloque_sans_carte: bool = False
+    essai_fin: Optional[datetime] = None
 
 
 # ─────────────────────────────────────────────
@@ -494,6 +499,20 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
     if not last or (now - last) > timedelta(minutes=5):
         user.last_login_at = now
         await db.commit()
+
+    # Essai en attente de carte : le front doit pouvoir l'expliquer et proposer
+    # le portail Stripe. Import local — `stripe_routes` importe `auth`, l'importer
+    # en tête d'`auth` créerait un cycle.
+    from api.routes.stripe_routes import STATUT_SANS_CARTE
+    from db.models import Subscription
+
+    bloque = (await db.execute(
+        select(Subscription)
+        .where(Subscription.user_id == user.user_id,
+               Subscription.statut == STATUT_SANS_CARTE)
+        .order_by(Subscription.created_at.desc())
+    )).scalars().first()
+
     return UserMeResponse(
         user_id=user.user_id,
         email=user.email,
@@ -505,6 +524,8 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         is_admin=bool(user.is_admin),
         bankroll_initiale=user.bankroll_initiale,
         created_at=user.created_at,
+        essai_bloque_sans_carte=bloque is not None,
+        essai_fin=bloque.essai_fin if bloque else None,
     )
 
 

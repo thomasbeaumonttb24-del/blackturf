@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { toast } from "sonner";
 import {
   Users, Brain, Activity, AlertTriangle, RefreshCw, Loader2,
-  CheckCircle, XCircle, Clock, X, Wallet, TrendingUp
+  CheckCircle, XCircle, Clock, X, Wallet, TrendingUp, CreditCard
 } from "lucide-react";
 
 const PROFIL_NET_LABELS: Record<string, string> = {
@@ -54,6 +54,79 @@ interface SystemError {
 interface ScraperStatus {
   [source: string]: { statut: string; derniere_maj: string | null; duree_ms: number | null; erreur: string | null };
 }
+
+interface AbonneLigne {
+  user_id: string;
+  email: string;
+  plan: string;
+  periodicite: string;
+  statut: string;
+  carte_enregistree: boolean;
+  acces_ouvert: boolean;
+  en_essai: boolean;
+  essai_fin: string | null;
+  jours_essai_restants: number | null;
+  periode_fin: string | null;
+  montant_cents: number;
+  stripe_subscription_id: string | null;
+  depuis: string;
+}
+
+interface MouvementAbo {
+  event_id: string;
+  type: string;
+  email: string | null;
+  plan: string | null;
+  plan_precedent: string | null;
+  montant_cents: number | null;
+  essai_fin: string | null;
+  pendant_essai: boolean | null;
+  created_at: string;
+}
+
+interface AbonnementsData {
+  resume: {
+    en_essai_avec_carte: number;
+    en_essai_sans_carte: number;
+    abonnes_payants: number;
+    fin_essai_sous_3j: number;
+    mrr: number;
+    arr: number;
+    essais_ouverts_30j: number;
+    essais_perdus_30j: number;
+    resiliations_30j: number;
+    resiliations_pendant_essai_30j: number;
+  };
+  abonnes: AbonneLigne[];
+  mouvements: MouvementAbo[];
+}
+
+// Libellés du journal. Doit rester aligné sur `services/abonnements.LIBELLES`.
+const MOUVEMENT_LABELS: Record<string, string> = {
+  essai_ouvert: "Essai ouvert",
+  essai_sans_carte: "Essai sans carte",
+  carte_ajoutee: "Carte enregistrée",
+  abonnement_actif: "Abonnement actif",
+  changement_plan: "Changement de formule",
+  essai_bientot_fini: "Essai bientôt fini",
+  essai_termine_sans_carte: "Essai perdu (sans carte)",
+  resiliation_demandee: "Résiliation demandée",
+  resilie: "Résilié",
+  paiement_echoue: "Paiement échoué",
+};
+
+const MOUVEMENT_TONS: Record<string, "success" | "warning" | "destructive" | "secondary"> = {
+  carte_ajoutee: "success",
+  abonnement_actif: "success",
+  essai_ouvert: "secondary",
+  changement_plan: "secondary",
+  essai_sans_carte: "warning",
+  essai_bientot_fini: "warning",
+  essai_termine_sans_carte: "destructive",
+  resiliation_demandee: "destructive",
+  resilie: "destructive",
+  paiement_echoue: "destructive",
+};
 
 function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string | number; sub?: string }) {
   return (
@@ -348,6 +421,15 @@ export default function AdminPage() {
     { refreshInterval: 60000, revalidateOnFocus: true }
   );
 
+  // Suivi des abonnements : essais en cours, cartes manquantes, journal des
+  // mouvements. Rafraîchi souvent — c'est la vue que l'exploitant garde ouverte
+  // quand un essai approche de sa fin.
+  const { data: abos } = useSWR<AbonnementsData>(
+    user?.is_admin ? "/admin-abonnements" : null,
+    () => adminApi.abonnements().then((r) => r.data),
+    { refreshInterval: 30000, revalidateOnFocus: true }
+  );
+
   const [userSearch, setUserSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const { data: users, mutate: mutateUsers } = useSWR(
@@ -596,6 +678,136 @@ export default function AdminPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Abonnements — essais, cartes manquantes, journal des mouvements */}
+      {abos && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-brand-gold" /> Abonnements
+            </CardTitle>
+            {abos.resume.en_essai_sans_carte > 0 && (
+              <Badge variant="warning">
+                {abos.resume.en_essai_sans_carte} sans carte
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {[
+                { label: "Payants", value: abos.resume.abonnes_payants },
+                { label: "En essai", value: abos.resume.en_essai_avec_carte },
+                { label: "Sans carte", value: abos.resume.en_essai_sans_carte, alerte: abos.resume.en_essai_sans_carte > 0 },
+                { label: "Fin d'essai < 3j", value: abos.resume.fin_essai_sous_3j, alerte: abos.resume.fin_essai_sous_3j > 0 },
+                { label: "MRR", value: formatEuro(abos.resume.mrr) },
+                { label: "Résiliations 30j", value: abos.resume.resiliations_30j },
+              ].map((s) => (
+                <div key={s.label} className={cn("text-center p-3 rounded-lg bg-muted/30", s.alerte && "bg-amber-100/60")}>
+                  <div className="text-xs text-muted-foreground">{s.label}</div>
+                  <div className="text-lg font-bold">{s.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Sur 30 jours : {abos.resume.essais_ouverts_30j} essai(s) ouvert(s),{" "}
+              {abos.resume.essais_perdus_30j} perdu(s) faute de carte,{" "}
+              {abos.resume.resiliations_pendant_essai_30j} résiliation(s) survenue(s)
+              pendant l&apos;essai. Un essai perdu n&apos;est pas une résiliation : le
+              premier n&apos;a jamais converti, le second était un client.
+            </p>
+
+            {abos.abonnes.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-foreground border-b border-border">
+                    <tr>
+                      <th className="text-left py-2 font-medium">Compte</th>
+                      <th className="text-left py-2 font-medium">Formule</th>
+                      <th className="text-left py-2 font-medium">État</th>
+                      <th className="text-left py-2 font-medium">Fin d&apos;essai</th>
+                      <th className="text-right py-2 font-medium">Montant</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {abos.abonnes.map((a) => (
+                      <tr key={a.stripe_subscription_id ?? a.user_id} className="border-b border-border/50">
+                        <td className="py-2 pr-3 truncate max-w-[220px]">{a.email}</td>
+                        <td className="py-2 pr-3 capitalize">
+                          {a.plan}
+                          <span className="text-muted-foreground text-xs">
+                            {a.periodicite === "annual" ? " / an" : " / mois"}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3">
+                          {!a.carte_enregistree ? (
+                            <Badge variant="warning" className="text-[10px]">Carte manquante — accès bloqué</Badge>
+                          ) : a.en_essai ? (
+                            <Badge variant="secondary" className="text-[10px]">Essai en cours</Badge>
+                          ) : a.acces_ouvert ? (
+                            <Badge variant="success" className="text-[10px]">Actif</Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px]">{a.statut}</Badge>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          {a.essai_fin ? (
+                            <>
+                              {formatDateTime(a.essai_fin)}
+                              {a.jours_essai_restants !== null && (
+                                <span className={cn("ml-1 text-xs",
+                                  a.jours_essai_restants <= 3 ? "text-amber-600 font-semibold" : "text-muted-foreground")}>
+                                  (J-{a.jours_essai_restants})
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="py-2 text-right whitespace-nowrap">
+                          {formatEuro(a.montant_cents / 100)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">Aucun abonnement en cours.</p>
+            )}
+
+            <div>
+              <h3 className="text-sm font-semibold mb-2">Derniers mouvements</h3>
+              {abos.mouvements.length > 0 ? (
+                <ul className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+                  {abos.mouvements.map((m) => (
+                    <li key={m.event_id} className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge variant={MOUVEMENT_TONS[m.type] ?? "secondary"} className="text-[10px]">
+                        {MOUVEMENT_LABELS[m.type] ?? m.type}
+                      </Badge>
+                      <span className="truncate max-w-[220px]">{m.email ?? "compte supprimé"}</span>
+                      {m.plan && (
+                        <span className="text-muted-foreground text-xs capitalize">
+                          {m.plan_precedent ? `${m.plan_precedent} → ${m.plan}` : m.plan}
+                        </span>
+                      )}
+                      {m.pendant_essai && (
+                        <span className="text-xs text-amber-600">pendant l&apos;essai</span>
+                      )}
+                      <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">
+                        {formatDateTime(m.created_at)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted-foreground text-sm">Aucun mouvement enregistré.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Modèle actif */}
       {dashboard?.modele && (

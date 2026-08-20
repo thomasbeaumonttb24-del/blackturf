@@ -17,7 +17,12 @@ from db.models import User
 from api.routes import stripe_routes
 
 
-def _fake_sub(status: str, price_id: str = "price_test_standard", sub_id: str | None = None) -> dict:
+def _fake_sub(status: str, price_id: str = "price_test_standard", sub_id: str | None = None,
+              carte: bool = True) -> dict:
+    """Abonnement Stripe factice. `carte=True` par défaut : depuis le 2026-08-20 un
+    essai SANS moyen de paiement n'ouvre plus aucun accès (cf.
+    test_stripe_essai_et_changement_plan.py), or ces tests-ci portent sur le
+    statut de l'abonnement, pas sur la carte."""
     now = int(time.time())
     return {
         "id": sub_id or str(uuid.uuid4()),
@@ -27,6 +32,7 @@ def _fake_sub(status: str, price_id: str = "price_test_standard", sub_id: str | 
         "current_period_start": now,
         "current_period_end": now + 30 * 86400,
         "trial_end": None,
+        "default_payment_method": "pm_test" if carte else None,
     }
 
 

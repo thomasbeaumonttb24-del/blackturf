@@ -11,6 +11,11 @@ export interface AuthUser {
   email_verified: boolean;
   bankroll_initiale: number | null;
   is_admin?: boolean;
+  // Essai ouvert mais bloqué faute de carte enregistrée : le compte reste en
+  // `free` tant que le moyen de paiement n'est pas là. Sans ce signal, la perte
+  // d'accès serait inexplicable pour l'abonné.
+  essai_bloque_sans_carte?: boolean;
+  essai_fin?: string | null;
 }
 
 // Les JETONS ne sont plus stockés ici : ils vivent dans des cookies httpOnly posés
