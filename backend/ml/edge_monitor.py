@@ -28,7 +28,18 @@ MIN_FILT_FOR_EDGE = 50
 
 
 async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) -> dict:
-    rows = (await session.execute(text("""
+    # Cette requête ramène `features_ml` en entier (212 721 lignes × un JSONB de
+    # 173 clés) et, contrairement aux agrégats voisins, elle a BESOIN de garder
+    # les lignes : le découpage train/test est temporel, donc postérieur à la
+    # lecture. Matérialiser les dicts coûtait ~3,5 Gio.
+    #
+    # Or la suite ne touche jamais aux features autrement qu'à travers les
+    # prédicats de SIGNALS. On projette donc chaque ligne, dès sa lecture, sur
+    # le tuple de booléens correspondant : le dict est relâché immédiatement et
+    # ce qu'on garde tient en quelques Mio. Les prédicats sont évalués une seule
+    # fois par ligne au lieu de deux (train puis test), et le résultat est
+    # identique au dict près, qui n'était plus lu.
+    result = await session.stream(text("""
         SELECT fm.features, COALESCE((fm.features->>'cote_pmu')::float, pa.cote_pmu) AS cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
         FROM features_ml fm
@@ -40,8 +51,17 @@ async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) ->
           -- post-course a computed_at > date_heure → exclu). Test edge honnête.
           AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
         ORDER BY c.date_heure
-    """))).fetchall()
-    data = [((f if isinstance(f, dict) else json.loads(f)), float(cote), int(win)) for f, cote, win in rows]
+    """))
+    noms = list(SIGNALS)
+    data: list[tuple[tuple[bool, ...], float, int]] = []
+    async for partition in result.partitions(2000):
+        for f, cote, win in partition:
+            ff = f if isinstance(f, dict) else json.loads(f)
+            data.append((
+                tuple(_safe(SIGNALS[nom], ff) for nom in noms),
+                float(cote), int(win),
+            ))
+        del partition
     n = len(data)
     if n < 500:
         return {"n_total": n, "insufficient": True}
@@ -50,23 +70,23 @@ async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) ->
     train, test = data[:split], data[split:]
 
     mult = {}
-    for name, pred in SIGNALS.items():
+    for i, name in enumerate(noms):
         st = pa = 0.0
-        for ff, c, w in train:
-            if _safe(pred, ff):
+        for flags, c, w in train:
+            if flags[i]:
                 st += 1; pa += c if w else 0
         mult[name] = max(0.6, min(1.6, 1 + (pa - st) / (st + K_SHRINK))) if st > 0 else 1.0
 
-    def conv(ff):
+    def conv(flags):
         m = 1.0
-        for name, pred in SIGNALS.items():
-            if _safe(pred, ff):
+        for i, name in enumerate(noms):
+            if flags[i]:
                 m *= mult.get(name, 1.0)
         return m
 
     fst = fpa = fpa_cap = fw = fn = 0
-    for ff, c, w in test:
-        if conv(ff) >= CONV_THR:
+    for flags, c, w in test:
+        if conv(flags) >= CONV_THR:
             fn += 1; fst += 1; fw += w
             if w:
                 fpa += c; fpa_cap += min(c, CAP)

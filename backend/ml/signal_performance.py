@@ -73,7 +73,17 @@ K_SHRINK = 40.0   # pseudo-paris (mise) shrinkant le ROI vers 0
 
 
 async def compute_signal_performance(session: AsyncSession) -> dict:
-    rows = (await session.execute(text("""
+    # `stream()` + agrégation au fil de l'eau, et NON `fetchall()`.
+    # Cette requête ne porte aucune borne temporelle : elle ramène la table
+    # `features_ml` entière, soit 212 721 lignes portant chacune un JSONB de
+    # 173 clés. Matérialisée en dicts Python, elle pesait ~4 Gio — sur un hôte
+    # de 7,6 Gio partagés. C'est ici que le worker était en train de tourner
+    # quand l'OOM killer l'a choisi le 20/08/2026, et non dans l'entraînement
+    # (mesuré à 1,5 Gio de pic).
+    #
+    # La fonction n'est qu'un accumulateur de compteurs : elle n'a jamais eu
+    # besoin de voir deux lignes en même temps. Résultat strictement identique.
+    result = await session.stream(text("""
         SELECT fm.features, pa.cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
         FROM features_ml fm
@@ -86,22 +96,28 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
           -- → exclu. Sinon on apprend "ce qui rapporte" sur des features reconstruites
           -- a posteriori (fuite temporelle) qui pilotent ensuite les value bets en prod.
           AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
-    """))).fetchall()
+    """))
 
     agg = {name: {"n": 0, "wins": 0, "stake": 0.0, "payout": 0.0} for name in SIGNALS}
-    for feats, cote, win in rows:
-        f = feats if isinstance(feats, dict) else json.loads(feats)
-        cote = float(cote)
-        for name, pred in SIGNALS.items():
-            try:
-                if pred(f):
-                    a = agg[name]
-                    a["n"] += 1
-                    a["wins"] += int(win)
-                    a["stake"] += 1.0
-                    a["payout"] += cote if win else 0.0
-            except Exception:
-                continue
+    n_total = 0
+    async for partition in result.partitions(2000):
+        for feats, cote, win in partition:
+            n_total += 1
+            f = feats if isinstance(feats, dict) else json.loads(feats)
+            cote = float(cote)
+            for name, pred in SIGNALS.items():
+                try:
+                    if pred(f):
+                        a = agg[name]
+                        a["n"] += 1
+                        a["wins"] += int(win)
+                        a["stake"] += 1.0
+                        a["payout"] += cote if win else 0.0
+                except Exception:
+                    continue
+        # Sans ce `del`, le curseur serveur n'apporte rien : on aurait seulement
+        # déplacé l'accumulation du driver vers la liste de partitions.
+        del partition
 
     signals = {}
     for name, a in agg.items():
@@ -121,7 +137,7 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
             "roi_shrunk": round(roi_shrunk, 3),
             "multiplier": round(mult, 3),
         }
-    return {"signals": signals, "n_total": len(rows)}
+    return {"signals": signals, "n_total": n_total}
 
 
 def _profile_pnl(profil: str, win: int, top3: int, cote: float) -> tuple[float, float]:
@@ -146,7 +162,12 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
     """Comme compute_signal_performance mais PAR PROFIL (conservateur/équilibré/agressif),
     avec l'objectif propre à chaque profil → les multiplicateurs diffèrent par profil.
     → permet un pronostic adapté au profil sélectionné."""
-    rows = (await session.execute(text("""
+    # Même table entière que `compute_signal_performance`, ramenée une SECONDE
+    # fois dans la foulée : ces deux appels consécutifs du nightly faisaient à
+    # eux seuls l'essentiel du pic mémoire du worker. Ici la version d'origine
+    # était pire encore — elle construisait `parsed`, une TROISIÈME copie qui
+    # cohabitait avec `rows` le temps de la boucle.
+    result = await session.stream(text("""
         SELECT fm.features, pa.cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
                CASE WHEN pa.numero IN (
@@ -160,28 +181,29 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
         WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
           -- ANTI-LEAKAGE (cf. compute_signal_performance) : features pré-départ only.
           AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
-    """))).fetchall()
+    """))
 
     profils = ["conservateur", "equilibre", "agressif"]
     agg = {p: {name: {"n": 0, "stake": 0.0, "payout": 0.0, "hits": 0} for name in SIGNALS} for p in profils}
-    parsed = []
-    for feats, cote, win, top3 in rows:
-        f = feats if isinstance(feats, dict) else json.loads(feats)
-        parsed.append((f, float(cote), int(win), int(top3)))
-
-    for f, cote, win, top3 in parsed:
-        present = [name for name, pred in SIGNALS.items() if _safe(pred, f)]
-        for p in profils:
-            stake, payout = _profile_pnl(p, win, top3, cote)
-            if stake <= 0:
-                continue
-            success = top3 if p == "conservateur" else win
-            for name in present:
-                a = agg[p][name]
-                a["n"] += 1
-                a["stake"] += stake
-                a["payout"] += payout
-                a["hits"] += success
+    n_total = 0
+    async for partition in result.partitions(2000):
+        for feats, cote, win, top3 in partition:
+            n_total += 1
+            f = feats if isinstance(feats, dict) else json.loads(feats)
+            cote, win, top3 = float(cote), int(win), int(top3)
+            present = [name for name, pred in SIGNALS.items() if _safe(pred, f)]
+            for p in profils:
+                stake, payout = _profile_pnl(p, win, top3, cote)
+                if stake <= 0:
+                    continue
+                success = top3 if p == "conservateur" else win
+                for name in present:
+                    a = agg[p][name]
+                    a["n"] += 1
+                    a["stake"] += stake
+                    a["payout"] += payout
+                    a["hits"] += success
+        del partition
 
     out = {}
     for p in profils:
@@ -199,7 +221,7 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
                 "multiplier": round(float(max(0.6, min(1.6, 1.0 + roi_shrunk))), 3),
             }
         out[p] = sig
-    return {"profils": out, "n_total": len(rows)}
+    return {"profils": out, "n_total": n_total}
 
 
 def _safe(pred, f) -> bool:
