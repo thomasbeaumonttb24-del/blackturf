@@ -8,6 +8,9 @@ reconstituables après la course).
 """
 import datetime as dt
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))   # `python scripts/x.py`
 
 from redis import Redis
 from rq.job import Job
