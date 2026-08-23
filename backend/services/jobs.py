@@ -540,6 +540,17 @@ def start_scheduler() -> None:
         misfire_grace_time=120,
     )
 
+    # IndexNow — deux passages : 08:30 (programme du jour complet, lendemain publié)
+    # et 22:30 (toutes les arrivées et tous les rapports le sont). Google n'utilise pas
+    # ce protocole ; il ne concerne que Bing, Yandex, Naver et Seznam.
+    scheduler.add_job(
+        job_indexnow_push,
+        CronTrigger(hour="8,22", minute=30, timezone="Europe/Paris"),
+        id="indexnow_push",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     scheduler.start()
     log.info("jobs.scheduler.started", nb_jobs=len(scheduler.get_jobs()))
 
@@ -549,3 +560,42 @@ def stop_scheduler() -> None:
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
         log.info("jobs.scheduler.stopped")
+
+
+async def job_indexnow_push() -> None:
+    """
+    Signale à Bing, Yandex, Naver et Seznam les URLs du jour (IndexNow).
+
+    Sans ce signalement, une fiche course n'est explorée qu'au prochain passage
+    spontané d'un robot — soit, pour une course, souvent après qu'elle a été courue.
+    Le contenu le plus périssable du site est aussi celui qui a le plus besoin d'être
+    signalé tôt.
+
+    **Google n'utilise pas IndexNow** : ce job n'accélère rien côté Google, qui passe
+    par le sitemap et Search Console.
+
+    Deux passages par jour : le matin, quand le programme du lendemain est publié et
+    que celui du jour est complet ; le soir, quand toutes les arrivées et tous les
+    rapports le sont. Signaler plus souvent des URLs inchangées est le meilleur moyen
+    de se faire ignorer.
+    """
+    from sqlalchemy import select, func
+    from db.database import AsyncSessionLocal
+    from db.models import Course
+    from services.temps_courses import jour_courses
+    from services.indexnow import signaler, urls_du_jour
+
+    jour = jour_courses()
+    try:
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(
+                select(Course.course_id).where(func.date(Course.date_heure) == jour)
+            )
+            course_ids = [r[0] for r in res.all()]
+    except Exception as e:  # noqa: BLE001
+        # Best-effort : on signale au moins les pages fixes du jour.
+        log.warning("jobs.indexnow.courses_indisponibles", err=str(e)[:160])
+        course_ids = []
+
+    envoyees = await signaler(urls_du_jour(course_ids, str(jour)))
+    log.info("jobs.indexnow.push", jour=str(jour), nb_courses=len(course_ids), envoyees=envoyees)

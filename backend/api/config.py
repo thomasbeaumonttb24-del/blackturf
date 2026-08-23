@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     email_from_name: str = "BlackTurf"
     openweather_api_key: str = ""
 
+    # IndexNow : signale à Bing, Yandex, Naver et Seznam qu'une URL vient de changer.
+    # Google N'UTILISE PAS ce protocole. La clé n'est pas un secret — elle est publiée
+    # en clair sur le site, c'est le mécanisme même du protocole. Vide = fonction inactive.
+    indexnow_key: str = ""
+
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""
