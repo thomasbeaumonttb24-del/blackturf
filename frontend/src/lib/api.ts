@@ -196,6 +196,18 @@ export const notificationsApi = {
 };
 
 export const adminApi = {
+  // Intégrations tierces. Comme tout le reste de l'admin, ces routes vivent sur
+  // `/admin/api/*` et NON sous `/api/v1` : oublier `baseURL` ici produit un appel vers
+  // une URL qui n'existe pas, et l'écran reste en chargement sans la moindre erreur.
+  integrationInstagram: () =>
+    api.get("/integrations/instagram", { baseURL: `${API_URL}/admin/api` }),
+  deposerJetonInstagram: (jeton: string) =>
+    api.post("/integrations/instagram", { jeton }, { baseURL: `${API_URL}/admin/api` }),
+  actionJetonInstagram: (quoi: "renouveler" | "tester") =>
+    api.post(`/integrations/instagram/${quoi}`, null, { baseURL: `${API_URL}/admin/api` }),
+  supprimerJetonInstagram: () =>
+    api.delete("/integrations/instagram", { baseURL: `${API_URL}/admin/api` }),
+
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
   users: (params?: Record<string, unknown>) =>
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),

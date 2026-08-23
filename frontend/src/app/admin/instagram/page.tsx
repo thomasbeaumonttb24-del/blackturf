@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRequireAuth } from "@/hooks/useAuth";
-import { api } from "@/lib/api";
+import { adminApi } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 
 /**
@@ -42,7 +42,7 @@ export default function AdminInstagramPage() {
 
   const { data: etat, mutate } = useSWR<EtatJeton>(
     user?.is_admin ? "/admin/integrations/instagram" : null,
-    () => api.get("/admin/integrations/instagram").then((r) => r.data),
+    () => adminApi.integrationInstagram().then((r) => r.data),
   );
 
   if (loading) {
@@ -69,7 +69,7 @@ export default function AdminInstagramPage() {
     }
     setEnvoi(true);
     try {
-      const r = await api.post("/admin/integrations/instagram", { jeton: valeur });
+      const r = await adminApi.deposerJetonInstagram(valeur);
       // On efface tout de suite le champ : laisser un secret dans un formulaire ouvert,
       // c'est l'exposer à la première capture d'écran.
       setJeton("");
@@ -90,7 +90,7 @@ export default function AdminInstagramPage() {
   async function lancer(quoi: "renouveler" | "tester") {
     setAction(quoi);
     try {
-      const r = await api.post(`/admin/integrations/instagram/${quoi}`);
+      const r = await adminApi.actionJetonInstagram(quoi);
       if (r.data?.ok) {
         toast.success(
           quoi === "tester"
@@ -111,7 +111,7 @@ export default function AdminInstagramPage() {
   async function retirer() {
     if (!confirm("Retirer le jeton ? La publication automatique s'arrêtera.")) return;
     try {
-      await api.delete("/admin/integrations/instagram");
+      await adminApi.supprimerJetonInstagram();
       toast.success("Jeton retiré.");
       mutate();
     } catch {
