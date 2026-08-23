@@ -1490,3 +1490,73 @@ async def stats_bet_plan_performance(
     perf = await compute_forward_performance(db, dimension, since=since)
     perf["gates"] = evaluate_segment_gates(perf)
     return perf
+
+
+@router.get("/stats/meilleurs-plans-jour")
+async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
+    """
+    Les meilleurs plans de la journée, pour les visuels de communication.
+
+    ATTENTION AU VOCABULAIRE — ces montants sont ceux de PLANS calculés et réglés aux
+    rapports réels du PMU, pas d'argent encaissé par qui que ce soit. Tout libellé du
+    type « nos gains » serait faux : on parle de `mise` et de `retour` d'un plan, jamais
+    de bénéfice réalisé.
+
+    On part de `bet_plan_settlement_actuel` et JAMAIS de `bet_plan_settlements` : la
+    seconde est append-only et sommer ses lignes compte plusieurs fois le même plan
+    (45 points d'écart de ROI constatés le 2026-08-23).
+
+    Le jour se lit à Paris : en UTC, la journée bascule à 02 h heure française et
+    l'endpoint renverrait les plans de la veille pendant deux heures chaque nuit.
+    """
+    lignes = await db.execute(text("""
+        SELECT s.course_id,
+               COALESCE(h.nom, c.hippodrome_nom, '') AS hippodrome,
+               s.montant_mise, s.montant_retour, s.net, s.nb_gagnes, s.nb_paris,
+               c.date_heure
+        FROM bet_plan_settlement_actuel s
+        JOIN courses c ON c.course_id = s.course_id
+        LEFT JOIN reunions r ON r.reunion_id = c.reunion_id
+        LEFT JOIN hippodromes h ON h.hippodrome_id = r.hippodrome_id
+        WHERE (c.date_heure AT TIME ZONE 'Europe/Paris')::date
+              = (now() AT TIME ZONE 'Europe/Paris')::date
+          AND s.net > 0
+        ORDER BY s.net DESC
+        LIMIT 20
+    """))
+
+    vus: set[str] = set()
+    plans: list[dict] = []
+    for r in lignes.mappings():
+        # Un même plan gagnant peut exister pour plusieurs profils sur la même course :
+        # les lister deux fois donnerait l'impression d'un doublon dans le visuel.
+        if r["course_id"] in vus:
+            continue
+        vus.add(r["course_id"])
+        plans.append({
+            "course_id": r["course_id"],
+            "hippodrome": (r["hippodrome"] or "").replace("HIPPODROME DE ", "").replace("HIPPODROME DU ", "").title(),
+            "code": (r["course_id"][8:] if len(r["course_id"]) > 8 else r["course_id"]),
+            "mise": round(float(r["montant_mise"] or 0), 2),
+            "retour": round(float(r["montant_retour"] or 0), 2),
+            "net": round(float(r["net"] or 0), 2),
+            "nb_gagnes": int(r["nb_gagnes"] or 0),
+            "nb_paris": int(r["nb_paris"] or 0),
+        })
+        if len(plans) >= 3:
+            break
+
+    volume = await db.execute(text("""
+        SELECT COUNT(DISTINCT c.course_id) AS nb_courses,
+               COUNT(DISTINCT c.reunion_id) AS nb_reunions
+        FROM courses c
+        WHERE (c.date_heure AT TIME ZONE 'Europe/Paris')::date
+              = (now() AT TIME ZONE 'Europe/Paris')::date
+    """))
+    v = volume.mappings().first() or {}
+
+    return {
+        "plans": plans,
+        "nb_courses": int(v.get("nb_courses") or 0),
+        "nb_reunions": int(v.get("nb_reunions") or 0),
+    }
