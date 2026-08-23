@@ -233,15 +233,23 @@ class TestTicketsAppoint:
             (x["proba_gain"], x["rapport_estime"]) for x in ordre]
         assert len(ordre) == 3 and len({id(x) for x in ordre}) == 3
 
+    # Champ à FAVORI MARQUÉ : les combinaisons y paient ×24-42, donc sous le seuil de
+    # finançabilité du risqué (cf. test_le_plafond_de_concentration_releve_le_rapport_minimal).
     CHAMP_LARGE = [(0.16, 5.5), (0.14, 6.5), (0.12, 8.0), (0.10, 11.0), (0.09, 13.0),
                    (0.08, 15.0), (0.07, 18.0), (0.06, 22.0), (0.05, 28.0), (0.04, 35.0),
                    (0.04, 42.0), (0.03, 55.0), (0.03, 70.0), (0.02, 90.0)]
+    # Champ OUVERT : aucun cheval ne domine, les trios ancrés paient ×59-100 — c'est là
+    # que le profil risqué peut réellement étaler plusieurs gros rapports.
+    CHAMP_OUVERT = [(0.10, 9.0), (0.09, 10.0), (0.09, 11.0), (0.08, 13.0), (0.08, 15.0),
+                    (0.07, 17.0), (0.07, 20.0), (0.06, 24.0), (0.06, 28.0), (0.05, 33.0),
+                    (0.05, 40.0), (0.04, 50.0), (0.04, 65.0), (0.03, 85.0)]
 
-    def _champ(self):
+    def _champ(self, rows=None):
+        rows = rows if rows is not None else self.CHAMP_LARGE
         return [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
                  "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
                  "cote_pmu": c, "non_partant": False}
-                for i, (p, c) in enumerate(self.CHAMP_LARGE)]
+                for i, (p, c) in enumerate(rows)]
 
     def test_risque_grand_champ_propose_plusieurs_paris(self):
         """Plusieurs tickets DANS la tranche, tous ancrés sur les 2 premiers prédits.
@@ -252,10 +260,15 @@ class TestTicketsAppoint:
         C'est le prix assumé de l'ancrage : mesure du 2026-08-23 (winsorisée), un Trio
         contenant les 2 premiers prédits rend −8,1 % contre −75,5 % sans. Trois tickets
         d'outsiders à 2€ étaient trois façons de perdre.
+
+        Sur un champ à favori marqué, les combinaisons paient ×24-42 : sous le seuil de
+        finançabilité du risqué, le plan se concentre légitimement sur son meilleur
+        ticket. C'est sur un champ OUVERT que l'étalement a un sens, et c'est là qu'on
+        l'exige. Sur la population réelle, le risqué tient 2,1 à 2,9 tickets par plan.
         """
-        champ = self._champ()
-        course = dict(self.COURSE, nb_partants=len(self.CHAMP_LARGE))
-        for montant, mini in ((10, 2), (30, 3)):
+        champ = self._champ(self.CHAMP_OUVERT)
+        course = dict(self.COURSE, nb_partants=len(self.CHAMP_OUVERT))
+        for montant, mini in ((10, 2), (30, 2)):
             d = plan_to_dict(generer_plan(montant, "agressif", champ, course,
                                           respect_montant=True))
             paris = [p for niv in d["niveaux"] for p in niv["paris"]]
@@ -266,20 +279,49 @@ class TestTicketsAppoint:
                 assert p["gain_potentiel"] >= montant * 10 * 0.95, (
                     f"{p['type']} rend {p['gain_potentiel']}€ < ×10 du plan")
 
-    def test_risque_etale_plusieurs_combinaisons_sur_la_meme_ancre(self):
+    def test_deux_combinaisons_sur_la_meme_ancre_ne_sont_pas_des_doublons(self):
         """Deux combinaisons ancrées ne diffèrent que par leur pied libre : c'est la
-        structure voulue, pas un doublon. La règle anti-doublon « ne diffèrent que d'un
-        cheval » ne doit donc pas les confondre, sinon le risqué retombe à un ticket."""
-        champ = self._champ()
-        course = dict(self.COURSE, nb_partants=len(self.CHAMP_LARGE))
-        d = plan_to_dict(generer_plan(30, "agressif", champ, course,
-                                      respect_montant=True))
-        combos = [p for niv in d["niveaux"] for p in niv["paris"]
-                  if len(p["chevaux"]) >= 2]
-        assert len(combos) >= 2, f"une seule combinaison : {combos}"
-        # Même appui (les 2 premiers prédits), pieds libres différents.
-        libres = {tuple(sorted(c["numero"] for c in p["chevaux"])) for p in combos}
-        assert len(libres) == len(combos), "combinaisons identiques"
+        structure voulue, pas un doublon. Vérifié sur la RÈGLE elle-même plutôt que sur
+        un plan complet : le nombre de tickets finançables dépend du budget et de la
+        cible de gain, pas de la règle anti-doublon qu'on veut tester ici."""
+        from services.mise_calculator import _couvre_deja
+        ancre = frozenset({1, 2})
+        t1 = {"type_pari": "Trio", "_ancre_top2": True, "_ancre_nums": ancre,
+              "chevaux": [{"numero": 1}, {"numero": 2}, {"numero": 7}]}
+        t2 = {"type_pari": "Trio", "_ancre_top2": True, "_ancre_nums": ancre,
+              "chevaux": [{"numero": 1}, {"numero": 2}, {"numero": 9}]}
+        assert not _couvre_deja(t2, [t1]), "deux pieds libres différents = deux paris"
+        # Le vrai doublon reste détecté.
+        t3 = {"type_pari": "Trio", "_ancre_top2": True, "_ancre_nums": ancre,
+              "chevaux": [{"numero": 2}, {"numero": 1}, {"numero": 7}]}
+        assert _couvre_deja(t3, [t1]), "même combinaison = doublon"
+
+    def test_le_plafond_de_concentration_releve_le_rapport_minimal(self):
+        """`var_cap` et la cible de gain se MULTIPLIENT, et il faut le savoir : un ticket
+        tout-ou-rien doit peser cible/rapport, plafonné à var_cap × le montant, donc il
+        n'est finançable que si rapport ≥ cible_mult / var_cap. Le rapport du plan
+        n'entre pas dans l'équation — le seuil est le même à 10 € qu'à 200 €.
+
+        Risqué : ×10 / 0,20 → seuil ×50 (contre ×28,6 quand var_cap valait 0,35). C'est
+        ce qui écarte les trios à ×25-45, mesurés à −63 % de ROI, et ce qui vaut au
+        profil +13 à +19 points de ROI sur deux fenêtres de 400 courses (2026-08-23).
+        """
+        from services.mise_calculator import PROFIL_CONFIG
+        cfg = PROFIL_CONFIG["agressif"]
+        seuil = cfg["gain_cible_mult"] / cfg["var_cap"]
+        assert seuil == pytest.approx(50.0), f"seuil de finançabilité = ×{seuil:g}"
+
+        champ = self._champ(self.CHAMP_OUVERT)
+        course = dict(self.COURSE, nb_partants=len(self.CHAMP_OUVERT))
+        for montant in (10, 30, 100):
+            d = plan_to_dict(generer_plan(montant, "agressif", champ, course,
+                                          respect_montant=True))
+            for niv in d["niveaux"]:
+                for p in niv["paris"]:
+                    if _is_high_variance({"type_pari": p["type"]}):
+                        assert p["mise"] <= montant * cfg["var_cap"] + 1, (
+                            f"{montant}€ : {p['type']} à {p['mise']}€ dépasse le plafond "
+                            f"de concentration")
 
     def test_plafond_de_rang_suit_le_classement(self):
         """Le plan doit se correler au CLASSEMENT de l'IA (demande user 2026-08-20).

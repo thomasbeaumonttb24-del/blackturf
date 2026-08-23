@@ -367,11 +367,27 @@ PROFIL_CONFIG = {
         # « gros rapport » n'est plus un outsider à valeur : c'est un pari contre le
         # classement, et c'est ce qui remplissait 17,8 % des tickets risqués.
         "rang_max": 8,
-        # var_cap 0.35 (resserré de 0.45) : le risqué reste 100% gros rapport, MAIS jamais
-        # plus de 35% du budget sur un seul ticket → la mise s'étale sur ≥3 gros-rapports
-        # DÉCORRÉLÉS (demande user : « plus de mises différentes en risqué », fini le
-        # 10€ sur un seul Simple Gagnant).
-        "var_cap": 0.35,
+        # var_cap 0.20 (0.45 → 0.35 → 0.20) : le risqué reste 100% gros rapport, MAIS
+        # jamais plus de 20% du budget sur un seul ticket TOUT-OU-RIEN → la mise s'étale
+        # sur plusieurs gros-rapports DÉCORRÉLÉS (demande user : « plus de mises
+        # différentes en risqué », fini le 10€ sur un seul Simple Gagnant).
+        #
+        # 0.35 → 0.20 mesuré par rejeu sur DEUX fenêtres indépendantes de 400 courses
+        # (2026-08-23), tranche ×10 inchangée :
+        #     0.35  −33,3 % / −48,0 %   (moyenne −40,7)
+        #     0.25  −32,5 % / −38,6 %   (moyenne −35,6)
+        #     0.20  −7,7 %  / −35,6 %   (moyenne −21,7)   ← retenu
+        #     0.15  −12,8 % / −32,1 %   (moyenne −22,5)
+        # +19 points en moyenne. Le mécanisme est simple : à 0.35 un plan de 20 € pouvait
+        # poser 7 € sur un Trio (mesuré −63 %) ; à 0.20 il en pose 4 au plus et le reste
+        # va sur les couplés et les simples, qui perdent bien moins. 0.15 et 0.10 font
+        # aussi bien à l'unité près (bruit) — on garde la valeur la moins brutale, qui
+        # laisse un Trio finançable à 4 € sur un plan de 20 €.
+        #
+        # Ni la tranche ×10, ni les types, ni le nombre de tickets ne changent : c'est un
+        # plafond de CONCENTRATION, pas un changement d'identité du profil (arbitrage
+        # utilisateur du 2026-08-23 : la tranche ×10 est conservée telle quelle).
+        "var_cap": 0.20,
         # alloc "spread" : la bande ≥×10 s'applique PAR PARI (chaque ticket gagnant paie
         # ≥×10 SA mise) — le dutching à retour égal sur la mise TOTALE collapsait presque
         # toujours sur UN seul ticket (coef total < 10 dès le 2e pari) = l'inverse du
