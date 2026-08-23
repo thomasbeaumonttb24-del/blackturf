@@ -170,6 +170,30 @@ def mise_base(nom_pari: str | None) -> float:
     return p.mise_base if p else 1.0
 
 
+# Le Multi est le seul pari du catalogue dont le PRIX dépend du nombre de chevaux
+# choisis : on couvre toutes les combinaisons de 4 parmi N, donc le ticket coûte
+# 3 € × C(N,4) — 3 € en 4, 15 € en 5, 45 € en 6, 105 € en 7. Le PMU publie d'ailleurs
+# un rapport DIFFÉRENT par formule (rapports_detail.e_multi, quatre entrées
+# décroissantes), ce que le règlement sait déjà lire.
+_MULTI_COUT = {4: 3.0, 5: 15.0, 6: 45.0, 7: 105.0}
+
+
+def cout_minimum(nom_pari: str | None) -> float:
+    """Prix du ticket le moins cher réellement achetable pour ce type de pari.
+
+    Conseiller 8 € sur un « Multi en 7 » revient à conseiller un ticket que le PMU
+    ne vend pas : la formule coûte 105 € et rien en dessous. Cette fonction donne
+    le plancher à respecter avant de proposer le pari.
+    """
+    n = str(nom_pari or "")
+    if "Multi en " in n:
+        try:
+            return _MULTI_COUT.get(int(n.rsplit(" ", 1)[1]), mise_base(n))
+        except (IndexError, ValueError):
+            return mise_base(n)
+    return mise_base(nom_pari)
+
+
 def partants_min(nom_pari: str | None) -> int:
     """Champ minimal sous lequel le PMU n'ouvre pas ce pari."""
     p = PAR_NOM.get(_famille(nom_pari))

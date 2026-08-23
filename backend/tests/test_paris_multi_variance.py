@@ -564,3 +564,53 @@ class TestAncrageTop2:
                                    _effective_config("agressif", 0.0), {})
         assert ordre and ordre[0]["_rang_hors_ancre"] == 7, (
             "le 3ᵉ pied au rang 6-8 doit primer sur le 3ᵉ favori")
+
+
+# ── Prix réel des formules Multi ─────────────────────────────────────────────
+
+class TestPrixFormuleMulti:
+    """Le Multi est le seul pari dont le PRIX dépend du nombre de chevaux : on couvre
+    toutes les combinaisons de 4 parmi n, donc 3 € × C(n,4). Le moteur annonçait 3 €
+    quelle que soit la formule et misait 7-9 € sur des « Multi en 7 » — des tickets
+    que le PMU ne vend pas (105 € minimum)."""
+
+    COURSE = {"nb_partants": 16, "course_id": "T1", "discipline": "Attelé",
+              "paris_disponibles": ["E_SIMPLE_GAGNANT", "E_MULTI"]}
+
+    def test_cout_minimum_suit_la_grille_pmu(self):
+        from services.pmu_paris_reference import cout_minimum
+        assert cout_minimum("Multi en 4") == 3.0
+        assert cout_minimum("Multi en 5") == 15.0
+        assert cout_minimum("Multi en 6") == 45.0
+        assert cout_minimum("Multi en 7") == 105.0
+        assert cout_minimum("Mini Multi en 6") == 45.0
+        assert cout_minimum("Simple Gagnant") == 1.0
+
+    def test_le_candidat_porte_le_cout_reel(self):
+        from ml.combo_bets import build_coverage_bets
+        props = build_coverage_bets(_field(8), self.COURSE, bankroll=1000.0)
+        multis = {p["type_pari"]: p for p in props["proposals"]
+                  if "Multi en" in p.get("type_pari", "")}
+        assert multis, "aucune formule Multi proposée — le test ne vérifie rien"
+        for nom, attendu in (("Multi en 4", 3.0), ("Multi en 5", 15.0),
+                             ("Multi en 6", 45.0), ("Multi en 7", 105.0)):
+            p = multis.get(nom)
+            if p is None:
+                continue
+            assert p["cout_total"] == attendu, f"{nom} annoncé à {p['cout_total']}€"
+            assert p["nb_combinaisons"] == math.comb(int(nom[-1]), 4)
+            # Le gain affiché suit le prix réel du ticket, pas la mise de base
+            # (le rapport est arrondi à 0.1 → tolérance de 0.05 × le prix).
+            assert abs(p["gain_potentiel"] - p["rapport_estime"] * attendu) <= 0.05 * attendu
+
+    def test_un_plan_ne_propose_jamais_un_ticket_invendable(self):
+        from services.pmu_paris_reference import cout_minimum
+        for montant in (10, 20, 50, 120):
+            for profil in ("conservateur", "equilibre", "agressif"):
+                d = plan_to_dict(generer_plan(montant, profil, _field(8), self.COURSE,
+                                              respect_montant=True))
+                for niv in d["niveaux"]:
+                    for p in niv["paris"]:
+                        assert cout_minimum(p["type"]) <= montant, (
+                            f"{profil} {montant}€ : {p['type']} coûte au minimum "
+                            f"{cout_minimum(p['type'])}€ au guichet")

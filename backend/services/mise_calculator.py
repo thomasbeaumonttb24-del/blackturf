@@ -21,6 +21,19 @@ CI_WIDTH_PENALTY = 3.0
 
 # Montant minimum PMU par type de pari (référence réglementaire ; le moteur
 # applique MISE_PLANCHER=2€ par-dessus).
+def _cout_minimum_pmu(type_pari: str) -> float:
+    """Prix du ticket le moins cher réellement achetable pour ce type (0 si inconnu).
+
+    Ne lève jamais : un type absent du catalogue de référence ne doit pas empêcher
+    de proposer un plan.
+    """
+    try:
+        from services.pmu_paris_reference import cout_minimum
+        return float(cout_minimum(type_pari))
+    except Exception:
+        return 0.0
+
+
 MISE_MIN = {
     "Simple Gagnant":   1.0,
     "Simple Placé":     1.0,
@@ -1380,6 +1393,12 @@ def _select_conviction(
     def passes_gates(c):
         if allowed_types is not None and _fam(c["type_pari"]) not in allowed_types:
             return False                                     # hors méthode du profil
+        # ACHETABLE AU GUICHET : le Multi est le seul pari dont le PRIX dépend du
+        # nombre de chevaux (3 € en 4, 15 € en 5, 45 € en 6, 105 € en 7 — on couvre
+        # C(n,4) combinaisons). Un plan de 10 € qui conseille « Multi en 7 » conseille
+        # un ticket que le PMU ne vend pas. On l'écarte plutôt que de l'afficher.
+        if _cout_minimum_pmu(c["type_pari"]) > montant:
+            return False
         # GATE DUR appris : un type au poids ~0 = bucket (type×contexte) PROUVÉ perdant
         # (ROI réel ≤ seuil sur n suffisant, cf. profil_learning.suppressed) → on ne le
         # propose plus du tout pour ce profil dans ce contexte. Couper > sous-pondérer.
