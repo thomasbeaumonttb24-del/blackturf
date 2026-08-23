@@ -2,7 +2,8 @@ import { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Mentions légales",
-  description: "Mentions légales de la plateforme BlackTurf",
+  description:
+    "Mentions légales de BlackTurf : éditeur, hébergeur, directeur de la publication, et avertissement sur le jeu responsable.",
   alternates: { canonical: "/mentions-legales" },
   // Sans og:title propre, la page héritait de celui de la racine — deux sources de
   // titre contradictoires, que Google ne sait pas départager.
