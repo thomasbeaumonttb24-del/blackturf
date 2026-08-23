@@ -8,6 +8,7 @@ import {
   titleCase,
   disciplineLabel,
 } from "@/lib/seo";
+import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import ProgrammeClient from "./ProgrammeClient";
 
 // ISR 5 min : le programme du jour est régénéré côté serveur, donc Googlebot reçoit un
@@ -135,6 +136,10 @@ export default async function ProgrammePage() {
               </ul>
             </div>
           ))}
+        </div>
+
+        <div className="mt-12 max-w-2xl">
+          <NewsletterForm source="programme" />
         </div>
       </section>
     </>

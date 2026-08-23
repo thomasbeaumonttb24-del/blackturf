@@ -1308,3 +1308,49 @@ class AssociationJockeyEntraineur(Base):
         UniqueConstraint("jockey_id", "entraineur_id", "saison"),
         Index("ix_asso_jockey_entraineur", "jockey_id", "entraineur_id"),
     )
+
+
+# ─────────────────────────────────────────────
+# Lettre d'information
+# ─────────────────────────────────────────────
+class NewsletterAbonne(Base):
+    """
+    Inscrit à la lettre hebdomadaire, en double opt-in.
+
+    Le site n'offrait jusqu'ici que deux issues au visiteur : s'abonner, ou partir.
+    Sur un produit à 12 €/mois qu'on n'achète pas au premier contact, c'était la fuite
+    la plus coûteuse du tunnel.
+
+    Double opt-in obligatoire : une adresse ne reçoit RIEN tant qu'elle n'a pas cliqué
+    le lien de confirmation. Cela protège de l'inscription d'un tiers par malveillance,
+    et c'est ce qui rend le consentement démontrable.
+
+    `consentement_texte` conserve la formulation EXACTE affichée au moment de
+    l'inscription. En cas de réclamation, prouver le consentement suppose de pouvoir
+    dire à quoi la personne a consenti — pas seulement qu'elle a coché quelque chose.
+    Aucune adresse IP n'est stockée : le double opt-in horodaté suffit et évite de
+    conserver une donnée personnelle de plus.
+    """
+    __tablename__ = "newsletter_abonnes"
+
+    abonne_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+
+    # en_attente → confirme → desinscrit. Une désinscription ne SUPPRIME pas la ligne :
+    # sans elle, une adresse désinscrite pourrait être réinscrite par un tiers et
+    # recevoir à nouveau des envois.
+    statut: Mapped[str] = mapped_column(String(15), default="en_attente", index=True)
+
+    token_confirmation: Mapped[str | None] = mapped_column(String(64), unique=True)
+    token_desinscription: Mapped[str] = mapped_column(String(64), unique=True)
+
+    # Page depuis laquelle l'inscription a eu lieu (accueil, programme, course…) :
+    # dit quel emplacement convertit, et lesquels ne servent à rien.
+    source: Mapped[str | None] = mapped_column(String(40))
+    consentement_texte: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    confirme_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    desinscrit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dernier_envoi_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    relance_confirmation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -13,6 +13,7 @@ import {
   type SeoCourseDetail,
   type SeoResultats,
 } from "@/lib/seo";
+import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import CourseClient from "./CourseClient";
 
 // ISR 2 min : les fiches à venir bougent (cotes, non-partants), les fiches terminées sont
@@ -227,6 +228,10 @@ export default async function CoursePage({ params }: Props) {
               Comprendre les types de paris
             </a>
           </nav>
+
+          <div className="mt-10">
+            <NewsletterForm source="course" />
+          </div>
         </section>
       )}
     </>

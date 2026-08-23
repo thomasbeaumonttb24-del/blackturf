@@ -35,6 +35,7 @@ const MAJ = {
   blogIndex: "2026-06-23",
   hippodromesIndex: "2026-08-23",
   disciplinesIndex: "2026-08-23",
+  newsletter: "2026-08-24",
   inscription: "2026-08-23",
   legal: "2026-07-02",
 } as const;
@@ -63,6 +64,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE_URL}/blog`, lastModified: d(MAJ.blogIndex) },
     { url: `${BASE_URL}/hippodromes`, lastModified: d(MAJ.hippodromesIndex) },
     { url: `${BASE_URL}/disciplines`, lastModified: d(MAJ.disciplinesIndex) },
+    { url: `${BASE_URL}/newsletter`, lastModified: d(MAJ.newsletter) },
     { url: `${BASE_URL}/inscription`, lastModified: d(MAJ.inscription) },
     { url: `${BASE_URL}/mentions-legales`, lastModified: d(MAJ.legal) },
     { url: `${BASE_URL}/cgu`, lastModified: d(MAJ.legal) },

@@ -14,6 +14,7 @@ import { CalculatorDemo } from "@/components/home/CalculatorDemo";
 import { LivePalmares } from "@/components/home/LivePalmares";
 import { HeroStats } from "@/components/home/HeroStats";
 import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
+import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
 // Le canonical n'est plus hérité de la racine (il y désignait "/" pour TOUTES les pages) :
 // l'accueil déclare donc le sien explicitement.
@@ -1004,6 +1005,16 @@ export default async function HomePage() {
               Voir le détail des formules
             </Link>
           </p>
+        </div>
+      </section>
+
+      {/* ═══════════ LETTRE HEBDOMADAIRE ═══════════ */}
+      {/* Placée AVANT la CTA d'abonnement : un visiteur qui n'est pas prêt à payer
+          repartait jusqu'ici sans laisser de trace. C'est la fuite la plus coûteuse
+          du tunnel sur un produit qu'on n'achète pas au premier contact. */}
+      <section className="bg-brand-warm py-16 border-t border-gray-200">
+        <div className="mx-auto max-w-2xl px-5 sm:px-6">
+          <NewsletterForm source="accueil" />
         </div>
       </section>
 

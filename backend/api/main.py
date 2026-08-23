@@ -9,7 +9,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from api.config import get_settings
 from api.routes import auth, courses, predictions, bankroll, admin, ws
 from api.routes import assistant, stripe_routes, strategies, stats, notifications
-from api.routes import telegram
+from api.routes import telegram, newsletter
 from db.database import engine, Base
 from db.redis_client import get_redis, close_redis
 
@@ -124,6 +124,7 @@ app.include_router(strategies.router, prefix="/api/v1", tags=["strategies"])
 app.include_router(stats.router, prefix="/api/v1", tags=["stats"])
 app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["notifications"])
 app.include_router(telegram.router, prefix="/api/v1/telegram", tags=["telegram"])
+app.include_router(newsletter.router, prefix="/api/v1", tags=["newsletter"])
 
 
 @app.get("/api/v1/health")

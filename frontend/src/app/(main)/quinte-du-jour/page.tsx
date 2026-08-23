@@ -15,6 +15,7 @@ import {
 } from "@/lib/seo";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
+import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
 export const revalidate = 300;
 
@@ -226,6 +227,10 @@ export default async function QuinteDuJourPage() {
             </p>
           </Section>
         )}
+
+        <div className="mt-10">
+          <NewsletterForm source="quinte-du-jour" />
+        </div>
 
         <Section title="Comment lire un Quinté+">
           <p className="text-sm leading-relaxed text-brand-charcoal/85">

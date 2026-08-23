@@ -14,6 +14,7 @@ import {
 } from "@/lib/seo";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
+import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
 /**
  * Page « arrivées et rapports » d'une journée PMU.
@@ -173,6 +174,14 @@ export async function ResultatsJour({ jour }: { jour: string }) {
             )}
           </nav>
         </Section>
+
+        <div className="mt-10">
+          <NewsletterForm
+            source={estAujourdhui ? "resultats" : "resultats-archive"}
+            titre="Recevoir le bilan de la semaine"
+            accroche="Les rapports d'aujourd'hui ne disent pas ce que paiera demain. Chaque lundi, le bilan chiffré de la semaine écoulée — gains comme pertes."
+          />
+        </div>
 
         <Callout href="/programme" cta="Voir le programme">
           Les rapports d&apos;une course passée disent ce qu&apos;elle a payé — pas ce que paiera la

@@ -23,6 +23,7 @@ const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string
   {
     title: "Ressources",
     links: [
+      { href: "/newsletter", label: "La lettre du lundi" },
       { href: "/quinte-du-jour", label: "Quinté+ du jour" },
       { href: "/resultats", label: "Résultats et rapports" },
       { href: "/blog", label: "Blog" },
