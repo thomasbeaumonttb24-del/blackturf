@@ -26,7 +26,21 @@ log = structlog.get_logger()
 settings = get_settings()
 
 VERSION = "v21.0"
-BASE = f"https://graph.facebook.com/{VERSION}"
+
+# DEUX VOIES D'ACCES EXISTENT, et elles n'ont pas les memes prerequis :
+#
+#   - « Instagram API with Facebook Login » -> hote graph.facebook.com, et le compte
+#     Instagram DOIT etre lie a une Page Facebook ;
+#   - « Instagram API with Instagram Login » -> hote graph.instagram.com, et un simple
+#     compte Instagram professionnel suffit, SANS Page.
+#
+# On prend la seconde : la liaison a une Page passe par une interface Meta defaillante
+# (bouton inerte au clic comme au clavier) et n'apporte rien de plus ici. L'hote reste
+# configurable pour pouvoir basculer sans redeployer si Meta ferme cette voie.
+def _base() -> str:
+    hote = getattr(settings, "instagram_api_host", "") or "graph.instagram.com"
+    return f"https://{hote}/{VERSION}"
+
 
 # Une légende Instagram est plafonnée à 2 200 caractères. Au-delà, l'API rejette la
 # publication entière : on tronque proprement plutôt que de perdre le post.
@@ -94,7 +108,7 @@ async def publier_image(url_image: str, legende: str) -> ResultatPublication:
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             conteneur = await client.post(
-                f"{BASE}/{compte}/media",
+                f"{_base()}/{compte}/media",
                 data={"image_url": url_image, "caption": legende, "access_token": jeton},
             )
             if conteneur.status_code != 200:
@@ -112,7 +126,7 @@ async def publier_image(url_image: str, legende: str) -> ResultatPublication:
                 return ResultatPublication(False, raison="conteneur sans identifiant")
 
             publication = await client.post(
-                f"{BASE}/{compte}/media_publish",
+                f"{_base()}/{compte}/media_publish",
                 data={"creation_id": creation_id, "access_token": jeton},
             )
             if publication.status_code != 200:
@@ -147,7 +161,7 @@ async def quota_restant() -> Optional[int]:
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
-                f"{BASE}/{compte}/content_publishing_limit",
+                f"{_base()}/{compte}/content_publishing_limit",
                 params={"access_token": jeton},
             )
         if resp.status_code != 200:

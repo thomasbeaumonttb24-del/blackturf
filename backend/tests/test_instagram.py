@@ -117,3 +117,18 @@ async def test_un_refus_de_meta_ne_leve_jamais(monkeypatch):
 
     assert res.publie is False
     assert "conteneur" in (res.raison or "")
+
+
+async def test_hote_par_defaut_est_la_voie_sans_page_facebook(monkeypatch):
+    """
+    La voie « Instagram Login » (graph.instagram.com) n'exige AUCUNE Page Facebook.
+    L'autre voie, graph.facebook.com, l'impose — et son interface de liaison est
+    défaillante côté Meta. Le défaut ne doit donc jamais rebasculer par inadvertance.
+    """
+    monkeypatch.setattr(instagram.settings, "instagram_api_host", "", raising=False)
+    assert instagram._base().startswith("https://graph.instagram.com/")
+
+
+async def test_hote_reste_configurable(monkeypatch):
+    monkeypatch.setattr(instagram.settings, "instagram_api_host", "graph.facebook.com", raising=False)
+    assert instagram._base().startswith("https://graph.facebook.com/")

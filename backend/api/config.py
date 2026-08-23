@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     meta_access_token: str = ""
     instagram_user_id: str = ""
     instagram_publication_active: bool = False
+    # graph.instagram.com = voie « Instagram Login » (aucune Page Facebook requise).
+    # graph.facebook.com = voie « Facebook Login », qui exige une Page liee.
+    instagram_api_host: str = "graph.instagram.com"
 
     # Google OAuth
     google_client_id: str = ""
