@@ -185,6 +185,33 @@ def _palier(montant: int) -> dict:
 # on joue contre son propre modèle. Les paris de type PLACÉ sont exemptés d'un cran
 # (RANG_MAX_BONUS_PLACE) : un cheval du milieu de tableau se place bien plus souvent
 # qu'il ne gagne.
+# Interrupteurs d'ESSAI (désactivés par défaut) : ils servent à MESURER en rejeu A/B
+# sur des courses déjà courues, jamais à changer le produit en douce.
+#
+# `_ANC_NEUTRE` neutralise le bonus de conviction porté par le rang du pied libre
+# d'une combinaison ancrée. Résultat du rejeu sur 400 courses (2026-08-23) : effet
+# NUL (−33,3 % avec, −33,3 % sans ; Trio −62,9 % contre −62,0 %). Le facteur ne nuit
+# pas mais n'apporte rien de mesurable — il reposait sur 17 gagnants.
+_ANC_NEUTRE = False
+# `_ANCRE_HORS_BANDE` exempte les combinaisons ANCRÉES sur les 2 premiers du plancher
+# de rapport du profil. Ce plancher est un CONTRAT PRODUIT (tranché le 2026-08-20).
+#
+# Ce qu'il coûte, mesuré : sur 120 courses, le Couplé Gagnant ancré du profil risqué
+# est écarté 73 fois par le seul plancher ×10 (son rapport vaut 2 à 9 — deux favoris
+# ne paient pas ×10), n'est pas offert 14 fois, et ne passe que 16 fois. C'est ce qui
+# explique que 17 % seulement des couplés gagnants joués soient ancrés, alors que
+# l'ancrage vaut +14 points sur ce type.
+#
+# MAIS le relâcher ne suffit PAS, et le rejeu A/B sur 400 courses le montre :
+#   plancher respecté  : risqué −33,3 %  modéré −14,4 %  prudent −21,6 %
+#   ancrés exemptés    : risqué −34,8 %  modéré −17,5 %  prudent −22,6 %
+# Parce que les deux contraintes sont couplées : un ticket ancré à ×6 doit être
+# dimensionné à ceil(cible/rapport) pour tenir la cible de gain, soit 34 € sur un plan
+# de 20 € — infinançable — pendant que le filtre d'ancrage a écarté les tickets non
+# ancrés qui, eux, tenaient la cible. Arbitrer réellement demande de toucher AUSSI au
+# multiple de gain du profil : c'est une décision produit, pas un réglage.
+_ANCRE_HORS_BANDE = False
+
 RANG_MAX_BONUS_PLACE = 2
 # Le plafond absolu ne suffit pas : dans un champ de 8 partants, le rang 8 EST le dernier
 # cheval — le jouer, c'est parier contre son propre classement. Le plafond est donc aussi
@@ -1328,7 +1355,7 @@ def _select_conviction(
         sans rien garantir ; le pied qui paie est l'outsider que le modèle croit
         encore. Neutre sur les paris non ancrés et sur les paris à 2 chevaux (pas de
         pied libre)."""
-        if not c.get("_ancre_top2"):
+        if _ANC_NEUTRE or not c.get("_ancre_top2"):
             return 1.0
         r = c.get("_rang_hors_ancre")
         if r is None:
@@ -1414,7 +1441,8 @@ def _select_conviction(
         # BANDE DE RAPPORT = séparateur produit (×1.8–5 / ×4–15 / ≥×10). Le pari doit
         # rapporter dans la fourchette du profil, sinon il appartient à un autre profil.
         rap = float(c.get("rapport_estime", 0.0) or 0.0)
-        if rap < rapport_min:                                # rapport trop faible pour ce profil
+        _exempt_bande = _ANCRE_HORS_BANDE and c.get("_ancre_top2")
+        if rap < rapport_min and not _exempt_bande:          # rapport trop faible pour ce profil
             return False
         if rapport_max_eff is not None and rap > rapport_max_eff:  # même au plancher, gain hors bande haute
             return False
