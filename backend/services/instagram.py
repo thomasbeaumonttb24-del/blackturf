@@ -62,10 +62,30 @@ class ResultatPublication:
         return f"ResultatPublication(publie={self.publie}, media_id={self.media_id}, raison={self.raison})"
 
 
-def _configure() -> tuple[Optional[str], Optional[str]]:
-    jeton = getattr(settings, "meta_access_token", "") or None
+async def _configure() -> tuple[Optional[str], Optional[str]]:
+    """
+    (jeton, identifiant de compte).
+
+    Le jeton est lu EN BASE en priorite : il y est depose depuis l'administration et
+    renouvele automatiquement tous les deux mois. La variable d'environnement ne sert
+    que de repli, pour un depannage ou un environnement de test — un secret pose dans un
+    fichier ne se renouvelle pas tout seul et finit par expirer sans prevenir.
+    """
     compte = getattr(settings, "instagram_user_id", "") or None
-    return jeton, compte
+
+    try:
+        from db.database import AsyncSessionLocal
+        from services.jetons import lire
+
+        async with AsyncSessionLocal() as session:
+            enregistre = await lire(session)
+            if enregistre and enregistre.valeur:
+                return enregistre.valeur, (enregistre.compte_id or compte)
+    except Exception as e:  # noqa: BLE001
+        # Base indisponible : on retombe sur l'environnement plutot que d'echouer.
+        log.warning("instagram.jeton.lecture_base_impossible", err=str(e)[:160])
+
+    return (getattr(settings, "meta_access_token", "") or None), compte
 
 
 def publication_active() -> bool:
@@ -85,7 +105,7 @@ async def publier_image(url_image: str, legende: str) -> ResultatPublication:
     Best-effort : ne lève jamais. Le poste est appelé depuis un job programmé, et une
     exception non rattrapée y arrêterait les tâches suivantes.
     """
-    jeton, compte = _configure()
+    jeton, compte = await _configure()
     if not jeton or not compte:
         return ResultatPublication(False, raison="jeton ou identifiant de compte absent")
 
@@ -155,7 +175,7 @@ async def quota_restant() -> Optional[int]:
     None = information indisponible. Utile en journal : dépasser le quota fait échouer
     toutes les publications suivantes sans autre explication qu'un code d'erreur.
     """
-    jeton, compte = _configure()
+    jeton, compte = await _configure()
     if not jeton or not compte:
         return None
     try:

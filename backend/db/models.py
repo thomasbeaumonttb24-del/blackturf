@@ -1354,3 +1354,32 @@ class NewsletterAbonne(Base):
     desinscrit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dernier_envoi_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     relance_confirmation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class JetonIntegration(Base):
+    """
+    Jeton d'accès d'un service tiers, déposé depuis l'administration.
+
+    Un jeton d'accès est un secret : quiconque le lit publie au nom de la marque. Il ne
+    doit donc transiter ni par un chat, ni par un historique de shell — d'où le dépôt
+    depuis une page d'admin, sur une connexion chiffrée, plutôt qu'un fichier .env édité
+    en SSH.
+
+    `expire_at` n'est pas décoratif : un jeton longue durée Instagram expire au bout de
+    60 jours. Sans renouvellement automatique, la publication s'arrêterait sans prévenir
+    deux mois après la mise en service, et personne ne s'en apercevrait avant des
+    semaines.
+    """
+    __tablename__ = "jetons_integration"
+
+    jeton_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    fournisseur: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    valeur: Mapped[str] = mapped_column(Text)
+    compte_id: Mapped[str | None] = mapped_column(String(64))
+    expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dernier_renouvellement_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    derniere_erreur: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

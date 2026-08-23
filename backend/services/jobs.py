@@ -569,6 +569,17 @@ def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    # Renouvellement des jetons d'integration — 04:20 Paris, tous les jours. Le job ne
+    # renouvelle qu'a l'approche de l'echeance ; passer tous les jours sert a absorber
+    # plusieurs echecs consecutifs avant que le jeton n'expire pour de bon.
+    scheduler.add_job(
+        job_renouveler_jetons,
+        CronTrigger(hour=4, minute=20, timezone="Europe/Paris"),
+        id="renouveler_jetons",
+        replace_existing=True,
+        misfire_grace_time=7200,
+    )
+
     scheduler.start()
     log.info("jobs.scheduler.started", nb_jobs=len(scheduler.get_jobs()))
 
@@ -676,3 +687,30 @@ async def job_publication_matin() -> None:
 
 async def job_publication_soir() -> None:
     await job_publication_reseaux("soir")
+
+
+async def job_renouveler_jetons() -> None:
+    """
+    Prolonge le jeton Instagram avant son expiration.
+
+    Un jeton longue durée Instagram vaut 60 jours. Sans ce job, la publication
+    s'arrêterait sans prévenir deux mois après la mise en service, et personne ne s'en
+    apercevrait avant des semaines. On passe tous les jours et on ne renouvelle qu'à
+    l'approche de l'échéance : Instagram refuse un renouvellement trop précoce.
+    """
+    from db.database import AsyncSessionLocal
+    from services.jetons import lire, renouveler_instagram, renouvellement_necessaire
+
+    try:
+        async with AsyncSessionLocal() as session:
+            jeton = await lire(session)
+            if jeton is None:
+                log.info("jobs.jetons.aucun_jeton")
+                return
+            if not renouvellement_necessaire(jeton):
+                log.info("jobs.jetons.pas_encore", expire_at=str(jeton.expire_at))
+                return
+            ok, raison = await renouveler_instagram(session)
+            log.info("jobs.jetons.renouvellement", ok=ok, raison=raison)
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.jetons.echec", err=str(e)[:200])
