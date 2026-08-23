@@ -1506,8 +1506,10 @@ async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
     seconde est append-only et sommer ses lignes compte plusieurs fois le même plan
     (45 points d'écart de ROI constatés le 2026-08-23).
 
-    Le jour se lit à Paris : en UTC, la journée bascule à 02 h heure française et
-    l'endpoint renverrait les plans de la veille pendant deux heures chaque nuit.
+    LE JOUR EST CELUI DU PMU, lu dans les 8 premiers caractères de `course_id`
+    (JJMMAAAA) — surtout pas `date_heure`. Une course courue à 22 h 50 UTC tombe après
+    minuit heure de Paris : filtrer sur l'horodatage la rattachait au lendemain, et le
+    visuel du 23 août affichait une course du 22 (constaté sur 22082026R8C10).
     """
     lignes = await db.execute(text("""
         SELECT s.course_id,
@@ -1518,8 +1520,8 @@ async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
         JOIN courses c ON c.course_id = s.course_id
         LEFT JOIN reunions r ON r.reunion_id = c.reunion_id
         LEFT JOIN hippodromes h ON h.hippodrome_id = r.hippodrome_id
-        WHERE (c.date_heure AT TIME ZONE 'Europe/Paris')::date
-              = (now() AT TIME ZONE 'Europe/Paris')::date
+        WHERE substring(s.course_id, 1, 8)
+              = to_char(now() AT TIME ZONE 'Europe/Paris', 'DDMMYYYY')
           AND s.net > 0
         ORDER BY s.net DESC
         LIMIT 20
@@ -1550,8 +1552,8 @@ async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
         SELECT COUNT(DISTINCT c.course_id) AS nb_courses,
                COUNT(DISTINCT c.reunion_id) AS nb_reunions
         FROM courses c
-        WHERE (c.date_heure AT TIME ZONE 'Europe/Paris')::date
-              = (now() AT TIME ZONE 'Europe/Paris')::date
+        WHERE substring(c.course_id, 1, 8)
+              = to_char(now() AT TIME ZONE 'Europe/Paris', 'DDMMYYYY')
     """))
     v = volume.mappings().first() or {}
 
