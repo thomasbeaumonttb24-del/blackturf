@@ -45,14 +45,21 @@ async def test_urls_d_un_autre_domaine_ecartees(monkeypatch):
     monkeypatch.setattr(indexnow.httpx, "AsyncClient", _Client)
 
     n = await indexnow.signaler([
+        "https://blackturf.fr",                # racine, SANS barre finale
         "https://blackturf.fr/programme",
         "https://exemple.fr/pirate",           # autre domaine
         "https://blackturf.fr/programme",      # doublon
         "http://blackturf.fr/non-https",       # pas https
+        "https://blackturf.fr.pirate.fr/x",    # préfixe trompeur
     ])
 
-    assert n == 1
-    assert envoye["payload"]["urlList"] == ["https://blackturf.fr/programme"]
+    # La racine s'écrit sans barre finale dans le sitemap. Un filtre qui exigeait le `/`
+    # l'écartait en silence : l'accueil n'était jamais signalé.
+    assert n == 2
+    assert envoye["payload"]["urlList"] == [
+        "https://blackturf.fr",
+        "https://blackturf.fr/programme",
+    ]
     assert envoye["payload"]["host"] == "blackturf.fr"
     assert envoye["payload"]["keyLocation"].endswith(".txt")
 

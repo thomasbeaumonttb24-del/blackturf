@@ -52,7 +52,14 @@ async def signaler(urls: Iterable[str]) -> int:
         log.info("indexnow.desactive")  # clé absente = fonction simplement inactive
         return 0
 
-    liste = [u for u in dict.fromkeys(urls) if u.startswith(f"https://{HOTE}/")][:MAX_URLS]
+    # Le filtre garde les URLs de CE domaine et rien d'autre — signaler l'URL d'un tiers
+    # ferait rejeter tout l'envoi. La racine s'écrit `https://blackturf.fr` SANS barre
+    # finale dans le sitemap : exiger le `/` l'écartait en silence, et l'accueil, la page
+    # la plus importante du site, n'était jamais signalée.
+    racine = f"https://{HOTE}"
+    liste = [
+        u for u in dict.fromkeys(urls) if u == racine or u.startswith(f"{racine}/")
+    ][:MAX_URLS]
     if not liste:
         return 0
 
