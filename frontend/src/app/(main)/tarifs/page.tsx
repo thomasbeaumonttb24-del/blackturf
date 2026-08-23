@@ -18,18 +18,63 @@ export const metadata: Metadata = {
   },
 };
 
+// `Product` faisait juger cette page comme une FICHE MARCHAND par Google (Search Console
+// la remontait en erreur) : ce balisage attend des frais de port, une politique de retour
+// et une disponibilité de stock, qui n'ont aucun sens pour un abonnement logiciel.
+// `SoftwareApplication` est le type prévu pour un service en ligne facturé à l'abonnement,
+// et reste éligible aux résultats enrichis.
 const offersJsonLd = {
   "@context": "https://schema.org",
-  "@type": "Product",
+  "@type": "SoftwareApplication",
   name: "BlackTurf — Conseiller IA paris hippiques PMU",
   description:
     "Pronostics et paris de valeur PMU par intelligence artificielle, plan de mise personnalisé.",
-  brand: { "@type": "Brand", name: "BlackTurf" },
+  applicationCategory: "SportsApplication",
+  operatingSystem: "Web",
+  url: "https://blackturf.fr",
+  inLanguage: "fr-FR",
+  author: { "@type": "Organization", name: "BlackTurf", url: "https://blackturf.fr" },
   offers: [
-    { "@type": "Offer", name: "Gratuit", price: "0", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
-    { "@type": "Offer", name: "Standard", price: "12", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
-    { "@type": "Offer", name: "Expert", price: "19", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", availability: "https://schema.org/InStock" },
+    { "@type": "Offer", name: "Gratuit", price: "0", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement mensuel" },
+    { "@type": "Offer", name: "Standard", price: "12", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement mensuel" },
+    { "@type": "Offer", name: "Expert", price: "19", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement mensuel" },
   ],
+};
+
+// Les questions affichées plus bas dans la page. Une seule source pour l'affichage et
+// pour le balisage : un FAQPage qui ne correspondrait pas au texte visible est une
+// violation des règles Google sur les données structurées.
+const FAQ = [
+  {
+    q: "Puis-je annuler à tout moment ?",
+    a: "Oui, sans frais ni condition. Votre abonnement reste actif jusqu'à la fin de la période.",
+  },
+  {
+    q: "Les prédictions sont-elles garanties ?",
+    a: "Non. BlackTurf est un outil d'aide à la décision basé sur l'IA. Les performances passées ne garantissent pas les résultats futurs.",
+  },
+  {
+    q: "Quelles sources de données utilisez-vous ?",
+    a: "PMU (données officielles), Geny, Letrot, Turfoo, météo OpenWeather. 10 sources agrégées en temps réel.",
+  },
+  {
+    q: "Comment fonctionne le modèle IA ?",
+    a: "Ensemble XGBoost (50%) + LightGBM (30%) + CatBoost (20%). 80+ features par partant. Brier Score < 0.18. Walk-forward validation 6 fenêtres. Retraining automatique nightly.",
+  },
+  {
+    q: "Qu'est-ce que le Calculateur de mise ?",
+    a: "Entrez votre mise → BlackTurf génère un plan personnalisé en 3 niveaux (sécurité, rendement, coup) selon votre profil de risque et les prédictions IA du jour.",
+  },
+];
+
+const faqJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ.map((item) => ({
+    "@type": "Question",
+    name: item.q,
+    acceptedAnswer: { "@type": "Answer", text: item.a },
+  })),
 };
 
 // Une cellule vaut true (✓), false (✗) ou une CHAÎNE quand la différence entre
@@ -60,6 +105,7 @@ export default function TarifsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-10 sm:py-16">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(offersJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
       {/* Header */}
       <div className="text-center mb-10 sm:mb-16">
         <Badge variant="gold" className="mb-4">Tarifs</Badge>
@@ -240,28 +286,7 @@ export default function TarifsPage() {
       <div className="max-w-2xl mx-auto text-center">
         <h2 className="text-xl sm:text-2xl font-bold mb-6 sm:mb-8">Questions fréquentes</h2>
         <div className="space-y-6 text-left">
-          {[
-            {
-              q: "Puis-je annuler à tout moment ?",
-              a: "Oui, sans frais ni condition. Votre abonnement reste actif jusqu'à la fin de la période.",
-            },
-            {
-              q: "Les prédictions sont-elles garanties ?",
-              a: "Non. BlackTurf est un outil d'aide à la décision basé sur l'IA. Les performances passées ne garantissent pas les résultats futurs.",
-            },
-            {
-              q: "Quelles sources de données utilisez-vous ?",
-              a: "PMU (données officielles), Geny, Letrot, Turfoo, météo OpenWeather. 10 sources agrégées en temps réel.",
-            },
-            {
-              q: "Comment fonctionne le modèle IA ?",
-              a: "Ensemble XGBoost (50%) + LightGBM (30%) + CatBoost (20%). 80+ features par partant. Brier Score < 0.18. Walk-forward validation 6 fenêtres. Retraining automatique nightly.",
-            },
-            {
-              q: "Qu'est-ce que le Calculateur de mise ?",
-              a: "Entrez votre mise → BlackTurf génère un plan personnalisé en 3 niveaux (sécurité, rendement, coup) selon votre profil de risque et les prédictions IA du jour.",
-            },
-          ].map((item) => (
+          {FAQ.map((item) => (
             <div key={item.q} className="rounded-lg border border-border p-4">
               <h3 className="font-semibold mb-2">{item.q}</h3>
               <p className="text-sm text-muted-foreground">{item.a}</p>

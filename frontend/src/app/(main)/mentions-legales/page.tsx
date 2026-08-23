@@ -1,7 +1,7 @@
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Mentions légales — BlackTurf",
+  title: "Mentions légales",
   description: "Mentions légales de la plateforme BlackTurf",
   alternates: { canonical: "/mentions-legales" },
 };

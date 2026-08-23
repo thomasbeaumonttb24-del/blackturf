@@ -1,7 +1,7 @@
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Conditions Générales de Vente — BlackTurf",
+  title: "Conditions Générales de Vente",
   description: "Conditions Générales de Vente des abonnements BlackTurf",
   alternates: { canonical: "/cgv" },
 };

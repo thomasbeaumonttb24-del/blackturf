@@ -1,7 +1,7 @@
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Politique de confidentialité — BlackTurf",
+  title: "Politique de confidentialité",
   description: "Politique de confidentialité et traitement des données personnelles — BlackTurf",
   alternates: { canonical: "/confidentialite" },
 };

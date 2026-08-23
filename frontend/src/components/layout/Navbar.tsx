@@ -15,9 +15,10 @@ import { planLabel, cn } from "@/lib/utils";
 
 const NAV_LINKS_PUBLIC = [
   { href: "/programme", label: "Programme" },
+  { href: "/quinte-du-jour", label: "Quinté+" },
+  { href: "/resultats", label: "Résultats" },
   { href: "/value-bets", label: "Paris de valeur" },
   { href: "/track-record", label: "Palmarès" },
-  { href: "/bankroll", label: "Capital" },
   { href: "/assistant", label: "Assistant IA" },
   { href: "/tarifs", label: "Tarifs" },
 ];
