@@ -4,6 +4,9 @@ export const metadata: Metadata = {
   title: "Conditions Générales d’Utilisation",
   description: "CGU de la plateforme BlackTurf — conditions d'utilisation du service",
   alternates: { canonical: "/cgu" },
+  // Sans og:title propre, la page héritait de celui de la racine — deux sources de
+  // titre contradictoires, que Google ne sait pas départager.
+  openGraph: { title: "Conditions Générales d’Utilisation — BlackTurf", url: "https://blackturf.fr/cgu" },
 };
 
 export default function CguPage() {

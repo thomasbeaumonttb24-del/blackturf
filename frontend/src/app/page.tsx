@@ -200,21 +200,10 @@ export default async function HomePage() {
   const fmtPct = (x: number | null, dec = 1) => (x == null ? "—" : `${x.toFixed(dec).replace(".", ",")}%`);
   const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString("fr-FR"));
   const FAQ = buildFaq(tr);
-  // FAQPage : le balisage reprend mot pour mot les questions/réponses affichées.
-  const faqJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: FAQ.map((f) => ({
-      "@type": "Question",
-      name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.r },
-    })),
-  };
 
   return (
     <div className="flex flex-col min-h-screen bg-brand-warm">
       <Navbar />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
 
       {/* ═══════════ HERO (image plein cadre + dynamisme, style palmarès) ═══════════ */}
       <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">

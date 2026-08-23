@@ -5,6 +5,9 @@ export const metadata: Metadata = {
   description:
     "Conditions Générales de Vente des abonnements BlackTurf : formules, durée, résiliation, droit de rétractation et facturation.",
   alternates: { canonical: "/cgv" },
+  // Sans og:title propre, la page héritait de celui de la racine — deux sources de
+  // titre contradictoires, que Google ne sait pas départager.
+  openGraph: { title: "Conditions Générales de Vente — BlackTurf", url: "https://blackturf.fr/cgv" },
 };
 
 export default function CGVPage() {

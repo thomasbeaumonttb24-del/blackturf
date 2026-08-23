@@ -4,6 +4,9 @@ export const metadata: Metadata = {
   title: "Politique de confidentialité",
   description: "Politique de confidentialité et traitement des données personnelles — BlackTurf",
   alternates: { canonical: "/confidentialite" },
+  // Sans og:title propre, la page héritait de celui de la racine — deux sources de
+  // titre contradictoires, que Google ne sait pas départager.
+  openGraph: { title: "Politique de confidentialité — BlackTurf", url: "https://blackturf.fr/confidentialite" },
 };
 
 export default function ConfidentialitePage() {

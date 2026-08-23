@@ -9,7 +9,7 @@ import { CheckoutButton } from "@/components/billing/CheckoutButton";
 export const metadata: Metadata = {
   title: "Tarifs — Gratuit, Standard, Expert",
   description:
-    "Les formules BlackTurf : Gratuit (programme + cotes), Standard 12€/mois (prédictions IA + paris de valeur + calculateur de mise) et Expert 19€/mois. Sans engagement.",
+    "Trois formules : Gratuit (programme et cotes), Standard 12 €/mois, Expert 19 €/mois. Sans engagement, 7 jours d'essai.",
   alternates: { canonical: "/tarifs" },
   openGraph: {
     title: "Tarifs BlackTurf — Gratuit, Standard, Expert",
