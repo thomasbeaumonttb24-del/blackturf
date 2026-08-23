@@ -647,6 +647,15 @@ DELTA_CLASSEMENT_REDUCE_PCT = -10.0
 # Nombre minimal de courses derrière la référence classement avant d'en tirer une
 # décision — même exigence de fiabilité que pour un segment.
 MIN_BASELINE_COURSES = MIN_SEGMENT_OBS
+# Avantage de la RÉFÉRENCE classement au-dessus duquel le type est jugé VIABLE :
+# suivre bêtement le classement y bat déjà le prélèvement. Un tel type ne doit pas
+# être éteint pour cause de mauvaise sélection — l'éteindre interdit la correction
+# qu'il appelle. Mesure du 2026-08-23 : le Couplé Placé sort à −32,2 % de ROI avec
+# le moteur (avantage −9,2 → suspendu par l'ancienne règle) mais à −10,3 % joué sur
+# les 2 premiers du classement, soit +12,7 points d'avantage : c'est le MEILLEUR
+# pool du système, et il était coupé. À l'inverse le Trio (référence à −6,2) et le
+# 2sur4 (−5,8) ne passent pas ce test : eux restent suspendus.
+BASELINE_EDGE_VIABLE_PCT = 0.0
 
 
 def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
@@ -664,7 +673,22 @@ def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
         streak_max = m.get("losing_streak_max")
         baseline = m.get("baseline_classement") or {}
         delta = m.get("delta_vs_classement_pct")
-        if m.get("reliable") and edge is not None and edge <= EDGE_SUSPEND_THRESHOLD_PCT:
+        # Le type est-il viable QUAND ON SUIT SIMPLEMENT LE CLASSEMENT ? Si oui, un
+        # mauvais résultat vient de la sélection, pas du pari : on réduit, on ne coupe
+        # pas — couper interdirait la correction que la mesure appelle.
+        baseline_viable = (
+            (baseline.get("n_courses") or 0) >= MIN_BASELINE_COURSES
+            and baseline.get("edge_pct") is not None
+            and baseline["edge_pct"] > BASELINE_EDGE_VIABLE_PCT
+        )
+        if (m.get("reliable") and baseline_viable and delta is not None
+                and delta <= DELTA_CLASSEMENT_REDUCE_PCT):
+            status, factor = "reduced", REDUCE_FACTOR
+            reason = (f"type VIABLE sur le classement (référence {baseline['roi_pct']}%, "
+                      f"avantage {baseline['edge_pct']} pts sur {baseline['n_courses']} courses) "
+                      f"mais sélection {delta} pts en dessous — le pari n'est pas en cause, "
+                      f"le choix des chevaux l'est")
+        elif m.get("reliable") and edge is not None and edge <= EDGE_SUSPEND_THRESHOLD_PCT:
             status, factor = "suspended", 0.0
             reason = (f"avantage={edge} pts <= {EDGE_SUSPEND_THRESHOLD_PCT} "
                       f"(roi_pct={m.get('roi_pct')}, prélèvement={m.get('prelevement_pct')}%, "
@@ -675,14 +699,6 @@ def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
             status, factor = "suspended", 0.0
             reason = (f"prélèvement inconnu, repli roi_pct={m['roi_pct']} "
                       f"<= {ROI_SUSPEND_THRESHOLD_PCT} (n={m['n_paris']})")
-        elif (m.get("reliable") and delta is not None
-              and delta <= DELTA_CLASSEMENT_REDUCE_PCT
-              and (baseline.get("n_courses") or 0) >= MIN_BASELINE_COURSES):
-            # Le type n'est pas le problème : c'est le choix des chevaux qui coûte.
-            status, factor = "reduced", REDUCE_FACTOR
-            reason = (f"sélection {delta} pts sous le simple suivi du classement "
-                      f"(moteur {m.get('roi_pct')}% vs classement {baseline.get('roi_pct')}% "
-                      f"sur {baseline.get('n_courses')} courses)")
         elif (streak_att and streak_max is not None
               and streak_max > DRAWDOWN_TOLERANCE_FACTOR * streak_att
               and not (edge is not None and edge > 0)):

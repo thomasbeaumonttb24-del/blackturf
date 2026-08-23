@@ -514,3 +514,18 @@ def test_gate_ignore_une_reference_classement_trop_courte():
     }}}
     gates = bpp.evaluate_segment_gates(perf)
     assert gates["Trio"]["status"] == "active"
+
+
+def test_gate_ne_ressuscite_pas_un_type_dont_la_reference_perd_aussi():
+    """Valeurs du 2026-08-23 : le Trio est 12 pts sous sa référence classement, mais
+    cette référence perd elle-même (avantage −6,2) — le type reste suspendu. Seul un
+    type viable EN SUIVANT LE CLASSEMENT échappe à la suspension."""
+    perf = {"segments": {"Trio": {
+        "reliable": True, "roi_pct": -43.4, "prelevement_pct": 25.0, "edge_pct": -18.4,
+        "n_paris": 3755, "n_plans": 3000,
+        "baseline_classement": {"roi_pct": -31.2, "edge_pct": -6.2, "n_courses": 205},
+        "delta_vs_classement_pct": -12.2,
+    }}}
+    gates = bpp.evaluate_segment_gates(perf)
+    assert gates["Trio"]["status"] == "suspended"
+    assert gates["Trio"]["factor"] == 0.0
