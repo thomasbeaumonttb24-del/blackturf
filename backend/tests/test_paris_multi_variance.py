@@ -233,25 +233,53 @@ class TestTicketsAppoint:
             (x["proba_gain"], x["rapport_estime"]) for x in ordre]
         assert len(ordre) == 3 and len({id(x) for x in ordre}) == 3
 
+    CHAMP_LARGE = [(0.16, 5.5), (0.14, 6.5), (0.12, 8.0), (0.10, 11.0), (0.09, 13.0),
+                   (0.08, 15.0), (0.07, 18.0), (0.06, 22.0), (0.05, 28.0), (0.04, 35.0),
+                   (0.04, 42.0), (0.03, 55.0), (0.03, 70.0), (0.02, 90.0)]
+
+    def _champ(self):
+        return [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
+                 "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
+                 "cote_pmu": c, "non_partant": False}
+                for i, (p, c) in enumerate(self.CHAMP_LARGE)]
+
     def test_risque_grand_champ_propose_plusieurs_paris(self):
-        """En risqué la cible ×10 est atteignable à 2€ dès un rapport ≥50 : le grand
-        champ fournit ces rapports, donc plusieurs tickets DANS la tranche."""
-        rows = [(0.16, 5.5), (0.14, 6.5), (0.12, 8.0), (0.10, 11.0), (0.09, 13.0),
-                (0.08, 15.0), (0.07, 18.0), (0.06, 22.0), (0.05, 28.0), (0.04, 35.0),
-                (0.04, 42.0), (0.03, 55.0), (0.03, 70.0), (0.02, 90.0)]
-        champ = [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
-                  "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
-                  "cote_pmu": c, "non_partant": False}
-                 for i, (p, c) in enumerate(rows)]
-        course = dict(self.COURSE, nb_partants=len(rows))
-        d = plan_to_dict(generer_plan(10, "agressif", champ, course,
+        """Plusieurs tickets DANS la tranche, tous ancrés sur les 2 premiers prédits.
+
+        Le nombre de tickets dépend du budget, pas seulement du champ : la cible ×10
+        du risqué impose `mise ≥ cible / rapport`, et une combinaison ANCRÉE sur les
+        2 premiers paie moins qu'un trio d'outsiders — donc coûte plus cher par ticket.
+        C'est le prix assumé de l'ancrage : mesure du 2026-08-23 (winsorisée), un Trio
+        contenant les 2 premiers prédits rend −8,1 % contre −75,5 % sans. Trois tickets
+        d'outsiders à 2€ étaient trois façons de perdre.
+        """
+        champ = self._champ()
+        course = dict(self.COURSE, nb_partants=len(self.CHAMP_LARGE))
+        for montant, mini in ((10, 2), (30, 3)):
+            d = plan_to_dict(generer_plan(montant, "agressif", champ, course,
+                                          respect_montant=True))
+            paris = [p for niv in d["niveaux"] for p in niv["paris"]]
+            assert len(paris) >= mini, (
+                f"grand champ risqué {montant}€ : seulement {len(paris)} pari(s)")
+            assert sum(p["mise"] for p in paris) == montant
+            for p in paris:
+                assert p["gain_potentiel"] >= montant * 10 * 0.95, (
+                    f"{p['type']} rend {p['gain_potentiel']}€ < ×10 du plan")
+
+    def test_risque_etale_plusieurs_combinaisons_sur_la_meme_ancre(self):
+        """Deux combinaisons ancrées ne diffèrent que par leur pied libre : c'est la
+        structure voulue, pas un doublon. La règle anti-doublon « ne diffèrent que d'un
+        cheval » ne doit donc pas les confondre, sinon le risqué retombe à un ticket."""
+        champ = self._champ()
+        course = dict(self.COURSE, nb_partants=len(self.CHAMP_LARGE))
+        d = plan_to_dict(generer_plan(30, "agressif", champ, course,
                                       respect_montant=True))
-        paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        assert len(paris) >= 3, f"grand champ risqué : seulement {len(paris)} pari(s)"
-        assert sum(p["mise"] for p in paris) == 10
-        for p in paris:
-            assert p["gain_potentiel"] >= 10 * 10 * 0.95, (
-                f"{p['type']} rend {p['gain_potentiel']}€ < ×10 du plan")
+        combos = [p for niv in d["niveaux"] for p in niv["paris"]
+                  if len(p["chevaux"]) >= 2]
+        assert len(combos) >= 2, f"une seule combinaison : {combos}"
+        # Même appui (les 2 premiers prédits), pieds libres différents.
+        libres = {tuple(sorted(c["numero"] for c in p["chevaux"])) for p in combos}
+        assert len(libres) == len(combos), "combinaisons identiques"
 
     def test_plafond_de_rang_suit_le_classement(self):
         """Le plan doit se correler au CLASSEMENT de l'IA (demande user 2026-08-20).
@@ -456,3 +484,83 @@ class TestHelpers:
         assert not _is_high_variance({"type_pari": "Multi en 7"})
         assert not _is_high_variance({"type_pari": "Mini Multi en 6"})
         assert not _is_high_variance({"type_pari": "Couplé Placé"})
+
+
+# ── Ancrage des combinaisons sur les 2 premiers du classement ────────────────
+
+class TestAncrageTop2:
+    """Mesure du 2026-08-23 sur les conseils réglés (winsorisée à 50× la mise) :
+
+        Couplé Gagnant  avec les 2 premiers prédits : 13,8 % de réussite, ROI  +0,5 %
+                        sans                        :  3,8 %,             ROI −13,9 %
+        Trio            avec                        :  3,7 %,             ROI  −8,1 %
+                        sans                        :  0,7 %,             ROI −75,5 %
+
+    Le plafond de rang borne le PIRE cheval ; l'ancrage impose un POINT D'APPUI. C'est
+    le second qui décide du rendement."""
+
+    COURSE = {"course_id": "T1", "nb_partants": 12, "discipline": "Attelé"}
+
+    def test_le_filtre_ne_garde_que_les_combinaisons_ancrees(self):
+        from services.mise_calculator import _filtrer_ancrage_top2
+        simple = {"chevaux": [{"numero": 1}]}
+        ancre = {"chevaux": [{"numero": 1}, {"numero": 2}], "_ancre_top2": True}
+        libre = {"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre_top2": False}
+        out = _filtrer_ancrage_top2([simple, ancre, libre], {"ancrage_top2": True})
+        assert out == [simple, ancre]           # le simple n'est jamais touché
+
+    def test_repli_total_si_aucune_combinaison_ancree(self):
+        """Promesse produit : un plan sur CHAQUE course. Sans candidat ancré, on ne
+        prive de rien — la liste revient telle quelle."""
+        from services.mise_calculator import _filtrer_ancrage_top2
+        libres = [{"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre_top2": False},
+                  {"chevaux": [{"numero": 5}, {"numero": 6}], "_ancre_top2": False}]
+        assert _filtrer_ancrage_top2(list(libres), {"ancrage_top2": True}) == libres
+
+    def test_desactivable_par_profil(self):
+        from services.mise_calculator import _filtrer_ancrage_top2
+        cands = [{"chevaux": [{"numero": 1}, {"numero": 2}], "_ancre_top2": True},
+                 {"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre_top2": False}]
+        assert _filtrer_ancrage_top2(list(cands), {"ancrage_top2": False}) == cands
+
+    def test_les_trois_profils_ancrent_par_defaut(self):
+        from services.mise_calculator import PROFIL_CONFIG, _effective_config
+        for profil in PROFIL_CONFIG:
+            assert _effective_config(profil, 0.0)["ancrage_top2"] is True
+
+    def test_les_combinaisons_du_plan_contiennent_les_deux_premiers(self):
+        champ = _field(12)
+        rang = {int(p["numero"]): i for i, p in enumerate(
+            sorted(champ, key=lambda x: float(x["proba_top1"]), reverse=True), start=1)}
+        top2 = {n for n, r in rang.items() if r <= 2}
+        for profil in ("conservateur", "equilibre", "agressif"):
+            d = plan_to_dict(generer_plan(30, profil, champ, self.COURSE,
+                                          respect_montant=True))
+            for niv in d["niveaux"]:
+                for p in niv["paris"]:
+                    nums = {c["numero"] for c in p["chevaux"]}
+                    if len(nums) >= 2:
+                        assert top2 <= nums, (
+                            f"{profil} : {p['type']} {sorted(nums)} sans appui "
+                            f"sur les 2 premiers {sorted(top2)}")
+
+    def test_le_pied_libre_rentable_prime_sur_le_troisieme_favori(self):
+        """Mesure du 2026-08-23 (winsorisée) sur les trios ancrés, par rang du 3ᵉ pied :
+        rang 3 → −80 % de ROI, rangs 4-5 → −21 %, rangs 6-8 → +92 %, rang 9+ → −100 %.
+        À rapport et probabilité IDENTIQUES, le classement doit donc préférer le pied
+        libre au rang 6-8 au 3ᵉ favori."""
+        from services.mise_calculator import _select_conviction, _effective_config
+
+        def _cand(numero_libre, rang_libre):
+            return {"type_pari": "Trio",
+                    "chevaux": [{"numero": 1}, {"numero": 2}, {"numero": numero_libre}],
+                    "proba_gain": 0.02, "rapport_estime": 40.0, "ev": 0.0, "edge": 0.0,
+                    "_ancre_top2": True, "_ancre_nums": frozenset({1, 2}),
+                    "_rang_hors_ancre": rang_libre, "_rang_max": rang_libre}
+
+        palier = {"nom": "petit", "max_bets": 3, "min_stake": 3,
+                  "favor_value": True, "cap_spec": 0.6}
+        ordre = _select_conviction([_cand(3, 3), _cand(7, 7)], 30, palier,
+                                   _effective_config("agressif", 0.0), {})
+        assert ordre and ordre[0]["_rang_hors_ancre"] == 7, (
+            "le 3ᵉ pied au rang 6-8 doit primer sur le 3ᵉ favori")

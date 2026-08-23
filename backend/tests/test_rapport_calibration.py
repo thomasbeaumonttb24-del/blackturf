@@ -185,18 +185,34 @@ class TestCalibrationAppliquee:
             assert g <= gmax + 0.1, f"calib: {t} gain ×{g:.2f} du total au-dessus bande {gmax}"
 
     def test_calibration_baisse_le_gain_affiche(self):
-        """Le gain affiché reflète le rapport CORRIGÉ : avec un facteur < 1 sur le type
-        sélectionné, le rapport effectif d'au moins un pari baisse vs sans calibration."""
-        plan_sans = plan_to_dict(generer_plan(20, "agressif", _field(10), COURSE,
+        """Le gain affiché reflète le rapport CORRIGÉ.
+
+        Comparé PARI PAR PARI (type + chevaux), pas sur le maximum du plan : la
+        calibration change aussi QUELS paris passent les gates, donc deux plans n'ont
+        aucune raison d'aligner leurs extrêmes. Sur un pari présent dans les deux, en
+        revanche, le rapport corrigé doit valoir le facteur × le rapport brut.
+        """
+        def _par_pari(plan_d):
+            return {(p["type"], tuple(sorted(c["numero"] for c in p["chevaux"]))):
+                    p["gain_potentiel"] / p["mise"]
+                    for niv in plan_d["niveaux"] for p in niv["paris"] if p["mise"] > 0}
+
+        types_eq = list(PROFIL_CONFIG["equilibre"]["types"])
+        plan_sans = plan_to_dict(generer_plan(20, "equilibre", _field(10), COURSE,
                                               respect_montant=True))
-        types_ag = list(PROFIL_CONFIG["agressif"]["types"])
-        calib = {"profils": {"agressif": {t: {"factor": 0.6} for t in types_ag}}}
-        plan_avec = plan_to_dict(generer_plan(20, "agressif", _field(10), COURSE,
-                                              respect_montant=True, rapport_calib=calib))
-        max_sans = max((r for _, r in _rapports_selectionnes(plan_sans)), default=0)
-        max_avec = max((r for _, r in _rapports_selectionnes(plan_avec)), default=0)
-        # le plus gros rapport corrigé ne peut pas dépasser le plus gros brut
-        assert max_avec <= max_sans + 0.5
+        sans = _par_pari(plan_sans)
+        for facteur in (0.9, 0.8, 0.6):
+            calib = {"profils": {"equilibre": {t: {"factor": facteur} for t in types_eq}}}
+            avec = _par_pari(plan_to_dict(generer_plan(
+                20, "equilibre", _field(10), COURSE,
+                respect_montant=True, rapport_calib=calib)))
+            communs = set(sans) & set(avec)
+            assert communs, f"facteur {facteur} : aucun pari commun aux deux plans"
+            for cle in communs:
+                # arrondis en cascade (rapport arrondi à 0.1, mise entière) → 10 % de marge
+                assert avec[cle] <= sans[cle] * facteur * 1.10 + 0.5, (
+                    f"{cle} (facteur {facteur}) : rapport corrigé {avec[cle]:.1f} "
+                    f"vs brut {sans[cle]:.1f}")
 
     def test_neutre_si_calib_vide(self):
         """rapport_calib vide → plan identique au plan sans calibration (cold-start sûr)."""

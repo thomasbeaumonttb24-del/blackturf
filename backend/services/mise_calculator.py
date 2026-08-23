@@ -391,6 +391,10 @@ def _effective_config(profil: str, heat: float) -> dict:
         # (le classement ne devient pas moins fiable quand le modèle est « chaud »)
         # → NON modulé par le heat.
         "rang_max": base.get("rang_max"),
+        # Ancrage des combinaisons sur les 2 premiers du classement (cf.
+        # _filtrer_ancrage_top2). Contrat produit mesuré → NON modulé par le heat :
+        # un modèle « chaud » ne rend pas un couplé non ancré rentable.
+        "ancrage_top2": base.get("ancrage_top2", True),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -502,11 +506,26 @@ def generer_plan(
     cands = enumerate_bet_candidates(preds, course_info)
     if not cands:
         return _plan_vide(montant, profil)
+    # Les deux premiers du classement : le point d'appui des combinaisons
+    # (cf. _filtrer_ancrage_top2 — 14 à 67 points de ROI selon le type).
+    _top2 = {n for n, r in _rang_par_num.items() if r <= 2}
     for c in cands:
         _rgs = [_rang_par_num.get(int(h["numero"])) for h in c.get("chevaux", [])
                 if h.get("numero") is not None]
         _rgs = [r for r in _rgs if r]
         c["_rang_max"] = max(_rgs) if _rgs else None
+        _nums = {int(h["numero"]) for h in c.get("chevaux", [])
+                 if h.get("numero") is not None}
+        c["_ancre_top2"] = len(_top2) == 2 and _top2.issubset(_nums)
+        c["_ancre_nums"] = frozenset(_top2) if len(_top2) == 2 else frozenset()
+        # Rang du meilleur pied HORS ancre : sur un Trio ancré, c'est lui qui fait le
+        # rapport. Mesure du 2026-08-23 (winsorisée) : 3ᵉ pied au rang 3 → −80 % de ROI
+        # (le 3ᵉ favori écrase le rapport sans rien garantir), rangs 4-5 → −21 %,
+        # rangs 6-8 → +92 % (n=388), rang 9+ → −100 %. Le bon 3ᵉ pied est un outsider
+        # que le modèle croit encore, pas le favori suivant.
+        _hors = [r for n, r in ((n, _rang_par_num.get(n)) for n in _nums)
+                 if r and n not in _top2]
+        c["_rang_hors_ancre"] = min(_hors) if _hors else None
     if ci_width_by_num:
         for c in cands:
             c["_ci_width"] = max(
@@ -821,11 +840,17 @@ def _couvre_deja(b: dict, deja: list[dict]) -> bool:
     déjà joué. Même règle de doublon que la sélection : même combinaison, combo du même
     type ne différant que d'un cheval, ou recouvrement ≥ 67 %."""
     hs = _chevaux_set(b)
+    ancre = frozenset(b.get("_ancre_nums") or ())
     for s in deja:
         ss = _chevaux_set(s)
         if hs == ss:
             return True
         if s.get("type_pari") != b.get("type_pari"):
+            continue
+        # Deux combos ancrés sur les 2 premiers du classement partagent leur appui par
+        # CONSTRUCTION : ce qui les distingue est le pied libre. Même exception qu'à la
+        # sélection, sinon un seul trio ancré peut être financé par course.
+        if b.get("_ancre_top2") and ancre and ancre <= ss:
             continue
         inter = len(hs & ss)
         if len(hs) >= 3 and inter >= max(len(hs), len(ss)) - 1:
@@ -1161,6 +1186,47 @@ def _bet_cote_max(c: dict) -> float:
     return max(cotes) if cotes else 0.0
 
 
+# ─────────────────────────────────────────────────────────────
+# ANCRAGE SUR LES DEUX PREMIERS DU CLASSEMENT
+# ─────────────────────────────────────────────────────────────
+# Le plafond de rang (`rang_max`) borne le PIRE cheval d'un pari. C'est un plafond,
+# pas un point d'appui — et la mesure dit que c'est le point d'appui qui rapporte.
+#
+# Mesure du 2026-08-23 sur les conseils réglés (gains winsorisés à 50× la mise, donc
+# aucun rapport isolé ne raconte l'histoire) :
+#
+#   Couplé Gagnant  contenant les 2 premiers prédits : 13,8 % de réussite, ROI  +0,5 %
+#                   sans                              :  3,8 %,             ROI −13,9 %
+#   Trio            contenant les 2 premiers prédits :  3,7 %,             ROI  −8,1 %
+#                   sans                              :  0,7 %,             ROI −75,5 %
+#
+# 14 points d'écart sur le couplé gagnant, 67 sur le trio. Un Couplé Gagnant ancré
+# rend +0,5 % sur un pool qui prélève 23 % : c'est le seul pari du catalogue qui
+# batte franchement sa maison. Le moteur ne le jouait que dans 11 % de ses couplés.
+#
+# La règle : parmi les combinaisons qui ONT DÉJÀ PASSÉ les gates du profil (bande de
+# rapport comprise — on ne contourne jamais le contrat de tranche), on ne garde que
+# celles ancrées sur les deux premiers prédits. S'il n'y en a AUCUNE, on garde tout :
+# la promesse d'un plan sur chaque course reste intacte.
+def _filtrer_ancrage_top2(ranked: list[dict], cfg: dict) -> list[dict]:
+    """Ne conserve que les combinaisons ancrées sur les 2 premiers du classement.
+
+    Les paris à un seul cheval ne sont jamais touchés (il n'y a pas d'ancrage à
+    faire) et le repli est total : sans candidat ancré, la liste revient inchangée.
+    """
+    if not ranked or not cfg.get("ancrage_top2", True):
+        return ranked
+    combos = [c for c in ranked if len(c.get("chevaux", [])) >= 2]
+    if not combos:
+        return ranked
+    ancres = [c for c in combos if c.get("_ancre_top2")]
+    if not ancres:
+        return ranked                      # aucune combinaison ancrée → on ne prive de rien
+    garde = {id(c) for c in ancres}
+    return [c for c in ranked
+            if len(c.get("chevaux", [])) < 2 or id(c) in garde]
+
+
 def _select_conviction(
     cands: list[dict], montant: int, palier: dict, cfg: dict, roi_weights: dict,
     signal_mults: Optional[dict] = None, respect_montant: bool = False,
@@ -1240,6 +1306,28 @@ def _select_conviction(
         except Exception:
             return 1.0
 
+    def anc_factor(c):
+        """Qualité MESURÉE du pied hors ancre d'une combinaison ancrée sur le top-2.
+
+        Sur un Trio ancré, c'est le 3ᵉ cheval qui fait le rapport. Mesure du
+        2026-08-23 (winsorisée à 50×) : rang 3 → −80 % de ROI, rangs 4-5 → −21 %,
+        rangs 6-8 → +92 %, rang 9+ → −100 %. Prendre le 3ᵉ favori écrase le rapport
+        sans rien garantir ; le pied qui paie est l'outsider que le modèle croit
+        encore. Neutre sur les paris non ancrés et sur les paris à 2 chevaux (pas de
+        pied libre)."""
+        if not c.get("_ancre_top2"):
+            return 1.0
+        r = c.get("_rang_hors_ancre")
+        if r is None:
+            return 1.0
+        if r == 3:
+            return 0.70
+        if r <= 5:
+            return 1.0
+        if r <= 8:
+            return 1.25
+        return 0.70
+
     def conviction(c):
         """Classement selon l'OBJECTIF du profil (× ROI réel passé du type × signal ×
         ROI réel de la bande d'EV × ROI réel de la TRANCHE DE RAPPORT).
@@ -1248,7 +1336,7 @@ def _select_conviction(
         y décroît continûment (Simple Gagnant −1,7 % en ×4-8 contre −15,4 % au-delà
         de ×15, sur des milliers de paris). La bande d'EV, elle, ne trie rien.
         """
-        rw = (roi_w(c) * sig_factor(c) * evb(c)
+        rw = (roi_w(c) * sig_factor(c) * evb(c) * anc_factor(c)
               * float(c.get("_pb_mult", 1.0) or 1.0))
         if objectif == "proba":
             # PRUDENT : MAX de victoires DANS la contrainte ≥1.8× (le rapport_min 1.8 garantit
@@ -1374,6 +1462,7 @@ def _select_conviction(
     # sécurité (dyn_ceil) + dédoublonnage (pas de quasi-doublons) + quota de tickets
     # purement spéculatifs (max_coup) pour la renta long terme.
     ranked = [c for c in sorted(cands, key=conviction, reverse=True) if passes_gates(c)]
+    ranked = _filtrer_ancrage_top2(ranked, cfg)
     if pool_out is not None:
         pool_out[:] = ranked
     keep_frac = float(cfg.get("keep_frac", 0.5))
@@ -1392,6 +1481,7 @@ def _select_conviction(
             if conviction(c) < keep_frac * best_conv:
                 break
             hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+            _ancre_nums = frozenset(c.get("_ancre_nums") or ())
             # Dédup : même combinaison déjà prise, OU combo de MÊME type qui ne diffère
             # que d'1 cheval (ex. Trio 6-4-8 vs 6-4-3 : corrélés, pas une vraie
             # couverture → un seul), OU fort recouvrement (≥67%).
@@ -1401,6 +1491,13 @@ def _select_conviction(
                 if t != c["type_pari"]:
                     return False
                 inter = len(hs & s)
+                # Deux combos ANCRÉS sur les 2 premiers ne diffèrent que par leur pied
+                # libre : c'est la structure VOULUE (même appui mesuré comme rentable,
+                # rapports différents), pas un faux doublon. Sans cette exception, la
+                # règle « ne diffèrent que d'1 cheval » ne laissait qu'UN seul trio
+                # ancré et vidait le spectre du profil risqué.
+                if c.get("_ancre_top2") and s >= _ancre_nums and _ancre_nums:
+                    return False
                 if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
                     return True                          # combos qui ne diffèrent que d'1 cheval
                 return inter / max(len(hs | s), 1) >= 0.67
@@ -1545,20 +1642,31 @@ def _select_conviction(
             _type_counts: dict[str, int] = {}
             for s in selected:
                 _type_counts[_fam(s["type_pari"])] = _type_counts.get(_fam(s["type_pari"]), 0) + 1
-            for c in sorted(cands, key=conviction, reverse=True):
+            # Le complément puise dans les candidats BRUTS : il doit donc repasser par
+            # l'ancrage, sinon il réintroduit exactement les combinaisons que la
+            # sélection vient d'écarter (mesuré −13,9 % sur le couplé gagnant non ancré,
+            # −75,5 % sur le trio non ancré).
+            _complement = _filtrer_ancrage_top2(
+                [c for c in sorted(cands, key=conviction, reverse=True) if _relaxed_ok(c)],
+                cfg)
+            for c in _complement:
                 if len(selected) >= need_bets:
                     break
-                if any(c is s for s in selected) or not _relaxed_ok(c):
+                if any(c is s for s in selected):
                     continue
                 if _type_counts.get(_fam(c["type_pari"]), 0) >= 3:
                     continue
                 hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+                _ancre_nums = frozenset(c.get("_ancre_nums") or ())
                 dup = False
                 for s, t in seen:
                     if hs == s:
                         dup = True
                         break
                     if t != c["type_pari"]:
+                        continue
+                    # Même appui, pied libre différent = structure voulue (cf. sélection).
+                    if c.get("_ancre_top2") and _ancre_nums and _ancre_nums <= s:
                         continue
                     inter = len(hs & s)
                     if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
