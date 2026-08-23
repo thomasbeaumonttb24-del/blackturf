@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # en clair sur le site, c'est le mécanisme même du protocole. Vide = fonction inactive.
     indexnow_key: str = ""
 
+    # ── Publication Instagram (Graph API) ──────────────────────────────────────────
+    # `instagram_publication_active` est le SEUL interrupteur qui autorise une
+    # publication reelle. Il reste a 0 tant que personne ne le passe explicitement a 1 :
+    # publier au nom d'une marque est irreversible et public, cela ne doit jamais
+    # demarrer simplement parce qu'un jeton se trouve present dans l'environnement.
+    meta_access_token: str = ""
+    instagram_user_id: str = ""
+    instagram_publication_active: bool = False
+
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""

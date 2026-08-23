@@ -551,6 +551,24 @@ def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    # Publications sociales — 09:15 (le support du Quinté+ est connu) et 20:45 (les
+    # rapports du Quinté+ sont publiés). Sans INSTAGRAM_PUBLICATION_ACTIVE=1, ces deux
+    # jobs tournent en simulation et ne publient rien.
+    scheduler.add_job(
+        job_publication_matin,
+        CronTrigger(hour=9, minute=15, timezone="Europe/Paris"),
+        id="publication_matin",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_publication_soir,
+        CronTrigger(hour=20, minute=45, timezone="Europe/Paris"),
+        id="publication_soir",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     scheduler.start()
     log.info("jobs.scheduler.started", nb_jobs=len(scheduler.get_jobs()))
 
@@ -599,3 +617,62 @@ async def job_indexnow_push() -> None:
 
     envoyees = await signaler(urls_du_jour(course_ids, str(jour)))
     log.info("jobs.indexnow.push", jour=str(jour), nb_courses=len(course_ids), envoyees=envoyees)
+
+
+async def job_publication_reseaux(moment: str) -> None:
+    """
+    Publie le visuel du jour sur Instagram — visuel du matin, ou arrivée du soir.
+
+    Les légendes et les URLs d'image viennent du SITE (`/visuels/legendes.json`), et non
+    d'une seconde rédaction côté backend : deux versions parallèles du même texte
+    finissent par diverger, et c'est celle qui est publiée qui a tort.
+
+    Rien ne part si `pret` est faux : le support du Quinté+ n'est pas encore désigné le
+    matin, l'arrivée pas encore publiée le soir. Publier « pas encore disponible » sur un
+    compte de marque est pire que ne rien publier.
+
+    Tant que INSTAGRAM_PUBLICATION_ACTIVE vaut 0, le job va jusqu'au bout mais ne publie
+    pas — il journalise ce qu'il aurait envoyé.
+    """
+    import httpx
+    from services.instagram import publier_image, publication_active, quota_restant
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                "http://frontend:3000/visuels/legendes.json",
+                headers={"Host": "blackturf.fr"},
+            )
+            resp.raise_for_status()
+            publications = resp.json().get("publications", [])
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.reseaux.legendes_indisponibles", moment=moment, err=str(e)[:200])
+        return
+
+    cible = next((p for p in publications if p.get("cle") == moment), None)
+    if not cible:
+        log.warning("jobs.reseaux.publication_absente", moment=moment)
+        return
+
+    if not cible.get("pret"):
+        log.info("jobs.reseaux.donnees_incompletes", moment=moment, detail="rien publié")
+        return
+
+    resultat = await publier_image(cible["image"], cible["legende"])
+    log.info(
+        "jobs.reseaux.publication",
+        moment=moment,
+        actif=publication_active(),
+        publie=bool(resultat),
+        media_id=resultat.media_id,
+        raison=resultat.raison,
+        quota_restant=await quota_restant() if publication_active() else None,
+    )
+
+
+async def job_publication_matin() -> None:
+    await job_publication_reseaux("matin")
+
+
+async def job_publication_soir() -> None:
+    await job_publication_reseaux("soir")
