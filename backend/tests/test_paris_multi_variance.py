@@ -528,7 +528,36 @@ class TestAncrageTop2:
         for profil in PROFIL_CONFIG:
             assert _effective_config(profil, 0.0)["ancrage_top2"] is True
 
+    def test_le_couple_place_est_exempte_de_l_ancrage(self):
+        """Seul type que l'ancrage DÉGRADE, mesuré deux fois : historique au niveau
+        course (−32,8 % ancré contre −27,6 %) et rejeu A/B sur 400 courses (le type
+        passe de −8,1 % à −24,2 % quand on l'ancre). Il faut deux chevaux dans les
+        trois premiers : deux cotes courtes paient ~×3 sur un pool qui prend 23 %."""
+        from services.mise_calculator import _filtrer_ancrage_top2, TYPES_SANS_ANCRAGE
+        assert "Couplé Placé" in TYPES_SANS_ANCRAGE
+        cp_libre = {"chevaux": [{"numero": 3}, {"numero": 4}], "type_pari": "Couplé Placé",
+                    "_ancre_top2": False}
+        cg_ancre = {"chevaux": [{"numero": 1}, {"numero": 2}], "type_pari": "Couplé Gagnant",
+                    "_ancre_top2": True}
+        cg_libre = {"chevaux": [{"numero": 5}, {"numero": 6}], "type_pari": "Couplé Gagnant",
+                    "_ancre_top2": False}
+        out = _filtrer_ancrage_top2([cp_libre, cg_ancre, cg_libre], {"ancrage_top2": True})
+        assert cp_libre in out, "le couplé placé non ancré doit survivre"
+        assert cg_ancre in out and cg_libre not in out
+
+    def test_un_couple_place_seul_ne_declenche_pas_le_filtre(self):
+        """Un couplé placé ancré ne doit pas servir de prétexte à couper les autres
+        combinaisons : il est hors du périmètre de la règle, des deux côtés."""
+        from services.mise_calculator import _filtrer_ancrage_top2
+        cp_ancre = {"chevaux": [{"numero": 1}, {"numero": 2}], "type_pari": "Couplé Placé",
+                    "_ancre_top2": True}
+        trio_libre = {"chevaux": [{"numero": 4}, {"numero": 5}, {"numero": 6}],
+                      "type_pari": "Trio", "_ancre_top2": False}
+        out = _filtrer_ancrage_top2([cp_ancre, trio_libre], {"ancrage_top2": True})
+        assert out == [cp_ancre, trio_libre]
+
     def test_les_combinaisons_du_plan_contiennent_les_deux_premiers(self):
+        from services.mise_calculator import TYPES_SANS_ANCRAGE
         champ = _field(12)
         rang = {int(p["numero"]): i for i, p in enumerate(
             sorted(champ, key=lambda x: float(x["proba_top1"]), reverse=True), start=1)}
@@ -539,7 +568,7 @@ class TestAncrageTop2:
             for niv in d["niveaux"]:
                 for p in niv["paris"]:
                     nums = {c["numero"] for c in p["chevaux"]}
-                    if len(nums) >= 2:
+                    if len(nums) >= 2 and p["type"] not in TYPES_SANS_ANCRAGE:
                         assert top2 <= nums, (
                             f"{profil} : {p['type']} {sorted(nums)} sans appui "
                             f"sur les 2 premiers {sorted(top2)}")

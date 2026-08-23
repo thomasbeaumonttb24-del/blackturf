@@ -1248,15 +1248,32 @@ def _bet_cote_max(c: dict) -> float:
 # rapport comprise — on ne contourne jamais le contrat de tranche), on ne garde que
 # celles ancrées sur les deux premiers prédits. S'il n'y en a AUCUNE, on garde tout :
 # la promesse d'un plan sur chaque course reste intacte.
+# Le COUPLÉ PLACÉ est le seul type que l'ancrage dégrade, et deux mesures
+# indépendantes le disent :
+#   • historique, au niveau course : ancré −32,8 % contre −27,6 % non ancré ;
+#   • rejeu A/B sur 400 courses (2026-08-23) : porter l'ancrage de 58 % à 76 % des
+#     couplés placés fait passer le type de −8,1 % à −24,2 %, et entraîne avec lui
+#     le prudent (−16,3 → −21,6) et le modéré (−10,3 → −14,4).
+# La raison tient à la structure du pari : il faut DEUX chevaux dans les trois
+# premiers, et les deux premiers du classement sont deux cotes courtes — le rapport
+# tombe vers ×3 pour un pool qui prélève 23 %. Associer le favori à un cheval plus
+# coté paie bien mieux pour une perte de fréquence modeste. L'ancrage vaut pour les
+# paris qui exigent l'ORDRE ou la victoire (couplé gagnant, trio), pas pour ceux qui
+# se contentent d'une place.
+TYPES_SANS_ANCRAGE = frozenset({"Couplé Placé"})
+
+
 def _filtrer_ancrage_top2(ranked: list[dict], cfg: dict) -> list[dict]:
     """Ne conserve que les combinaisons ancrées sur les 2 premiers du classement.
 
     Les paris à un seul cheval ne sont jamais touchés (il n'y a pas d'ancrage à
-    faire) et le repli est total : sans candidat ancré, la liste revient inchangée.
+    faire), les types de `TYPES_SANS_ANCRAGE` non plus, et le repli est total :
+    sans candidat ancré, la liste revient inchangée.
     """
     if not ranked or not cfg.get("ancrage_top2", True):
         return ranked
-    combos = [c for c in ranked if len(c.get("chevaux", [])) >= 2]
+    combos = [c for c in ranked if len(c.get("chevaux", [])) >= 2
+              and c.get("type_pari") not in TYPES_SANS_ANCRAGE]
     if not combos:
         return ranked
     ancres = [c for c in combos if c.get("_ancre_top2")]
@@ -1264,7 +1281,9 @@ def _filtrer_ancrage_top2(ranked: list[dict], cfg: dict) -> list[dict]:
         return ranked                      # aucune combinaison ancrée → on ne prive de rien
     garde = {id(c) for c in ancres}
     return [c for c in ranked
-            if len(c.get("chevaux", [])) < 2 or id(c) in garde]
+            if len(c.get("chevaux", [])) < 2
+            or c.get("type_pari") in TYPES_SANS_ANCRAGE
+            or id(c) in garde]
 
 
 def _select_conviction(
