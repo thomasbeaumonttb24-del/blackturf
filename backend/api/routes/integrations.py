@@ -143,3 +143,43 @@ async def _verifier(valeur: str):
         }
     except Exception as e:  # noqa: BLE001
         return False, f"{type(e).__name__}: {e}"[:200]
+
+
+@router.post("/integrations/instagram/publier-mosaique")
+async def publier_mosaique_instagram(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """
+    Publie la mosaïque du jour — six publications qui forment une seule image sur la
+    grille du profil.
+
+    Les tuiles et leurs légendes viennent du SITE, déjà triées dans l'ordre de
+    publication : la grille se remplissant du plus récent en haut à gauche, il faut
+    publier à l'envers, et cet ordre est une propriété de la composition, pas de l'API.
+
+    Cette route ne publie QUE si l'interrupteur global est ouvert. Elle ne le force
+    jamais : publier au nom d'une marque reste une décision explicite.
+    """
+    from services.instagram import publier_mosaique, publication_active
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                "http://frontend:3000/visuels/mosaique/legendes.json",
+                headers={"Host": "blackturf.fr"},
+            )
+            resp.raise_for_status()
+            tuiles = resp.json().get("tuiles", [])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Mosaïque indisponible : {e}"[:200])
+
+    if len(tuiles) != 6:
+        raise HTTPException(status_code=502, detail=f"Mosaïque incomplète ({len(tuiles)} tuiles)")
+
+    resultats = await publier_mosaique(tuiles)
+    return {
+        "publication_active": publication_active(),
+        "tuiles": resultats,
+        "publiees": sum(1 for r in resultats if r["publie"]),
+    }

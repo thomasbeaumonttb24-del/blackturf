@@ -190,3 +190,39 @@ async def quota_restant() -> Optional[int]:
         return max(0, 100 - int(data.get("quota_usage", 0)))
     except Exception:  # noqa: BLE001
         return None
+
+
+async def publier_mosaique(tuiles: list[dict], pause_secondes: int = 20) -> list[dict]:
+    """
+    Publie les six tuiles d'une mosaïque, DANS L'ORDRE REÇU.
+
+    La grille d'un profil Instagram se remplit du plus récent en haut à gauche : les
+    tuiles doivent donc arriver déjà triées à l'envers — bas-droite d'abord, haut-gauche
+    en dernier. Ce n'est PAS à ce module de les retrier : l'ordre est une propriété de la
+    composition, et le site le publie avec les légendes.
+
+    On s'arrête à la première tuile refusée. Une mosaïque incomplète est laide mais
+    réparable ; une mosaïque dont il manque une tuile au milieu, publiée par-dessus les
+    suivantes, ne se rattrape qu'en supprimant tout.
+
+    `pause_secondes` espace les envois : six publications en rafale sur un compte neuf est
+    exactement le motif que les plateformes traitent comme automatisé.
+    """
+    import asyncio
+
+    resultats: list[dict] = []
+    for i, t in enumerate(tuiles):
+        if i:
+            await asyncio.sleep(pause_secondes)
+        r = await publier_image(t["image"], t.get("legende", ""))
+        resultats.append({
+            "tuile": t.get("tuile"),
+            "publie": bool(r),
+            "media_id": r.media_id,
+            "raison": r.raison,
+        })
+        log.info("instagram.mosaique.tuile", tuile=t.get("tuile"), publie=bool(r), raison=r.raison)
+        if not r:
+            log.warning("instagram.mosaique.interrompue", a_la_tuile=t.get("tuile"), raison=r.raison)
+            break
+    return resultats
