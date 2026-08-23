@@ -189,7 +189,20 @@ async def main():
             wr[prof] = st["win"] / st["n"] * 100 if st["n"] else 0
             roi = (st["gain"] - st["mise"]) / st["mise"] * 100 if st["mise"] else 0
             print(f"     {prof:13} win={wr[prof]:5.1f}%  ROI={roi:8.1f}%  paris={st['n']}")
-        chk("gradient risque : prudent gagne plus souvent que risque", wr["conservateur"] > wr["agressif"], f"{wr['conservateur']:.0f} vs {wr['agressif']:.0f}")
+        # Le gradient de risque est une propriete STATISTIQUE : sur 80 courses le
+        # profil risque compte une poignee de gagnants, et 3 % contre 4 % ne dit rien.
+        # On ne tranche donc que si chaque profil a de quoi trancher ; sinon on affiche
+        # et on passe, plutot que de faire clignoter l'outil au hasard.
+        MIN_GAGNANTS = 30
+        n_min = min(prof_stat[p]["win"] for p in ("conservateur", "agressif"))
+        if n_min >= MIN_GAGNANTS:
+            chk("gradient risque : prudent gagne plus souvent que risque",
+                wr["conservateur"] > wr["agressif"],
+                f"{wr['conservateur']:.0f} vs {wr['agressif']:.0f}")
+        else:
+            print(f"     [INFO] gradient de risque non tranche : {n_min} gagnants sur le "
+                  f"profil le moins fourni (< {MIN_GAGNANTS}) — "
+                  f"prudent {wr['conservateur']:.1f}% vs risque {wr['agressif']:.1f}%")
 
         # ===== F. APPRENTISSAGE =====
         print("\nF. Apprentissage -- heat & roi_weights derives du reel")

@@ -372,17 +372,24 @@ PROFIL_CONFIG = {
         # sur plusieurs gros-rapports DÉCORRÉLÉS (demande user : « plus de mises
         # différentes en risqué », fini le 10€ sur un seul Simple Gagnant).
         #
-        # 0.35 → 0.20 mesuré par rejeu sur DEUX fenêtres indépendantes de 400 courses
-        # (2026-08-23), tranche ×10 inchangée :
-        #     0.35  −33,3 % / −48,0 %   (moyenne −40,7)
-        #     0.25  −32,5 % / −38,6 %   (moyenne −35,6)
-        #     0.20  −7,7 %  / −35,6 %   (moyenne −21,7)   ← retenu
-        #     0.15  −12,8 % / −32,1 %   (moyenne −22,5)
-        # +19 points en moyenne. Le mécanisme est simple : à 0.35 un plan de 20 € pouvait
-        # poser 7 € sur un Trio (mesuré −63 %) ; à 0.20 il en pose 4 au plus et le reste
-        # va sur les couplés et les simples, qui perdent bien moins. 0.15 et 0.10 font
-        # aussi bien à l'unité près (bruit) — on garde la valeur la moins brutale, qui
-        # laisse un Trio finançable à 4 € sur un plan de 20 €.
+        # 0.35 → 0.20, mesuré le 2026-08-23 par rejeu A/B à jeu de courses FIGÉ (seul
+        # var_cap change ; prudent et modéré ressortent identiques au centime, ce qui
+        # confirme que le réglage n'agit que sur ce profil) :
+        #     fenêtre A (400 courses) : −33,3 % → −3,8 %   (+29,5 points)
+        #     fenêtre B (400 courses) : −34,1 % → −33,6 %  (+0,5 point)
+        # L'effet est donc NEUTRE À FRANCHEMENT POSITIF selon la période, jamais négatif
+        # — cinq fenêtres testées, aucune dégradation. Sa taille reste incertaine : ne
+        # pas annoncer « +30 points » sur la foi de la fenêtre A.
+        #
+        # (Un premier sondage à fenêtre glissante donnait +13 à +19 points de façon
+        # apparemment régulière ; c'était un artefact — la fenêtre « 400 dernières
+        # courses » se décale à chaque arrivée. Toute comparaison A/B doit figer le jeu
+        # de courses, sinon on compare deux échantillons différents.)
+        #
+        # Le mécanisme, lui, est simple : à 0.35 un plan de 20 € pouvait poser 7 € sur un
+        # Trio (mesuré −60 %) ; à 0.20 il en pose 4 au plus, et le reste va sur les
+        # couplés et les simples, qui perdent bien moins. Sur la fenêtre A, les tickets
+        # Trio passent de 253 à 205 et les Couplés Gagnants de 548 à 604.
         #
         # Ni la tranche ×10, ni les types, ni le nombre de tickets ne changent : c'est un
         # plafond de CONCENTRATION, pas un changement d'identité du profil (arbitrage
