@@ -14,6 +14,7 @@ est faible (peu de paris = peu de signal).
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -267,7 +268,19 @@ _RECENT_RACES = 60         # fenêtre brier
 _RECENT_BETS = 80          # fenêtre ROI récent
 _BRIER_GOOD = 0.16         # brier ≤ → modèle bien calibré
 _BRIER_BAD = 0.26          # brier ≥ → mal calibré
-_MIN_BETS_FOR_ROI = 15     # en-deçà, le terme ROI est ignoré (pas assez de signal)
+# Fenêtre du terme « résultats » : les PLANS réellement émis et réglés.
+_HEAT_ROI_JOURS = 7
+_MIN_PLANS_FOR_ROI = 100
+# Un plan ne peut pas rendre plus de 50× sa mise dans ce calcul : le thermostat
+# décide d'un comportement, il ne doit jamais basculer sur un coup isolé (même
+# plafond que le ROI par tranche de rapport).
+_HEAT_GAIN_CAP = 50.0
+# Prélèvement PMU moyen du système, pondéré par la mise — MESURÉ le 2026-08-23 sur
+# 29 672 paris réglés : 20,08 %. Il sert de zéro au terme « résultats » : un plan à
+# −20 % sur des pools qui prennent 20 % n'est pas une série perdante, c'est le tarif
+# de la maison. À re-mesurer (`compute_forward_performance` → global.prelevement_pct)
+# si le catalogue de types joués change nettement.
+PRELEVEMENT_MOYEN_SYSTEME_PCT = 20.0
 
 
 async def compute_model_heat(session: AsyncSession) -> dict:
@@ -276,8 +289,10 @@ async def compute_model_heat(session: AsyncSession) -> dict:
     heat = 0.5 × terme_calibration + 0.5 × terme_roi_récent, borné [-1, +1].
       - terme_calibration : brier moyen des dernières courses apprises (mappé
         [_BRIER_GOOD, _BRIER_BAD] → [+1, -1]).
-      - terme_roi_récent : ROI net des derniers paris IA réglés (mappé ±30% → ±1) ;
-        ignoré si échantillon < _MIN_BETS_FOR_ROI.
+      - terme_résultats : AVANTAGE des plans émis et réglés sur les 7 derniers
+        jours (ROI winsorisé + prélèvement du pool, mappé ±30% → ±1) ; ignoré sous
+        _MIN_PLANS_FOR_ROI plans. Un système à −20 % sur des pools qui prennent
+        20 % est à l'équilibre, pas en série perdante.
     Renvoie {heat, brier, roi_recent, n_races, n_bets} (tout réel ; None si absent).
     """
     # ── Calibration : brier moyen récent (race_learning_log) ──
@@ -297,21 +312,54 @@ async def compute_model_heat(session: AsyncSession) -> dict:
     except Exception:
         brier = None
 
-    # ── Résultats : ROI net des derniers paris IA réglés (bankroll_entries) ──
+    # ── Résultats : AVANTAGE récent des PLANS réellement émis et réglés ─────────
+    #
+    # Cette mesure lisait `bankroll_entries` — les paris que des utilisateurs ont
+    # saisis à la main en cochant « suivi reco IA ». Constat du 2026-08-23 : 80
+    # lignes étalées sur DEUX MOIS (12/06 → 20/08), 388 € misés, +849 € nets, soit
+    # un ROI de +218,8 % dont +578 € portés par deux tickets (un Mini Multi à ×120,
+    # un Couplé Gagnant à ×111). Le terme était donc collé à son maximum (+1) et le
+    # thermostat annonçait heat = 0,748 — audace maximale sur TOUS les profils —
+    # pendant que les plans du système mesuraient −6 % à −27 %.
+    #
+    # Un échantillon saisi à la main est auto-sélectionné (on note ses gains), vieux,
+    # minuscule, et sans rapport avec ce que le moteur conseille aujourd'hui. On lit
+    # désormais les PLANS ÉMIS ET RÉGLÉS, la même source que tout le reste de
+    # l'apprentissage — dédupliqués sur le dernier règlement, gains plafonnés.
+    #
+    # Et on ne juge pas le ROI BRUT mais l'AVANTAGE (ROI + prélèvement du pool) : un
+    # système à −20 % sur des pools qui prennent 20 % ne traverse pas une série
+    # perdante, il paie le tarif. Sans cela le thermostat resterait au plancher en
+    # permanence et ne thermostaterait plus rien.
     roi_recent = None
     n_bets = 0
     try:
+        since = datetime.now(timezone.utc) - timedelta(days=_HEAT_ROI_JOURS)
         row = (await session.execute(text("""
-            SELECT COALESCE(SUM(gain_perte), 0), COALESCE(SUM(mise), 0), COUNT(*) FROM (
-                SELECT gain_perte, mise FROM bankroll_entries
-                WHERE resultat IN ('gagne','perd') AND gain_perte IS NOT NULL
-                  AND mise > 0 AND suivi_reco_ia = true
-                ORDER BY date DESC LIMIT :lim
+            SELECT COALESCE(SUM(mise), 0), COALESCE(SUM(retour), 0), COUNT(*)
+            FROM (
+                SELECT montant_mise AS mise,
+                       CASE WHEN montant_retour < montant_mise * :cap
+                            THEN montant_retour ELSE montant_mise * :cap END AS retour
+                FROM (
+                    SELECT t.montant_mise, t.montant_retour,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY t.plan_snapshot_id
+                               ORDER BY t.settled_at DESC, t.settlement_id DESC
+                           ) AS rn
+                    FROM bet_plan_settlements t
+                    JOIN bet_plan_snapshots s
+                      ON s.plan_snapshot_id = t.plan_snapshot_id
+                    WHERE t.statut = 'settled' AND s.is_pre_course = true
+                      AND t.settled_at >= :since AND t.montant_mise > 0
+                ) ranked
+                WHERE rn = 1
             ) q
-        """), {"lim": _RECENT_BETS})).first()
-        if row and float(row[1] or 0) > 0:
+        """), {"since": since, "cap": _HEAT_GAIN_CAP})).first()
+        if row and float(row[0] or 0) > 0 and int(row[2] or 0) >= _MIN_PLANS_FOR_ROI:
             n_bets = int(row[2] or 0)
-            roi_recent = float(row[0]) / float(row[1])
+            roi = (float(row[1]) - float(row[0])) / float(row[0])
+            roi_recent = roi + PRELEVEMENT_MOYEN_SYSTEME_PCT / 100.0
     except Exception:
         roi_recent = None
 
@@ -321,7 +369,7 @@ async def compute_model_heat(session: AsyncSession) -> dict:
         # brier _BRIER_GOOD → +1, _BRIER_BAD → -1 (linéaire borné)
         cal = (_BRIER_BAD - brier) / (_BRIER_BAD - _BRIER_GOOD) * 2.0 - 1.0
         terms.append(max(-1.0, min(1.0, cal)))
-    if roi_recent is not None and n_bets >= _MIN_BETS_FOR_ROI:
+    if roi_recent is not None and n_bets >= _MIN_PLANS_FOR_ROI:
         terms.append(max(-1.0, min(1.0, roi_recent / 0.30)))
 
     heat = round(sum(terms) / len(terms), 3) if terms else 0.0
