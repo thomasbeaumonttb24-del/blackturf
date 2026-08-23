@@ -4,7 +4,7 @@ export const meta = {
   slug: "favori-ou-outsider",
   title: "Favori ou outsider : que faut-il jouer ?",
   description:
-    "Faut-il parier le favori ou chercher l'outsider ? Taux de réussite, rentabilité réelle, biais favori-outsider : ce que disent les chiffres pour parier malin au PMU.",
+    "Favori ou outsider ? Taux de réussite, rentabilité réelle et biais favori-outsider : ce que disent les chiffres au PMU.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Stratégie", "Favori", "Outsider"],

@@ -6,10 +6,10 @@ import { SeoHero, Container, Section, Callout, Chip } from "@/components/seo/kit
 export const metadata: Metadata = {
   title: "Le pari de valeur expliqué",
   description:
-    "Qu'est-ce qu'un pari de valeur (value bet) aux courses ? Probabilité réelle contre cote, espérance de gain, et pourquoi viser la valeur plutôt que le favori. La méthode BlackTurf.",
+    "Qu'est-ce qu'un pari de valeur aux courses : probabilité réelle contre cote, espérance de gain, et pourquoi le favori paie rarement.",
   alternates: { canonical: "/guides/pari-de-valeur" },
   openGraph: {
-    title: "Le pari de valeur expliqué | BlackTurf",
+    title: "Le pari de valeur expliqué",
     description: "Probabilité vs cote, espérance de gain, et pourquoi la valeur bat le favori sur la durée.",
     url: "https://blackturf.fr/guides/pari-de-valeur",
     type: "article",

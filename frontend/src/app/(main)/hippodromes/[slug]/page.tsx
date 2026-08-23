@@ -21,12 +21,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const description =
     `${h.name} (${h.city}, ${h.region}) : ${h.disciplines.join(", ")}.` +
     (h.signature ? ` Course phare : ${h.signature}.` : "") +
-    " Programme du jour, partants et pronostics de valeur analysés par l'IA BlackTurf.";
+    " Programme du jour, partants et cotes.";
   return {
     title,
     description,
     alternates: { canonical: `/hippodromes/${h.slug}` },
-    openGraph: { title: `${title} | BlackTurf`, description, url: `https://blackturf.fr/hippodromes/${h.slug}` },
+    openGraph: { title, description, url: `https://blackturf.fr/hippodromes/${h.slug}` },
   };
 }
 

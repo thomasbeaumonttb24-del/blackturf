@@ -67,44 +67,7 @@ function InscriptionContent() {
   }
 
   return (
-    <div className="min-h-screen gradient-hero flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl grid md:grid-cols-2 gap-8 items-center">
-        {/* Left — value prop */}
-        <div className="hidden md:block">
-          <Link href="/" className="inline-flex items-center gap-2.5 mb-8">
-            <Image src="/logo.png" alt="BlackTurf" width={40} height={40} className="rounded-xl object-contain" />
-            <span className="text-2xl font-bold text-gray-900">Black<span className="text-amber-600">Turf</span></span>
-          </Link>
-
-          <h1 className="text-3xl font-bold mb-4">
-            Rejoignez les parieurs<br />
-            <span className="text-gradient">qui gagnent à long terme</span>
-          </h1>
-          <p className="text-muted-foreground mb-8">
-            Créez votre compte gratuit et accédez aux analyses IA les plus précises du marché.
-          </p>
-
-          <ul className="space-y-3">
-            {PERKS.map((perk) => (
-              <li key={perk} className="flex items-center gap-3 text-sm">
-                <div className="h-5 w-5 rounded-full bg-brand-gold/20 flex items-center justify-center flex-shrink-0">
-                  <Check className="h-3 w-3 text-brand-gold" />
-                </div>
-                {perk}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Right — form */}
-        <div>
-          <div className="md:hidden text-center mb-6">
-            <Link href="/" className="inline-flex items-center gap-2.5">
-              <Image src="/logo.png" alt="BlackTurf" width={36} height={36} className="rounded-lg object-contain" />
-              <span className="text-xl font-bold text-gray-900">Black<span className="text-amber-600">Turf</span></span>
-            </Link>
-          </div>
-
+    <div>
           <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl">
             <h2 className="text-xl font-bold mb-1">Créer un compte</h2>
             <p className="text-sm text-muted-foreground mb-6">
@@ -183,16 +146,52 @@ function InscriptionContent() {
               ⚠️ Interdit aux mineurs. Le jeu peut créer une dépendance.
             </p>
           </div>
-        </div>
-      </div>
     </div>
   );
 }
 
 export default function InscriptionPage() {
   return (
-    <Suspense>
-      <InscriptionContent />
-    </Suspense>
+    <div className="min-h-screen gradient-hero flex items-center justify-center p-4">
+      <div className="w-full max-w-4xl grid md:grid-cols-2 gap-8 items-center">
+        {/* Colonne de présentation — entièrement statique, donc rendue côté serveur.
+            Elle se trouvait auparavant DANS le <Suspense> : or l'appel à useSearchParams
+            fait basculer tout le sous-arbre en rendu navigateur, et la page arrivait au
+            robot d'indexation sans <h1> et sans une ligne de texte. Seul le formulaire a
+            besoin des paramètres d'URL, lui seul reste sous Suspense.
+            Le titre reste visible sur mobile (indexation mobile-first) ; seule la liste
+            des avantages est repliée sur petit écran. */}
+        <div>
+          <Link href="/" className="inline-flex items-center gap-2.5 mb-6 md:mb-8">
+            <Image src="/logo.png" alt="Logo BlackTurf" width={40} height={40} className="rounded-xl object-contain" />
+            <span className="text-2xl font-bold text-gray-900">Black<span className="text-amber-600">Turf</span></span>
+          </Link>
+
+          <h1 className="text-2xl md:text-3xl font-bold mb-4">
+            Créez votre compte{" "}
+            <span className="text-gradient">BlackTurf</span>
+          </h1>
+          <p className="text-muted-foreground mb-6 md:mb-8">
+            Le programme PMU du jour, les prédictions de l&apos;algorithme et un plan de mise
+            calculé sur votre budget. Compte gratuit, 7 jours d&apos;essai Standard offerts.
+          </p>
+
+          <ul className="hidden md:flex flex-col gap-3">
+            {PERKS.map((perk) => (
+              <li key={perk} className="flex items-center gap-3 text-sm">
+                <div className="h-5 w-5 rounded-full bg-brand-gold/20 flex items-center justify-center flex-shrink-0">
+                  <Check className="h-3 w-3 text-brand-gold" />
+                </div>
+                {perk}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <Suspense>
+          <InscriptionContent />
+        </Suspense>
+      </div>
+    </div>
   );
 }

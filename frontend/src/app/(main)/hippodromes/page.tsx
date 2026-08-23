@@ -7,10 +7,10 @@ import { SeoHero, Container, Callout, Chip } from "@/components/seo/kit";
 export const metadata: Metadata = {
   title: "Hippodromes français — courses PMU par hippodrome",
   description:
-    "Tous les grands hippodromes français : Vincennes, ParisLongchamp, Chantilly, Deauville, Auteuil… Disciplines, courses phares et programme PMU du jour, hippodrome par hippodrome.",
+    "Les grands hippodromes français : Vincennes, ParisLongchamp, Chantilly, Deauville, Auteuil. Disciplines, courses phares et programme du jour.",
   alternates: { canonical: "/hippodromes" },
   openGraph: {
-    title: "Hippodromes français — courses PMU | BlackTurf",
+    title: "Hippodromes français — courses PMU",
     description: "Vincennes, ParisLongchamp, Chantilly, Deauville, Auteuil… et le programme du jour.",
     url: "https://blackturf.fr/hippodromes",
   },

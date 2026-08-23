@@ -19,9 +19,11 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!d) return { title: "Discipline" };
   return {
     title: d.name,
-    description: `${d.intro} Programme du jour, partants et paris de valeur analysés par l'IA BlackTurf.`.slice(0, 300),
+    // Google tronque vers 155-160 caractères : l'intro de la discipline suffit, on
+    // n'ajoute plus de queue promotionnelle qui serait coupée de toute façon.
+    description: d.intro.slice(0, 155),
     alternates: { canonical: `/disciplines/${d.slug}` },
-    openGraph: { title: `${d.name} | BlackTurf`, description: d.intro, url: `https://blackturf.fr/disciplines/${d.slug}` },
+    openGraph: { title: `${d.name}`, description: d.intro, url: `https://blackturf.fr/disciplines/${d.slug}` },
   };
 }
 

@@ -4,7 +4,7 @@ export const meta = {
   slug: "reduction-kilometrique-trot",
   title: "Réduction kilométrique : décrypter la vitesse au trot",
   description:
-    "La réduction kilométrique (le temps au kilomètre) mesure la vitesse d'un trotteur. Comment la lire, la comparer à conditions égales et l'utiliser sans se tromper.",
+    "La réduction kilométrique mesure la vitesse d'un trotteur. Comment la lire, la comparer à conditions égales, et ses pièges.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Trot", "Réduction kilométrique", "Data"],

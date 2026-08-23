@@ -41,9 +41,9 @@ const offersJsonLd = {
   ],
 };
 
-// Les questions affichées plus bas dans la page. Une seule source pour l'affichage et
-// pour le balisage : un FAQPage qui ne correspondrait pas au texte visible est une
-// violation des règles Google sur les données structurées.
+// Questions affichées plus bas dans la page. Elles ne sont volontairement PAS balisées en
+// FAQPage : depuis le 7 mai 2026, Google ne produit plus aucun résultat enrichi à partir de
+// ce type. Le balisage resterait valide, mais sans le moindre effet en recherche.
 const FAQ = [
   {
     q: "Puis-je annuler à tout moment ?",
@@ -67,15 +67,6 @@ const FAQ = [
   },
 ];
 
-const faqJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: FAQ.map((item) => ({
-    "@type": "Question",
-    name: item.q,
-    acceptedAnswer: { "@type": "Answer", text: item.a },
-  })),
-};
 
 // Une cellule vaut true (✓), false (✗) ou une CHAÎNE quand la différence entre
 // plans est une quantité, pas une présence : afficher ✓ partout laisserait croire
@@ -105,7 +96,6 @@ export default function TarifsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-10 sm:py-16">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(offersJsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
       {/* Header */}
       <div className="text-center mb-10 sm:mb-16">
         <Badge variant="gold" className="mb-4">Tarifs</Badge>

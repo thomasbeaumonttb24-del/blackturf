@@ -4,7 +4,7 @@ export const meta = {
   slug: "champ-reduit-base-tickets",
   title: "Base et champ réduit : construire ses tickets PMU",
   description:
-    "Base, champ total, champ réduit : comment construire un ticket PMU qui couvre intelligemment sans exploser la mise. Méthode et exemples pour Tiercé, Quarté+ et Quinté+.",
+    "Base, champ total, champ réduit : construire un ticket PMU qui couvre sans exploser la mise. Méthode et exemples chiffrés.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Méthode", "Tickets", "PMU"],

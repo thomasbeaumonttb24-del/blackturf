@@ -7,6 +7,7 @@ import {
   titleCase,
   heureParis,
   jourLong,
+  jourCourt,
   jourDeCourseId,
   codeReunionCourse,
   type SeoCourseDetail,
@@ -47,20 +48,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     ? `${code} ${hippo} — arrivée, rapports et partants`
     : `${code} ${hippo} — partants, cotes et pronostic`;
 
+  // Le nom d'un prix peut être long : on garde la date courte et une queue brève pour
+  // rester sous les ~155-160 caractères après lesquels Google tronque l'extrait.
   const description =
     `${libelleCourse(c)} — ${hippo}, ${disc}, ${c.distance} m, ${c.nb_partants} partants` +
-    (jour ? `, ${jourLong(jour)} à ${heureParis(c.date_heure)}` : "") +
-    (termine
-      ? ". Arrivée officielle, rapports PMU et analyse post-course."
-      : ". Partants, cotes comparées et probabilité par cheval calculée par l'IA BlackTurf.") +
-    (c.est_quinte ? " Course support du Quinté+." : "");
+    (jour ? `, ${jourCourt(jour)} à ${heureParis(c.date_heure)}` : "") +
+    (c.est_quinte ? ". Support du Quinté+" : "") +
+    (termine ? ". Arrivée et rapports PMU." : ". Partants, cotes et probabilité par cheval.");
 
   return {
     title,
     description,
     alternates: { canonical: `/courses/${c.course_id}` },
     openGraph: {
-      title: `${title} | BlackTurf`,
+      title,
       description,
       url: `https://blackturf.fr/courses/${c.course_id}`,
       type: "article",

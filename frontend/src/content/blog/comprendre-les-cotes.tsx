@@ -4,7 +4,7 @@ export const meta = {
   slug: "comprendre-les-cotes",
   title: "Cotes hippiques : tout comprendre",
   description:
-    "Cote PMU, probabilité implicite, cote de référence et cote finale : comment lire les cotes hippiques, ce qu'elles disent vraiment et comment elles bougent jusqu'au départ.",
+    "Cote PMU, probabilité implicite, cote de référence et cote finale : comment lire une cote hippique et pourquoi elle bouge.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Cotes", "PMU", "Bases"],

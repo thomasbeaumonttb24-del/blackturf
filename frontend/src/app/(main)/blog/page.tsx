@@ -7,7 +7,7 @@ import { SeoHero, Container, Callout, Chip } from "@/components/seo/kit";
 export const metadata: Metadata = {
   title: "Blog — paris hippiques & analyse PMU",
   description:
-    "Le blog BlackTurf : méthodes d'analyse des courses PMU, stratégie de paris de valeur, gestion de bankroll, cotes, trot et intelligence artificielle appliquée aux pronostics.",
+    "Méthodes d'analyse des courses PMU : paris de valeur, gestion de bankroll, lecture des cotes, stratégies au trot.",
   alternates: { canonical: "/blog" },
   openGraph: {
     title: "Blog BlackTurf — paris hippiques & analyse PMU",

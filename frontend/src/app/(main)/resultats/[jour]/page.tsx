@@ -21,15 +21,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { jour } = await params;
   if (!jourValide(jour)) return { title: "Résultats PMU" };
   const title = `Résultats PMU du ${jourCourt(jour)} — arrivées et rapports`;
-  const description = `Les arrivées officielles et les rapports PMU du ${jourLong(
+  const description = `Arrivées officielles et rapports PMU du ${jourLong(
     jour,
-  )} : Quinté+, Quarté+, Tiercé, Couplé, Simple et 2 sur 4, réunion par réunion.`;
+  )} : Quinté+, Quarté+, Tiercé, Couplé, Simple et 2 sur 4.`;
   return {
     title,
     description,
     alternates: { canonical: `/resultats/${jour}` },
     openGraph: {
-      title: `${title} | BlackTurf`,
+      title,
       description,
       url: `https://blackturf.fr/resultats/${jour}`,
       type: "article",

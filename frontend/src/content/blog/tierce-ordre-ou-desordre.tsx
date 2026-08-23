@@ -4,7 +4,7 @@ export const meta = {
   slug: "tierce-ordre-ou-desordre",
   title: "Tiercé : ordre ou désordre, comment choisir",
   description:
-    "Jouer le Tiercé dans l'ordre ou le désordre ? Différence de rapport, probabilité, et la stratégie « ordre + désordre » pour ne pas regretter. Explications claires.",
+    "Tiercé dans l'ordre ou dans le désordre : différence de rapport et de probabilité, et la stratégie « ordre + désordre ».",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Tiercé", "PMU", "Stratégie"],

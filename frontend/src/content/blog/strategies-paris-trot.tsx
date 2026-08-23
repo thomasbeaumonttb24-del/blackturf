@@ -4,7 +4,7 @@ export const meta = {
   slug: "strategies-paris-trot",
   title: "Trot attelé : 5 clés pour mieux parier",
   description:
-    "Ferrure, recul au départ, réduction kilométrique, disqualification au trot, drivers : 5 facteurs spécifiques au trot attelé pour affiner ses pronostics et éviter les pièges.",
+    "Ferrure, recul au départ, réduction kilométrique, disqualification, drivers : 5 facteurs propres au trot attelé.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Trot", "Stratégie", "Discipline"],

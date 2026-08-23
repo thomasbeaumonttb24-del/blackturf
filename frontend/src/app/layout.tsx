@@ -20,16 +20,16 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: {
-    default: "BlackTurf — Votre Conseiller Expert en Paris Hippiques",
-    template: "%s | BlackTurf",
+    default: "BlackTurf — pronostics PMU notés aux rapports réels",
+    // Pas de gabarit « %s | BlackTurf » : Google affiche déjà « blackturf.fr » comme nom
+    // de site au-dessus du titre. Le suffixe répétait donc la marque une seconde fois et
+    // mangeait la largeur disponible sur mobile, là où le titre est tronqué.
+    template: "%s",
   },
+  // Google tronque autour de 155-160 caractères : l'essentiel passe devant.
   description:
-    "Entrez votre mise → BlackTurf génère votre plan de pari personnalisé. Un algorithme propulsé par l'IA (XGBoost + LightGBM + CatBoost) qui se réentraîne après chaque course sur les résultats réels du PMU.",
-  keywords: [
-    "pronostics hippiques", "pari de valeur", "intelligence artificielle",
-    "PMU", "analyse hippique", "tiercé", "quinté", "critère de Kelly",
-    "conseiller paris", "capital hippique",
-  ],
+    "Programme PMU du jour, probabilité calculée pour chaque cheval et plan de mise ajusté à votre budget. Chaque pronostic est noté aux rapports réels du PMU.",
+  // `meta keywords` est ignorée par Google depuis 2009 — retirée.
   metadataBase: new URL("https://blackturf.fr"),
   manifest: "/manifest.json",
   appleWebApp: {
@@ -42,15 +42,17 @@ export const metadata: Metadata = {
     locale: "fr_FR",
     url: "https://blackturf.fr",
     siteName: "BlackTurf",
-    title: "BlackTurf — Votre Conseiller Expert en Paris Hippiques",
+    // Aligné sur le <title> : og:title est une des sources dont Google se sert pour
+    // fabriquer le lien de titre, une divergence l'empêche de trancher.
+    title: "BlackTurf — pronostics PMU notés aux rapports réels",
     description:
-      "Plan de mise personnalisé. Paris de valeur détectés par IA. Programme PMU du jour analysé.",
+      "Programme PMU du jour, probabilité par cheval et plan de mise sur votre budget. Pronostics notés aux rapports réels.",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "BlackTurf" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "BlackTurf — Le moteur qui réapprend chaque course",
-    description: "Plan de mise personnalisé. Paris de valeur en temps réel.",
+    title: "BlackTurf — pronostics PMU notés aux rapports réels",
+    description: "Programme PMU du jour, probabilité par cheval, plan de mise sur votre budget.",
   },
   robots: { index: true, follow: true },
   // Pas de canonical global : `alternates` est HÉRITÉ par toute page qui ne le redéfinit
@@ -73,6 +75,9 @@ const siteJsonLd = {
   "@context": "https://schema.org",
   "@type": "WebSite",
   name: "BlackTurf",
+  // Variante réellement tapée par les visiteurs (29 impressions sur « black turf » en
+  // 90 jours) : alternateName permet à Google de rattacher les deux au même site.
+  alternateName: "Black Turf",
   url: "https://blackturf.fr",
   inLanguage: "fr-FR",
   potentialAction: {

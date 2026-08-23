@@ -4,7 +4,7 @@ export const meta = {
   slug: "analyser-quinte-du-jour",
   title: "Comment analyser le Quinté+ du jour",
   description:
-    "Méthode en 6 étapes pour analyser le Quinté+ du jour : forme, conditions de course, partants, cotes et value. Évitez les pièges du favori et trouvez les bons rapports.",
+    "Méthode en 6 étapes pour analyser le Quinté+ du jour : forme, conditions, partants, cotes et valeur. Éviter les pièges du favori.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Quinté+", "Méthode", "PMU"],

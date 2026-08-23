@@ -4,7 +4,7 @@ export const meta = {
   slug: "comprendre-le-2sur4",
   title: "Le 2sur4 : le pari accessible pour viser large",
   description:
-    "Le 2sur4 : trouver 2 chevaux parmi les 4 premiers, dans le désordre. Pourquoi c'est l'un des paris les plus accessibles du PMU, ses conditions et comment bien le jouer.",
+    "Le 2sur4 : trouver 2 chevaux parmi les 4 premiers, dans le désordre. Conditions d'ouverture du pari et façons de le jouer.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["2sur4", "PMU", "Accessible"],

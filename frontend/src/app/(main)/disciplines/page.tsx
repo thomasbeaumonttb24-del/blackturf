@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     "Trot, plat, obstacle : comprendre les trois disciplines des courses PMU, leurs facteurs clés et leurs paris. Et le programme du jour course par course, par discipline.",
   alternates: { canonical: "/disciplines" },
   openGraph: {
-    title: "Disciplines hippiques : trot, plat, obstacle | BlackTurf",
+    title: "Disciplines hippiques : trot, plat, obstacle",
     description: "Comprendre le trot, le plat et l'obstacle, et le programme du jour par discipline.",
     url: "https://blackturf.fr/disciplines",
   },

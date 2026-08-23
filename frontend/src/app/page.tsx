@@ -220,7 +220,7 @@ export default async function HomePage() {
       <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">
         {/* Image plein cadre + Ken Burns */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/hero-1600.webp" alt="Départ d'une course de chevaux aux portes numérotées"
+        <img src="/img/hero-1600.webp" width={1600} height={1067} alt="Départ d'une course de chevaux aux portes numérotées"
           srcSet="/img/hero-640.webp 640w, /img/hero-1024.webp 1024w, /img/hero-1600.webp 1600w"
           sizes="100vw"
           fetchPriority="high" decoding="async"
@@ -497,7 +497,7 @@ export default async function HomePage() {
             <ScrollReveal className="lg:col-span-2" delay={80}>
               <div className="relative rounded-2xl overflow-hidden h-full min-h-[220px]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/img/portrait.webp" alt="Cheval et jockey en tête de course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+                <img src="/img/portrait.webp" width={1067} height={1600} alt="Cheval et jockey en tête de course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
                 <div className="absolute inset-0 bg-gradient-to-t from-gray-950/85 via-gray-950/20 to-transparent" />
                 <div className="absolute bottom-0 left-0 p-6">
                   <p className="text-white font-display text-xl font-bold leading-snug max-w-xs">Les bons chevaux, au bon prix, selon votre tolérance au risque.</p>
@@ -589,7 +589,7 @@ export default async function HomePage() {
       {/* ═══════════ BANDEAU CINÉMATIQUE ═══════════ */}
       <section className="relative overflow-hidden bg-gray-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/showcase.webp" alt="Peloton de chevaux en pleine course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+        <img src="/img/showcase.webp" width={1600} height={1177} alt="Peloton de chevaux en pleine course" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
         <div className="absolute inset-0 bg-gradient-to-r from-gray-950 via-gray-950/85 to-gray-950/25" />
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950/90 via-transparent to-gray-950/30" />
         <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
@@ -609,7 +609,7 @@ export default async function HomePage() {
           {/* Inset photo */}
           <div className="hidden lg:block absolute right-8 bottom-10 w-64">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/img/duel.webp" alt="Duel de chevaux à l'arrivée" loading="lazy" decoding="async" className="tilt-card w-full h-40 object-cover rounded-2xl ring-1 ring-white/20 shadow-2xl" />
+            <img src="/img/duel.webp" width={1600} height={1201} alt="Duel de chevaux à l'arrivée" loading="lazy" decoding="async" className="tilt-card w-full h-40 object-cover rounded-2xl ring-1 ring-white/20 shadow-2xl" />
             <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-300">
               <Trophy className="h-3.5 w-3.5 text-amber-300" /> Réglé aux rapports PMU officiels
             </div>
@@ -709,7 +709,7 @@ export default async function HomePage() {
       {/* ═══════════ GESTION DU CAPITAL (vrai outil, image) ═══════════ */}
       <section className="relative py-24 overflow-hidden bg-gray-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/value.jpg" alt="Chevaux sur la piste au soleil couchant" className="absolute inset-0 h-full w-full object-cover ken-burns opacity-40" />
+        <img src="/img/value.jpg" width={1600} height={1067} alt="Chevaux sur la piste au soleil couchant" className="absolute inset-0 h-full w-full object-cover ken-burns opacity-40" />
         <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-gray-950/80 to-gray-950/60" />
         <div className="relative mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
@@ -1021,7 +1021,7 @@ export default async function HomePage() {
       {/* ═══════════ CTA FINALE — photo ═══════════ */}
       <section className="relative overflow-hidden bg-gray-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/cta.jpg" alt="Arrivée d'une course devant le public" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+        <img src="/img/cta.jpg" width={1600} height={1064} alt="Arrivée d'une course devant le public" className="absolute inset-0 h-full w-full object-cover ken-burns" />
         <div className="absolute inset-0 bg-gray-950/75" />
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/40 to-gray-950/70" />
         <div className="relative mx-auto max-w-3xl px-4 sm:px-6 text-center py-24 sm:py-32">

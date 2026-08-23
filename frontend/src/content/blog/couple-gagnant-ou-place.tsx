@@ -4,7 +4,7 @@ export const meta = {
   slug: "couple-gagnant-ou-place",
   title: "Couplé gagnant ou couplé placé : lequel choisir ?",
   description:
-    "Couplé gagnant (1er + 2e) ou couplé placé (2 chevaux dans les places) : différences de conditions, de rapport et de probabilité pour choisir le bon selon la course.",
+    "Couplé gagnant ou couplé placé : différences de conditions, de rapport et de probabilité, et lequel choisir selon la course.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Couplé", "PMU", "Bases"],

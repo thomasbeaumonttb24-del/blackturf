@@ -4,7 +4,7 @@ export const meta = {
   slug: "ia-pronostics-hippiques",
   title: "L'intelligence artificielle peut-elle battre les courses ?",
   description:
-    "Machine learning et pronostics hippiques : ce que l'IA sait vraiment faire, ses limites face au pari mutuel et au prélèvement PMU, et comment elle se compare au parieur humain.",
+    "Machine learning et pronostics hippiques : ce que l'IA sait faire, ses limites face au prélèvement PMU, et ce qu'elle vaut.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["IA", "Machine learning", "Pronostics"],

@@ -4,7 +4,7 @@ export const meta = {
   slug: "quinte-flexi-strategie",
   title: "Quinté+ Flexi : jouer plus de chevaux pour moins cher",
   description:
-    "Le Flexi permet de jouer un champ élargi au Quinté+ en réduisant la mise (et le gain) à 50 %, 25 % ou 10 %. Comment l'utiliser intelligemment sans diluer son espérance.",
+    "Le Flexi élargit le champ au Quinté+ en réduisant mise et gain à 50 %, 25 % ou 10 %. Quand il aide, quand il dilue.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Quinté+", "Flexi", "Stratégie"],

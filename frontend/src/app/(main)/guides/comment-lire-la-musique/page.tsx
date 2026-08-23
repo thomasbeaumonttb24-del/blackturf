@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     "Apprenez à lire la musique d'un cheval de course (1a 2p 0a Da…) : signification des chiffres, des lettres de discipline et des abréviations de disqualification pour juger la forme.",
   alternates: { canonical: "/guides/comment-lire-la-musique" },
   openGraph: {
-    title: "Comment lire la musique d'un cheval | BlackTurf",
+    title: "Comment lire la musique d'un cheval",
     description: "Décrypter la musique : chiffres, lettres de discipline et abréviations.",
     url: "https://blackturf.fr/guides/comment-lire-la-musique",
     type: "article",

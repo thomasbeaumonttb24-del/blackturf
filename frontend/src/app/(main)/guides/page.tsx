@@ -5,10 +5,10 @@ import { SeoHero, Container, LinkCard, Callout, Chip } from "@/components/seo/ki
 export const metadata: Metadata = {
   title: "Guides paris hippiques PMU",
   description:
-    "Guides gratuits pour parier au PMU : types de paris (Simple, Couplé, Tiercé, Quinté+, 2sur4, Multi), lecture de la musique des chevaux et stratégie de paris de valeur.",
+    "Guides gratuits pour parier au PMU : types de paris, lecture de la musique d'un cheval, stratégie de pari de valeur.",
   alternates: { canonical: "/guides" },
   openGraph: {
-    title: "Guides paris hippiques PMU | BlackTurf",
+    title: "Guides paris hippiques PMU",
     description: "Apprenez à parier au PMU : types de paris, lecture de la musique, paris de valeur.",
     url: "https://blackturf.fr/guides",
   },

@@ -34,19 +34,18 @@ export async function generateMetadata(): Promise<Metadata> {
   const title = c
     ? `Quinté+ du ${jourCourt(jour)} — ${titleCase(c.hippodrome_nom)}, partants et arrivée`
     : `Quinté+ du jour — partants, pronostic et arrivée`;
+  // Extrait tronqué par Google vers 155-160 caractères : date, lieu et heure d'abord.
   const description = c
-    ? `Le Quinté+ du ${jourLong(jour)} se court à ${titleCase(c.hippodrome_nom)} (${codeReunionCourse(
-        c.course_id,
-      )}, ${disciplineLabel(c.discipline)}, ${c.distance} m, ${c.nb_partants} partants) à ${heureParis(
-        c.date_heure,
-      )}. Partants, cotes, probabilité par cheval, puis arrivée officielle et rapports PMU.`
-    : "Le Quinté+ du jour : hippodrome, partants, cotes, probabilité calculée pour chaque cheval, puis l'arrivée officielle et les rapports PMU dès leur publication.";
+    ? `Quinté+ du ${jourLong(jour)} à ${titleCase(c.hippodrome_nom)} : ${
+        c.nb_partants
+      } partants, départ à ${heureParis(c.date_heure)}. Partants, cotes, arrivée et rapports.`
+    : "Le Quinté+ du jour : hippodrome, partants, cotes, puis l'arrivée officielle et les rapports PMU.";
 
   return {
     title,
     description,
     alternates: { canonical: "/quinte-du-jour" },
-    openGraph: { title: `${title} | BlackTurf`, description, url: "https://blackturf.fr/quinte-du-jour" },
+    openGraph: { title, description, url: "https://blackturf.fr/quinte-du-jour" },
   };
 }
 

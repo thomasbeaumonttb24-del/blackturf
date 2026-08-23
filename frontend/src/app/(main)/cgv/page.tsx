@@ -2,7 +2,8 @@ import { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Conditions Générales de Vente",
-  description: "Conditions Générales de Vente des abonnements BlackTurf",
+  description:
+    "Conditions Générales de Vente des abonnements BlackTurf : formules, durée, résiliation, droit de rétractation et facturation.",
   alternates: { canonical: "/cgv" },
 };
 

@@ -4,7 +4,7 @@ export const meta = {
   slug: "gestion-bankroll-courses",
   title: "Gérer son capital aux courses : la méthode bankroll",
   description:
-    "Mise fixe, mise proportionnelle, critère de Kelly fractionné : comment gérer son capital (bankroll) aux courses pour durer, encaisser la variance et éviter la ruine.",
+    "Mise fixe, mise proportionnelle, Kelly fractionné : gérer son capital aux courses pour encaisser la variance et durer.",
   date: "2026-06-23",
   updated: "2026-06-23",
   tags: ["Bankroll", "Méthode", "Gestion"],

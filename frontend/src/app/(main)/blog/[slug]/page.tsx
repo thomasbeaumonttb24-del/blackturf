@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     description: a.description,
     alternates: { canonical: `/blog/${a.slug}` },
     openGraph: {
-      title: `${a.title} | BlackTurf`,
+      title: `${a.title}`,
       description: a.description,
       url: `https://blackturf.fr/blog/${a.slug}`,
       type: "article",

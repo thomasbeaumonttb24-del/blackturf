@@ -22,17 +22,19 @@ export async function generateMetadata(): Promise<Metadata> {
   const hippodromes = (prog?.reunions ?? [])
     .map((r) => titleCase(r.hippodrome))
     .filter(Boolean)
-    .slice(0, 4)
+    .slice(0, 2)
     .join(", ");
 
   const title = nbCourses
     ? `Programme PMU du ${jourCourt(jour)} — ${nbCourses} courses, ${nbReunions} réunions`
     : `Programme PMU du jour — réunions et courses`;
+  // Google tronque l'extrait autour de 155-160 caractères : l'information la plus
+  // spécifique (date, volume, hippodromes) passe devant, la promesse produit derrière.
   const description = nbCourses
-    ? `Le programme PMU complet du ${jourLong(jour)} : ${nbCourses} courses sur ${nbReunions} réunions${
-        hippodromes ? ` (${hippodromes}…)` : ""
-      }. Partants, cotes, heure de départ et analyse course par course.`
-    : "Le programme PMU du jour, réunion par réunion : partants, cotes, heures de départ et analyse de chaque course.";
+    ? `Les ${nbCourses} courses PMU du ${jourLong(jour)}, sur ${nbReunions} réunions${
+        hippodromes ? ` : ${hippodromes}` : ""
+      }. Partants, cotes et heure de départ.`
+    : "Le programme PMU du jour, réunion par réunion : partants, cotes et heures de départ.";
 
   return {
     title,
