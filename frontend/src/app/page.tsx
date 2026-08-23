@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight, TrendingUp, Zap, Shield, Trophy,
@@ -13,6 +14,12 @@ import { CalculatorDemo } from "@/components/home/CalculatorDemo";
 import { LivePalmares } from "@/components/home/LivePalmares";
 import { HeroStats } from "@/components/home/HeroStats";
 import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
+
+// Le canonical n'est plus hérité de la racine (il y désignait "/" pour TOUTES les pages) :
+// l'accueil déclare donc le sien explicitement.
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 // ─── Exemple de course (illustratif, tagué « Exemple » partout) ──────────────
 const EXAMPLE = { hippo: "Deauville", code: "R4 · C5", disc: "Plat · 1600m" };

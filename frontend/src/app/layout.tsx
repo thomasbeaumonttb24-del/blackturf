@@ -53,7 +53,10 @@ export const metadata: Metadata = {
     description: "Plan de mise personnalisé. Paris de valeur en temps réel.",
   },
   robots: { index: true, follow: true },
-  alternates: { canonical: "/" },
+  // Pas de canonical global : `alternates` est HÉRITÉ par toute page qui ne le redéfinit
+  // pas. Un canonical "/" posé ici faisait déclarer à /programme et à chaque /courses/<id>
+  // qu'elles étaient des doublons de l'accueil — Google les fusionnait avec la home au lieu
+  // de les indexer. Chaque page pose désormais SON propre canonical.
 };
 
 // Données structurées globales (organisation + site) → éligibilité rich results / sitelinks.

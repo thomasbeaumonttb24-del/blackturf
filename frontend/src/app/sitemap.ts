@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { fetchProgramme } from "@/lib/seo";
+import { fetchProgramme, jourParis } from "@/lib/seo";
 import { ARTICLES } from "@/lib/blog";
 import { HIPPODROMES } from "@/lib/hippodromes";
 import { DISCIPLINES } from "@/lib/disciplines";
@@ -11,16 +11,16 @@ const BASE_URL = "https://blackturf.fr";
 // les URLs de courses qui étaient invisibles tant qu'elles n'étaient rendues que côté client).
 export const revalidate = 300;
 
-function yyyymmdd(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
 
   const staticPages: MetadataRoute.Sitemap = [
     { url: BASE_URL, lastModified: now, changeFrequency: "daily", priority: 1 },
     { url: `${BASE_URL}/programme`, lastModified: now, changeFrequency: "hourly", priority: 0.95 },
+    // Pages « du jour » : contenu neuf chaque matin, ce sont elles qui portent la
+    // fraîcheur du site pour Google (et les requêtes les plus tapées du turf).
+    { url: `${BASE_URL}/quinte-du-jour`, lastModified: now, changeFrequency: "daily", priority: 0.95 },
+    { url: `${BASE_URL}/resultats`, lastModified: now, changeFrequency: "hourly", priority: 0.9 },
     { url: `${BASE_URL}/tarifs`, lastModified: now, changeFrequency: "weekly", priority: 0.9 },
     { url: `${BASE_URL}/guides`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
     { url: `${BASE_URL}/guides/types-de-paris-pmu`, lastModified: now, changeFrequency: "monthly", priority: 0.65 },
@@ -33,6 +33,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE_URL}/login`, lastModified: now, changeFrequency: "monthly", priority: 0.4 },
     { url: `${BASE_URL}/mentions-legales`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
     { url: `${BASE_URL}/cgu`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
+    { url: `${BASE_URL}/cgv`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
     { url: `${BASE_URL}/confidentialite`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
   ];
 
@@ -57,12 +58,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.6,
   }));
 
-  // Courses du jour (publiques). Best-effort : si l'API ne répond pas, on garde les statiques.
+  // Courses de la veille, du jour et du lendemain. La veille porte les arrivées et les
+  // rapports (le contenu qui vieillit le mieux), le lendemain permet à Google de découvrir
+  // une course AVANT qu'elle ne soit courue — sans quoi la fiche n'est explorée qu'une fois
+  // la course finie et n'a jamais eu sa chance sur « partants <course> ».
+  // Le jour se calcule à Paris : en UTC, la journée bascule à 02 h du matin heure française
+  // et le sitemap listait alors les courses de la veille.
   const courseUrls: MetadataRoute.Sitemap = [];
   const seen = new Set<string>();
-  const prog = await fetchProgramme(yyyymmdd(now));
-  if (prog?.reunions) {
-    for (const r of prog.reunions) {
+  const jours = [jourParis(-1), jourParis(0), jourParis(1)];
+  const progs = await Promise.all(jours.map((j) => fetchProgramme(j)));
+  for (const prog of progs) {
+    for (const r of prog?.reunions ?? []) {
       for (const c of r.courses ?? []) {
         if (!c.course_id || seen.has(c.course_id)) continue;
         seen.add(c.course_id);

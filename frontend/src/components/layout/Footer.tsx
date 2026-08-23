@@ -23,6 +23,8 @@ const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string
   {
     title: "Ressources",
     links: [
+      { href: "/quinte-du-jour", label: "Quinté+ du jour" },
+      { href: "/resultats", label: "Résultats et rapports" },
       { href: "/blog", label: "Blog" },
       { href: "/hippodromes", label: "Hippodromes" },
       { href: "/disciplines", label: "Disciplines" },

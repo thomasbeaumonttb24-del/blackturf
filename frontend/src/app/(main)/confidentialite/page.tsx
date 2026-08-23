@@ -3,7 +3,7 @@ import { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Politique de confidentialité — BlackTurf",
   description: "Politique de confidentialité et traitement des données personnelles — BlackTurf",
-  robots: { index: false, follow: false },
+  alternates: { canonical: "/confidentialite" },
 };
 
 export default function ConfidentialitePage() {

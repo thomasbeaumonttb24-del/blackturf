@@ -52,9 +52,17 @@ export function formatMontantDevise(
   }
 }
 
+// Une heure de départ PMU est une heure de PARIS, pas une heure locale : sans `timeZone`
+// explicite, Intl utilise le fuseau du runtime. Le conteneur serveur tourne en UTC, donc
+// le HTML rendu côté serveur annonçait « 09:40 » là où le navigateur affiche « 11:40 » —
+// deux dégâts : un écart d'hydratation, et une heure fausse dans la page indexée par
+// Google. On fige donc Europe/Paris des deux côtés.
+const TZ_PARIS = "Europe/Paris";
+
 export function formatDate(d: string | Date | null | undefined): string {
   if (!d) return "—";
   return new Intl.DateTimeFormat("fr-FR", {
+    timeZone: TZ_PARIS,
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -64,6 +72,7 @@ export function formatDate(d: string | Date | null | undefined): string {
 export function formatTime(d: string | Date | null | undefined): string {
   if (!d) return "—";
   return new Intl.DateTimeFormat("fr-FR", {
+    timeZone: TZ_PARIS,
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(d));
@@ -72,6 +81,7 @@ export function formatTime(d: string | Date | null | undefined): string {
 export function formatDateTime(d: string | Date | null | undefined): string {
   if (!d) return "—";
   return new Intl.DateTimeFormat("fr-FR", {
+    timeZone: TZ_PARIS,
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",

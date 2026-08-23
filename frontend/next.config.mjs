@@ -21,6 +21,18 @@ const nextConfig = {
       ],
     },
   ],
+  async redirects() {
+    return [
+      // /courses n'a jamais eu de page : Google l'a pourtant indexée (via les liens vers
+      // /courses/<id>) et servait donc un 404 aux visiteurs. Le hub des courses, c'est le
+      // programme du jour.
+      { source: "/courses", destination: "/programme", permanent: true },
+      // Variantes tapées à la main / vues dans les liens entrants.
+      { source: "/quinte", destination: "/quinte-du-jour", permanent: true },
+      { source: "/resultats-pmu", destination: "/resultats", permanent: true },
+      { source: "/arrivees", destination: "/resultats", permanent: true },
+    ];
+  },
   async rewrites() {
     return [
       {

@@ -196,7 +196,7 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
               {p.derniere_rencontre && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   Dernière rencontre le{" "}
-                  {new Date(p.derniere_rencontre.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "2-digit" })}
+                  {new Date(p.derniere_rencontre.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "2-digit" })}
                   {p.derniere_rencontre.a_position && p.derniere_rencontre.b_position
                     ? ` — ${p.derniere_rencontre.a_position}e contre ${p.derniere_rencontre.b_position}e`
                     : ""}
