@@ -88,7 +88,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ tuile: string 
   const png = Buffer.from(await rendu.arrayBuffer());
   try {
     const { default: sharp } = await import("sharp");
-    const jpeg = await sharp(png).flatten({ background: "#0A0C10" }).jpeg({ quality: 92 }).toBuffer();
+    const jpeg = await sharp(png).flatten({ background: "#F5F2EA" }).jpeg({ quality: 92 }).toBuffer();
     return new Response(new Uint8Array(jpeg), {
       headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=900" },
     });
