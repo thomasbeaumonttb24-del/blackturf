@@ -37,6 +37,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE_URL}/confidentialite`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
   ];
 
+  // Archives d'arrivées : une page par journée écoulée. Contrairement au programme, une
+  // arrivée et ses rapports ne changent plus jamais — c'est le seul contenu du site qui
+  // ne se périme pas. On expose les 30 derniers jours ; les plus anciens restent
+  // accessibles par la navigation « journée précédente ».
+  const archivesResultats: MetadataRoute.Sitemap = Array.from({ length: 30 }, (_, i) => {
+    const j = jourParis(-(i + 1));
+    return {
+      url: `${BASE_URL}/resultats/${j}`,
+      lastModified: new Date(`${j}T22:00:00Z`),
+      changeFrequency: "yearly" as const,
+      priority: 0.55,
+    };
+  });
+
   const blogPages: MetadataRoute.Sitemap = ARTICLES.map((a) => ({
     url: `${BASE_URL}/blog/${a.slug}`,
     lastModified: new Date(a.updated + "T12:00:00Z"),
@@ -83,5 +97,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }
   }
 
-  return [...staticPages, ...blogPages, ...hippodromePages, ...disciplinePages, ...courseUrls];
+  return [...staticPages, ...archivesResultats, ...blogPages, ...hippodromePages, ...disciplinePages, ...courseUrls];
 }
