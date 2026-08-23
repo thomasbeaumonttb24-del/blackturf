@@ -17,6 +17,8 @@ Aucune valeur inventée : tout vient des résultats réels ; signal absent → n
 from __future__ import annotations
 
 import json
+import math
+
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,6 +72,45 @@ SIGNALS: dict = {
 }
 
 K_SHRINK = 40.0   # pseudo-paris (mise) shrinkant le ROI vers 0
+SIG_M_MIN, SIG_M_MAX = 0.6, 1.6   # bornes du multiplicateur d'un signal
+
+
+# ─────────────────────────────────────────────────────────────
+# Un signal se juge par rapport aux AUTRES CHEVAUX, pas par rapport à zéro
+# ─────────────────────────────────────────────────────────────
+# Le multiplicateur valait `1 + roi`, où `roi` est le rendement d'une mise plate sur
+# les chevaux qui portent le signal. Or le rendement d'une mise plate sur N'IMPORTE
+# QUEL cheval vaut environ −15 % (le prélèvement PMU du simple gagnant) : TOUS les
+# signaux sortent donc sous 1, et le produit de 4 à 6 d'entre eux s'écrase sur la
+# borne basse.
+#
+# Constat du 2026-08-23 sur 242 chevaux de 20 courses : **207 (86 %) recevaient
+# exactement 0,50**, la borne. Un multiplicateur constant ne trie plus rien — et
+# l'explication affichée à l'utilisateur annonçait « signaux mitigés, mise réduite »
+# sur presque chaque cheval, sans que la mise change puisque le facteur était commun.
+#
+# On mesure donc un signal RELATIVEMENT au rendement moyen de la population : un
+# signal à −15 % dans un monde à −15 % est neutre, pas mauvais.
+def _roi_reference(agg: dict) -> float:
+    """Rendement moyen de la population qui sert de zéro aux multiplicateurs.
+
+    Agrégé sur l'ensemble des observations de signaux : c'est exactement la même
+    mise plate, sur le même échantillon, donc le bon point de comparaison.
+    """
+    stake = sum(a["stake"] for a in agg.values())
+    payout = sum(a["payout"] for a in agg.values())
+    return ((payout - stake) / stake) if stake > 0 else 0.0
+
+
+def _multiplicateur_relatif(roi: float, roi_reference: float, n: int) -> float:
+    """Avantage du signal sur la population, ramené vers 1 quand l'échantillon est
+    mince, puis borné. Un signal exactement dans la moyenne rend 1.0."""
+    base = 1.0 + roi_reference
+    if base <= 0:
+        return 1.0
+    ratio = (1.0 + roi) / base
+    shrink = n / (n + K_SHRINK)          # peu d'observations → on reste près de 1
+    return float(max(SIG_M_MIN, min(SIG_M_MAX, 1.0 + (ratio - 1.0) * shrink)))
 
 
 async def compute_signal_performance(session: AsyncSession) -> dict:
@@ -119,25 +160,27 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
         # déplacé l'accumulation du driver vers la liste de partitions.
         del partition
 
+    roi_reference = _roi_reference(agg)
     signals = {}
     for name, a in agg.items():
         n = a["n"]
         if n == 0:
-            signals[name] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0, "multiplier": 1.0}
+            signals[name] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0,
+                             "multiplier": 1.0}
             continue
         roi = (a["payout"] - a["stake"]) / a["stake"]
         # ROI shrinké : (payout - stake) / (stake + K) → tend vers 0 si n petit
         roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + K_SHRINK)
-        # multiplicateur de conviction borné : 1 + roi_shrunk, clampé [0.6, 1.6]
-        mult = float(max(0.6, min(1.6, 1.0 + roi_shrunk)))
+        mult = _multiplicateur_relatif(roi, roi_reference, n)
         signals[name] = {
             "n": n,
             "win_rate": round(a["wins"] / n, 3),
             "roi": round(roi, 3),
             "roi_shrunk": round(roi_shrunk, 3),
+            "roi_reference": round(roi_reference, 3),
             "multiplier": round(mult, 3),
         }
-    return {"signals": signals, "n_total": n_total}
+    return {"signals": signals, "n_total": n_total, "roi_reference": round(roi_reference, 3)}
 
 
 def _profile_pnl(profil: str, win: int, top3: int, cote: float) -> tuple[float, float]:
@@ -206,22 +249,29 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
         del partition
 
     out = {}
+    references = {}
     for p in profils:
         sig = {}
+        # Chaque profil a son propre zéro : le conservateur mise au placé, l'agressif
+        # ne joue que les cotes ≥ 6 — leurs rendements moyens n'ont rien à voir.
+        roi_reference = _roi_reference(agg[p])
+        references[p] = round(roi_reference, 3)
         for name, a in agg[p].items():
             if a["stake"] <= 0:
                 sig[name] = {"n": a["n"], "roi_shrunk": 0.0, "multiplier": 1.0, "hit_rate": None}
                 continue
+            roi = (a["payout"] - a["stake"]) / a["stake"]
             roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + K_SHRINK)
             sig[name] = {
                 "n": a["n"],
                 "hit_rate": round(a["hits"] / a["n"], 3) if a["n"] else None,
-                "roi": round((a["payout"] - a["stake"]) / a["stake"], 3),
+                "roi": round(roi, 3),
                 "roi_shrunk": round(roi_shrunk, 3),
-                "multiplier": round(float(max(0.6, min(1.6, 1.0 + roi_shrunk))), 3),
+                "roi_reference": round(roi_reference, 3),
+                "multiplier": round(_multiplicateur_relatif(roi, roi_reference, a["n"]), 3),
             }
         out[p] = sig
-    return {"profils": out, "n_total": n_total}
+    return {"profils": out, "n_total": n_total, "roi_reference": references}
 
 
 def _safe(pred, f) -> bool:
@@ -852,11 +902,23 @@ def signal_multiplier(features: dict, perf: dict | None, profil: str | None = No
         sigs = perf["signals"]
     if not sigs:
         return 1.0
-    m = 1.0
+    # MOYENNE GÉOMÉTRIQUE, pas produit. Le produit fait payer au cheval le NOMBRE de
+    # signaux qu'il porte : six facteurs à 0,9 donnent 0,53 alors que chaque signal pris
+    # séparément ne dit « −10 % » qu'une fois. Combiné à des multiplicateurs tous < 1
+    # (cf. _multiplicateur_relatif), 86 % des chevaux tombaient sur la borne basse le
+    # 2026-08-23 — le tilt ne triait plus rien. La moyenne géométrique garde le sens
+    # (un signal neutre ne change rien, deux mauvais pèsent plus qu'un) sans que porter
+    # beaucoup de signaux soit en soi une faute.
+    mults = []
     for name, pred in SIGNALS.items():
         try:
             if pred(features) and name in sigs:
-                m *= sigs[name].get("multiplier", 1.0)
+                m = float(sigs[name].get("multiplier", 1.0) or 1.0)
+                if m > 0:
+                    mults.append(m)
         except Exception:
             continue
-    return float(max(0.5, min(2.0, m)))
+    if not mults:
+        return 1.0
+    moyenne = math.exp(sum(math.log(m) for m in mults) / len(mults))
+    return float(max(0.5, min(2.0, moyenne)))
