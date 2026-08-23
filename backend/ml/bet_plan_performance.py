@@ -20,6 +20,7 @@ isolé ne doit jamais faire déclarer une stratégie rentable.
 from __future__ import annotations
 
 import json
+import math
 import random
 import statistics
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from ml.cote_calibration import COTE_EDGES, bucket_index
 from ml.isotonic_calibration import _nb_bucket
 from ml.profil_learning import JACKPOT_TYPES, _is_jackpot_type
 from ml.signal_performance import EV_BANDS, _ev_band_key
+from services.pmu_paris_reference import prelevement
 
 log = structlog.get_logger(module="bet_plan_performance")
 
@@ -176,6 +178,40 @@ def _bootstrap_ci(values: list[float], iters: int = BOOTSTRAP_ITER) -> Optional[
     return round(lo, 4), round(hi, 4)
 
 
+def _prelevement_moyen_pct(bet_rows: list[dict]) -> Optional[float]:
+    """Prélèvement PMU du groupe, en %, pondéré par la MISE réellement engagée.
+
+    Le pari mutuel n'a pas un seul « taux de la maison » : le PMU garde ~15,5 % sur
+    un simple, ~23 % sur un couplé, ~25 % sur un trio, ~30 % sur un Multi. Un même
+    ROI ne dit donc PAS la même chose selon le pool : −20 % sur un Multi, c'est
+    +10 points de mieux que le hasard ; −20 % sur un Simple Gagnant, c'est
+    −4,5 points de moins. Pondéré par la mise (et non par le nombre de paris) parce
+    que c'est l'argent engagé, pas le nombre de tickets, qui subit le prélèvement.
+    """
+    total = sum(float(b.get("mise") or 0.0) for b in bet_rows)
+    if total <= 0:
+        return None
+    pondere = sum(float(b.get("mise") or 0.0) * prelevement(b.get("type"))
+                  for b in bet_rows)
+    return round(pondere / total * 100, 2)
+
+
+def _streak_attendue(hit_rate: Optional[float], n_plans: int) -> Optional[float]:
+    """Plus longue série perdante ATTENDUE pour un taux de réussite donné.
+
+    Espérance de la plus longue suite d'échecs sur ``n`` tirages indépendants de
+    probabilité de succès ``p`` : ln(n) / ln(1/(1−p)). Un Multi en 4 qui tombe une
+    fois sur onze enchaîne NORMALEMENT une trentaine de plans perdants sur 300 —
+    ce n'est pas une anomalie de risque, c'est sa loi. Sans cette référence, tout
+    pari à faible fréquence et gros rapport se fait signaler « drawdown excessif »
+    quel que soit son rendement (constat prod du 2026-08-23 : « Mini Multi en 4 »
+    à +332 % de ROI était rétrogradé pour cette seule raison).
+    """
+    if not hit_rate or hit_rate <= 0 or hit_rate >= 1 or n_plans < 2:
+        return None
+    return math.log(n_plans) / math.log(1.0 / (1.0 - hit_rate))
+
+
 def _metrics_for_group(bet_rows: list[dict], plan_rows: list[dict]) -> dict:
     """Métriques agrégées sur un groupe de paris + les plans qui les contiennent.
 
@@ -206,6 +242,14 @@ def _metrics_for_group(bet_rows: list[dict], plan_rows: list[dict]) -> dict:
         ci = None
 
     reliable = n_paris >= MIN_SEGMENT_OBS
+    # AVANTAGE RÉEL = ce que le ROI vaut UNE FOIS LE PRÉLÈVEMENT DÉDUIT de la
+    # comparaison. Un parieur sans aucune compétence sur un pool qui prélève t %
+    # finit à −t % : c'est le zéro. `edge_pct = roi_pct + prelevement_pct` mesure
+    # donc la compétence propre du système, la seule grandeur comparable entre un
+    # Simple Gagnant (15,5 %) et un Multi (30 %).
+    prelev = _prelevement_moyen_pct(bet_rows)
+    edge = round(roi + prelev, 2) if (roi is not None and prelev is not None) else None
+    streak_attendue = _streak_attendue(hit_rate, n_plans)
     return {
         "n_plans": n_plans,
         "n_paris": n_paris,
@@ -215,10 +259,17 @@ def _metrics_for_group(bet_rows: list[dict], plan_rows: list[dict]) -> dict:
         "net_profit": net,
         "roi_pct": roi if reliable else None,
         "roi_pct_raw": roi,
+        "prelevement_pct": prelev,
+        "edge_pct": edge if reliable else None,
+        "edge_pct_raw": edge,
         "hit_rate": hit_rate,
         "taux_courses_beneficiaires": taux_courses_benef,
         "drawdown_max": drawdown_max,
         "losing_streak_max": losing_streak_max,
+        # Série perdante NORMALE pour ce taux de réussite — le repère qui dit si
+        # `losing_streak_max` est une anomalie ou la loi du pari.
+        "losing_streak_attendue": (round(streak_attendue, 1)
+                                   if streak_attendue is not None else None),
         "volatilite": volatilite,
         "mediane_resultat_plan": mediane,
         "ic90_moyenne_plan": ci,
@@ -284,6 +335,128 @@ async def _naive_favorite_roi(session: AsyncSession, course_ids: list[str]) -> O
     net = round(gain - mise, 2)
     return {"n_courses": n, "montant_mise": round(mise, 2), "montant_retour": round(gain, 2),
             "net_profit": net, "roi_pct": round(net / mise * 100, 2) if mise else None}
+
+
+def _taille_baseline(type_pari: str) -> Optional[int]:
+    """Nombre de chevaux que prendrait le MÊME type de pari joué sur le classement.
+
+    « Multi en 6 » → les 6 premiers du classement, « Trio » → les 3 premiers, etc.
+    None = type dont on ne sait pas construire la sélection de référence : on
+    préfère ne rien comparer plutôt que comparer n'importe quoi.
+    """
+    if not type_pari:
+        return None
+    t = str(type_pari)
+    if "Multi en " in t:                       # « Multi en 5 », « Mini Multi en 5 »
+        try:
+            return int(t.rsplit(" ", 1)[1])
+        except (IndexError, ValueError):
+            return None
+    return {
+        "Simple Gagnant": 1, "Simple Placé": 1,
+        "Couplé Gagnant": 2, "Couplé Placé": 2, "Couplé Ordre": 2, "2sur4": 2,
+        "Trio": 3, "Trio Ordre": 3, "Tiercé Désordre": 3, "Tiercé Ordre": 3,
+        "Super 4": 4, "Quarté+": 4, "Quarté+ Désordre": 4,
+        "Quinté+": 5, "Quinté+ Désordre": 5, "Quinté+ Flexi": 5, "Pick5": 5,
+    }.get(t)
+
+
+async def _baseline_classement_par_type(
+    session: AsyncSession, course_ids: list[str], types: list[str],
+) -> dict[str, dict]:
+    """Rendement du MÊME type de pari joué sur les N PREMIERS DU CLASSEMENT.
+
+    C'est le comparateur qui manquait. ``naive_favorite_comparator`` répond à
+    « bat-on le favori du marché ? » ; celui-ci répond à la question qui décide de
+    l'architecture du moteur : **la sélection apporte-t-elle quelque chose au
+    classement, ou lui coûte-t-elle ?** Un type dont le moteur tire −33 % là où
+    « les 2 premiers du classement » rend −11 % n'a pas un problème de type de
+    pari : il a un problème de choix des chevaux.
+
+    Réglé par ``settle_pari`` — exactement le même code que les vrais conseils,
+    donc même traitement des rapports, des ex-æquo et des non-partants. Mise 1 €
+    par course. Un pari gagnant dont le rapport n'est pas publié est EXCLU (jamais
+    compté 0), même règle d'honnêteté que le règlement des plans.
+    """
+    if not course_ids or not types:
+        return {}
+    tailles = {t: _taille_baseline(t) for t in types}
+    tailles = {t: n for t, n in tailles.items() if n}
+    if not tailles:
+        return {}
+
+    stmt = text("""
+        SELECT pr.course_id, pr.rang_predit, pa.numero, pa.non_partant,
+               c.nb_partants, r.classement, r.rapports, r.rapports_detail
+        FROM predictions pr
+        JOIN participations pa ON pa.participation_id = pr.participation_id
+        JOIN courses c ON c.course_id = pr.course_id
+        JOIN resultats r ON r.course_id = pr.course_id
+        WHERE pr.course_id IN :cids
+    """).bindparams(bindparam("cids", expanding=True))
+    rows = (await session.execute(stmt, {"cids": list(set(course_ids))})).all()
+    if not rows:
+        return {}
+
+    par_course: dict[str, dict] = {}
+    for course_id, rang, numero, non_partant, nb_partants, cl_raw, rap_raw, det_raw in rows:
+        c = par_course.setdefault(course_id, {
+            "rangs": {}, "np": set(), "nb_partants": nb_partants,
+            "classement": cl_raw, "rapports": rap_raw, "detail": det_raw,
+        })
+        try:
+            num = int(numero)
+        except (TypeError, ValueError):
+            continue
+        if non_partant:
+            c["np"].add(num)
+            continue                      # un NP n'a pas sa place dans la référence
+        if rang is not None:
+            c["rangs"][int(rang)] = num
+
+    from services.bet_settlement import settle_pari
+
+    out: dict[str, dict] = {}
+    for course_id, c in par_course.items():
+        classement = c["classement"] if isinstance(c["classement"], list) else (
+            json.loads(c["classement"]) if c["classement"] else None)
+        if not classement:
+            continue
+        rapports = c["rapports"] if isinstance(c["rapports"], dict) else (
+            json.loads(c["rapports"]) if c["rapports"] else {})
+        detail = c["detail"] if isinstance(c["detail"], dict) else (
+            json.loads(c["detail"]) if c["detail"] else None)
+        # Rangs RECALCULÉS après retrait des non-partants : « les 2 premiers du
+        # classement » doit désigner deux chevaux réellement au départ.
+        ordre = [c["rangs"][r] for r in sorted(c["rangs"]) if c["rangs"][r] not in c["np"]]
+        for type_pari, n in tailles.items():
+            if len(ordre) < n:
+                continue
+            res = settle_pari(type_pari, ordre[:n], classement, rapports,
+                              c["nb_partants"] or len(classement), detail, c["np"])
+            if res.get("rembourse"):
+                continue
+            agg = out.setdefault(type_pari, {"n_courses": 0, "mise": 0.0, "gain": 0.0,
+                                             "n_gagnes": 0, "n_rapport_absent": 0})
+            if res.get("gagne"):
+                if res.get("rapport_reel") is None:
+                    agg["n_rapport_absent"] += 1
+                    continue              # gain inconnu → hors mesure, jamais 0
+                agg["gain"] += float(res["rapport_reel"]) * float(res.get("gain_mult", 1.0))
+                agg["n_gagnes"] += 1
+            agg["n_courses"] += 1
+            agg["mise"] += 1.0
+
+    for type_pari, agg in out.items():
+        mise = agg["mise"]
+        roi = round((agg["gain"] - mise) / mise * 100, 2) if mise > 0 else None
+        agg["roi_pct"] = roi
+        agg["hit_rate"] = round(agg["n_gagnes"] / agg["n_courses"], 4) if agg["n_courses"] else None
+        agg["prelevement_pct"] = round(prelevement(type_pari) * 100, 2)
+        agg["edge_pct"] = round(roi + agg["prelevement_pct"], 2) if roi is not None else None
+        agg["mise"] = round(mise, 2)
+        agg["gain"] = round(agg["gain"], 2)
+    return out
 
 
 async def compute_forward_performance(
@@ -402,6 +575,29 @@ async def compute_forward_performance(
 
     naive = await _naive_favorite_roi(session, [p["course_id"] for p in plan_rows])
 
+    # Référence CLASSEMENT : le même type de pari, joué sur les N premiers du
+    # classement, sur les MÊMES courses. Rattaché à chaque segment de la dimension
+    # `type_pari` — la seule où la comparaison a un sens (un « type de pari » a une
+    # sélection de référence évidente, pas une « bande d'EV »).
+    if dimension == "type_pari" and segments:
+        try:
+            baselines = await _baseline_classement_par_type(
+                session, [p["course_id"] for p in plan_rows], list(segments))
+        except Exception as exc:      # une référence indisponible ne casse jamais la mesure
+            log.warning("bet_plan_performance.baseline_classement_skip", err=str(exc)[:160])
+            baselines = {}
+        for key, m in segments.items():
+            base = baselines.get(key)
+            if not base:
+                continue
+            m["baseline_classement"] = base
+            # Écart en points de ROI entre notre sélection et le simple suivi du
+            # classement. Négatif = la sélection DÉTRUIT de la valeur sur ce type.
+            m["delta_vs_classement_pct"] = (
+                round(m["roi_pct"] - base["roi_pct"], 2)
+                if m.get("roi_pct") is not None and base.get("roi_pct") is not None
+                else None)
+
     return {
         "dimension": dimension,
         "since": since.isoformat() if since else None,
@@ -415,15 +611,42 @@ async def compute_forward_performance(
 # ─────────────────────────────────────────────────────────────
 # Gates automatiques — segment négatif / drawdown excessif
 # ─────────────────────────────────────────────────────────────
-# ROI% sous ce seuil, avec assez d'observations, suspend le segment (poids ×0).
-# -20% : nettement au-delà du prélèvement PMU moyen (~25-30% brut mais réparti,
-# l'edge visé est positif) — un ROI durablement pire que ça n'est pas du bruit.
+# AVANTAGE (edge_pct = roi_pct + prélèvement du pool) sous ce seuil → suspension.
+#
+# L'ancien seuil était un ROI ABSOLU de −20 %, avec pour justification qu'il serait
+# « nettement au-delà du prélèvement PMU ». C'était faux pour la moitié du catalogue :
+# le PMU garde ~15,5 % sur un simple mais ~23 % sur un couplé, ~25 % sur un trio et
+# ~30 % sur un Multi. Un seuil unique juge donc les pools à handicaps différents avec
+# la même règle, et il coupe mécaniquement les pools chers, quelle que soit la
+# compétence du système. Constat prod du 2026-08-23 (fenêtre 90 j) :
+#   • Couplé Placé   −32,7 % de ROI, prélèvement 23 %  → avantage −9,7 pts  → suspendu
+#   • Simple Gagnant −19,2 % de ROI, prélèvement 15,5 % → avantage −3,7 pts → gardé
+# alors que la mesure sur le classement montre l'avantage le plus FORT sur les paires
+# (couplés) et quasi nul sur le gagnant sec. Le tri était à l'envers.
+#
+# −8 points : on ne suspend que ce qui est franchement PIRE que le hasard sur son
+# propre pool. Entre −8 et 0, le système ne bat pas le prélèvement mais n'aggrave pas
+# non plus le tirage au sort : il reste jouable à conviction apprise (les poids ROI
+# le pénalisent déjà) et continue de produire du signal d'apprentissage.
+EDGE_SUSPEND_THRESHOLD_PCT = -8.0
+# Repli quand le prélèvement du segment est inconnu (aucune mise, type hors
+# catalogue) : on retombe sur l'ancien seuil absolu plutôt que de ne rien décider.
 ROI_SUSPEND_THRESHOLD_PCT = -20.0
-# drawdown_max / montant misé du segment ≥ cette fraction → mises réduites de
-# moitié plutôt que suspendues (le segment n'est pas prouvé perdant, mais la
-# série de pertes vécue dépasse ce qu'un profil normal doit encaisser).
-DRAWDOWN_REDUCE_FRACTION = 0.5
+# Un drawdown ne signale un problème que s'il dépasse NETTEMENT celui qu'implique
+# la fréquence du pari (cf. _streak_attendue). Facteur 2 : deux fois la série
+# perdante attendue, c'est au-delà de la variance ordinaire.
+DRAWDOWN_TOLERANCE_FACTOR = 2.0
 REDUCE_FACTOR = 0.5
+# Écart, en points de ROI, en dessous duquel la sélection est jugée DESTRUCTRICE
+# face au simple suivi du classement (cf. _baseline_classement_par_type). Mesure
+# du 2026-08-23 : sur le Couplé Placé, le moteur rend −32,7 % là où « les 2 premiers
+# du classement » rend −11,5 % — 21 points perdus par le choix des chevaux, pas par
+# le type de pari. Réduction (×0,5), pas suspension : le type reste bon, c'est la
+# sélection qui doit être corrigée en amont.
+DELTA_CLASSEMENT_REDUCE_PCT = -10.0
+# Nombre minimal de courses derrière la référence classement avant d'en tirer une
+# décision — même exigence de fiabilité que pour un segment.
+MIN_BASELINE_COURSES = MIN_SEGMENT_OBS
 
 
 def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
@@ -436,18 +659,44 @@ def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for key, m in (perf.get("segments") or {}).items():
         status, factor, reason = "active", 1.0, None
-        if m.get("reliable") and m.get("roi_pct") is not None and m["roi_pct"] <= ROI_SUSPEND_THRESHOLD_PCT:
+        edge = m.get("edge_pct")
+        streak_att = m.get("losing_streak_attendue")
+        streak_max = m.get("losing_streak_max")
+        baseline = m.get("baseline_classement") or {}
+        delta = m.get("delta_vs_classement_pct")
+        if m.get("reliable") and edge is not None and edge <= EDGE_SUSPEND_THRESHOLD_PCT:
             status, factor = "suspended", 0.0
-            reason = f"roi_pct={m['roi_pct']} <= {ROI_SUSPEND_THRESHOLD_PCT} (n={m['n_paris']})"
-        elif (m.get("drawdown_max") is not None and m.get("montant_mise")
-              and m["montant_mise"] > 0
-              and m["drawdown_max"] / m["montant_mise"] >= DRAWDOWN_REDUCE_FRACTION):
+            reason = (f"avantage={edge} pts <= {EDGE_SUSPEND_THRESHOLD_PCT} "
+                      f"(roi_pct={m.get('roi_pct')}, prélèvement={m.get('prelevement_pct')}%, "
+                      f"n={m['n_paris']})")
+        elif (m.get("reliable") and edge is None and m.get("roi_pct") is not None
+              and m["roi_pct"] <= ROI_SUSPEND_THRESHOLD_PCT):
+            # Prélèvement inconnu → repli sur l'ancien critère absolu.
+            status, factor = "suspended", 0.0
+            reason = (f"prélèvement inconnu, repli roi_pct={m['roi_pct']} "
+                      f"<= {ROI_SUSPEND_THRESHOLD_PCT} (n={m['n_paris']})")
+        elif (m.get("reliable") and delta is not None
+              and delta <= DELTA_CLASSEMENT_REDUCE_PCT
+              and (baseline.get("n_courses") or 0) >= MIN_BASELINE_COURSES):
+            # Le type n'est pas le problème : c'est le choix des chevaux qui coûte.
             status, factor = "reduced", REDUCE_FACTOR
-            reason = (f"drawdown_max={m['drawdown_max']} >= "
-                     f"{DRAWDOWN_REDUCE_FRACTION:.0%} de montant_mise={m['montant_mise']}")
+            reason = (f"sélection {delta} pts sous le simple suivi du classement "
+                      f"(moteur {m.get('roi_pct')}% vs classement {baseline.get('roi_pct')}% "
+                      f"sur {baseline.get('n_courses')} courses)")
+        elif (streak_att and streak_max is not None
+              and streak_max > DRAWDOWN_TOLERANCE_FACTOR * streak_att
+              and not (edge is not None and edge > 0)):
+            # Série perdante bien au-delà de ce que la fréquence du pari implique,
+            # ET aucun avantage démontré pour la justifier → on réduit sans couper.
+            status, factor = "reduced", REDUCE_FACTOR
+            reason = (f"série perdante {streak_max} > {DRAWDOWN_TOLERANCE_FACTOR:g}× "
+                      f"l'attendu {streak_att} (drawdown_max={m.get('drawdown_max')})")
         out[key] = {
             "status": status, "factor": factor, "reason": reason,
-            "roi_pct": m.get("roi_pct"), "n_paris": m.get("n_paris"),
+            "roi_pct": m.get("roi_pct"), "edge_pct": edge,
+            "prelevement_pct": m.get("prelevement_pct"),
+            "delta_vs_classement_pct": delta,
+            "n_paris": m.get("n_paris"),
             "n_plans": m.get("n_plans"), "drawdown_max": m.get("drawdown_max"),
         }
     return out

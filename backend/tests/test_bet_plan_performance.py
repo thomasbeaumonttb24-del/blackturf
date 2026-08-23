@@ -145,14 +145,85 @@ def test_gate_suspend_un_segment_fiable_et_durablement_negatif():
     assert gates["Tiercé Désordre"]["factor"] == 0.0
 
 
-def test_gate_reduit_sur_drawdown_excessif_sans_segment_prouve_perdant():
+def test_gate_reduit_sur_serie_perdante_bien_au_dela_de_l_attendu():
+    # 1 réussite sur 2 sur 100 plans → série perdante attendue ≈ 6,6 ; observée 20,
+    # soit 3× l'attendu, sans avantage démontré → réduction (pas suspension).
     perf = {"segments": {"Placé": {
-        "reliable": True, "roi_pct": -5.0, "n_paris": 60, "n_plans": 30,
-        "drawdown_max": 55.0, "montant_mise": 100.0,   # 55% > seuil 50%
+        "reliable": True, "roi_pct": -5.0, "edge_pct": -1.0, "n_paris": 60,
+        "n_plans": 100, "drawdown_max": 55.0, "montant_mise": 100.0,
+        "losing_streak_attendue": 6.6, "losing_streak_max": 20,
     }}}
     gates = bpp.evaluate_segment_gates(perf)
     assert gates["Placé"]["status"] == "reduced"
     assert gates["Placé"]["factor"] == bpp.REDUCE_FACTOR
+
+
+def test_gate_ne_penalise_pas_un_pari_rare_mais_rentable():
+    """Un pari qui tombe une fois sur onze enchaîne NORMALEMENT de longues séries
+    perdantes. Tant que son avantage est positif, ce n'est pas un signal de risque —
+    l'ancienne règle (drawdown ≥ 50 % de la mise) rétrogradait « Mini Multi en 4 »
+    mesuré à +332 % de ROI."""
+    perf = {"segments": {"Mini Multi en 4": {
+        "reliable": True, "roi_pct": 332.3, "edge_pct": 362.3, "prelevement_pct": 30.0,
+        "n_paris": 215, "n_plans": 300, "drawdown_max": 900.0, "montant_mise": 1000.0,
+        "losing_streak_attendue": 60.5, "losing_streak_max": 200,
+    }}}
+    gates = bpp.evaluate_segment_gates(perf)
+    assert gates["Mini Multi en 4"]["status"] == "active"
+    assert gates["Mini Multi en 4"]["factor"] == 1.0
+
+
+def test_gate_juge_l_avantage_sur_le_pool_pas_le_roi_absolu():
+    """Valeurs réelles mesurées en prod le 2026-08-23 (fenêtre 90 j) : le Couplé Placé
+    a un ROI MEILLEUR que le Mini Multi en 6, mais un prélèvement bien plus faible —
+    c'est donc lui qui est réellement plus loin du hasard sur son propre pool."""
+    perf = {"segments": {
+        "Couplé Placé": {"reliable": True, "roi_pct": -32.7, "prelevement_pct": 23.0,
+                         "edge_pct": -9.7, "n_paris": 2738, "n_plans": 2000,
+                         "losing_streak_attendue": 20.0, "losing_streak_max": 25},
+        "Mini Multi en 6": {"reliable": True, "roi_pct": -37.8, "prelevement_pct": 30.0,
+                            "edge_pct": -7.8, "n_paris": 186, "n_plans": 180,
+                            "losing_streak_attendue": 30.0, "losing_streak_max": 35},
+    }}
+    gates = bpp.evaluate_segment_gates(perf)
+    assert gates["Couplé Placé"]["status"] == "suspended"
+    assert gates["Mini Multi en 6"]["status"] == "active"
+
+
+def test_gate_repli_sur_le_roi_absolu_quand_le_prelevement_est_inconnu():
+    perf = {"segments": {"Type inconnu": {
+        "reliable": True, "roi_pct": -35.0, "edge_pct": None, "n_paris": 80,
+        "n_plans": 40, "drawdown_max": 10.0, "montant_mise": 80.0,
+    }}}
+    gates = bpp.evaluate_segment_gates(perf)
+    assert gates["Type inconnu"]["status"] == "suspended"
+    assert "repli" in gates["Type inconnu"]["reason"]
+
+
+def test_prelevement_moyen_est_pondere_par_la_mise():
+    """9 € sur un couplé (23 %) et 1 € sur un simple (15,5 %) → 22,25 %, pas 19,25 %
+    (moyenne par ticket) : c'est l'argent engagé qui subit le prélèvement."""
+    bets = [{"mise": 9.0, "type": "Couplé Gagnant", "gain": None, "statut": "perdu"},
+            {"mise": 1.0, "type": "Simple Gagnant", "gain": None, "statut": "perdu"}]
+    assert bpp._prelevement_moyen_pct(bets) == 22.25
+
+
+def test_avantage_ajoute_le_prelevement_au_roi():
+    bets = [{"mise": 1.0, "type": "Couplé Gagnant", "gain": None, "statut": "perdu"}
+            for _ in range(bpp.MIN_SEGMENT_OBS)]
+    bets[0] = {"mise": 1.0, "type": "Couplé Gagnant", "gain": 25.0, "statut": "gagne"}
+    m = bpp._metrics_for_group(bets, [])
+    assert m["prelevement_pct"] == 23.0
+    assert m["edge_pct"] == round(m["roi_pct"] + 23.0, 2)
+
+
+def test_streak_attendue_croit_quand_le_pari_est_rare():
+    rare = bpp._streak_attendue(0.09, 300)
+    frequent = bpp._streak_attendue(0.50, 300)
+    assert rare > frequent > 0
+    assert bpp._streak_attendue(None, 300) is None
+    assert bpp._streak_attendue(0.0, 300) is None
+    assert bpp._streak_attendue(0.5, 1) is None
 
 
 def test_gate_reste_actif_sous_le_seuil_de_fiabilite_meme_si_roi_tres_negatif():
@@ -335,3 +406,111 @@ async def test_naive_favorite_utilise_la_position_pas_l_ordre_du_tableau(db):
     out = await bpp._naive_favorite_roi(db, ["CF"])
     assert out is not None
     assert out["net_profit"] == 1.0   # favori (7, cote 2.0) a bien gagné → +1€
+
+
+# ── Référence CLASSEMENT : la sélection apporte-t-elle quelque chose ? ───────
+
+def test_taille_baseline_par_type():
+    assert bpp._taille_baseline("Simple Placé") == 1
+    assert bpp._taille_baseline("Couplé Gagnant") == 2
+    assert bpp._taille_baseline("Trio") == 3
+    assert bpp._taille_baseline("Multi en 6") == 6
+    assert bpp._taille_baseline("Mini Multi en 4") == 4
+    assert bpp._taille_baseline("Type exotique") is None
+
+
+async def _seed_course_classement(db, course_id, *, arrivee, rangs, rapports,
+                                  non_partants=(), nb_partants=10):
+    """Une course terminée + le classement prédit, pour la référence classement.
+
+    `rangs` : {rang_predit: numero}. `arrivee` : numéros dans l'ordre d'arrivée.
+    """
+    db.add(Course(course_id=course_id, reunion_id="R9", numero=1, nom="T",
+                  date_heure=DEPART, hippodrome_nom="Vincennes", discipline="Attelé",
+                  distance=2700, nb_partants=nb_partants, statut="termine"))
+    for rang, numero in rangs.items():
+        pid = f"pa-{course_id}-{numero}"
+        db.add(Participation(participation_id=pid, course_id=course_id,
+                             cheval_id=f"ch-{course_id}-{numero}", numero=numero,
+                             cote_pmu=3.0, non_partant=(numero in non_partants)))
+        db.add(Prediction(prediction_id=f"pr-{course_id}-{numero}",
+                          participation_id=pid, course_id=course_id,
+                          proba_top1=0.5, proba_top3=0.7, rang_predit=rang))
+    db.add(Resultat(course_id=course_id, rapports=rapports, classement=[
+        {"numero": n, "position": i + 1} for i, n in enumerate(arrivee)]))
+
+
+@pytest.mark.asyncio
+async def test_baseline_classement_mesure_le_simple_suivi_du_classement(db):
+    # Course A : le n°1 du classement gagne, rapport 4.0 → +3 €.
+    await _seed_course_classement(db, "B1", arrivee=[7, 8, 9],
+                                  rangs={1: 7, 2: 8, 3: 9},
+                                  rapports={"e_simple_gagnant": 4.0})
+    # Course B : le n°1 du classement perd → −1 €.
+    await _seed_course_classement(db, "B2", arrivee=[9, 8, 7],
+                                  rangs={1: 7, 2: 8, 3: 9},
+                                  rapports={"e_simple_gagnant": 4.0})
+    await db.commit()
+
+    out = await bpp._baseline_classement_par_type(db, ["B1", "B2"], ["Simple Gagnant"])
+    sg = out["Simple Gagnant"]
+    assert sg["n_courses"] == 2 and sg["mise"] == 2.0
+    assert sg["gain"] == 4.0          # une seule course gagnante, rapport 4
+    assert sg["roi_pct"] == 100.0     # 4 € rendus pour 2 € engagés
+    assert sg["prelevement_pct"] == 15.5
+    assert sg["edge_pct"] == 115.5
+
+
+@pytest.mark.asyncio
+async def test_baseline_exclut_un_gagnant_sans_rapport_publie(db):
+    """Même règle d'honnêteté que le règlement : un gain inconnu sort de la mesure,
+    il n'est jamais compté 0 — sinon la référence se dégrade toute seule."""
+    await _seed_course_classement(db, "B3", arrivee=[7, 8, 9],
+                                  rangs={1: 7, 2: 8, 3: 9}, rapports={})
+    await db.commit()
+
+    out = await bpp._baseline_classement_par_type(db, ["B3"], ["Simple Gagnant"])
+    sg = out["Simple Gagnant"]
+    assert sg["n_courses"] == 0 and sg["n_rapport_absent"] == 1
+    assert sg["roi_pct"] is None
+
+
+@pytest.mark.asyncio
+async def test_baseline_ignore_les_non_partants_dans_le_classement(db):
+    """Le n°1 du classement est non-partant → la référence joue le suivant, pas un
+    cheval absent (et ne se règle pas en 'remboursé')."""
+    await _seed_course_classement(db, "B4", arrivee=[8, 9, 6],
+                                  rangs={1: 7, 2: 8, 3: 9}, non_partants=(7,),
+                                  rapports={"e_simple_gagnant": 5.0})
+    await db.commit()
+
+    out = await bpp._baseline_classement_par_type(db, ["B4"], ["Simple Gagnant"])
+    sg = out["Simple Gagnant"]
+    assert sg["n_courses"] == 1
+    assert sg["gain"] == 5.0          # le n°2 du classement (8) a gagné
+
+
+def test_gate_reduit_une_selection_sous_la_reference_classement():
+    """Valeurs réelles du 2026-08-23 : le moteur rend −32,7 % sur le Couplé Placé
+    là où « les 2 premiers du classement » rend −11,5 %."""
+    perf = {"segments": {"Couplé Placé": {
+        "reliable": True, "roi_pct": -32.7, "prelevement_pct": 23.0, "edge_pct": -5.0,
+        "n_paris": 2738, "n_plans": 2000,
+        "baseline_classement": {"roi_pct": -11.5, "n_courses": 695, "edge_pct": 11.5},
+        "delta_vs_classement_pct": -21.2,
+    }}}
+    gates = bpp.evaluate_segment_gates(perf)
+    assert gates["Couplé Placé"]["status"] == "reduced"
+    assert gates["Couplé Placé"]["factor"] == bpp.REDUCE_FACTOR
+    assert "classement" in gates["Couplé Placé"]["reason"]
+
+
+def test_gate_ignore_une_reference_classement_trop_courte():
+    perf = {"segments": {"Trio": {
+        "reliable": True, "roi_pct": -30.0, "prelevement_pct": 25.0, "edge_pct": -5.0,
+        "n_paris": 200, "n_plans": 150,
+        "baseline_classement": {"roi_pct": 5.0, "n_courses": 4},
+        "delta_vs_classement_pct": -35.0,
+    }}}
+    gates = bpp.evaluate_segment_gates(perf)
+    assert gates["Trio"]["status"] == "active"

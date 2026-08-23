@@ -144,17 +144,25 @@ async def _garantir_catalogue_profil(session: AsyncSession, profil: str,
         return weights
 
     def _rang(t: str) -> tuple[int, float]:
-        """Classe d'abord les types dont le ROI est MESURÉ, du moins mauvais au pire.
+        """Classe d'abord les types dont le rendement est MESURÉ, du meilleur au pire.
 
         Tenter l'inverse (« pas de mesure = pas de preuve qu'il est mauvais ») réanimait
         des paris quasi jamais offerts par le PMU (Pick5, Multi en 4) au lieu des paris
         de travail du profil : le catalogue restait vide en pratique. Un type mesuré à
         −25 % qu'on peut jouer sur chaque course vaut mieux qu'un type inconnu absent
         de 95 % des programmes.
+
+        Le classement se fait sur l'AVANTAGE (ROI + prélèvement du pool), pas sur le ROI
+        brut : réanimer « le moins mauvais en absolu » revient à toujours choisir les
+        pools bon marché (simples) et à écarter les couplés, alors que c'est là que
+        l'avantage mesuré du système est le plus fort. Un Couplé Placé à −30 % sur un
+        pool qui prélève 23 % vaut mieux qu'un Simple Gagnant à −25 % sur un pool qui
+        n'en prélève que 15,5 %.
         """
+        from services.pmu_paris_reference import prelevement
         g = gates.get(t) or {}
         r = g.get("roi_pct")
-        return (1, float(r)) if r is not None else (0, 0.0)
+        return (1, float(r) + prelevement(t) * 100.0) if r is not None else (0, 0.0)
 
     morts = sorted((t for t in candidats if weights[t] <= 0.001), key=_rang, reverse=True)
     if not morts:
