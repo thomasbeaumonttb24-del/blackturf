@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ml.prediction_evaluation import MIN_PROFIL_WEIGHTS_RUNS
+from services.pmu_paris_reference import prelevement
 
 log = structlog.get_logger()
 
@@ -452,14 +453,25 @@ async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIME
 # 3. POIDS D'APPRENTISSAGE depuis les pronos émis réglés
 # ─────────────────────────────────────────────────────────────
 def shrunk_weight(net: float, mise: float, n: float,
-                  k: int = SHRINK_K, w_min: float = W_MIN, w_max: float = W_MAX) -> float:
-    """Multiplicateur appris : 1 + ROI shrinké vers 0 (n/(n+k)), borné [w_min, w_max].
+                  k: int = SHRINK_K, w_min: float = W_MIN, w_max: float = W_MAX,
+                  roi_reference: float = 0.0) -> float:
+    """Multiplicateur appris : 1 + AVANTAGE shrinké vers 0 (n/(n+k)), borné.
+
+    `roi_reference` = rendement d'un joueur SANS COMPÉTENCE sur ce pari, c'est-à-dire
+    −prélèvement du pool. Comparer à 0 revient à croire qu'un pari devrait rendre son
+    prix : le PMU garde ~15,5 % sur un simple mais ~23 % sur un couplé et ~30 % sur un
+    Multi, donc à ROI égal ces paris ne disent PAS la même chose. Sans cette référence,
+    un Couplé Placé à −30 % (soit −7 points sur son pool) sortait derrière un Simple
+    Gagnant à −25 % (soit −9,5 points sur le sien) — l'inverse de ce que mesure la
+    performance réelle.
+
     Fonction PURE (testable sans DB). n ou mise nuls → neutre 1.0.
-    `n` accepte un flottant (n EFFECTIF pondéré par la récence, cf. DECAY_HALF_LIFE_DAYS)."""
+    `n` accepte un flottant (n EFFECTIF pondéré par la récence, cf. DECAY_HALF_LIFE_DAYS).
+    """
     if mise <= 0 or n <= 0:
         return 1.0
-    roi = net / mise
-    eff = roi * (n / (n + k))
+    avantage = net / mise - roi_reference
+    eff = avantage * (n / (n + k))
     return max(w_min, min(w_max, 1.0 + eff))
 
 
@@ -565,7 +577,8 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                 # Poids sur les agrégats EFFECTIFS (récence) : le ROI récent pilote,
                 # l'ancien s'estompe (demi-vie DECAY_HALF_LIFE_DAYS). Seuil d'activation
                 # sur le n BRUT (préserve « pas d'invention sous 10 runs »).
-                w = shrunk_weight(ts["gain_e"] - ts["mise_e"], ts["mise_e"], ts["n_e"])
+                w = shrunk_weight(ts["gain_e"] - ts["mise_e"], ts["mise_e"], ts["n_e"],
+                                  roi_reference=-prelevement(t))
             else:
                 w = 1.0          # échantillon insuffisant → neutre, pas d'invention
             weights[t] = round(w, 3)
@@ -608,10 +621,12 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                         suppressed.append(f"{ck}:{t} (roi={round(roi*100)}% n={n})")
                     else:
                         cw[t] = round(shrunk_weight(ts["gain_e"] - ts["mise_e"],
-                                                    ts["mise_e"], ts["n_e"]), 3)
+                                                    ts["mise_e"], ts["n_e"],
+                                                    roi_reference=-prelevement(t)), 3)
                 elif n >= MIN_RUNS_FOR_WEIGHTS_CTX:
                     cw[t] = round(shrunk_weight(ts["gain_e"] - ts["mise_e"],
-                                                ts["mise_e"], ts["n_e"]), 3)
+                                                ts["mise_e"], ts["n_e"],
+                                                roi_reference=-prelevement(t)), 3)
             if cw:
                 ctx_weights[ck] = cw
         if suppressed:

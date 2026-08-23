@@ -134,3 +134,39 @@ def test_les_bandes_d_ev_sont_aussi_jugees_contre_la_population():
     # Une bande franchement pire que la population le déclenche, elle.
     toxique = _multiplicateur_relatif(-0.45, -0.20, 50_000)
     assert toxique < 0.80
+
+
+# ── Poids appris par TYPE : même correction, sur le prélèvement du pool ───────
+
+def test_le_poids_dun_type_se_juge_sur_le_prelevement_de_son_pool():
+    """Troisième occurrence de la même erreur, dans le poids qui pilote la conviction :
+    `1 + roi` faisait passer un Simple Gagnant à −25 % (soit −9,5 pts sur un pool qui
+    prend 15,5 %) DEVANT un Couplé Placé à −30 % (soit −7 pts sur un pool qui prend
+    23 %) — l'inverse de la performance réelle mesurée."""
+    from ml.profil_learning import shrunk_weight
+    from services.pmu_paris_reference import prelevement
+
+    n = 100_000  # shrinkage négligeable : on compare les formules, pas le lissage
+    sg = shrunk_weight(-25.0, 100.0, n, roi_reference=-prelevement("Simple Gagnant"))
+    cp = shrunk_weight(-30.0, 100.0, n, roi_reference=-prelevement("Couplé Placé"))
+    assert cp > sg, f"Couplé Placé {cp} devrait primer sur Simple Gagnant {sg}"
+
+    # Sans référence, l'ordre s'inverse — c'était le comportement d'avant.
+    assert shrunk_weight(-30.0, 100.0, n) < shrunk_weight(-25.0, 100.0, n)
+
+
+def test_un_type_exactement_au_tarif_de_son_pool_est_neutre():
+    from ml.profil_learning import shrunk_weight
+    from services.pmu_paris_reference import prelevement
+
+    t = "Trio"
+    roi_sans_competence = -prelevement(t) * 100.0   # net pour 100 € misés
+    w = shrunk_weight(roi_sans_competence, 100.0, 100_000, roi_reference=-prelevement(t))
+    assert w == pytest.approx(1.0, abs=1e-6)
+
+
+def test_la_reference_par_defaut_reste_zero():
+    """Les appelants qui ne passent pas de référence gardent l'ancien comportement :
+    la correction ne s'applique que là où on connaît le pool."""
+    from ml.profil_learning import shrunk_weight
+    assert shrunk_weight(-20.0, 100.0, 100_000) == pytest.approx(0.8, abs=1e-3)
