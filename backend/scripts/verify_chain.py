@@ -81,7 +81,20 @@ async def main():
         preds, course_info = await _course_preds(s, cid)
         cands = enumerate_bet_candidates(preds, course_info)
         chk("candidats generes", len(cands) > 0, f"n={len(cands)}")
-        chk("EV == proba x rapport - 1", all(abs(c["ev"] - (c["proba_gain"] * c["rapport_estime"] - 1)) < 0.06 for c in cands))
+        # L'EV n'a de sens QUE sur les paris a cote ferme (simples) : le rapport d'un
+        # combo parimutuel depend du pool, inconnu avant la course. Le drapeau
+        # `combo_ev_none` la neutralise donc a 0 pour les combos — sinon
+        # ev = p_modele x (TRJ / p_marche) - 1 est mecaniquement positive des que le
+        # modele depasse le marche, et tout combo franchissait les gates d'EV.
+        from ml.algo_flags import FLAGS as _F
+        simples = [c for c in cands if "Simple" in c["type_pari"]]
+        combos = [c for c in cands if "Simple" not in c["type_pari"]]
+        chk("EV == proba x rapport - 1 (simples)",
+            all(abs(c["ev"] - (c["proba_gain"] * c["rapport_estime"] - 1)) < 0.06
+                for c in simples), f"n={len(simples)}")
+        if _F.combo_ev_none:
+            chk("EV des combos neutralisee (rapport parimutuel inconnu)",
+                all(c["ev"] == 0.0 for c in combos), f"n={len(combos)}")
         chk("proba in ]0,1], rapport >= 1", all(0 < c["proba_gain"] <= 1 and c["rapport_estime"] >= 1 for c in cands))
         chk("niveaux valides", all(c["niveau"] in ("securite", "rendement", "surprise", "coup") for c in cands))
         types = set(c["type_pari"] for c in cands)
@@ -95,7 +108,29 @@ async def main():
                 plan = plan_to_dict(generer_plan(m, prof, preds, course_info, 200.0, roi_w, heat))
                 paris = [p for nv in plan["niveaux"] for p in nv["paris"]]
                 tot = sum(p["mise"] for p in paris)
-                chk(f"{prof}/{m}E sum(mises)==montant", tot == m, f"{tot}!={m}")
+                # Le montant SAISI est deploye en entier ; en staking AUTO
+                # (respect_montant absent) la discipline de mise engage moins et
+                # met le reliquat en RESERVE. L'invariant est donc :
+                # somme des mises == montant_joue, et joue + reserve == montant.
+                chk(f"{prof}/{m}E sum(mises)==montant_joue",
+                    abs(tot - plan["montant_joue"]) < 0.01, f'{tot}!={plan["montant_joue"]}')
+                # `montant_total` peut etre INFERIEUR au montant demande : en staking
+                # AUTO, le cap `staking_safe` limite l'exposition a bankroll_cap_frac
+                # du bankroll (ici 3 % de 200 EUR = 6 EUR). L'invariant porte donc sur
+                # le montant RETENU, et le cap ne peut que reduire.
+                chk(f"{prof}/{m}E joue+reserve==montant_total",
+                    abs(plan["montant_joue"] + plan["montant_reserve"]
+                        - plan["montant_total"]) < 0.01,
+                    f'{plan["montant_joue"]}+{plan["montant_reserve"]}'
+                    f'!={plan["montant_total"]}')
+                chk(f"{prof}/{m}E cap staking ne fait que reduire",
+                    plan["montant_total"] <= m, f'{plan["montant_total"]}>{m}')
+                tot_force = sum(
+                    p["mise"] for nv in plan_to_dict(generer_plan(
+                        m, prof, preds, course_info, 200.0, roi_w, heat,
+                        respect_montant=True))["niveaux"] for p in nv["paris"])
+                chk(f"{prof}/{m}E montant saisi deploye en entier", tot_force == m,
+                    f"{tot_force}!={m}")
                 esp = round(sum(p["mise"] * p["ev_estime"] for p in paris), 2)
                 chk(f"{prof}/{m}E esperance==sum(mise*ev)", abs(esp - plan["esperance_gain"]) < 0.05, f"{esp} vs {plan['esperance_gain']}")
                 at = cfg.get("types")
