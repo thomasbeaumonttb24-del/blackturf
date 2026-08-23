@@ -542,6 +542,35 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
     return out
 
 
+# ── Ne JAMAIS effacer une table annexe qu'on ne recalcule pas ────────────────────
+# La ligne `rapport_calibration` porte plusieurs apprentissages FUSIONNÉS (choix
+# assumé de l'appelant nightly : la table est déjà chargée et transmise partout où
+# un plan se construit) — la calibration estimé→réel, ET le ROI par TRANCHE DE
+# RAPPORT (`payout_buckets`), que `mise_calculator.conviction()` décrit comme « de
+# loin le facteur le mieux étayé ».
+#
+# Deux chemins écrivent ici. Le nightly calcule les deux et écrit le tout. Le chemin
+# POST-COURSE (pipeline, après CHAQUE arrivée) ne recalcule que la calibration et
+# écrasait donc `payout_buckets` quelques minutes après le nightly. Constat du
+# 2026-08-23 : la clé était tout simplement ABSENTE de la table en prod, donc
+# `payout_bucket_multiplier` renvoyait 1.0 sur chaque candidat — le tilt n'a JAMAIS
+# agi, sans un seul signal d'erreur.
+CLES_ANNEXES_PRESERVEES = ("payout_buckets",)
+
+
+def fusionner_cles_preservees(perf: dict, ancien: dict | None) -> dict:
+    """Reporte les clés annexes que l'écrivain courant n'apporte pas.
+
+    Un appelant qui RECALCULE la clé la remplace normalement : le report ne fige
+    jamais une valeur périmée, il empêche seulement de l'effacer.
+    """
+    out = dict(perf or {})
+    for cle in CLES_ANNEXES_PRESERVEES:
+        if cle not in out and cle in (ancien or {}):
+            out[cle] = ancien[cle]
+    return out
+
+
 async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> bool:
     """Persiste la calibration estimé→réel des rapports. False = état PRÉSERVÉ.
 
@@ -564,6 +593,13 @@ async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> bool
             CONSTRAINT rapport_calib_singleton CHECK (id = 1)
         )
     """))
+    if any(k not in perf for k in CLES_ANNEXES_PRESERVEES):
+        ancien = (await session.execute(text(
+            "SELECT data FROM rapport_calibration WHERE id=1"))).first()
+        ancien_d = (ancien[0] if ancien else None) or {}
+        if isinstance(ancien_d, str):
+            ancien_d = json.loads(ancien_d)
+        perf = fusionner_cles_preservees(perf, ancien_d)
     await session.execute(text("""
         INSERT INTO rapport_calibration (id, data, updated_at) VALUES (1, :d, now())
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()

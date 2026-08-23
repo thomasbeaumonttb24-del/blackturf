@@ -216,3 +216,49 @@ def test_l_incertitude_n_est_pas_symetrique():
     assert (signal_performance.PB_K_SHRINK_PARIS
             > signal_performance.PB_K_SHRINK_GAGNANTS), (
         "pénaliser demande plus d'observations qu'il n'en faut de gagnants pour favoriser")
+
+
+# ── Le tilt par tranche de rapport ne doit pas être effacé par un autre écrivain ──
+
+def test_persist_preserve_les_payout_buckets_dun_autre_ecrivain():
+    """Deux chemins écrivent `rapport_calibration` : le nightly, qui calcule AUSSI le
+    ROI par tranche de rapport, et le post-course, qui ne calcule que la calibration.
+
+    Constat prod du 2026-08-23 : le second écrasait `payout_buckets` quelques minutes
+    après le premier, donc `payout_bucket_multiplier` renvoyait 1.0 sur chaque
+    candidat — le tilt le mieux étayé du moteur n'a jamais agi, sans un seul signal
+    d'erreur. Un écrivain qui ne recalcule pas une clé annexe doit la reporter.
+    """
+    from ml.signal_performance import fusionner_cles_preservees, payout_bucket_multiplier
+
+    buckets = {"Simple Gagnant": {"4_8": {"multiplier": 1.12, "n": 400, "n_wins": 160}}}
+    nightly = {"n_runs": 40, "global": {}, "profils": {}, "payout_buckets": buckets}
+    post_course = {"n_runs": 41, "global": {"Trio": {}}, "profils": {}}
+
+    fusionne = fusionner_cles_preservees(post_course, nightly)
+    assert fusionne["payout_buckets"] == buckets, "tilt effacé par le second écrivain"
+    assert fusionne["global"] == {"Trio": {}}, "la clé recalculée doit bien être remplacée"
+    # Et le tilt redevient effectif sur un candidat.
+    assert payout_bucket_multiplier("Simple Gagnant", 6.0, fusionne) == 1.12
+
+
+def test_persist_remplace_les_payout_buckets_quand_ils_sont_recalcules():
+    """Le report ne doit jamais figer une valeur périmée : un écrivain qui APPORTE
+    la clé la remplace."""
+    from ml.signal_performance import fusionner_cles_preservees
+
+    ancien = {"payout_buckets": {"Trio": {"4_8": {"multiplier": 0.7}}}}
+    neuf = {"n_runs": 40, "payout_buckets": {"Trio": {"4_8": {"multiplier": 1.3}}}}
+    out = fusionner_cles_preservees(neuf, ancien)
+    assert out["payout_buckets"]["Trio"]["4_8"]["multiplier"] == 1.3
+
+
+def test_toute_cle_annexe_declaree_est_bien_reportee():
+    """Garde-fou : si on ajoute demain une clé annexe à la liste, elle doit être
+    couverte par le même report (sinon on recrée le bug en silence)."""
+    from ml.signal_performance import (CLES_ANNEXES_PRESERVEES,
+                                       fusionner_cles_preservees)
+    ancien = {c: {"marqueur": c} for c in CLES_ANNEXES_PRESERVEES}
+    out = fusionner_cles_preservees({"n_runs": 1}, ancien)
+    for c in CLES_ANNEXES_PRESERVEES:
+        assert out[c] == {"marqueur": c}, f"clé annexe {c} non reportée"
