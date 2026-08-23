@@ -115,3 +115,22 @@ def test_tous_les_signaux_du_fixture_existent_bien():
     for n in ("forme_basse", "en_regression", "elo_inferieur", "montee_categorie",
               "terrain_defavorable", "premier_deferre"):
         assert n in SIGNALS
+
+
+# ── Bandes d'EV : même correction, et un gate dur qui en dépend ──────────────
+
+def test_les_bandes_d_ev_sont_aussi_jugees_contre_la_population():
+    """Le multiplicateur de bande d'EV alimente un GATE DUR dans mise_calculator
+    (`if evb(c) <= 0.80 : rejet`). Mesuré en prod le 2026-08-23, TOUTES les bandes
+    valaient entre 0,667 et 0,808 — le gate rejetait donc tout candidat spéculatif
+    quelle que soit sa bande : une interdiction générale déguisée en apprentissage."""
+    from ml.signal_performance import _multiplicateur_relatif
+
+    # Une bande exactement dans la moyenne ne doit PAS déclencher le gate à 0,80.
+    moyenne = _multiplicateur_relatif(-0.20, -0.20, 50_000)
+    assert moyenne == pytest.approx(1.0, abs=1e-6)
+    assert moyenne > 0.80
+
+    # Une bande franchement pire que la population le déclenche, elle.
+    toxique = _multiplicateur_relatif(-0.45, -0.20, 50_000)
+    assert toxique < 0.80

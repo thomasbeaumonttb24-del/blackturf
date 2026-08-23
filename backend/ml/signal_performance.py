@@ -370,25 +370,36 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
         a["stake"] += 1.0
         a["payout"] += cote if win else 0.0
 
+    # Même correction que pour les signaux : une bande d'EV se juge par rapport aux
+    # AUTRES bandes, pas par rapport à zéro. Le ROI d'une mise plate sur n'importe
+    # quel partant vaut ~−20 % (prélèvement PMU), donc `1 + roi` mettait TOUTES les
+    # bandes sous 1 — mesuré le 2026-08-23 en prod : 0,667 à 0,808, aucune au-dessus.
+    # Or ce multiplicateur alimente un GATE DUR dans mise_calculator
+    # (`if evb(c) <= 0.80: return False`) : avec toutes les bandes sous 0,81, ce gate
+    # rejetait tout candidat spéculatif quelle que soit sa bande. Une interdiction
+    # generale deguisee en apprentissage.
+    roi_reference = _roi_reference(agg)
     bands = {}
     for key, a in agg.items():
         n = a["n"]
         if n == 0:
-            bands[key] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0, "multiplier": 1.0}
+            bands[key] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0,
+                          "multiplier": 1.0}
             continue
         roi = (a["payout"] - a["stake"]) / a["stake"]
         roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + EV_K_SHRINK)
         reliable = n >= MIN_EV_BAND_OBS
-        mult = float(max(0.5, min(1.6, 1.0 + roi_shrunk))) if reliable else 1.0
+        mult = _multiplicateur_relatif(roi, roi_reference, n) if reliable else 1.0
         bands[key] = {
             "n": n,
             "win_rate": round(a["wins"] / n, 3),
             "roi": round(roi, 3),
             "roi_shrunk": round(roi_shrunk, 3),
+            "roi_reference": round(roi_reference, 3),
             "multiplier": round(mult, 3),
             "reliable": reliable,
         }
-    return {"bands": bands, "n_total": len(rows)}
+    return {"bands": bands, "n_total": len(rows), "roi_reference": round(roi_reference, 3)}
 
 
 async def persist_ev_band_performance(session: AsyncSession, perf: dict) -> bool:
