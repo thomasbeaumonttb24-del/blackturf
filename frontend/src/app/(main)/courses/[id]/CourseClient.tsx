@@ -7,7 +7,7 @@ import {
   Calculator, ChevronRight, ChevronDown, Star, Zap, Info, BarChart2,
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
   MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil, Tv,
-  HelpCircle, X, ShieldCheck, Gauge, Flame, LockKeyhole, Radio, WalletCards,
+  HelpCircle, X, Minus, ShieldCheck, Gauge, Flame, LockKeyhole, Radio, WalletCards,
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
@@ -1245,6 +1245,9 @@ function ResultatsSection({ resultats, partants }: {
 // ─── Bilan du pronostic (course terminée) ──────────────────────────────────────
 // Compare le pronostic FIGÉ avant la course à l'arrivée réelle. Aucune donnée
 // recalculée : on lit les Prediction stockées (immuables) + le classement officiel.
+// Présentation : verdict d'abord, trois chiffres ensuite, table en dernier — et
+// jamais un émoji en guise d'icône (rendu dépendant de la police, impossible à
+// mettre aux couleurs du site).
 function PronosticVerdictSection({ predictions, classement }: {
   predictions: Prediction[];
   classement: Array<{ numero: number; nom: string; position: number | null }>;
@@ -1265,77 +1268,163 @@ function PronosticVerdictSection({ predictions, classement }: {
   const favGagne = favPos === 1;
   const favPlace = favPos != null && favPos <= 3;
   const gagnantDansTop3IA = rangIAduGagnant != null && rangIAduGagnant <= 3;
+  // Combien des cinq chevaux retenus par le modèle ont réellement fini dans les cinq.
+  const dansTop5 = picks.filter((p) => {
+    const pos = posByNum.get(p.numero);
+    return pos != null && pos <= 5;
+  }).length;
 
-  // Verdict global, du meilleur au moins bon
+  const ord = (n: number) => (n === 1 ? "1ᵉʳ" : `${n}ᵉ`);
+
+  // Verdict global, du meilleur au moins bon.
   const verdict = favGagne
-    ? { emoji: "🎯", label: "Gagnant trouvé — favori vainqueur", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
+    ? { label: "Gagnant trouvé — le favori du modèle a gagné", cls: "bg-emerald-600 text-white", Icone: Trophy }
     : favPlace
-    ? { emoji: "✅", label: `Favori placé (${favPos}${favPos === 1 ? "er" : "e"})`, cls: "border-amber-300 bg-amber-50 text-amber-800" }
+    ? { label: `Favori du modèle placé ${ord(favPos!)}`, cls: "bg-emerald-600 text-white", Icone: CheckCircle2 }
     : gagnantDansTop3IA
-    ? { emoji: "➕", label: `Vainqueur dans le top 3 IA (classé #${rangIAduGagnant})`, cls: "border-amber-300 bg-amber-50 text-amber-800" }
-    : { emoji: "❌", label: "Pronostic manqué", cls: "border-rose-300 bg-rose-50 text-rose-800" };
+    ? { label: `Vainqueur dans le top 3 du modèle (classé ${ord(rangIAduGagnant!)})`, cls: "bg-amber-500 text-white", Icone: CheckCircle2 }
+    : { label: "Pronostic manqué", cls: "bg-stone-700 text-white", Icone: X };
 
   const pickVerdict = (pos: number | null | undefined) => {
-    if (pos == null) return { icon: "⚪", txt: "NP", cls: "text-muted-foreground" };
-    if (pos === 1) return { icon: "🥇", txt: "1er", cls: "text-emerald-600 font-semibold" };
-    if (pos <= 3) return { icon: "✅", txt: `${pos}e`, cls: "text-amber-600 font-semibold" };
-    return { icon: "❌", txt: `${pos}e`, cls: "text-muted-foreground" };
+    if (pos == null) return { Icone: Minus, txt: "non classé", cls: "bg-stone-100 text-stone-500 ring-stone-200", ligne: "" };
+    if (pos === 1) return { Icone: Trophy, txt: "1ᵉʳ", cls: "bg-amber-100 text-amber-900 ring-amber-300", ligne: "bg-amber-50/50" };
+    if (pos <= 3) return { Icone: CheckCircle2, txt: ord(pos), cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", ligne: "bg-emerald-50/40" };
+    return { Icone: X, txt: ord(pos), cls: "bg-stone-100 text-stone-500 ring-stone-200", ligne: "" };
   };
 
+  const maxP3 = Math.max(...picks.map((p) => p.proba_top3 || 0), 0.01);
+
   return (
-    <div className="cx-fade" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px" }}>
-      <h2 className="mb-3 flex flex-wrap items-center gap-2" style={{ margin: "0 0 14px", fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>
-        Bilan du pronostic
-        <span style={{ fontSize: 11.5, fontWeight: 400, fontFamily: "'Inter',sans-serif", color: CX.gray400 }}>
-          · pronostic figé avant la course
+    <div className="cx-fade" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "20px 20px 22px" }}>
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div>
+          <h2 className="font-display text-[17px] font-bold leading-tight text-slate-900">Bilan du pronostic</h2>
+          <p className="mt-1 text-[12.5px] text-stone-500">
+            Le classement du modèle, tel qu&apos;il était figé avant le départ, face à l&apos;arrivée officielle.
+          </p>
+        </div>
+        <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+          <LockKeyhole className="h-3 w-3" aria-hidden="true" /> Figé avant le départ
         </span>
-      </h2>
+      </header>
 
-      <div className={cn("mb-3 inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold", verdict.cls)}>
-        {verdict.label}
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white">
+        <div className="flex flex-wrap items-center gap-2 border-b border-stone-100 bg-stone-50/70 px-3 py-2 sm:px-4">
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold", verdict.cls)}>
+            <verdict.Icone className="h-3.5 w-3.5" aria-hidden="true" />
+            {verdict.label}
+          </span>
+          {gagnant && (
+            <span className="text-[12px] text-stone-500">
+              vainqueur <span className="font-semibold text-slate-900">N°{gagnant.numero} {gagnant.nom}</span>
+              {rangIAduGagnant != null
+                ? <> · classé {ord(rangIAduGagnant)} par le modèle</>
+                : <> · absent du classement du modèle</>}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 divide-x divide-stone-100">
+          <div className="px-3 py-2.5 sm:px-4">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-stone-400">Favori du modèle</div>
+            <div className={cn(
+              "mt-1 font-display text-[22px] font-bold leading-none tabular-nums",
+              favGagne ? "text-amber-600" : favPlace ? "text-emerald-600" : "text-slate-900",
+            )}>
+              {favPos != null ? ord(favPos) : "—"}
+            </div>
+            <div className="mt-1 hidden truncate text-[11px] text-stone-400 sm:block">
+              {favPos == null
+                ? "non classé à l'arrivée"
+                : favoriIA ? `N°${favoriIA.numero} ${favoriIA.nom_cheval}` : ""}
+            </div>
+          </div>
+          <div className="px-3 py-2.5 sm:px-4">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-stone-400">Rang du gagnant</div>
+            <div className={cn(
+              "mt-1 font-display text-[22px] font-bold leading-none tabular-nums",
+              gagnantDansTop3IA ? "text-emerald-600" : "text-slate-900",
+            )}>
+              {rangIAduGagnant != null ? ord(rangIAduGagnant) : "—"}
+            </div>
+            <div className="mt-1 hidden text-[11px] text-stone-400 sm:block">dans le classement du modèle</div>
+          </div>
+          <div className="px-3 py-2.5 sm:px-4">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-stone-400">Top 5 du modèle</div>
+            <div className="mt-1 font-display text-[22px] font-bold leading-none tabular-nums text-slate-900">
+              {dansTop5}<span className="text-[13px] font-normal text-stone-400">/{picks.length}</span>
+            </div>
+            <div className="mt-1 hidden text-[11px] text-stone-400 sm:block">dans les cinq premiers</div>
+          </div>
+        </div>
       </div>
 
-      {gagnant && (
-        <p className="mb-3 text-sm text-muted-foreground">
-          Vainqueur : <span className="font-semibold text-foreground">N°{gagnant.numero} {gagnant.nom}</span>
-          {rangIAduGagnant != null
-            ? <> — l&apos;algorithme le classait <span className="font-semibold text-foreground">#{rangIAduGagnant}</span></>
-            : <> — non pronostiqué par l&apos;algorithme</>}
-        </p>
-      )}
+      <div className="mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white">
+        <div className="hidden grid-cols-[30px_minmax(0,1fr)_120px_92px] items-center gap-3 border-b border-stone-100 bg-stone-50/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400 sm:grid">
+          <span className="text-center">#</span>
+          <span>Cheval</span>
+          <span className="text-right" title="Probabilité de terminer dans les trois premiers">Proba top-3</span>
+          <span className="text-right">Arrivée</span>
+        </div>
+        {picks.map((p) => {
+          const pos = posByNum.get(p.numero);
+          const pv = pickVerdict(pos);
+          return (
+            <div
+              key={p.participation_id}
+              className={cn(
+                "grid grid-cols-[30px_minmax(0,1fr)_92px] items-center gap-3 border-b border-stone-100 px-3 py-2.5 last:border-b-0 sm:grid-cols-[30px_minmax(0,1fr)_120px_92px]",
+                pv.ligne,
+              )}
+            >
+              <span className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-lg font-display text-[13px] font-bold tabular-nums ring-1",
+                p.rang_predit === 1 ? "bg-amber-100 text-amber-900 ring-amber-200"
+                  : p.rang_predit <= 3 ? "bg-stone-100 text-slate-700 ring-stone-200"
+                  : "bg-white text-stone-400 ring-stone-200",
+              )}>
+                {p.rang_predit}
+              </span>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted-foreground border-b">
-              <th className="py-1 pr-2">Prono</th>
-              <th className="py-1 pr-2">N°</th>
-              <th className="py-1 pr-2">Cheval</th>
-              <th className="py-1 pr-2 text-right hidden sm:table-cell">Proba top-3</th>
-              <th className="py-1 pr-2 text-right">Arrivée</th>
-            </tr>
-          </thead>
-          <tbody>
-            {picks.map((p) => {
-              const pos = posByNum.get(p.numero);
-              const pv = pickVerdict(pos);
-              return (
-                <tr key={p.participation_id} className="border-b border-border/40">
-                  <td className="py-1 pr-2 font-bold tabular-nums">#{p.rang_predit}</td>
-                  <td className="py-1 pr-2 tabular-nums">{p.numero}</td>
-                  <td className="py-1 pr-2">{p.nom_cheval}</td>
-                  <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground hidden sm:table-cell">
-                    {(p.proba_top3 * 100).toFixed(0)}%
-                  </td>
-                  <td className={cn("py-1 pr-2 text-right tabular-nums", pv.cls)}>
-                    {pv.icon} {pv.txt}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              <div className="min-w-0">
+                <span className="truncate text-[13.5px] font-semibold text-slate-900">
+                  <span className="font-mono text-[11px] font-normal text-muted-foreground">N°{p.numero}</span>{" "}
+                  {p.nom_cheval}
+                </span>
+                <div className="mt-1 flex items-center gap-2 sm:hidden">
+                  <div className="h-1.5 w-16 overflow-hidden rounded-full bg-stone-100">
+                    <div className="h-full rounded-full bg-stone-300" style={{ width: `${Math.max(2, ((p.proba_top3 || 0) / maxP3) * 100)}%` }} />
+                  </div>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    top-3 {Math.round((p.proba_top3 || 0) * 100)} %
+                  </span>
+                </div>
+              </div>
+
+              <div className="hidden items-center gap-2 sm:flex">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100">
+                  <div className="h-full rounded-full bg-stone-300" style={{ width: `${Math.max(2, ((p.proba_top3 || 0) / maxP3) * 100)}%` }} />
+                </div>
+                <span className="w-10 shrink-0 text-right font-display text-[13px] font-bold tabular-nums text-slate-900">
+                  {Math.round((p.proba_top3 || 0) * 100)} %
+                </span>
+              </div>
+
+              <span className="justify-self-end">
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11.5px] font-semibold tabular-nums ring-1", pv.cls)}>
+                  <pv.Icone className="h-3 w-3" aria-hidden="true" />
+                  {pv.txt}
+                </span>
+              </span>
+            </div>
+          );
+        })}
       </div>
+
+      <p className="mt-2.5 text-[11px] leading-4 text-stone-400">
+        Le rang vient d&apos;un modèle d&apos;ordonnancement dédié : il ne suit pas toujours l&apos;ordre
+        des probabilités affichées.
+      </p>
     </div>
   );
 }
