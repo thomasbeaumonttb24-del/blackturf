@@ -755,12 +755,16 @@ export function PreuvesRecentesCard() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-stone-200 bg-stone-50/70 px-3.5 py-3">
         <span className="flex items-baseline gap-1.5">
           <span className="font-display text-xl font-bold tabular-nums text-emerald-600">{n_gagnant_top1}</span>
-          <span className="text-[12px] text-stone-600">gagnants donnés n°1</span>
+          <span className="text-[12px] text-stone-600">
+            gagnant{n_gagnant_top1 > 1 ? "s" : ""} donné{n_gagnant_top1 > 1 ? "s" : ""} 1ᵉʳ
+          </span>
         </span>
         <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
         <span className="flex items-baseline gap-1.5">
           <span className="font-display text-xl font-bold tabular-nums text-amber-600">{n_gagnant_top3}</span>
-          <span className="text-[12px] text-stone-600">gagnants dans le top 3</span>
+          <span className="text-[12px] text-stone-600">
+            gagnant{n_gagnant_top3 > 1 ? "s" : ""} dans le top 3
+          </span>
         </span>
         <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
         <span className="text-[12px] text-stone-500">

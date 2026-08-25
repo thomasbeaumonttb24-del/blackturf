@@ -20,7 +20,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
-  ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter,
+  ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter, Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
@@ -297,7 +297,15 @@ function ValueBetsCompteurBanner() {
 }
 
 /* ─── Ligne de course (timeline) ────────────────────────── */
-function TimelineRow({ course, reunionNum, vbCount, delay, targetId }: { course: CourseSummary; reunionNum: number; vbCount?: number; delay: number; targetId?: string }) {
+interface ApercuCourse {
+  analysee: boolean;
+  nb_notes: number;
+  nb_ecartes: number;
+  confiance: number | null;
+  accord_marche: boolean | null;
+}
+
+function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: { course: CourseSummary; reunionNum: number; vbCount?: number; apercu?: ApercuCourse; delay: number; targetId?: string }) {
   const m = discMeta(course.discipline);
   const isLive = course.statut === "en_cours";
   const isDone = course.statut === "termine" || course.statut === "annule";
@@ -331,8 +339,18 @@ function TimelineRow({ course, reunionNum, vbCount, delay, targetId }: { course:
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+          <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             R{reunionNum}C{course.numero}
+            {/* Repère « analysée » logé DANS la pastille de code : sur mobile, un
+                badge autonome poussait le badge Quinté+ à la ligne suivante et
+                allongeait chaque course de 42 px. Le détail chiffré s'affiche
+                dès 640 px, sous le nom de la course. */}
+            {apercu?.analysee && (
+              <Sparkles
+                className="h-2.5 w-2.5 sm:hidden"
+                aria-label="Course analysée par le modèle"
+              />
+            )}
           </span>
           <span className={cn("max-w-full truncate text-sm font-semibold sm:max-w-[230px]", isDone ? "text-gray-500" : "text-gray-800")}>
             <span className="text-gray-400">{course.hippodrome_nom}</span>
@@ -353,6 +371,31 @@ function TimelineRow({ course, reunionNum, vbCount, delay, targetId }: { course:
           <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
           {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-500 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
         </div>
+        {/* Preuve qu'un modèle a travaillé sur CETTE course. Rien d'identifiant :
+            un nombre de chevaux notés, une confiance, et le fait que le modèle
+            suive ou non le favori des parieurs. Sans cela, la page programme ne
+            montre que des horaires et rien n'invite à ouvrir une fiche. */}
+        {apercu?.analysee && (
+          <div className="mt-1.5 hidden flex-wrap items-center gap-1.5 sm:flex">
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-white">
+              <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
+              Analysée
+            </span>
+            {apercu.confiance != null && (
+              <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 tabular-nums">
+                confiance {apercu.confiance}/100
+              </span>
+            )}
+            {apercu.accord_marche === false && (
+              <span
+                title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
+                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+              >
+                ne suit pas le marché
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex flex-shrink-0 items-center gap-1.5">
         {vbCount !== undefined && vbCount > 0 && (
@@ -408,6 +451,15 @@ export default function ProgrammeClient({
       return acc;
     }, {} as Record<string, number>);
   }, [valueBets]);
+
+  /* Aperçu public de l'analyse, une requête pour toute la journée. Public :
+     c'est justement au visiteur SANS compte qu'il doit s'adresser. */
+  const { data: apercuJour } = useSWR(
+    `/programme-apercu/${format(selectedDate, "yyyy-MM-dd")}`,
+    () => coursesApi.programmeApercu(format(selectedDate, "yyyy-MM-dd")).then((r) => r.data),
+    { refreshInterval: 300000, revalidateOnFocus: false },
+  );
+  const apercuByCourse = (apercuJour as { courses?: Record<string, ApercuCourse> } | undefined)?.courses ?? {};
 
   /* Fetch programme */
   useEffect(() => {
@@ -690,6 +742,7 @@ export default function ProgrammeClient({
                         course={course}
                         reunionNum={reunionNum}
                         vbCount={isPaid ? vbByCourse[course.course_id] : undefined}
+                        apercu={apercuByCourse[course.course_id]}
                         delay={Math.min(i, 8) * 0.05}
                         targetId={course.course_id === nextRace?.course.course_id ? "next-race-row" : undefined}
                       />

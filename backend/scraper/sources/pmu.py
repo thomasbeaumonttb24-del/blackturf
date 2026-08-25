@@ -182,6 +182,15 @@ class PmuScraper(BaseScraper):
                 r = await client.get(url)
                 r.raise_for_status()
                 self._cb.record_success()
+                # 204 / corps vide = « rien à dire sur cette course », pas une panne.
+                # Le PMU répond 204 sur `masse-enjeu` d'une réunion qui ne publie pas
+                # ses enjeux. Sans ce court-circuit, `r.json()` lève, le code retente
+                # trois fois, journalise une erreur PAR COURSE — et surtout appelle
+                # `record_failure` sur la source CRITIQUE : assez de 204 d'affilée et
+                # le disjoncteur s'ouvre, bloquant les vrais appels PMU.
+                if r.status_code == 204 or not r.content:
+                    log.debug("pmu.sans_contenu", url=url, status=r.status_code)
+                    return None
                 return r.json()
             except Exception as e:
                 self._cb.record_failure("pmu")

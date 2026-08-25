@@ -15,6 +15,7 @@ import {
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
+import { PreuvesRecentesCard } from "@/components/courses/insights";
 
 /**
  * Page « arrivées et rapports » d'une journée PMU.
@@ -153,6 +154,15 @@ export async function ResultatsJour({ jour }: { jour: string }) {
             </p>
           )}
         </Section>
+
+        {/* Ce que le modèle avait dit sur les dernières courses courues. Réservé à
+            la page du JOUR : sur une archive, « les dernières courses » ne sont pas
+            celles que le lecteur regarde, et le bloc mentirait par juxtaposition. */}
+        {estAujourdhui && (
+          <div className="mt-8">
+            <PreuvesRecentesCard />
+          </div>
+        )}
 
         <Section title="Autres journées">
           <nav className="flex flex-wrap gap-x-5 gap-y-2 text-sm">

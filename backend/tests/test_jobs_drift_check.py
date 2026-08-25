@@ -58,6 +58,13 @@ class _FakeSyncRedis:
         self.claimed = False
 
 
+def _autoriser_retrain_intraday(monkeypatch):
+    """Ouvre l'interrupteur `retrain_intraday_enabled`, fermé par défaut depuis le
+    25/08/2026. Les tests d'enqueue portent sur le CHEMIN, pas sur le réglage."""
+    from api.config import get_settings
+    monkeypatch.setattr(get_settings(), "retrain_intraday_enabled", True, raising=False)
+
+
 @pytest.mark.asyncio
 async def test_ne_leve_plus_meme_si_get_drift_detector_nu_casse(monkeypatch):
     """LE test de la régression : avant le fix, `job_drift_check` dépendait de
@@ -137,6 +144,7 @@ async def test_severite_critical_enqueue_le_retrain_incremental(monkeypatch):
         return _FakeDriftDetector("critical")
 
     monkeypatch.setattr("ml.drift_detector.initialize_drift_detector", _fake_init)
+    _autoriser_retrain_intraday(monkeypatch)
     fake_redis = _FakeSyncRedis()
     monkeypatch.setattr("redis.from_url", lambda _url: fake_redis)
 
@@ -163,6 +171,7 @@ async def test_drift_critique_restreint_a_un_enqueue_par_cooldown(monkeypatch):
         return _FakeDriftDetector("critical")
 
     monkeypatch.setattr("ml.drift_detector.initialize_drift_detector", _fake_init)
+    _autoriser_retrain_intraday(monkeypatch)
     fake_redis = _FakeSyncRedis()
     monkeypatch.setattr("redis.from_url", lambda _url: fake_redis)
 
@@ -194,3 +203,31 @@ async def test_erreur_inattendue_ne_remonte_jamais(monkeypatch):
     monkeypatch.setattr("ml.drift_detector.initialize_drift_detector", _fake_init)
 
     await jobs.job_drift_check()  # ne doit pas lever
+
+
+@pytest.mark.asyncio
+async def test_drift_critique_n_enqueue_rien_si_intraday_ferme(monkeypatch):
+    """Le contrôle de dérive tourne TOUTES LES HEURES. Tant que le retrain de
+    journée est fermé, il ne doit pas être la porte dérobée qui lance quand même
+    un entraînement de ~20 min sur le worker RQ unique, en pleine après-midi de
+    courses. La dérive reste journalisée ; le nightly de 02:00 la traitera."""
+    import db.database as dbmod
+
+    monkeypatch.setattr(dbmod, "AsyncSessionLocal", _fake_session_local())
+
+    async def _fake_init(session):
+        return _FakeDriftDetector("critical")
+
+    monkeypatch.setattr("ml.drift_detector.initialize_drift_detector", _fake_init)
+    from api.config import get_settings
+    monkeypatch.setattr(get_settings(), "retrain_intraday_enabled", False, raising=False)
+
+    enqueued = []
+    monkeypatch.setattr(
+        "rq.Queue.enqueue",
+        lambda self, *a, **kw: enqueued.append(a) or SimpleNamespace(id="job-1"),
+    )
+
+    await jobs.job_drift_check()
+
+    assert enqueued == []

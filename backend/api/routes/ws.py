@@ -10,6 +10,7 @@ import structlog
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from starlette.websockets import WebSocketState
 from jose import JWTError, jwt
 from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,29 @@ from db.redis_client import get_redis
 settings = get_settings()
 log = structlog.get_logger()
 router = APIRouter()
+
+
+async def fermer_ws(websocket: WebSocket, code: int = 1000) -> None:
+    """Ferme un WebSocket AU PLUS UNE FOIS.
+
+    Fermer une seconde fois — typiquement le heartbeat qui coupe sur pong
+    manquant, puis la sortie normale du handler — fait lever à Starlette
+    `RuntimeError: Unexpected ASGI message 'websocket.close', after sending
+    'websocket.close'`, que uvicorn remonte en traceback ASGI complet. Constaté
+    en prod le 25/08/2026 sur `/ws/user/alertes` : quarante lignes de pile pour
+    une déconnexion parfaitement normale, qui noient les vraies erreurs de la
+    même page de logs.
+    """
+    if (websocket.client_state is WebSocketState.DISCONNECTED
+            or websocket.application_state is WebSocketState.DISCONNECTED):
+        return
+    try:
+        await websocket.close(code=code)
+    except RuntimeError:
+        # Course entre deux fermetures concurrentes : la connexion est fermée,
+        # c'est le résultat voulu.
+        pass
+
 
 # Heartbeat constants
 PING_INTERVAL = 30   # seconds between server pings
@@ -146,7 +170,7 @@ async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query
     await websocket.accept()
     user_id = await _authenticate_ws(websocket, token)
     if not user_id:
-        await websocket.close(code=4401)
+        await fermer_ws(websocket, code=4401)
         return
 
     connected_at = datetime.now(timezone.utc)
@@ -203,7 +227,7 @@ async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query
                 # Check pong timeout
                 if (asyncio.get_event_loop().time() - last_pong) > PONG_TIMEOUT:
                     log.warning("ws.cotes.pong_timeout", course_id=course_id, user_id=user_id)
-                    await websocket.close()
+                    await fermer_ws(websocket)
                     return
 
             # Send ping
@@ -218,7 +242,7 @@ async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query
     except Exception as e:
         log.error("ws.cotes.error", error=str(e))
         try:
-            await websocket.close()
+            await fermer_ws(websocket)
         except Exception:
             pass
 
@@ -239,13 +263,13 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
     await websocket.accept()
     user_id = await _authenticate_ws(websocket, token)
     if not user_id:
-        await websocket.close(code=4401)
+        await fermer_ws(websocket, code=4401)
         return
 
     plan = await _get_user_plan(user_id)
     if plan not in PLANS_ABONNES:
         log.warning("ws.valuebets.paywall_reject", user_id=user_id, plan=plan)
-        await websocket.close(code=4403)
+        await fermer_ws(websocket, code=4403)
         return
 
     last_pong = asyncio.get_event_loop().time()
@@ -324,7 +348,7 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
 
                 if (asyncio.get_event_loop().time() - last_pong) > PONG_TIMEOUT:
                     log.warning("ws.valuebets.pong_timeout", user_id=user_id)
-                    await websocket.close()
+                    await fermer_ws(websocket)
                     return
 
             await websocket.send_json({
@@ -337,7 +361,7 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
     except Exception as e:
         log.error("ws.valuebets.error", error=str(e))
         try:
-            await websocket.close()
+            await fermer_ws(websocket)
         except Exception:
             pass
 
@@ -351,7 +375,7 @@ async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
     await websocket.accept()
     user_id = await _authenticate_ws(websocket, token)
     if not user_id:
-        await websocket.close(code=4401)
+        await fermer_ws(websocket, code=4401)
         return
 
     await manager.connect(user_id, websocket)
@@ -390,7 +414,7 @@ async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
                         connected_at=manager._connected_at.get(id(websocket)),
                     )
                     try:
-                        await websocket.close()
+                        await fermer_ws(websocket)
                     except Exception:
                         pass
                     break

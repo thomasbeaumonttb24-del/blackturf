@@ -3,7 +3,7 @@ Courses routes — BlackTurf.
 Programme du jour, détail course, partants.
 """
 import structlog
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, time as dtime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,7 +24,7 @@ from db.models import (
 )
 from db.models import User
 from services.course_resolution import STATUTS_NON_COURUES
-from services.temps_courses import jour_courses
+from services.temps_courses import jour_courses, PARIS
 from ml.portfolio import BetPortfolioEngine
 from ml.adaptive_learning import get_adaptive_learning
 from ml.monte_carlo import MonteCarloSimulator
@@ -489,6 +489,111 @@ def _build_analyse(feat: Optional[dict], sj, se) -> Optional[dict]:
 # ─────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────
+@router.get("/programme/apercu")
+async def get_programme_apercu(
+    jour: Optional[date] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Aperçu ANONYME de l'analyse, pour toutes les courses d'une journée — public.
+
+    Le problème résolu (funnel) : la page programme est la première que voit un
+    visiteur venu d'une recherche, et elle ne lui montre que des horaires. Rien
+    n'y dit qu'un modèle a travaillé sur ces courses. Il fallait ouvrir une fiche
+    pour l'apprendre — donc savoir que ça valait la peine de cliquer.
+
+    Ce qui est exposé, par course et RIEN de plus : le nombre de chevaux notés,
+    la confiance du modèle sur son n°1, et s'il place le favori des parieurs en
+    tête. Aucun numéro, aucun nom, aucune probabilité individuelle — exactement
+    la même règle que `/courses/{id}/apercu`, dont ceci est la version en lot.
+    Une requête unique agrégée : 40 appels séparés sur une page de programme
+    coûteraient plus cher que la page elle-même.
+    """
+    import json
+    target = jour or jour_courses()
+    cache_key = f"programme:apercu:{target.isoformat()}"
+
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        log.debug("courses.programme_apercu_cache_read_failed", error=str(e))
+
+    # SQL volontairement SIMPLE et portable : `FILTER (WHERE …)` et `array_agg`
+    # sont du PostgreSQL, et la suite de tests tourne sur SQLite — un endpoint
+    # dont l'invariant de non-fuite n'est pas testable ne vaut rien. Une journée
+    # pèse ~40 courses × ~12 partants : l'agrégation en Python coûte moins que le
+    # temps d'aller-retour de la requête.
+    rows = (await db.execute(text("""
+        SELECT pr.course_id      AS course_id,
+               pa.numero         AS numero,
+               pa.cote_pmu       AS cote_pmu,
+               pr.rang_predit    AS rang_predit,
+               pr.proba_top1     AS proba_top1,
+               pr.confidence_score AS confiance
+          FROM predictions pr
+          JOIN participations pa ON pa.participation_id = pr.participation_id
+          JOIN courses c         ON c.course_id = pr.course_id
+         WHERE c.date_heure >= :debut AND c.date_heure < :fin
+           AND pa.non_partant = false
+    """), {
+        # Fenêtre en UTC autour du jour de courses demandé : `date_heure` est stocké
+        # en UTC, et un `date()` local ferait glisser la journée d'une heure l'été.
+        # Bornes = minuit à minuit À PARIS, converties en UTC. `date_heure` est
+        # stocké en UTC : découper sur minuit UTC déplacerait d'un jour les
+        # réunions de fin de soirée. Même définition du jour que `jour_courses`.
+        "debut": datetime.combine(target, dtime.min, tzinfo=PARIS).astimezone(timezone.utc),
+        "fin": datetime.combine(target + timedelta(days=1), dtime.min, tzinfo=PARIS).astimezone(timezone.utc),
+    })).mappings().all()
+
+    par_course: dict[str, dict] = {}
+    for r in rows:
+        agg = par_course.setdefault(r["course_id"], {
+            "nb_notes": 0, "nb_ecartes": 0, "confiance": None,
+            "numero_top1": None, "cote_top1": None,
+            "numero_favori": None, "cote_favori": None,
+        })
+        agg["nb_notes"] += 1
+        if (r["proba_top1"] or 0) < 0.03:
+            agg["nb_ecartes"] += 1
+        if r["rang_predit"] == 1:
+            agg["numero_top1"] = r["numero"]
+            agg["confiance"] = r["confiance"]
+        cote = r["cote_pmu"]
+        if cote and cote > 1 and (agg["cote_favori"] is None or cote < agg["cote_favori"]):
+            agg["cote_favori"] = cote
+            agg["numero_favori"] = r["numero"]
+
+    courses = {}
+    for course_id, agg in par_course.items():
+        if not agg["nb_notes"]:
+            continue
+        # `accord_marche` : le n°1 du modèle est-il aussi le favori des cotes ?
+        # Booléen agrégé — il ne désigne aucun cheval.
+        fav, top1 = agg["numero_favori"], agg["numero_top1"]
+        courses[course_id] = {
+            "analysee": True,
+            "nb_notes": agg["nb_notes"],
+            "nb_ecartes": agg["nb_ecartes"],
+            "confiance": int(round(agg["confiance"])) if agg["confiance"] is not None else None,
+            "accord_marche": (bool(fav == top1) if (fav is not None and top1 is not None) else None),
+        }
+
+    resultat = {
+        "jour": target.isoformat(),
+        "courses": courses,
+        "nb_analysees": len(courses),
+    }
+    try:
+        redis = await get_redis()
+        await redis.setex(cache_key, 120, json.dumps(resultat))
+    except Exception:
+        pass
+    return resultat
+
+
 @router.get("/programme", response_model=ProgrammeOut)
 async def get_programme(
     jour: Optional[date] = Query(default=None),

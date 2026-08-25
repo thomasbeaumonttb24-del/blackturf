@@ -16,6 +16,7 @@ import {
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
+import { PreuvesRecentesCard } from "@/components/courses/insights";
 
 export const revalidate = 300;
 
@@ -227,6 +228,13 @@ export default async function QuinteDuJourPage() {
             </p>
           </Section>
         )}
+
+        {/* Le Quinté+ attire le trafic le plus large de la journée, souvent des
+            visiteurs qui ne connaissent pas le site : ces six courses courues, avec
+            le rang donné au gagnant, sont la preuve la plus courte à lire. */}
+        <div className="mt-10">
+          <PreuvesRecentesCard />
+        </div>
 
         <div className="mt-10">
           <NewsletterForm source="quinte-du-jour" />

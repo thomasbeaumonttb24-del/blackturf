@@ -103,6 +103,10 @@ export const authApi = {
 
 export const coursesApi = {
   programme: (jour?: string) => api.get("/programme", { params: jour ? { jour } : {} }),
+  // Aperçu ANONYME de l'analyse pour toute une journée (une requête, pas 40).
+  // Public : c'est au visiteur sans compte qu'il s'adresse.
+  programmeApercu: (jour?: string) =>
+    api.get("/programme/apercu", { params: jour ? { jour } : {}, tolere401: true }),
   course: (id: string) => api.get(`/courses/${id}`),
   resultats: (id: string) => api.get(`/courses/${id}/resultats`),
   // Types de paris réellement proposés par le PMU pour la course (2sur4 inclus seulement

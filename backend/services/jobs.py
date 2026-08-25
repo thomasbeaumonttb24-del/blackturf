@@ -157,6 +157,17 @@ async def job_drift_check() -> None:
             import redis as sync_redis
             from rq import Queue
             from api.config import get_settings
+            # MÊME interrupteur que le retrain post-course (25/08/2026). Ce contrôle
+            # de dérive tourne TOUTES LES HEURES : sans cette garde, il restait la
+            # seule voie capable de lancer un entraînement de ~20 min en pleine
+            # après-midi de courses, sur le worker RQ UNIQUE qui règle aussi les
+            # paris, calcule les prédictions et envoie les alertes. La dérive reste
+            # journalisée en warning ; le nightly de 02:00 UTC, qui voit le même
+            # dataset, la traitera hors course.
+            if not get_settings().retrain_intraday_enabled:
+                log.info("jobs.drift_check.retrain_intraday_disabled",
+                         brier_mean=report.get("brier_mean"))
+                return
             r = sync_redis.from_url(get_settings().redis_url)
             q = Queue("ml", connection=r, default_timeout=3600)
             job = _enqueue_drift_retrain_once(r, q)
