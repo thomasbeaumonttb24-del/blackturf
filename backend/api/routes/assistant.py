@@ -346,7 +346,9 @@ async def _answer_metrics(db: AsyncSession, user: User) -> str:
     if data.get("roi_simule"):
         lines.append(f"• ROI simulé : **{data['roi_simule']}**")
     if data.get("nb_courses_train"):
-        lines.append(f"• Entraîné sur **{data['nb_courses_train']}** courses")
+        # PARTANTS et non courses : `nb_courses_train` compte les lignes du
+        # dataset (≈9,3 par course), cf. ml/pipeline.py.
+        lines.append(f"• Entraîné sur **{data['nb_courses_train']}** partants")
     lines.append("\nLe modèle se ré-entraîne chaque nuit avec les résultats du jour (apprentissage continu).")
     return "\n".join(lines) + DISCLAIMER
 

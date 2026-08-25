@@ -33,6 +33,8 @@ interface ModelVersion {
   roi_simule: number | null;
   walk_forward_auc: number | null;
   walk_forward_variance: number | null;
+  /** Nombre de PARTANTS d'entraînement (~9,3 par course), pas de courses :
+   *  la colonne SQL porte ce nom depuis la migration 0001. */
   nb_courses_train: number;
   est_actif: boolean;
   est_rollback: boolean;
@@ -882,7 +884,7 @@ export default function AdminPage() {
                     <span className="text-muted-foreground">WF-AUC <span className="text-foreground font-semibold">{m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}</span></span>
                     <span className="text-muted-foreground">Top-3 <span className="text-foreground font-semibold">{m.precision_top3 != null ? `${(m.precision_top3 * 100).toFixed(1)}%` : "—"}</span></span>
                     <span className="text-muted-foreground">ROI <span className={cn("font-semibold", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald" : "text-destructive")}>{m.roi_simule != null ? `${m.roi_simule >= 0 ? "+" : ""}${(m.roi_simule * 100).toFixed(1)}%` : "—"}</span></span>
-                    <span className="text-muted-foreground">{m.nb_courses_train} courses</span>
+                    <span className="text-muted-foreground">{m.nb_courses_train.toLocaleString("fr-FR")} partants</span>
                   </div>
                 </div>
               ))}
@@ -898,7 +900,7 @@ export default function AdminPage() {
                     <th className="text-right p-3">WF-AUC</th>
                     <th className="text-right p-3">Top-3</th>
                     <th className="text-right p-3">ROI sim.</th>
-                    <th className="text-right p-3">Courses</th>
+                    <th className="text-right p-3" title="Partants d'entraînement (≈9,3 par course)">Partants</th>
                     <th className="text-center p-3">Statut</th>
                     <th className="text-right p-3">Action</th>
                   </tr>
@@ -918,7 +920,7 @@ export default function AdminPage() {
                       <td className={cn("p-3 text-right", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald" : "text-destructive")}>
                         {m.roi_simule != null ? `${m.roi_simule >= 0 ? "+" : ""}${(m.roi_simule * 100).toFixed(1)}%` : "—"}
                       </td>
-                      <td className="p-3 text-right text-muted-foreground">{m.nb_courses_train}</td>
+                      <td className="p-3 text-right text-muted-foreground tabular-nums">{m.nb_courses_train.toLocaleString("fr-FR")}</td>
                       <td className="p-3 text-center">
                         {m.est_actif ? (
                           <Badge variant="success">Actif</Badge>

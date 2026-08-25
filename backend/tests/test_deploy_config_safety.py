@@ -135,6 +135,27 @@ def test_les_variables_lues_par_le_code_atteignent_les_conteneurs():
         )
 
 
+def test_la_fenetre_de_retraining_atteint_le_worker():
+    """Le retrain tourne dans le WORKER : le réglage doit y être énuméré.
+
+    Absent du bloc `environment:`, `RETRAIN_HISTORY_MONTHS` retomberait sur le
+    défaut du code sans que rien ne le dise — et une fenêtre trop courte fait
+    RÉTRÉCIR le dataset d'entraînement d'une version à l'autre (42 285 partants
+    le 17/08/2026, 41 121 le 25/08) au lieu de le faire croître. Même silence
+    pour `RETRAIN_MAX_ROWS`, dont l'absence lèverait le garde-fou mémoire.
+    """
+    texte = _lire(COMPOSE_PROD)
+    motif = "^  worker:" + chr(10) + "(.*?)(?=^  [^ ])"
+    bloc = re.search(motif, texte, re.S | re.M)
+    if not bloc:
+        pytest.skip("service `worker` introuvable dans le compose")
+    for variable in ("RETRAIN_HISTORY_MONTHS", "RETRAIN_MAX_ROWS"):
+        assert re.search(rf"^\s*-\s*{variable}=", bloc.group(1), re.M), (
+            f"{variable} n'est pas transmis au worker : le retrain nocturne "
+            "utiliserait le défaut du code, en silence."
+        )
+
+
 def test_le_service_db_declare_un_dev_shm_suffisant():
     """Docker plafonne /dev/shm à 64 Mo : PostgreSQL y meurt en silence.
 

@@ -27,7 +27,7 @@ from db.models import (
 )
 from ml.elo import update_elo_after_race
 from ml.features import compute_all_features_for_course
-from ml.models import BlackTurfEnsemble, build_training_dataset
+from ml.models import BlackTurfEnsemble
 from ml.valuebets import detect_value_bet, save_value_bet, calculer_mise_kelly
 from ml.recommendations import generer_recommandations_course, formater_fiche_recommandation
 from ml.post_race_analyzer import PostRaceAnalyzer
@@ -790,15 +790,28 @@ async def run_post_course(course_id: str) -> None:
     except Exception as e:
         log.warning("pipeline.bet_plan_settle_skip", course_id=course_id, err=str(e)[:140])
 
-    # 7. Mini-retraining si nb_resultats_depuis_dernier_retrain % 20 == 0
-    # COOLDOWN (anti-flood) : _count_recent_results() reste à un multiple du seuil sur une
-    # fenêtre → SANS cooldown, CHAQUE post-course re-déclenchait un retrain complet (47k
-    # lignes, ~2 min, lourd) toutes les 2-4 min, surtout au reboot quand le backlog de
-    # résultats se règle → pic mémoire/CPU permanent (cause d'OOM sur 8 Go). Le cooldown
-    # Redis (clé auto-expirante) borne à 1 retrain incrémental / RETRAIN_COOLDOWN_S. Le
-    # nightly complet (scheduler 02:00) reste indépendant.
+    # 7. Retrain déclenché en JOURNÉE — désactivé par défaut depuis le 25/08/2026.
+    #
+    # `rq worker ml default` est un processus UNIQUE : tant qu'il entraîne, il ne
+    # règle plus les résultats, ne calcule plus de prédictions et n'envoie plus
+    # d'alertes. Sur une fenêtre de trois mois l'entraînement durait 92 s et la
+    # file s'en remettait ; sur douze mois il dure 1 215 s (mesuré en prod le
+    # 25/08), dont 1 015 s de walk-forward — qu'on ne peut pas sauter puisque
+    # c'est la métrique de promotion. Bloquer vingt minutes de règlements en
+    # pleine après-midi de courses coûte plus cher que de rafraîchir le modèle
+    # une fois de plus dans la journée : le nightly de 02:00 UTC tourne déjà hors
+    # de toute course (aucune entre 23 h et 06 h UTC) et voit exactement le même
+    # dataset, l'incrémental n'ayant plus de fenêtre distincte.
+    #
+    # Remettre à 1 seulement si le retrain sort de ce worker (file dédiée).
     nb_new = await _count_recent_results()
-    if nb_new % settings.retrain_every_n_results == 0:
+    if not settings.retrain_intraday_enabled:
+        log.info("pipeline.mini_retrain.intraday_disabled", nb_resultats=nb_new)
+    elif nb_new % settings.retrain_every_n_results == 0:
+        # COOLDOWN (anti-flood) : _count_recent_results() reste à un multiple du
+        # seuil sur une fenêtre → SANS cooldown, CHAQUE post-course re-déclenchait
+        # un retrain complet toutes les 2-4 min, surtout au reboot quand le
+        # backlog de résultats se règle → pic mémoire/CPU permanent.
         if await _incr_retrain_cooldown_active():
             log.info("pipeline.mini_retrain.cooldown_skip", nb_resultats=nb_new)
         else:
@@ -904,11 +917,15 @@ async def _run_retraining_with_lease(label: str, runner) -> bool:
 
 async def _run_incremental_retraining_unlocked() -> None:
     """
-    Retraining léger sur les 500 dernières courses.
-    Plus rapide que le nightly complet.
+    Retraining déclenché en journée (1 max / RETRAIN_COOLDOWN_S).
+
+    MÊME fenêtre que le nightly : une fenêtre plus courte ici produisait un
+    challenger entraîné sur 3 mois face à un champion entraîné sur 12, et le
+    garde-fou `data_jump` (≥1,5× de données) promouvait alors mécaniquement le
+    plus large à chaque alternance, quel que soit son walk-forward.
     """
     log.info("pipeline.incremental_retrain.start")
-    await _do_retraining(mois=3, label="incremental")
+    await _do_retraining(mois=settings.retrain_history_months, label="incremental")
 
 
 async def run_incremental_retraining() -> None:
@@ -927,10 +944,13 @@ async def _run_nightly_retraining_unlocked() -> None:
     Retraining complet nightly à 2h UTC.
     Fenêtre récente configurable, validation et déploiement conditionnel.
 
-    La production utilise trois mois par défaut : ses features JSON représentent
-    déjà environ 40 000 partants et tiennent sous la limite mémoire de 6 Gio du
-    worker. Une fenêtre de 18 mois provoquait un arrêt cgroup (signal 9) avant
-    même l'entraînement et empêchait donc tout apprentissage nocturne.
+    La fenêtre est GLISSANTE. Tant qu'elle valait trois mois, chaque nuit lui
+    retirait un jour ancien (~500 partants) pour lui ajouter un jour récent
+    (~380 en août) : le dataset RÉTRÉCISSAIT version après version — 42 285
+    partants le 17/08, 41 121 le 25/08 — alors que la base en contenait 175 714
+    exploitables sur douze mois. Douze mois est désormais le défaut ; la RAM est
+    tenue par `retrain_max_rows` et par la construction du dataset par blocs
+    (cf. `_build_training_dataset_from_db`), pas en jetant des données.
     """
     log.info("pipeline.nightly_retrain.start")
     await _do_retraining(mois=settings.retrain_history_months, label="nightly")
@@ -1161,29 +1181,24 @@ async def _do_retraining(mois: int, label: str) -> None:
     async with AsyncSessionLocal() as session:
         # Construire le dataset
         _log_rss(f"{label}.start")
-        features_rows, resultats_dict = await _build_training_dataset_from_db(session, mois)
-        _log_rss(f"{label}.dataset_fetched", n_rows=len(features_rows))
+        X, y, y_win = await _build_training_dataset_from_db(
+            session, mois, max_rows=settings.retrain_max_rows
+        )
+        _log_rss(f"{label}.dataset_fetched", n_rows=len(X))
         # Seuil abaissé à 300 : amorçage sur vraies courses (le synthétique sert de
         # prior tant qu'on a peu de données réelles ; il sera remplacé dès qu'on a
         # un vrai modèle, cf. override est_synthetique ci-dessous).
-        if len(features_rows) < 300:
-            log.warning("pipeline.retrain.insufficient_data", nb_rows=len(features_rows))
+        if len(X) < 300:
+            log.warning("pipeline.retrain.insufficient_data", nb_rows=len(X))
             return
 
-        X, y, y_win = build_training_dataset(features_rows, resultats_dict)
-        if X.empty:
-            log.error("pipeline.retrain.empty_dataset")
-            return
-
-        log.info("pipeline.retrain.dataset_ready", n=len(X),
+        log.info("pipeline.retrain.dataset_ready", n=len(X), mois=mois,
+                 n_courses=int(X["course_id"].nunique()) if "course_id" in X.columns else None,
                  pos_rate=float(y.mean()), win_rate=float(y_win.mean()) if len(y_win) else 0.0)
 
-        # Libérer la liste brute (144k dicts × 173 clés ≈ 2-3 Go) : inutile une fois X
-        # construit. Réduit le pic RAM (serveur 8 Go → OOM à la phase promotion sinon).
-        del features_rows, resultats_dict
-        # Rendu au NOYAU, pas seulement à la libc : sans malloc_trim ces gigas
-        # restent comptés dans le RSS et désignent le worker comme victime de
-        # l'OOM global bien après la fin du calcul.
+        # Rendu au NOYAU, pas seulement à la libc : sans malloc_trim les arènes
+        # des blocs de construction restent comptées dans le RSS et désignent le
+        # worker comme victime de l'OOM global bien après la fin du calcul.
         _release_memory(f"{label}.dataset_freed")
 
         # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
@@ -1316,6 +1331,11 @@ async def _do_retraining(mois: int, label: str) -> None:
                 rank_auc=metrics.get("wf_rank_auc"),
                 market_rank_auc=metrics.get("wf_market_rank_auc"),
                 rank_delta_market=_rank_delta_market,
+                # PARTANTS, pas courses (≈9,3 lignes par course). Le nom de la
+                # colonne date de la migration 0001 ; les 519 versions déjà
+                # enregistrées portent cette unité et les garde-fous
+                # (MIN_RELIABLE_TRAIN, data_jump) s'y comparent. On ne change
+                # donc pas l'unité, on a corrigé les libellés qui l'affichaient.
                 nb_courses_train=n_train_rows,
                 est_actif=True,
                 est_synthetique=False,  # entraîné sur de vraies courses
@@ -2235,9 +2255,16 @@ async def _get_alertes_equipement(session: AsyncSession, course_id: str) -> list
 
 
 async def _build_training_dataset_from_db(
-    session: AsyncSession, mois: int
-) -> tuple[list[dict], dict]:
-    """Construit le dataset d'entraînement depuis PostgreSQL."""
+    session: AsyncSession, mois: int, max_rows: int | None = None
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    """Construit (X, y_top3, y_win) depuis PostgreSQL, par blocs.
+
+    Rend directement les matrices d'entraînement et NON la liste de dicts brute :
+    un partant pèse ~30 Ko en dict Python (173 clés JSON) contre ~700 octets en
+    ligne de DataFrame float32. C'est ce facteur ~40 qui rendait une fenêtre
+    longue impossible et forçait les trois mois glissants — donc la décroissance
+    du nombre de partants d'entraînement d'une version à l'autre.
+    """
     date_limite = datetime.now() - timedelta(days=mois * 30)
 
     # FLAG train_prerace_only : n'entraîne que sur features FIGÉES AVANT le départ
@@ -2251,46 +2278,68 @@ async def _build_training_dataset_from_db(
         if _AF.train_prerace_only else ""
     )
 
+    _where = f"""
+        WHERE c.date_heure > :date_limite
+          AND c.statut = 'termine'
+          AND h.position_arrivee IS NOT NULL
+          AND h.position_arrivee < 99
+          {_prerace_clause}
+    """
+    _from = """
+        FROM features_ml fm
+        JOIN participations p ON fm.participation_id = p.participation_id
+        JOIN historique_courses h ON h.cheval_id = p.cheval_id AND h.course_id = p.course_id
+        JOIN courses c ON p.course_id = c.course_id
+    """
+
+    # Plafond mémoire : on REMONTE la borne basse jusqu'à la date du max_rows-ième
+    # partant le plus récent, plutôt que de tronquer après coup. Le curseur reste
+    # ainsi chronologique (temporal_holdout_mask suppose X trié) et on ne
+    # matérialise jamais les lignes écartées.
+    if max_rows:
+        _cut = await session.scalar(text(f"""
+            SELECT c.date_heure {_from} {_where}
+            ORDER BY c.date_heure DESC LIMIT 1 OFFSET :max_rows
+        """), {"date_limite": date_limite, "max_rows": int(max_rows)})
+        if _cut is not None:
+            log.warning("pipeline.dataset.row_cap_hit",
+                        max_rows=int(max_rows), mois=mois,
+                        date_limite_effective=str(_cut))
+            date_limite = _cut
+
     # Récupérer les features sauvegardées avec leurs labels.
     #
     # `session.stream()` et NON `session.execute()` : ce dernier fait remonter
     # TOUT le résultat dans un buffer asyncpg avant la première ligne Python
-    # (~42 000 lignes portant chacune un JSONB de 173 clés). Le curseur serveur
-    # laisse Postgres garder le gros du résultat de son côté et ne matérialise
-    # qu'une partition à la fois.
+    # (chaque ligne portant un JSONB de 173 clés). Le curseur serveur laisse
+    # Postgres garder le gros du résultat de son côté et ne matérialise qu'une
+    # partition à la fois.
     result = await session.stream(text(f"""
         SELECT
             fm.features,
             h.position_arrivee,
             h.cheval_id,
             p.course_id
-        FROM features_ml fm
-        JOIN participations p ON fm.participation_id = p.participation_id
-        JOIN historique_courses h ON h.cheval_id = p.cheval_id AND h.course_id = p.course_id
-        JOIN courses c ON p.course_id = c.course_id
-        WHERE c.date_heure > :date_limite
-          AND c.statut = 'termine'
-          AND h.position_arrivee IS NOT NULL
-          AND h.position_arrivee < 99
-          {_prerace_clause}
+        {_from}
+        {_where}
         ORDER BY c.date_heure
     """), {"date_limite": date_limite})
 
-    # `fetchall()` matérialisait TOUT le résultat (~42 000 lignes × un JSONB de
-    # 173 clés) puis la boucle en construisait une SECONDE copie via `dict()` :
-    # les deux vivaient simultanément, doublant le pic pour rien. On consomme
-    # désormais le curseur par blocs et on relâche chaque bloc au fur et à mesure,
-    # ce qui plafonne le surcoût à un bloc au lieu du dataset entier.
-    features_list: list[dict] = []
-    resultats_dict: dict[str, dict] = {}
+    # Chaque partition devient TOUT DE SUITE un petit DataFrame float32 puis est
+    # relâchée : à aucun moment les 175 000 dicts ne coexistent. Les labels sont
+    # dérivés de `position_arrivee` déjà présent dans la ligne — l'ancien
+    # dictionnaire {course_id: {cheval_id: position}}, reconstruit à partir des
+    # MÊMES lignes, n'apportait qu'une jointure redondante et un second gouffre.
+    chunks: list[pd.DataFrame] = []
+    labels_top3: list[int] = []
+    labels_win: list[int] = []
 
-    async for partition in result.partitions(2000):
+    async for partition in result.partitions(5000):
+        rows = []
         for feat_json, position, cheval_id, course_id in partition:
-            # asyncpg décode déjà le JSONB en dict neuf, propre à cette ligne :
-            # le `dict(feat_json)` d'origine en faisait une SECONDE copie qui
-            # cohabitait avec la première jusqu'à la fin de la boucle. On garde
-            # la conversion en secours pour le codec SQLite des tests, qui rend
-            # une chaîne.
+            # asyncpg décode déjà le JSONB en dict neuf, propre à cette ligne. On
+            # garde la conversion en secours pour le codec SQLite des tests, qui
+            # rend une chaîne.
             if isinstance(feat_json, dict):
                 feat = feat_json
             elif isinstance(feat_json, str):
@@ -2298,17 +2347,37 @@ async def _build_training_dataset_from_db(
                 feat = _json.loads(feat_json)
             else:
                 feat = dict(feat_json)
+            # Identifiants pris sur les COLONNES, pas sur le JSON : `course_id`
+            # pilote le découpage par groupe (temporal_holdout_mask) et une ligne
+            # dont le JSON ne le portait pas était silencieusement jetée.
             feat["cheval_id"] = cheval_id
-            features_list.append(feat)
+            feat["course_id"] = course_id
+            rows.append(feat)
 
-            if course_id not in resultats_dict:
-                resultats_dict[course_id] = {}
-            resultats_dict[course_id][cheval_id] = int(position)
+            pos = int(position)
+            labels_top3.append(int(0 < pos <= 3))
+            labels_win.append(int(pos == 1))
+
+        if rows:
+            _df = pd.DataFrame(rows)
+            _fc = _df.select_dtypes(include=["float64"]).columns
+            if len(_fc):
+                _df[_fc] = _df[_fc].astype("float32")
+            chunks.append(_df)
         # La partition consommée doit mourir ici, sinon le curseur serveur ne
         # sert à rien : on aurait juste déplacé le buffer du driver vers Python.
-        del partition
+        del rows, partition
 
-    return features_list, resultats_dict
+    if not chunks:
+        empty = pd.Series([], dtype=int)
+        return pd.DataFrame(), empty, empty
+
+    X = pd.concat(chunks, ignore_index=True, copy=False)
+    chunks.clear()
+    _fc = X.select_dtypes(include=["float64"]).columns
+    if len(_fc):
+        X[_fc] = X[_fc].astype("float32")
+    return X, pd.Series(labels_top3, name="label"), pd.Series(labels_win, name="win")
 
 
 async def _get_next_version_num(session: AsyncSession) -> int:

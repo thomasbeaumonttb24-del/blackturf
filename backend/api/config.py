@@ -73,10 +73,22 @@ class Settings(BaseSettings):
     model_min_auc: float = 0.60
     retrain_hour_utc: int = 2
     retrain_every_n_results: int = 20
-    # Le dataset JSON se déplie fortement en mémoire pendant l'entraînement.
-    # Trois mois (~40k partants en production) tiennent dans le worker 6 Gio ;
-    # une fenêtre plus longue reste configurable sur un serveur plus puissant.
-    retrain_history_months: int = Field(default=3, ge=1, le=36)
+    # Fenêtre d'historique du retraining. Elle est GLISSANTE : chaque nuit elle
+    # perd un jour ancien et gagne un jour récent. Tant qu'elle valait trois mois,
+    # le nombre de partants d'entraînement DÉCROISSAIT mécaniquement (les semaines
+    # de mai portaient ~3 900 partants, celles d'août ~2 800) alors que la base en
+    # contenait 175 000 exploitables sur douze mois — 76 % jetés chaque nuit, et
+    # aucune saison hivernale dans le modèle d'été. Douze mois couvrent un cycle
+    # complet. Le plafond `retrain_max_rows` protège la RAM, pas la fenêtre.
+    retrain_history_months: int = Field(default=12, ge=1, le=36)
+    # Garde-fou mémoire : au-delà, on garde les N partants les PLUS RÉCENTS. Un
+    # plafond fait stagner le compteur, il ne le fait pas décroître — contrairement
+    # à une fenêtre glissante trop courte.
+    retrain_max_rows: int = Field(default=220_000, ge=1_000)
+    # Retrain déclenché en journée par post_course. Le worker RQ est unique : un
+    # entraînement de 20 min (fenêtre douze mois) y bloque règlements, prédictions
+    # et alertes. Le nightly de 02:00 UTC voit le même dataset, hors courses.
+    retrain_intraday_enabled: bool = False
 
     # Telegram
     telegram_bot_token: str = ""
