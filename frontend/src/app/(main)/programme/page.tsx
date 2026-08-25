@@ -9,6 +9,7 @@ import {
   disciplineLabel,
 } from "@/lib/seo";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
+import { PreuvesRecentesCard } from "@/components/courses/insights";
 import ProgrammeClient from "./ProgrammeClient";
 
 // ISR 5 min : le programme du jour est régénéré côté serveur, donc Googlebot reçoit un
@@ -94,6 +95,14 @@ export default async function ProgrammePage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
       <ProgrammeClient initialProgramme={prog} initialJour={jour} />
+
+      {/* Le visiteur qui découvre le site par le programme ne voit, sinon, qu'une
+          liste d'horaires : rien ne lui dit qu'un modèle tourne derrière. Ces six
+          courses courues, avec le rang donné au gagnant, sont vérifiables une par
+          une — et ce sont les plus récentes, pas les mieux réussies. */}
+      <section className="mx-auto mb-10 max-w-7xl px-4 sm:px-6 lg:px-8">
+        <PreuvesRecentesCard />
+      </section>
 
       {/* Récapitulatif texte du jour. Le composant client, lui, est une application :
           filtres, compte à rebours, cotes live. Ce bloc est la version stable et

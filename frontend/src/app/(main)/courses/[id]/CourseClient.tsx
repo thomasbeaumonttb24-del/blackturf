@@ -19,7 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import {
   ParisDisponiblesCard, ConfrontationsCard, PoolEvolutionCard, TempsPassageCard,
-  CompteurDepart, ApercuAnalyseCard, useApercuAnalyse,
+  CompteurDepart, ApercuAnalyseCard, PreuvesRecentesCard, useApercuAnalyse,
 } from "@/components/courses/insights";
 import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, type ClassementSignal,
@@ -2779,6 +2779,11 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
                 abonne={Boolean(user && !["free", "decouverte"].includes(user.plan))}
               />
             )}
+            {/* Preuve concrète : ce que le modèle a dit sur les dernières courses
+                COURUES. Un prospect ne peut pas juger un pourcentage global ; il
+                peut ouvrir six courses réelles et vérifier. Réservé à ceux qui
+                n'ont pas déjà le classement — un abonné n'a rien à se prouver. */}
+            {(!predictions || predictions.length === 0) && <PreuvesRecentesCard />}
         {/* ── 4 STAT CARDS ── */}
         {predictions && predictions.length > 0 && (() => {
           const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];

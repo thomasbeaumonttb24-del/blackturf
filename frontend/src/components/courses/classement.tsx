@@ -91,8 +91,11 @@ export function ClassementAlgo({
     <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
       <header className="flex flex-wrap items-center gap-2 border-b border-stone-100 px-4 py-3.5 sm:px-5">
         <h3 className="font-display text-[15px] font-bold text-slate-900">Le classement de l&apos;algorithme</h3>
-        <span className="text-[11px] text-muted-foreground">
-          {lignes.length} chevaux notés · triés par probabilité de victoire
+        <span
+          className="text-[11px] text-muted-foreground"
+          title="Le rang vient d'un modèle d'ordonnancement dédié, entraîné à ordonner les partants d'une même course. Il ne suit donc pas toujours l'ordre des probabilités : deux chevaux peuvent afficher le même pourcentage sans être au même rang."
+        >
+          {lignes.length} chevaux notés · ordre du modèle de classement
         </span>
         <button
           type="button"
@@ -270,6 +273,8 @@ export function ClassementAlgo({
           {aCoteJuste && <span><span className="font-semibold text-emerald-700">cote juste en vert</span> : pari de valeur retenu par le modèle</span>}
         </div>
         <p className="mt-1.5 text-[10.5px] leading-4 text-muted-foreground">
+          Le rang est donné par un modèle d&apos;ordonnancement dédié : il ne suit pas toujours
+          l&apos;ordre des probabilités, et deux chevaux peuvent afficher le même pourcentage.
           Probabilités issues du modèle à 80+ critères (forme, ELO, association jockey/entraîneur, distance,
           terrain, marché). Aide à la décision — aucune garantie de gain.
         </p>
@@ -342,7 +347,7 @@ export function ClassementApercu({
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-stone-100 px-4 py-3.5 sm:px-5">
         <h3 className="font-display text-[15px] font-bold text-slate-900">Le classement de l&apos;algorithme</h3>
         <span className="text-[11px] text-muted-foreground">
-          {lignes.length} chevaux notés · triés par probabilité de victoire
+          {lignes.length} chevaux notés · ordre du modèle de classement
         </span>
         <span className="ml-auto rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">
           {revele ? "course courue · classement complet" : "aperçu gratuit"}
@@ -511,6 +516,8 @@ export function ClassementApercu({
           </p>
         ) : (
           <p className="text-[12px] leading-5 text-stone-600">
+            Le rang vient d&apos;un modèle d&apos;ordonnancement dédié : deux chevaux peuvent afficher
+            la même probabilité sans être au même rang.{" "}
             Vous voyez la probabilité de victoire de chaque rang et la cote juste qui en découle,
             mais pas les chevaux. L&apos;abonnement ouvre les noms, la cote du marché en face de la
             cote juste — c&apos;est là que se voit un pari de valeur — et les signaux retenus{" "}

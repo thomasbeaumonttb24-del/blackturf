@@ -15,12 +15,19 @@
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, Sparkles, Swords, Ticket, Timer, TrendingUp, Trophy, Lock, Info } from "lucide-react";
+import { Check, Loader2, Minus, Sparkles, Swords, Ticket, Timer, TrendingUp, Trophy, Lock, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const nf = (n: number, d = 0) =>
   n.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+/** « 25082026R5C4 » → « R5C4 ». Le code réunion/course est ce que les parieurs lisent. */
+const codeCourse = (id: string) => (id.match(/R\d+C\d+$/i)?.[0] ?? id).toUpperCase();
+
+/** Les noms arrivent du PMU EN CAPITALES : illisibles en bloc dans une carte. */
+const titre = (s: string) =>
+  s.toLowerCase().replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, p, c) => p + c.toUpperCase());
 
 function Card({ title, icon: Icon, aside, children, className }: {
   title: string;
@@ -465,25 +472,6 @@ function Tuile({ valeur, unite, libelle, ton = "neutre" }: {
   );
 }
 
-/** Ligne de classement dont l'identité est masquée : on montre qu'un classement
- *  existe, jamais lequel. Rien n'est caché en CSS — l'endpoint `apercu` ne
- *  renvoie ni numéro ni nom tant que la course n'est pas courue. */
-function LigneMasquee({ rang, proba }: { rang: number; proba?: number | null }) {
-  return (
-    <li className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/60 px-3 py-2.5">
-      <span className="w-5 text-center font-display text-sm font-bold text-stone-400">{rang}</span>
-      <span className="inline-flex h-4 w-10 rounded bg-stone-200/90" aria-hidden="true" />
-      <span className="inline-flex h-4 flex-1 rounded bg-stone-200/70" aria-hidden="true" />
-      <span className="sr-only">Cheval réservé aux abonnés</span>
-      {proba != null ? (
-        <span className="font-display text-sm font-bold tabular-nums text-amber-600">{Math.round(proba * 100)}%</span>
-      ) : (
-        <Lock className="h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
-      )}
-    </li>
-  );
-}
-
 export function ApercuAnalyseCard({
   statut, partants, nbPartants, connecte, abonne = false, apercu,
 }: {
@@ -663,19 +651,6 @@ export function ApercuAnalyseCard({
             </div>
           )}
 
-          <ol className="mt-4 space-y-2">
-            <LigneMasquee rang={1} proba={apercu.proba_top1} />
-            <LigneMasquee rang={2} />
-            <LigneMasquee rang={3} />
-          </ol>
-
-          {apercu.nb_ecartes > 0 && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Le modèle écarte {apercu.nb_ecartes} des {apercu.nb_analyses} partants sous 3 % de chances,
-              et classe les autres du plus probable au moins probable.
-            </p>
-          )}
-
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
             <p className="text-[13px] font-semibold text-amber-900">
               La cote dit qui les parieurs préfèrent. Elle ne dit pas qui a le plus de chances.
@@ -719,6 +694,127 @@ export function ApercuAnalyseCard({
           </a>
         </div>
       )}
+    </Card>
+  );
+}
+
+// ─── Ce que le modèle a dit sur les dernières courses courues ─────────────────
+// Un prospect qui arrive ici depuis une recherche ne connaît pas le site. Un
+// pourcentage global reste abstrait ; six courses réelles, nommées, avec le rang
+// que le modèle donnait au gagnant, se vérifient en un clic.
+// Les trois règles qui tiennent ce bloc, côté serveur comme ici :
+//   • ce sont les courses les PLUS RÉCENTES, jamais les mieux réussies ;
+//   • le pronostic était figé avant le départ ;
+//   • le compteur global est affiché à côté des exemples — sans lui, montrer
+//     six exemples serait un biais du survivant.
+interface PreuveCourse {
+  course_id: string;
+  nom: string | null;
+  hippodrome: string;
+  date_heure: string | null;
+  nb_partants: number | null;
+  est_quinte: boolean;
+  gagnant_numero: number | null;
+  gagnant_nom: string | null;
+  rang_du_gagnant: number | null;
+  gagnant_top1: boolean;
+  gagnant_top3: boolean;
+  favori_cote: number | null;
+  rapport_gagnant: number | null;
+}
+
+interface PreuvesResp {
+  courses: PreuveCourse[];
+  n_courses: number;
+  n_gagnant_top1: number;
+  n_gagnant_top3: number;
+}
+
+const ordinal = (n: number) => (n === 1 ? "1ᵉʳ" : `${n}ᵉ`);
+
+export function PreuvesRecentesCard() {
+  const { data } = useEndpoint<PreuvesResp>("/stats/preuves-recentes?limite=6");
+  if (!data || !data.courses?.length) return null;
+
+  const { courses, n_courses, n_gagnant_top1, n_gagnant_top3 } = data;
+
+  return (
+    <Card
+      title="Ce que le modèle a dit sur les dernières courses"
+      icon={Trophy}
+      aside="vérifiable, une par une"
+    >
+      {/* Le compteur AVANT les exemples : c'est lui qui empêche de lire la
+          rangée de cartes comme une vitrine de réussites choisies. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-stone-200 bg-stone-50/70 px-3.5 py-3">
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-display text-xl font-bold tabular-nums text-emerald-600">{n_gagnant_top1}</span>
+          <span className="text-[12px] text-stone-600">gagnants donnés n°1</span>
+        </span>
+        <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-display text-xl font-bold tabular-nums text-amber-600">{n_gagnant_top3}</span>
+          <span className="text-[12px] text-stone-600">gagnants dans le top 3</span>
+        </span>
+        <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
+        <span className="text-[12px] text-stone-500">
+          sur les <span className="font-semibold text-slate-900 tabular-nums">{n_courses}</span> dernières
+          courses courues — les plus récentes, pas les mieux réussies
+        </span>
+      </div>
+
+      <ul className="mt-3 flex gap-2.5 overflow-x-auto pb-1.5">
+        {courses.map((c) => {
+          const rang = c.rang_du_gagnant;
+          const ton = c.gagnant_top1
+            ? { bd: "border-emerald-200", bg: "bg-emerald-50/60", fg: "text-emerald-700", txt: "gagnant donné n°1" }
+            : c.gagnant_top3
+              ? { bd: "border-amber-200", bg: "bg-amber-50/60", fg: "text-amber-700", txt: `gagnant donné ${rang ? ordinal(rang) : ""}` }
+              : { bd: "border-stone-200", bg: "bg-white", fg: "text-stone-500", txt: rang ? `gagnant donné ${ordinal(rang)}` : "gagnant hors classement" };
+          return (
+            <li key={c.course_id} className="min-w-[15rem] flex-shrink-0">
+              <a
+                href={`/courses/${c.course_id}`}
+                className={cn(
+                  "flex h-full flex-col rounded-xl border p-3 transition-colors hover:border-amber-300",
+                  ton.bd, ton.bg,
+                )}
+              >
+                <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span className="font-mono">{codeCourse(c.course_id)}</span>
+                  <span className="truncate">{titre(c.hippodrome)}</span>
+                  {c.est_quinte && (
+                    <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[9.5px] font-bold text-white">Q+</span>
+                  )}
+                </span>
+
+                <span className={cn("mt-1.5 flex items-center gap-1 text-[12px] font-semibold", ton.fg)}>
+                  {c.gagnant_top3
+                    ? <Check className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                    : <Minus className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />}
+                  {ton.txt}
+                </span>
+
+                <span className="mt-1.5 truncate text-[13px] font-semibold text-slate-900">
+                  <span className="font-mono text-[11px] font-normal text-muted-foreground">N°{c.gagnant_numero}</span>{" "}
+                  {c.gagnant_nom ? titre(c.gagnant_nom) : "—"}
+                </span>
+
+                <span className="mt-0.5 text-[11px] text-muted-foreground">
+                  {c.nb_partants ? `${c.nb_partants} partants` : ""}
+                  {c.rapport_gagnant ? ` · gagnant payé ${nf(c.rapport_gagnant, 2)} pour 1 €` : ""}
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className="mt-2.5 text-[11px] leading-4 text-muted-foreground">
+        Chaque carte ouvre la fiche de la course : le classement complet du modèle y est
+        affiché, avec la place réelle de chaque cheval. Les courses ratées y figurent comme
+        les autres.
+      </p>
     </Card>
   );
 }

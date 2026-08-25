@@ -1349,6 +1349,139 @@ _PALMARES_INTEGRITE = (
 )
 
 
+@router.get("/stats/preuves-recentes")
+async def stats_preuves_recentes(
+    limite: int = 6,
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    """Ce que le modèle a dit sur les DERNIÈRES courses courues — public.
+
+    Raison d'être (funnel) : un prospect qui arrive sur une fiche course depuis
+    Google ne sait pas ce que produit le site. Les agrégats (« 66 % de top-3 »)
+    sont abstraits ; une poignée de courses réelles, nommées, avec le rang que
+    le modèle avait donné au gagnant, est vérifiable et concrète.
+
+    Honnêteté — les trois règles qui tiennent ce bloc :
+      - on prend les courses les PLUS RÉCENTES, jamais les meilleures : aucun
+        tri sur la réussite, donc les ratés sortent aussi ;
+      - le pronostic devait être FIGÉ AVANT LE DÉPART (`predictions.created_at
+        < courses.date_heure`) : sinon on afficherait une prédiction écrite
+        après l'arrivée, ce qui ne prouve rien ;
+      - `n_courses` et `n_gagnant_top3` sont renvoyés ensemble : sans le
+        dénominateur, une liste d'exemples serait un biais du survivant.
+
+    Aucun risque de paywall : uniquement des courses TERMINÉES, dont l'arrivée
+    est publique. La valeur payante porte sur les courses à venir.
+    """
+    limite = max(3, min(12, limite))
+    CACHE_KEY = f"stats:preuves-recentes:{limite}"
+    cached = await _cache_get(redis, CACHE_KEY)
+    if cached:
+        return cached
+
+    # Une seule requête : pour chaque course terminée récente, le rang prédit du
+    # vainqueur officiel, plus le rang 1 du modèle et sa place réelle.
+    rows = (await db.execute(text("""
+        WITH courues AS (
+            SELECT c.course_id, c.nom, c.hippodrome_nom, c.date_heure, c.discipline,
+                   c.nb_partants, c.est_quinte,
+                   (SELECT (e->>'numero')::int
+                      FROM jsonb_array_elements(r.classement::jsonb) e
+                     WHERE (e->>'position') = '1' LIMIT 1) AS gagnant_numero,
+                   (SELECT e->>'nom'
+                      FROM jsonb_array_elements(r.classement::jsonb) e
+                     WHERE (e->>'position') = '1' LIMIT 1) AS gagnant_nom,
+                   r.rapports
+              FROM courses c
+              JOIN resultats r ON r.course_id = c.course_id
+             WHERE c.statut = 'termine'
+               AND jsonb_typeof(r.classement::jsonb) = 'array'
+               AND c.date_heure > now() - interval '7 days'
+             ORDER BY c.date_heure DESC
+             LIMIT 60
+        )
+        SELECT k.course_id, k.nom, k.hippodrome_nom, k.date_heure, k.discipline,
+               k.nb_partants, k.est_quinte, k.gagnant_numero, k.gagnant_nom, k.rapports,
+               pg.rang_predit  AS rang_du_gagnant,
+               p1.numero       AS favori_numero,
+               ch1.nom         AS favori_nom,
+               p1.cote_figee   AS favori_cote,
+               (SELECT (e->>'position')::int
+                  FROM resultats rr, jsonb_array_elements(rr.classement::jsonb) e
+                 WHERE rr.course_id = k.course_id
+                   AND (e->>'numero')::int = p1.numero LIMIT 1) AS favori_position
+          FROM courues k
+          -- rang que le modèle donnait au vainqueur
+          LEFT JOIN LATERAL (
+              SELECT pr.rang_predit
+                FROM predictions pr
+                JOIN participations pa ON pa.participation_id = pr.participation_id
+               WHERE pr.course_id = k.course_id
+                 AND pa.numero = k.gagnant_numero
+                 AND pr.created_at < k.date_heure
+               LIMIT 1
+          ) pg ON TRUE
+          -- le n°1 du modèle sur cette course
+          LEFT JOIN LATERAL (
+              SELECT pa.numero, pa.cheval_id, pr.cote_figee
+                FROM predictions pr
+                JOIN participations pa ON pa.participation_id = pr.participation_id
+               WHERE pr.course_id = k.course_id
+                 AND pr.rang_predit = 1
+                 AND pr.created_at < k.date_heure
+               LIMIT 1
+          ) p1 ON TRUE
+          LEFT JOIN chevaux ch1 ON ch1.cheval_id = p1.cheval_id
+         WHERE pg.rang_predit IS NOT NULL
+         ORDER BY k.date_heure DESC
+         LIMIT :lim
+    """), {"lim": limite})).mappings().all()
+
+    courses = []
+    for r in rows:
+        rapports = r["rapports"] or {}
+        if isinstance(rapports, str):
+            try:
+                rapports = json.loads(rapports)
+            except Exception:
+                rapports = {}
+        sg = None
+        for cle in ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international"):
+            if rapports.get(cle) is not None:
+                sg = float(rapports[cle])
+                break
+        courses.append({
+            "course_id": r["course_id"],
+            "nom": r["nom"],
+            "hippodrome": r["hippodrome_nom"],
+            "date_heure": r["date_heure"].isoformat() if r["date_heure"] else None,
+            "discipline": r["discipline"],
+            "nb_partants": r["nb_partants"],
+            "est_quinte": bool(r["est_quinte"]),
+            "gagnant_numero": r["gagnant_numero"],
+            "gagnant_nom": r["gagnant_nom"],
+            "rang_du_gagnant": r["rang_du_gagnant"],
+            "gagnant_top1": r["rang_du_gagnant"] == 1,
+            "gagnant_top3": r["rang_du_gagnant"] is not None and r["rang_du_gagnant"] <= 3,
+            "favori_numero": r["favori_numero"],
+            "favori_nom": r["favori_nom"],
+            "favori_cote": float(r["favori_cote"]) if r["favori_cote"] else None,
+            "favori_position": r["favori_position"],
+            "rapport_gagnant": sg,
+        })
+
+    resultat = {
+        "courses": courses,
+        "n_courses": len(courses),
+        "n_gagnant_top1": sum(1 for c in courses if c["gagnant_top1"]),
+        "n_gagnant_top3": sum(1 for c in courses if c["gagnant_top3"]),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await _cache_set(redis, CACHE_KEY, resultat, ttl=600)  # 10 min
+    return resultat
+
+
 @router.get("/stats/palmares-public")
 async def stats_palmares_public(
     db: AsyncSession = Depends(get_db),
