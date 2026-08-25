@@ -418,8 +418,8 @@ function DisciplineCard({ d, maxCourses, hasard }: {
     <div className="group relative overflow-hidden rounded-2xl border border-stone-200 bg-white p-5 transition-all hover:border-amber-200 hover:shadow-[0_20px_45px_-38px_rgba(180,83,9,.75)]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-stone-50 ring-1 ring-stone-200">
-            <DisciplineImg discipline={d.discipline} className="h-7 w-8" />
+          <span className="inline-flex h-11 w-14 items-center justify-center rounded-xl bg-stone-50 ring-1 ring-stone-200">
+            <DisciplineImg discipline={d.discipline} className="h-7 w-11" />
           </span>
           <div>
             <span className="block text-sm font-semibold capitalize text-foreground">{d.discipline}</span>

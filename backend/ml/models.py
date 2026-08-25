@@ -67,7 +67,15 @@ META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "lab
              #     jockey/entraîneur/asso sont, eux, recalculés point-in-time (trailing
              #     365j, date<départ) dans features.py et CONSERVÉS.
              "jockey_victoires_saison", "entraineur_victoires_saison",
-             "jockey_montes_30j", "jockey_roi", "entraineur_roi"}
+             "jockey_montes_30j", "jockey_roi", "entraineur_roi",
+             # (c) VERSIONS CORRIGÉES, calculées pour l'AFFICHAGE seul. Elles
+             #     rejouent `class_drop_ratio` / `elo_vs_moyenne` sur des échelles
+             #     homogènes (allocations toutes en euros, ELO comparé au champ de la
+             #     même discipline). Le modèle en production a été entraîné sur les
+             #     versions d'origine : les garder hors du jeu d'entraînement évite un
+             #     doublon quasi colinéaire et tout écart train/serve. À réintégrer
+             #     sciemment lors d'un retrain dédié, en retirant ces deux noms.
+             "class_drop_ratio_reel", "elo_vs_champ"}
 
 # Brier score minimum requis avant déploiement
 BRIER_THRESHOLD = 0.18

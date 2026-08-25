@@ -86,6 +86,12 @@ class PredictionOut(BaseModel):
     rang_predit: int
     confidence_score: Optional[float]
     cote_pmu: Optional[float]
+    # Cote de marché relevée AU MOMENT DU PRONOSTIC. `cote_pmu` ci-dessus est la cote
+    # AFFICHÉE (live avant gel, dernière connue après) : les deux diffèrent souvent
+    # beaucoup (7,7 contre 5,4 sur un partant mesuré en prod). L'écart cote juste ↔
+    # marché n'a de sens que rapporté à l'instant où la probabilité a été calculée,
+    # d'où cette valeur envoyée explicitement plutôt que déduite côté navigateur.
+    cote_figee: Optional[float] = None
     cote_juste: Optional[float] = None  # cote "juste" IA = 1/proba_top1 (sans marge)
     value_bet: Optional[dict]
 
@@ -97,6 +103,10 @@ class CoursePredictionsOut(BaseModel):
     recommandations: list[dict]
     verrouille: bool = False      # True = quota journalier dépassé → données IA masquées
     quota_restant: int = -1       # pronos restants aujourd'hui ; -1 = illimité
+    # Horodatage du calcul et état du gel — affichés tels quels pour que le lecteur
+    # sache de quand datent les probabilités qu'il regarde.
+    calcule_a: Optional[datetime] = None
+    cotes_figees: bool = False
 
 
 class ValueBetOut(BaseModel):
@@ -264,6 +274,7 @@ async def get_predictions(
             rang_predit=pred.rang_predit,
             confidence_score=pred.confidence_score,
             cote_pmu=cote_aff,
+            cote_figee=(round(pred.cote_figee, 2) if pred.cote_figee else None),
             value_bet=value_bet,
         ))
 
@@ -325,6 +336,8 @@ async def get_predictions(
         recommandations=recos,
         verrouille=False,
         quota_restant=quota_restant,
+        calcule_a=min((p.created_at for p, _, _ in rows if p.created_at), default=None),
+        cotes_figees=fige,
     )
 
 

@@ -30,13 +30,13 @@ export function disciplineMeta(d: string) {
 
 /* Silhouettes détourées par discipline (masques transparents). */
 const DISCIPLINE_IMG: Record<string, string> = {
-  Plat:      "/img/disciplines/plat-v2.png",
-  "Attelé":  "/img/disciplines/attele-v2.png",
-  Monté:     "/img/disciplines/monte-v2.png",
-  Obstacle:  "/img/disciplines/obstacle-v2.png",
-  Haies:     "/img/disciplines/obstacle-v2.png",
-  Steeple:   "/img/disciplines/obstacle-v2.png",
-  Cross:     "/img/disciplines/obstacle-v2.png",
+  Plat:      "/img/disciplines/plat-v3.png",
+  "Attelé":  "/img/disciplines/attele-v3.png",
+  Monté:     "/img/disciplines/monte-v3.png",
+  Obstacle:  "/img/disciplines/obstacle-v3.png",
+  Haies:     "/img/disciplines/obstacle-v3.png",
+  Steeple:   "/img/disciplines/obstacle-v3.png",
+  Cross:     "/img/disciplines/obstacle-v3.png",
 };
 
 /** Silhouette teintée : le PNG sert de masque, la couleur vient de la discipline. */
@@ -164,7 +164,7 @@ export function DisciplineIcon({
   const k = normDiscipline(discipline);
   const m = disciplineMeta(discipline);
   const img = DISCIPLINE_IMG[k];
-  const box = size === "sm" ? "h-6 w-6 p-1" : size === "lg" ? "h-10 w-10 p-1.5" : "h-8 w-8 p-1.5";
+  const box = size === "sm" ? "h-6 w-8 p-[3px]" : size === "lg" ? "h-10 w-14 p-1.5" : "h-8 w-11 p-1";
   return (
     <span
       className={cn(

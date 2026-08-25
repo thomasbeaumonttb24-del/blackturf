@@ -32,6 +32,22 @@ log = structlog.get_logger()
 
 ELO_INITIAL = 1500.0
 
+# Les chevaux portent un ELO PAR DISCIPLINE (plat / trot / obstacle). Toute
+# comparaison « ce cheval vs le champ » doit rester dans la même colonne, sinon on
+# soustrait deux échelles différentes. Ces deux constantes sont la source unique de
+# la correspondance discipline → colonne ELO.
+_IDX_ELO_DISC = {"plat": 3, "trot": 4, "obstacle": 5}
+
+
+def _cle_discipline(discipline) -> str:
+    """Discipline PMU (« Attelé », « Steeple-chase »…) → clé ELO (plat/trot/obstacle)."""
+    d = (discipline or "plat").lower()
+    if "trot" in d or "attel" in d or "mont" in d:
+        return "trot"
+    if "haies" in d or "steeple" in d or "obstacle" in d or "cross" in d:
+        return "obstacle"
+    return "plat"
+
 TERRAIN_CATEGORIES = {
     "bon": ["bon", "ferme", "dur", "très bon"],
     "souple": ["bon souple", "souple", "assez souple"],
@@ -410,14 +426,23 @@ async def compute_features_for_participation(
 
     # ELO moyen et max de la course
     elo_stats = await session.execute(text("""
-        SELECT AVG(ch.elo_score_global), MAX(ch.elo_score_global), MIN(ch.elo_score_global)
+        SELECT AVG(ch.elo_score_global), MAX(ch.elo_score_global), MIN(ch.elo_score_global),
+               AVG(ch.elo_score_plat), AVG(ch.elo_score_trot), AVG(ch.elo_score_obstacle)
         FROM participations p
         JOIN chevaux ch ON p.cheval_id = ch.cheval_id
         WHERE p.course_id = :cid AND p.non_partant = false
     """), {"cid": course_id})
-    elo_avg, elo_max, elo_min = elo_stats.fetchone() or (ELO_INITIAL, ELO_INITIAL, ELO_INITIAL)
+    _elo_row = elo_stats.fetchone()
+    elo_avg, elo_max, elo_min = (
+        (_elo_row[0], _elo_row[1], _elo_row[2]) if _elo_row
+        else (ELO_INITIAL, ELO_INITIAL, ELO_INITIAL))
     elo_avg = float(elo_avg or ELO_INITIAL)
     elo_max = float(elo_max or ELO_INITIAL)
+    # Moyennes du champ PAR DISCIPLINE : comparer un ELO d'attelé à la moyenne
+    # GLOBALE du champ mélange deux échelles (cf. "elo_vs_champ" plus bas).
+    elo_avg_disc = float(
+        (_elo_row[_IDX_ELO_DISC[_cle_discipline(discipline)]] if _elo_row else None)
+        or elo_avg)
 
     # Évolution ELO sur 5 dernières courses
     elo_hist = await session.execute(text("""
@@ -432,6 +457,12 @@ async def compute_features_for_participation(
         "elo_global": float(elo_global or ELO_INITIAL),
         "elo_discipline": elo_score,
         "elo_vs_moyenne": elo_score - elo_avg,
+        # Affichage seul (hors modèle) : `elo_vs_moyenne` retranche la moyenne GLOBALE
+        # du champ d'un ELO de DISCIPLINE — deux échelles différentes. Le badge
+        # « Supérieur / Inférieur au champ » s'appuyait donc sur un écart biaisé
+        # (+101 points en moyenne sur un champ d'attelé), assez pour inverser le signe
+        # des chevaux proches de la moyenne. Ici les deux termes sont homogènes.
+        "elo_vs_champ": elo_score - elo_avg_disc,
         "elo_vs_max": elo_score - elo_max,
         "elo_pct_rank": elo_score / elo_max if elo_max > 0 else 0.5,
         "delta_elo_5courses": delta_elo_5,
@@ -441,7 +472,16 @@ async def compute_features_for_participation(
     hist_courses = await session.execute(text("""
         SELECT h.position_arrivee, h.distance, h.terrain, h.hippodrome, h.date_course,
                h.nb_partants, h.cote_depart, h.discipline, h.allocation,
-               h.acceleration_label, h.reduction_km
+               h.acceleration_label, h.reduction_km,
+               -- ALLOCATION NORMALISÉE EN EUROS, en DERNIÈRE colonne (lue par h[-1])
+               -- pour ne décaler aucun index positionnel existant.
+               -- `historique_courses` mélange DEUX unités : les lignes issues du
+               -- pipeline PMU (course_id renseigné) sont en CENTIMES, celles du
+               -- scraper d'historique externe (course_id NULL) sont en EUROS.
+               -- Moyenner les deux telles quelles gonfle class_drop_ratio d'un
+               -- facteur ~2 (médiane observée 1,96 au lieu de ~1,0).
+               CASE WHEN h.course_id IS NOT NULL THEN h.allocation / 100.0
+                    ELSE h.allocation::float END AS allocation_eur
         FROM historique_courses h
         WHERE h.cheval_id = :cid AND h.date_course < :today
         ORDER BY h.date_course DESC
@@ -1534,7 +1574,12 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
                -- (distanceAvecPrecedent). EN FIN → index 14. 0 = vainqueur.
                h.ecart_longueurs,
                -- Déroulé / trip note de la course passée (#9). EN FIN → index 15.
-               h.commentaire_course
+               h.commentaire_course,
+               -- ALLOCATION NORMALISÉE EN EUROS — DERNIÈRE colonne, lue par h[-1].
+               -- Voir le commentaire de la requête mono-cheval : la table mélange
+               -- centimes (lignes PMU) et euros (scraper d'historique externe).
+               CASE WHEN h.course_id IS NOT NULL THEN h.allocation / 100.0
+                    ELSE h.allocation::float END AS allocation_eur
         FROM historique_courses h
         WHERE h.cheval_id = ANY(:cids)
           AND h.date_course < :today
@@ -1627,7 +1672,8 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
 
     # 8. ELO stats de la course (moyenne, max, min)
     elo_course_r = await session.execute(text("""
-        SELECT AVG(ch.elo_score_global), MAX(ch.elo_score_global), MIN(ch.elo_score_global)
+        SELECT AVG(ch.elo_score_global), MAX(ch.elo_score_global), MIN(ch.elo_score_global),
+               AVG(ch.elo_score_plat), AVG(ch.elo_score_trot), AVG(ch.elo_score_obstacle)
         FROM participations p
         JOIN chevaux ch ON p.cheval_id = ch.cheval_id
         WHERE p.course_id = :cid AND p.non_partant = false
@@ -1635,6 +1681,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     elo_avg_row = elo_course_r.fetchone()
     elo_avg = float(elo_avg_row[0] or ELO_INITIAL)
     elo_max = float(elo_avg_row[1] or ELO_INITIAL)
+    # Moyennes du champ PAR DISCIPLINE — cf. "elo_vs_champ".
+    elo_avg_disc_map = {
+        cle: float(elo_avg_row[idx] or elo_avg) for cle, idx in _IDX_ELO_DISC.items()
+    }
 
     # 9. Cotes de tous les partants pour HHI
     field_cotes_r = await session.execute(text("""
@@ -1966,6 +2016,7 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         "meteo_row": meteo_row,
         "presse_by_numero": presse_by_numero,
         "elo_avg": elo_avg,
+        "elo_avg_disc_map": elo_avg_disc_map,
         "elo_max": elo_max,
         "field_cotes": field_cotes,
         "sire_dist_by_cheval": sire_dist_by_cheval,
@@ -2101,10 +2152,15 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     velocity_elo = float(np.mean(delta_elos[:5])) if delta_elos else 0.0
     elo_trend_30j = float(np.polyfit(np.arange(len(delta_elos)), delta_elos, 1)[0] * 5) if len(delta_elos) >= 3 else 0.0
 
+    elo_avg_disc = (batch.get("elo_avg_disc_map") or {}).get(
+        _cle_discipline(discipline), elo_avg)
+
     feat_elo = {
         "elo_global": float(elo_global or ELO_INITIAL),
         "elo_discipline": elo_score,
         "elo_vs_moyenne": elo_score - elo_avg,
+        # Affichage seul (hors modèle) — écart au champ à échelle homogène.
+        "elo_vs_champ": elo_score - elo_avg_disc,
         "elo_vs_max": elo_score - elo_max,
         "elo_pct_rank": elo_score / max(elo_max, 1),
         "delta_elo_5courses": delta_elo_5,
@@ -2639,11 +2695,30 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
                 elif class_drop_ratio > 1.4:
                     class_jump_score = -float(np.clip(class_drop_ratio - 1.0, 0, 1)) * 0.8  # négatif
 
+    # Version CORRIGÉE du ratio de classe — AFFICHAGE / narratif uniquement.
+    # `class_drop_ratio` ci-dessus compare une allocation en CENTIMES
+    # (courses.allocation) à une moyenne d'historique qui mélange centimes et euros :
+    # le ratio en sort gonflé ~2x, et le badge « Montée de catégorie » se déclenchait
+    # sur 71 % des partants — jusqu'à annoncer une montée là où le cheval DESCEND
+    # réellement de catégorie. Ici les deux termes sont ramenés en euros.
+    # La feature ML d'origine n'est pas touchée (parité train/serve) ; celle-ci est
+    # exclue du modèle via META_COLS.
+    class_drop_ratio_reel = None
+    if historique and allocation:
+        _alloc_eur = [float(h[-1]) for h in historique[:5] if h[-1] and float(h[-1]) > 0]
+        if _alloc_eur:
+            _moy_eur = float(np.mean(_alloc_eur))
+            if _moy_eur > 0:
+                class_drop_ratio_reel = float(
+                    np.clip((float(allocation) / 100.0) / _moy_eur, 0.2, 5.0))
+
     feat_class = {
         "class_drop_ratio": float(np.clip(class_drop_ratio, 0.2, 5.0)),
         "class_jump_score": float(np.clip(class_jump_score, -1.0, 1.0)),
         "class_drop_flag": int(class_drop_ratio < 0.75),   # descente significative
         "class_rise_flag": int(class_drop_ratio > 1.40),   # montée significative
+        # Affichage seul (hors modèle) — None si l'historique ne permet pas de conclure.
+        "class_drop_ratio_reel": class_drop_ratio_reel,
     }
 
     # ── GG. Recul trot (distance de handicap) ─────────────────────────────────

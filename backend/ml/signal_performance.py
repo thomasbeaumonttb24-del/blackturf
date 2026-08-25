@@ -54,8 +54,10 @@ SIGNALS: dict = {
     "forme_basse":        lambda f: (f.get("forme_5_courses") or 0.5) < 0.35,
     "en_progression":     lambda f: (f.get("forme_tendance") or 0) > 0.20,
     "en_regression":      lambda f: (f.get("forme_tendance") or 0) < -0.20,
-    "descente_categorie": lambda f: (f.get("class_drop_ratio") or 1.0) < 0.75,
-    "montee_categorie":   lambda f: (f.get("class_drop_ratio") or 1.0) > 1.40,
+    # Même source que le badge affiché (cf. narrative.py) : `class_drop_ratio_reel`
+    # en priorité, repli sur la feature d'origine pour les lignes historiques.
+    "descente_categorie": lambda f: (f.get("class_drop_ratio_reel") or f.get("class_drop_ratio") or 1.0) < 0.75,
+    "montee_categorie":   lambda f: (f.get("class_drop_ratio_reel") or f.get("class_drop_ratio") or 1.0) > 1.40,
     # terrain_ideal : condition `running_style_terrain_fit > 0.6` RETIRÉE (2026-07-02) —
     # running_style jamais peuplé (0/50645 chevaux) → le AND rendait le signal
     # inerte à vie alors que pref_terrain_actuel vit (terrain_defavorable n=14k).

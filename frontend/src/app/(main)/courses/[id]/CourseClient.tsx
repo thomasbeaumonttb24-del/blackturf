@@ -107,6 +107,9 @@ interface Prediction {
   rang_predit: number;
   confidence_score: number | null;
   cote_pmu: number | null;
+  /** Cote de marché au moment du pronostic — peut différer nettement de `cote_pmu`,
+   *  qui est la cote AFFICHÉE (live avant gel, dernière connue après). */
+  cote_figee?: number | null;
   cote_juste: number | null;
   value_bet: { ev_max: number; niveau: number; meilleure_source: string } | null;
 }
@@ -253,7 +256,7 @@ const DISCIPLINE_MASK: Record<string, { file: string; color: string }> = {
 function discMask(discipline: string): { url: string; color: string } {
   const k = discipline ? discipline.charAt(0).toUpperCase() + discipline.slice(1).toLowerCase() : "";
   const m = DISCIPLINE_MASK[k] ?? { file: "attele", color: "#0E7C66" };
-  return { url: `/img/disciplines/${m.file}-v2.png`, color: m.color };
+  return { url: `/img/disciplines/${m.file}-v3.png`, color: m.color };
 }
 
 // Feuille de style injectée (keyframes + responsive du .dc.html).
@@ -2471,6 +2474,11 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
   const { user } = useAuth();
   const [course, setCourse] = useState<CourseData | null>(initialCourse);
   const [predictions, setPredictions] = useState<Prediction[] | null>(null);
+  // Métadonnées du calcul renvoyées par /predictions : sans elles, le tableau met
+  // face à face une cote juste calculée à un instant T et une cote de marché d'un
+  // autre instant, sans jamais le dire au lecteur.
+  const [predMeta, setPredMeta] = useState<{ calcule_a: string | null; cotes_figees: boolean }>(
+    { calcule_a: null, cotes_figees: false });
   const [loadingCourse, setLoadingCourse] = useState(!initialCourse);
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
@@ -2623,7 +2631,13 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
     if (!user || ["free", "decouverte"].includes(user.plan)) return;
     setLoadingPred(true);
     predictionsApi.get(id, 100)
-      .then((res) => setPredictions(res.data.predictions))
+      .then((res) => {
+        setPredictions(res.data.predictions);
+        setPredMeta({
+          calcule_a: res.data.calcule_a ?? null,
+          cotes_figees: Boolean(res.data.cotes_figees),
+        });
+      })
       .catch(() => setPredictions(null))
       .finally(() => setLoadingPred(false));
   }, [id, user]);
@@ -2672,7 +2686,13 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
       setTimeout(() => {
         setLoadingPred(true);
         predictionsApi.get(id, 100)
-          .then((res) => setPredictions(res.data.predictions))
+          .then((res) => {
+            setPredictions(res.data.predictions);
+            setPredMeta({
+              calcule_a: res.data.calcule_a ?? null,
+              cotes_figees: Boolean(res.data.cotes_figees),
+            });
+          })
           .finally(() => setLoadingPred(false));
       }, 4000);
     } catch {
@@ -2752,7 +2772,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
       <header className="cx-fade relative mb-5 overflow-hidden rounded-3xl border border-amber-500/15 bg-gradient-to-b from-[#FFFBF0] to-white p-5 shadow-[0_1px_3px_rgba(0,0,0,.04),0_16px_44px_-26px_rgba(180,83,9,.18)] sm:p-7">
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute bottom-4 right-6 hidden h-28 w-52 opacity-[0.09] sm:block"
+          className="pointer-events-none absolute bottom-4 right-6 hidden h-20 w-40 opacity-[0.09] sm:block"
           style={{
             background: disc.color,
             WebkitMask: `url(${disc.url}) right bottom/contain no-repeat`,
@@ -2823,7 +2843,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13.5px] text-slate-500">
               <span className="inline-flex items-center gap-2">
                 <span
-                  className="inline-block h-3.5 w-[18px]"
+                  className="inline-block h-[18px] w-[32px]"
                   style={{ background: disc.color, WebkitMask: `url(${disc.url}) center/contain no-repeat`, mask: `url(${disc.url}) center/contain no-repeat` }}
                   aria-hidden="true"
                 />
@@ -3097,6 +3117,13 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
               })()}
               coteLive={liveCoteMap}
               nonPartants={new Set(course.partants.filter((p) => p.non_partant).map((p) => p.numero))}
+              nonClasses={new Set(
+                (resultats?.classement ?? [])
+                  .filter((c) => c.position == null)
+                  .map((c) => c.numero),
+              )}
+              calculeA={predMeta.calcule_a}
+              cotesFigees={predMeta.cotes_figees}
               onLegende={() => setShowGlossaire(true)}
             />
           ))}

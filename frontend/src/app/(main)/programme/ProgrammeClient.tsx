@@ -9,10 +9,10 @@
  *
  * ⚠ ASSETS À COPIER dans le dossier /public :
  *   public/img/logo-horse.png
- *   public/img/disciplines/attele-v2.png
- *   public/img/disciplines/plat-v2.png
- *   public/img/disciplines/monte-v2.png
- *   public/img/disciplines/obstacle-v2.png
+ *   public/img/disciplines/attele-v3.png
+ *   public/img/disciplines/plat-v3.png
+ *   public/img/disciplines/monte-v3.png
+ *   public/img/disciplines/obstacle-v3.png
  * (fournis dans ce même paquet, sous /public)
  */
 
@@ -66,20 +66,20 @@ const enjeux = (v: number | null) => {
 
 /* ─── Palette des disciplines (couleur + silhouette détourée) ── */
 type DiscMeta = { color: string; bg: string; ring: string; mask: string };
-const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v2.png" };
+const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v3.png" };
 
 function discMeta(discipline: string): DiscMeta {
   const d = (discipline || "").toLowerCase();
-  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v2.png" };
-  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v2.png" };
-  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v2.png" };
-  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v2.png" };
-  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v2.png" };
+  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v3.png" };
+  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v3.png" };
+  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v3.png" };
+  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v3.png" };
+  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v3.png" };
   return DISC_FALLBACK;
 }
 
 /* Icône discipline : silhouette détourée, teintée (fond transparent) */
-function DiscIcon({ discipline, w = 30, h = 24, color }: { discipline: string; w?: number; h?: number; color?: string }) {
+function DiscIcon({ discipline, w = 40, h = 28, color }: { discipline: string; w?: number; h?: number; color?: string }) {
   const m = discMeta(discipline);
   const url = `/img/disciplines/${m.mask}`;
   return (
@@ -204,9 +204,10 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
       <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: "linear-gradient(180deg,#F59E0B,#D97706)" }} />
       <span
         aria-hidden
-        className="pointer-events-none absolute"
+        className="pointer-events-none absolute max-[767px]:hidden"
         style={{
-          right: 210, bottom: -30, width: 360, height: 210, background: "rgba(255,255,255,.06)",
+          // la silhouette reste entièrement dans la carte : aucun sabot rogné par l'overflow
+          right: 200, bottom: 10, width: 300, height: 132, background: "rgba(255,255,255,.07)",
           WebkitMaskImage: `url(${url})`, maskImage: `url(${url})`,
           WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
           WebkitMaskPosition: "center", maskPosition: "center",
@@ -325,7 +326,7 @@ function TimelineRow({ course, reunionNum, vbCount, delay, targetId }: { course:
         </span>
         {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-600">{countdown}</span>}
       </div>
-      <span className="hidden h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: isDone ? "#EFEDE4" : m.bg, border: `1px solid ${isDone ? "#E2DFD3" : m.ring}` }}>
+      <span className="hidden h-[40px] w-[48px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: isDone ? "#EFEDE4" : m.bg, border: `1px solid ${isDone ? "#E2DFD3" : m.ring}` }}>
         <DiscIcon discipline={course.discipline} color={isDone ? "#B7B2A0" : undefined} />
       </span>
       <div className="min-w-0 flex-1">
@@ -637,7 +638,7 @@ export default function ProgrammeClient({
                     className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
                       active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900")}
                   >
-                    {d !== "Tous" && <DiscIcon discipline={d} w={26} h={18} color={active ? "#FFFFFF" : discMeta(d).color} />}
+                    {d !== "Tous" && <DiscIcon discipline={d} w={30} h={20} color={active ? "#FFFFFF" : discMeta(d).color} />}
                     {titleCase(d)}
                     <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>{count}</span>
                   </button>

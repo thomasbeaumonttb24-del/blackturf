@@ -151,14 +151,22 @@ def explain_prediction(features: dict, proba_top3: float, proba_top1: float,
                          "score": min(abs(tendance), 1), "categorie": "forme"})
 
     # ── Class drop ────────────────────────────────────────────────────────
-    class_drop = features.get("class_drop_ratio", 1.0)
+    # On lit EN PRIORITÉ `class_drop_ratio_reel` : la feature ML `class_drop_ratio`
+    # divise une allocation en centimes par une moyenne d'historique qui mélange
+    # centimes et euros (cf. features.py). Résultat mesuré en prod : « Montée de
+    # catégorie » sortait sur 71 % des partants, et sur le favori d'une course de
+    # La Capelle le badge annonçait une montée alors que le ratio réel (0,70) est
+    # une DESCENTE. Repli sur l'ancienne valeur pour les analyses déjà en cache.
+    class_drop = features.get("class_drop_ratio_reel")
+    if class_drop is None:
+        class_drop = features.get("class_drop_ratio", 1.0)
     if class_drop < 0.75:
         positifs.append({"feature": "class_drop_ratio", "label": "⬇️ Descente de catégorie",
-                         "detail": f"Course {(1-class_drop)*100:.0f}% moins dotée qu'à l'habitude — avantage de classe",
+                         "detail": f"Course {(1-class_drop)*100:.0f}% moins dotée que ses 5 dernières — avantage de classe",
                          "score": min((1 - class_drop) * 2, 1.0), "categorie": "classe"})
     elif class_drop > 1.40:
         negatifs.append({"feature": "class_drop_ratio", "label": "⬆️ Montée de catégorie",
-                         "detail": f"Course {(class_drop-1)*100:.0f}% plus dotée qu'à l'habitude — défi",
+                         "detail": f"Course {(class_drop-1)*100:.0f}% plus dotée que ses 5 dernières — adversité plus relevée",
                          "score": min((class_drop - 1) * 1.5, 1.0), "categorie": "classe"})
 
     # ── Terrain ───────────────────────────────────────────────────────────
@@ -181,14 +189,20 @@ def explain_prediction(features: dict, proba_top3: float, proba_top1: float,
                          "score": pace_conflict, "categorie": "conditions"})
 
     # ── ELO ──────────────────────────────────────────────────────────────
-    elo_vs = features.get("elo_vs_moyenne", 0)
+    # `elo_vs_moyenne` (feature ML) retranche la moyenne GLOBALE du champ d'un ELO
+    # de DISCIPLINE : deux échelles, donc un écart biaisé (+101 points en moyenne sur
+    # un champ d'attelé mesuré en prod) qui peut inverser le signe des chevaux proches
+    # de la moyenne. `elo_vs_champ` compare les deux termes dans la même discipline.
+    elo_vs = features.get("elo_vs_champ")
+    if elo_vs is None:
+        elo_vs = features.get("elo_vs_moyenne", 0)
     if elo_vs > 50:
         positifs.append({"feature": "elo_vs_moyenne", "label": "💪 Supérieur au champ",
-                         "detail": f"ELO {elo_vs:.0f} points au-dessus de la moyenne — domination potentielle",
+                         "detail": f"Niveau (ELO) {elo_vs:.0f} points au-dessus de la moyenne des partants du jour",
                          "score": min(elo_vs / 200, 1.0), "categorie": "elo"})
     elif elo_vs < -50:
         negatifs.append({"feature": "elo_vs_moyenne", "label": "📉 Inférieur au champ",
-                         "detail": f"ELO {abs(elo_vs):.0f} points sous la moyenne — challenge difficile",
+                         "detail": f"Niveau (ELO) {abs(elo_vs):.0f} points sous la moyenne des partants du jour",
                          "score": min(abs(elo_vs) / 200, 1.0), "categorie": "elo"})
 
     # ── Jockey / entraîneur ───────────────────────────────────────────────
