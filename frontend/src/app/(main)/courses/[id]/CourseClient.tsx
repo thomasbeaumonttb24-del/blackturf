@@ -1978,9 +1978,37 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
 // Une carte par cheval : cote actuelle + variation + graphe individuel d'évolution.
 
 /* ─── Détail d'un partant (réutilisé : ligne dépliée desktop + carte mobile) ─── */
-function PartantDetail({ partant }: { partant: Partant }) {
-  const SUBCARD = { borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "#FFFFFF", padding: "11px 13px" } as const;
-  const HEAD_ST = { fontSize: 9.5, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: ".07em", color: CX.gray400, marginBottom: 8 };
+
+/** Équipement des pieds, en français lisible. Les valeurs viennent du PMU en
+ *  constantes tronquées à 30 caractères ; on les traduit, et toute valeur
+ *  inconnue retombe sur un nettoyage générique plutôt que sur du charabia. */
+const LIBELLE_DEFERRE: Record<string, string> = {
+  DEFERRE_ANTERIEURS_POSTERIEURS: "Déferré des 4 pieds",
+  DEFERRE_ANTERIEURS: "Déferré des antérieurs",
+  DEFERRE_POSTERIEURS: "Déferré des postérieurs",
+  PROTEGE_ANTERIEURS_DEFERRRE_PO: "Protégé devant · déferré derrière",
+  DEFERRE_ANTERIEURS_PROTEGE_POS: "Déferré devant · protégé derrière",
+  PROTEGE_ANTERIEURS: "Protégé des antérieurs",
+  PROTEGE_POSTERIEURS: "Protégé des postérieurs",
+  PROTEGE_ANTERIEURS_POSTERIEURS: "Protégé des 4 pieds",
+  REFERRE_ANTERIEURS_POSTERIEURS: "Referré des 4 pieds",
+};
+const LIBELLE_OEILLERES: Record<string, string> = {
+  SANS_OEILLERES: "Sans",
+  OEILLERES_CLASSIQUE: "Classiques",
+  OEILLERES_AUSTRALIENNES: "Australiennes",
+};
+const libelleEquipement = (v: string | null | undefined, table: Record<string, string>, defaut: string) => {
+  if (!v) return defaut;
+  const cle = v.toUpperCase();
+  return table[cle] ?? cle.replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase());
+};
+
+function PartantDetail({ partant, eloChamp }: { partant: Partant; eloChamp?: { min: number; max: number; moy: number } | null }) {
+  const SUBCARD = { borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "#FFFFFF", padding: "12px 14px" } as const;
+  // Même graisse d'intitulé que partout ailleurs (bilans, classement) : à 9,5 px
+  // les titres de carte se lisaient comme du bruit gris.
+  const HEAD_ST = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: ".09em", color: CX.gray400, marginBottom: 9 };
   const Head = ({ children }: { children: React.ReactNode }) => <div style={HEAD_ST}>{children}</div>;
   const label = { fontSize: 11, color: CX.gray400 } as const;
   const val = { color: CX.gray700 } as const;
@@ -2078,10 +2106,33 @@ function PartantDetail({ partant }: { partant: Partant }) {
         <div style={SUBCARD}>
           <Head>Niveau &amp; forme</Head>
           {elo != null && (
-            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-              <span style={label}>ELO</span>
-              <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 20, color: eloColor, lineHeight: 1 }}>{Math.round(elo)}</span>
-            </div>
+            <>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                <span style={label}>ELO</span>
+                <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 20, color: eloColor, lineHeight: 1 }}>{Math.round(elo)}</span>
+                {eloChamp && (
+                  <span style={{ fontSize: 11, color: elo >= eloChamp.moy ? CX.em : CX.gray400, marginLeft: "auto", fontWeight: 600 }}>
+                    {elo >= eloChamp.moy ? "au-dessus" : "en dessous"} du champ
+                  </span>
+                )}
+              </div>
+              {/* Un ELO nu ne dit rien : la barre le situe entre le plus faible et
+                  le plus fort du lot, et le trait marque la moyenne du champ. */}
+              {eloChamp && eloChamp.max > eloChamp.min && (
+                <div style={{ position: "relative", marginTop: 7, height: 6, borderRadius: 999, background: CX.surf5, overflow: "visible" }}>
+                  <div style={{ height: "100%", borderRadius: 999, background: elo >= eloChamp.moy ? CX.emLight : "#D6D3D1", width: `${Math.max(3, Math.min(100, ((elo - eloChamp.min) / (eloChamp.max - eloChamp.min)) * 100))}%` }} />
+                  <span
+                    title={`Moyenne du champ : ${Math.round(eloChamp.moy)}`}
+                    style={{ position: "absolute", top: -2, bottom: -2, width: 2, borderRadius: 2, background: CX.gray400, left: `${Math.max(0, Math.min(100, ((eloChamp.moy - eloChamp.min) / (eloChamp.max - eloChamp.min)) * 100))}%` }}
+                  />
+                </div>
+              )}
+              {eloChamp && (
+                <div style={{ fontSize: 10.5, color: CX.gray400, marginTop: 4 }}>
+                  champ : {Math.round(eloChamp.min)} → {Math.round(eloChamp.max)} · moyenne {Math.round(eloChamp.moy)}
+                </div>
+              )}
+            </>
           )}
           {a?.elo?.trend_30j != null && Math.abs(a.elo.trend_30j) >= 2 && (
             <div style={{ fontSize: 11, marginTop: 4, fontWeight: 600, color: a.elo.trend_30j > 0 ? CX.em : CX.red }}>
@@ -2156,10 +2207,12 @@ function PartantDetail({ partant }: { partant: Partant }) {
           <div style={{ fontSize: 11, color: CX.gray600, marginTop: 5 }}>Jockey saison : <b style={{ color: CX.gray700 }}>{pct(js.taux_victoire)}%</b> V · {pct(js.taux_place)}% P{js.victoires_saison != null ? ` · ${js.victoires_saison}/${js.courses_saison}` : ""}{js.roi != null ? ` · ROI ${js.roi >= 0 ? "+" : ""}${Math.round(js.roi * 100)}%` : ""}</div>
         )}
         {es && (pct(es.taux_victoire) != null) && (
-          <div style={{ fontSize: 11, color: CX.gray600, marginTop: 2 }}>Entraîneur : <b style={{ color: CX.gray700 }}>{pct(es.taux_victoire)}%</b> V{es.roi != null ? ` · ROI ${es.roi >= 0 ? "+" : ""}${Math.round(es.roi * 100)}%` : ""}</div>
+          <div style={{ fontSize: 11, color: CX.gray600, marginTop: 2 }}>Entraîneur saison : <b style={{ color: CX.gray700 }}>{pct(es.taux_victoire)}%</b> V{es.roi != null ? ` · ROI ${es.roi >= 0 ? "+" : ""}${Math.round(es.roi * 100)}%` : ""}</div>
         )}
         {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 3 && (
-          <div style={{ fontSize: 11, color: CX.gold, marginTop: 5 }}>🤝 Duo : {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% sur {partant.asso_jockey_entraineur_nb} courses</div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, color: CX.goldDeep, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "2px 8px", marginTop: 7 }}>
+            <Users className="h-3 w-3" aria-hidden="true" /> Duo gagnant {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}% sur {partant.asso_jockey_entraineur_nb} courses
+          </div>
         )}
       </div>
 
@@ -2187,28 +2240,44 @@ function PartantDetail({ partant }: { partant: Partant }) {
         </div>
       ) : null}
 
-      {/* Équipement */}
+      {/* Conditions de course — équipement, poids, corde. Trois demi-cartes
+          laissaient des trous dans la grille ; un seul bloc se lit d'un coup. */}
       <div style={SUBCARD}>
-        <Head>Équipement</Head>
-        <div style={{ fontSize: 12.5, color: CX.gray700, textTransform: "capitalize" }}>Déferré : <b>{(partant.deferre || "Non").replace(/_/g, " ").toLowerCase()}</b>{partant.premier_deferre && <span style={{ color: CX.gold, fontSize: 10, textTransform: "none" }}> 1ʳᵉ fois ★</span>}</div>
-        <div style={{ fontSize: 12.5, color: CX.gray700, marginTop: 3, textTransform: "capitalize" }}>Œillères : <b>{(partant.oeilleres || "Non").replace(/_/g, " ").replace(/oeilleres?/i, "").trim().toLowerCase() || "sans"}</b>{partant.premieres_oeilleres && <span style={{ color: CX.gold, fontSize: 10, textTransform: "none" }}> 1ʳᵉ fois ★</span>}</div>
-      </div>
-
-      {/* Poids / Départ */}
-      {(partant.handicap_poids || partant.poids_prevu || partant.numero_corde || partant.poids_reel_pesee) && (
-        <div style={SUBCARD}>
-          <Head>Poids / Départ</Head>
+        <Head>Conditions de course</Head>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "7px 12px" }}>
+          <div>
+            <div style={{ fontSize: 10.5, color: CX.gray400 }}>Déferré</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: CX.gray700 }}>
+              {libelleEquipement(partant.deferre, LIBELLE_DEFERRE, "Non déferré")}
+              {partant.premier_deferre && <span style={{ color: CX.gold, fontSize: 10 }}> · 1ʳᵉ fois</span>}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10.5, color: CX.gray400 }}>Œillères</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: CX.gray700 }}>
+              {libelleEquipement(partant.oeilleres, LIBELLE_OEILLERES, "Sans")}
+              {partant.premieres_oeilleres && <span style={{ color: CX.gold, fontSize: 10 }}> · 1ʳᵉ fois</span>}
+            </div>
+          </div>
           {(partant.handicap_poids ?? partant.poids_prevu) != null && (
-            <div style={{ fontSize: 12.5, color: CX.gray700 }}>Poids : <b style={{ fontFamily: CX.sg }}>{(partant.handicap_poids ?? partant.poids_prevu)} kg</b></div>
+            <div>
+              <div style={{ fontSize: 10.5, color: CX.gray400 }}>Poids</div>
+              <div style={{ fontFamily: CX.sg, fontSize: 12.5, fontWeight: 700, color: CX.gray700 }}>
+                {partant.handicap_poids ?? partant.poids_prevu} kg
+                {partant.poids_reel_pesee != null && (
+                  <span style={{ fontFamily: "inherit", fontWeight: 400, fontSize: 10.5, color: CX.gray400 }}> · pesée {partant.poids_reel_pesee}</span>
+                )}
+              </div>
+            </div>
           )}
           {partant.numero_corde != null && (
-            <div style={{ fontSize: 12.5, color: CX.gray700, marginTop: 3 }}>Corde : <b style={{ fontFamily: CX.sg }}>{partant.numero_corde}</b></div>
-          )}
-          {partant.poids_reel_pesee != null && (
-            <div style={{ fontSize: 11, color: CX.gray400, marginTop: 3 }}>Pesée réelle : {partant.poids_reel_pesee} kg</div>
+            <div>
+              <div style={{ fontSize: 10.5, color: CX.gray400 }}>Corde</div>
+              <div style={{ fontFamily: CX.sg, fontSize: 12.5, fontWeight: 700, color: CX.gray700 }}>{partant.numero_corde}</div>
+            </div>
           )}
         </div>
-      )}
+      </div>
       </div>
     </div>
   );
@@ -3424,7 +3493,25 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
         )}
 
         {/* ═══ PARTANTS — le champ en détail ═══ */}
-        {ongletActif === "partants" && (
+        {ongletActif === "partants" && (() => {
+          const probaMaxCourse = Math.max(...(predictions ?? []).map((p) => p.proba_top1 || 0), 0.01);
+          // Échelle ELO DU LOT : un ELO de 960 ne dit rien dans l'absolu, il dit
+          // tout comparé aux autres partants de la même course.
+          const elos = course.partants
+            .filter((p) => !p.non_partant && p.elo_global != null)
+            .map((p) => p.elo_global as number)
+            .sort((a, b) => a - b);
+          // Bornes de la barre : on écarte l'extrême de chaque bout dès 6 chevaux.
+          // Un seul cheval à 2 500 contre un champ à 1 400 tassait tout le monde
+          // sur le premier tiers de la jauge.
+          const eloChamp = elos.length >= 3
+            ? {
+                min: elos.length >= 6 ? elos[1] : elos[0],
+                max: elos.length >= 6 ? elos[elos.length - 2] : elos[elos.length - 1],
+                moy: elos.reduce((a, b) => a + b, 0) / elos.length,
+              }
+            : null;
+          return (
           <>
           {/* Tableau partants */}
           <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
@@ -3435,19 +3522,22 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
               </span>
             </div>
             {/* ── En-tête colonnes (grille design) ── */}
-            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 54px 60px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
+            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 68px 72px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
               <span style={{ textAlign: "center" }}>N°</span>
               <span>Cheval</span>
-              <span style={{ textAlign: "right" }}>Cote</span>
+              <span style={{ textAlign: "right" }} title="Cote du marché — live tant que la course n'est pas partie">Cote</span>
               {predictions && predictions.length > 0 && (
                 <>
-                  <span className="cx-algo" style={{ textAlign: "right" }}>Algo</span>
-                  <span style={{ textAlign: "right" }}>Proba</span>
+                  <span className="cx-algo" style={{ textAlign: "right" }} title="Cote juste : cote à partir de laquelle le pari devient rentable selon le modèle (1/probabilité)">Cote juste</span>
+                  <span style={{ textAlign: "right" }} title="Probabilité de victoire calculée par le modèle ; en dessous, probabilité de finir dans les trois premiers">Victoire</span>
                 </>
               )}
               <span />
             </div>
             <div style={{ display: "flex", flexDirection: "column" }}>
+              {/* Toutes les barres de probabilité partagent la MÊME échelle (le
+                  favori du modèle = barre pleine) : sinon deux lignes de longueur
+                  identique porteraient des probabilités différentes. */}
               {[...course.partants]
                 // Non-partants conservés mais relégués en bas (indiqués, hors prono).
                 .sort((a, b) => Number(!!a.non_partant) - Number(!!b.non_partant))
@@ -3469,7 +3559,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
                       <div
                         onClick={() => setExpandedPartant(isExp ? null : partant.participation_id)}
                         className="cx-prow"
-                        style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 54px 60px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
+                        style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 68px 72px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
                       >
                         {/* N° + badge rang */}
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -3542,18 +3632,42 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
 
                         {/* Algo + proba : colonnes masquées tant qu'aucune prédiction
                             n'est chargée — deux colonnes de tirets n'apprennent rien. */}
-                        {predictions && predictions.length > 0 && (
-                        <div className="cx-algo" style={{ textAlign: "right", fontFamily: CX.sg, fontSize: 12.5, color: CX.gray400 }}>
-                          {pred?.cote_juste ? formatCote(pred.cote_juste) : "—"}
-                        </div>
-                        )}
+                        {predictions && predictions.length > 0 && (() => {
+                          const cj = pred?.cote_juste ?? null;
+                          // Le marché paie-t-il plus (écart en notre faveur) ou moins que
+                          // le prix « juste » du modèle ? C'est toute la lecture de la colonne.
+                          const ecart = cj && cote && cote > 1 ? (cote - cj) / cj : null;
+                          const favorable = ecart != null && ecart >= 0.08;
+                          const cher = ecart != null && ecart <= -0.08;
+                          return (
+                            <div
+                              className="cx-algo"
+                              style={{ textAlign: "right", fontFamily: CX.sg, fontSize: 12.5, fontWeight: favorable ? 700 : 400, color: favorable ? CX.emDeep : cher ? CX.gray400 : CX.gray600 }}
+                              title={
+                                cj == null ? undefined
+                                : favorable ? `Cote juste ${formatCote(cj)} — le marché paie ${formatCote(cote!)}, soit ${Math.round(ecart! * 100)} % de plus`
+                                : cher ? `Cote juste ${formatCote(cj)} — le marché paie moins (${formatCote(cote!)}) : le prix ne couvre pas le risque`
+                                : `Cote juste ${formatCote(cj)} — le marché est au prix`
+                              }
+                            >
+                              {cj ? formatCote(cj) : "—"}
+                            </div>
+                          );
+                        })()}
 
                         {predictions && predictions.length > 0 && (
                         <div style={{ textAlign: "right" }}>
                           {pred ? (
                             <>
-                              <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: rang === 1 ? CX.gold : CX.ink2 }}>{(pred.proba_top1 * 100).toFixed(0)}%</div>
-                              <div style={{ fontSize: 10, color: CX.gray400, marginTop: 1 }}>{(pred.proba_top3 * 100).toFixed(0)}% t3</div>
+                              <div style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 15, color: rang === 1 ? CX.gold : CX.ink2 }}>
+                                {pred.proba_top1 < 0.005 ? "< 1" : (pred.proba_top1 * 100).toFixed(0)}%
+                              </div>
+                              <div style={{ height: 4, borderRadius: 999, background: CX.surf5, overflow: "hidden", margin: "3px 0 2px" }}>
+                                <div style={{ height: "100%", borderRadius: 999, background: rang === 1 ? CX.goldAmber : rang != null && rang <= 3 ? CX.slate : "#D6D3D1", width: `${Math.max(3, Math.min(100, (pred.proba_top1 / Math.max(probaMaxCourse, 0.01)) * 100))}%` }} />
+                              </div>
+                              <div style={{ fontSize: 10, color: CX.gray400 }} title="Probabilité de finir dans les trois premiers">
+                                top-3 {(pred.proba_top3 * 100).toFixed(0)}%
+                              </div>
                             </>
                           ) : (
                             <span style={{ color: CX.gray400 }}>—</span>
@@ -3568,7 +3682,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
                       {/* Détail déplié */}
                       {isExp && (
                         <div style={{ padding: "2px 18px 16px 18px", background: CX.surf2 }}>
-                          <PartantDetail partant={partant} />
+                          <PartantDetail partant={partant} eloChamp={eloChamp} />
                         </div>
                       )}
                     </div>
@@ -3582,7 +3696,8 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
             <PronosticsPresse pronostics={course.pronostics_presse} />
           )}
           </>
-        )}
+          );
+        })()}
 
         {/* ═══ MARCHÉ — les cotes, l'argent, les formules jouables ═══ */}
         {ongletActif === "marche" && (
