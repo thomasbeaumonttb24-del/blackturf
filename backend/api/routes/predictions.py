@@ -11,12 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func
 
 from api.model_metrics import real_model_metrics, plausible_brier
-from api.middleware.rate_limit import rate_limit_predictions
+from api.middleware.rate_limit import rate_limit_predictions, rate_limit_public
 from api.routes.auth import get_current_user, require_pro
 from db.database import get_db
 from db.models import (
     Prediction, ValueBet, Recommandation, Participation,
-    Cheval, Course, User
+    Cheval, Course, Resultat, User
 )
 
 log = structlog.get_logger()
@@ -326,6 +326,200 @@ async def get_predictions(
         verrouille=False,
         quota_restant=quota_restant,
     )
+
+
+# ─────────────────────────────────────────────
+# Aperçu public de l'analyse (funnel)
+# ─────────────────────────────────────────────
+# Un visiteur sans abonnement ne voyait, sur une course à venir, que les cotes
+# publiques : rien ne lui prouvait qu'une analyse existe, ni ce qu'elle vaut. Il
+# ne pouvait donc pas avoir envie de payer pour la lire. Cet endpoint expose la
+# FORME de l'analyse sans son CONTENU exploitable :
+#   - à venir  → agrégats anonymes (confiance, accord/désaccord avec le marché,
+#                bande de cote du 1er, nombre de chevaux écartés, value bets).
+#                Aucun numéro, aucun nom : le pronostic reste payant.
+#   - terminée → tout est révélé. La course n'est plus jouable, la valeur payante
+#                porte sur les courses À VENIR ; montrer ce que le modèle avait dit
+#                AVANT le départ est la meilleure preuve qu'on puisse donner.
+_BANDES_COTE = ((2.0, "moins de 2"), (4.0, "2 à 4"), (8.0, "4 à 8"),
+                (15.0, "8 à 15"), (30.0, "15 à 30"))
+
+# Nombre de lignes du classement RÉELLEMENT nommées avant la course. Ce sont les
+# DERNIÈRES du classement — les chevaux que le modèle écarte. Le raisonnement :
+# elles prouvent la profondeur de l'analyse (probabilité, cote juste, écart au
+# marché) sans rien donner d'exploitable, puisque savoir quel tocard éviter dans
+# un champ de 16 ne construit aucun pari. Le haut du classement, lui, reste la
+# contrepartie de l'abonnement.
+NB_LIGNES_REVELEES = 2
+# En dessous de ce nombre de partants notés, la queue de classement en dirait
+# trop (dans un champ de 5, écarter 2 chevaux, c'est presque donner le tiercé).
+MIN_CHAMP_POUR_REVELER = 8
+
+
+def _bande_cote(cote: float | None) -> str | None:
+    """Tranche de cote — assez large pour ne pas désigner un cheval précis."""
+    if not cote or cote <= 1:
+        return None
+    for seuil, libelle in _BANDES_COTE:
+        if cote < seuil:
+            return libelle
+    return "plus de 30"
+
+
+class ApercuAnalyseOut(BaseModel):
+    course_id: str
+    statut: str
+    disponible: bool = False       # une analyse existe en base pour cette course
+    revele: bool = False           # True = course terminée → contenu complet
+    nb_analyses: int = 0           # chevaux réellement notés par le modèle
+    confiance: Optional[int] = None        # confiance du modèle sur son n°1 (0-100)
+    proba_top1: Optional[float] = None     # proba de victoire du n°1 du modèle
+    accord_marche: Optional[bool] = None   # n°1 du modèle == favori des cotes ?
+    bande_cote: Optional[str] = None       # tranche de cote du n°1 du modèle
+    nb_ecartes: int = 0            # chevaux à qui le modèle donne < 3 % de chances
+    nb_value_bets: int = 0         # écarts prix/probabilité détectés
+    ev_max_pct: Optional[int] = None       # meilleure espérance, arrondie à 5 %
+    verdict: Optional[dict] = None         # rempli UNIQUEMENT si `revele`
+    # Aperçu du classement : une ligne par cheval noté, dans l'ordre du modèle.
+    # `revele=False` → la ligne ne porte QUE le rang et les probabilités ; ni
+    # numéro ni nom ne quittent le serveur.
+    classement: list[dict] = []
+    nb_lignes_revelees: int = 0
+
+
+@router.get("/courses/{course_id}/apercu", response_model=ApercuAnalyseOut)
+async def get_apercu_analyse(
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Aperçu PUBLIC de l'analyse d'une course — aucun compte requis."""
+    course = (await db.execute(
+        select(Course).where(Course.course_id == course_id)
+    )).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+
+    rows = (await db.execute(
+        select(Prediction, Participation, Cheval)
+        .join(Participation, Participation.participation_id == Prediction.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .where(and_(Prediction.course_id == course_id,
+                    Participation.non_partant == False))  # noqa: E712
+        .order_by(Prediction.rang_predit)
+    )).all()
+
+    base = ApercuAnalyseOut(course_id=course_id, statut=course.statut)
+    if not rows:
+        # Aucune analyse : on le dit franchement plutôt que d'afficher une carte
+        # vide ou, pire, des agrégats fabriqués.
+        return base
+
+    pred1, part1, cheval1 = rows[0]
+    base.disponible = True
+    base.nb_analyses = len(rows)
+    base.confiance = int(round(pred1.confidence_score)) if pred1.confidence_score is not None else None
+    base.proba_top1 = round(pred1.proba_top1, 4) if pred1.proba_top1 is not None else None
+    base.nb_ecartes = sum(1 for p, _, _ in rows if (p.proba_top1 or 0) < 0.03)
+
+    # Favori du marché = plus petite cote PMU réellement cotée du champ.
+    cotes = [(pa.cote_pmu, pa.numero) for _, pa, _ in rows if pa.cote_pmu and pa.cote_pmu > 1]
+    if cotes:
+        base.accord_marche = (min(cotes)[1] == part1.numero)
+    base.bande_cote = _bande_cote(part1.cote_pmu or pred1.cote_figee)
+
+    vbs = (await db.execute(
+        select(ValueBet).where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712
+    )).scalars().all()
+    base.nb_value_bets = len(vbs)
+    if vbs:
+        ev = max(vb.ev_max for vb in vbs)
+        # Arrondi à 5 % : une espérance au point près servirait à identifier le cheval.
+        base.ev_max_pct = int(round(ev * 100 / 5.0) * 5)
+
+    # ── Aperçu du classement ──────────────────────────────────────────────────
+    # Avant la course : toutes les lignes portent le rang et les probabilités
+    # (la FORME du classement, qui n'identifie personne), et seules les
+    # dernières portent un nom. Après la course : tout est nommé.
+    positions: dict[int, int] = {}
+    resultat = None
+    if course.statut == "termine":
+        resultat = (await db.execute(
+            select(Resultat).where(Resultat.course_id == course_id)
+        )).scalar_one_or_none()
+        if resultat and resultat.classement:
+            positions = {
+                l["numero"]: int(l["position"])
+                for l in resultat.classement
+                if isinstance(l, dict) and isinstance(l.get("position"), (int, float))
+                and l.get("numero") is not None
+            }
+    course_revelee = bool(positions)
+
+    total = len(rows)
+    seuil_queue = (total - NB_LIGNES_REVELEES) if total >= MIN_CHAMP_POUR_REVELER else total
+    lignes: list[dict] = []
+    for idx, (pred, part, cheval) in enumerate(rows):
+        ligne_revelee = course_revelee or idx >= seuil_queue
+        ligne: dict = {
+            "rang": pred.rang_predit,
+            "proba_top1": round(pred.proba_top1, 4) if pred.proba_top1 is not None else None,
+            "proba_top3": round(pred.proba_top3, 4) if pred.proba_top3 is not None else None,
+            # La cote juste est 1/proba (même définition que /predictions) : elle
+            # se déduit d'une probabilité déjà envoyée, donc l'afficher même sur
+            # une ligne masquée ne révèle RIEN de plus — et remplit la colonne
+            # avec du vrai plutôt qu'avec des pointillés.
+            "cote_juste": (round(min(100.0, max(1.01, 1.0 / pred.proba_top1)), 1)
+                           if pred.proba_top1 and pred.proba_top1 > 0.001 else None),
+            "revele": ligne_revelee,
+        }
+        if ligne_revelee:
+            ligne.update({
+                "numero": part.numero,
+                "nom": cheval.nom,
+                # La cote du MARCHÉ, elle, identifie un cheval à coup sûr
+                # (elle est publique et unique) : réservée aux lignes révélées.
+                "cote": part.cote_pmu,
+            })
+            if part.numero in positions:
+                ligne["position"] = positions[part.numero]
+        lignes.append(ligne)
+    base.classement = lignes
+    base.nb_lignes_revelees = sum(1 for l in lignes if l["revele"])
+
+    # ── Course terminée : on lève le voile ────────────────────────────────────
+    if course.statut != "termine":
+        return base
+    if not resultat or not resultat.classement:
+        return base
+
+    arrivee = sorted(
+        [l for l in resultat.classement
+         if isinstance(l, dict) and isinstance(l.get("position"), (int, float))],
+        key=lambda l: l["position"],
+    )[:3]
+    if not arrivee:
+        return base
+
+    gagnant_num = arrivee[0].get("numero")
+    rang_gagnant = next(
+        (p.rang_predit for p, pa, _ in rows if pa.numero == gagnant_num), None
+    )
+    base.revele = True
+    base.verdict = {
+        "arrivee": [{"position": l.get("position"), "numero": l.get("numero"),
+                     "nom": l.get("nom") or l.get("cheval")} for l in arrivee],
+        "top3_modele": [
+            {"rang": p.rang_predit, "numero": pa.numero, "nom": ch.nom,
+             "proba_top1": round(p.proba_top1, 4) if p.proba_top1 is not None else None,
+             "cote": pa.cote_pmu}
+            for p, pa, ch in rows[:3]
+        ],
+        "rang_predit_gagnant": rang_gagnant,
+        "gagnant_top1": rang_gagnant == 1,
+        "gagnant_top3": rang_gagnant is not None and rang_gagnant <= 3,
+    }
+    return base
 
 
 @router.post("/courses/{course_id}/predict")

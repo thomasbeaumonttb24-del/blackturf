@@ -19,10 +19,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import {
   ParisDisponiblesCard, ConfrontationsCard, PoolEvolutionCard, TempsPassageCard,
-  CompteurDepart, MarcheSnapshotCard,
+  CompteurDepart, ApercuAnalyseCard, useApercuAnalyse,
 } from "@/components/courses/insights";
 import {
-  ClassementAlgo, ClassementVerrouille, type ClassementSignal,
+  ClassementAlgo, ClassementApercu, ClassementVerrouille, type ClassementSignal,
 } from "@/components/courses/classement";
 import { formatCote, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -1371,41 +1371,126 @@ interface BilanResp {
    reste calculé côté backend — features `conf_*` — et nourrit le modèle et la
    narrative, mais n'est plus montré tel quel à l'utilisateur). */
 
-/* Tableau de détail d'un bilan (paris réglés d'un profil) */
+/* ─── Bilan du plan : pièces d'affichage ─────────────────────────────────────
+   Le bloc est la vitrine post-course : un visiteur doit comprendre en un coup
+   d'œil ce que le plan a misé, ce qu'il a rapporté, et si le modèle avait vu
+   l'arrivée. D'où la hiérarchie : verdict → 4 chiffres → confrontation
+   modèle/arrivée alignée par rang → détail des paris → CTA.
+   Aucune information n'est portée par la seule couleur (règle a11y) : chaque
+   état porte aussi une icône et un mot. */
+
+/** Montant en euros, écriture française (virgule décimale). Le reste du site
+ *  affichait « -10.00€ » : un point décimal dans un montant, ça se lit deux fois. */
+const eur = (v: number, d = 2) =>
+  `${v.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d })}€`;
+
+const PROFIL_TAB_META: Record<string, { icone: typeof ShieldCheck; label: string; sous: string }> = {
+  conservateur: { icone: ShieldCheck, label: "Prudent", sous: "peu de paris" },
+  equilibre: { icone: Gauge, label: "Modéré", sous: "équilibré" },
+  agressif: { icone: Flame, label: "Risqué", sous: "gros rapports" },
+};
+
+/** Un chiffre du bandeau de résultat. Libellé discret au-dessus, valeur en
+ *  chiffres tabulaires : les colonnes restent alignées d'un profil à l'autre. */
+function BilanKpi({ libelle, valeur, ton = "neutre", aide }: {
+  libelle: string;
+  valeur: string;
+  ton?: "neutre" | "positif" | "negatif" | "attente";
+  aide?: string;
+}) {
+  const couleur =
+    ton === "positif" ? "text-emerald-600"
+    : ton === "negatif" ? "text-rose-600"
+    : ton === "attente" ? "text-amber-600"
+    : "text-slate-900";
+  return (
+    <div className="px-3 py-2.5 sm:px-4">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-stone-400">{libelle}</div>
+      <div className={cn("mt-1 font-display text-[22px] font-bold leading-none tabular-nums sm:text-2xl", couleur)}>
+        {valeur}
+      </div>
+      {aide && <div className="mt-1 text-[11px] leading-tight text-stone-400">{aide}</div>}
+    </div>
+  );
+}
+
+/** Statut d'un pari : icône + mot + montant. Jamais la couleur seule. */
+function StatutPari({ statut, gain }: { statut: "gagne" | "perdu" | "en_attente"; gain: number | null }) {
+  if (statut === "gagne") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[12px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+        <span className="tabular-nums">+{eur(gain ?? 0)}</span>
+      </span>
+    );
+  }
+  if (statut === "en_attente") {
+    return (
+      <span
+        title="Rapport PMU pas encore publié"
+        className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[12px] font-semibold text-amber-700 ring-1 ring-amber-200"
+      >
+        <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+        Gagné · rapport en attente
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-[12px] font-medium text-stone-500 ring-1 ring-stone-200">
+      <X className="h-3.5 w-3.5" aria-hidden="true" />
+      Perdu
+    </span>
+  );
+}
+
+/* Détail des paris réglés d'un profil. Table réelle (lisible au lecteur
+   d'écran), qui défile dans son propre conteneur sur mobile. */
 function BilanDetail({ bilan }: { bilan: BilanData }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+      <table className="w-full min-w-[460px] border-collapse text-[13px]">
+        <caption className="sr-only">Détail des paris du plan et de leur règlement</caption>
         <thead>
-          <tr className="text-left text-xs text-muted-foreground border-b">
-            <th className="py-1 pr-2">Pari</th>
-            <th className="py-1 pr-2">Chevaux</th>
-            <th className="py-1 pr-2 text-right">Mise</th>
-            <th className="py-1 pr-2 text-right">Résultat</th>
+          <tr className="bg-stone-50 text-left text-[10.5px] uppercase tracking-[0.08em] text-stone-400">
+            <th scope="col" className="px-3 py-2 font-semibold">Pari</th>
+            <th scope="col" className="px-3 py-2 font-semibold">Chevaux</th>
+            <th scope="col" className="px-3 py-2 text-right font-semibold">Mise</th>
+            <th scope="col" className="px-3 py-2 text-right font-semibold">Résultat</th>
           </tr>
         </thead>
         <tbody>
           {bilan.paris.map((p, i) => (
-            <tr key={i} className="border-b border-border/40">
-              <td className="py-1 pr-2 font-medium">{p.type}</td>
-              <td className="py-1 pr-2 text-muted-foreground">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</td>
-              <td className="py-1 pr-2 text-right tabular-nums">{p.mise.toFixed(0)}€</td>
-              <td className="py-1 pr-2 text-right tabular-nums">
-                {p.statut === "gagne"
-                  ? <span className="text-emerald-600 font-semibold">✓ +{(p.gain ?? 0).toFixed(2)}€</span>
-                  : p.statut === "en_attente"
-                  ? <span className="text-amber-600 font-semibold" title="Rapport PMU pas encore publié">Gagné · rapport en attente</span>
-                  : <span className="text-muted-foreground">✗ perdu</span>}
+            <tr
+              key={i}
+              className={cn(
+                "border-t border-stone-100",
+                p.statut === "gagne" && "bg-emerald-50/40",
+              )}
+            >
+              <td className="px-3 py-2.5 font-medium text-slate-900">{p.type}</td>
+              <td className="px-3 py-2.5 font-mono text-[12px] text-stone-500">
+                {p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}
+              </td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-stone-600">{eur(p.mise, 0)}</td>
+              <td className="px-3 py-2.5 text-right">
+                <StatutPari statut={p.statut} gain={p.gain} />
               </td>
             </tr>
           ))}
         </tbody>
         <tfoot>
-          <tr className="border-t font-semibold">
-            <td className="py-1.5 pr-2" colSpan={2}>Total ({bilan.nb_gagnes}/{bilan.nb_paris} gagné{bilan.nb_gagnes > 1 ? "s" : ""})</td>
-            <td className="py-1.5 pr-2 text-right tabular-nums">{bilan.total_mise.toFixed(0)}€</td>
-            <td className={cn("py-1.5 pr-2 text-right tabular-nums", bilan.total_gain > 0 ? "text-emerald-600" : "text-muted-foreground")}>
-              {bilan.total_gain.toFixed(2)}€
+          <tr className="border-t-2 border-stone-200 bg-stone-50/80">
+            <td className="px-3 py-2.5 font-semibold text-slate-900" colSpan={2}>
+              Total — {bilan.nb_gagnes} pari{bilan.nb_gagnes > 1 ? "s" : ""} gagné{bilan.nb_gagnes > 1 ? "s" : ""} sur {bilan.nb_paris}
+            </td>
+            <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-slate-900">
+              {eur(bilan.total_mise, 0)}
+            </td>
+            <td className={cn(
+              "px-3 py-2.5 text-right font-display font-bold tabular-nums",
+              bilan.total_gain > 0 ? "text-emerald-600" : "text-stone-400",
+            )}>
+              {eur(bilan.total_gain)}
             </td>
           </tr>
         </tfoot>
@@ -1414,11 +1499,130 @@ function BilanDetail({ bilan }: { bilan: BilanData }) {
   );
 }
 
-const PROFIL_TAB_META: Record<string, { emoji: string; label: string }> = {
-  conservateur: { emoji: "🛡️", label: "Prudent" },
-  equilibre: { emoji: "⚖️", label: "Modéré" },
-  agressif: { emoji: "🔥", label: "Risqué" },
-};
+/** Confrontation modèle / arrivée, ALIGNÉE PAR RANG.
+ *  L'ancienne version affichait deux nuages de pastilles + une légende de
+ *  couleurs : il fallait décoder avant de comprendre. Ici chaque ligne répond à
+ *  « à ce rang, le modèle disait X, la course a donné Y ». */
+function ConfrontationRangs({ predN, realN, gagnant, rangGagnant, modeleAVuGagnant }: {
+  predN: number[];
+  realN: number[];
+  gagnant: number | null;
+  rangGagnant: number | null;
+  modeleAVuGagnant: boolean;
+}) {
+  const realSet = new Set(realN);
+  const predSet = new Set(predN);
+  const lignes = Array.from({ length: Math.max(predN.length, realN.length) }, (_, i) => ({
+    rang: i + 1,
+    pred: predN[i] ?? null,
+    reel: realN[i] ?? null,
+  }));
+  const trouves = predN.filter((n) => realSet.has(n)).length;
+
+  return (
+    <section aria-label="Comparaison du pronostic et de l'arrivée">
+      <header className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <h3 className="font-display text-[13.5px] font-bold text-slate-900">Le modèle face à l&apos;arrivée</h3>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1" aria-hidden="true">
+            {predN.map((n, i) => (
+              <span
+                key={i}
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  realSet.has(n) ? "bg-emerald-500" : "bg-stone-200",
+                )}
+              />
+            ))}
+          </span>
+          <span className="text-[12px] font-semibold tabular-nums text-stone-600">
+            {trouves}/{predN.length} chevaux trouvés
+          </span>
+        </div>
+      </header>
+
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white">
+        <div className="grid grid-cols-[2.5rem_1fr_1fr] gap-2 border-b border-stone-100 bg-stone-50 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-stone-400">
+          <span>Rang</span>
+          <span><span className="sm:hidden">Modèle</span><span className="hidden sm:inline">Pronostic du modèle</span></span>
+          <span><span className="sm:hidden">Arrivée</span><span className="hidden sm:inline">Arrivée réelle</span></span>
+        </div>
+        {lignes.map(({ rang, pred, reel }) => {
+          const predHit = pred != null && realSet.has(pred);
+          const reelVu = reel != null && predSet.has(reel);
+          const reelGagnant = rang === 1;
+          return (
+            <div
+              key={rang}
+              className="grid grid-cols-[2.5rem_1fr_1fr] items-center gap-2 border-b border-stone-100 px-3 py-2 last:border-b-0"
+            >
+              <span className="font-display text-[13px] font-bold tabular-nums text-stone-300">{rang}</span>
+
+              <span className="flex items-center gap-1.5">
+                {pred != null ? (
+                  <>
+                    <span className={cn(
+                      "inline-flex items-center rounded-lg px-2 py-1 font-display text-[13px] font-bold tabular-nums ring-1",
+                      predHit ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-stone-50 text-stone-500 ring-stone-200",
+                    )}>
+                      N°{pred}
+                    </span>
+                    {predHit && (
+                      <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-600">
+                        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                        <span className="hidden sm:inline">dans l&apos;arrivée</span>
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[12px] text-stone-300">—</span>
+                )}
+              </span>
+
+              <span className="flex items-center gap-1.5">
+                {reel != null ? (
+                  <>
+                    <span className={cn(
+                      "inline-flex items-center rounded-lg px-2 py-1 font-display text-[13px] font-bold tabular-nums ring-1",
+                      reelGagnant ? "bg-amber-100 text-amber-800 ring-amber-300"
+                        : reelVu ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                        : "bg-stone-50 text-stone-500 ring-stone-200",
+                    )}>
+                      N°{reel}
+                    </span>
+                    {reelGagnant && (
+                      <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-amber-700">
+                        <Trophy className="h-3 w-3" aria-hidden="true" />
+                        <span className="hidden sm:inline">vainqueur</span>
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[12px] text-stone-300">—</span>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {gagnant != null && (
+        <p className="mt-2 text-[12px] text-stone-500">
+          Vainqueur <span className="font-semibold text-slate-900">N°{gagnant}</span> —{" "}
+          {modeleAVuGagnant ? (
+            <span className="font-medium text-emerald-700">
+              trouvé : le modèle le classait {rangGagnant === 1 ? "1ᵉʳ" : `${rangGagnant}ᵉ`}
+            </span>
+          ) : (
+            <span className="font-medium text-rose-600">
+              manqué{rangGagnant ? ` : le modèle le classait ${rangGagnant === 1 ? "1ᵉʳ" : `${rangGagnant}ᵉ`}` : ""}
+            </span>
+          )}
+        </p>
+      )}
+    </section>
+  );
+}
 
 // `paywall` = visiteur anonyme ou plan Découverte/Free : le bilan lui est montré
 // (course terminée ⇒ rien d'exploitable ne fuite) et se termine par un CTA — c'est
@@ -1477,139 +1681,145 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
     : [{ profil: "equilibre", profil_label: "Modéré", mode_adaptatif: "normal", esperance_gain: 0, bilan: data.bilan, verdict: data.verdict, source: data.source }];
   const cur = profils.find((b) => b.profil === sel) ?? profils[0];
   const bilan = cur.bilan;
+  const attente = cur.verdict === "en_attente";
 
   const vCfg = cur.verdict === "gagnant"
-    ? { label: "Plan gagnant", cls: "border-emerald-300 bg-emerald-50 text-emerald-800" }
+    ? { label: "Plan gagnant", cls: "bg-emerald-600 text-white", Icone: CheckCircle2 }
     : cur.verdict === "perdant"
-    ? { label: "Plan perdant", cls: "border-rose-300 bg-rose-50 text-rose-800" }
-    : { label: `En attente de ${bilan.nb_en_attente} rapport${bilan.nb_en_attente > 1 ? "s" : ""} PMU`, cls: "border-amber-300 bg-amber-50 text-amber-800" };
+    ? { label: "Plan perdant", cls: "bg-stone-700 text-white", Icone: X }
+    : { label: `En attente de ${bilan.nb_en_attente} rapport${bilan.nb_en_attente > 1 ? "s" : ""} PMU`, cls: "bg-amber-500 text-white", Icone: Clock };
+
+  const predN = cmp.predicted_top5 ?? cmp.predicted_top3;
+  const realN = cmp.actual_top5 ?? cmp.actual_top3;
 
   return (
-    <div className="cx-fade" style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.3)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 45%)", padding: "18px 20px" }}>
-      <h2 className="mb-1 flex flex-wrap items-center gap-2" style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>
-        Bilan du plan — {data.montant}€
-        <span className="text-xs font-normal text-muted-foreground hidden sm:inline">
-          {cur.source === "fige"
-            ? "· plan figé AVANT le départ, réglé sur l'arrivée réelle (par profil)"
-            : "· simulation rétrospective sur l'arrivée réelle, par profil"}
-        </span>
+    <div
+      className="cx-fade"
+      style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.3)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 40%)", padding: "20px 20px 22px" }}
+    >
+      {/* ── En-tête : ce qu'on regarde, et la garantie d'intégrité ────────── */}
+      <header className="mb-5 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <h2 className="font-display text-[17px] font-bold leading-tight text-slate-900">
+            Bilan du plan de mise
+            <span className="ml-2 rounded-full bg-stone-900 px-2.5 py-0.5 align-middle text-[11px] font-semibold text-white tabular-nums">
+              {data.montant}€
+            </span>
+          </h2>
+          <p className="mt-1 text-[12.5px] leading-snug text-stone-500">
+            {cur.source === "fige"
+              ? "Plan figé avant le départ, réglé aux rapports PMU réels."
+              : "Simulation rétrospective sur l'arrivée réelle, réglée aux rapports PMU."}
+          </p>
+        </div>
         {cur.source === "fige" && (
           <span
             title={cur.fige_le ? `Plan figé le ${new Date(cur.fige_le).toLocaleString("fr-FR")}, avant le départ — identique au palmarès` : "Plan figé avant le départ — identique au palmarès"}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+            className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200"
           >
-            ✓ Figé avant départ
+            <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+            Figé avant le départ
           </span>
         )}
-      </h2>
+      </header>
 
-      {/* Onglets profils — chaque profil = méthode de jeu différente */}
+      {/* ── Profils : trois méthodes de jeu, trois résultats ──────────────── */}
       {profils.length > 1 && (
-        <div className="my-3 grid grid-cols-3 gap-1.5">
-          {profils.map((b) => {
-            const meta = PROFIL_TAB_META[b.profil] ?? { emoji: "•", label: b.profil_label };
-            const net = b.bilan.net;
-            return (
-              <button
-                key={b.profil}
-                onClick={() => setSel(b.profil)}
-                className={cn(
-                  "rounded-lg border px-2 py-1.5 text-left transition-colors",
-                  sel === b.profil ? "border-brand-gold bg-brand-gold/10" : "border-border hover:border-brand-gold/40"
-                )}
-              >
-                <div className="text-[11px] font-semibold">{meta.emoji} {meta.label}</div>
-                <div className={cn("text-xs font-mono font-bold tabular-nums",
-                  b.verdict === "en_attente" ? "text-amber-600" : net >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                  {b.verdict === "en_attente" ? "⏳" : `${net >= 0 ? "+" : ""}${net.toFixed(0)}€`}
-                </div>
-              </button>
-            );
-          })}
+        <div className="mb-4">
+          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-stone-400">
+            Profil de risque
+          </div>
+          <div role="tablist" aria-label="Profil de risque" className="grid grid-cols-3 gap-2">
+            {profils.map((b) => {
+              const meta = PROFIL_TAB_META[b.profil] ?? { icone: Gauge, label: b.profil_label, sous: "" };
+              const Icone = meta.icone;
+              const net = b.bilan.net;
+              const actif = sel === b.profil;
+              return (
+                <button
+                  key={b.profil}
+                  role="tab"
+                  aria-selected={actif}
+                  onClick={() => setSel(b.profil)}
+                  className={cn(
+                    "min-h-[62px] rounded-xl border px-2.5 py-2 text-left transition-colors",
+                    actif
+                      ? "border-amber-400 bg-amber-50 shadow-[0_1px_3px_rgba(17,24,39,.08)]"
+                      : "border-stone-200 bg-white hover:border-amber-300",
+                  )}
+                >
+                  <span className={cn(
+                    "flex items-center gap-1.5 text-[11.5px] font-semibold",
+                    actif ? "text-amber-900" : "text-stone-600",
+                  )}>
+                    <Icone className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                    {meta.label}
+                  </span>
+                  <span className={cn(
+                    "mt-1 block font-display text-[15px] font-bold tabular-nums",
+                    b.verdict === "en_attente" ? "text-amber-600" : net >= 0 ? "text-emerald-600" : "text-rose-600",
+                  )}>
+                    {b.verdict === "en_attente" ? "en attente" : `${net >= 0 ? "+" : ""}${eur(net, 0)}`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Verdict + net du profil sélectionné */}
-      <div className="my-3 flex flex-wrap items-center gap-3">
-        <div className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold", vCfg.cls)}>
-          {vCfg.label}
+      {/* ── Le résultat, en quatre chiffres ───────────────────────────────── */}
+      <div className="mb-5 overflow-hidden rounded-xl border border-stone-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 bg-stone-50/70 px-3 py-2 sm:px-4">
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold", vCfg.cls)}>
+            <vCfg.Icone className="h-3.5 w-3.5" aria-hidden="true" />
+            {vCfg.label}
+          </span>
+          <span className="text-[11.5px] text-stone-500">
+            profil <span className="font-semibold text-stone-700">{cur.profil_label}</span>
+            {bilan.provisoire ? " · résultat provisoire" : ""}
+          </span>
         </div>
-        <div className="text-sm">
-          <span className="text-muted-foreground">Résultat net{bilan.provisoire ? " (provisoire)" : ""} :</span>{" "}
-          <span className={cn("font-bold tabular-nums", bilan.net >= 0 ? "text-emerald-600" : "text-rose-600")}>
-            {bilan.net >= 0 ? "+" : ""}{bilan.net.toFixed(2)}€
-          </span>
-          <span className="text-muted-foreground"> · ROI </span>
-          <span className={cn("font-bold tabular-nums", bilan.roi >= 0 ? "text-emerald-600" : "text-rose-600")}>
-            {bilan.roi >= 0 ? "+" : ""}{bilan.roi}%
-          </span>
+        <div className="grid grid-cols-2 divide-x divide-stone-100 sm:grid-cols-4">
+          <BilanKpi libelle="Misé" valeur={eur(bilan.total_mise, 0)} />
+          <BilanKpi
+            libelle="Récupéré"
+            valeur={eur(bilan.total_gain)}
+            ton={bilan.total_gain > 0 ? "positif" : "neutre"}
+            aide={`${bilan.nb_gagnes} gagné${bilan.nb_gagnes > 1 ? "s" : ""} sur ${bilan.nb_paris} pari${bilan.nb_paris > 1 ? "s" : ""}`}
+          />
+          <BilanKpi
+            libelle="Résultat net"
+            valeur={`${bilan.net >= 0 ? "+" : ""}${eur(bilan.net)}`}
+            ton={attente ? "attente" : bilan.net >= 0 ? "positif" : "negatif"}
+          />
+          <BilanKpi
+            libelle="ROI"
+            valeur={`${bilan.roi >= 0 ? "+" : ""}${bilan.roi}%`}
+            ton={attente ? "attente" : bilan.roi >= 0 ? "positif" : "negatif"}
+            aide="rapporté à la mise"
+          />
         </div>
       </div>
 
-      {/* Comparaison prono vs réel — top-5 (couvre 2sur4 / Quarté / Quinté) */}
-      {(() => {
-        const predN = cmp.predicted_top5 ?? cmp.predicted_top3;
-        const realN = cmp.actual_top5 ?? cmp.actual_top3;
-        const realSet = new Set(realN);
-        const predSet = new Set(predN);
-        const overlap5 = predN.filter((n) => realSet.has(n)).length;
-        return (
-          <>
-            <div className="mb-2 grid gap-2 sm:grid-cols-2 text-xs">
-              <div className="rounded-lg bg-white/70 ring-1 ring-border/60 p-2.5">
-                <p className="mb-1.5 font-semibold text-muted-foreground">Top-{predN.length} pronostiqué (modèle)</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {predN.map((n, i) => {
-                    const hit = realSet.has(n);
-                    return (
-                      <span key={n} className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold ring-1 tabular-nums",
-                        hit ? "bg-emerald-50 ring-emerald-300 text-emerald-700" : "bg-gray-50 ring-gray-200 text-gray-600")}>
-                        <span className="text-[9px] font-normal text-muted-foreground">{i + 1}</span>N°{n}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="rounded-lg bg-white/70 ring-1 ring-border/60 p-2.5">
-                <p className="mb-1.5 font-semibold text-muted-foreground">Arrivée réelle (top-{realN.length})</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {realN.map((n, i) => {
-                    const winner = i === 0;
-                    const seen = predSet.has(n);
-                    return (
-                      <span key={n} className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold ring-1 tabular-nums",
-                        winner ? "bg-amber-100 ring-amber-400 text-amber-800"
-                          : seen ? "bg-emerald-50 ring-emerald-300 text-emerald-700"
-                          : "bg-gray-50 ring-gray-200 text-gray-600")}>
-                        <span className="text-[9px] font-normal text-muted-foreground">{i + 1}.</span>N°{n}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-            {/* Légende + bilan modèle */}
-            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-300 ring-1 ring-amber-400" />Vainqueur</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-200 ring-1 ring-emerald-300" />Trouvé par le modèle</span>
-              {cmp.gagnant_reel != null && (
-                <span className="text-muted-foreground">
-                  · Vainqueur N°{cmp.gagnant_reel}{" "}
-                  {cmp.modele_a_vu_gagnant
-                    ? <span className="text-emerald-700 font-medium">vu (rang {cmp.rang_predit_gagnant})</span>
-                    : <span className="text-rose-700 font-medium">manqué{cmp.rang_predit_gagnant ? ` (rang ${cmp.rang_predit_gagnant})` : ""}</span>}
-                  {" · "}<span className="font-medium text-gray-700">{overlap5}/5</span> chevaux trouvés
-                </span>
-              )}
-            </div>
-          </>
-        );
-      })()}
+      {/* ── Le modèle face à l'arrivée ────────────────────────────────────── */}
+      <div className="mb-5">
+        <ConfrontationRangs
+          predN={predN}
+          realN={realN}
+          gagnant={cmp.gagnant_reel}
+          rangGagnant={cmp.rang_predit_gagnant}
+          modeleAVuGagnant={cmp.modele_a_vu_gagnant}
+        />
+      </div>
 
-      {/* Détail des paris du profil sélectionné */}
+      {/* ── Détail des paris du profil sélectionné ────────────────────────── */}
+      <h3 className="mb-2 font-display text-[13.5px] font-bold text-slate-900">
+        Les paris de ce plan
+      </h3>
       <BilanDetail bilan={bilan} />
 
-      <p className="mt-2 text-[10px] text-muted-foreground/70">
+      <p className="mt-2.5 text-[11px] leading-relaxed text-stone-400">
         {cur.source === "fige"
           ? "Plan figé avant le départ, réglé aux rapports PMU réels. Jouez responsable."
           : "Simulation rétrospective réglée aux rapports PMU réels. Jouez responsable."}
@@ -1625,38 +1835,33 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
           ? regles.reduce((a, b) => (b.bilan.net > a.bilan.net ? b : a))
           : null;
         return (
-          <div className="mt-4 rounded-xl border border-amber-300/60 bg-white/70 p-3.5">
-            <p className="mb-1 text-[13px] font-semibold" style={{ color: CX.ink2 }}>
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+            <p className="text-[13.5px] font-semibold text-amber-900">
               Ce plan ne vous a pas été montré avant le départ.
             </p>
-            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-amber-900/80">
               {best && best.bilan.net > 0 ? (
                 <>
                   Sur cette course, le profil <strong>{best.profil_label}</strong> ressort à{" "}
-                  <strong className="text-emerald-600 tabular-nums">
-                    +{best.bilan.net.toFixed(2)}€
-                  </strong>{" "}
-                  pour {data.montant}€ misés. Une course ne fait pas un rendement —
-                  le détail course par course est dans le palmarès public.
+                  <strong className="tabular-nums text-emerald-700">+{eur(best.bilan.net)}</strong>{" "}
+                  pour {data.montant}€ misés. Une course ne fait pas un rendement — le détail
+                  course par course est dans le palmarès public.
                 </>
               ) : best ? (
                 <>
-                  Sur cette course, le meilleur profil (<strong>{best.profil_label}</strong>)
-                  finit à{" "}
-                  <strong className="text-rose-600 tabular-nums">
-                    {best.bilan.net.toFixed(2)}€
-                  </strong>{" "}
-                  pour {data.montant}€ misés. On affiche les plans perdants comme les
-                  gagnants : c&apos;est le même bilan que celui du palmarès public.
+                  Sur cette course, le meilleur profil (<strong>{best.profil_label}</strong>) finit à{" "}
+                  <strong className="tabular-nums text-rose-600">{eur(best.bilan.net)}</strong>{" "}
+                  pour {data.montant}€ misés. On affiche les plans perdants comme les gagnants :
+                  c&apos;est le même bilan que celui du palmarès public.
                 </>
               ) : (
                 <>
-                  Le règlement de ce plan attend encore des rapports PMU. Les bilans
-                  complets, course par course, sont dans le palmarès public.
+                  Le règlement de ce plan attend encore des rapports PMU. Les bilans complets,
+                  course par course, sont dans le palmarès public.
                 </>
               )}
             </p>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-3">
               <CheckoutButton
                 plan="standard"
                 periodicite="monthly"
@@ -1667,8 +1872,7 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
               />
               <Link
                 href="/track-record"
-                className="text-xs font-medium underline underline-offset-2"
-                style={{ color: CX.gray500 }}
+                className="text-[12.5px] font-medium text-stone-500 underline underline-offset-2 hover:text-amber-700"
               >
                 Voir le palmarès complet
               </Link>
@@ -2252,6 +2456,11 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
     return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [id]);
 
+  // Aperçu public : chargé UNIQUEMENT quand la page n'a pas les prédictions
+  // (visiteur, plan Découverte, ou course non analysée). Un abonné qui lit déjà
+  // le classement complet n'a aucune raison de déclencher cet appel.
+  const { data: apercu } = useApercuAnalyse(predictions && predictions.length ? null : id);
+
   useEffect(() => {
     if (!user || ["free", "decouverte"].includes(user.plan)) return;
     setLoadingPred(true);
@@ -2561,10 +2770,13 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
         {ongletActif === "synthese" && (
           <>
             {(!predictions || predictions.length === 0) && (
-              <MarcheSnapshotCard
+              <ApercuAnalyseCard
+                apercu={apercu}
+                statut={course.statut}
                 partants={course.partants}
                 nbPartants={course.nb_partants}
                 connecte={Boolean(user)}
+                abonne={Boolean(user && !["free", "decouverte"].includes(user.plan))}
               />
             )}
         {/* ── 4 STAT CARDS ── */}
@@ -2641,16 +2853,30 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
               Table extraite dans components/courses/classement.tsx : elle vit
               maintenant en pleine largeur, et chaque colonne correspond à un
               champ réellement renvoyé par l'API (aucune valeur reconstituée). */}
+          {/* Visiteur anonyme : c'est le plus gros du trafic (référencement).
+              Lui cacher la table, c'est lui demander de payer pour un produit
+              qu'il n'a jamais vu — il reçoit donc le même aperçu. */}
+          {!user && apercu?.disponible && (
+            <ClassementApercu apercu={apercu} connecte={false} onLegende={() => setShowGlossaire(true)} />
+          )}
+
           {user && (["free", "decouverte"].includes(user.plan) ? (
-            <ClassementVerrouille
-              titre="Le classement de l'algorithme"
-              texte="Probabilité de victoire et de place pour chaque partant, cote juste, signaux retenus contre le cheval comme en sa faveur. Inclus dès la formule Standard."
-              action={
-                <Button variant="brand" size="sm" asChild>
-                  <Link href="/tarifs">Passer Standard — 12€/mois</Link>
-                </Button>
-              }
-            />
+            // Découverte / Free : au lieu d'un cadenas muet, la table réelle avec
+            // ses vraies colonnes — probabilités visibles, identités masquées,
+            // bas de classement offert. Il faut voir ce qu'on achète.
+            apercu?.disponible ? (
+              <ClassementApercu apercu={apercu} connecte onLegende={() => setShowGlossaire(true)} />
+            ) : (
+              <ClassementVerrouille
+                titre="Le classement de l'algorithme"
+                texte="Probabilité de victoire et de place pour chaque partant, cote juste, signaux retenus contre le cheval comme en sa faveur. Inclus dès la formule Standard."
+                action={
+                  <Button variant="brand" size="sm" asChild>
+                    <Link href="/tarifs">Passer Standard — 12€/mois</Link>
+                  </Button>
+                }
+              />
+            )
           ) : loadingPred ? (
             <div className="flex justify-center rounded-2xl border border-stone-200 bg-white py-10">
               <Loader2 className="h-5 w-5 animate-spin text-stone-400" />

@@ -159,81 +159,176 @@ export default async function CoursePage({ params }: Props) {
           HTML servi) contient donc le nom de la course, les partants et les cotes. */}
       <CourseClient initialCourse={course as never} />
 
-      {/* Résumé texte de la course. Doublure volontairement sobre de l'application
+      {/* Fiche course en toutes lettres. Doublure volontairement sobre de l'application
           au-dessus : elle reste lisible sans JavaScript, s'imprime, et donne au moteur de
-          recherche une formulation en toutes lettres de ce que contient la page. */}
+          recherche une formulation explicite de ce que contient la page. Elle ne rejoue
+          PAS la mise en page de l'onglet Partants : ici, un tableau de référence — état
+          civil de la course, engagés, et l'arrivée quand elle est connue. */}
       {course && (
         <section className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
-          <h2 className="font-display text-lg font-bold text-gray-900">
-            {libelleCourse(course)} — {titleCase(course.hippodrome_nom)}
-            {jour ? `, ${jourLong(jour)}` : ""}
-          </h2>
-          <p className="mt-2 text-sm leading-relaxed text-gray-600">
-            {codeReunionCourse(course.course_id)} : {disciplineLabel(course.discipline)} de{" "}
-            {course.distance} mètres, {course.nb_partants} partants, départ à{" "}
-            {heureParis(course.date_heure)}
-            {course.allocation
-              ? `, pour une allocation de ${Math.round(course.allocation / 100).toLocaleString("fr-FR")} €`
-              : ""}
-            .{" "}
-            {course.est_quinte
-              ? "Cette course est le support du Quinté+ du jour. "
-              : course.est_quarte
-              ? "Cette course est support du Quarté+. "
-              : ""}
-            {resultats?.classement?.length
-              ? `Arrivée officielle : ${resultats.classement
-                  .slice(0, 5)
-                  .map((l) => l.numero)
-                  .join(" - ")}.`
-              : "Les partants, les cotes des principaux opérateurs et la probabilité calculée pour chaque cheval sont détaillés ci-dessus."}
-          </p>
+          <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
+              Fiche course
+            </p>
+            <h2 className="mt-1 font-display text-lg font-bold text-slate-900">
+              {libelleCourse(course)} — {titleCase(course.hippodrome_nom)}
+              {jour ? `, ${jourLong(jour)}` : ""}
+            </h2>
 
-          {course.conditions_texte && (
-            <>
-              <h3 className="mt-6 text-sm font-bold text-gray-800">Conditions de la course</h3>
-              <p className="mt-1 text-[13px] leading-relaxed text-gray-500">
-                {course.conditions_texte}
-              </p>
-            </>
-          )}
+            {/* État civil de la course : une donnée par case, plutôt qu'une phrase
+                qui empile sept chiffres et qu'on relit deux fois. */}
+            <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-stone-200 bg-stone-200 sm:grid-cols-3 lg:grid-cols-6">
+              {[
+                { k: "Course", v: codeReunionCourse(course.course_id) },
+                { k: "Discipline", v: disciplineLabel(course.discipline) },
+                { k: "Distance", v: `${course.distance.toLocaleString("fr-FR")} m` },
+                { k: "Partants", v: String(course.nb_partants) },
+                { k: "Départ", v: heureParis(course.date_heure) },
+                {
+                  k: "Allocation",
+                  v: course.allocation
+                    ? `${Math.round(course.allocation / 100).toLocaleString("fr-FR")} €`
+                    : "—",
+                },
+              ].map((c) => (
+                <div key={c.k} className="bg-white px-3 py-2.5">
+                  <dt className="text-[11px] text-stone-400">{c.k}</dt>
+                  <dd className="mt-0.5 font-display text-[13.5px] font-bold text-slate-900">{c.v}</dd>
+                </div>
+              ))}
+            </dl>
 
-          <h3 className="mt-6 text-sm font-bold text-gray-800">
-            Liste des partants ({course.nb_partants})
-          </h3>
-          <ol className="mt-2 grid gap-x-6 gap-y-1 text-[13px] text-gray-600 sm:grid-cols-2">
-            {(course.partants ?? []).map((p) => (
-              <li key={p.numero} className={p.non_partant ? "line-through opacity-50" : ""}>
-                <span className="font-semibold tabular-nums text-gray-800">{p.numero}.</span>{" "}
-                {titleCase(p.nom_cheval)}
-                {p.jockey ? ` — ${titleCase(p.jockey)}` : ""}
-                {p.musique ? ` (${p.musique})` : ""}
-                {p.cote_pmu ? ` · cote ${p.cote_pmu.toFixed(1)}` : ""}
-                {p.non_partant ? " · non-partant" : ""}
-              </li>
-            ))}
-          </ol>
+            {(course.est_quinte || course.est_quarte || course.est_tierce) && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {course.est_quinte && (
+                  <span className="rounded-full bg-amber-500 px-3 py-1 text-[11px] font-semibold text-white">
+                    Support du Quinté+ du jour
+                  </span>
+                )}
+                {course.est_quarte && !course.est_quinte && (
+                  <span className="rounded-full bg-stone-900 px-3 py-1 text-[11px] font-semibold text-white">
+                    Support du Quarté+
+                  </span>
+                )}
+                {course.est_tierce && !course.est_quarte && !course.est_quinte && (
+                  <span className="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-semibold text-stone-700">
+                    Support du Tiercé
+                  </span>
+                )}
+              </div>
+            )}
 
-          <nav className="mt-6 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
-            <a href="/programme" className="hover:text-brand-gold-deep hover:underline">
-              Programme PMU du jour
-            </a>
-            <a href="/quinte-du-jour" className="hover:text-brand-gold-deep hover:underline">
-              Quinté+ du jour
-            </a>
-            <a href="/resultats" className="hover:text-brand-gold-deep hover:underline">
-              Arrivées et rapports du jour
-            </a>
-            <a href="/guides/types-de-paris-pmu" className="hover:text-brand-gold-deep hover:underline">
-              Comprendre les types de paris
-            </a>
-          </nav>
+            <p className="mt-4 text-sm leading-relaxed text-stone-600">
+              {resultats?.classement?.length
+                ? `Arrivée officielle : ${resultats.classement
+                    .slice(0, 5)
+                    .map((l) => l.numero)
+                    .join(" - ")}. Les rapports PMU, le détail de l'arrivée et le bilan du plan de mise sont affichés plus haut.`
+                : `Les ${course.nb_partants} engagés, les cotes des principaux opérateurs et la probabilité calculée pour chaque cheval sont détaillés plus haut, onglet par onglet.`}
+            </p>
+
+            {course.conditions_texte && (
+              <div className="mt-5 rounded-xl border border-stone-200 bg-stone-50/70 p-4">
+                <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
+                  Conditions de la course
+                </h3>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-stone-600">
+                  {course.conditions_texte}
+                </p>
+              </div>
+            )}
+
+            <h3 className="mt-6 font-display text-[15px] font-bold text-slate-900">
+              Tous les engagés ({course.nb_partants})
+            </h3>
+            <div className="mt-3 overflow-x-auto rounded-xl border border-stone-200">
+              <table className="w-full min-w-[560px] border-collapse text-[13px]">
+                <thead>
+                  <tr className="bg-stone-50 text-left text-[11px] uppercase tracking-[0.08em] text-stone-400">
+                    <th scope="col" className="px-3 py-2 font-semibold">N°</th>
+                    <th scope="col" className="px-3 py-2 font-semibold">Cheval</th>
+                    <th scope="col" className="px-3 py-2 font-semibold">Jockey / driver</th>
+                    <th scope="col" className="px-3 py-2 font-semibold">Musique</th>
+                    <th scope="col" className="px-3 py-2 text-right font-semibold">Cote</th>
+                    {resultats?.classement?.length ? (
+                      <th scope="col" className="px-3 py-2 text-right font-semibold">Arrivée</th>
+                    ) : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(course.partants ?? []).map((p) => {
+                    const place =
+                      resultats?.classement?.find((l) => l.numero === p.numero)?.position ?? null;
+                    return (
+                      <tr
+                        key={p.numero}
+                        className={`border-t border-stone-100 ${p.non_partant ? "text-stone-400" : "text-stone-600"}`}
+                      >
+                        <td className="px-3 py-2 font-display font-bold tabular-nums text-slate-900">
+                          {p.numero}
+                        </td>
+                        <td className={`px-3 py-2 font-medium text-slate-900 ${p.non_partant ? "line-through opacity-60" : ""}`}>
+                          {titleCase(p.nom_cheval)}
+                          {p.non_partant ? (
+                            <span className="ml-2 rounded-full bg-stone-100 px-2 py-0.5 text-[10.5px] font-semibold uppercase text-stone-500">
+                              non-partant
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2">{p.jockey ? titleCase(p.jockey) : "—"}</td>
+                        <td className="px-3 py-2 font-mono text-[12px]">{p.musique || "—"}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {p.cote_pmu ? p.cote_pmu.toFixed(1) : "—"}
+                        </td>
+                        {resultats?.classement?.length ? (
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {place ? (
+                              <span
+                                className={
+                                  place <= 3
+                                    ? "rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                    : "text-stone-500"
+                                }
+                              >
+                                {place}
+                                <span className="align-super text-[9px]">{place === 1 ? "er" : "e"}</span>
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <nav className="mt-5 flex flex-wrap gap-2 text-[12.5px]">
+              {[
+                { href: "/programme", txt: "Programme PMU du jour" },
+                { href: "/quinte-du-jour", txt: "Quinté+ du jour" },
+                { href: "/resultats", txt: "Arrivées et rapports du jour" },
+                { href: "/guides/types-de-paris-pmu", txt: "Comprendre les types de paris" },
+              ].map((l) => (
+                <a
+                  key={l.href}
+                  href={l.href}
+                  className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 font-medium text-stone-600 transition-colors hover:border-brand-gold-deep hover:text-brand-gold-deep"
+                >
+                  {l.txt}
+                </a>
+              ))}
+            </nav>
+          </div>
 
           <div className="mt-10">
             <NewsletterForm source="course" />
           </div>
         </section>
       )}
+
     </>
   );
 }

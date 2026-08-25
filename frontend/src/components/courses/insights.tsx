@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, Swords, Ticket, Timer, TrendingUp, Lock, Info } from "lucide-react";
+import { Loader2, Sparkles, Swords, Ticket, Timer, TrendingUp, Trophy, Lock, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -400,63 +400,325 @@ export function CompteurDepart({ dateHeure, statut }: { dateHeure: string; statu
   );
 }
 
-// ─── Lecture publique du marché ───────────────────────────────────────────────
-// Ce que la page peut montrer à un visiteur sans compte : la hiérarchie des
-// cotes, qui est une donnée publique. Elle ne remplace pas le pronostic — elle
-// montre précisément ce que le pronostic, lui, apporte en plus.
-export function MarcheSnapshotCard({
-  partants, nbPartants, connecte,
+// ─── Aperçu public de l'analyse ───────────────────────────────────────────────
+// Le funnel : un visiteur sans abonnement ne voyait que les cotes publiques —
+// aucune raison de croire qu'une analyse existe, donc aucune raison de payer.
+// Cette carte montre la FORME de l'analyse sans son contenu exploitable :
+//   • course à venir  → agrégats anonymes (confiance, accord/désaccord avec le
+//     marché, bande de cote du n°1, chevaux écartés, écarts de prix détectés) ;
+//     aucun numéro, aucun nom : le pronostic du jour reste payant ;
+//   • course terminée → tout est révélé. Elle n'est plus jouable : montrer ce que
+//     le modèle avait dit AVANT le départ est la meilleure preuve disponible, et
+//     elle est donnée telle quelle, réussie comme ratée.
+export interface ApercuLigneApercu {
+  rang: number;
+  proba_top1: number | null;
+  proba_top3: number | null;
+  revele: boolean;
+  numero?: number;
+  nom?: string;
+  cote?: number | null;
+  cote_juste?: number | null;
+  position?: number;
+}
+
+export interface ApercuAnalyse {
+  disponible: boolean;
+  revele: boolean;
+  nb_analyses: number;
+  confiance: number | null;
+  proba_top1: number | null;
+  accord_marche: boolean | null;
+  bande_cote: string | null;
+  nb_ecartes: number;
+  nb_value_bets: number;
+  ev_max_pct: number | null;
+  verdict: {
+    arrivee: Array<{ position: number; numero: number; nom: string | null }>;
+    top3_modele: Array<{ rang: number; numero: number; nom: string; proba_top1: number | null; cote: number | null }>;
+    rang_predit_gagnant: number | null;
+    gagnant_top1: boolean;
+    gagnant_top3: boolean;
+  } | null;
+  classement: ApercuLigneApercu[];
+  nb_lignes_revelees: number;
+}
+
+/** Aperçu public d'une course. `null` en courseId = on ne charge rien (l'abonné
+ *  qui a déjà ses prédictions n'a aucune raison de déclencher cet appel). */
+export function useApercuAnalyse(courseId: string | null) {
+  return useEndpoint<ApercuAnalyse>(courseId ? `/courses/${courseId}/apercu` : null);
+}
+
+function Tuile({ valeur, unite, libelle, ton = "neutre" }: {
+  valeur: string; unite?: string; libelle: string; ton?: "neutre" | "or" | "vert";
+}) {
+  const couleur = ton === "or" ? "text-amber-600" : ton === "vert" ? "text-emerald-600" : "text-slate-900";
+  return (
+    <div className="rounded-xl border border-stone-200 bg-stone-50/60 px-3 py-2.5">
+      <div className="flex items-baseline gap-1">
+        <span className={cn("font-display text-xl font-bold tabular-nums leading-none", couleur)}>{valeur}</span>
+        {unite && <span className="text-[11px] text-muted-foreground">{unite}</span>}
+      </div>
+      <div className="mt-1.5 text-[11px] leading-tight text-muted-foreground">{libelle}</div>
+    </div>
+  );
+}
+
+/** Ligne de classement dont l'identité est masquée : on montre qu'un classement
+ *  existe, jamais lequel. Rien n'est caché en CSS — l'endpoint `apercu` ne
+ *  renvoie ni numéro ni nom tant que la course n'est pas courue. */
+function LigneMasquee({ rang, proba }: { rang: number; proba?: number | null }) {
+  return (
+    <li className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/60 px-3 py-2.5">
+      <span className="w-5 text-center font-display text-sm font-bold text-stone-400">{rang}</span>
+      <span className="inline-flex h-4 w-10 rounded bg-stone-200/90" aria-hidden="true" />
+      <span className="inline-flex h-4 flex-1 rounded bg-stone-200/70" aria-hidden="true" />
+      <span className="sr-only">Cheval réservé aux abonnés</span>
+      {proba != null ? (
+        <span className="font-display text-sm font-bold tabular-nums text-amber-600">{Math.round(proba * 100)}%</span>
+      ) : (
+        <Lock className="h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
+      )}
+    </li>
+  );
+}
+
+export function ApercuAnalyseCard({
+  statut, partants, nbPartants, connecte, abonne = false, apercu,
 }: {
+  statut: string;
   partants: Array<{ numero: number; nom_cheval: string; cote_pmu: number | null; non_partant: boolean }>;
   nbPartants: number;
   connecte: boolean;
+  /** Plan payant : la carte ne lui vend rien. Elle n'apparaît chez lui que si le
+   *  classement n'a pas pu être chargé — lui montrer un CTA d'abonnement serait
+   *  lui réclamer ce qu'il paie déjà. */
+  abonne?: boolean;
+  /** Chargé une seule fois par la page (`useApercuAnalyse`) et partagé avec la
+   *  table du classement : deux appels au même endpoint n'apporteraient rien. */
+  apercu: ApercuAnalyse | null;
 }) {
+  // Preuve chiffrée et réelle : fréquence à laquelle le gagnant sort du top 3 du
+  // modèle sur l'historique. `null` tant qu'elle n'est pas mesurable → rien affiché.
+  const { data: stats } = useEndpoint<{ precision_top3: number | null }>("/stats/public");
+
   const cotes = partants
     .filter((p) => !p.non_partant && typeof p.cote_pmu === "number" && (p.cote_pmu as number) > 1)
     .sort((a, b) => (a.cote_pmu as number) - (b.cote_pmu as number));
-  if (cotes.length < 3) return null;
+  const fav = cotes[0];
+  const ecart = cotes.length >= 2 ? (cotes[1].cote_pmu as number) / (fav.cote_pmu as number) : null;
+  const lectureMarche =
+    ecart == null ? null
+    : ecart >= 1.8 ? "favori très détaché"
+    : ecart >= 1.25 ? "un favori se détache"
+    : "cotes de tête serrées";
 
-  const [fav, deux, trois] = cotes;
-  const ecart = (deux.cote_pmu as number) / (fav.cote_pmu as number);
-  const lecture =
-    ecart >= 1.8 ? { txt: "Favori net", detail: "le marché a désigné un favori très détaché" }
-    : ecart >= 1.25 ? { txt: "Favori marqué", detail: "un cheval se détache, sans écraser le lot" }
-    : { txt: "Course ouverte", detail: "les cotes de tête sont serrées : rien n'est joué" };
+  // Ni cotes ni analyse : la carte n'aurait rien à dire.
+  if (!fav && !apercu?.disponible) return null;
+
+  const v = apercu?.verdict ?? null;
+  const revele = Boolean(apercu?.revele && v);
+  const precision = stats?.precision_top3 ?? null;
+  const phrasePreuve =
+    precision != null
+      ? ` Sur l'historique vérifié, le gagnant figure dans le top 3 du modèle ${Math.round(precision * 100)} % du temps.`
+      : "";
+
+  const cta = revele
+    ? { href: connecte ? "/programme" : "/inscription", txt: connecte ? "Voir les courses à venir" : "Essayer 7 jours gratuitement" }
+    : connecte
+      ? { href: "/tarifs", txt: "Débloquer le pronostic" }
+      : { href: "/inscription", txt: "Voir le pronostic — essai 7 jours gratuit" };
 
   return (
-    <Card title="Ce que dit le marché" icon={TrendingUp} aside="cotes publiques">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{lecture.txt}</span>
-        <span className="text-xs text-muted-foreground">{lecture.detail}</span>
-      </div>
-
-      <ol className="mt-4 space-y-2">
-        {[fav, deux, trois].map((p, i) => (
-          <li key={p.numero} className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/60 px-3 py-2.5">
-            <span className="w-5 text-center font-display text-sm font-bold text-stone-400">{i + 1}</span>
-            <span className="font-mono text-xs text-muted-foreground">N°{p.numero}</span>
-            <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{p.nom_cheval}</span>
-            <span className="font-display text-sm font-bold tabular-nums text-slate-900">{nf(p.cote_pmu as number, 1)}</span>
-          </li>
-        ))}
-      </ol>
-
-      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
-        <p className="text-[13px] font-semibold text-amber-900">
-          La cote dit qui les parieurs préfèrent. Elle ne dit pas qui a le plus de chances.
+    <Card
+      title={revele ? "Ce que le modèle avait dit avant le départ" : "L'analyse de cette course"}
+      icon={revele ? Trophy : Sparkles}
+      aside="aperçu gratuit"
+    >
+      {/* Le marché tient en une ligne : la hiérarchie complète des cotes vit dans
+          l'onglet Partants — la répéter ici volait la place de l'analyse. */}
+      {fav && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[11px] font-semibold text-white">Marché</span>
+          favori N°{fav.numero} {fav.nom_cheval} à {nf(fav.cote_pmu as number, 1)}
+          {lectureMarche ? ` · ${lectureMarche}` : ""}
         </p>
-        <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
-          Sur les {nbPartants} partants de cette course, l&apos;algorithme calcule une probabilité par cheval
-          à partir de 80 critères — forme, terrain, jockey, vitesse, mouvements de cote — puis la compare
-          au prix du marché pour repérer les écarts exploitables.
-        </p>
-        <a
-          href={connecte ? "/tarifs" : "/inscription"}
-          className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
-        >
-          {connecte ? "Débloquer le pronostic" : "Voir le pronostic — essai 7 jours gratuit"}
-        </a>
-      </div>
+      )}
+
+      {/* ═══ Course courue : on lève le voile, résultat réussi comme raté ═══ */}
+      {revele && v && (
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-semibold",
+                v.gagnant_top1 ? "bg-emerald-600 text-white"
+                : v.gagnant_top3 ? "bg-amber-500 text-white"
+                : "bg-stone-200 text-stone-700",
+              )}
+            >
+              {v.gagnant_top1 ? "Gagnant trouvé"
+                : v.gagnant_top3 ? "Gagnant dans le top 3"
+                : v.rang_predit_gagnant
+                  ? `Gagnant classé ${v.rang_predit_gagnant}ᵉ`
+                  : "Gagnant hors classement"}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              arrivée : {v.arrivee.map((l) => l.numero).join(" - ")}
+            </span>
+          </div>
+
+          <ol className="mt-4 space-y-2">
+            {v.top3_modele.map((p) => {
+              const place = v.arrivee.find((l) => l.numero === p.numero)?.position ?? null;
+              return (
+                <li
+                  key={p.numero}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl border px-3 py-2.5",
+                    place ? "border-emerald-200 bg-emerald-50/50" : "border-stone-100 bg-stone-50/60",
+                  )}
+                >
+                  <span className="w-5 text-center font-display text-sm font-bold text-stone-400">{p.rang}</span>
+                  <span className="font-mono text-xs text-muted-foreground">N°{p.numero}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{p.nom}</span>
+                  {place != null && (
+                    <span className="rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                      {place === 1 ? "1ᵉʳ" : `${place}ᵉ`} à l&apos;arrivée
+                    </span>
+                  )}
+                  {p.proba_top1 != null && (
+                    <span className="font-display text-sm font-bold tabular-nums text-slate-900">
+                      {Math.round(p.proba_top1 * 100)}%
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+            <p className="text-[13px] font-semibold text-amber-900">
+              Ce classement était affiché sur cette page avant le départ.
+            </p>
+            <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
+              Probabilité de victoire et de place par cheval, cote juste, signaux retenus pour et contre :
+              c&apos;est ce que les abonnés lisent sur les courses de ce soir, avant qu&apos;elles ne soient
+              courues.{phrasePreuve}
+            </p>
+            {!abonne && (
+              <a
+                href={cta.href}
+                className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+              >
+                {cta.txt}
+              </a>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ═══ Course à venir : la forme de l'analyse, jamais son contenu ═══ */}
+      {!revele && apercu?.disponible && (
+        <>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            {apercu.confiance != null && (
+              <Tuile valeur={String(apercu.confiance)} unite="/ 100" libelle="confiance du modèle sur cette course" />
+            )}
+            {apercu.proba_top1 != null && (
+              <Tuile
+                valeur={`${Math.round(apercu.proba_top1 * 100)}%`}
+                libelle="chances de victoire de son n°1"
+                ton="or"
+              />
+            )}
+            <Tuile
+              valeur={String(apercu.nb_value_bets)}
+              libelle={
+                apercu.nb_value_bets > 0 && apercu.ev_max_pct != null
+                  ? `écart prix / probabilité — jusqu'à +${apercu.ev_max_pct} % d'espérance`
+                  : "écart prix / probabilité détecté"
+              }
+              ton={apercu.nb_value_bets > 0 ? "vert" : "neutre"}
+            />
+          </div>
+
+          {apercu.accord_marche != null && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-semibold",
+                  apercu.accord_marche ? "bg-slate-900 text-white" : "bg-amber-500 text-white",
+                )}
+              >
+                {apercu.accord_marche ? "Le modèle confirme le favori" : "Le modèle ne suit pas le marché"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {apercu.accord_marche
+                  ? "il place le favori des parieurs en tête, avec sa propre probabilité"
+                  : `son n°1 n'est pas le favori des parieurs${apercu.bande_cote ? ` — il est coté ${apercu.bande_cote}` : ""}`}
+              </span>
+            </div>
+          )}
+
+          <ol className="mt-4 space-y-2">
+            <LigneMasquee rang={1} proba={apercu.proba_top1} />
+            <LigneMasquee rang={2} />
+            <LigneMasquee rang={3} />
+          </ol>
+
+          {apercu.nb_ecartes > 0 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Le modèle écarte {apercu.nb_ecartes} des {apercu.nb_analyses} partants sous 3 % de chances,
+              et classe les autres du plus probable au moins probable.
+            </p>
+          )}
+
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+            <p className="text-[13px] font-semibold text-amber-900">
+              La cote dit qui les parieurs préfèrent. Elle ne dit pas qui a le plus de chances.
+            </p>
+            <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
+              Sur les {nbPartants} partants, l&apos;algorithme calcule une probabilité par cheval à partir de
+              80 critères — forme, terrain, jockey, vitesse, mouvements de cote — puis la compare au prix du
+              marché. L&apos;abonnement ouvre les noms, la probabilité de chaque cheval et le plan de mise
+              ajusté à votre budget.{phrasePreuve}
+            </p>
+            {!abonne && (
+              <a
+                href={cta.href}
+                className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+              >
+                {cta.txt}
+              </a>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ═══ Aucune analyse en base : on le dit, sans carte vide ni promesse ═══ */}
+      {!revele && apercu && !apercu.disponible && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+          <p className="text-[13px] font-semibold text-amber-900">
+            {statut === "termine"
+              ? "Cette course n'a pas été analysée par le modèle."
+              : "L'analyse de cette course n'est pas encore publiée."}
+          </p>
+          <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
+            Sur les courses couvertes, l&apos;algorithme calcule une probabilité par cheval à partir de
+            80 critères, la compare au prix du marché et en tire un plan de mise sur votre budget.
+            {phrasePreuve}
+          </p>
+          <a
+            href={connecte ? "/programme" : "/inscription"}
+            className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+          >
+            {connecte ? "Voir les courses analysées" : "Essayer 7 jours gratuitement"}
+          </a>
+        </div>
+      )}
     </Card>
   );
 }

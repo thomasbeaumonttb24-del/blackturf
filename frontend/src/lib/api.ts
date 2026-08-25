@@ -115,6 +115,9 @@ export const coursesApi = {
 };
 
 export const predictionsApi = {
+  // Aperçu PUBLIC de l'analyse (funnel) : agrégats anonymes avant la course,
+  // contenu complet une fois la course courue. Aucun compte requis.
+  apercu: (courseId: string) => api.get(`/courses/${courseId}/apercu`, { tolere401: true }),
   get: (courseId: string, bankroll?: number) =>
     api.get(`/courses/${courseId}/predictions`, { params: { bankroll } }),
   trigger: (courseId: string, bankroll?: number) =>
