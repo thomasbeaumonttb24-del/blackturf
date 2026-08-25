@@ -25,9 +25,15 @@ const nf = (n: number, d = 0) =>
 /** « 25082026R5C4 » → « R5C4 ». Le code réunion/course est ce que les parieurs lisent. */
 const codeCourse = (id: string) => (id.match(/R\d+C\d+$/i)?.[0] ?? id).toUpperCase();
 
-/** Les noms arrivent du PMU EN CAPITALES : illisibles en bloc dans une carte. */
+/** Les noms arrivent du PMU EN CAPITALES : illisibles en bloc dans une carte.
+ *  Le préfixe « HIPPODROME DE … » est retiré comme partout ailleurs sur le site
+ *  (cf. `titleCase` de lib/seo) : c'est « Cabourg », pas « Hippodrome De Cabourg ». */
 const titre = (s: string) =>
-  s.toLowerCase().replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, p, c) => p + c.toUpperCase());
+  s
+    .toLowerCase()
+    .replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, p, c) => p + c.toUpperCase())
+    .replace(/^Hippodrome (De |Du |D'|Des |La |Le )/i, "")
+    .trim();
 
 function Card({ title, icon: Icon, aside, children, className }: {
   title: string;
@@ -767,7 +773,7 @@ export function PreuvesRecentesCard() {
         {courses.map((c) => {
           const rang = c.rang_du_gagnant;
           const ton = c.gagnant_top1
-            ? { bd: "border-emerald-200", bg: "bg-emerald-50/60", fg: "text-emerald-700", txt: "gagnant donné n°1" }
+            ? { bd: "border-emerald-200", bg: "bg-emerald-50/60", fg: "text-emerald-700", txt: "gagnant donné 1ᵉʳ" }
             : c.gagnant_top3
               ? { bd: "border-amber-200", bg: "bg-amber-50/60", fg: "text-amber-700", txt: `gagnant donné ${rang ? ordinal(rang) : ""}` }
               : { bd: "border-stone-200", bg: "bg-white", fg: "text-stone-500", txt: rang ? `gagnant donné ${ordinal(rang)}` : "gagnant hors classement" };
