@@ -11,6 +11,8 @@ import {
   titleCase,
   disciplineLabel,
   codeReunionCourse,
+  ogBase,
+  twitterBase,
   type SeoCourse,
 } from "@/lib/seo";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
@@ -47,7 +49,8 @@ export async function generateMetadata(): Promise<Metadata> {
     title,
     description,
     alternates: { canonical: "/quinte-du-jour" },
-    openGraph: { title, description, url: "https://blackturf.fr/quinte-du-jour" },
+    openGraph: ogBase({ title, description, url: "/quinte-du-jour" }),
+    twitter: twitterBase({ title, description }),
   };
 }
 
@@ -62,8 +65,71 @@ export default async function QuinteDuJourPage() {
   const rapports = rapportsTries(resultats?.rapports);
   const quinteDetail = resultats?.rapports_detail?.e_quinte_plus ?? [];
 
+  /* Données structurées. C'est la page de plus forte intention du site — « quinté du
+   * jour », « arrivée quinté » — et c'était la seule des pages éditoriales à n'émettre
+   * aucun balisage propre : ni fil d'Ariane, ni événement, alors que la fiche course de
+   * cette même épreuve en portait un complet. Le `SportsEvent` est ici la même épreuve,
+   * décrite depuis son adresse permanente. */
+  const hippo = course ? titleCase(course.hippodrome_nom) : null;
+  const gagnant = resultats?.classement?.find((l) => l.position === 1);
+
+  const eventJsonLd = course
+    ? {
+        "@context": "https://schema.org",
+        "@type": "SportsEvent",
+        name: `Quinté+ du ${jourLong(jour)} — ${titleCase(course.nom ?? "")} à ${hippo}`,
+        startDate: course.date_heure,
+        eventStatus:
+          course.statut === "annule"
+            ? "https://schema.org/EventCancelled"
+            : "https://schema.org/EventScheduled",
+        eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+        sport: `Course hippique — ${disciplineLabel(course.discipline)}`,
+        // L'URL canonique de l'événement reste la fiche course : elle est permanente,
+        // là où /quinte-du-jour désigne une épreuve différente chaque jour.
+        url: `https://blackturf.fr/courses/${course.course_id}`,
+        location: {
+          "@type": "Place",
+          name: hippo,
+          address: { "@type": "PostalAddress", addressLocality: hippo, addressCountry: "FR" },
+        },
+        description: `${disciplineLabel(course.discipline)}, ${course.distance} mètres, ${
+          course.nb_partants
+        } partants, départ à ${heureParis(course.date_heure)}.`,
+        ...(gagnant
+          ? { about: `Vainqueur : ${titleCase(gagnant.nom)} (n°${gagnant.numero}).` }
+          : {}),
+      }
+    : null;
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Accueil", item: "https://blackturf.fr" },
+      { "@type": "ListItem", position: 2, name: "Programme", item: "https://blackturf.fr/programme" },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: "Quinté+ du jour",
+        item: "https://blackturf.fr/quinte-du-jour",
+      },
+    ],
+  };
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+      {eventJsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(eventJsonLd) }}
+        />
+      )}
+
       <SeoHero
         eyebrow="Mis à jour chaque jour"
         breadcrumbs={[

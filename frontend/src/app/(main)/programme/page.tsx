@@ -8,6 +8,8 @@ import {
   heureParis,
   titleCase,
   disciplineLabel,
+  ogBase,
+  twitterBase,
 } from "@/lib/seo";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import { PreuvesRecentesCard } from "@/components/courses/insights";
@@ -43,12 +45,8 @@ export async function generateMetadata(): Promise<Metadata> {
     title,
     description,
     alternates: { canonical: "/programme" },
-    openGraph: {
-      title,
-      description,
-      url: "https://blackturf.fr/programme",
-      type: "website",
-    },
+    openGraph: ogBase({ title, description, url: "/programme" }),
+    twitter: twitterBase({ title, description }),
   };
 }
 
@@ -59,21 +57,26 @@ export default async function ProgrammePage() {
   // ItemList des courses du jour → Google comprend la page comme un index d'événements
   // datés et non comme une page générique, ce qui aide la fraîcheur (Top Stories / query
   // deserves freshness sur « programme pmu <date> »).
+  //
+  // `position` se comptait par réunion, à l'intérieur du `flatMap` : les quarante-deux
+  // courses du 26 août sortaient numérotées 1-8, 1-10, 1-8, 1-8, 1-8 — dix positions
+  // distinctes pour quarante-deux éléments. Une ItemList exige un rang unique et continu
+  // sur la liste entière, sinon l'ordre annoncé est ininterprétable. Le compteur est donc
+  // remonté hors des sous-listes.
+  const coursesDuJour = (prog?.reunions ?? []).flatMap((r) => r.courses ?? []);
   const itemListJsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
     name: `Programme PMU du ${jourLong(jour)}`,
-    numberOfItems: prog?.nb_courses ?? 0,
-    itemListElement: (prog?.reunions ?? []).flatMap((r) =>
-      (r.courses ?? []).map((c, i) => ({
-        "@type": "ListItem",
-        position: i + 1,
-        url: `https://blackturf.fr/courses/${c.course_id}`,
-        name: `${titleCase(c.hippodrome_nom)} — ${c.nom ?? `Course ${c.numero}`} (${heureParis(
-          c.date_heure,
-        )})`,
-      })),
-    ),
+    numberOfItems: coursesDuJour.length,
+    itemListElement: coursesDuJour.map((c, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      url: `https://blackturf.fr/courses/${c.course_id}`,
+      name: `${titleCase(c.hippodrome_nom)} — ${c.nom ?? `Course ${c.numero}`} (${heureParis(
+        c.date_heure,
+      )})`,
+    })),
   };
 
   const breadcrumbJsonLd = {

@@ -2,14 +2,28 @@ import Link from "next/link";
 import Image from "next/image";
 import { ShieldCheck, Database, Mail } from "lucide-react";
 
-const COLUMNS: Array<{ title: string; links: Array<{ href: string; label: string }> }> = [
+/**
+ * `rel="nofollow"` sur les liens vers des espaces privés.
+ *
+ * `/bankroll` et `/assistant` sont interdits d'exploration par robots.txt, mais étaient
+ * liés depuis le pied de page de CHAQUE page du site. Un lien massivement répété vers une
+ * adresse qu'un robot n'a pas le droit de charger produit exactement le cas que Search
+ * Console signale comme « indexée malgré le blocage par robots.txt » : Google connaît
+ * l'URL par le lien, ne peut pas la lire, et l'indexe sans contenu. Le `nofollow` retire
+ * ces adresses du graphe de liens sans rien changer pour le visiteur, qui les utilise.
+ */
+const COLUMNS: Array<{
+  title: string;
+  links: Array<{ href: string; label: string; prive?: boolean }>;
+}> = [
   {
     title: "Produit",
     links: [
       { href: "/programme", label: "Programme du jour" },
-      { href: "/value-bets", label: "Paris de valeur" },
-      { href: "/bankroll", label: "Suivi du capital" },
-      { href: "/assistant", label: "Assistant IA" },
+      { href: "/track-record", label: "Palmarès mesuré" },
+      { href: "/value-bets", label: "Paris de valeur", prive: true },
+      { href: "/bankroll", label: "Suivi du capital", prive: true },
+      { href: "/assistant", label: "Assistant IA", prive: true },
     ],
   },
   {
@@ -99,7 +113,11 @@ export function Footer() {
               <ul className="space-y-2 text-sm text-gray-600">
                 {col.links.map((l) => (
                   <li key={l.label}>
-                    <Link href={l.href} className="transition-colors hover:text-brand-gold-dark">
+                    <Link
+                      href={l.href}
+                      rel={l.prive ? "nofollow" : undefined}
+                      className="transition-colors hover:text-brand-gold-dark"
+                    >
                       {l.label}
                     </Link>
                   </li>

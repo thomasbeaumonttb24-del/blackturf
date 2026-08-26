@@ -3,6 +3,13 @@ import type { Metadata } from "next";
 
 // Page 404 globale : renvoie un vrai statut HTTP 404 (Next) avec un contenu utile +
 // liens de retour, au lieu d'un soft-404. noindex pour ne pas polluer l'index.
+//
+// Le `robots` ci-dessous fait DOUBLON avec celui que Next pose de lui-même sur une page
+// `not-found` : le document sort avec « noindex » puis « noindex, follow ». Il a pourtant
+// été essayé de le retirer, et c'est pire — la page hérite alors du `index, follow` du
+// layout racine, et le document porte deux directives CONTRADICTOIRES au lieu de deux
+// directives identiques. Vérifié le 2026-08-26 sur le rendu de production locale. On
+// garde donc le doublon inoffensif.
 export const metadata: Metadata = {
   title: "Page introuvable",
   robots: { index: false, follow: true },

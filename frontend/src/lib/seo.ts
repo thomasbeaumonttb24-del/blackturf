@@ -1,7 +1,55 @@
-// Server-side SEO data fetchers (no axios, no window). Used by sitemap.ts + server page
-// wrappers (programme, course). Plain fetch + ISR cache so crawlers get real HTML without
-// hammering the API. Best-effort: any failure returns empty so a page never 500s on SEO data.
+// Server-side SEO data fetchers (no axios, no window). Used by the sitemap routes + server
+// page wrappers (programme, course). Plain fetch + ISR cache so crawlers get real HTML
+// without hammering the API. Best-effort: any failure returns empty so a page never 500s
+// on SEO data.
+import type { Metadata } from "next";
+
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+
+/* ───────────────────────────── Open Graph ─────────────────────────────
+ * Next ne FUSIONNE pas `openGraph` : dès qu'une page déclare cet objet, il REMPLACE
+ * entièrement celui du layout racine — y compris `images`. Toutes les pages qui
+ * posaient leur propre titre OG perdaient donc l'illustration, et un partage de fiche
+ * course, de programme ou d'article ne montrait aucune vignette. Constaté sur les huit
+ * gabarits du site le 2026-08-26 : seule l'accueil, qui n'écrase rien, gardait la sienne.
+ *
+ * `ogBase()` reconstruit le socle commun (image + site + locale) pour que chaque page
+ * n'ait plus qu'à poser son titre et son URL. Une page qui a sa propre illustration
+ * passe simplement `image`.
+ */
+export const OG_IMAGE = { url: "/og-image.jpg", width: 1200, height: 630, alt: "BlackTurf" };
+
+export function ogBase(o: {
+  title: string;
+  description: string;
+  url: string;
+  type?: "website" | "article";
+  image?: { url: string; width: number; height: number; alt: string };
+}): NonNullable<Metadata["openGraph"]> {
+  return {
+    title: o.title,
+    description: o.description,
+    url: o.url.startsWith("http") ? o.url : `https://blackturf.fr${o.url}`,
+    siteName: "BlackTurf",
+    locale: "fr_FR",
+    type: o.type ?? "website",
+    images: [o.image ?? OG_IMAGE],
+  };
+}
+
+/** Carte Twitter alignée sur l'Open Graph — même remarque : `twitter` est écrasé, pas fusionné. */
+export function twitterBase(o: {
+  title: string;
+  description: string;
+  image?: string;
+}): NonNullable<Metadata["twitter"]> {
+  return {
+    card: "summary_large_image",
+    title: o.title,
+    description: o.description,
+    images: [o.image ?? OG_IMAGE.url],
+  };
+}
 
 export interface SeoCourse {
   course_id: string;
@@ -127,25 +175,95 @@ export function jourParis(offsetJours = 0, base?: Date): string {
   }).format(d); // fr-CA → "YYYY-MM-DD"
 }
 
+/* En français le premier jour du mois s'écrit « 1er », jamais « 1 » : `Intl` ne connaît
+ * pas cette règle et sortait « Résultats PMU du 1 mai ». Corrigé ici une fois pour
+ * toutes, donc dans les titres, les pages et les visuels qui partagent ces helpers. */
+function premierDuMois(rendu: string): string {
+  return rendu.replace(/(^|\s)1(\s\p{L})/u, "$11er$2");
+}
+
 /** "2026-08-23" → "dimanche 23 août 2026" */
 export function jourLong(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
-  return new Intl.DateTimeFormat("fr-FR", {
-    timeZone: "Europe/Paris",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(d);
+  return premierDuMois(
+    new Intl.DateTimeFormat("fr-FR", {
+      timeZone: "Europe/Paris",
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(d),
+  );
 }
 
 /** "2026-08-23" → "23 août" (titres courts, sous la limite des 60 caractères) */
 export function jourCourt(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
+  return premierDuMois(
+    new Intl.DateTimeFormat("fr-FR", {
+      timeZone: "Europe/Paris",
+      day: "numeric",
+      month: "long",
+    }).format(d),
+  );
+}
+
+/** "2026-08-23" → "23 août 2026". Porte l'année : un titre de page d'archive doit
+ *  rester unique d'une année sur l'autre, sinon deux journées différentes portent le
+ *  même `<title>` et Google en choisit une seule. */
+export function jourCourtAnnee(iso: string): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  return premierDuMois(
+    new Intl.DateTimeFormat("fr-FR", {
+      timeZone: "Europe/Paris",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(d),
+  );
+}
+
+/* Première journée réellement couverte par la base (vérifié le 2026-08-26 : le
+ * 2025-08-31 renvoie zéro course, le 2025-09-01 en renvoie 45). Sert de borne unique à
+ * la validation des URLs d'archives ET à la découpe mensuelle des sitemaps : les deux
+ * doivent s'accorder, sinon le sitemap annonce des journées que la page refuse en 404. */
+export const PREMIER_JOUR_ARCHIVE = "2025-09-01";
+
+/** Liste des mois "AAAA-MM" du plus récent au plus ancien, du mois courant à celui de
+ *  `PREMIER_JOUR_ARCHIVE`. */
+export function moisArchives(aujourdhui = jourParis()): string[] {
+  const out: string[] = [];
+  const debut = PREMIER_JOUR_ARCHIVE.slice(0, 7);
+  let [y, m] = aujourdhui.slice(0, 7).split("-").map(Number);
+  for (let garde = 0; garde < 600; garde++) {
+    const ym = `${y}-${String(m).padStart(2, "0")}`;
+    out.push(ym);
+    if (ym <= debut) break;
+    m -= 1;
+    if (m === 0) { m = 12; y -= 1; }
+  }
+  return out;
+}
+
+/** Premier et dernier jour d'un mois "AAAA-MM", bornés à la fenêtre réellement couverte. */
+export function bornesDuMois(ym: string, aujourdhui = jourParis()): { debut: string; fin: string } {
+  const [y, m] = ym.split("-").map(Number);
+  const dernier = new Date(Date.UTC(y, m, 0)).getUTCDate(); // jour 0 du mois suivant
+  const debut = `${ym}-01`;
+  const fin = `${ym}-${String(dernier).padStart(2, "0")}`;
+  return {
+    debut: debut < PREMIER_JOUR_ARCHIVE ? PREMIER_JOUR_ARCHIVE : debut,
+    fin: fin > aujourdhui ? aujourdhui : fin,
+  };
+}
+
+/** "2026-08" → "août 2026" (regroupement par mois des archives) */
+export function moisLong(ym: string): string {
+  const d = new Date(`${ym}-01T12:00:00Z`);
   return new Intl.DateTimeFormat("fr-FR", {
     timeZone: "Europe/Paris",
-    day: "numeric",
     month: "long",
+    year: "numeric",
   }).format(d);
 }
 
@@ -256,6 +374,95 @@ export async function fetchValueBetsCompteur(
     });
     if (!res.ok) return null;
     return (await res.json()) as { count: number; niveau_min: number };
+  } catch {
+    return null;
+  }
+}
+
+/* ───────────────── Index d'exploration (sitemaps + page d'archives) ─────────────────
+ * Voir `/api/v1/seo/index` côté backend pour le pourquoi : sans ces deux appels, les
+ * fiches course et les journées de résultats passées n'ont aucun chemin d'accès.
+ */
+export interface SeoIndexCourse {
+  id: string;
+  jour: string; // AAAA-MM-JJ
+  termine: boolean;
+  hippodrome: string;
+}
+
+/** "2026-08-26" + n jours → "2026-08-xx" (arithmétique en UTC midi, sans dérive de fuseau). */
+export function decalerJours(jour: string, n: number): string {
+  const d = new Date(`${jour}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Courses courues entre deux dates (bornes incluses). Max 62 jours par appel. */
+export async function fetchSeoIndex(
+  debut: string,
+  fin: string,
+  revalidate = 3600,
+): Promise<{ courses: SeoIndexCourse[]; jours: string[] }> {
+  try {
+    const res = await fetch(`${API}/seo/index?debut=${debut}&fin=${fin}`, {
+      next: { revalidate },
+    });
+    if (!res.ok) return { courses: [], jours: [] };
+    const d = (await res.json()) as { courses?: SeoIndexCourse[]; jours?: string[] };
+    return { courses: d.courses ?? [], jours: d.jours ?? [] };
+  } catch {
+    return { courses: [], jours: [] };
+  }
+}
+
+/** Toutes les journées portant une arrivée, de la plus récente à la plus ancienne. */
+export async function fetchJoursResultats(): Promise<Array<{ jour: string; nb_courses: number }>> {
+  try {
+    const res = await fetch(`${API}/seo/jours-resultats`, { next: { revalidate: 1800 } });
+    if (!res.ok) return [];
+    const d = (await res.json()) as { jours?: Array<{ jour: string; nb_courses: number }> };
+    return d.jours ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/* ───────────────────────── Track record (rendu serveur) ───────────────────────── */
+export interface SeoTrackRecord {
+  global: {
+    accuracy_top1: number;
+    accuracy_top3: number;
+    brier_moyen: number | null;
+    nb_courses_analysees: number;
+    nb_courses_rejouables: number;
+    mesure_depuis: string | null;
+    hasard_top1: number;
+    hasard_top3: number;
+    nb_partants_moyen: number;
+    favori_win_rate: number;
+    favori_place_rate: number;
+    nb_favoris_evalues: number;
+    favori_roi: number | null;
+    favori_mise_totale: number | null;
+    favori_gain_total: number | null;
+    favori_net: number | null;
+  };
+  by_discipline?: Array<{
+    discipline: string;
+    nb_courses: number;
+    accuracy_top1: number;
+    accuracy_top3: number;
+  }>;
+  updated_at?: string;
+}
+
+/** Chiffres du palmarès, servis par un cache « stale-while-revalidate » côté API
+ *  (128 ms mesurés en prod). Best-effort : la page reste valable sans eux. */
+export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
+  try {
+    const res = await fetch(`${API}/stats/track-record`, { next: { revalidate: 900 } });
+    if (!res.ok) return null;
+    return (await res.json()) as SeoTrackRecord;
   } catch {
     return null;
   }

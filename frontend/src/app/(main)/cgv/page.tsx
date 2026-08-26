@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: "Conditions Générales de Vente",
@@ -7,7 +8,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/cgv" },
   // Sans og:title propre, la page héritait de celui de la racine — deux sources de
   // titre contradictoires, que Google ne sait pas départager.
-  openGraph: { title: "Conditions Générales de Vente — BlackTurf", url: "https://blackturf.fr/cgv" },
+  openGraph: { title: "Conditions Générales de Vente — BlackTurf", url: "https://blackturf.fr/cgv", images: [OG_IMAGE] },
 };
 
 export default function CGVPage() {

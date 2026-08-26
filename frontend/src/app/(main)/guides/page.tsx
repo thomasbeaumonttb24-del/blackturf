@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import { Ticket, Music, Target, BookOpen } from "lucide-react";
 import { SeoHero, Container, LinkCard, Callout, Chip } from "@/components/seo/kit";
 
@@ -11,6 +12,7 @@ export const metadata: Metadata = {
     title: "Guides paris hippiques PMU",
     description: "Apprenez à parier au PMU : types de paris, lecture de la musique, paris de valeur.",
     url: "https://blackturf.fr/guides",
+    images: [OG_IMAGE],
   },
 };
 

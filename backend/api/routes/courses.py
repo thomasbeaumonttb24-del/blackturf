@@ -489,6 +489,141 @@ def _build_analyse(feat: Optional[dict], sj, se) -> Optional[dict]:
 # ─────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────
+# Borne d'appel de /seo/index : deux mois par requête. Le sitemap découpé en mois
+# n'en demande jamais plus, et un robot qui fabriquerait `debut=2000-01-01` ne peut
+# pas déclencher un balayage de toute la table.
+SEO_INDEX_MAX_JOURS = 62
+
+
+@router.get("/seo/index")
+async def get_seo_index(
+    debut: date = Query(...),
+    fin: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Index d'exploration : identifiants des courses réellement courues sur une
+    période, et journées qui portent au moins une arrivée.
+
+    Existe pour une seule raison, mesurée le 2026-08-26 : les fiches course et les
+    journées de résultats passées répondaient 200 et « index, follow », mais aucune
+    n'était atteignable. Le sitemap ne listait que la veille et le jour même, et le
+    seul chemin vers une archive était la chaîne « journée précédente », de proche en
+    proche — soit près de 180 clics pour atteindre le mois de mars. Google n'explore
+    pas à cette profondeur : tout l'historique du site était hors d'atteinte.
+
+    La réponse est volontairement maigre — identifiant, jour, état — parce qu'elle ne
+    sert qu'à FABRIQUER DES URLS : un sitemap mensuel et une page d'archives. Passer
+    par `/programme` jour par jour aurait coûté un appel par journée et rapatrié les
+    partants, les cotes et le pénétromètre pour n'en garder que l'identifiant.
+    """
+    import json
+
+    if fin < debut:
+        raise HTTPException(400, "Intervalle invalide : `fin` précède `debut`.")
+    if (fin - debut).days + 1 > SEO_INDEX_MAX_JOURS:
+        raise HTTPException(400, f"Intervalle trop large (max {SEO_INDEX_MAX_JOURS} jours).")
+
+    cache_key = f"seo:index:{debut.isoformat()}:{fin.isoformat()}"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        log.debug("courses.seo_index_cache_read_failed", error=str(e))
+
+    q = (
+        select(
+            Course.course_id,
+            func.date(Course.date_heure).label("jour"),
+            Course.statut,
+            Course.hippodrome_nom,
+        )
+        .where(func.date(Course.date_heure) >= debut)
+        .where(func.date(Course.date_heure) <= fin)
+        # Mêmes exclusions que le programme : une course annulée par le PMU ou restée
+        # sans résultat n'a jamais eu lieu, sa fiche n'a rien à faire dans un sitemap.
+        .where(Course.statut.notin_(STATUTS_NON_COURUES))
+        .order_by(Course.date_heure)
+    )
+    rows = (await db.execute(q)).all()
+
+    # `hippodrome` sert aux fiches d'hippodrome, qui listent les dernières réunions
+    # courues chez elles ; le sitemap, lui, n'en fait rien. Le champ est court et la
+    # réponse est mise en cache : la dupliquer par usage coûterait plus qu'il ne rapporte.
+    courses = [
+        {
+            "id": r.course_id,
+            "jour": str(r.jour),
+            "termine": r.statut == "termine",
+            "hippodrome": r.hippodrome_nom,
+        }
+        for r in rows
+    ]
+    jours = sorted({c["jour"] for c in courses if c["termine"]})
+    result = {
+        "debut": debut.isoformat(),
+        "fin": fin.isoformat(),
+        "courses": courses,
+        "jours": jours,
+    }
+
+    # Une période entièrement passée est figée : cache long. Une période qui touche au
+    # jour courant continue de recevoir des courses et des arrivées : cache court.
+    try:
+        redis = await get_redis()
+        ttl = 300 if fin >= jour_courses() else 21600  # 5 min vs 6 h
+        await redis.setex(cache_key, ttl, json.dumps(result))
+    except Exception as e:
+        log.debug("courses.seo_index_cache_write_failed", error=str(e))
+
+    return result
+
+
+@router.get("/seo/jours-resultats")
+async def get_seo_jours_resultats(
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Toutes les journées portant au moins une arrivée, plus leur nombre de courses.
+
+    Alimente la page `/resultats/archives`, qui donne à chaque journée passée un lien
+    à deux clics de l'accueil. Une seule requête agrégée : la page listerait sinon
+    quelque cent quatre-vingts journées en appelant `/programme` pour chacune.
+    """
+    import json
+
+    cache_key = "seo:jours-resultats"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        log.debug("courses.seo_jours_cache_read_failed", error=str(e))
+
+    q = (
+        select(
+            func.date(Course.date_heure).label("jour"),
+            func.count().label("nb"),
+        )
+        .where(Course.statut == "termine")
+        .group_by(func.date(Course.date_heure))
+        .order_by(func.date(Course.date_heure).desc())
+    )
+    rows = (await db.execute(q)).all()
+    result = {"jours": [{"jour": str(r.jour), "nb_courses": int(r.nb)} for r in rows]}
+
+    try:
+        redis = await get_redis()
+        await redis.setex(cache_key, 1800, json.dumps(result))  # 30 min
+    except Exception as e:
+        log.debug("courses.seo_jours_cache_write_failed", error=str(e))
+
+    return result
+
+
 @router.get("/programme/apercu")
 async def get_programme_apercu(
     jour: Optional[date] = Query(default=None),

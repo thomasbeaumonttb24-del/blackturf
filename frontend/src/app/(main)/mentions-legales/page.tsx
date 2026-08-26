@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: "Mentions légales",
@@ -7,7 +8,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/mentions-legales" },
   // Sans og:title propre, la page héritait de celui de la racine — deux sources de
   // titre contradictoires, que Google ne sait pas départager.
-  openGraph: { title: "Mentions légales — BlackTurf", url: "https://blackturf.fr/mentions-legales" },
+  openGraph: { title: "Mentions légales — BlackTurf", url: "https://blackturf.fr/mentions-legales", images: [OG_IMAGE] },
 };
 
 export default function MentionsLegalesPage() {

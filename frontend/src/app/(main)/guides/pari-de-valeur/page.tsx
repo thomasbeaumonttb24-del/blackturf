@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import Link from "next/link";
 import { Target, TrendingUp } from "lucide-react";
 import { SeoHero, Container, Section, Callout, Chip } from "@/components/seo/kit";
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
     description: "Probabilité vs cote, espérance de gain, et pourquoi la valeur bat le favori sur la durée.",
     url: "https://blackturf.fr/guides/pari-de-valeur",
     type: "article",
+    images: [OG_IMAGE],
   },
 };
 

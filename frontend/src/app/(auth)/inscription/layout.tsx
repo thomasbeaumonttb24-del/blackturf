@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 
 // La page elle-même est un composant client (formulaire) : elle ne peut pas exporter de
 // `metadata`. Sans ce layout, /inscription héritait du titre et de la description de
@@ -14,6 +15,7 @@ export const metadata: Metadata = {
     description:
       "Programme PMU du jour, prédictions de l'algorithme et plan de mise sur votre budget. 7 jours d'essai offerts.",
     url: "https://blackturf.fr/inscription",
+    images: [OG_IMAGE],
   },
 };
 

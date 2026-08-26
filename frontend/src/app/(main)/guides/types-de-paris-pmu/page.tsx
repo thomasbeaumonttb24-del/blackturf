@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import { Ticket } from "lucide-react";
 import { SeoHero, Container, Section, DefCard, Callout, Chip } from "@/components/seo/kit";
 
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
     description: "Conditions de gain et places payées de chaque pari PMU.",
     url: "https://blackturf.fr/guides/types-de-paris-pmu",
     type: "article",
+    images: [OG_IMAGE],
   },
 };
 

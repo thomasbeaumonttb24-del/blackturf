@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import Link from "next/link";
 import { Clock, ArrowRight, Newspaper } from "lucide-react";
 import { ARTICLES, formatDateFr } from "@/lib/blog";
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
     title: "Blog BlackTurf — paris hippiques & analyse PMU",
     description: "Méthodes, stratégie et data pour mieux parier au PMU. Articles clairs et sans bullshit.",
     url: "https://blackturf.fr/blog",
+    images: [OG_IMAGE],
   },
 };
 
@@ -30,6 +32,9 @@ export default function BlogIndex() {
       description: a.description,
       datePublished: a.date,
       dateModified: a.updated,
+      // Même auteur que sur la fiche de l'article : deux déclarations divergentes pour
+      // un même contenu se contredisent au lieu de se renforcer.
+      author: { "@type": "Person", name: "Thomas Beaumont" },
       url: `https://blackturf.fr/blog/${a.slug}`,
     })),
   };

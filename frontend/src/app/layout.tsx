@@ -69,11 +69,16 @@ export const metadata: Metadata = {
       "Programme PMU du jour, probabilité par cheval et plan de mise sur votre budget. Pronostics notés aux rapports réels.",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "BlackTurf" }],
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "BlackTurf — pronostics PMU notés aux rapports réels",
-    description: "Programme PMU du jour, probabilité par cheval, plan de mise sur votre budget.",
-  },
+  // Volontairement réduite à la seule forme de carte.
+  //
+  // Un `twitter` complet posé ici était HÉRITÉ par toutes les pages qui ne le
+  // redéfinissaient pas — c'est-à-dire presque toutes. Partager une fiche course ou une
+  // journée de résultats affichait donc « BlackTurf — pronostics PMU notés aux rapports
+  // réels », le titre de l'accueil, quelle que soit la page. En ne déclarant que `card`,
+  // les réseaux retombent sur les balises Open Graph de la page elle-même, qui sont
+  // exactes : c'est le comportement de repli prévu par leur spécification, et cela évite
+  // de maintenir deux fois le même texte.
+  twitter: { card: "summary_large_image" },
   robots: { index: true, follow: true },
   // Pas de canonical global : `alternates` est HÉRITÉ par toute page qui ne le redéfinit
   // pas. Un canonical "/" posé ici faisait déclarer à /programme et à chaque /courses/<id>
@@ -82,14 +87,40 @@ export const metadata: Metadata = {
 };
 
 // Données structurées globales (organisation + site) → éligibilité rich results / sitelinks.
+//
+// L'entité était réduite au nom, à l'URL et au logo, alors que /mentions-legales publie
+// déjà l'éditeur nommé, son SIREN, son adresse et son contact. Sur un sujet d'argent, ces
+// éléments sont précisément ce qui permet à Google de rattacher le site à une entité
+// réelle et identifiable plutôt qu'à une marque anonyme. Tout ce qui est déclaré ici est
+// visible sur la page des mentions légales : rien n'est balisé qui ne soit publié.
 const orgJsonLd = {
   "@context": "https://schema.org",
   "@type": "Organization",
   name: "BlackTurf",
+  legalName: "Thomas Beaumont (entreprise individuelle)",
   url: "https://blackturf.fr",
   logo: "https://blackturf.fr/logo.png",
+  image: "https://blackturf.fr/og-image.jpg",
   description:
     "Conseiller IA en paris hippiques PMU : plan de mise personnalisé et paris de valeur, réentraîné après chaque course.",
+  foundingDate: "2025-04-01",
+  founder: { "@type": "Person", name: "Thomas Beaumont" },
+  address: {
+    "@type": "PostalAddress",
+    streetAddress: "10 rue Alix d'Unienville",
+    postalCode: "33100",
+    addressLocality: "Bordeaux",
+    addressCountry: "FR",
+  },
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "customer support",
+    email: "contact@blackturf.fr",
+    availableLanguage: ["fr"],
+  },
+  // Identifiant d'entreprise français : c'est la référence vérifiable auprès d'un tiers.
+  identifier: { "@type": "PropertyValue", propertyID: "SIREN", value: "907548184" },
+  areaServed: "FR",
 };
 const siteJsonLd = {
   "@context": "https://schema.org",

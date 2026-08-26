@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import Link from "next/link";
 import { Container, SeoHero, Section } from "@/components/seo/kit";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
     title: "La lettre BlackTurf",
     description: "Le bilan chiffré de la semaine, gains comme pertes. Un envoi par lundi.",
     url: "https://blackturf.fr/newsletter",
+    images: [OG_IMAGE],
   },
 };
 

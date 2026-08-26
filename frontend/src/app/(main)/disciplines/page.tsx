@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import Link from "next/link";
 import { ArrowRight, Layers } from "lucide-react";
 import { DISCIPLINES } from "@/lib/disciplines";
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
     title: "Disciplines hippiques : trot, plat, obstacle",
     description: "Comprendre le trot, le plat et l'obstacle, et le programme du jour par discipline.",
     url: "https://blackturf.fr/disciplines",
+    images: [OG_IMAGE],
   },
 };
 

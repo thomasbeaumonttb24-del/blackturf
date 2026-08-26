@@ -2472,6 +2472,27 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
+/** Arrivée officielle + rapports PMU, tels que les renvoie `/courses/{id}/resultats`. */
+export type ResultatsData = {
+  classement: Array<{
+    numero: number;
+    nom: string;
+    position: number | null;
+    temps: number | null;
+    reduction_km: number | null;
+    incident?: string | null;
+    disqualifie?: boolean;
+  }>;
+  rapports: Record<string, number> | null;
+  rapports_detail: Record<
+    string,
+    Array<{ combinaison: string | null; rapport: number; libelle?: string | null }>
+  > | null;
+  temps_gagnant: string | null;
+  commentaire: string | null;
+  duree_course: number | null;
+};
+
 /**
  * `initialCourse` vient du composant serveur (page.tsx). Il fait que le PREMIER rendu —
  * celui qui part dans le HTML, donc celui que lit Googlebot — contient déjà le nom de la
@@ -2479,7 +2500,22 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
  * useEffect : le robot ne recevait qu'un squelette, et aucune des ~250 fiches course
  * publiées chaque jour ne pouvait ranker.
  */
-export default function CoursePage({ initialCourse = null }: { initialCourse?: CourseData | null }) {
+export default function CoursePage({
+  initialCourse = null,
+  initialResultats = null,
+}: {
+  initialCourse?: CourseData | null;
+  /**
+   * Arrivée et rapports déjà chargés côté serveur, quand la course est terminée.
+   *
+   * Sans eux, le HTML servi affichait « Arrivée officielle en cours de publication… »
+   * — l'état de chargement du composant — pendant que le bloc rendu côté serveur, plus
+   * bas dans la même page, annonçait l'arrivée complète. Une page qui se contredit à
+   * deux endroits, pour un robot comme pour un lecteur sans JavaScript. Les passer ici
+   * supprime la contradiction et économise un aller-retour à chaque ouverture de fiche.
+   */
+  initialResultats?: ResultatsData | null;
+}) {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [course, setCourse] = useState<CourseData | null>(initialCourse);
@@ -2568,14 +2604,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
     };
   } | null>(null);
 
-  const [resultats, setResultats] = useState<{
-    classement: Array<{ numero: number; nom: string; position: number | null; temps: number | null; reduction_km: number | null; incident?: string | null; disqualifie?: boolean }>;
-    rapports: Record<string, number> | null;
-    rapports_detail: Record<string, Array<{ combinaison: string | null; rapport: number; libelle?: string | null }>> | null;
-    temps_gagnant: string | null;
-    commentaire: string | null;
-    duree_course: number | null;
-  } | null>(null);
+  const [resultats, setResultats] = useState<ResultatsData | null>(initialResultats);
 
   const { partants: liveCotes, connected: wsConnected } = useCotesLive(
     id,

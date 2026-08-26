@@ -1,13 +1,59 @@
 import type { Metadata } from "next";
+import { fetchTrackRecord, ogBase, twitterBase } from "@/lib/seo";
+import { PalmaresResume } from "@/components/seo/PalmaresResume";
 
-// Pages sans contenu indexable (gated / shell client / recherche interne) : noindex pour
-// éviter le "Crawled - currently not indexed" / thin content dans Search Console.
-// follow:true → le crawler suit quand même les liens sortants. (À retirer le jour où la
-// page passe en SSR avec contenu réel — ex. statistiques / track-record = potentiel SEO.)
+/**
+ * `/track-record` — palmarès mesuré de l'algorithme.
+ *
+ * Cette page était en `noindex` et, faute de métadonnées propres, portait le titre et la
+ * description de la page d'accueil. C'était l'actif le plus solide du site rendu
+ * invisible : elle publie le taux de réussite mesuré sur près de quatre mille courses,
+ * la comparaison avec un tirage au sort, ET le rendement réel du favori de l'algorithme,
+ * négatif. Un site d'argent qui publie ses pertes est exactement ce que Google cherche à
+ * distinguer d'un site qui promet des gains.
+ *
+ * Le `noindex` était justifié par une raison technique réelle : la page est un composant
+ * client intégral, dont le HTML servi ne contenait qu'un squelette. Un résumé rendu côté
+ * serveur y remédie — il porte les chiffres en toutes lettres, reste lisible sans
+ * JavaScript, et conserve du texte utile même si l'API ne répond pas.
+ */
+export const revalidate = 900;
+
+const TITLE = "Palmarès BlackTurf — résultats mesurés de l'algorithme";
+const DESCRIPTION =
+  "Taux de réussite de l'algorithme mesuré course après course, comparé au hasard et au marché, et le rendement réel du favori — pertes comprises.";
+
 export const metadata: Metadata = {
-  robots: { index: false, follow: true },
+  title: TITLE,
+  description: DESCRIPTION,
+  alternates: { canonical: "/track-record" },
+  openGraph: ogBase({ title: TITLE, description: DESCRIPTION, url: "/track-record" }),
+  twitter: twitterBase({ title: TITLE, description: DESCRIPTION }),
+  robots: { index: true, follow: true },
 };
 
-export default function NoIndexLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+const breadcrumbJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Accueil", item: "https://blackturf.fr" },
+    { "@type": "ListItem", position: 2, name: "Palmarès", item: "https://blackturf.fr/track-record" },
+  ],
+};
+
+export default async function TrackRecordLayout({ children }: { children: React.ReactNode }) {
+  const tr = await fetchTrackRecord();
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+      {children}
+      {/* Sous l'application, la même chose en toutes lettres : lisible sans JavaScript,
+          imprimable, et explicite pour un moteur de recherche. Même parti pris que la
+          doublure de la fiche course. */}
+      <PalmaresResume tr={tr} />
+    </>
+  );
 }

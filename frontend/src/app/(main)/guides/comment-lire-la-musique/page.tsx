@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import { Music } from "lucide-react";
 import { SeoHero, Container, Section, Callout, Chip } from "@/components/seo/kit";
 
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
     description: "Décrypter la musique : chiffres, lettres de discipline et abréviations.",
     url: "https://blackturf.fr/guides/comment-lire-la-musique",
     type: "article",
+    images: [OG_IMAGE],
   },
 };
 

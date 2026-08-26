@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: "Conditions Générales d’Utilisation",
@@ -6,7 +7,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/cgu" },
   // Sans og:title propre, la page héritait de celui de la racine — deux sources de
   // titre contradictoires, que Google ne sait pas départager.
-  openGraph: { title: "Conditions Générales d’Utilisation — BlackTurf", url: "https://blackturf.fr/cgu" },
+  openGraph: { title: "Conditions Générales d’Utilisation — BlackTurf", url: "https://blackturf.fr/cgu", images: [OG_IMAGE] },
 };
 
 export default function CguPage() {

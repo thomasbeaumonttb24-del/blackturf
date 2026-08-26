@@ -622,9 +622,28 @@ export default function ProgrammeClient({
                 </button>
               )}
             </div>
+
+            {/* Une journée passée consultée depuis le sélecteur n'a pas d'adresse à elle :
+                l'URL reste /programme. Sa page permanente, c'est celle de ses arrivées —
+                elle porte les mêmes courses, plus les rapports, et elle est indexable. */}
+            {format(selectedDate, "yyyy-MM-dd") < jourParis() && (
+              <a
+                href={`/resultats/${format(selectedDate, "yyyy-MM-dd")}`}
+                className="mb-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12.5px] font-medium text-amber-800 transition-colors hover:border-amber-400"
+              >
+                Arrivées et rapports du {format(selectedDate, "d MMMM yyyy", { locale: fr })} →
+              </a>
+            )}
+
+            {/* Le titre de la page ne disait que la date — « Mercredi 26 août 2026 » —
+                sans nommer ce qu'on y trouve. Le `<title>` annonçait bien « Programme
+                PMU », mais le `h1`, qui est le titre du CONTENU, ne le reprenait nulle
+                part : ni pour un lecteur arrivant par un lien, ni pour un moteur qui y
+                cherche le sujet de la page. Le dégradé porte désormais l'intitulé, la
+                date reste en gris à sa suite. */}
             <h1 className="text-[27px] sm:text-[38px] font-bold leading-[1.08] sm:leading-[1.04] tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
-              <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>{dayName}</span>
-              <span className="text-gray-800"> {restDate}</span>
+              <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>Programme PMU</span>
+              <span className="text-gray-800"> — {dayName.toLowerCase()} {restDate}</span>
             </h1>
 
             {programme && programme.nb_courses > 0 && (

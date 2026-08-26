@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import Link from "next/link";
 import { MapPin, Trophy, ArrowRight } from "lucide-react";
 import { HIPPODROMES } from "@/lib/hippodromes";
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
     title: "Hippodromes français — courses PMU",
     description: "Vincennes, ParisLongchamp, Chantilly, Deauville, Auteuil… et le programme du jour.",
     url: "https://blackturf.fr/hippodromes",
+    images: [OG_IMAGE],
   },
 };
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo";
 import Link from "next/link";
 import { Check, X, Zap, ChevronRight, Calculator } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ export const metadata: Metadata = {
     title: "Tarifs BlackTurf — Gratuit, Standard, Expert",
     description: "Prédictions IA, paris de valeur et calculateur de mise. Sans engagement.",
     url: "https://blackturf.fr/tarifs",
+    images: [OG_IMAGE],
   },
 };
 

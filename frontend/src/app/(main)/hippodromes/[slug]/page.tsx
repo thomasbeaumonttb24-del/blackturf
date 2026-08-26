@@ -3,7 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MapPin, Trophy, ChevronRight, CalendarDays } from "lucide-react";
 import { HIPPODROMES, getHippodrome, matchHippodrome } from "@/lib/hippodromes";
-import { fetchProgramme, disciplineLabel } from "@/lib/seo";
+import {
+  fetchProgramme,
+  fetchSeoIndex,
+  decalerJours,
+  jourCourtAnnee,
+  disciplineLabel,
+  OG_IMAGE,
+} from "@/lib/seo";
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
 
 export const dynamicParams = false;
@@ -26,7 +33,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     title,
     description,
     alternates: { canonical: `/hippodromes/${h.slug}` },
-    openGraph: { title, description, url: `https://blackturf.fr/hippodromes/${h.slug}` },
+    openGraph: { title, description, url: `https://blackturf.fr/hippodromes/${h.slug}`, images: [OG_IMAGE] },
   };
 }
 
@@ -39,10 +46,32 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
   const h = getHippodrome(slug);
   if (!h) notFound();
 
-  const prog = await fetchProgramme(todayParis());
+  const aujourdhui = todayParis();
+  const prog = await fetchProgramme(aujourdhui);
   const todayCourses = (prog?.reunions ?? [])
     .filter((r) => matchHippodrome(r.hippodrome, h))
     .flatMap((r) => r.courses ?? []);
+
+  /* Les trente derniers jours de courses sur cet hippodrome.
+   *
+   * La page ne montrait que le programme du jour : un hippodrome qui ne court pas
+   * aujourd'hui — le cas de la plupart d'entre eux la plupart du temps — affichait une
+   * fiche vide, dont le seul contenu propre était son paragraphe d'introduction. Une page
+   * qui n'a rien à dire les trois quarts de l'année ne se maintient pas dans l'index, et
+   * ne rend service à personne.
+   *
+   * Les dernières réunions courues y remédient : le contenu est réel, daté, et donne aux
+   * fiches course de cet hippodrome un second chemin d'exploration, latéral cette fois. */
+  const debutFenetre = decalerJours(aujourdhui, -30);
+  const { courses: recentes } = await fetchSeoIndex(debutFenetre, aujourdhui, 3600);
+  const parJour = new Map<string, number>();
+  for (const c of recentes) {
+    if (!c.termine || !matchHippodrome(c.hippodrome, h)) continue;
+    parJour.set(c.jour, (parJour.get(c.jour) ?? 0) + 1);
+  }
+  const dernieresReunions = [...parJour.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 12);
 
   const placeLd = {
     "@context": "https://schema.org",
@@ -112,6 +141,40 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
             </div>
           )}
         </Section>
+
+        {dernieresReunions.length > 0 && (
+          <Section title={`Dernières réunions à ${h.city}`}>
+            <p className="text-sm leading-relaxed text-brand-charcoal">
+              Les arrivées et les rapports PMU des journées récemment courues sur cet
+              hippodrome. Une arrivée publiée ne change plus : ces pages restent exactes.
+            </p>
+            <ul className="mt-4 flex flex-wrap gap-2">
+              {dernieresReunions.map(([jour, nb]) => (
+                <li key={jour}>
+                  <Link
+                    href={jour === aujourdhui ? "/resultats" : `/resultats/${jour}`}
+                    className="inline-flex items-baseline gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm transition-colors hover:border-brand-gold-deep hover:text-brand-gold-dark"
+                  >
+                    <span className="font-display font-semibold text-brand-dark">
+                      {jourCourtAnnee(jour)}
+                    </span>
+                    <span className="text-[11px] text-brand-charcoal">
+                      {nb} course{nb > 1 ? "s" : ""}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+              <li>
+                <Link
+                  href="/resultats/archives"
+                  className="inline-block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-brand-gold-dark transition-colors hover:border-brand-gold-deep"
+                >
+                  Toutes les archives →
+                </Link>
+              </li>
+            </ul>
+          </Section>
+        )}
 
         <Section title={`Mieux parier sur les courses de ${h.city}`}>
           <p className="text-sm leading-relaxed text-brand-charcoal">

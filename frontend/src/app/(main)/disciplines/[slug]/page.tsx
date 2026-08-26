@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Check, ChevronRight, CalendarDays } from "lucide-react";
 import { DISCIPLINES, getDiscipline, matchDiscipline } from "@/lib/disciplines";
-import { fetchProgramme, disciplineLabel, titleCase } from "@/lib/seo";
+import { fetchProgramme, disciplineLabel, titleCase, OG_IMAGE } from "@/lib/seo";
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
 
 export const dynamicParams = false;
@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     // n'ajoute plus de queue promotionnelle qui serait coupée de toute façon.
     description: d.intro.slice(0, 155),
     alternates: { canonical: `/disciplines/${d.slug}` },
-    openGraph: { title: `${d.name}`, description: d.intro, url: `https://blackturf.fr/disciplines/${d.slug}` },
+    openGraph: { title: `${d.name}`, description: d.intro, url: `https://blackturf.fr/disciplines/${d.slug}`, images: [OG_IMAGE] },
   };
 }
 

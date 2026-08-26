@@ -8,8 +8,12 @@ import {
   heureParis,
   jourLong,
   jourCourt,
+  jourCourtAnnee,
+  jourParis,
   jourDeCourseId,
   codeReunionCourse,
+  ogBase,
+  twitterBase,
   type SeoCourseDetail,
   type SeoResultats,
 } from "@/lib/seo";
@@ -19,6 +23,26 @@ import CourseClient from "./CourseClient";
 // ISR 2 min : les fiches à venir bougent (cotes, non-partants), les fiches terminées sont
 // figées. Un crawl ne déclenche donc au pire qu'un appel API toutes les deux minutes.
 export const revalidate = 120;
+
+/**
+ * Tableau vide, et c'est délibéré.
+ *
+ * Sans `generateStaticParams`, Next traite une route dynamique comme rendue à la demande
+ * et n'en met JAMAIS le HTML en cache : chaque requête repassait par le rendu complet et
+ * la réponse partait en `Cache-Control: private, no-cache, no-store`. Le `revalidate`
+ * ci-dessus ne portait que sur les appels `fetch`, pas sur la page. Mesuré le 2026-08-26
+ * en production : 1,18 s pour une fiche froide, contre 0,11 s sur les pages capables
+ * d'ISR — sur un site qui publie près de dix-sept mille fiches, dont la quasi-totalité
+ * est « froide » quand un robot s'y présente.
+ *
+ * La documentation de Next est explicite : il faut retourner un tableau vide pour que les
+ * chemins soient régénérables à l'exécution. Vide, parce qu'il n'est pas question de
+ * pré-générer dix-sept mille pages à chaque build : chaque fiche est rendue à sa première
+ * demande, puis servie depuis le cache.
+ */
+export async function generateStaticParams() {
+  return [];
+}
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -43,11 +67,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const disc = disciplineLabel(c.discipline);
   const termine = c.statut === "termine";
 
-  // Le titre reprend les formulations réellement tapées : « partants R2C1 », « arrivée et
-  // rapports », le nom du prix, l'hippodrome. Sans dépasser ~60 caractères utiles.
-  const title = termine
-    ? `${code} ${hippo} — arrivée, rapports et partants`
-    : `${code} ${hippo} — partants, cotes et pronostic`;
+  const title = titreCourse(c, termine);
 
   // Le nom d'un prix peut être long : on garde la date courte et une queue brève pour
   // rester sous les ~155-160 caractères après lesquels Google tronque l'extrait.
@@ -61,13 +81,57 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title,
     description,
     alternates: { canonical: `/courses/${c.course_id}` },
-    openGraph: {
+    openGraph: ogBase({
       title,
       description,
-      url: `https://blackturf.fr/courses/${c.course_id}`,
+      url: `/courses/${c.course_id}`,
       type: "article",
-    },
+    }),
+    twitter: twitterBase({ title, description }),
   };
+}
+
+/**
+ * Titre d'une fiche course.
+ *
+ * L'ancien format — « R2C1 Paris-Vincennes — arrivée, rapports et partants » — avait deux
+ * défauts mesurés le 2026-08-26 :
+ *
+ *  1. il ne portait aucune date, donc chaque R1C1 courue à Vichy depuis septembre 2025
+ *     partageait exactement le même `<title>` ; sur près de dix-sept mille fiches, cela
+ *     faisait autant de doublons entre lesquels Google devait trancher seul ;
+ *  2. il omettait le nom du prix — pourtant l'intitulé de la course, affiché en `h1` et
+ *     précisément ce qu'un parieur tape (« prix de saint-galmier arrivée »).
+ *
+ * Le nom du prix passe donc devant, la date rend le titre unique à vie. Le code de course
+ * et l'hippodrome restent dans la description et dans le `h1` de la page.
+ */
+function titreCourse(c: SeoCourseDetail, termine: boolean): string {
+  const jour = jourDeCourseId(c.course_id);
+  const suffixe = termine ? "arrivée et rapports" : "partants et pronostic";
+  const dateTxt = jour ? ` du ${jourCourtAnnee(jour)}` : "";
+  const nom = titleCase(c.nom ?? "");
+
+  // Sans nom de prix (courses étrangères, imports partiels), le couple code + hippodrome
+  // reste discriminant dès lors que la date est présente.
+  if (!nom) {
+    return `${codeReunionCourse(c.course_id)} ${titleCase(c.hippodrome_nom)} — ${suffixe}${dateTxt}`;
+  }
+
+  // Google recoupe le titre autour de 60-65 caractères : au-delà, c'est la fin — donc la
+  // date, seule garante de l'unicité — qui disparaîtrait. On raccourcit le nom du prix
+  // plutôt que de laisser tomber la date, et on coupe sur un mot entier : « Prix De
+  // L'Agriculture De P… » se lit moins bien que « Prix De L'Agriculture… ».
+  const fixe = ` — ${suffixe}${dateTxt}`;
+  const budget = 65 - fixe.length;
+  if (nom.length <= budget) return `${nom}${fixe}`;
+
+  const coupe = nom.slice(0, Math.max(14, budget - 1));
+  const dernierEspace = coupe.lastIndexOf(" ");
+  // Un mot unique plus long que le budget se coupe quand même : mieux vaut un titre
+  // tronqué qu'un titre qui déborde et perd sa date.
+  const nomCourt = dernierEspace > 12 ? coupe.slice(0, dernierEspace) : coupe.trimEnd();
+  return `${nomCourt}…${fixe}`;
 }
 
 function jsonLdCourse(c: SeoCourseDetail, resultats: SeoResultats | null) {
@@ -96,12 +160,18 @@ function jsonLdCourse(c: SeoCourseDetail, resultats: SeoResultats | null) {
 
   // Les chevaux engagés sont les « compétiteurs » de l'événement : c'est ce qui donne à
   // Google le lien entre le nom d'un cheval et cette course.
+  //
+  // Le cheval était typé `Person` et son jockey placé en `affiliation` de type
+  // `Organization` : un cheval n'est pas une personne et un driver n'est pas une société.
+  // Schema.org n'a pas de type « cheval de course » ; `SportsTeam` est le porteur correct
+  // d'un binôme cheval + jockey — un compétiteur composé de plusieurs individus — et
+  // `athlete` y déclare le jockey, qui, lui, est bien une personne.
   const partants = (c.partants ?? []).filter((p) => !p.non_partant);
   if (partants.length) {
     event.competitor = partants.map((p) => ({
-      "@type": "Person",
+      "@type": "SportsTeam",
       name: titleCase(p.nom_cheval),
-      ...(p.jockey ? { affiliation: { "@type": "Organization", name: titleCase(p.jockey) } } : {}),
+      ...(p.jockey ? { athlete: { "@type": "Person", name: titleCase(p.jockey) } } : {}),
     }));
   }
   if (gagnant) {
@@ -123,22 +193,34 @@ export default async function CoursePage({ params }: Props) {
   const resultats = course?.statut === "termine" ? await fetchResultats(id) : null;
 
   const jour = course ? jourDeCourseId(course.course_id) : null;
-  const breadcrumbJsonLd = course
-    ? {
-        "@context": "https://schema.org",
-        "@type": "BreadcrumbList",
-        itemListElement: [
-          { "@type": "ListItem", position: 1, name: "Accueil", item: "https://blackturf.fr" },
-          { "@type": "ListItem", position: 2, name: "Programme du jour", item: "https://blackturf.fr/programme" },
-          {
-            "@type": "ListItem",
-            position: 3,
-            name: `${codeReunionCourse(course.course_id)} — ${titleCase(course.hippodrome_nom)}`,
-            item: `https://blackturf.fr/courses/${course.course_id}`,
-          },
-        ],
-      }
+  const estAujourdhui = jour === jourParis();
+
+  // Le fil d'Ariane d'une course PASSÉE pointait vers « Programme du jour », c'est-à-dire
+  // vers le programme d'aujourd'hui : un parent qui ne contient pas l'enfant. Une fiche
+  // archivée remonte désormais vers sa journée d'arrivées, qui la liste réellement.
+  const parent = course
+    ? estAujourdhui || !jour
+      ? { name: "Programme du jour", item: "https://blackturf.fr/programme" }
+      : { name: `Résultats du ${jourCourtAnnee(jour)}`, item: `https://blackturf.fr/resultats/${jour}` }
     : null;
+
+  const breadcrumbJsonLd =
+    course && parent
+      ? {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          itemListElement: [
+            { "@type": "ListItem", position: 1, name: "Accueil", item: "https://blackturf.fr" },
+            { "@type": "ListItem", position: 2, ...parent },
+            {
+              "@type": "ListItem",
+              position: 3,
+              name: `${codeReunionCourse(course.course_id)} — ${titleCase(course.hippodrome_nom)}`,
+              item: `https://blackturf.fr/courses/${course.course_id}`,
+            },
+          ],
+        }
+      : null;
 
   return (
     <>
@@ -155,9 +237,10 @@ export default async function CoursePage({ params }: Props) {
         />
       )}
 
-      {/* Le composant client reçoit la course déjà chargée : son premier rendu (celui du
-          HTML servi) contient donc le nom de la course, les partants et les cotes. */}
-      <CourseClient initialCourse={course as never} />
+      {/* Le composant client reçoit la course ET, si elle est courue, son arrivée : son
+          premier rendu — celui du HTML servi — contient donc le nom de la course, les
+          partants, les cotes et le classement, au lieu d'un message d'attente. */}
+      <CourseClient initialCourse={course as never} initialResultats={resultats as never} />
 
       {/* Fiche course en toutes lettres. Doublure volontairement sobre de l'application
           au-dessus : elle reste lisible sans JavaScript, s'imprime, et donne au moteur de
