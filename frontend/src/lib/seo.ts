@@ -415,6 +415,28 @@ export async function fetchSeoIndex(
   }
 }
 
+/**
+ * Toutes les arrivées d'une journée, en un seul appel.
+ *
+ * Remplace un `Promise.all` sur `fetchResultats()` course par course : jusqu'à
+ * quatre-vingt-dix requêtes simultanées vers l'API, dont nginx rejetait tout ce qui
+ * dépassait trente connexions par IP. Les échecs devenaient des arrivées manquantes,
+ * silencieusement, et la page amputée partait en cache. Voir `/api/v1/seo/arrivees`.
+ */
+export async function fetchArriveesDuJour(
+  jour: string,
+  revalidate = 300,
+): Promise<Record<string, SeoResultats> | null> {
+  try {
+    const res = await fetch(`${API}/seo/arrivees?jour=${jour}`, { next: { revalidate } });
+    if (!res.ok) return null;
+    const d = (await res.json()) as { arrivees?: Record<string, SeoResultats> };
+    return d.arrivees ?? {};
+  } catch {
+    return null;
+  }
+}
+
 /** Toutes les journées portant une arrivée, de la plus récente à la plus ancienne. */
 export async function fetchJoursResultats(): Promise<Array<{ jour: string; nb_courses: number }>> {
   try {

@@ -581,6 +581,69 @@ async def get_seo_index(
     return result
 
 
+@router.get("/seo/arrivees")
+async def get_seo_arrivees(
+    jour: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Toutes les arrivées d'une journée, en UNE requête.
+
+    Pourquoi cet endpoint existe — bug mesuré le 2026-08-26, juste après l'ouverture des
+    archives à l'exploration. La page `/resultats/{jour}` appelait
+    `/courses/{id}/resultats` pour CHAQUE course de la journée, toutes en parallèle. Une
+    journée compte jusqu'à quatre-vingt-dix courses ; le frontend sort par une seule
+    adresse IP, et nginx plafonne à trente connexions simultanées par IP sur l'API. Les
+    requêtes au-delà recevaient un 503, que le `fetch` best-effort du frontend traduisait
+    en `null` — donc en arrivée absente, **sans le moindre message**. Et la page ainsi
+    amputée partait en cache.
+
+    Constaté sur six journées tirées au hasard : 31 arrivées affichées sur 41, 52 sur 63,
+    34 sur 42, 15 sur 54, 15 sur 65, 14 sur 62. Jusqu'à 77 % du contenu manquant sur une
+    page qui annonçait pourtant le compte complet.
+
+    La réponse ne porte QUE ce qu'affiche la page — classement et rapports. Le détail des
+    rapports par combinaison, volumineux, reste sur la fiche de chaque course, seule à
+    l'utiliser.
+    """
+    import json
+
+    cache_key = f"seo:arrivees:{jour.isoformat()}"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        log.debug("courses.seo_arrivees_cache_read_failed", error=str(e))
+
+    q = (
+        select(Resultat.course_id, Resultat.classement, Resultat.rapports)
+        .join(Course, Course.course_id == Resultat.course_id)
+        .where(func.date(Course.date_heure) == jour)
+        .where(Course.statut == "termine")
+    )
+    rows = (await db.execute(q)).all()
+
+    result = {
+        "jour": jour.isoformat(),
+        "arrivees": {
+            r.course_id: {"classement": r.classement, "rapports": r.rapports}
+            for r in rows
+        },
+    }
+
+    try:
+        redis = await get_redis()
+        # Une journée close ne bouge plus ; celle en cours reçoit encore des arrivées.
+        ttl = 120 if jour >= jour_courses() else 21600
+        await redis.setex(cache_key, ttl, json.dumps(result, default=str))
+    except Exception as e:
+        log.debug("courses.seo_arrivees_cache_write_failed", error=str(e))
+
+    return result
+
+
 @router.get("/seo/jours-resultats")
 async def get_seo_jours_resultats(
     db: AsyncSession = Depends(get_db),

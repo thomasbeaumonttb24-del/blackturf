@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   fetchProgramme,
-  fetchResultats,
+  fetchArriveesDuJour,
   jourParis,
   jourLong,
   jourCourt,
@@ -36,12 +36,22 @@ export async function ResultatsJour({ jour }: { jour: string }) {
     .filter((c) => c.statut === "termine")
     .sort((a, b) => a.date_heure.localeCompare(b.date_heure));
 
-  const resultats = await Promise.all(
-    terminees.map(async (c) => [c, await fetchResultats(c.course_id)] as const),
-  );
-  const avecArrivee = resultats.filter(
-    (x): x is readonly [SeoCourse, SeoResultats] => !!x[1]?.classement?.length,
-  );
+  /* Un seul appel pour toute la journée.
+   *
+   * Auparavant : un `Promise.all` sur `fetchResultats()`, soit une requête par course et
+   * jusqu'à quatre-vingt-dix en parallèle. Le frontend sort par une seule IP et nginx
+   * plafonne l'API à trente connexions simultanées par IP : tout ce qui dépassait
+   * recevait un 503, que le fetch best-effort transformait en `null` — donc en arrivée
+   * absente, sans message, sur une page qui annonçait pourtant le compte complet. Mesuré
+   * le 2026-08-26 sur six journées : jusqu'à 14 arrivées affichées sur 62.
+   *
+   * `arrivees` vaut `null` si l'appel groupé échoue — cas distinct d'une journée
+   * réellement sans arrivée, et signalé comme tel au lecteur plus bas. */
+  const arrivees = await fetchArriveesDuJour(jour, estAujourdhui ? 120 : 21600);
+  const avecArrivee: Array<readonly [SeoCourse, SeoResultats]> = terminees
+    .map((c) => [c, arrivees?.[c.course_id]] as const)
+    .filter((x): x is readonly [SeoCourse, SeoResultats] => !!x[1]?.classement?.length);
+  const arriveesIndisponibles = arrivees === null;
 
   const quinte = avecArrivee.find(([c]) => c.est_quinte);
   const rapportsQuinte = quinte ? rapportsTries(quinte[1].rapports) : [];
@@ -122,15 +132,19 @@ export async function ResultatsJour({ jour }: { jour: string }) {
         ]}
         title={`Résultats PMU du ${jourCourt(jour)}`}
         lead={
-          avecArrivee.length
-            ? `${avecArrivee.length} arrivées publiées sur les ${prog?.nb_courses ?? 0} courses du ${jourLong(
-                jour,
-              )}. Rapports officiels PMU pour 1 € de mise.`
-            : `Aucune arrivée publiée pour le ${jourLong(jour)}.${
-                estAujourdhui
-                  ? " Les rapports paraissent quelques minutes après chaque course."
-                  : ""
-              }`
+          arriveesIndisponibles
+            ? // Ne jamais annoncer « aucune arrivée » quand on n'a pas pu les lire : la
+              // page dirait le contraire de la vérité, et le dirait dans son titre.
+              `Les arrivées du ${jourLong(jour)} n'ont pas pu être chargées. Réessayez dans un instant.`
+            : avecArrivee.length
+              ? `${avecArrivee.length} arrivées publiées sur les ${prog?.nb_courses ?? 0} courses du ${jourLong(
+                  jour,
+                )}. Rapports officiels PMU pour 1 € de mise.`
+              : `Aucune arrivée publiée pour le ${jourLong(jour)}.${
+                  estAujourdhui
+                    ? " Les rapports paraissent quelques minutes après chaque course."
+                    : ""
+                }`
         }
       />
 
