@@ -20,7 +20,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
-  ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter, Sparkles,
+  ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter,
 } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
@@ -345,16 +345,6 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             R{reunionNum}C{course.numero}
-            {/* Repère « analysée » logé DANS la pastille de code : sur mobile, un
-                badge autonome poussait le badge Quinté+ à la ligne suivante et
-                allongeait chaque course de 42 px. Le détail chiffré s'affiche
-                dès 640 px, sous le nom de la course. */}
-            {apercu?.analysee && (
-              <Sparkles
-                className="h-2.5 w-2.5 sm:hidden"
-                aria-label="Course analysée par le modèle"
-              />
-            )}
           </span>
           <span className={cn("max-w-full truncate text-sm font-semibold sm:max-w-[230px]", isDone ? "text-gray-600" : "text-gray-800")}>
             <span className="text-gray-600">{course.hippodrome_nom}</span>
@@ -375,16 +365,12 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
           <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
           {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-600 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
         </div>
-        {/* Preuve qu'un modèle a travaillé sur CETTE course. Rien d'identifiant :
-            un nombre de chevaux notés, une confiance, et le fait que le modèle
-            suive ou non le favori des parieurs. Sans cela, la page programme ne
-            montre que des horaires et rien n'invite à ouvrir une fiche. */}
+        {/* Ce que le modèle dit de CETTE course. Rien d'identifiant : une
+            confiance, et le fait qu'il suive ou non le favori des parieurs.
+            Pas de pastille « Analysée » : toutes les courses le sont, elle
+            n'apprenait rien et volait la place des deux chiffres qui varient. */}
         {apercu?.analysee && (
           <div className="mt-1.5 hidden flex-wrap items-center gap-1.5 sm:flex">
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-white">
-              <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
-              Analysée
-            </span>
             {apercu.confiance != null && (
               <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 tabular-nums">
                 confiance {apercu.confiance}/100
@@ -425,9 +411,11 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
 export default function ProgrammeClient({
   initialProgramme = null,
   initialJour,
+  initialCompteurVB = null,
 }: {
   initialProgramme?: { reunions: Reunion[]; nb_courses: number } | null;
   initialJour: string; // "YYYY-MM-DD", jour de Paris calculé côté serveur
+  initialCompteurVB?: { count: number; niveau_min: number } | null;
 } ) {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(() => new Date(`${initialJour}T12:00:00`));
