@@ -163,7 +163,7 @@ export default function InscriptionPage() {
             des avantages est repliée sur petit écran. */}
         <div>
           <Link href="/" className="inline-flex items-center gap-2.5 mb-6 md:mb-8">
-            <Image src="/logo.png" alt="Logo BlackTurf" width={40} height={40} className="rounded-xl object-contain" />
+            <Image src="/logo.png" alt="Logo BlackTurf" width={40} height={40} priority className="rounded-xl object-contain" />
             <span className="text-2xl font-bold text-gray-900">Black<span className="text-amber-700">Turf</span></span>
           </Link>
 

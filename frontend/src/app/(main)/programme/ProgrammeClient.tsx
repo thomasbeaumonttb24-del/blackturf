@@ -687,7 +687,11 @@ export default function ProgrammeClient({
                         active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")}
                     >
                       <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700 }}>R{r.numero}</span>
-                      <span className="opacity-75 whitespace-nowrap font-medium">{r.hippodrome}</span>
+                      {/* Pas d'`opacity-75` ici : le gris du bouton passé à 75 % donne
+                          #78808A sur blanc, soit 3,99:1 — dernier échec de contraste du
+                          site. La hiérarchie visuelle tient déjà sans lui : « R1 » est en
+                          graisse 700, le nom de l'hippodrome en `font-medium`. */}
+                      <span className="whitespace-nowrap font-medium">{r.hippodrome}</span>
                     </button>
                   );
                 })}
