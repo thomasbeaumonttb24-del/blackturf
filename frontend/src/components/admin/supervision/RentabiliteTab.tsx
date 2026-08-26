@@ -91,7 +91,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
         <StatTile
           label="Pire perte cumulée"
           value={eur(r.drawdown_max)}
-          valueClass="text-red-600"
+          valueClass="text-red-700"
           sub={`depuis le plus haut · ${eur(r.drawdown_max_winsor)} plafonné`}
           icon={<TrendingDown className="h-3.5 w-3.5 text-gray-300" />}
           hint="Drawdown maximum : ce qu'un suiveur aurait vu fondre au pire moment, gains réels compris."
@@ -122,7 +122,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               tick={axisTick} axisLine={axisLine} tickLine={tickLine}
               tickFormatter={(v) => `${Math.round(v)} €`} width={64}
             />
-            <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="3 3" />
+            <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" />
             <Tooltip content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />} />
             <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
             <Area
@@ -131,7 +131,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
             />
             <Line
               type="monotone" dataKey="cumul_net_winsor" name={`Plafonné à ${cap}× la mise`}
-              stroke="#9CA3AF" strokeWidth={1.5} strokeDasharray="4 3" dot={false} isAnimationActive={false}
+              stroke="#4B5563" strokeWidth={1.5} strokeDasharray="4 3" dot={false} isAnimationActive={false}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -154,7 +154,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <CartesianGrid {...GRID} />
               <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v} €`} width={56} />
-              <ReferenceLine y={0} stroke="#9CA3AF" />
+              <ReferenceLine y={0} stroke="#4B5563" />
               <Tooltip
                 cursor={{ fill: "rgba(148,163,184,0.08)" }}
                 content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />}
@@ -171,12 +171,12 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <div className="text-emerald-700">Meilleur jour</div>
               <div className="font-bold tabular-nums text-emerald-700">
                 {signedEur(r.meilleur_jour?.net, 2)}
-                <span className="ml-1 font-normal text-emerald-600/70">
+                <span className="ml-1 font-normal text-emerald-700">
                   {r.meilleur_jour ? jourCourt(r.meilleur_jour.jour) : ""}
                 </span>
               </div>
               {r.meilleur_jour && r.meilleur_jour.net_winsor !== r.meilleur_jour.net && (
-                <div className="mt-0.5 text-emerald-600/70">
+                <div className="mt-0.5 text-emerald-700">
                   {signedEur(r.meilleur_jour.net_winsor, 2)} une fois plafonné
                 </div>
               )}
@@ -185,7 +185,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <div className="text-red-700">Pire jour</div>
               <div className="font-bold tabular-nums text-red-700">
                 {signedEur(r.pire_jour?.net, 2)}
-                <span className="ml-1 font-normal text-red-600/70">
+                <span className="ml-1 font-normal text-red-700">
                   {r.pire_jour ? jourCourt(r.pire_jour.jour) : ""}
                 </span>
               </div>
@@ -202,7 +202,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <CartesianGrid {...GRID} />
               <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v} %`} width={48} />
-              <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="3 3" label={{ value: "équilibre", fontSize: 9, fill: "#9CA3AF", position: "right" }} />
+              <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" label={{ value: "équilibre", fontSize: 9, fill: "#4B5563", position: "right" }} />
               <Tooltip content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />} />
               <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
               <Line
@@ -211,7 +211,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               />
               <Line
                 type="monotone" dataKey="roi_glissant_winsor_pct" name="plafonné"
-                stroke="#9CA3AF" strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false}
+                stroke="#4B5563" strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -233,7 +233,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <CartesianGrid {...GRID} />
               <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${Math.round(v)} €`} width={64} />
-              <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="3 3" />
+              <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" />
               <Tooltip content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />} />
               <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
               {profils.map((p) => (

@@ -47,11 +47,11 @@ export default function DisciplinesIndex() {
         <div className="grid gap-5 sm:grid-cols-3">
           {DISCIPLINES.map((d) => (
             <Link key={d.slug} href={`/disciplines/${d.slug}`} className="glass-card group flex flex-col rounded-2xl p-5">
-              <h2 className="font-display text-lg font-semibold text-brand-dark transition-colors group-hover:text-brand-gold-deep">
+              <h2 className="font-display text-lg font-semibold text-brand-dark transition-colors group-hover:text-brand-gold-dark">
                 {d.short}
               </h2>
-              <p className="mt-2 flex-1 text-sm leading-relaxed text-brand-charcoal/75">{d.intro}</p>
-              <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-brand-gold-deep">
+              <p className="mt-2 flex-1 text-sm leading-relaxed text-brand-charcoal">{d.intro}</p>
+              <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-brand-gold-dark">
                 Découvrir <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </span>
             </Link>

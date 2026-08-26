@@ -72,7 +72,7 @@ function InscriptionContent() {
             <h2 className="text-xl font-bold mb-1">Créer un compte</h2>
             <p className="text-sm text-muted-foreground mb-6">
               Déjà inscrit ?{" "}
-              <Link href="/login" className="text-brand-gold hover:underline">
+              <Link href="/login" className="font-medium text-brand-gold-dark underline underline-offset-2">
                 Se connecter
               </Link>
             </p>
@@ -164,7 +164,7 @@ export default function InscriptionPage() {
         <div>
           <Link href="/" className="inline-flex items-center gap-2.5 mb-6 md:mb-8">
             <Image src="/logo.png" alt="Logo BlackTurf" width={40} height={40} className="rounded-xl object-contain" />
-            <span className="text-2xl font-bold text-gray-900">Black<span className="text-amber-600">Turf</span></span>
+            <span className="text-2xl font-bold text-gray-900">Black<span className="text-amber-700">Turf</span></span>
           </Link>
 
           <h1 className="text-2xl md:text-3xl font-bold mb-4">
@@ -180,7 +180,7 @@ export default function InscriptionPage() {
             {PERKS.map((perk) => (
               <li key={perk} className="flex items-center gap-3 text-sm">
                 <div className="h-5 w-5 rounded-full bg-brand-gold/20 flex items-center justify-center flex-shrink-0">
-                  <Check className="h-3 w-3 text-brand-gold" />
+                  <Check className="h-3 w-3 text-brand-gold-dark" />
                 </div>
                 {perk}
               </li>

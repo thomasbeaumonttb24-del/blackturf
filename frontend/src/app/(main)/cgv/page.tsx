@@ -46,7 +46,7 @@ export default function CGVPage() {
         </ul>
         <p className="text-muted-foreground">
           Les tarifs en vigueur sont ceux affichés sur la page{" "}
-          <a href="/tarifs" className="underline text-brand-gold">Tarifs</a> au moment de la commande.
+          <a href="/tarifs" className="underline text-brand-gold-dark">Tarifs</a> au moment de la commande.
           Tout changement de tarif est sans effet sur les abonnements en cours jusqu&apos;à leur échéance.
         </p>
       </section>
@@ -57,8 +57,8 @@ export default function CGVPage() {
           Le paiement s&apos;effectue en ligne par carte bancaire via notre prestataire <strong>Stripe</strong>
           (paiement sécurisé). L&apos;abonnement est activé après confirmation du paiement. La commande vaut
           acceptation des présentes CGV, des{" "}
-          <a href="/cgu" className="underline text-brand-gold">CGU</a> et de la{" "}
-          <a href="/confidentialite" className="underline text-brand-gold">Politique de confidentialité</a>.
+          <a href="/cgu" className="underline text-brand-gold-dark">CGU</a> et de la{" "}
+          <a href="/confidentialite" className="underline text-brand-gold-dark">Politique de confidentialité</a>.
         </p>
       </section>
 
@@ -114,7 +114,7 @@ export default function CGVPage() {
           gratuitement à un médiateur de la consommation en vue de la résolution amiable d&apos;un litige.
           Médiateur compétent : <strong>[médiateur à désigner — adhésion en cours]</strong>. En attendant, vous
           pouvez utiliser la plateforme européenne de Règlement en Ligne des Litiges :{" "}
-          <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener noreferrer" className="underline text-brand-gold">
+          <a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener noreferrer" className="underline text-brand-gold-dark">
             ec.europa.eu/consumers/odr
           </a>.
         </p>
@@ -128,7 +128,7 @@ export default function CGVPage() {
           recommandation financière personnalisée. L&apos;utilisateur reste seul responsable de ses paris et de
           ses pertes éventuelles. Service strictement réservé aux personnes <strong>majeures (18 ans et
           plus)</strong>. Jeu responsable : joueurs-info-service.fr — 09&nbsp;74&nbsp;75&nbsp;13&nbsp;13. Voir les{" "}
-          <a href="/cgu" className="underline text-brand-gold">CGU</a> pour le détail des limitations de responsabilité.
+          <a href="/cgu" className="underline text-brand-gold-dark">CGU</a> pour le détail des limitations de responsabilité.
         </p>
       </section>
 

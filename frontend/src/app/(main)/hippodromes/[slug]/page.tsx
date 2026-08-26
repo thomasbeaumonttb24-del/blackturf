@@ -95,31 +95,31 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
                     </span>
                     <span className="font-medium text-brand-dark">{c.nom || `Course ${c.numero}`}</span>
                   </span>
-                  <span className="flex shrink-0 items-center gap-2 text-xs text-brand-charcoal/60">
+                  <span className="flex shrink-0 items-center gap-2 text-xs text-brand-charcoal">
                     {disciplineLabel(c.discipline)}{c.distance ? ` · ${c.distance}m` : ""}
-                    <ChevronRight className="h-4 w-4 text-brand-gold/40" />
+                    <ChevronRight className="h-4 w-4 text-brand-gold-dark/40" />
                   </span>
                 </Link>
               ))}
             </div>
           ) : (
-            <div className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50/50 px-4 py-5 text-sm text-brand-charcoal/70">
-              <CalendarDays className="h-5 w-5 text-brand-charcoal/40" />
+            <div className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50/50 px-4 py-5 text-sm text-brand-charcoal">
+              <CalendarDays className="h-5 w-5 text-brand-charcoal" />
               <span>
                 Aucune course programmée aujourd&apos;hui sur cet hippodrome. Consultez le{" "}
-                <Link href="/programme" className="font-medium text-brand-gold-deep underline">programme du jour</Link>.
+                <Link href="/programme" className="font-medium text-brand-gold-dark underline">programme du jour</Link>.
               </span>
             </div>
           )}
         </Section>
 
         <Section title={`Mieux parier sur les courses de ${h.city}`}>
-          <p className="text-sm leading-relaxed text-brand-charcoal/80">
+          <p className="text-sm leading-relaxed text-brand-charcoal">
             Quel que soit l&apos;hippodrome, la clé reste la même : trouver les{" "}
-            <Link href="/guides/pari-de-valeur" className="font-medium text-brand-gold-deep underline">paris de valeur</Link>.
+            <Link href="/guides/pari-de-valeur" className="font-medium text-brand-gold-dark underline">paris de valeur</Link>.
             Découvrez aussi nos guides sur les{" "}
-            <Link href="/guides/types-de-paris-pmu" className="font-medium text-brand-gold-deep underline">types de paris PMU</Link>{" "}
-            et la <Link href="/guides/comment-lire-la-musique" className="font-medium text-brand-gold-deep underline">lecture de la musique</Link>.
+            <Link href="/guides/types-de-paris-pmu" className="font-medium text-brand-gold-dark underline">types de paris PMU</Link>{" "}
+            et la <Link href="/guides/comment-lire-la-musique" className="font-medium text-brand-gold-dark underline">lecture de la musique</Link>.
           </p>
         </Section>
       </Container>

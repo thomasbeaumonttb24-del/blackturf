@@ -1,0 +1,55 @@
+# BlackTurf
+
+> Analyse algorithmique des courses hippiques PMU françaises. Pour chaque partant du
+> programme du jour, un modèle réentraîné quotidiennement publie une probabilité de
+> victoire, la compare à la cote du marché et en déduit un plan de mise ajusté au budget
+> et au profil de risque du visiteur. Chaque pronostic est ensuite noté aux rapports
+> officiels du PMU, gains comme pertes.
+
+Site en français. Public : parieurs hippiques francophones. Édité en France ; les paris
+d'argent sont interdits aux mineurs.
+
+## Ce que le site publie
+
+- [Programme du jour](https://blackturf.fr/programme) : toutes les réunions et courses PMU de la journée, horaires en heure de Paris, discipline, distance, nombre de partants.
+- [Quinté du jour](https://blackturf.fr/quinte-du-jour) : la course quinté, ses partants et l'analyse du modèle.
+- [Résultats](https://blackturf.fr/resultats) : arrivées officielles et rapports PMU, jour par jour.
+- [Fiche course](https://blackturf.fr/programme) : accessible depuis le programme — classement du modèle, probabilité par cheval, cote juste, écart avec le marché, plan de mise par profil.
+
+## Guides
+
+- [Les types de paris PMU](https://blackturf.fr/guides/types-de-paris-pmu) : conditions de gain de chaque formule, du Simple au Quinté+.
+- [Lire la musique d'un cheval](https://blackturf.fr/guides/comment-lire-la-musique) : décodage de la suite de performances passées.
+- [Le pari de valeur](https://blackturf.fr/guides/pari-de-valeur) : probabilité contre cote, espérance de gain, pourquoi le favori n'est pas toujours le bon pari.
+- [Tous les guides](https://blackturf.fr/guides)
+- [Blog](https://blackturf.fr/blog)
+
+## Références
+
+- [Hippodromes](https://blackturf.fr/hippodromes) : fiches des principaux hippodromes français.
+- [Disciplines](https://blackturf.fr/disciplines) : trot, plat, obstacle.
+
+## Service
+
+- [Tarifs](https://blackturf.fr/tarifs)
+- [Créer un compte](https://blackturf.fr/inscription)
+- [Lettre d'information](https://blackturf.fr/newsletter)
+
+## Ce que BlackTurf ne prétend pas
+
+Le site ne promet aucun gain. Le pari hippique est un jeu à somme négative : le PMU
+prélève environ 20 % des enjeux avant toute redistribution, ce qui rend une rentabilité
+durablement positive très difficile. BlackTurf publie l'historique complet de ses
+pronostics — y compris les périodes perdantes — et mesure sa valeur ajoutée par l'écart
+avec le classement du marché, non par un rendement affiché.
+
+## Mentions
+
+- [Mentions légales](https://blackturf.fr/mentions-legales)
+- [Conditions générales d'utilisation](https://blackturf.fr/cgu)
+- [Conditions générales de vente](https://blackturf.fr/cgv)
+- [Politique de confidentialité](https://blackturf.fr/confidentialite)
+
+## Optional
+
+- [Plan du site (XML)](https://blackturf.fr/sitemap.xml)

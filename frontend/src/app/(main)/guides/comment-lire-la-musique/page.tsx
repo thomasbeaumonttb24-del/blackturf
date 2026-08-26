@@ -79,12 +79,12 @@ export default function GuideMusique() {
           <div className="mt-3 flex flex-wrap items-end gap-2">
             {EXAMPLE.map(([n, l], i) => (
               <span key={i} className="inline-flex items-baseline rounded-lg bg-white px-3 py-2 font-mono text-lg font-bold text-brand-dark ring-1 ring-amber-100">
-                <span className={n === "D" ? "text-brand-red" : "text-brand-gold-deep"}>{n}</span>
-                <span className="text-sm text-brand-charcoal/60">{l}</span>
+                <span className={n === "D" ? "text-brand-red" : "text-brand-gold-dark"}>{n}</span>
+                <span className="text-sm text-brand-charcoal">{l}</span>
               </span>
             ))}
           </div>
-          <p className="mt-3 text-sm text-brand-charcoal/70">
+          <p className="mt-3 text-sm text-brand-charcoal">
             Victoire, puis 2e, puis non placé, puis disqualifié, puis 3e — toutes en trot attelé. La course la plus récente est à gauche.
           </p>
         </div>
@@ -93,8 +93,8 @@ export default function GuideMusique() {
           <div className="overflow-hidden rounded-xl border border-gray-200">
             {CODES.map(([c, d], i) => (
               <div key={c} className={`flex gap-4 px-4 py-3 text-sm ${i % 2 ? "bg-amber-50/40" : "bg-white"}`}>
-                <span className="w-20 shrink-0 font-mono font-semibold text-brand-gold-deep">{c}</span>
-                <span className="text-brand-charcoal/80">{d}</span>
+                <span className="w-20 shrink-0 font-mono font-semibold text-brand-gold-dark">{c}</span>
+                <span className="text-brand-charcoal">{d}</span>
               </div>
             ))}
           </div>
@@ -105,17 +105,17 @@ export default function GuideMusique() {
             {LETTERS.map(([l, d]) => (
               <div key={l} className="card-hover flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm">
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-gold-soft font-mono font-bold text-brand-gold-dark">{l}</span>
-                <span className="text-brand-charcoal/80">{d}</span>
+                <span className="text-brand-charcoal">{d}</span>
               </div>
             ))}
           </div>
         </Section>
 
         <Section title="Ce que la musique révèle (et ses limites)">
-          <p className="text-sm leading-relaxed text-brand-charcoal/80">
+          <p className="text-sm leading-relaxed text-brand-charcoal">
             Une série de places rapprochées (1a 2a 1a) signale une forme régulière. Mais attention : la « bonne forme » est aussi celle que le public voit — elle est donc souvent sur-jouée, ce qui écrase la cote. Lire la musique sert à comprendre le contexte (montée de catégorie, changement de discipline, disqualifications), pas à parier mécaniquement.
           </p>
-          <p className="mt-3 text-sm leading-relaxed text-brand-charcoal/80">
+          <p className="mt-3 text-sm leading-relaxed text-brand-charcoal">
             C&apos;est pourquoi BlackTurf croise la musique avec 80+ autres critères (couple jockey/entraîneur, ELO, pedigree, terrain, confrontations directes…) plutôt que de s&apos;y fier seule.
           </p>
         </Section>

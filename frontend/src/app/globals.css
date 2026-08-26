@@ -14,7 +14,7 @@
     --secondary: 40 15% 96%;
     --secondary-foreground: 222 47% 11%;
     --muted: 40 10% 96%;
-    --muted-foreground: 220 9% 46%;
+    --muted-foreground: 217 15% 34%;
     --accent: 40 15% 95%;
     --accent-foreground: 222 47% 11%;
     --destructive: 0 84% 60%;
@@ -174,15 +174,15 @@
   font-feature-settings: "tnum";
   font-variant-numeric: tabular-nums;
 }
-.stat-positive { color: #059669; }
-.stat-negative { color: #DC2626; }
-.stat-gold     { color: #D97706; }
+.stat-positive { color: #047857; }
+.stat-negative { color: #B91C1C; }
+.stat-gold     { color: #B45309; }
 
 /* ── Value bet levels ── */
 .vb-1 { color: #2563EB; background: rgba(37,99,235,0.08);  border-radius: 4px; padding: 1px 6px; }
-.vb-2 { color: #059669; background: rgba(5,150,105,0.08);   border-radius: 4px; padding: 1px 6px; }
-.vb-3 { color: #D97706; background: rgba(217,119,6,0.10);   border-radius: 4px; padding: 1px 6px; }
-.vb-4 { color: #DC2626; background: rgba(220,38,38,0.08);   border-radius: 4px; padding: 1px 6px; }
+.vb-2 { color: #047857; background: rgba(5,150,105,0.08);   border-radius: 4px; padding: 1px 6px; }
+.vb-3 { color: #B45309; background: rgba(217,119,6,0.10);   border-radius: 4px; padding: 1px 6px; }
+.vb-4 { color: #B91C1C; background: rgba(220,38,38,0.08);   border-radius: 4px; padding: 1px 6px; }
 
 /* ── Plan de mise niveaux ── */
 .plan-securite  { border-left: 3px solid #059669; background: rgba(5,150,105,0.04); }

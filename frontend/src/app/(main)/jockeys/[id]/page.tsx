@@ -78,8 +78,8 @@ function pct(v: number) {
 }
 
 function roiColor(roi: number) {
-  if (roi > 0.05) return "text-emerald-600";
-  if (roi < -0.05) return "text-red-600";
+  if (roi > 0.05) return "text-emerald-700";
+  if (roi < -0.05) return "text-red-700";
   return "text-muted-foreground";
 }
 
@@ -155,7 +155,7 @@ export default function JockeyPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Activity className="h-8 w-8 animate-spin text-brand-gold" />
+        <Activity className="h-8 w-8 animate-spin text-brand-gold-dark" />
       </div>
     );
   }
@@ -205,7 +205,7 @@ export default function JockeyPage() {
             {s.montes_30j !== undefined && (
               <div className="flex flex-col items-center rounded-xl border border-border/40 bg-muted/20 px-4 py-2">
                 <span className="text-[10px] text-muted-foreground">30 derniers jours</span>
-                <span className="text-2xl font-extrabold font-mono text-brand-gold">
+                <span className="text-2xl font-extrabold font-mono text-brand-gold-dark">
                   {s.montes_30j}
                 </span>
                 <span className="text-[10px] text-muted-foreground">montées</span>
@@ -270,7 +270,7 @@ export default function JockeyPage() {
         <Card className="bg-card/60 border-border/40">
           <CardHeader className="pb-2">
             <div className="flex items-center gap-2">
-              <Trophy className="h-4 w-4 text-brand-gold" />
+              <Trophy className="h-4 w-4 text-brand-gold-dark" />
               <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
                 Top hippodromes (saison)
               </CardTitle>
@@ -318,7 +318,7 @@ export default function JockeyPage() {
         <Card className="bg-card/60 border-border/40">
           <CardHeader className="pb-2">
             <div className="flex items-center gap-2">
-              <Users className="h-4 w-4 text-blue-600" />
+              <Users className="h-4 w-4 text-blue-700" />
               <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
                 Top associations entraîneurs
               </CardTitle>
@@ -337,7 +337,7 @@ export default function JockeyPage() {
                     <p className="text-sm font-semibold truncate">{a.entraineur}</p>
                     <div className="flex items-center gap-3 text-xs shrink-0">
                       <span className="text-muted-foreground font-mono">{a.nb_courses}c</span>
-                      <span className="font-mono text-amber-600">{a.nb_victoires}v</span>
+                      <span className="font-mono text-amber-700">{a.nb_victoires}v</span>
                       <span
                         className="font-bold font-mono"
                         style={{ color: p >= 25 ? "#F59E0B" : p >= 15 ? "#3B82F6" : "#6B7280" }}
@@ -374,7 +374,7 @@ export default function JockeyPage() {
                         {a.entraineur}
                       </td>
                       <td className="px-4 py-2 text-right font-mono tabular-nums">{a.nb_courses}</td>
-                      <td className="px-4 py-2 text-right font-mono tabular-nums text-amber-600">
+                      <td className="px-4 py-2 text-right font-mono tabular-nums text-amber-700">
                         {a.nb_victoires}
                       </td>
                       <td className="px-4 py-2 text-right">
@@ -418,7 +418,7 @@ export default function JockeyPage() {
                 <div className="min-w-0">
                   <Link
                     href={`/chevaux/${p.cheval_id}`}
-                    className="text-sm font-semibold truncate block hover:text-brand-gold transition-colors"
+                    className="text-sm font-semibold truncate block hover:text-brand-gold-dark transition-colors"
                   >
                     {p.nom_cheval}
                   </Link>
@@ -473,7 +473,7 @@ export default function JockeyPage() {
                     <td className="px-3 py-2 font-semibold max-w-[120px] truncate">
                       <Link
                         href={`/chevaux/${p.cheval_id}`}
-                        className="hover:text-brand-gold transition-colors"
+                        className="hover:text-brand-gold-dark transition-colors"
                       >
                         {p.nom_cheval}
                       </Link>

@@ -132,7 +132,7 @@ function formatGains(val: number | null) {
 }
 
 function positionBadge(pos: number | null, incident: string | null) {
-  if (incident) return <span className="text-xs font-bold text-amber-500">{incident.slice(0, 4)}</span>;
+  if (incident) return <span className="text-xs font-bold text-amber-700">{incident.slice(0, 4)}</span>;
   if (!pos) return <span className="text-muted-foreground text-xs">—</span>;
   if (pos === 1)
     return <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-500/30">1</span>;
@@ -171,7 +171,7 @@ export default function ChevalPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Activity className="h-8 w-8 animate-spin text-brand-gold" />
+        <Activity className="h-8 w-8 animate-spin text-brand-gold-dark" />
       </div>
     );
   }
@@ -251,15 +251,15 @@ export default function ChevalPage() {
               <div className="flex flex-col items-center gap-0.5">
                 <span className="text-[10px] text-muted-foreground">30j</span>
                 {lastDelta > 5 ? (
-                  <TrendingUp className="h-5 w-5 text-emerald-600" />
+                  <TrendingUp className="h-5 w-5 text-emerald-700" />
                 ) : lastDelta < -5 ? (
-                  <TrendingDown className="h-5 w-5 text-red-600" />
+                  <TrendingDown className="h-5 w-5 text-red-700" />
                 ) : (
                   <Minus className="h-5 w-5 text-muted-foreground" />
                 )}
                 <span className={cn(
                   "text-[10px] font-mono font-bold",
-                  lastDelta > 5 ? "text-emerald-600" : lastDelta < -5 ? "text-red-600" : "text-muted-foreground"
+                  lastDelta > 5 ? "text-emerald-700" : lastDelta < -5 ? "text-red-700" : "text-muted-foreground"
                 )}>
                   {lastDelta > 0 ? "+" : ""}{Math.round(lastDelta)}
                 </span>
@@ -278,7 +278,7 @@ export default function ChevalPage() {
             className={cn(
               "shrink-0 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors",
               activeTab === t
-                ? "bg-brand-gold/15 text-brand-gold border border-brand-gold/30"
+                ? "bg-brand-gold/15 text-brand-gold-dark border border-brand-gold/30"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
             )}
           >
@@ -314,7 +314,7 @@ export default function ChevalPage() {
                 ].map(({ label, value }) => (
                   <div key={label} className="space-y-0.5">
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wider">{label}</p>
-                    <p className="font-semibold">{value || <span className="text-muted-foreground/50">—</span>}</p>
+                    <p className="font-semibold">{value || <span className="text-muted-foreground">—</span>}</p>
                   </div>
                 ))}
               </div>
@@ -378,8 +378,8 @@ export default function ChevalPage() {
 
                 {/* Win rate summary */}
                 <div className="mt-4 flex items-center gap-2 text-sm">
-                  <Trophy className="h-4 w-4 text-brand-gold" />
-                  <span className="font-semibold text-brand-gold font-mono">
+                  <Trophy className="h-4 w-4 text-brand-gold-dark" />
+                  <span className="font-semibold text-brand-gold-dark font-mono">
                     {data.performances.nb_courses > 0
                       ? Math.round((data.performances.nb_victoires / data.performances.nb_courses) * 100)
                       : 0}%
@@ -423,7 +423,7 @@ export default function ChevalPage() {
                         <p className="text-muted-foreground text-xs">—</p>
                       )}
                       {data.top_terrain === t && (
-                        <Star className="h-3 w-3 text-brand-gold mx-auto" />
+                        <Star className="h-3 w-3 text-brand-gold-dark mx-auto" />
                       )}
                     </div>
                   );
@@ -515,7 +515,7 @@ export default function ChevalPage() {
         <Card className="bg-card/60 border-border/40">
           <CardHeader className="pb-2">
             <div className="flex items-center gap-2">
-              <BarChart2 className="h-4 w-4 text-brand-gold" />
+              <BarChart2 className="h-4 w-4 text-brand-gold-dark" />
               <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
                 Évolution ELO (10 dernières courses)
               </CardTitle>
@@ -625,7 +625,7 @@ export default function ChevalPage() {
                   <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground">
                     <span className="font-mono">Cote {h.cote ? h.cote.toFixed(1) : "—"}</span>
                     {h.gains ? (
-                      <span className="font-mono text-emerald-600">{formatGains(h.gains)}</span>
+                      <span className="font-mono text-emerald-700">{formatGains(h.gains)}</span>
                     ) : null}
                   </div>
                 </div>
@@ -681,7 +681,7 @@ export default function ChevalPage() {
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
                         {h.cote ? `${h.cote.toFixed(1)}` : "—"}
                       </td>
-                      <td className="px-3 py-2 font-mono whitespace-nowrap text-emerald-600 hidden sm:table-cell">
+                      <td className="px-3 py-2 font-mono whitespace-nowrap text-emerald-700 hidden sm:table-cell">
                         {h.gains ? formatGains(h.gains) : "—"}
                       </td>
                       <td className="px-3 py-2 max-w-[100px] truncate text-muted-foreground hidden lg:table-cell">

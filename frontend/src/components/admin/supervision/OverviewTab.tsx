@@ -130,7 +130,7 @@ export default function OverviewTab({
         <StatTile
           label="Pire perte cumulée"
           value={eur(r?.drawdown_max)}
-          valueClass="text-red-600"
+          valueClass="text-red-700"
           sub={`${num(r?.serie_perdante_max_jours)} jours perdants d'affilée`}
           icon={<ShieldAlert className="h-3.5 w-3.5 text-gray-300" />}
         />
@@ -138,7 +138,7 @@ export default function OverviewTab({
 
       {/* Ce que disent les chiffres */}
       <Section
-        title={<span className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-amber-500" />Ce que disent les chiffres</span>}
+        title={<span className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-amber-700" />Ce que disent les chiffres</span>}
         desc="Constats calculés à partir des données ci-dessous, recalculés à chaque rafraîchissement."
       >
         {phrases.length === 0 ? (
@@ -162,7 +162,7 @@ export default function OverviewTab({
           title="Capital cumulé"
           desc="Résultat net additionné jour après jour sur les conseils réellement émis, gains réels sans plafond."
           right={
-            <button onClick={() => onGoTo("rentabilite")} className="flex items-center gap-1 text-[11px] font-medium text-amber-600 hover:text-amber-700">
+            <button onClick={() => onGoTo("rentabilite")} className="flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-700">
               Détail <ArrowUpRight className="h-3 w-3" />
             </button>
           }
@@ -181,7 +181,7 @@ export default function OverviewTab({
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={26} />
                 <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${Math.round(v)} €`} width={62} />
-                <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="3 3" />
+                <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />} />
                 <Area type="monotone" dataKey="cumul_net" name="Capital cumulé" stroke={DIVERGING_NEG} strokeWidth={2} fill="url(#ovCapital)" isAnimationActive={false} />
               </AreaChart>
@@ -194,7 +194,7 @@ export default function OverviewTab({
           title="Par famille de pari"
           desc="Regroupement PMU : les variantes d'un même pari partagent règle et prélèvement."
           right={
-            <button onClick={() => onGoTo("paris")} className="flex items-center gap-1 text-[11px] font-medium text-amber-600 hover:text-amber-700">
+            <button onClick={() => onGoTo("paris")} className="flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-700">
               Détail <ArrowUpRight className="h-3 w-3" />
             </button>
           }
@@ -223,7 +223,7 @@ export default function OverviewTab({
                         }}
                       />
                     </div>
-                    <span className="w-24 shrink-0 text-right text-[10px] tabular-nums text-gray-400">
+                    <span className="w-24 shrink-0 text-right text-[10px] tabular-nums text-gray-600">
                       {num(f.n_paris)} paris · {pct(f.part_mise_pct, 0)}
                     </span>
                   </div>
@@ -248,13 +248,13 @@ export default function OverviewTab({
                 href={`/courses/${v.course_id}`}
                 className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] transition-colors hover:bg-amber-50/60"
               >
-                <span className="w-10 shrink-0 tabular-nums text-gray-400">
-                  {v.date ? new Date(v.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) : "—"}
+                <span className="w-10 shrink-0 tabular-nums text-gray-600">
+                  {v.date ? new Date(v.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit" }) : "—"}
                 </span>
                 <span className="w-12 shrink-0 font-mono font-semibold text-gray-700">{v.code ?? "—"}</span>
-                <span className="flex-1 truncate text-gray-500">{v.hippodrome}</span>
-                <span className="shrink-0 text-[10px] text-gray-400">{v.profil}</span>
-                <span className="w-16 shrink-0 text-right font-mono font-bold tabular-nums text-emerald-600">
+                <span className="flex-1 truncate text-gray-600">{v.hippodrome}</span>
+                <span className="shrink-0 text-[10px] text-gray-600">{v.profil}</span>
+                <span className="w-16 shrink-0 text-right font-mono font-bold tabular-nums text-emerald-700">
                   {signedEur(v.net, 2)}
                 </span>
               </a>

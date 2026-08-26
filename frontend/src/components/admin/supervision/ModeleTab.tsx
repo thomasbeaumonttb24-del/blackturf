@@ -31,11 +31,11 @@ interface ConvergencePayload {
 const MIN_OBS_BIN = 30;
 
 function delta(v: number | null | undefined, digits = 4, higherIsBetter = true) {
-  if (v == null || !isFinite(v)) return <span className="text-gray-400">—</span>;
+  if (v == null || !isFinite(v)) return <span className="text-gray-600">—</span>;
   const good = higherIsBetter ? v > 0 : v < 0;
   const Icon = v > 0 ? TrendingUp : TrendingDown;
   return (
-    <span className={`inline-flex items-center gap-0.5 ${v === 0 ? "text-gray-400" : good ? "text-emerald-600" : "text-red-600"}`}>
+    <span className={`inline-flex items-center gap-0.5 ${v === 0 ? "text-gray-600" : good ? "text-emerald-700" : "text-red-700"}`}>
       <Icon className="h-3 w-3" />
       {v > 0 ? "+" : "−"}{Math.abs(v).toFixed(digits)}
     </span>
@@ -63,10 +63,10 @@ export default function ModeleTab({
         <StatTile
           label="Version active"
           value={active ? `v${active.version}` : "—"}
-          sub={active?.date ? new Date(active.date).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }) : "—"}
+          sub={active?.date ? new Date(active.date).toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "medium", timeStyle: "short" }) : "—"}
           icon={<Cpu className="h-3.5 w-3.5 text-gray-300" />}
           footer={
-            <span className="text-[10px] text-gray-400">
+            <span className="text-[10px] text-gray-600">
               {num(algo.total_versions)} versions entraînées au total
             </span>
           }
@@ -100,7 +100,7 @@ export default function ModeleTab({
       <Section
         title="Trajectoire de l'AUC, version après version"
         desc="Les deux courbes sont dans la même unité. Un écart qui se creuse entre l'AUC d'entraînement et l'AUC walk-forward signale du surapprentissage."
-        right={<span className="text-[10px] text-gray-400">{versions.length} dernières versions</span>}
+        right={<span className="text-[10px] text-gray-600">{versions.length} dernières versions</span>}
       >
         {versions.length < 2 ? (
           <Empty>Moins de deux versions non synthétiques enregistrées.</Empty>
@@ -236,27 +236,27 @@ export default function ModeleTab({
               const solide = b.n >= MIN_OBS_BIN;
               return (
                 <div key={i} className={`flex items-center gap-3 text-[11px] ${solide ? "" : "opacity-55"}`}>
-                  <span className="w-16 shrink-0 tabular-nums text-gray-400">
+                  <span className="w-16 shrink-0 tabular-nums text-gray-600">
                     {Math.round(b.lo * 100)}–{Math.round(b.hi * 100)} %
                   </span>
                   <div className="flex-1">
                     <div className="flex items-center gap-1.5">
                       <div className="h-2 rounded-full bg-blue-500" style={{ width: `${b.proba_moy * 100}%`, minWidth: 2 }} />
-                      <span className="text-[10px] text-gray-400">annoncé {pct(b.proba_moy * 100, 0)}</span>
+                      <span className="text-[10px] text-gray-600">annoncé {pct(b.proba_moy * 100, 0)}</span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
                       <div className="h-2 rounded-full bg-amber-500" style={{ width: `${b.freq_reelle * 100}%`, minWidth: 2 }} />
-                      <span className="text-[10px] text-gray-400">réel {pct(b.freq_reelle * 100, 0)}</span>
+                      <span className="text-[10px] text-gray-600">réel {pct(b.freq_reelle * 100, 0)}</span>
                     </div>
                   </div>
-                  <span className={`w-16 shrink-0 text-right font-mono font-bold tabular-nums ${!solide || Math.abs(ecart) < 3 ? "text-gray-400" : ecart > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  <span className={`w-16 shrink-0 text-right font-mono font-bold tabular-nums ${!solide || Math.abs(ecart) < 3 ? "text-gray-600" : ecart > 0 ? "text-emerald-700" : "text-red-700"}`}>
                     {signedPct(ecart, 0)}
                   </span>
                   <span
                     className="w-20 shrink-0 text-right tabular-nums text-gray-300"
                     title={solide ? `${b.n} observations` : `${b.n} observations — sous ${MIN_OBS_BIN}, l'écart n'est pas interprétable`}
                   >
-                    {num(b.n)}{!solide && <span className="ml-1 text-amber-500">·peu</span>}
+                    {num(b.n)}{!solide && <span className="ml-1 text-amber-700">·peu</span>}
                   </span>
                 </div>
               );
@@ -276,7 +276,7 @@ export default function ModeleTab({
         <div className="-mx-4 max-h-[420px] overflow-auto px-4">
           <table className="w-full min-w-[640px] text-xs">
             <thead className="sticky top-0 bg-white">
-              <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-400">
+              <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
                 <th className="py-2 pr-3 text-left font-semibold">Version</th>
                 <th className="px-2 py-2 text-left font-semibold">Date</th>
                 <th className="px-2 py-2 text-right font-semibold">AUC</th>
@@ -291,14 +291,14 @@ export default function ModeleTab({
               {[...versions].reverse().map((v) => (
                 <tr key={v.version} className={`border-b border-gray-50 ${v.actif ? "bg-emerald-50/50" : ""}`}>
                   <td className="py-2 pr-3 font-mono font-semibold text-gray-800">v{v.version}</td>
-                  <td className="px-2 py-2 text-gray-500">
-                    {v.date ? new Date(v.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                  <td className="px-2 py-2 text-gray-600">
+                    {v.date ? new Date(v.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-700">{v.auc_roc?.toFixed(4) ?? "—"}</td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-700">{v.walk_forward_auc?.toFixed(4) ?? "—"}</td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-700">{v.brier?.toFixed(4) ?? "—"}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-500">{v.precision_top3 != null ? pct(v.precision_top3) : "—"}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-500">{num(v.courses_train)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{v.precision_top3 != null ? pct(v.precision_top3) : "—"}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{num(v.courses_train)}</td>
                   <td className="py-2 pl-2">
                     {v.actif ? (
                       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">

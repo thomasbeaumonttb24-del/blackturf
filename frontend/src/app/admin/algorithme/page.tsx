@@ -165,7 +165,7 @@ export default function SupervisionIAPage() {
         <div className="text-center">
           <Brain className="mx-auto mb-4 h-10 w-10 text-gray-300" />
           <h2 className="text-lg font-bold text-gray-900">Accès réservé</h2>
-          <p className="mt-1 text-sm text-gray-500">Cette page est réservée aux administrateurs.</p>
+          <p className="mt-1 text-sm text-gray-600">Cette page est réservée aux administrateurs.</p>
         </div>
       </div>
     );
@@ -182,11 +182,11 @@ export default function SupervisionIAPage() {
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-900">
-                <Brain className="h-4 w-4 text-amber-400" />
+                <Brain className="h-4 w-4 text-amber-700" />
               </span>
               Supervision IA
             </h1>
-            <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+            <p className="mt-1 text-xs text-gray-600 sm:text-sm">
               Ce que l&apos;algorithme a conseillé, ce que ça a rapporté, et comment il apprend —
               mesuré sur les rapports PMU réels, jamais reconstitué après coup.
             </p>
@@ -199,7 +199,7 @@ export default function SupervisionIAPage() {
                   key={f.days}
                   onClick={() => setDays(f.days)}
                   className={`px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
-                    days === f.days ? "bg-gray-900 text-white" : "text-gray-500 hover:bg-gray-50"
+                    days === f.days ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50"
                   }`}
                 >
                   {f.label}
@@ -241,7 +241,7 @@ export default function SupervisionIAPage() {
               className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition-colors sm:text-[13px] ${
                 tab === t.key
                   ? "bg-gray-900 text-white"
-                  : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
               }`}
             >
               {t.label}
@@ -261,7 +261,7 @@ export default function SupervisionIAPage() {
         )}
         {tab === "paris" && (
           loadingParis && !paris
-            ? <div className="rounded-xl border border-dashed border-gray-200 p-16 text-center text-xs text-gray-400">Chargement des chiffres par type de pari…</div>
+            ? <div className="rounded-xl border border-dashed border-gray-200 p-16 text-center text-xs text-gray-600">Chargement des chiffres par type de pari…</div>
             : <ParisTab data={paris} />
         )}
         {tab === "rentabilite" && <RentabiliteTab data={renta} />}
@@ -279,7 +279,7 @@ export default function SupervisionIAPage() {
           />
         )}
 
-        <p className="pb-6 text-center text-[10px] text-gray-400">
+        <p className="pb-6 text-center text-[10px] text-gray-600">
           Source : conseils de mise réellement émis avant le départ, réglés sur les rapports PMU
           publiés. Runs reconstruits a posteriori exclus. Les ROI qui servent de VERDICT sont
           calculés gains plafonnés à 50× la mise ; les courbes de capital et les résultats par

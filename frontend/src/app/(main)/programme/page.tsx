@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import {
   fetchProgramme,
+  fetchValueBetsCompteur,
   jourParis,
   jourLong,
   jourCourt,
@@ -53,7 +54,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function ProgrammePage() {
   const jour = jourParis();
-  const prog = await fetchProgramme(jour);
+  const [prog, compteurVB] = await Promise.all([fetchProgramme(jour), fetchValueBetsCompteur(3)]);
 
   // ItemList des courses du jour → Google comprend la page comme un index d'événements
   // datés et non comme une page générique, ce qui aide la fraîcheur (Top Stories / query
@@ -94,7 +95,7 @@ export default async function ProgrammePage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
-      <ProgrammeClient initialProgramme={prog} initialJour={jour} />
+      <ProgrammeClient initialProgramme={prog} initialJour={jour} initialCompteurVB={compteurVB} />
 
       {/* Le visiteur qui découvre le site par le programme ne voit, sinon, qu'une
           liste d'horaires : rien ne lui dit qu'un modèle tourne derrière. Ces six
@@ -112,7 +113,7 @@ export default async function ProgrammePage() {
         <h2 className="font-display text-xl font-bold text-gray-900">
           Toutes les courses du {jourLong(jour)}
         </h2>
-        <p className="mt-2 max-w-3xl text-sm text-gray-500">
+        <p className="mt-2 max-w-3xl text-sm text-gray-600">
           {prog?.nb_courses
             ? `${prog.nb_courses} courses réparties sur ${prog.reunions.length} réunions. Cliquez sur une course pour ouvrir sa fiche : partants, cotes des principaux opérateurs, arrivée et rapports officiels une fois la course courue.`
             : "Le programme du jour n'est pas encore disponible. Il est publié par le PMU la veille au soir."}
@@ -129,14 +130,14 @@ export default async function ProgrammePage() {
                   <li key={c.course_id} className="text-sm text-gray-600">
                     <a
                       href={`/courses/${c.course_id}`}
-                      className="hover:text-brand-gold-deep hover:underline"
+                      className="hover:text-brand-gold-dark hover:underline"
                     >
                       <span className="tabular-nums font-medium text-gray-800">
                         {heureParis(c.date_heure)}
                       </span>{" "}
                       C{c.numero} · {titleCase(c.nom ?? "")}
                     </a>{" "}
-                    <span className="text-gray-400">
+                    <span className="text-gray-600">
                       ({disciplineLabel(c.discipline)}, {c.distance} m, {c.nb_partants} partants
                       {c.est_quinte ? ", Quinté+" : ""})
                     </span>

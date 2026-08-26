@@ -26,7 +26,7 @@ export function BoutonCopier({ texte }: { texte: string }) {
     >
       {copie ? (
         <>
-          <Check className="h-4 w-4 text-emerald-600" aria-hidden="true" /> Légende copiée
+          <Check className="h-4 w-4 text-emerald-700" aria-hidden="true" /> Légende copiée
         </>
       ) : (
         <>

@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function NotFound() {
   return (
     <main className="flex min-h-[60vh] flex-col items-center justify-center px-6 text-center">
-      <p className="font-mono text-5xl font-bold text-brand-gold">404</p>
+      <p className="font-mono text-5xl font-bold text-brand-gold-dark">404</p>
       <h1 className="mt-3 text-xl font-bold">Cette page n&apos;existe pas (ou plus)</h1>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
         La course ou la page demandée est introuvable. Elle a peut-être été retirée,

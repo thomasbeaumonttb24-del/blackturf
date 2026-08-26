@@ -28,7 +28,7 @@ export function EVBadge({ ev }: { ev: number }) {
   return (
     <span className={cn(
       "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold font-mono",
-      positive ? "bg-brand-emerald/15 text-brand-emerald" : "bg-brand-red/15 text-brand-red"
+      positive ? "bg-brand-emerald/15 text-brand-emerald-dark" : "bg-brand-red/15 text-brand-red"
     )}>
       {positive ? "+" : ""}{pct}%
     </span>
@@ -46,11 +46,11 @@ export function ELOBadge({ elo }: { elo: number | null }) {
 }
 
 const RUNNING_STYLE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  mene:      { label: "Mène",      color: "text-red-600",   bg: "bg-red-50 ring-red-200" },
-  suit_tete: { label: "Suit tête", color: "text-orange-600", bg: "bg-orange-50 ring-orange-200" },
-  placier:   { label: "Placier",   color: "text-blue-600",  bg: "bg-blue-50 ring-blue-200" },
-  ferme:     { label: "Ferme",     color: "text-emerald-600", bg: "bg-emerald-50 ring-emerald-200" },
-  irregulier:{ label: "Irrégulier", color: "text-gray-500", bg: "bg-gray-50 ring-gray-200" },
+  mene:      { label: "Mène",      color: "text-red-700",   bg: "bg-red-50 ring-red-200" },
+  suit_tete: { label: "Suit tête", color: "text-orange-700", bg: "bg-orange-50 ring-orange-200" },
+  placier:   { label: "Placier",   color: "text-blue-700",  bg: "bg-blue-50 ring-blue-200" },
+  ferme:     { label: "Ferme",     color: "text-emerald-700", bg: "bg-emerald-50 ring-emerald-200" },
+  irregulier:{ label: "Irrégulier", color: "text-gray-600", bg: "bg-gray-50 ring-gray-200" },
 };
 export function RunningStyleBadge({ style }: { style: string | null }) {
   if (!style) return null;
@@ -68,7 +68,7 @@ const DISCIPLINE_MUSIQUE: Record<string, string> = {
 };
 export function MusiqueDisplay({ musique, plain = false }: { musique: string | null; plain?: boolean }) {
   if (!musique || !musique.trim()) {
-    return <span className="text-xs text-muted-foreground/50">{plain ? "—" : "Aucune musique"}</span>;
+    return <span className="text-xs text-muted-foreground">{plain ? "—" : "Aucune musique"}</span>;
   }
   const tokens = (musique.match(/\(\d{2,4}\)|[0-9A-Za-z][a-z]/g) || [])
     .filter((t) => !t.startsWith("("))
@@ -77,7 +77,7 @@ export function MusiqueDisplay({ musique, plain = false }: { musique: string | n
   // Variante sobre : texte mono discret, sans boîtes colorées (ligne du tableau).
   if (plain) {
     return (
-      <span className="font-mono text-[11px] tracking-tight text-muted-foreground/80">
+      <span className="font-mono text-[11px] tracking-tight text-muted-foreground">
         {tokens.join(" ")}
       </span>
     );
@@ -86,7 +86,7 @@ export function MusiqueDisplay({ musique, plain = false }: { musique: string | n
     h === "1" ? "bg-amber-100 text-amber-700 ring-amber-300"
     : h === "2" || h === "3" ? "bg-blue-50 text-blue-700 ring-blue-200"
     : /[4-9]/.test(h) ? "bg-gray-100 text-gray-600 ring-gray-200"
-    : "bg-rose-50 text-rose-600 ring-rose-200";
+    : "bg-rose-50 text-rose-700 ring-rose-200";
   const titleOf = (t: string) => {
     const h = headOf(t);
     const disc = DISCIPLINE_MUSIQUE[t.slice(-1).toLowerCase()];

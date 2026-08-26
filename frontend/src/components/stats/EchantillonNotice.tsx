@@ -16,7 +16,7 @@ function formatDateFr(iso: string | null | undefined): string | null {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
     ? null
-    : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+    : d.toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "long", year: "numeric" });
 }
 
 /**

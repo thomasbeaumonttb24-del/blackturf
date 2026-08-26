@@ -54,8 +54,8 @@ type ResultFilter = "all" | "gagne" | "perd" | "attente";
 function ResultBadge({ r }: { r: string | null }) {
   if (r === "gagne") return <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full"><CheckCircle2 className="w-3 h-3" />Gagné</span>;
   if (r === "perd")  return <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full"><XCircle className="w-3 h-3" />Perdu</span>;
-  if (r === "annule") return <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full"><Minus className="w-3 h-3" />Annulé</span>;
-  return <span className="inline-flex text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">En attente</span>;
+  if (r === "annule") return <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full"><Minus className="w-3 h-3" />Annulé</span>;
+  return <span className="inline-flex text-xs font-medium text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">En attente</span>;
 }
 
 // ─── Main ────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ export default function BankrollPage() {
         <div className="relative p-6 sm:p-8">
           <div className="flex flex-col lg:flex-row lg:items-center gap-6">
             <div className="flex-1">
-              <div className="flex items-center gap-2 text-amber-300/90 text-xs font-semibold uppercase tracking-wider">
+              <div className="flex items-center gap-2 text-amber-300 text-xs font-semibold uppercase tracking-wider">
                 <Wallet className="w-4 h-4" /> Suivi du capital
               </div>
               <div className="mt-2 flex items-end gap-3 flex-wrap">
@@ -264,7 +264,7 @@ export default function BankrollPage() {
               <input type="text" value={searchQ} onChange={(e) => setSearchQ(e.target.value)}
                 placeholder="Rechercher par cheval, type…"
                 className="w-full pl-9 pr-4 py-2 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/50" />
-              {searchQ && <button onClick={() => setSearchQ("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500"><X className="w-3 h-3" /></button>}
+              {searchQ && <button onClick={() => setSearchQ("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-600"><X className="w-3 h-3" /></button>}
             </div>
             <div className="flex gap-2 flex-wrap">
               {([["all", "Tous"], ["gagne", "Gagnés"], ["perd", "Perdus"], ["attente", "En attente"]] as [ResultFilter, string][]).map(([r, label]) => (
@@ -274,14 +274,14 @@ export default function BankrollPage() {
                       ? r === "gagne" ? "bg-emerald-50 border-emerald-200 text-emerald-700"
                         : r === "perd" ? "bg-red-50 border-red-200 text-red-700"
                         : "bg-amber-50 border-amber-200 text-amber-700"
-                      : "border-gray-200 text-gray-500 hover:text-gray-700 bg-white")}>
+                      : "border-gray-200 text-gray-600 hover:text-gray-700 bg-white")}>
                   {label}
                 </button>
               ))}
             </div>
           </div>
           {filteredEntries.length !== (entries?.length ?? 0) && (
-            <p className="text-xs text-gray-400">{filteredEntries.length} sur {entries?.length ?? 0} paris</p>
+            <p className="text-xs text-gray-600">{filteredEntries.length} sur {entries?.length ?? 0} paris</p>
           )}
         </div>
 
@@ -289,7 +289,7 @@ export default function BankrollPage() {
           {filteredEntries.length === 0 ? (
             <div className="text-center py-16">
               <Filter className="w-10 h-10 text-gray-100 mx-auto mb-3" />
-              <p className="text-sm text-gray-400">
+              <p className="text-sm text-gray-600">
                 {!entries?.length ? "Aucun pari suivi pour le moment. Tes paris suivis depuis les pronostics apparaîtront ici." : "Aucun résultat pour ces filtres."}
               </p>
             </div>
@@ -297,7 +297,7 @@ export default function BankrollPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-500">
+                  <tr className="border-b border-gray-100 bg-gray-50/70 text-xs text-gray-600">
                     {[
                       { key: "date", label: "Date" },
                       { key: null, label: "Type" },
@@ -327,7 +327,7 @@ export default function BankrollPage() {
                       e.resultat === "gagne" && "bg-emerald-50/20",
                       e.resultat === "perd" && "bg-red-50/10",
                     )}>
-                      <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{formatDateTime(e.date)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDateTime(e.date)}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="text-xs font-medium text-gray-700">{e.type_pari}</div>
                         {rcCode(e.course_id, e.numero_reunion) && (
@@ -336,9 +336,9 @@ export default function BankrollPage() {
                           </Link>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-400 hidden md:table-cell max-w-[100px] truncate">{e.chevaux || "—"}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell max-w-[100px] truncate">{e.chevaux || "—"}</td>
                       <td className="px-4 py-3 text-right font-mono text-sm font-semibold text-gray-800">{formatEuro(e.mise)}</td>
-                      <td className="px-4 py-3 text-right text-gray-500 hidden sm:table-cell font-mono text-xs">{e.cote?.toFixed(2) || "—"}</td>
+                      <td className="px-4 py-3 text-right text-gray-600 hidden sm:table-cell font-mono text-xs">{e.cote?.toFixed(2) || "—"}</td>
                       <td className="px-4 py-3 text-center">
                         {/* Résultat réglé automatiquement (vrais rapports PMU). Tant que la
                             course n'est pas terminée / le rapport pas publié → « En attente ».
@@ -346,7 +346,7 @@ export default function BankrollPage() {
                         <ResultBadge r={e.resultat} />
                       </td>
                       <td className={cn("px-4 py-3 text-right font-bold font-mono tabular-nums text-sm",
-                        (e.gain_perte ?? 0) > 0 ? "text-emerald-600" : (e.gain_perte ?? 0) < 0 ? "text-red-500" : "text-gray-400")}>
+                        (e.gain_perte ?? 0) > 0 ? "text-emerald-700" : (e.gain_perte ?? 0) < 0 ? "text-red-700" : "text-gray-600")}>
                         {e.gain_perte !== null ? formatEuro(e.gain_perte) : "—"}
                       </td>
                     </tr>
@@ -361,7 +361,7 @@ export default function BankrollPage() {
             <div className="border-t border-gray-50 p-3 text-center">
               <button
                 onClick={() => setShowAllEntries((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-amber-600 hover:bg-amber-50 transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 transition-colors"
               >
                 {showAllEntries
                   ? "Réduire"
@@ -376,7 +376,7 @@ export default function BankrollPage() {
       {analytics && (
         <div className="space-y-5 pt-2">
           <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
-            <BarChart2 className="w-4 h-4 text-amber-500" />Analyse &amp; outils
+            <BarChart2 className="w-4 h-4 text-amber-700" />Analyse &amp; outils
           </h2>
 
           {/* Évolution du capital */}
@@ -385,28 +385,28 @@ export default function BankrollPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-amber-500" />Évolution du capital
+                    <TrendingUp className="w-4 h-4 text-amber-700" />Évolution du capital
                   </CardTitle>
                   <div className="flex rounded-lg border border-gray-200 overflow-hidden">
                     {(["7j", "30j", "3m", "tout"] as Period[]).map((p) => (
                       <button key={p} onClick={() => setPeriod(p)}
                         className={cn("px-2.5 py-1 text-xs font-medium transition-colors",
-                          period === p ? "bg-amber-500 text-white" : "text-gray-500 hover:bg-gray-50")}>
+                          period === p ? "bg-amber-500 text-brand-dark" : "text-gray-600 hover:bg-gray-50")}>
                         {p === "tout" ? "Tout" : p}
                       </button>
                     ))}
                   </div>
                 </div>
                 {chartData.length > 1 ? (
-                  <div className={cn("text-2xl font-black mt-1 tabular-nums leading-none", isPositive ? "text-emerald-600" : "text-red-500")}>
+                  <div className={cn("text-2xl font-black mt-1 tabular-nums leading-none", isPositive ? "text-emerald-700" : "text-red-700")}>
                     {formatEuro(chartData.at(-1)!.bankroll)}
-                    <span className="text-xs font-medium text-gray-400 ml-2">
+                    <span className="text-xs font-medium text-gray-600 ml-2">
                       {isPositive ? "▲" : "▼"} {formatEuro(Math.abs(chartData.at(-1)!.bankroll - chartData[0]!.bankroll))}
                       <span className="text-gray-300"> · </span>{chartData.length} points
                     </span>
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-1">Pas assez de paris réglés sur cette période.</p>
+                  <p className="text-xs text-gray-600 mt-1">Pas assez de paris réglés sur cette période.</p>
                 )}
               </CardHeader>
               <CardContent className="pt-2">
@@ -437,7 +437,7 @@ export default function BankrollPage() {
                 ) : (
                   <div className="h-[190px] flex flex-col items-center justify-center text-center gap-1.5">
                     <TrendingUp className="w-7 h-7 text-gray-200" />
-                    <p className="text-xs text-gray-400">La courbe apparaîtra dès quelques paris réglés sur cette période.</p>
+                    <p className="text-xs text-gray-600">La courbe apparaîtra dès quelques paris réglés sur cette période.</p>
                   </div>
                 )}
               </CardContent>
@@ -447,15 +447,15 @@ export default function BankrollPage() {
           {/* 3 repères clés — aérés */}
           <div className="grid grid-cols-3 gap-3">
             {[
-              { icon: Flame, label: "Meilleure série", value: `${analytics.maxStreak}`, sub: "gagnés d'affilée", color: "text-orange-500" },
-              { icon: Trophy, label: "Meilleur gain", value: formatEuro(analytics.bestWin), sub: "sur un pari", color: "text-emerald-600" },
-              { icon: ArrowDownRight, label: "Drawdown max", value: formatEuro(analytics.maxDrawdown), sub: "plus forte baisse", color: "text-purple-500" },
+              { icon: Flame, label: "Meilleure série", value: `${analytics.maxStreak}`, sub: "gagnés d'affilée", color: "text-orange-700" },
+              { icon: Trophy, label: "Meilleur gain", value: formatEuro(analytics.bestWin), sub: "sur un pari", color: "text-emerald-700" },
+              { icon: ArrowDownRight, label: "Drawdown max", value: formatEuro(analytics.maxDrawdown), sub: "plus forte baisse", color: "text-purple-700" },
             ].map(({ icon: Icon, label, value, sub, color }) => (
               <div key={label} className="rounded-2xl border border-gray-100 bg-white p-4 text-center">
                 <Icon className={`w-5 h-5 ${color} mx-auto mb-2`} />
                 <div className="text-lg font-black text-gray-900 tabular-nums leading-none">{value}</div>
                 <div className="text-[11px] font-medium text-gray-600 mt-1">{label}</div>
-                <div className="text-[10px] text-gray-400">{sub}</div>
+                <div className="text-[10px] text-gray-600">{sub}</div>
               </div>
             ))}
           </div>
@@ -465,9 +465,9 @@ export default function BankrollPage() {
             <Card className="border-gray-100 shadow-sm">
               <CardHeader className="pb-1">
                 <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-amber-500" />Performance par type de pari
+                  <Layers className="w-4 h-4 text-amber-700" />Performance par type de pari
                 </CardTitle>
-                <p className="text-[11px] text-gray-400">Bénéfice net réel par type — barre verte = profit, rouge = perte.</p>
+                <p className="text-[11px] text-gray-600">Bénéfice net réel par type — barre verte = profit, rouge = perte.</p>
               </CardHeader>
               <CardContent className="pt-3 space-y-2.5">
                 {(() => {
@@ -479,7 +479,7 @@ export default function BankrollPage() {
                       <div key={t.type} className="flex items-center gap-2.5">
                         <div className="w-[88px] sm:w-28 shrink-0">
                           <div className="text-[13px] font-medium text-gray-700 truncate leading-tight">{t.type}</div>
-                          <div className="text-[10px] text-gray-400 tabular-nums">{t.nb} pari{t.nb > 1 ? "s" : ""}{t.settled > 0 ? ` · ${Math.round(t.winRate)}%` : ""}</div>
+                          <div className="text-[10px] text-gray-600 tabular-nums">{t.nb} pari{t.nb > 1 ? "s" : ""}{t.settled > 0 ? ` · ${Math.round(t.winRate)}%` : ""}</div>
                         </div>
                         <div className="flex-1 h-7 rounded-lg bg-gray-100/80 overflow-hidden">
                           <div
@@ -504,7 +504,7 @@ export default function BankrollPage() {
           <Card className="border-gray-100 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <BarChart2 className="w-4 h-4 text-purple-500" />Répartition des paris
+                  <BarChart2 className="w-4 h-4 text-purple-700" />Répartition des paris
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-1">
@@ -512,10 +512,10 @@ export default function BankrollPage() {
                   const rc = analytics.resultCounts;
                   const total = Math.max(1, rc.gagne + rc.perd + rc.attente + rc.annule);
                   const segs = [
-                    { k: "Gagnés", n: rc.gagne, cls: "bg-emerald-500", txt: "text-emerald-600" },
-                    { k: "Perdus", n: rc.perd, cls: "bg-red-400", txt: "text-red-500" },
-                    { k: "En attente", n: rc.attente, cls: "bg-amber-400", txt: "text-amber-600" },
-                    { k: "Annulés", n: rc.annule, cls: "bg-gray-300", txt: "text-gray-500" },
+                    { k: "Gagnés", n: rc.gagne, cls: "bg-emerald-500", txt: "text-emerald-700" },
+                    { k: "Perdus", n: rc.perd, cls: "bg-red-400", txt: "text-red-700" },
+                    { k: "En attente", n: rc.attente, cls: "bg-amber-400", txt: "text-amber-700" },
+                    { k: "Annulés", n: rc.annule, cls: "bg-gray-300", txt: "text-gray-600" },
                   ].filter((s) => s.n > 0);
                   return (
                     <>
@@ -525,7 +525,7 @@ export default function BankrollPage() {
                       <div className="mt-3 space-y-1.5">
                         {segs.map((s) => (
                           <div key={s.k} className="flex items-center justify-between text-xs">
-                            <span className="flex items-center gap-1.5 text-gray-500"><span className={cn("h-2 w-2 rounded-full", s.cls)} />{s.k}</span>
+                            <span className="flex items-center gap-1.5 text-gray-600"><span className={cn("h-2 w-2 rounded-full", s.cls)} />{s.k}</span>
                             <span className={cn("font-semibold tabular-nums", s.txt)}>{s.n} · {Math.round((s.n / total) * 100)}%</span>
                           </div>
                         ))}

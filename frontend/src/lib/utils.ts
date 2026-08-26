@@ -114,8 +114,8 @@ export function planColor(plan: string): string {
     {
       free: "text-muted-foreground",
       decouverte: "text-muted-foreground",
-      standard: "text-brand-gold",
-      expert: "text-brand-emerald",
+      standard: "text-brand-gold-dark",
+      expert: "text-brand-emerald-dark",
     }[p] ?? ""
   );
 }
@@ -142,7 +142,7 @@ export function disciplineIcon(discipline: string): string {
 export function niveauCourseColor(niveau: string): string {
   return (
     {
-      Group1: "text-brand-gold font-bold",
+      Group1: "text-brand-gold-dark font-bold",
       Group2: "text-yellow-400",
       Group3: "text-yellow-300",
       Listed: "text-blue-400",

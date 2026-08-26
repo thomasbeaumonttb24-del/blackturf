@@ -45,7 +45,7 @@ export default function MotDePasseOubliePage() {
             <div className="h-10 w-10 rounded-xl bg-brand-gold flex items-center justify-center">
               <Zap className="h-5 w-5 text-white" />
             </div>
-            <span className="text-2xl font-bold">Black<span className="text-brand-gold">Turf</span></span>
+            <span className="text-2xl font-bold">Black<span className="text-brand-gold-dark">Turf</span></span>
           </Link>
           <h1 className="text-2xl font-bold">Mot de passe oublié</h1>
           <p className="text-muted-foreground text-sm mt-1">
@@ -56,7 +56,7 @@ export default function MotDePasseOubliePage() {
         <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl">
           {sent ? (
             <div className="text-center py-4">
-              <CheckCircle className="h-12 w-12 text-brand-emerald mx-auto mb-4" />
+              <CheckCircle className="h-12 w-12 text-brand-emerald-dark mx-auto mb-4" />
               <h2 className="font-bold text-lg mb-2">Email envoyé !</h2>
               <p className="text-sm text-muted-foreground mb-6">
                 Si un compte existe avec cette adresse, vous recevrez un lien de réinitialisation

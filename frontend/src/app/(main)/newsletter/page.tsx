@@ -30,7 +30,7 @@ export default function NewsletterPage() {
         <NewsletterForm source="page-newsletter" />
 
         <Section title="Ce qu'il y a dedans">
-          <ul className="space-y-3 text-sm leading-relaxed text-brand-charcoal/85">
+          <ul className="space-y-3 text-sm leading-relaxed text-brand-charcoal">
             <li>
               <strong className="text-brand-dark">Le bilan de la semaine, en euros.</strong> Ce
               que les plans ont rapporté ou coûté, aux rapports réels publiés par le PMU — pas à
@@ -50,7 +50,7 @@ export default function NewsletterPage() {
         </Section>
 
         <Section title="Ce qu'il n'y a pas dedans">
-          <p className="text-sm leading-relaxed text-brand-charcoal/85">
+          <p className="text-sm leading-relaxed text-brand-charcoal">
             Aucun pronostic « garanti », aucune promesse de gain, aucun rappel des seules
             semaines qui se sont bien passées. Le prélèvement du PMU tourne autour de 20 % des
             enjeux : personne ne peut promettre un gain régulier là-dessus, et quiconque le fait
@@ -61,13 +61,13 @@ export default function NewsletterPage() {
         </Section>
 
         <Section title="Vos données">
-          <p className="text-sm leading-relaxed text-brand-charcoal/85">
+          <p className="text-sm leading-relaxed text-brand-charcoal">
             Votre adresse ne sert qu&apos;à cet envoi. Elle n&apos;est ni revendue, ni partagée.
             Rien ne part tant que vous n&apos;avez pas cliqué le lien de confirmation, et chaque
             lettre porte un lien de désinscription en un clic. Le détail est dans la{" "}
             <Link
               href="/confidentialite"
-              className="font-medium text-brand-gold-deep hover:underline"
+              className="font-medium text-brand-gold-dark hover:underline"
             >
               politique de confidentialité
             </Link>

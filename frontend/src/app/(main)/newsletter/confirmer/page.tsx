@@ -47,24 +47,24 @@ export default async function ConfirmerPage({
       />
       <Container>
         {resultat.ok ? (
-          <p className="text-sm leading-relaxed text-brand-charcoal/85">
+          <p className="text-sm leading-relaxed text-brand-charcoal">
             Vous recevrez la première lettre lundi matin : le bilan chiffré de la semaine,
             gains comme pertes. En attendant, le{" "}
-            <Link href="/programme" className="font-medium text-brand-gold-deep hover:underline">
+            <Link href="/programme" className="font-medium text-brand-gold-dark hover:underline">
               programme du jour
             </Link>{" "}
             et les{" "}
-            <Link href="/resultats" className="font-medium text-brand-gold-deep hover:underline">
+            <Link href="/resultats" className="font-medium text-brand-gold-dark hover:underline">
               arrivées et rapports
             </Link>{" "}
             sont en accès libre.
           </p>
         ) : (
-          <p className="text-sm leading-relaxed text-brand-charcoal/85">
+          <p className="text-sm leading-relaxed text-brand-charcoal">
             Un lien de confirmation ne sert qu&apos;une fois, et une nouvelle demande
             d&apos;inscription annule le précédent. Si vous êtes déjà confirmé, il n&apos;y a
             rien à faire. Sinon,{" "}
-            <Link href="/newsletter" className="font-medium text-brand-gold-deep hover:underline">
+            <Link href="/newsletter" className="font-medium text-brand-gold-dark hover:underline">
               redemandez un lien
             </Link>
             .

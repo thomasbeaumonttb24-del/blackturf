@@ -70,14 +70,14 @@ function KpiCard({
           </div>
           {positive !== undefined && (
             <span className={cn("flex items-center gap-1 text-xs font-medium",
-              positive ? "text-emerald-600" : "text-red-600"
+              positive ? "text-emerald-700" : "text-red-700"
             )}>
               {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
             </span>
           )}
         </div>
         <div className={cn("text-xl sm:text-2xl font-bold tabular-nums",
-          positive === true ? "text-emerald-600" : positive === false ? "text-red-600" : "text-foreground"
+          positive === true ? "text-emerald-700" : positive === false ? "text-red-700" : "text-foreground"
         )}>
           {value}
         </div>
@@ -90,12 +90,12 @@ function KpiCard({
 
 function ResultBadge({ r }: { r: string | null }) {
   if (r === "gagne") return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
       <CheckCircle2 className="w-3 h-3" />Gagné
     </span>
   );
   if (r === "perd") return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
       <XCircle className="w-3 h-3" />Perdu
     </span>
   );
@@ -111,7 +111,7 @@ function BetTable({ bets, title, color }: { bets: BetRow[]; title: string; color
   return (
     <div>
       <h3 className={cn("text-sm font-semibold mb-3",
-        color === "green" ? "text-emerald-600" : "text-red-600"
+        color === "green" ? "text-emerald-700" : "text-red-700"
       )}>{title}</h3>
       <div className="space-y-2">
         {bets.map((b) => (
@@ -131,7 +131,7 @@ function BetTable({ bets, title, color }: { bets: BetRow[]; title: string; color
               </div>
             </div>
             <div className={cn("font-bold tabular-nums shrink-0 ml-4",
-              (b.gain_perte ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"
+              (b.gain_perte ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"
             )}>
               {(b.gain_perte ?? 0) >= 0 ? "+" : ""}{(b.gain_perte ?? 0).toFixed(2)}€
             </div>
@@ -151,7 +151,7 @@ function PnlTooltip({ active, payload, label }: {
   return (
     <div className="rounded-xl bg-white ring-1 ring-border px-3 py-2 text-xs shadow-md">
       <div className="font-medium text-foreground mb-1">{label}</div>
-      <div className={cn("font-bold tabular-nums", val >= 0 ? "text-emerald-600" : "text-red-500")}>
+      <div className={cn("font-bold tabular-nums", val >= 0 ? "text-emerald-700" : "text-red-700")}>
         {val >= 0 ? "+" : ""}{val.toFixed(2)}€
       </div>
     </div>
@@ -202,7 +202,7 @@ export default function StatistiquesPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600" />
+              <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-amber-700" />
               Mes Statistiques
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -262,7 +262,7 @@ export default function StatistiquesPage() {
           <Card className="lg:col-span-2 border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-amber-600" />
+                <TrendingUp className="w-4 h-4 text-amber-700" />
                 Gains et pertes / mois
               </CardTitle>
             </CardHeader>
@@ -272,12 +272,12 @@ export default function StatistiquesPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F6" vertical={false} />
                   <XAxis
                     dataKey="mois"
-                    tick={{ fontSize: 10, fill: "#9CA3AF" }}
+                    tick={{ fontSize: 10, fill: "#4B5563" }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fontSize: 10, fill: "#9CA3AF" }}
+                    tick={{ fontSize: 10, fill: "#4B5563" }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(v) => `${v}€`}
@@ -301,7 +301,7 @@ export default function StatistiquesPage() {
           <Card className="border-border/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-blue-600" />
+                <BarChart3 className="w-4 h-4 text-blue-700" />
                 Rendement par discipline
               </CardTitle>
             </CardHeader>
@@ -320,7 +320,7 @@ export default function StatistiquesPage() {
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-foreground font-medium">{d.discipline}</span>
                           <span className={cn("text-xs font-bold tabular-nums",
-                            isPos ? "text-emerald-600" : "text-red-600"
+                            isPos ? "text-emerald-700" : "text-red-700"
                           )}>
                             {isPos ? "+" : ""}{d.roi}%
                           </span>
@@ -378,7 +378,7 @@ export default function StatistiquesPage() {
         <Card className="border-border/60">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Brain className="w-4 h-4 text-blue-600" />
+              <Brain className="w-4 h-4 text-blue-700" />
               Suivi des recommandations IA
             </CardTitle>
           </CardHeader>
@@ -399,11 +399,11 @@ export default function StatistiquesPage() {
               {/* Paris IA */}
               <div className="p-4 rounded-xl bg-blue-50 border border-blue-500/20">
                 <div className="flex items-center gap-1.5 mb-2">
-                  <Zap className="w-4 h-4 text-blue-600" />
+                  <Zap className="w-4 h-4 text-blue-700" />
                   <span className="text-sm font-semibold text-foreground">Avec IA</span>
                 </div>
                 <div className={cn("text-xl font-bold tabular-nums",
-                  data.suivi_ia.roi_ia >= 0 ? "text-emerald-600" : "text-red-600"
+                  data.suivi_ia.roi_ia >= 0 ? "text-emerald-700" : "text-red-700"
                 )}>
                   Rendement {data.suivi_ia.roi_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_ia}%
                 </div>
@@ -419,7 +419,7 @@ export default function StatistiquesPage() {
                   <span className="text-sm font-semibold text-foreground">Sans IA</span>
                 </div>
                 <div className={cn("text-xl font-bold tabular-nums",
-                  data.suivi_ia.roi_non_ia >= 0 ? "text-emerald-600" : "text-red-600"
+                  data.suivi_ia.roi_non_ia >= 0 ? "text-emerald-700" : "text-red-700"
                 )}>
                   Rendement {data.suivi_ia.roi_non_ia >= 0 ? "+" : ""}{data.suivi_ia.roi_non_ia}%
                 </div>

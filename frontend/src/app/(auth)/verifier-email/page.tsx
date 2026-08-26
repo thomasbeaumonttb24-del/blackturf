@@ -35,20 +35,20 @@ function VerifierEmailContent() {
           <div className="h-10 w-10 rounded-xl bg-brand-gold flex items-center justify-center">
             <Zap className="h-5 w-5 text-white" />
           </div>
-          <span className="text-2xl font-bold">Black<span className="text-brand-gold">Turf</span></span>
+          <span className="text-2xl font-bold">Black<span className="text-brand-gold-dark">Turf</span></span>
         </Link>
 
         <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl">
           {status === "loading" && (
             <div className="py-4">
-              <Loader2 className="h-12 w-12 animate-spin text-brand-gold mx-auto mb-4" />
+              <Loader2 className="h-12 w-12 animate-spin text-brand-gold-dark mx-auto mb-4" />
               <p className="text-muted-foreground">Vérification en cours...</p>
             </div>
           )}
 
           {status === "success" && (
             <div className="py-4">
-              <CheckCircle className="h-12 w-12 text-brand-emerald mx-auto mb-4" />
+              <CheckCircle className="h-12 w-12 text-brand-emerald-dark mx-auto mb-4" />
               <h1 className="text-xl font-bold mb-2">Email vérifié !</h1>
               <p className="text-sm text-muted-foreground mb-6">
                 Votre adresse email est confirmée. Vous avez maintenant accès à toutes les fonctionnalités.

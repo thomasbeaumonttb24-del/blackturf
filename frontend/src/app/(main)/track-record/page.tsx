@@ -349,7 +349,7 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
               <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border/60 pt-3 text-xs">
                 <div><span className="block text-muted-foreground">Pari</span><span className="mt-0.5 block font-medium">{b.type_pari} · {b.chevaux.map((n) => `N°${n}`).join(" + ")}</span></div>
                 <div className="text-right"><span className="block text-muted-foreground">Mise / rapport</span><span className="mt-0.5 block font-medium tabular-nums">{b.mise.toFixed(0)}€{b.rapport ? ` · ×${b.rapport.toFixed(1)}` : ""}</span></div>
-                <div className="flex items-center gap-1.5 text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />{b.date ? new Date(b.date).toLocaleDateString("fr-FR") : "Date indisponible"}</div>
+                <div className="flex items-center gap-1.5 text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />{b.date ? new Date(b.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : "Date indisponible"}</div>
                 <div className="flex justify-end"><span className={cn("inline-flex items-center rounded-full px-2 py-1 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span></div>
               </div>
               {b.fige_avant_course && <p className="mt-3 flex items-center gap-1.5 text-[10px] font-medium text-emerald-700"><LockKeyhole className="h-3 w-3" aria-hidden="true" /> Pronostic figé avant le départ</p>}
@@ -381,7 +381,7 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
               <tr key={i} className={cn("transition-colors hover:bg-stone-50/80", ranked && i < 3 && "bg-amber-50/45")}>
                 {ranked && <td className="px-3 py-4 font-black text-amber-900 tabular-nums">{i + 1}</td>}
                 <td className="whitespace-nowrap px-3 py-4 text-xs text-muted-foreground tabular-nums">
-                  {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                  {b.date ? new Date(b.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
                 </td>
                 <td className="px-3 py-4">
                   <Link href={`/courses/${b.course_id}`} className="inline-flex items-center gap-1 font-semibold underline-offset-4 transition-colors hover:text-amber-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">{b.code ?? "—"}<ExternalLink className="h-3 w-3" aria-hidden="true" /></Link>
@@ -445,7 +445,7 @@ function DisciplineCard({ d, maxCourses, hasard }: {
       </div>
       {hasard != null && (
         <div className="relative h-3">
-          <span className="absolute top-0 -translate-x-1/2 text-[9px] font-medium text-slate-400"
+          <span className="absolute top-0 -translate-x-1/2 text-[9px] font-medium text-slate-600"
             style={{ left: `${Math.min(hasard, 100)}%` }}>▲ hasard</span>
         </div>
       )}
@@ -514,11 +514,11 @@ function ComparBar({ label, aide, nous, hasard, facteur }: {
         </div>
         {hasard != null && (
           <div className="flex items-center gap-3">
-            <span className="w-24 shrink-0 text-[11px] font-medium uppercase tracking-wider text-slate-400">Hasard</span>
+            <span className="w-24 shrink-0 text-[11px] font-medium uppercase tracking-wider text-slate-600">Hasard</span>
             <div className="h-3 flex-1 overflow-hidden rounded-full bg-stone-100">
               <div className="h-full rounded-full bg-slate-300" style={{ width: `${Math.min(hasard, 100)}%` }} />
             </div>
-            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-slate-500">{nf(hasard, 1)} %</span>
+            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-slate-600">{nf(hasard, 1)} %</span>
           </div>
         )}
       </div>
@@ -666,7 +666,7 @@ export default function TrackRecordPage() {
   const facteur3 = hasard3 && hasard3 > 0 ? g.accuracy_top3 / hasard3 : null;
   const facteur1 = hasard1 && hasard1 > 0 ? g.accuracy_top1 / hasard1 : null;
   const depuis = g.mesure_depuis
-    ? new Date(g.mesure_depuis).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+    ? new Date(g.mesure_depuis).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", year: "numeric" })
     : null;
   const maxCourses = Math.max(1, ...data.by_discipline.map((d) => d.nb_courses));
   const clv = data.clv;
@@ -721,7 +721,7 @@ export default function TrackRecordPage() {
             </Button>
           </div>
 
-          <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-400">
+          <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-600">
             <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Horodaté avant le départ</span>
             <span className="text-slate-600" aria-hidden="true">·</span>
             <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Rapports PMU officiels</span>
@@ -767,7 +767,7 @@ export default function TrackRecordPage() {
           {data.updated_at && (
             <span className="inline-flex items-center gap-1.5">
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-              Actualisé à {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+              Actualisé à {new Date(data.updated_at).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" })}
             </span>
           )}
         </div>
@@ -935,7 +935,7 @@ export default function TrackRecordPage() {
                                   {pm.label}
                                   <span className="text-[11px] text-muted-foreground font-normal">· {p.paris_gagnes} paris gagnés</span>
                                 </span>
-                                <CountUpEuro value={gain} prefix="+" className="text-sm font-black tabular-nums text-emerald-600" />
+                                <CountUpEuro value={gain} prefix="+" className="text-sm font-black tabular-nums text-emerald-700" />
                               </div>
                               <div className="h-2.5 overflow-hidden rounded-full bg-stone-100">
                                 <div
@@ -1004,7 +1004,7 @@ export default function TrackRecordPage() {
                 { icon: ExternalLink, n: "03", title: "Consultable une par une", text: "Chaque ligne renvoie vers sa course : partants, cotes, arrivée. Rien ne repose sur notre parole." },
               ].map((step) => (
                 <li key={step.n} className="rounded-2xl bg-stone-50 p-4">
-                  <div className="flex items-center justify-between"><step.icon className="h-4 w-4 text-amber-800" aria-hidden="true" /><span className="font-display text-[10px] font-bold tracking-widest text-stone-400">{step.n}</span></div>
+                  <div className="flex items-center justify-between"><step.icon className="h-4 w-4 text-amber-800" aria-hidden="true" /><span className="font-display text-[10px] font-bold tracking-widest text-stone-600">{step.n}</span></div>
                   <h3 className="mt-4 text-sm font-semibold">{step.title}</h3>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">{step.text}</p>
                 </li>
@@ -1205,7 +1205,7 @@ export default function TrackRecordPage() {
             ].map((f) => (
               <div key={f.title} className={cn("rounded-2xl border p-5", f.pro ? "border-amber-200 bg-white" : "border-stone-200 bg-stone-50/60")}>
                 <div className="flex items-center justify-between">
-                  <span className={cn("inline-flex h-9 w-9 items-center justify-center rounded-xl", f.pro ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200" : "bg-white text-slate-500 ring-1 ring-stone-200")}>
+                  <span className={cn("inline-flex h-9 w-9 items-center justify-center rounded-xl", f.pro ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200" : "bg-white text-slate-600 ring-1 ring-stone-200")}>
                     <f.icon className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider", f.pro ? "bg-amber-100 text-amber-900" : "bg-stone-200/70 text-slate-600")}>
@@ -1246,7 +1246,7 @@ export default function TrackRecordPage() {
               <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-7 shadow-none">
                 <Link href="/tarifs">Démarrer l&apos;essai gratuit <ArrowRight className="ml-1 h-4 w-4" /></Link>
               </Button>
-              <p className="text-center text-[11px] text-slate-400">Standard 12€/mois · Expert 19€/mois · sans engagement</p>
+              <p className="text-center text-[11px] text-slate-600">Standard 12€/mois · Expert 19€/mois · sans engagement</p>
             </div>
           </div>
         </section>

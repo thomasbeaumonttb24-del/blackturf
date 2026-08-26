@@ -49,6 +49,7 @@ const config: Config = {
           dark: "#111827",
           charcoal: "#374151",
           emerald: "#059669",
+          "emerald-dark": "#047857",
           red: "#DC2626",
           blue: "#2563EB",
           amber: "#FCD34D",

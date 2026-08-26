@@ -45,7 +45,7 @@ function DesabonnementInner() {
   if (!token) {
     return (
       <Wrapper>
-        <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-amber-500" />
+        <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-amber-700" />
         <h1 className="mb-2 text-xl font-bold">Lien incomplet</h1>
         <p className="text-sm text-muted-foreground">
           Ce lien de désabonnement ne contient pas de jeton. Utilisez le lien exact reçu dans l&apos;e-mail.
@@ -57,7 +57,7 @@ function DesabonnementInner() {
   if (state === "done") {
     return (
       <Wrapper>
-        <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-emerald-500" />
+        <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-emerald-700" />
         <h1 className="mb-2 text-xl font-bold">Désabonnement enregistré</h1>
         <p className="mb-6 text-sm text-muted-foreground">
           {message || "Vous ne recevrez plus d'e-mails de ce type."}

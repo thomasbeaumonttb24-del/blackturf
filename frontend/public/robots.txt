@@ -1,12 +1,12 @@
+# BlackTurf — https://blackturf.fr
+# Les lignes « Allow » redondantes avec « Allow: / » ont ete retirees : elles ne
+# changeaient rien (tout etait deja autorise) et masquaient les vraies exclusions.
+
 User-agent: *
 Allow: /
-Allow: /programme
-Allow: /courses
-Allow: /tarifs
-Allow: /mentions-legales
-Allow: /cgu
-Allow: /confidentialite
 
+# Espaces prives ou pages de service : aucun contenu indexable, et une URL indexee
+# ici renvoie un ecran de connexion — soft 404 cote Search Console.
 Disallow: /api/
 Disallow: /admin/
 Disallow: /profil
@@ -15,5 +15,34 @@ Disallow: /strategies
 Disallow: /assistant
 Disallow: /dashboard
 Disallow: /notifications
+Disallow: /studio
+Disallow: /desabonnement
+Disallow: /abonnement/
+Disallow: /verifier-email
+Disallow: /reinitialiser-mot-de-passe
+Disallow: /mot-de-passe-oublie
+Disallow: /newsletter/confirmer
+Disallow: /newsletter/desinscription
+
+# ─── Moteurs de reponse et agents conversationnels ────────────────────────────
+# Memes pages publiques que les robots classiques. Le resume structure du site,
+# destine a un agent, est publie dans /llms.txt.
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /profil
+Disallow: /bankroll
+Disallow: /strategies
+Disallow: /assistant
+Disallow: /dashboard
+Disallow: /notifications
+Disallow: /studio
 
 Sitemap: https://blackturf.fr/sitemap.xml

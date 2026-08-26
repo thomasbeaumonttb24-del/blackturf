@@ -23,10 +23,10 @@ function age(min: number | null | undefined): string {
 
 /** Vert < 30 min, ambre < 3 h, rouge au-delà : la fraîcheur est un signal. */
 function freshCls(min: number | null | undefined): string {
-  if (min == null) return "text-gray-400";
-  if (min < 30) return "text-emerald-600";
-  if (min < 180) return "text-amber-600";
-  return "text-red-600";
+  if (min == null) return "text-gray-600";
+  if (min < 30) return "text-emerald-700";
+  if (min < 180) return "text-amber-700";
+  return "text-red-700";
 }
 
 function Cell({
@@ -39,11 +39,11 @@ function Cell({
     <div className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
       <span className="shrink-0 text-gray-300">{icon}</span>
       <div className="min-w-0">
-        <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+        <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-gray-600">
           {label}
         </div>
         <div className={`truncate text-sm font-bold tabular-nums ${valueClass}`}>{value}</div>
-        {sub && <div className="truncate text-[10px] text-gray-400">{sub}</div>}
+        {sub && <div className="truncate text-[10px] text-gray-600">{sub}</div>}
       </div>
     </div>
   );
@@ -78,13 +78,13 @@ export default function LiveBar({
         <span className="text-[11px] font-semibold text-gray-600">
           {live ? "En direct" : "Rafraîchissement en pause"}
         </span>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-[11px] text-gray-600">
           · données du serveur, actualisées {secondsSince < 5 ? "à l'instant" : `il y a ${secondsSince} s`}
         </span>
         {derniereCourseIntegree && (
           <span className="ml-auto rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
             recalculé après la course de{" "}
-            {new Date(derniereCourseIntegree).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            {new Date(derniereCourseIntegree).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
       </div>

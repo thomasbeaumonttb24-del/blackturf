@@ -50,7 +50,7 @@ export function EmailVerificationBanner() {
         </button>
         <button
           onClick={() => setMasque(true)}
-          className="text-amber-700/70 hover:text-amber-900"
+          className="text-amber-700 hover:text-amber-900"
           aria-label="Masquer ce rappel"
         >
           ✕

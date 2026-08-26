@@ -71,9 +71,9 @@ function category(n: Pick<NotifItem, "categorie" | "type_alerte">): FilterTab {
 }
 
 function NotifIcon({ cat }: { cat: FilterTab }) {
-  if (cat === "value_bet") return <Zap className="w-4 h-4 text-amber-600" />;
-  if (cat === "resultat") return <Trophy className="w-4 h-4 text-emerald-600" />;
-  return <Info className="w-4 h-4 text-blue-600" />;
+  if (cat === "value_bet") return <Zap className="w-4 h-4 text-amber-700" />;
+  if (cat === "resultat") return <Trophy className="w-4 h-4 text-emerald-700" />;
+  return <Info className="w-4 h-4 text-blue-700" />;
 }
 
 function timeAgo(dateStr: string | null): string {
@@ -98,8 +98,8 @@ function ToggleSwitch({
     >
       <div className="mt-0.5 shrink-0">
         {checked
-          ? <ToggleRight className="w-8 h-8 text-amber-600 transition-colors" />
-          : <ToggleLeft className="w-8 h-8 text-muted-foreground transition-colors group-hover:text-muted-foreground/70" />
+          ? <ToggleRight className="w-8 h-8 text-amber-700 transition-colors" />
+          : <ToggleLeft className="w-8 h-8 text-muted-foreground transition-colors group-hover:text-muted-foreground" />
         }
       </div>
       <div>
@@ -213,10 +213,10 @@ export default function NotificationsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Bell className="w-6 h-6 text-amber-600" />
+              <Bell className="w-6 h-6 text-amber-700" />
               Notifications
               {unread > 0 && (
-                <Badge className="bg-amber-500 text-white text-xs px-2 py-0.5 ml-1">
+                <Badge className="bg-amber-500 text-brand-dark text-xs px-2 py-0.5 ml-1">
                   {unread}
                 </Badge>
               )}
@@ -353,7 +353,7 @@ export default function NotificationsPage() {
                   <Link
                     href={`/courses/${n.course_id}`}
                     onClick={(e) => e.stopPropagation()}
-                    className="inline-flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 mt-1.5 transition-colors"
+                    className="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-700 mt-1.5 transition-colors"
                   >
                     Voir la course <ChevronRight className="w-3 h-3" />
                   </Link>
@@ -419,7 +419,7 @@ export default function NotificationsPage() {
                           <span
                             key={i}
                             className={cn("text-[10px]",
-                              isMin ? "text-amber-600" : "text-muted-foreground"
+                              isMin ? "text-amber-700" : "text-muted-foreground"
                             )}
                           >★</span>
                         ))}

@@ -204,7 +204,18 @@ export default async function HomePage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-brand-warm">
+      {/* L'accueil n'est PAS dans le groupe (main) : il compose lui-même sa navigation et
+          son pied de page. Il n'avait donc ni repère `main` ni lien d'évitement — la page
+          la plus visitée du site était la seule sans structure de repères. */}
+      <a
+        href="#contenu"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-brand-dark focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+      >
+        Aller au contenu principal
+      </a>
       <Navbar />
+
+      <main id="contenu">
 
       {/* ═══════════ HERO (image plein cadre + dynamisme, style palmarès) ═══════════ */}
       <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">
@@ -234,7 +245,7 @@ export default async function HomePage() {
 
           <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
             <Button size="xl" asChild
-              className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-lg shadow-amber-500/30">
+              className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-bold text-base shadow-lg shadow-amber-500/30">
               <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
             </Button>
             <Button variant="outline" size="xl" asChild
@@ -269,7 +280,7 @@ export default async function HomePage() {
                 Le travail est déjà fait{" "}
                 <span className="text-gradient">quand vous arrivez</span>
               </h2>
-              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+              <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
                 Vous n&apos;avez ni base de données à monter, ni modèle à entraîner : trois gestes suffisent.
               </p>
             </div>
@@ -286,7 +297,7 @@ export default async function HomePage() {
                     <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
                       style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
                     <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed">{s.desc}</p>
+                    <p className="text-sm text-gray-600 leading-relaxed">{s.desc}</p>
                   </div>
                 </div>
               </ScrollReveal>
@@ -308,7 +319,7 @@ export default async function HomePage() {
               <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
                 Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
               </h2>
-              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+              <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
                 Aucun pronostic n'est réécrit après la course. Voici la précision réelle de BlackTurf sur les
                 courses déjà réglées, et ce que ferait un tirage au sort sur les mêmes courses.
               </p>
@@ -324,10 +335,10 @@ export default async function HomePage() {
             ].map((m, i) => (
               <ScrollReveal key={m.label} delay={i * 70}>
                 <div className="tilt-card relative overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
-                  <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300/60" />
+                  <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300" />
                   <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
                   <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{m.sub}</p>
+                  <p className="text-xs text-gray-600 mt-0.5">{m.sub}</p>
                 </div>
               </ScrollReveal>
             ))}
@@ -343,7 +354,7 @@ export default async function HomePage() {
               <ScrollReveal>
                 <div className="glass-card rounded-2xl p-6 h-full">
                   <div className="flex items-center gap-2 mb-5">
-                    <BarChart3 className="h-4 w-4 text-brand-gold-deep" />
+                    <BarChart3 className="h-4 w-4 text-brand-gold-dark" />
                     <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 par discipline</h3>
                   </div>
                   <div className="space-y-4">
@@ -352,7 +363,7 @@ export default async function HomePage() {
                         <div className="flex items-center justify-between text-xs mb-1.5">
                           <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
                           <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
-                            <span className="text-gray-500 font-normal ml-1.5">· {d.nb_courses} courses</span>
+                            <span className="text-gray-600 font-normal ml-1.5">· {d.nb_courses} courses</span>
                           </span>
                         </div>
                         <div className="relative h-3 rounded-full bg-gray-100 overflow-hidden">
@@ -365,7 +376,7 @@ export default async function HomePage() {
                       </div>
                     ))}
                   </div>
-                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-500">
+                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-600">
                     <span className="inline-block w-px h-3 bg-gray-400/60" />
                     {tr.hasard_top3 != null
                       ? `Repère « hasard » à ${tr.hasard_top3.toFixed(0)} % — l'espérance d'un tirage au sort sur ces mêmes courses. Au-delà, l'analyse fait mieux.`
@@ -382,10 +393,10 @@ export default async function HomePage() {
                 <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
                   <div className="flex items-center justify-between mb-5">
                     <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-emerald-600" />
+                      <TrendingUp className="h-4 w-4 text-emerald-700" />
                       <h3 className="font-semibold text-gray-900 text-sm">Précision Top-3 · 7 derniers jours</h3>
                     </div>
-                    <span className="text-[11px] text-gray-500">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
+                    <span className="text-[11px] text-gray-600">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
                   </div>
 
                   {/* Aire de chart à hauteur FIXE → barres % fiables */}
@@ -396,7 +407,7 @@ export default async function HomePage() {
                     ))}
                     {/* ligne moyenne */}
                     <div className="absolute left-0 right-0 border-t border-dashed border-emerald-300" style={{ bottom: `${Math.min(avg, 100)}%` }}>
-                      <span className="absolute right-0 -top-3.5 text-[9px] font-semibold text-emerald-500 bg-white px-1">moyenne</span>
+                      <span className="absolute right-0 -top-3.5 text-[9px] font-semibold text-emerald-700 bg-white px-1">moyenne</span>
                     </div>
                     <div className="absolute inset-0 flex items-end justify-between gap-2.5">
                       {tr.by_day.map((d) => (
@@ -411,17 +422,17 @@ export default async function HomePage() {
                   </div>
                   <div className="mt-2 flex justify-between gap-2.5">
                     {tr.by_day.map((d) => (
-                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-500">{d.jour}</span>
+                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-600">{d.jour}</span>
                     ))}
                   </div>
-                  <p className="mt-4 text-[11px] text-gray-500">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
+                  <p className="mt-4 text-[11px] text-gray-600">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
                 </div>
               </ScrollReveal>
               );
             })()}
           </div>
 
-          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto leading-relaxed">
+          <p className="mt-6 text-center text-[11px] text-gray-600 max-w-2xl mx-auto leading-relaxed">
             La précision d'analyse mesure la qualité du classement des chevaux. Ce n'est ni un taux de
             gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
           </p>
@@ -445,7 +456,7 @@ export default async function HomePage() {
                 Un plan de mise{" "}
                 <span className="text-gradient">selon votre profil</span>
               </h2>
-              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+              <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
                 Même course, trois façons de jouer. Vous choisissez votre profil et votre budget —
                 BlackTurf construit les paris adaptés et calcule le gain potentiel de chacun.
               </p>
@@ -460,25 +471,25 @@ export default async function HomePage() {
                   <span className="eyebrow text-amber-700 text-[10px] font-bold">
                     <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> Pronostic BlackTurf
                   </span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-white bg-brand-gold-deep rounded px-1.5 py-0.5">{EXAMPLE.hippo}</span>
-                  <span className="text-xs text-gray-500 font-mono">{EXAMPLE.code} · {EXAMPLE.disc}</span>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-brand-dark bg-brand-gold-deep rounded px-1.5 py-0.5">{EXAMPLE.hippo}</span>
+                  <span className="text-xs text-gray-600 font-mono">{EXAMPLE.code} · {EXAMPLE.disc}</span>
                 </div>
                 <div className="mt-3 space-y-1.5">
                   {EXAMPLE_PICKS.map((h) => (
                     <div key={h.rank} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${h.rank === 1 ? "bg-amber-50 ring-1 ring-amber-200" : "bg-gray-50"}`}>
-                      <span className={`num-display text-xs font-black w-7 ${h.rank === 1 ? "text-brand-gold-deep" : "text-gray-500"}`}>N°{h.num}</span>
+                      <span className={`num-display text-xs font-black w-7 ${h.rank === 1 ? "text-brand-gold-dark" : "text-gray-600"}`}>N°{h.num}</span>
                       <span className="text-sm font-medium text-gray-900 flex-1 truncate">{h.nom}</span>
                       <span className="num-display text-xs font-bold text-gray-700 w-9 text-right">{h.p}%</span>
-                      <span className="text-[11px] font-mono text-gray-500 w-8 text-right">{h.cote}</span>
+                      <span className="text-[11px] font-mono text-gray-600 w-8 text-right">{h.cote}</span>
                     </div>
                   ))}
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-[11px]">
                   <span className="flex items-center gap-1.5 font-semibold text-emerald-700"><Zap className="h-3 w-3" /> Valeur ★★★ détectée</span>
-                  <span className="text-gray-500">EV <span className="num-display font-bold text-emerald-600">+14,2%</span></span>
+                  <span className="text-gray-600">EV <span className="num-display font-bold text-emerald-700">+14,2%</span></span>
                 </div>
               </div>
             </ScrollReveal>
@@ -506,27 +517,27 @@ export default async function HomePage() {
                     <h3 className="font-display text-lg font-bold text-gray-900">{pr.name}</h3>
                     {pr.popular && <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">Le + choisi</span>}
                   </div>
-                  <p className="text-xs text-gray-500 mb-4">{pr.tagline}</p>
+                  <p className="text-xs text-gray-600 mb-4">{pr.tagline}</p>
                   <div className="space-y-2">
                     {pr.bets.map((b, j) => (
                       <div key={j} className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-semibold text-gray-900">{b.type}</span>
-                          <span className="text-[11px] font-mono text-gray-500">{b.chevaux}</span>
+                          <span className="text-[11px] font-mono text-gray-600">{b.chevaux}</span>
                         </div>
                         <div className="mt-1 flex items-center justify-between text-xs">
-                          <span className="text-gray-500">Mise <span className="font-mono font-semibold text-gray-700">{b.mise}</span></span>
-                          <span className="num-display font-bold text-emerald-600">{b.gain}</span>
+                          <span className="text-gray-600">Mise <span className="font-mono font-semibold text-gray-700">{b.mise}</span></span>
+                          <span className="num-display font-bold text-emerald-700">{b.gain}</span>
                         </div>
                       </div>
                     ))}
                   </div>
-                  <p className="mt-3 text-[10px] text-gray-500">Gain potentiel si le pari est gagnant.</p>
+                  <p className="mt-3 text-[10px] text-gray-600">Gain potentiel si le pari est gagnant.</p>
                 </div>
               </ScrollReveal>
             ))}
           </div>
-          <p className="mt-6 text-center text-[11px] text-gray-500 max-w-2xl mx-auto">
+          <p className="mt-6 text-center text-[11px] text-gray-600 max-w-2xl mx-auto">
             Exemple illustratif sur une course type. Les paris et gains varient selon la course, votre mise et les
             rapports PMU réels. Parier comporte un risque de perte.
           </p>
@@ -540,9 +551,9 @@ export default async function HomePage() {
             <ScrollReveal direction="right" className="order-2 lg:order-1">
               <div className="glass-card rounded-3xl p-2">
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
-                  <Calculator className="h-4 w-4 text-brand-gold-deep" />
+                  <Calculator className="h-4 w-4 text-brand-gold-dark" />
                   <span className="text-xs font-semibold text-gray-700">Calculateur de mise</span>
-                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
+                  <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">Démo</span>
                 </div>
                 <CalculatorDemo />
               </div>
@@ -563,11 +574,11 @@ export default async function HomePage() {
                 <ul className="space-y-2.5 mb-7">
                   {["Répartition automatique par palier de risque", "Gain net potentiel calculé en direct", "Adapté à votre capital et à votre profil"].map((f) => (
                     <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
-                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-600" /> {f}
+                      <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-700" /> {f}
                     </li>
                   ))}
                 </ul>
-                <Link href="/programme" className="press inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold-deep hover:gap-2.5 transition-all">
+                <Link href="/programme" className="press inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold-dark hover:gap-2.5 transition-all">
                   Lancer le calculateur <ArrowRight className="h-4 w-4" />
                 </Link>
               </div>
@@ -591,7 +602,7 @@ export default async function HomePage() {
               Pendant qu'ils jouent au feeling,{" "}
               <span className="text-gradient-animated">vous jouez aux chiffres.</span>
             </h2>
-            <p className="mt-5 text-base sm:text-lg text-gray-200/90 leading-relaxed max-w-lg">
+            <p className="mt-5 text-base sm:text-lg text-gray-200 leading-relaxed max-w-lg">
               Chaque pronostic est confronté à l'arrivée réelle, puis le modèle se recale. La différence
               entre parier et parier informé se joue exactement là.
             </p>
@@ -627,7 +638,7 @@ export default async function HomePage() {
               <ul className="space-y-2.5">
                 {["Probabilité du modèle vs cote du marché", "Niveaux de valeur ★ à ★★★★", "Triangulation PMU · Geny · BZH"].map((f) => (
                   <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
-                    <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-600" /> {f}
+                    <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-700" /> {f}
                   </li>
                 ))}
               </ul>
@@ -642,13 +653,13 @@ export default async function HomePage() {
               <div className="glass-card rounded-3xl p-6">
                 <div className="flex items-center justify-between mb-4">
                   <span className="eyebrow text-amber-700 text-[10px] font-bold"><Zap className="h-3 w-3" /> Pari de valeur détecté</span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
 
                 <div className="rounded-2xl border border-amber-500/30 bg-amber-50/50 p-4">
                   <div className="flex items-start justify-between mb-2">
                     <div>
-                      <span className="flex gap-0.5 text-amber-600" aria-label="Niveau 3 sur 4 — Fort signal">
+                      <span role="img" className="flex gap-0.5 text-amber-700" aria-label="Niveau 3 sur 4 — Fort signal">
                         {[0, 1, 2, 3].map((i) => (
                           <Star key={i} className={`h-3 w-3 ${i < 3 ? "fill-current" : "opacity-20"}`} />
                         ))}
@@ -660,17 +671,17 @@ export default async function HomePage() {
                     </span>
                   </div>
 
-                  <div className="font-bold text-sm text-gray-900">Vent d&apos;Est <span className="font-mono font-normal text-gray-500">N°7</span></div>
-                  <div className="text-xs text-gray-500 mt-0.5">{EXAMPLE.hippo} · {EXAMPLE.disc}</div>
+                  <div className="font-bold text-sm text-gray-900">Vent d&apos;Est <span className="font-mono font-normal text-gray-600">N°7</span></div>
+                  <div className="text-xs text-gray-600 mt-0.5">{EXAMPLE.hippo} · {EXAMPLE.disc}</div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <div className="rounded-lg bg-white/70 p-2 text-center">
-                      <div className="text-[10px] text-gray-500">Espérance</div>
-                      <div className="num-display text-sm font-extrabold text-emerald-600">+27,5%</div>
+                      <div className="text-[10px] text-gray-600">Espérance</div>
+                      <div className="num-display text-sm font-extrabold text-emerald-700">+27,5%</div>
                     </div>
                     <div className="rounded-lg bg-white/70 p-2 text-center">
-                      <div className="text-[10px] font-medium text-blue-600">PMU</div>
-                      <div className="num-display text-sm font-extrabold text-blue-600">8.5</div>
+                      <div className="text-[10px] font-medium text-blue-700">PMU</div>
+                      <div className="num-display text-sm font-extrabold text-blue-700">8.5</div>
                     </div>
                   </div>
                 </div>
@@ -678,15 +689,15 @@ export default async function HomePage() {
                 <div className="mt-3 grid grid-cols-2 gap-2 text-center">
                   <div className="rounded-xl bg-gray-50 p-3">
                     <div className="num-display text-lg font-extrabold text-gray-900">15%</div>
-                    <div className="text-[10px] text-gray-500 mt-0.5">Proba modèle</div>
+                    <div className="text-[10px] text-gray-600 mt-0.5">Proba modèle</div>
                   </div>
                   <div className="rounded-xl bg-gray-50 p-3">
-                    <div className="num-display text-lg font-extrabold text-gray-500">11,8%</div>
-                    <div className="text-[10px] text-gray-500 mt-0.5">Proba marché (1/cote)</div>
+                    <div className="num-display text-lg font-extrabold text-gray-600">11,8%</div>
+                    <div className="text-[10px] text-gray-600 mt-0.5">Proba marché (1/cote)</div>
                   </div>
                 </div>
 
-                <p className="mt-4 text-xs text-gray-500 leading-relaxed">
+                <p className="mt-4 text-xs text-gray-600 leading-relaxed">
                   À 8,5, le marché lui donne ~11,8% de chances ; le modèle en voit 15%.
                   L&apos;espérance <span className="font-mono">(8,5 × 0,15) − 1 = +27,5%</span> : la cote paie plus que le risque réel.
                 </p>
@@ -699,7 +710,7 @@ export default async function HomePage() {
       {/* ═══════════ GESTION DU CAPITAL (vrai outil, image) ═══════════ */}
       <section className="relative py-24 overflow-hidden bg-gray-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/value.jpg" width={1600} height={1067} alt="Chevaux sur la piste au soleil couchant" className="absolute inset-0 h-full w-full object-cover ken-burns opacity-40" />
+        <img src="/img/value.webp" width={1600} height={1067} alt="Chevaux sur la piste au soleil couchant" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns opacity-40" />
         <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-gray-950/80 to-gray-950/60" />
         <div className="relative mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
@@ -711,14 +722,14 @@ export default async function HomePage() {
                 Votre bankroll,{" "}
                 <span className="text-gradient-animated">suivie sans triche</span>
               </h2>
-              <p className="text-gray-200/85 leading-relaxed mb-6">
+              <p className="text-gray-200 leading-relaxed mb-6">
                 Chaque pari validé est réglé automatiquement aux vrais rapports PMU. Vous voyez votre rendement
                 réel — les gains comme les pertes. Pas de chiffre maquillé : c'est ce qui vous permet de savoir
                 si vous gagnez vraiment.
               </p>
               <ul className="space-y-2.5">
                 {["Règlement automatique aux rapports officiels", "Rendement réel, gains ET pertes", "Critère de Kelly pour doser vos mises"].map((f) => (
-                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-200/90">
+                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-200">
                     <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-400" /> {f}
                   </li>
                 ))}
@@ -729,32 +740,32 @@ export default async function HomePage() {
               <div className="rounded-3xl bg-white/95 backdrop-blur p-5 shadow-2xl">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-gray-700">Suivi du capital</span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
                 </div>
 
                 {/* Capital départ → actuel (comme le vrai suivi) */}
                 <div className="flex items-end justify-between rounded-xl bg-gradient-to-r from-emerald-50 to-white border border-emerald-100 px-4 py-3 mb-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Capital</div>
-                    <div className="num-display text-lg font-extrabold text-gray-900">{CAPITAL_DEPART}€ <span className="text-gray-300 font-normal">→</span> {CAPITAL_DEPART + CAPITAL_NET}€</div>
+                    <div className="text-[10px] uppercase tracking-wide text-gray-600">Capital</div>
+                    <div className="num-display text-lg font-extrabold text-gray-900">{CAPITAL_DEPART}€ <span className="text-gray-600 font-normal">→</span> {CAPITAL_DEPART + CAPITAL_NET}€</div>
                   </div>
-                  <div className="num-display text-lg font-extrabold text-emerald-600">{CAPITAL_NET >= 0 ? "+" : ""}{CAPITAL_NET}€</div>
+                  <div className="num-display text-lg font-extrabold text-emerald-700">{CAPITAL_NET >= 0 ? "+" : ""}{CAPITAL_NET}€</div>
                 </div>
 
                 <div className="space-y-1.5">
                   {CAPITAL_DEMO.map((b, i) => (
                     <div key={i} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
                       <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${b.won ? "bg-emerald-500" : "bg-gray-300"}`} />
-                      <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-500">{b.chevaux}</span></span>
-                      <span className="text-gray-500 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
-                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-600" : "text-gray-500"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
+                      <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-600">{b.chevaux}</span></span>
+                      <span className="text-gray-600 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
+                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-700" : "text-gray-600"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
                     </div>
                   ))}
                 </div>
 
                 <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                  <span className="text-gray-500"><span className="font-semibold text-gray-700">{CAPITAL_WINS}/{CAPITAL_DEMO.length}</span> gagnés · réglé aux vrais rapports PMU</span>
-                  <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold"><span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> temps réel</span>
+                  <span className="text-gray-600"><span className="font-semibold text-gray-700">{CAPITAL_WINS}/{CAPITAL_DEMO.length}</span> gagnés · réglé aux vrais rapports PMU</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> temps réel</span>
                 </div>
               </div>
             </ScrollReveal>
@@ -785,15 +796,15 @@ export default async function HomePage() {
                   <FEATURE_MAIN.icon className="h-7 w-7" style={{ color: "#D97706" }} strokeWidth={2} />
                 </div>
                 <h3 className="font-display text-2xl font-bold text-gray-900 mb-3 leading-snug">{FEATURE_MAIN.title}</h3>
-                <p className="text-gray-500 leading-relaxed mb-6 max-w-lg">{FEATURE_MAIN.desc}</p>
+                <p className="text-gray-600 leading-relaxed mb-6 max-w-lg">{FEATURE_MAIN.desc}</p>
                 <div className="mt-auto grid sm:grid-cols-2 gap-3.5">
                   {FEATURE_MAIN.categories.map((cat) => (
                     <div key={cat.label} className="rounded-2xl bg-white/70 border border-amber-100 p-3.5">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-brand-gold-deep mb-2">{cat.label}</div>
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-brand-gold-dark mb-2">{cat.label}</div>
                       <ul className="space-y-1.5">
                         {cat.items.map((it) => (
                           <li key={it} className="flex items-start gap-2 text-xs text-gray-700 leading-snug">
-                            <Check className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-emerald-600" />
+                            <Check className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-emerald-700" />
                             <span>{it}</span>
                           </li>
                         ))}
@@ -812,7 +823,7 @@ export default async function HomePage() {
                     <f.icon className="h-5 w-5" style={{ color: f.color }} strokeWidth={2} />
                   </div>
                   <h3 className="font-semibold text-gray-900 text-[15px] leading-snug mb-2">{f.title}</h3>
-                  <p className="text-[13px] text-gray-500 leading-relaxed">{f.desc}</p>
+                  <p className="text-[13px] text-gray-600 leading-relaxed">{f.desc}</p>
                 </div>
               </ScrollReveal>
             ))}
@@ -834,7 +845,7 @@ export default async function HomePage() {
                 Trois façons de jouer,{" "}
                 <span className="text-gradient">un outil pour chacune</span>
               </h2>
-              <p className="text-gray-500 text-sm mt-3 max-w-2xl mx-auto">
+              <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
                 On ne vend pas le même produit au joueur du dimanche et à celui qui suit six réunions par jour.
                 Repérez-vous ci-dessous : la formule adaptée est indiquée.
               </p>
@@ -886,19 +897,19 @@ export default async function HomePage() {
                 <div className={`rounded-3xl h-full p-6 flex flex-col ${p.populaire ? "bg-white border-2 border-amber-300 shadow-md" : "bg-white border border-gray-200 shadow-sm tilt-card"}`}>
                   <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center mb-4"
                     style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.16)" }}>
-                    <p.icon className="h-5 w-5 text-brand-gold-deep" strokeWidth={2} />
+                    <p.icon className="h-5 w-5 text-brand-gold-dark" strokeWidth={2} />
                   </div>
                   <h3 className="font-display text-lg font-bold text-gray-900 leading-snug">{p.titre}</h3>
-                  <p className="text-xs text-gray-500 mt-1">{p.profil}</p>
+                  <p className="text-xs text-gray-600 mt-1">{p.profil}</p>
                   <ul className="mt-4 space-y-2 flex-1">
                     {p.points.map((pt) => (
                       <li key={pt} className="flex items-start gap-2 text-[13px] text-gray-600 leading-snug">
-                        <Check className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-emerald-600" /> {pt}
+                        <Check className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-emerald-700" /> {pt}
                       </li>
                     ))}
                   </ul>
                   <Link href={p.href}
-                    className="press mt-5 inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-all hover:border-brand-gold/40 hover:bg-amber-50 hover:text-brand-gold-deep">
+                    className="press mt-5 inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-all hover:border-brand-gold/40 hover:bg-amber-50 hover:text-brand-gold-dark">
                     {p.plan} <ChevronRight className="h-4 w-4" />
                   </Link>
                 </div>
@@ -920,7 +931,7 @@ export default async function HomePage() {
                 Moins cher qu&apos;un{" "}
                 <span className="text-gradient">ticket perdu par semaine</span>
               </h2>
-              <p className="text-gray-500 max-w-xl mx-auto">
+              <p className="text-gray-600 max-w-xl mx-auto">
                 7 jours d&apos;essai gratuit, sans prélèvement avant son terme. Le palmarès, lui, reste public — vous pouvez
                 juger avant de payer.
               </p>
@@ -933,34 +944,34 @@ export default async function HomePage() {
                 <div className={`relative rounded-3xl p-7 h-full ${plan.popular ? "plan-popular bg-white border border-amber-300 md:-translate-y-2" : "bg-white border border-gray-200 shadow-sm tilt-card"}`}>
                   {plan.badge && (
                     <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-                      <span className="inline-block text-xs bg-gradient-gold text-white font-bold px-4 py-1 rounded-full shadow-md shadow-amber-400/30">{plan.badge}</span>
+                      <span className="inline-block text-xs bg-gradient-gold text-brand-dark font-bold px-4 py-1 rounded-full shadow-md shadow-amber-400/30">{plan.badge}</span>
                     </div>
                   )}
                   <div className="mb-6 mt-1">
                     <h3 className="font-display text-xl font-bold text-gray-900 mb-0.5">{plan.name}</h3>
-                    <p className="text-xs text-gray-500 mb-4">{plan.desc}</p>
+                    <p className="text-xs text-gray-600 mb-4">{plan.desc}</p>
                     <div className="flex items-baseline gap-1">
-                      <span className={`num-display text-4xl font-extrabold ${plan.popular ? "text-brand-gold-deep" : "text-gray-900"}`}>{plan.price}</span>
-                      <span className="text-gray-500 text-sm">{plan.period}</span>
+                      <span className={`num-display text-4xl font-extrabold ${plan.popular ? "text-brand-gold-dark" : "text-gray-900"}`}>{plan.price}</span>
+                      <span className="text-gray-600 text-sm">{plan.period}</span>
                     </div>
                   </div>
                   <ul className="space-y-2.5 mb-8">
                     {plan.features.map((f) => (
                       <li key={f} className="flex items-start gap-2.5 text-sm">
-                        <Check className="h-4 w-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                        <Check className="h-4 w-4 text-emerald-700 mt-0.5 flex-shrink-0" />
                         <span className="text-gray-600">{f}</span>
                       </li>
                     ))}
                   </ul>
                   <Link href={plan.href}
-                    className={`press flex items-center justify-center gap-1.5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-all ${plan.popular ? "btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white shadow-md shadow-amber-400/25" : "border border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:text-brand-gold-deep hover:bg-amber-50"}`}>
+                    className={`press flex items-center justify-center gap-1.5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-all ${plan.popular ? "btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-brand-dark shadow-md shadow-amber-400/25" : "border border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:text-brand-gold-dark hover:bg-amber-50"}`}>
                     {plan.cta} <ChevronRight className="h-4 w-4" />
                   </Link>
                 </div>
               </ScrollReveal>
             ))}
           </div>
-          <p className="text-center text-xs text-gray-500 mt-8">
+          <p className="text-center text-xs text-gray-600 mt-8">
             -20% avec l&apos;abonnement annuel · Paiement sécurisé Stripe · Annulation à tout moment
           </p>
         </div>
@@ -991,7 +1002,7 @@ export default async function HomePage() {
                 <details className="group rounded-2xl border border-gray-200 bg-white px-5 py-4 open:border-amber-300 open:bg-amber-50/30">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-gray-900 marker:content-none">
                     {f.q}
-                    <ChevronRight className="h-4 w-4 shrink-0 text-brand-gold-deep transition-transform group-open:rotate-90" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-brand-gold-dark transition-transform group-open:rotate-90" />
                   </summary>
                   <p className="mt-3 text-sm leading-6 text-gray-600">{f.r}</p>
                 </details>
@@ -999,9 +1010,9 @@ export default async function HomePage() {
             ))}
           </div>
 
-          <p className="mt-8 text-center text-sm text-gray-500">
+          <p className="mt-8 text-center text-sm text-gray-600">
             Une autre question ?{" "}
-            <Link href="/tarifs" className="font-semibold text-brand-gold-deep underline-offset-4 hover:underline">
+            <Link href="/tarifs" className="font-semibold text-brand-gold-dark underline-offset-4 hover:underline">
               Voir le détail des formules
             </Link>
           </p>
@@ -1021,7 +1032,7 @@ export default async function HomePage() {
       {/* ═══════════ CTA FINALE — photo ═══════════ */}
       <section className="relative overflow-hidden bg-gray-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/cta.jpg" width={1600} height={1064} alt="Arrivée d'une course devant le public" className="absolute inset-0 h-full w-full object-cover ken-burns" />
+        <img src="/img/cta.webp" width={1600} height={1064} alt="Arrivée d'une course devant le public" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns" />
         <div className="absolute inset-0 bg-gray-950/75" />
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/40 to-gray-950/70" />
         <div className="relative mx-auto max-w-3xl px-4 sm:px-6 text-center py-24 sm:py-32">
@@ -1034,13 +1045,13 @@ export default async function HomePage() {
               <span className="text-gradient-animated">une méthode</span>
               {" "}— pas avec votre instinct.
             </h2>
-            <p className="text-gray-200/90 text-lg mb-10 max-w-xl mx-auto">
+            <p className="text-gray-200 text-lg mb-10 max-w-xl mx-auto">
               Des analyses chiffrées et vérifiées sur les vrais résultats du PMU. Essayez BlackTurf
               7 jours, sans engagement : annulez avant la fin de l&apos;essai et rien ne vous est prélevé.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="xl" asChild
-                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-white font-bold text-base shadow-xl shadow-amber-900/40">
+                className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-bold text-base shadow-xl shadow-amber-900/40">
                 <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
               </Button>
               <Button variant="outline" size="xl" asChild
@@ -1055,8 +1066,8 @@ export default async function HomePage() {
       {/* ═══════════ JEU RESPONSABLE ═══════════ */}
       <section className="py-8 border-t border-gray-100 bg-brand-warm">
         <div className="mx-auto max-w-3xl px-4 text-center">
-          <p className="text-xs text-gray-500 leading-relaxed inline-flex flex-wrap items-center justify-center gap-x-1.5">
-            <AlertTriangle className="h-3.5 w-3.5 text-gray-500 inline" />
+          <p className="text-xs text-gray-600 leading-relaxed inline-flex flex-wrap items-center justify-center gap-x-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-gray-600 inline" />
             <span><strong className="text-gray-600">Jeu responsable.</strong> BlackTurf est un outil d&apos;aide à la décision,
             pas une garantie de gain. Les performances passées ne préjugent pas des performances futures.
             Interdit aux mineurs. En cas de difficulté :{" "}
@@ -1065,6 +1076,8 @@ export default async function HomePage() {
           </p>
         </div>
       </section>
+
+      </main>
 
       <Footer />
     </div>

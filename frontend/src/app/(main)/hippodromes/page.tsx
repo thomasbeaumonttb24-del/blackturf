@@ -49,17 +49,17 @@ export default function HippodromesIndex() {
           {sorted.map((h) => (
             <Link key={h.slug} href={`/hippodromes/${h.slug}`} className="glass-card group flex flex-col rounded-2xl p-5">
               <div className="flex items-start justify-between gap-2">
-                <h2 className="font-display text-lg font-semibold text-brand-dark transition-colors group-hover:text-brand-gold-deep">
+                <h2 className="font-display text-lg font-semibold text-brand-dark transition-colors group-hover:text-brand-gold-dark">
                   {h.name}
                 </h2>
-                <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-brand-gold/50 transition-all group-hover:translate-x-0.5 group-hover:text-brand-gold-deep" />
+                <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-brand-gold-dark/50 transition-all group-hover:translate-x-0.5 group-hover:text-brand-gold-dark" />
               </div>
-              <p className="mt-1 inline-flex items-center gap-1 text-xs text-brand-charcoal/60">
+              <p className="mt-1 inline-flex items-center gap-1 text-xs text-brand-charcoal">
                 <MapPin className="h-3 w-3" /> {h.city} · {h.region}
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {h.disciplines.map((d) => (
-                  <span key={d} className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-brand-charcoal/80">{d}</span>
+                  <span key={d} className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-brand-charcoal">{d}</span>
                 ))}
               </div>
               {h.signature && (

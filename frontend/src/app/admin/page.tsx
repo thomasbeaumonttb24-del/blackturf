@@ -136,7 +136,7 @@ function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; 
       <CardContent className="p-3 sm:p-5">
         <div className="flex items-center gap-2 sm:gap-3 mb-2">
           <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-brand-gold/10 flex items-center justify-center shrink-0">
-            <Icon className="h-4 w-4 text-brand-gold" />
+            <Icon className="h-4 w-4 text-brand-gold-dark" />
           </div>
           <span className="text-xs sm:text-sm text-muted-foreground leading-tight">{label}</span>
         </div>
@@ -190,7 +190,7 @@ function subBadge(statut: string | null, stripeClient: boolean) {
   if (statut === "canceled")
     return <Badge variant="secondary" className="text-[10px] text-muted-foreground">Résilié</Badge>;
   if (statut === "incomplete" || statut === "incomplete_expired")
-    return <Badge variant="secondary" className="text-[10px] text-amber-600">Paiement incomplet</Badge>;
+    return <Badge variant="secondary" className="text-[10px] text-amber-700">Paiement incomplet</Badge>;
   if (stripeClient)
     return <Badge variant="secondary" className="text-[10px] text-muted-foreground" title="Client Stripe créé, jamais d'abonnement finalisé">Checkout abandonné</Badge>;
   return <span className="text-muted-foreground text-xs">—</span>;
@@ -246,14 +246,14 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
               </div>
               <div className="rounded-lg bg-muted/30 p-3">
                 <div className="text-xs text-muted-foreground">Gain net</div>
-                <div className={cn("text-lg font-bold tabular-nums", data.portefeuille.gain_net >= 0 ? "text-green-600" : "text-destructive")}>
+                <div className={cn("text-lg font-bold tabular-nums", data.portefeuille.gain_net >= 0 ? "text-green-700" : "text-destructive")}>
                   {data.portefeuille.gain_net >= 0 ? "+" : ""}{formatEuro(data.portefeuille.gain_net)}
                 </div>
                 <div className="text-[10px] text-muted-foreground">misé {formatEuro(data.portefeuille.mise_totale)}</div>
               </div>
               <div className="rounded-lg bg-muted/30 p-3">
                 <div className="text-xs text-muted-foreground">ROI</div>
-                <div className={cn("text-lg font-bold tabular-nums", data.portefeuille.roi == null ? "text-muted-foreground" : data.portefeuille.roi >= 0 ? "text-green-600" : "text-destructive")}>
+                <div className={cn("text-lg font-bold tabular-nums", data.portefeuille.roi == null ? "text-muted-foreground" : data.portefeuille.roi >= 0 ? "text-green-700" : "text-destructive")}>
                   {data.portefeuille.roi == null ? "—" : `${data.portefeuille.roi >= 0 ? "+" : ""}${data.portefeuille.roi}%`}
                 </div>
                 <div className="text-[10px] text-muted-foreground">{data.portefeuille.nb_predictions_used} suivis IA</div>
@@ -277,7 +277,7 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
                     <div key={t.type_pari} className="rounded-lg border border-border px-3 py-1.5 text-xs">
                       <span className="font-semibold capitalize">{t.type_pari}</span>
                       <span className="text-muted-foreground"> · {t.nb_gagnes}/{t.nb} · </span>
-                      <span className={cn("tabular-nums", t.net >= 0 ? "text-green-600" : "text-destructive")}>{t.net >= 0 ? "+" : ""}{formatEuro(t.net)}</span>
+                      <span className={cn("tabular-nums", t.net >= 0 ? "text-green-700" : "text-destructive")}>{t.net >= 0 ? "+" : ""}{formatEuro(t.net)}</span>
                       {t.roi != null && <span className="text-muted-foreground"> ({t.roi >= 0 ? "+" : ""}{t.roi}%)</span>}
                     </div>
                   ))}
@@ -294,7 +294,7 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
                     <div key={s.sub_id} className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant="secondary" className="text-[10px]">{s.plan}</Badge>
                       <span>{s.periodicite}</span>
-                      <span className={cn(s.statut === "active" ? "text-green-600" : "text-muted-foreground")}>· {s.statut}</span>
+                      <span className={cn(s.statut === "active" ? "text-green-700" : "text-muted-foreground")}>· {s.statut}</span>
                       {s.periode_fin && <span>· jusqu&apos;au {formatDateTime(s.periode_fin)}</span>}
                     </div>
                   ))}
@@ -316,7 +316,7 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium capitalize">
                             {b.type_pari}
-                            {b.suivi_reco_ia && <span className="ml-1 text-[9px] text-brand-gold">IA</span>}
+                            {b.suivi_reco_ia && <span className="ml-1 text-[9px] text-brand-gold-dark">IA</span>}
                           </span>
                           {resultBadge(b.resultat)}
                         </div>
@@ -326,7 +326,7 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
                             {b.course_code && <span className="font-mono font-semibold text-foreground">{b.course_code} </span>}
                             {formatEuro(b.mise)}{b.cote ? ` · @${b.cote.toFixed(2)}` : ""}
                           </span>
-                          <span className={cn("tabular-nums font-semibold", (b.gain_perte ?? 0) > 0 ? "text-green-600" : (b.gain_perte ?? 0) < 0 ? "text-destructive" : "text-muted-foreground")}>
+                          <span className={cn("tabular-nums font-semibold", (b.gain_perte ?? 0) > 0 ? "text-green-700" : (b.gain_perte ?? 0) < 0 ? "text-destructive" : "text-muted-foreground")}>
                             {b.gain_perte == null ? "—" : `${b.gain_perte >= 0 ? "+" : ""}${formatEuro(b.gain_perte)}`}
                           </span>
                         </div>
@@ -358,13 +358,13 @@ function UserDetailModal({ userId, onClose }: { userId: string; onClose: () => v
                             </td>
                             <td className="p-2 capitalize whitespace-nowrap">
                               {b.type_pari}
-                              {b.suivi_reco_ia && <span className="ml-1 text-[9px] text-brand-gold" title="Suivi reco IA">IA</span>}
+                              {b.suivi_reco_ia && <span className="ml-1 text-[9px] text-brand-gold-dark" title="Suivi reco IA">IA</span>}
                             </td>
                             <td className="p-2 max-w-[120px] truncate" title={b.chevaux || ""}>{b.chevaux || "—"}</td>
                             <td className="p-2 text-right tabular-nums">{formatEuro(b.mise)}</td>
                             <td className="p-2 text-right tabular-nums text-muted-foreground">{b.cote ? b.cote.toFixed(2) : "—"}</td>
                             <td className="p-2 text-center">{resultBadge(b.resultat)}</td>
-                            <td className={cn("p-2 text-right tabular-nums font-semibold", (b.gain_perte ?? 0) > 0 ? "text-green-600" : (b.gain_perte ?? 0) < 0 ? "text-destructive" : "text-muted-foreground")}>
+                            <td className={cn("p-2 text-right tabular-nums font-semibold", (b.gain_perte ?? 0) > 0 ? "text-green-700" : (b.gain_perte ?? 0) < 0 ? "text-destructive" : "text-muted-foreground")}>
                               {b.gain_perte == null ? "—" : `${b.gain_perte >= 0 ? "+" : ""}${formatEuro(b.gain_perte)}`}
                             </td>
                           </tr>
@@ -546,7 +546,7 @@ export default function AdminPage() {
                           {e.source}
                         </span>
                         {e.endpoint && <span className="font-mono text-muted-foreground truncate">{e.endpoint}</span>}
-                        {e.resolved && <span className="text-emerald-600 text-[10px]">✓ résolu</span>}
+                        {e.resolved && <span className="text-emerald-700 text-[10px]">✓ résolu</span>}
                       </span>
                       <span className="block mt-1 font-medium text-foreground break-words">{e.message}</span>
                     </span>
@@ -579,7 +579,7 @@ export default function AdminPage() {
       <Card className="border-brand-gold/30">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Wallet className="h-4 w-4 text-brand-gold" /> Rentabilité réelle par profil (net)
+            <Wallet className="h-4 w-4 text-brand-gold-dark" /> Rentabilité réelle par profil (net)
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
             10€/profil/course, rapports PMU réels. Net réel (peut être négatif), suivi admin.
@@ -593,13 +593,13 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                 <div className="rounded-lg bg-muted/30 p-3 text-center">
                   <div className="text-xs text-muted-foreground">Bénéfice net total</div>
-                  <div className={cn("text-xl font-bold tabular-nums", (palmares.total_benefice ?? 0) >= 0 ? "text-green-600" : "text-destructive")}>
+                  <div className={cn("text-xl font-bold tabular-nums", (palmares.total_benefice ?? 0) >= 0 ? "text-green-700" : "text-destructive")}>
                     {(palmares.total_benefice ?? 0) >= 0 ? "+" : ""}{(palmares.total_benefice ?? 0).toFixed(0)}€
                   </div>
                 </div>
                 <div className="rounded-lg bg-muted/30 p-3 text-center">
                   <div className="text-xs text-muted-foreground">Total gagné</div>
-                  <div className="text-xl font-bold tabular-nums text-green-600">{(palmares.total_gain ?? 0).toFixed(0)}€</div>
+                  <div className="text-xl font-bold tabular-nums text-green-700">{(palmares.total_gain ?? 0).toFixed(0)}€</div>
                 </div>
                 <div className="rounded-lg bg-muted/30 p-3 text-center">
                   <div className="text-xs text-muted-foreground">Paris gagnés</div>
@@ -618,15 +618,15 @@ export default function AdminPage() {
                       <div key={p.profil} className="rounded-lg border border-border p-3">
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-sm">{PROFIL_NET_LABELS[p.profil] ?? p.label}</span>
-                          <span className={cn("text-sm font-bold tabular-nums", p.gain_net >= 0 ? "text-green-600" : "text-destructive")}>
+                          <span className={cn("text-sm font-bold tabular-nums", p.gain_net >= 0 ? "text-green-700" : "text-destructive")}>
                             {p.gain_net >= 0 ? "+" : ""}{p.gain_net.toFixed(0)}€
                           </span>
                         </div>
                         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground tabular-nums">
                           <span>{p.nb_courses} courses</span>
                           <span>misé {(p.mise_totale ?? 0).toFixed(0)}€</span>
-                          <span className="text-green-600">gagné {(p.gain_total ?? 0).toFixed(0)}€</span>
-                          <span className={cn((p.roi ?? 0) >= 0 ? "text-green-600" : "text-destructive")}>
+                          <span className="text-green-700">gagné {(p.gain_total ?? 0).toFixed(0)}€</span>
+                          <span className={cn((p.roi ?? 0) >= 0 ? "text-green-700" : "text-destructive")}>
                             ROI {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}
                           </span>
                           {p.taux_courses_beneficiaires != null && <span>{p.taux_courses_beneficiaires}% courses +</span>}
@@ -654,11 +654,11 @@ export default function AdminPage() {
                             <td className="p-2 font-medium">{PROFIL_NET_LABELS[p.profil] ?? p.label}</td>
                             <td className="p-2 text-right tabular-nums text-muted-foreground">{p.nb_courses}</td>
                             <td className="p-2 text-right tabular-nums text-muted-foreground">{(p.mise_totale ?? 0).toFixed(0)}€</td>
-                            <td className="p-2 text-right tabular-nums text-green-600">{(p.gain_total ?? 0).toFixed(0)}€</td>
-                            <td className={cn("p-2 text-right tabular-nums font-semibold", p.gain_net >= 0 ? "text-green-600" : "text-destructive")}>
+                            <td className="p-2 text-right tabular-nums text-green-700">{(p.gain_total ?? 0).toFixed(0)}€</td>
+                            <td className={cn("p-2 text-right tabular-nums font-semibold", p.gain_net >= 0 ? "text-green-700" : "text-destructive")}>
                               {p.gain_net >= 0 ? "+" : ""}{p.gain_net.toFixed(0)}€
                             </td>
-                            <td className={cn("p-2 text-right tabular-nums font-semibold", (p.roi ?? 0) >= 0 ? "text-green-600" : "text-destructive")}>
+                            <td className={cn("p-2 text-right tabular-nums font-semibold", (p.roi ?? 0) >= 0 ? "text-green-700" : "text-destructive")}>
                               {p.roi != null ? `${p.roi >= 0 ? "+" : ""}${p.roi}%` : "—"}
                             </td>
                             <td className="p-2 text-right tabular-nums text-muted-foreground">
@@ -672,7 +672,7 @@ export default function AdminPage() {
                 </>
               )}
               {palmares.updated_at && (
-                <p className="mt-3 text-[11px] text-muted-foreground/70 flex items-center gap-1">
+                <p className="mt-3 text-[11px] text-muted-foreground flex items-center gap-1">
                   <TrendingUp className="h-3 w-3" /> Mis à jour {formatDateTime(palmares.updated_at)} · recalculé à chaque fin de course
                 </p>
               )}
@@ -686,7 +686,7 @@ export default function AdminPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
-              <CreditCard className="h-4 w-4 text-brand-gold" /> Abonnements
+              <CreditCard className="h-4 w-4 text-brand-gold-dark" /> Abonnements
             </CardTitle>
             {abos.resume.en_essai_sans_carte > 0 && (
               <Badge variant="warning">
@@ -758,7 +758,7 @@ export default function AdminPage() {
                               {formatDateTime(a.essai_fin)}
                               {a.jours_essai_restants !== null && (
                                 <span className={cn("ml-1 text-xs",
-                                  a.jours_essai_restants <= 3 ? "text-amber-600 font-semibold" : "text-muted-foreground")}>
+                                  a.jours_essai_restants <= 3 ? "text-amber-700 font-semibold" : "text-muted-foreground")}>
                                   (J-{a.jours_essai_restants})
                                 </span>
                               )}
@@ -795,7 +795,7 @@ export default function AdminPage() {
                         </span>
                       )}
                       {m.pendant_essai && (
-                        <span className="text-xs text-amber-600">pendant l&apos;essai</span>
+                        <span className="text-xs text-amber-700">pendant l&apos;essai</span>
                       )}
                       <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">
                         {formatDateTime(m.created_at)}
@@ -816,7 +816,7 @@ export default function AdminPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
-              <Brain className="h-4 w-4 text-brand-gold" /> Modèle actif
+              <Brain className="h-4 w-4 text-brand-gold-dark" /> Modèle actif
             </CardTitle>
             {dashboard.modele.version && (
               <Badge variant="success">v{dashboard.modele.version}</Badge>
@@ -880,10 +880,10 @@ export default function AdminPage() {
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] tabular-nums">
                     <span className="text-muted-foreground">AUC <span className="text-foreground font-semibold">{m.auc_roc.toFixed(4)}</span></span>
-                    <span className="text-muted-foreground">Brier <span className={cn("font-semibold", m.brier_score < 0.18 ? "text-brand-emerald" : "text-brand-red")}>{m.brier_score.toFixed(4)}</span></span>
+                    <span className="text-muted-foreground">Brier <span className={cn("font-semibold", m.brier_score < 0.18 ? "text-brand-emerald-dark" : "text-brand-red")}>{m.brier_score.toFixed(4)}</span></span>
                     <span className="text-muted-foreground">WF-AUC <span className="text-foreground font-semibold">{m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}</span></span>
                     <span className="text-muted-foreground">Top-3 <span className="text-foreground font-semibold">{m.precision_top3 != null ? `${(m.precision_top3 * 100).toFixed(1)}%` : "—"}</span></span>
-                    <span className="text-muted-foreground">ROI <span className={cn("font-semibold", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald" : "text-destructive")}>{m.roi_simule != null ? `${m.roi_simule >= 0 ? "+" : ""}${(m.roi_simule * 100).toFixed(1)}%` : "—"}</span></span>
+                    <span className="text-muted-foreground">ROI <span className={cn("font-semibold", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald-dark" : "text-destructive")}>{m.roi_simule != null ? `${m.roi_simule >= 0 ? "+" : ""}${(m.roi_simule * 100).toFixed(1)}%` : "—"}</span></span>
                     <span className="text-muted-foreground">{m.nb_courses_train.toLocaleString("fr-FR")} partants</span>
                   </div>
                 </div>
@@ -910,14 +910,14 @@ export default function AdminPage() {
                     <tr key={m.version_num} className={cn("border-b border-border/50", m.est_actif && "bg-brand-gold/5")}>
                       <td className="p-3 font-mono font-bold">v{m.version_num}</td>
                       <td className="p-3 text-right">{m.auc_roc.toFixed(4)}</td>
-                      <td className={cn("p-3 text-right text-xs", m.brier_score < 0.18 ? "text-brand-emerald" : "text-brand-red")}>
+                      <td className={cn("p-3 text-right text-xs", m.brier_score < 0.18 ? "text-brand-emerald-dark" : "text-brand-red")}>
                         {m.brier_score.toFixed(4)}
                       </td>
                       <td className="p-3 text-right text-xs text-muted-foreground">
                         {m.walk_forward_auc ? m.walk_forward_auc.toFixed(4) : "—"}
                       </td>
                       <td className="p-3 text-right">{m.precision_top3 != null ? `${(m.precision_top3 * 100).toFixed(1)}%` : "—"}</td>
-                      <td className={cn("p-3 text-right", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald" : "text-destructive")}>
+                      <td className={cn("p-3 text-right", (m.roi_simule ?? 0) >= 0 ? "text-brand-emerald-dark" : "text-destructive")}>
                         {m.roi_simule != null ? `${m.roi_simule >= 0 ? "+" : ""}${(m.roi_simule * 100).toFixed(1)}%` : "—"}
                       </td>
                       <td className="p-3 text-right text-muted-foreground tabular-nums">{m.nb_courses_train.toLocaleString("fr-FR")}</td>
@@ -965,7 +965,7 @@ export default function AdminPage() {
                 <div key={source} className="rounded-lg border border-border p-3">
                   <div className="flex items-center gap-2 mb-1">
                     {status.statut === "ok" ? (
-                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      <CheckCircle className="h-4 w-4 text-green-700" />
                     ) : (
                       <XCircle className="h-4 w-4 text-destructive" />
                     )}
@@ -999,7 +999,7 @@ export default function AdminPage() {
                   placeholder="Rechercher…"
                   className="rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm flex-1 sm:w-56 sm:flex-none focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
                 />
-                <button onClick={exportUsers} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:border-brand-gold/50 hover:text-brand-gold transition-colors whitespace-nowrap">
+                <button onClick={exportUsers} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:border-brand-gold/50 hover:text-brand-gold-dark transition-colors whitespace-nowrap">
                   ⬇ CSV
                 </button>
               </div>
@@ -1032,13 +1032,13 @@ export default function AdminPage() {
                       </button>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <Badge variant={u.plan === "expert" ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
-                        {u.is_active ? <CheckCircle className="h-4 w-4 text-green-600" /> : <XCircle className="h-4 w-4 text-destructive" />}
+                        {u.is_active ? <CheckCircle className="h-4 w-4 text-green-700" /> : <XCircle className="h-4 w-4 text-destructive" />}
                       </div>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
                       <span className="font-mono">{u.solde_actuel?.toFixed(0)}€</span>
-                      <span className={cn("font-mono font-semibold", u.gain_net >= 0 ? "text-green-600" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</span>
-                      <span className={cn("font-mono", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-600" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</span>
+                      <span className={cn("font-mono font-semibold", u.gain_net >= 0 ? "text-green-700" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</span>
+                      <span className={cn("font-mono", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-700" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</span>
                       <span className="text-muted-foreground">{u.nb_gagnes}/{u.nb_paris} paris</span>
                       <span className="text-muted-foreground capitalize">{u.profil_risque}</span>
                     </div>
@@ -1050,12 +1050,12 @@ export default function AdminPage() {
                       <button
                         onClick={() => toggleActive(u.user_id, u.is_active)}
                         className={cn("rounded px-2 py-1 text-[10px] font-semibold border transition-colors",
-                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-600 hover:bg-green-500/10")}>
+                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-700 hover:bg-green-500/10")}>
                         {u.is_active ? "Suspendre" : "Réactiver"}
                       </button>
                       <button
                         onClick={() => adjustBankroll(u.user_id, u.email)}
-                        className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold transition-colors">
+                        className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold-dark transition-colors">
                         💰 Ajuster
                       </button>
                     </div>
@@ -1098,7 +1098,7 @@ export default function AdminPage() {
                     <td className="p-3">
                       <button
                         onClick={() => setSelectedUser(u.user_id)}
-                        className="font-medium flex items-center gap-1.5 text-left hover:text-brand-gold transition-colors"
+                        className="font-medium flex items-center gap-1.5 text-left hover:text-brand-gold-dark transition-colors"
                         title="Voir l'historique complet">
                         {nom}
                         {u.is_admin && <Badge variant="secondary" className="text-[9px]">ADMIN</Badge>}
@@ -1106,8 +1106,8 @@ export default function AdminPage() {
                       <div className="text-xs text-muted-foreground flex items-center gap-1.5">
                         {u.email}
                         <span className="text-[9px]" title={u.auth_method === "google" ? "Google" : "Email"}>{u.auth_method === "google" ? "🔵 G" : "✉"}</span>
-                        {u.email_verified ? <span className="text-[9px] text-green-600" title="Email vérifié">✓</span> : <span className="text-[9px] text-amber-500" title="Non vérifié">⚠</span>}
-                        {u.stripe_client && <span className="text-[9px] text-violet-500" title="Client Stripe">💳</span>}
+                        {u.email_verified ? <span className="text-[9px] text-green-700" title="Email vérifié">✓</span> : <span className="text-[9px] text-amber-700" title="Non vérifié">⚠</span>}
+                        {u.stripe_client && <span className="text-[9px] text-violet-700" title="Client Stripe">💳</span>}
                       </div>
                     </td>
                     <td className="p-3 text-center">
@@ -1116,10 +1116,10 @@ export default function AdminPage() {
                     <td className="p-3 text-center text-xs text-muted-foreground capitalize">{u.profil_risque}</td>
                     <td className="p-3 text-right font-mono tabular-nums">{u.solde_actuel?.toFixed(0)}€</td>
                     <td className="p-3 text-right font-mono tabular-nums text-muted-foreground">{u.mise_totale?.toFixed(0)}€</td>
-                    <td className={cn("p-3 text-right font-mono tabular-nums font-semibold", u.gain_net >= 0 ? "text-green-600" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</td>
-                    <td className={cn("p-3 text-right font-mono tabular-nums", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-600" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</td>
+                    <td className={cn("p-3 text-right font-mono tabular-nums font-semibold", u.gain_net >= 0 ? "text-green-700" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</td>
+                    <td className={cn("p-3 text-right font-mono tabular-nums", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-700" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</td>
                     <td className="p-3 text-center text-xs tabular-nums">{u.nb_gagnes}/{u.nb_paris}</td>
-                    <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-600 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
+                    <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-700 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
                     <td className="p-3 text-center">{subBadge(u.abonnement_statut, u.stripe_client)}</td>
                     <td className="p-3 text-right text-muted-foreground text-xs whitespace-nowrap">{lastLoginLabel(u.last_login)}</td>
                     <td className="p-3 text-right text-muted-foreground text-xs">{formatDateTime(u.created_at)}</td>
@@ -1127,13 +1127,13 @@ export default function AdminPage() {
                       <button
                         onClick={() => toggleActive(u.user_id, u.is_active)}
                         className={cn("rounded px-2 py-1 text-[10px] font-semibold border transition-colors mr-1",
-                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-600 hover:bg-green-500/10")}
+                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-700 hover:bg-green-500/10")}
                         title={u.is_active ? "Suspendre le compte" : "Réactiver le compte"}>
                         {u.is_active ? "Suspendre" : "Réactiver"}
                       </button>
                       <button
                         onClick={() => adjustBankroll(u.user_id, u.email)}
-                        className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold transition-colors"
+                        className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold-dark transition-colors"
                         title="Créditer / débiter le portefeuille">
                         💰 Ajuster
                       </button>

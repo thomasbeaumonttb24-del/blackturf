@@ -155,7 +155,7 @@ export default function AssistantPage() {
         </div>
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">BlackTurf IA</h1>
-          <p className="text-gray-500 leading-relaxed">
+          <p className="text-gray-600 leading-relaxed">
             Posez vos questions en langage naturel. L&apos;IA accède aux données en temps réel :
             programme du jour, paris de valeur, prédictions, indicateurs de mouvement.
           </p>
@@ -167,17 +167,17 @@ export default function AssistantPage() {
             "\"Mon capital est de 500€, comment répartir mes mises ?\"",
           ].map((ex) => (
             <p key={ex} className="text-sm text-amber-800 font-medium flex items-start gap-2">
-              <span className="text-amber-400 mt-0.5">›</span> {ex}
+              <span className="text-amber-700 mt-0.5">›</span> {ex}
             </p>
           ))}
         </div>
         <div>
-          <p className="text-sm text-gray-500 mb-4">
-            Fonctionnalité réservée au plan <strong className="text-amber-600">Expert</strong>.
+          <p className="text-sm text-gray-600 mb-4">
+            Fonctionnalité réservée au plan <strong className="text-amber-700">Expert</strong>.
           </p>
           <Link
             href="/tarifs"
-            className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-semibold px-6 py-3 transition-colors shadow-sm shadow-amber-200"
+            className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 hover:bg-amber-600 text-brand-dark font-semibold px-6 py-3 transition-colors shadow-sm shadow-amber-200"
           >
             <Zap className="h-4 w-4" /> Passer Expert
           </Link>
@@ -199,7 +199,7 @@ export default function AssistantPage() {
             <h1 className="font-bold text-gray-900 text-sm">BlackTurf IA</h1>
             <div className="flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-gray-400">Moteur BlackTurf · Données en direct</span>
+              <span className="text-xs text-gray-600">Moteur BlackTurf · Données en direct</span>
             </div>
           </div>
         </div>
@@ -209,7 +209,7 @@ export default function AssistantPage() {
             role: "assistant",
             content: "Conversation réinitialisée. Comment puis-je vous aider ?",
           }])}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 rounded-xl px-3 py-1.5 hover:bg-gray-100 transition-colors"
+          className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-800 rounded-xl px-3 py-1.5 hover:bg-gray-100 transition-colors"
         >
           <RefreshCw className="h-3.5 w-3.5" /> Réinitialiser
         </button>
@@ -290,19 +290,19 @@ export default function AssistantPage() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
           placeholder="Posez votre question sur les courses…"
-          className="flex-1 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder:text-gray-400 transition-all"
+          className="flex-1 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder:text-gray-600 transition-all"
           disabled={streaming}
         />
         <button
           onClick={() => sendMessage()}
           disabled={!input.trim() || streaming}
-          className="h-12 w-12 rounded-2xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white flex items-center justify-center transition-all flex-shrink-0 shadow-sm shadow-amber-200"
+          className="h-12 w-12 rounded-2xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-brand-dark flex items-center justify-center transition-all flex-shrink-0 shadow-sm shadow-amber-200"
         >
           {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>
       </div>
 
-      <p className="text-center text-[10px] text-gray-400 mt-2 flex-shrink-0">
+      <p className="text-center text-[10px] text-gray-600 mt-2 flex-shrink-0">
         Outil d&apos;aide à la décision — aucune garantie de gain — jouez de façon responsable
       </p>
     </div>

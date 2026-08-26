@@ -54,12 +54,12 @@ function LoginContent() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2.5 mb-4">
             <Image src="/logo.png" alt="BlackTurf" width={40} height={40} className="rounded-xl object-contain" />
-            <span className="text-2xl font-bold text-gray-900">Black<span className="text-amber-600">Turf</span></span>
+            <span className="text-2xl font-bold text-gray-900">Black<span className="text-amber-700">Turf</span></span>
           </Link>
           <h1 className="text-2xl font-bold text-gray-900">Connexion</h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-gray-600 text-sm mt-1">
             Pas encore inscrit ?{" "}
-            <Link href="/inscription" className="text-amber-600 hover:underline font-medium">
+            <Link href="/inscription" className="text-amber-700 hover:underline font-medium">
               Créer un compte
             </Link>
           </p>

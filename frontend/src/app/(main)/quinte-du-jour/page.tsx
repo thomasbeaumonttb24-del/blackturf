@@ -86,7 +86,7 @@ export default async function QuinteDuJourPage() {
         {course ? (
           <>
             <Section title={`${titleCase(course.nom ?? "")} — ${titleCase(course.hippodrome_nom)}`}>
-              <p className="text-sm leading-relaxed text-brand-charcoal/85">
+              <p className="text-sm leading-relaxed text-brand-charcoal">
                 Le Quinté+ du {jourLong(jour)} se dispute à {titleCase(course.hippodrome_nom)} sur{" "}
                 {course.distance} mètres ({disciplineLabel(course.discipline)}), avec{" "}
                 {course.nb_partants} partants au départ de {heureParis(course.date_heure)}.
@@ -99,14 +99,14 @@ export default async function QuinteDuJourPage() {
                 par cheval et plan de mise adapté à votre budget — est sur{" "}
                 <Link
                   href={`/courses/${course.course_id}`}
-                  className="font-medium text-brand-gold-deep underline-offset-2 hover:underline"
+                  className="font-medium text-brand-gold-dark underline-offset-2 hover:underline"
                 >
                   la fiche de la course
                 </Link>
                 .
               </p>
               {course.conditions_texte && (
-                <p className="mt-4 text-[13px] leading-relaxed text-brand-charcoal/70">
+                <p className="mt-4 text-[13px] leading-relaxed text-brand-charcoal">
                   {course.conditions_texte}
                 </p>
               )}
@@ -116,7 +116,7 @@ export default async function QuinteDuJourPage() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[520px] text-sm">
                   <thead>
-                    <tr className="border-b border-amber-100 text-left text-[11px] uppercase tracking-wide text-brand-charcoal/60">
+                    <tr className="border-b border-amber-100 text-left text-[11px] uppercase tracking-wide text-brand-charcoal">
                       <th className="py-2 pr-3">N°</th>
                       <th className="py-2 pr-3">Cheval</th>
                       <th className="py-2 pr-3">Jockey</th>
@@ -135,10 +135,10 @@ export default async function QuinteDuJourPage() {
                           {titleCase(p.nom_cheval)}
                           {p.non_partant ? " (non-partant)" : ""}
                         </td>
-                        <td className="py-2 pr-3 text-brand-charcoal/80">
+                        <td className="py-2 pr-3 text-brand-charcoal">
                           {p.jockey ? titleCase(p.jockey) : "—"}
                         </td>
-                        <td className="py-2 pr-3 font-mono text-[12px] text-brand-charcoal/70">
+                        <td className="py-2 pr-3 font-mono text-[12px] text-brand-charcoal">
                           {p.musique ?? "—"}
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums">
@@ -153,7 +153,7 @@ export default async function QuinteDuJourPage() {
 
             {resultats?.classement?.length ? (
               <Section title="Arrivée officielle du Quinté+">
-                <p className="text-sm text-brand-charcoal/85">
+                <p className="text-sm text-brand-charcoal">
                   Arrivée du Quinté+ du {jourLong(jour)} à {titleCase(course.hippodrome_nom)} :{" "}
                   <strong className="tabular-nums">
                     {resultats.classement
@@ -162,7 +162,7 @@ export default async function QuinteDuJourPage() {
                       .join(" - ")}
                   </strong>
                 </p>
-                <ol className="mt-3 space-y-1 text-sm text-brand-charcoal/85">
+                <ol className="mt-3 space-y-1 text-sm text-brand-charcoal">
                   {resultats.classement.slice(0, 8).map((l) => (
                     <li key={l.position}>
                       <span className="font-semibold tabular-nums">{l.position}.</span> n°{l.numero}{" "}
@@ -176,7 +176,7 @@ export default async function QuinteDuJourPage() {
 
             {rapports.length ? (
               <Section title="Rapports PMU officiels">
-                <p className="text-sm text-brand-charcoal/70">
+                <p className="text-sm text-brand-charcoal">
                   Rapports pour 1 € de mise, publiés par le PMU après l&apos;arrivée.
                 </p>
                 <div className="mt-3 overflow-x-auto">
@@ -184,7 +184,7 @@ export default async function QuinteDuJourPage() {
                     <tbody>
                       {rapports.map(([code, val]) => (
                         <tr key={code} className="border-b border-amber-50">
-                          <td className="py-2 pr-3 text-brand-charcoal/85">{libellePari(code)}</td>
+                          <td className="py-2 pr-3 text-brand-charcoal">{libellePari(code)}</td>
                           <td className="py-2 text-right font-semibold tabular-nums text-brand-dark">
                             {formatRapport(val)} €
                           </td>
@@ -199,7 +199,7 @@ export default async function QuinteDuJourPage() {
                     <h3 className="mt-6 text-sm font-bold text-brand-dark">
                       Détail du Quinté+ (ordre, désordre, bonus)
                     </h3>
-                    <ul className="mt-2 space-y-1 text-sm text-brand-charcoal/85">
+                    <ul className="mt-2 space-y-1 text-sm text-brand-charcoal">
                       {quinteDetail.map((d, i) => (
                         <li key={`${d.libelle}-${i}`}>
                           {d.libelle} — <span className="tabular-nums">{d.combinaison}</span> :{" "}
@@ -219,9 +219,9 @@ export default async function QuinteDuJourPage() {
           </>
         ) : (
           <Section title="Pas encore de Quinté+ publié">
-            <p className="text-sm text-brand-charcoal/85">
+            <p className="text-sm text-brand-charcoal">
               Le PMU désigne la course support du Quinté+ la veille au soir. En attendant, le{" "}
-              <Link href="/programme" className="font-medium text-brand-gold-deep hover:underline">
+              <Link href="/programme" className="font-medium text-brand-gold-dark hover:underline">
                 programme complet du jour
               </Link>{" "}
               est déjà disponible.
@@ -241,18 +241,18 @@ export default async function QuinteDuJourPage() {
         </div>
 
         <Section title="Comment lire un Quinté+">
-          <p className="text-sm leading-relaxed text-brand-charcoal/85">
+          <p className="text-sm leading-relaxed text-brand-charcoal">
             Le Quinté+ demande de désigner les cinq premiers chevaux d&apos;une course. Trouvé dans
             l&apos;ordre exact, il paie souvent plusieurs milliers d&apos;euros ; dans le désordre,
             quelques centaines. Le PMU prélève environ 20 % des enjeux avant redistribution : sur ce
             type de pari, le seul avantage possible vient d&apos;un écart entre la probabilité
             réelle d&apos;un cheval et celle qu&apos;implique sa cote — c&apos;est exactement ce que
             mesure BlackTurf, sans promettre de gain.{" "}
-            <Link href="/guides/pari-de-valeur" className="font-medium text-brand-gold-deep hover:underline">
+            <Link href="/guides/pari-de-valeur" className="font-medium text-brand-gold-dark hover:underline">
               Comprendre le pari de valeur
             </Link>{" "}
             ·{" "}
-            <Link href="/guides/types-de-paris-pmu" className="font-medium text-brand-gold-deep hover:underline">
+            <Link href="/guides/types-de-paris-pmu" className="font-medium text-brand-gold-dark hover:underline">
               Tous les types de paris PMU
             </Link>
           </p>

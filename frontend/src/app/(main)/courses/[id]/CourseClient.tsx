@@ -1117,7 +1117,7 @@ function ResultatsSection({ resultats, partants }: {
                   <td className="px-2 py-2 tabular-nums">{c.numero}</td>
                   <td className="px-2 py-2">
                     <span className="line-through decoration-rose-400/60">{c.nom}</span>
-                    <span className="ml-2 align-middle text-[11px] font-medium text-rose-600">{fmtIncident(c.incident)}</span>
+                    <span className="ml-2 align-middle text-[11px] font-medium text-rose-700">{fmtIncident(c.incident)}</span>
                   </td>
                   {hasTemps && <td className="px-2 py-2 hidden sm:table-cell" />}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
@@ -1198,7 +1198,7 @@ function ResultatsSection({ resultats, partants }: {
                           </div>
                         ))}
                         {!isPlaceOrWin && arr.length > rows.length && (
-                          <p className="text-[10px] text-muted-foreground/60">+ {arr.length - rows.length} autres combinaisons gagnantes</p>
+                          <p className="text-[10px] text-muted-foreground">+ {arr.length - rows.length} autres combinaisons gagnantes</p>
                         )}
                       </div>
                     </div>
@@ -1332,7 +1332,7 @@ function PronosticVerdictSection({ predictions, classement }: {
             <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-stone-600">Favori du modèle</div>
             <div className={cn(
               "mt-1 font-display text-[22px] font-bold leading-none tabular-nums",
-              favGagne ? "text-amber-700" : favPlace ? "text-emerald-600" : "text-slate-900",
+              favGagne ? "text-amber-700" : favPlace ? "text-emerald-700" : "text-slate-900",
             )}>
               {favPos != null ? ord(favPos) : "—"}
             </div>
@@ -1346,7 +1346,7 @@ function PronosticVerdictSection({ predictions, classement }: {
             <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-stone-600">Rang du gagnant</div>
             <div className={cn(
               "mt-1 font-display text-[22px] font-bold leading-none tabular-nums",
-              gagnantDansTop3IA ? "text-emerald-600" : "text-slate-900",
+              gagnantDansTop3IA ? "text-emerald-700" : "text-slate-900",
             )}>
               {rangIAduGagnant != null ? ord(rangIAduGagnant) : "—"}
             </div>
@@ -1491,8 +1491,8 @@ function BilanKpi({ libelle, valeur, ton = "neutre", aide }: {
   aide?: string;
 }) {
   const couleur =
-    ton === "positif" ? "text-emerald-600"
-    : ton === "negatif" ? "text-rose-600"
+    ton === "positif" ? "text-emerald-700"
+    : ton === "negatif" ? "text-rose-700"
     : ton === "attente" ? "text-amber-700"
     : "text-slate-900";
   return (
@@ -1580,7 +1580,7 @@ function BilanDetail({ bilan }: { bilan: BilanData }) {
             </td>
             <td className={cn(
               "px-3 py-2.5 text-right font-display font-bold tabular-nums",
-              bilan.total_gain > 0 ? "text-emerald-600" : "text-stone-600",
+              bilan.total_gain > 0 ? "text-emerald-700" : "text-stone-600",
             )}>
               {eur(bilan.total_gain)}
             </td>
@@ -1660,7 +1660,7 @@ function ConfrontationRangs({ predN, realN, gagnant, rangGagnant, modeleAVuGagna
                       N°{pred}
                     </span>
                     {predHit && (
-                      <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-600">
+                      <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-700">
                         <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
                         <span className="hidden sm:inline">dans l&apos;arrivée</span>
                       </span>
@@ -1706,7 +1706,7 @@ function ConfrontationRangs({ predN, realN, gagnant, rangGagnant, modeleAVuGagna
               trouvé : le modèle le classait {rangGagnant === 1 ? "1ᵉʳ" : `${rangGagnant}ᵉ`}
             </span>
           ) : (
-            <span className="font-medium text-rose-600">
+            <span className="font-medium text-rose-700">
               manqué{rangGagnant ? ` : le modèle le classait ${rangGagnant === 1 ? "1ᵉʳ" : `${rangGagnant}ᵉ`}` : ""}
             </span>
           )}
@@ -1849,7 +1849,7 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
                   </span>
                   <span className={cn(
                     "mt-1 block font-display text-[15px] font-bold tabular-nums",
-                    b.verdict === "en_attente" ? "text-amber-700" : net >= 0 ? "text-emerald-600" : "text-rose-600",
+                    b.verdict === "en_attente" ? "text-amber-700" : net >= 0 ? "text-emerald-700" : "text-rose-700",
                   )}>
                     {b.verdict === "en_attente" ? "en attente" : `${net >= 0 ? "+" : ""}${eur(net, 0)}`}
                   </span>
@@ -1931,7 +1931,7 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
             <p className="text-[13.5px] font-semibold text-amber-900">
               Ce plan ne vous a pas été montré avant le départ.
             </p>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-amber-900/80">
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-amber-900">
               {best && best.bilan.net > 0 ? (
                 <>
                   Sur cette course, le profil <strong>{best.profil_label}</strong> ressort à{" "}
@@ -1942,7 +1942,7 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
               ) : best ? (
                 <>
                   Sur cette course, le meilleur profil (<strong>{best.profil_label}</strong>) finit à{" "}
-                  <strong className="tabular-nums text-rose-600">{eur(best.bilan.net)}</strong>{" "}
+                  <strong className="tabular-nums text-rose-700">{eur(best.bilan.net)}</strong>{" "}
                   pour {data.montant}€ misés. On affiche les plans perdants comme les gagnants :
                   c&apos;est le même bilan que celui du palmarès public.
                 </>
@@ -2827,7 +2827,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
                 </span>
               )}
               {wsConnected && (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-600">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" style={{ animation: "cxDotPulse 1.4s ease-in-out infinite" }} />
                   Cotes en direct
                 </span>
@@ -3258,7 +3258,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
                             <div key={label} className="flex gap-2">
                               <span className={cn(
                                 "mt-1 text-[8px] leading-none flex-shrink-0",
-                                sens === "pos" ? "text-emerald-600" : sens === "neg" ? "text-rose-600" : "text-amber-700",
+                                sens === "pos" ? "text-emerald-700" : sens === "neg" ? "text-rose-700" : "text-amber-700",
                               )}>
                                 {sens === "pos" ? "▲" : sens === "neg" ? "▼" : "●"}
                               </span>
@@ -3276,7 +3276,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
                     <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-brand-gold-dark" />
                     <span>Sur ordinateur, le survol d&apos;une pastille donne aussi le détail chiffré propre à ce cheval. Un signal qui contredirait le classement du modèle n&apos;est jamais affiché.</span>
                   </p>
-                  <p className="text-[11px] text-muted-foreground/70 text-center pb-1">
+                  <p className="text-[11px] text-muted-foreground text-center pb-1">
                     Modèle à 80+ critères. Aide à la décision, aucune garantie de gain.
                   </p>
                 </div>
@@ -3302,12 +3302,12 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
                 // déjà affichée plus haut) ignorée. Si l'analyse est en prose libre (Claude),
                 // repli sur un simple paragraphe.
                 const META: Record<string, { Icon: typeof Brain; cls: string }> = {
-                  "Lecture": { Icon: Activity, cls: "text-violet-500" },
+                  "Lecture": { Icon: Activity, cls: "text-violet-700" },
                   "Favori IA": { Icon: Star, cls: "text-brand-gold-dark" },
-                  "Atouts": { Icon: CheckCircle2, cls: "text-emerald-500" },
-                  "Également en vue": { Icon: Users, cls: "text-blue-500" },
-                  "Outsiders à valeur": { Icon: TrendingUp, cls: "text-emerald-600" },
-                  "Conclusion": { Icon: Target, cls: "text-violet-600" },
+                  "Atouts": { Icon: CheckCircle2, cls: "text-emerald-700" },
+                  "Également en vue": { Icon: Users, cls: "text-blue-700" },
+                  "Outsiders à valeur": { Icon: TrendingUp, cls: "text-emerald-700" },
+                  "Conclusion": { Icon: Target, cls: "text-violet-700" },
                   "À surveiller": { Icon: AlertTriangle, cls: "text-amber-700" },
                 };
                 const lines = analysis.narrative.split("\n").map((l) => l.trim()).filter(Boolean);

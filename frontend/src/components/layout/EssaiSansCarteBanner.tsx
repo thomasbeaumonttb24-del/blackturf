@@ -26,8 +26,7 @@ export function EssaiSansCarteBanner() {
   if (loading || !user || !user.essai_bloque_sans_carte) return null;
 
   const finEssai = user.essai_fin
-    ? new Date(user.essai_fin).toLocaleDateString("fr-FR", {
-        day: "2-digit", month: "long", hour: "2-digit", minute: "2-digit",
+    ? new Date(user.essai_fin).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "long", hour: "2-digit", minute: "2-digit",
       })
     : null;
 

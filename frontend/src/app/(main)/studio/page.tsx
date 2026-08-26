@@ -35,7 +35,7 @@ export default async function StudioPage() {
       <Container>
         {visuels.map((v) => (
           <Section key={v.titre} title={v.titre}>
-            <p className="text-sm text-brand-charcoal/70">{QUAND[v.cle]}</p>
+            <p className="text-sm text-brand-charcoal">{QUAND[v.cle]}</p>
 
             {!v.pret && (
               <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -74,7 +74,7 @@ export default async function StudioPage() {
         ))}
 
         <Section title="Avant de publier">
-          <ul className="space-y-2 text-sm leading-relaxed text-brand-charcoal/85">
+          <ul className="space-y-2 text-sm leading-relaxed text-brand-charcoal">
             <li>
               Les visuels ne portent <strong>aucun pronostic et aucun chiffre de gain</strong>.
               Une image circule hors de son contexte : elle ne doit jamais pouvoir se lire comme

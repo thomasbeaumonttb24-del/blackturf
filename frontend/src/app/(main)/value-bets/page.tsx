@@ -21,8 +21,8 @@ import { formatCote, formatEV, formatDateTime, cn } from "@/lib/utils";
 
 // ─── constants ───────────────────────────────────────────────
 const NIVEAU_COLORS: Record<number, string> = {
-  1: "text-muted-foreground", 2: "text-blue-600",
-  3: "text-amber-600", 4: "text-emerald-600",
+  1: "text-muted-foreground", 2: "text-blue-700",
+  3: "text-amber-700", 4: "text-emerald-700",
 };
 const NIVEAU_LABELS: Record<number, string> = {
   1: "Intéressant", 2: "Bon signal", 3: "Fort signal", 4: "Exceptionnel",
@@ -59,13 +59,13 @@ type VB = {
 
 // ─── Source badge ─────────────────────────────────────────────
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
-  pmu:     { label: "PMU",     color: "text-blue-600" },
-  geny:    { label: "Geny",    color: "text-purple-600" },
+  pmu:     { label: "PMU",     color: "text-blue-700" },
+  geny:    { label: "Geny",    color: "text-purple-700" },
   bzh:     { label: "BZH",     color: "text-gray-600" },
-  winamax: { label: "Winamax", color: "text-orange-600" },
-  betclic: { label: "Betclic", color: "text-red-600" },
-  unibet:  { label: "Unibet",  color: "text-green-600" },
-  betfair: { label: "Betfair", color: "text-cyan-600" },
+  winamax: { label: "Winamax", color: "text-orange-700" },
+  betclic: { label: "Betclic", color: "text-red-700" },
+  unibet:  { label: "Unibet",  color: "text-green-700" },
+  betfair: { label: "Betfair", color: "text-cyan-700" },
 };
 
 // SVG icons plutôt qu'emoji (cohérence + accessibilité) pour la méthode de détection SPI.
@@ -79,7 +79,7 @@ const SPI_METHOD_META: Record<string, { icon: LucideIcon; label: string }> = {
 // ─── sub-components ──────────────────────────────────────────
 function StarRating({ n }: { n: number }) {
   return (
-    <span className="flex gap-0.5" aria-label={`Niveau ${n} sur 4 — ${NIVEAU_LABELS[n]}`}>
+    <span role="img" className="flex gap-0.5" aria-label={`Niveau ${n} sur 4 — ${NIVEAU_LABELS[n]}`}>
       {Array.from({ length: 4 }).map((_, i) => (
         <Star key={i} className={`w-3 h-3 ${i < n ? "fill-current" : "opacity-20"} ${NIVEAU_COLORS[n]}`} aria-hidden="true" />
       ))}
@@ -197,7 +197,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
             </div>
             <div className="text-right">
               <div className="text-xs text-muted-foreground">Espérance</div>
-              <div className={`font-bold text-sm tabular-nums ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <div className={`font-bold text-sm tabular-nums ${vb.ev_max > 0 ? "text-emerald-700" : "text-red-700"}`}>
                 {formatEV(vb.ev_max)}
               </div>
             </div>
@@ -207,7 +207,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
                 <div className="text-[10px] text-muted-foreground">Mouv.</div>
                 <div className={cn(
                   "font-bold text-xs font-mono tabular-nums",
-                  vb.mouvement_cote_pct > 0 ? "text-emerald-600" : "text-red-600"
+                  vb.mouvement_cote_pct > 0 ? "text-emerald-700" : "text-red-700"
                 )}>
                   {vb.mouvement_cote_pct > 0 ? "↓" : "↑"}{Math.abs(vb.mouvement_cote_pct).toFixed(0)}%
                 </div>
@@ -251,7 +251,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
                 </Badge>
               )}
               {vb.jockey_suspendu && (
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-red-500 text-red-500 gap-1">
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-red-500 text-red-700 gap-1">
                   <AlertTriangle className="w-2.5 h-2.5" aria-hidden="true" /> Jockey susp.
                 </Badge>
               )}
@@ -276,7 +276,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           <div className={cn("grid gap-2 mt-3", vb.mouvement_cote_pct != null && Math.abs(vb.mouvement_cote_pct) >= 5 ? "grid-cols-3" : "grid-cols-2")}>
             <div className="rounded-lg bg-muted/50 p-2 text-center">
               <div className="text-[10px] text-muted-foreground">Espérance</div>
-              <div className={`font-bold text-sm tabular-nums ${vb.ev_max > 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <div className={`font-bold text-sm tabular-nums ${vb.ev_max > 0 ? "text-emerald-700" : "text-red-700"}`}>
                 {formatEV(vb.ev_max)}
               </div>
             </div>
@@ -293,7 +293,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
                 <div className="text-[10px] text-muted-foreground">Mouv.</div>
                 <div className={cn(
                   "font-bold text-sm font-mono tabular-nums",
-                  vb.mouvement_cote_pct > 0 ? "text-emerald-600" : "text-red-600"
+                  vb.mouvement_cote_pct > 0 ? "text-emerald-700" : "text-red-700"
                 )}>
                   {vb.mouvement_cote_pct > 0 ? "↓" : "↑"}{Math.abs(vb.mouvement_cote_pct).toFixed(0)}%
                 </div>
@@ -407,7 +407,7 @@ export default function ValueBetsPage() {
   if (!isPro) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center">
-        <Zap className="h-12 w-12 mx-auto mb-4 text-brand-gold" aria-hidden="true" />
+        <Zap className="h-12 w-12 mx-auto mb-4 text-brand-gold-dark" aria-hidden="true" />
         <h1 className="text-2xl font-bold mb-3">Paris de valeur en temps réel</h1>
         <p className="text-muted-foreground mb-2">
           Détection automatique espérance {">"} 0 · 4 niveaux d&apos;étoiles · Triangulation 3 sources.
@@ -418,7 +418,7 @@ export default function ValueBetsPage() {
         <div className="grid sm:grid-cols-3 gap-4 mb-8 text-left max-w-xl mx-auto">
           {["Alertes en temps réel", "Espérance > 0 garantie", "4 niveaux de confiance"].map((f) => (
             <div key={f} className="flex items-center gap-2 text-sm">
-              <span className="text-emerald-600">✓</span>{f}
+              <span className="text-emerald-700">✓</span>{f}
             </div>
           ))}
         </div>
@@ -438,13 +438,13 @@ export default function ValueBetsPage() {
 
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="min-w-0">
-            <span className="eyebrow text-[11px] font-semibold text-brand-gold-deep mb-1.5">
+            <span className="eyebrow text-[11px] font-semibold text-brand-gold-dark mb-1.5">
               <Zap className="h-3 w-3" aria-hidden="true" /> Détection IA en direct
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold font-display flex items-center gap-2.5 flex-wrap">
               Paris de valeur
               {connected ? (
-                <span className="flex items-center gap-1.5 text-sm font-normal text-emerald-600 rounded-full border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-0.5">
+                <span className="flex items-center gap-1.5 text-sm font-normal text-emerald-700 rounded-full border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-0.5">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 live-dot" aria-hidden="true" />
                   En direct
                 </span>
@@ -457,7 +457,7 @@ export default function ValueBetsPage() {
             <p className="text-muted-foreground text-sm mt-1.5">
               Opportunités à espérance positive détectées par l&apos;IA
               {lastSync && (
-                <span className="text-muted-foreground/70"> · actualisé à {lastSync.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+                <span className="text-muted-foreground"> · actualisé à {lastSync.toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" })}</span>
               )}
             </p>
           </div>
@@ -485,14 +485,14 @@ export default function ValueBetsPage() {
             <Button
               variant="outline"
               size="sm"
-              className={cn("gap-2 bg-background/60", showFilters && "border-brand-gold text-brand-gold")}
+              className={cn("gap-2 bg-background/60", showFilters && "border-brand-gold text-brand-gold-dark")}
               onClick={() => setShowFilters((v) => !v)}
               aria-pressed={showFilters}
             >
               <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
               Filtres
               {(discipline !== "Tous" || niveauMin > 1) && (
-                <span className="bg-brand-gold text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center">
+                <span className="bg-brand-gold text-brand-dark rounded-full w-4 h-4 text-[10px] flex items-center justify-center">
                   {(discipline !== "Tous" ? 1 : 0) + (niveauMin > 1 ? 1 : 0)}
                 </span>
               )}
@@ -510,17 +510,17 @@ export default function ValueBetsPage() {
           </div>
           <div className="glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3">
             <div className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1">
-              <Star className="h-3 w-3 text-amber-500 fill-amber-500" aria-hidden="true" /> Premium ★★★+
+              <Star className="h-3 w-3 text-amber-700 fill-amber-500" aria-hidden="true" /> Premium ★★★+
             </div>
-            <div className="num-display text-xl sm:text-2xl font-bold text-amber-600">
+            <div className="num-display text-xl sm:text-2xl font-bold text-amber-700">
               <AnimatedCounter end={nbPremium} duration={900} />
             </div>
           </div>
           <div className="glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3">
             <div className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1">
-              <TrendingUp className="h-3 w-3 text-emerald-600" aria-hidden="true" /> Espérance moy.
+              <TrendingUp className="h-3 w-3 text-emerald-700" aria-hidden="true" /> Espérance moy.
             </div>
-            <div className="num-display text-xl sm:text-2xl font-bold text-emerald-600">
+            <div className="num-display text-xl sm:text-2xl font-bold text-emerald-700">
               {avgEV != null ? <>+<AnimatedCounter end={avgEV} decimals={1} duration={900} />%</> : "—"}
             </div>
           </div>
@@ -542,7 +542,7 @@ export default function ValueBetsPage() {
                     className={cn(
                       "flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-all",
                       niveauMin === n
-                        ? "bg-brand-gold/20 border-brand-gold text-brand-gold font-medium"
+                        ? "bg-brand-gold/20 border-brand-gold text-brand-gold-dark font-medium"
                         : "border-border/60 text-muted-foreground hover:border-brand-gold/40 hover:text-foreground"
                     )}
                   >
@@ -565,7 +565,7 @@ export default function ValueBetsPage() {
                       className={cn(
                         "text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5",
                         discipline === d
-                          ? "bg-brand-gold/20 border-brand-gold text-brand-gold font-medium"
+                          ? "bg-brand-gold/20 border-brand-gold text-brand-gold-dark font-medium"
                           : "border-border/60 text-muted-foreground hover:border-brand-gold/40 hover:text-foreground"
                       )}
                     >
@@ -633,7 +633,7 @@ export default function ValueBetsPage() {
             lors des prochaines courses du jour.
           </p>
           {discipline !== "Tous" && (
-            <button onClick={() => setDiscipline("Tous")} className="mt-3 text-xs text-brand-gold hover:underline flex items-center gap-1 mx-auto">
+            <button onClick={() => setDiscipline("Tous")} className="mt-3 text-xs text-brand-gold-dark hover:underline flex items-center gap-1 mx-auto">
               <Filter className="w-3 h-3" aria-hidden="true" /> Voir tous les paris de valeur
             </button>
           )}

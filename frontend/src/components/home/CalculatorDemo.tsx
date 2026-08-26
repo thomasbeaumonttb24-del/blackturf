@@ -71,7 +71,7 @@ export function CalculatorDemo() {
         {PROFILS.map((p) => (
           <button key={p.key} type="button" onClick={() => setProfilKey(p.key)}
             className={`press rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors border ${
-              profilKey === p.key ? "border-brand-gold bg-brand-gold/10 text-brand-gold-deep" : "border-gray-200 text-gray-500 hover:border-brand-gold/40"
+              profilKey === p.key ? "border-brand-gold bg-brand-gold/10 text-brand-gold-dark" : "border-gray-200 text-gray-600 hover:border-brand-gold/40"
             }`}>
             {p.emoji} {p.label}
           </button>
@@ -79,20 +79,20 @@ export function CalculatorDemo() {
       </div>
 
       {/* Saisie de la mise */}
-      <label htmlFor="demo-mise" className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Votre mise</label>
+      <label htmlFor="demo-mise" className="text-[11px] uppercase tracking-wider text-gray-600 font-semibold">Votre mise</label>
       <div className="mt-1.5 flex items-center gap-2">
         <div className="relative flex-1">
           <input id="demo-mise" type="number" min={1} inputMode="numeric" value={mise || ""}
             onChange={(e) => setMise(parseInt(e.target.value, 10) || 0)}
             className="num-display w-full rounded-lg border border-gray-200 bg-white pl-3 pr-7 py-2 text-lg font-bold text-gray-900 outline-none transition-colors focus:border-brand-gold focus:ring-2 focus:ring-brand-gold/20"
             aria-label="Montant de votre mise en euros" />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 font-semibold">€</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 font-semibold">€</span>
         </div>
         <div className="flex gap-1">
           {CHIPS.map((c) => (
             <button key={c} type="button" onClick={() => setMise(c)}
               className={`press rounded-md px-2.5 py-2 text-xs font-semibold transition-colors ${
-                mise === c ? "bg-brand-gold text-white" : "bg-gray-100 text-gray-600 hover:bg-amber-50"
+                mise === c ? "bg-brand-gold text-brand-dark" : "bg-gray-100 text-gray-600 hover:bg-amber-50"
               }`}>{c}€</button>
           ))}
         </div>
@@ -101,12 +101,12 @@ export function CalculatorDemo() {
       {/* En-tête plan : montant + EV global */}
       <div className="mt-4 flex items-center justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Plan {profil.emoji} {profil.label}</div>
-          <div className="num-display text-xl font-extrabold text-brand-gold-deep">{eur(m)}€</div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600 font-semibold">Plan {profil.emoji} {profil.label}</div>
+          <div className="num-display text-xl font-extrabold text-brand-gold-dark">{eur(m)}€</div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Espérance estimée</div>
-          <div className="num-display text-lg font-extrabold text-emerald-600">+{profil.ev}%</div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600 font-semibold">Espérance estimée</div>
+          <div className="num-display text-lg font-extrabold text-emerald-700">+{profil.ev}%</div>
         </div>
       </div>
 
@@ -122,19 +122,19 @@ export function CalculatorDemo() {
             <div key={niv.key} className={`rounded-lg p-3 ${NIV_CLASS[niv.key] ?? ""}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-xs font-bold text-gray-800">{niv.emoji} {niv.label}</span>
-                <span className="text-[11px] text-gray-500 num-display">{Math.round(part * 100)}% · {eur(montantNiv)}€</span>
+                <span className="text-[11px] text-gray-600 num-display">{Math.round(part * 100)}% · {eur(montantNiv)}€</span>
               </div>
               <div className="space-y-1.5">
                 {niv.paris.map((p, i) => (
                   <div key={i} className="flex items-center justify-between text-xs">
                     <div className="min-w-0 flex-1">
                       <span className="font-semibold text-gray-900">{p.type}</span>
-                      <span className="text-gray-500 font-mono ml-1.5">{p.chevaux}</span>
-                      <span className="text-gray-500/70 ml-1.5">~{Math.round(p.proba * 100)}%</span>
+                      <span className="text-gray-600 font-mono ml-1.5">{p.chevaux}</span>
+                      <span className="text-gray-600 ml-1.5">~{Math.round(p.proba * 100)}%</span>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <span className="font-mono text-gray-600">{eur(stake)}€</span>
-                      <span className="text-emerald-600 font-bold num-display ml-2">→ ~{eur(stake * p.rapport)}€</span>
+                      <span className="text-emerald-700 font-bold num-display ml-2">→ ~{eur(stake * p.rapport)}€</span>
                     </div>
                   </div>
                 ))}
@@ -146,12 +146,12 @@ export function CalculatorDemo() {
 
       <div className="mt-3 text-xs">
         <div className="rounded-md bg-gray-50 px-3 py-2">
-          <div className="text-gray-500">Mise totale jouée</div>
+          <div className="text-gray-600">Mise totale jouée</div>
           <div className="num-display font-bold text-gray-900">{eur(m)}€</div>
         </div>
       </div>
 
-      <p className="mt-2 text-[10px] text-gray-500">
+      <p className="mt-2 text-[10px] text-gray-600">
         Exemple sur une course type. Le vrai calculateur utilise les rapports PMU réels et règle vos paris à l&apos;arrivée.
       </p>
     </div>

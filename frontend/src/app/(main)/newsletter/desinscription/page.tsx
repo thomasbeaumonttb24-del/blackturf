@@ -42,15 +42,15 @@ export default async function DesinscriptionPage({
         lead={resultat.message}
       />
       <Container>
-        <p className="text-sm leading-relaxed text-brand-charcoal/85">
+        <p className="text-sm leading-relaxed text-brand-charcoal">
           {resultat.ok
             ? "Plus aucun envoi ne partira vers cette adresse. Le site reste évidemment accessible sans inscription."
             : "Si le lien vient d'un e-mail ancien, ouvrez celui de la dernière lettre reçue : chaque envoi contient un lien valable."}{" "}
-          <Link href="/programme" className="font-medium text-brand-gold-deep hover:underline">
+          <Link href="/programme" className="font-medium text-brand-gold-dark hover:underline">
             Programme du jour
           </Link>{" "}
           ·{" "}
-          <Link href="/resultats" className="font-medium text-brand-gold-deep hover:underline">
+          <Link href="/resultats" className="font-medium text-brand-gold-dark hover:underline">
             Arrivées et rapports
           </Link>
         </p>

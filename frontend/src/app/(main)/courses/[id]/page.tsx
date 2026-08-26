@@ -166,14 +166,29 @@ export default async function CoursePage({ params }: Props) {
           civil de la course, engagés, et l'arrivée quand elle est connue. */}
       {course && (
         <section className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
-          <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
-              Fiche course
-            </p>
-            <h2 className="mt-1 font-display text-lg font-bold text-slate-900">
-              {libelleCourse(course)} — {titleCase(course.hippodrome_nom)}
-              {jour ? `, ${jourLong(jour)}` : ""}
-            </h2>
+          {/* `<details>` natif : le contenu reste dans le HTML servi — lisible sans
+              JavaScript et par un robot d'indexation, ce qui est toute la raison
+              d'être de ce bloc — mais il ne déroule plus douze lignes de tableau
+              sous une page déjà longue tant que le lecteur ne l'a pas demandé. */}
+          <details className="group rounded-2xl border border-stone-200 bg-white">
+            <summary className="flex cursor-pointer list-none items-center gap-3 p-5 sm:p-7 [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0">
+                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-600">
+                  Fiche course
+                </span>
+                <h2 className="mt-1 font-display text-lg font-bold text-slate-900">
+                  {libelleCourse(course)} — {titleCase(course.hippodrome_nom)}
+                  {jour ? `, ${jourLong(jour)}` : ""}
+                </h2>
+              </span>
+              <span className="ml-auto flex shrink-0 items-center gap-2 text-[12px] font-medium text-stone-600">
+                <span className="hidden sm:inline">Engagés, conditions et arrivée</span>
+                <svg className="h-4 w-4 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            </summary>
+            <div className="px-5 pb-5 sm:px-7 sm:pb-7">
 
             {/* État civil de la course : une donnée par case, plutôt qu'une phrase
                 qui empile sept chiffres et qu'on relit deux fois. */}
@@ -192,7 +207,7 @@ export default async function CoursePage({ params }: Props) {
                 },
               ].map((c) => (
                 <div key={c.k} className="bg-white px-3 py-2.5">
-                  <dt className="text-[11px] text-stone-400">{c.k}</dt>
+                  <dt className="text-[11px] text-stone-600">{c.k}</dt>
                   <dd className="mt-0.5 font-display text-[13.5px] font-bold text-slate-900">{c.v}</dd>
                 </div>
               ))}
@@ -201,7 +216,7 @@ export default async function CoursePage({ params }: Props) {
             {(course.est_quinte || course.est_quarte || course.est_tierce) && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {course.est_quinte && (
-                  <span className="rounded-full bg-amber-500 px-3 py-1 text-[11px] font-semibold text-white">
+                  <span className="rounded-full bg-amber-500 px-3 py-1 text-[11px] font-semibold text-brand-dark">
                     Support du Quinté+ du jour
                   </span>
                 )}
@@ -229,7 +244,7 @@ export default async function CoursePage({ params }: Props) {
 
             {course.conditions_texte && (
               <div className="mt-5 rounded-xl border border-stone-200 bg-stone-50/70 p-4">
-                <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
+                <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-600">
                   Conditions de la course
                 </h3>
                 <p className="mt-1.5 text-[13px] leading-relaxed text-stone-600">
@@ -244,7 +259,7 @@ export default async function CoursePage({ params }: Props) {
             <div className="mt-3 overflow-x-auto rounded-xl border border-stone-200">
               <table className="w-full min-w-[560px] border-collapse text-[13px]">
                 <thead>
-                  <tr className="bg-stone-50 text-left text-[11px] uppercase tracking-[0.08em] text-stone-400">
+                  <tr className="bg-stone-50 text-left text-[11px] uppercase tracking-[0.08em] text-stone-600">
                     <th scope="col" className="px-3 py-2 font-semibold">N°</th>
                     <th scope="col" className="px-3 py-2 font-semibold">Cheval</th>
                     <th scope="col" className="px-3 py-2 font-semibold">Jockey / driver</th>
@@ -262,7 +277,7 @@ export default async function CoursePage({ params }: Props) {
                     return (
                       <tr
                         key={p.numero}
-                        className={`border-t border-stone-100 ${p.non_partant ? "text-stone-400" : "text-stone-600"}`}
+                        className={`border-t border-stone-100 ${p.non_partant ? "text-stone-600" : "text-stone-600"}`}
                       >
                         <td className="px-3 py-2 font-display font-bold tabular-nums text-slate-900">
                           {p.numero}
@@ -270,7 +285,7 @@ export default async function CoursePage({ params }: Props) {
                         <td className={`px-3 py-2 font-medium text-slate-900 ${p.non_partant ? "line-through opacity-60" : ""}`}>
                           {titleCase(p.nom_cheval)}
                           {p.non_partant ? (
-                            <span className="ml-2 rounded-full bg-stone-100 px-2 py-0.5 text-[10.5px] font-semibold uppercase text-stone-500">
+                            <span className="ml-2 rounded-full bg-stone-100 px-2 py-0.5 text-[10.5px] font-semibold uppercase text-stone-600">
                               non-partant
                             </span>
                           ) : null}
@@ -287,7 +302,7 @@ export default async function CoursePage({ params }: Props) {
                                 className={
                                   place <= 3
                                     ? "rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                                    : "text-stone-500"
+                                    : "text-stone-600"
                                 }
                               >
                                 {place}
@@ -315,13 +330,14 @@ export default async function CoursePage({ params }: Props) {
                 <a
                   key={l.href}
                   href={l.href}
-                  className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 font-medium text-stone-600 transition-colors hover:border-brand-gold-deep hover:text-brand-gold-deep"
+                  className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 font-medium text-stone-600 transition-colors hover:border-brand-gold-deep hover:text-brand-gold-dark"
                 >
                   {l.txt}
                 </a>
               ))}
             </nav>
-          </div>
+            </div>
+          </details>
 
           <div className="mt-10">
             <NewsletterForm source="course" />

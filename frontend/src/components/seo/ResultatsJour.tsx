@@ -74,7 +74,7 @@ export async function ResultatsJour({ jour }: { jour: string }) {
       <Container>
         {quinte ? (
           <Section title={`Arrivée du Quinté+ — ${titleCase(quinte[0].hippodrome_nom)}`}>
-            <p className="text-sm text-brand-charcoal/85">
+            <p className="text-sm text-brand-charcoal">
               Arrivée :{" "}
               <strong className="tabular-nums">
                 {quinte[1].classement!.slice(0, 5).map((l) => l.numero).join(" - ")}
@@ -87,7 +87,7 @@ export async function ResultatsJour({ jour }: { jour: string }) {
                   <tbody>
                     {rapportsQuinte.map(([code, val]) => (
                       <tr key={code} className="border-b border-amber-50">
-                        <td className="py-2 pr-3 text-brand-charcoal/85">{libellePari(code)}</td>
+                        <td className="py-2 pr-3 text-brand-charcoal">{libellePari(code)}</td>
                         <td className="py-2 text-right font-semibold tabular-nums text-brand-dark">
                           {formatRapport(val)} €
                         </td>
@@ -99,7 +99,7 @@ export async function ResultatsJour({ jour }: { jour: string }) {
             ) : null}
             {estAujourdhui && (
               <p className="mt-3 text-sm">
-                <Link href="/quinte-du-jour" className="font-medium text-brand-gold-deep hover:underline">
+                <Link href="/quinte-du-jour" className="font-medium text-brand-gold-dark hover:underline">
                   Détail complet du Quinté+ du jour
                 </Link>
               </p>
@@ -114,27 +114,27 @@ export async function ResultatsJour({ jour }: { jour: string }) {
                 <li key={c.course_id} className="border-b border-amber-50 pb-4 last:border-0">
                   <Link
                     href={`/courses/${c.course_id}`}
-                    className="font-display text-[15px] font-semibold text-brand-dark hover:text-brand-gold-deep"
+                    className="font-display text-[15px] font-semibold text-brand-dark hover:text-brand-gold-dark"
                   >
                     {codeReunionCourse(c.course_id)} · {titleCase(c.hippodrome_nom)} —{" "}
                     {titleCase(c.nom ?? "")}
                   </Link>
-                  <div className="mt-0.5 text-[12px] text-brand-charcoal/60">
+                  <div className="mt-0.5 text-[12px] text-brand-charcoal">
                     {heureParis(c.date_heure)} · {disciplineLabel(c.discipline)} · {c.distance} m ·{" "}
                     {c.nb_partants} partants
                     {c.est_quinte ? " · Quinté+" : c.est_quarte ? " · Quarté+" : ""}
                   </div>
-                  <div className="mt-1.5 text-sm text-brand-charcoal/85">
+                  <div className="mt-1.5 text-sm text-brand-charcoal">
                     Arrivée :{" "}
                     <strong className="tabular-nums">
                       {r.classement!.slice(0, 5).map((l) => l.numero).join(" - ")}
                     </strong>{" "}
-                    <span className="text-brand-charcoal/60">
+                    <span className="text-brand-charcoal">
                       ({r.classement!.slice(0, 3).map((l) => titleCase(l.nom)).join(", ")})
                     </span>
                   </div>
                   {rapportsTries(r.rapports).length ? (
-                    <div className="mt-1 text-[12.5px] text-brand-charcoal/70">
+                    <div className="mt-1 text-[12.5px] text-brand-charcoal">
                       {rapportsTries(r.rapports)
                         .slice(0, 5)
                         .map(([code, val]) => `${libellePari(code)} ${formatRapport(val)} €`)
@@ -145,9 +145,9 @@ export async function ResultatsJour({ jour }: { jour: string }) {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-brand-charcoal/85">
+            <p className="text-sm text-brand-charcoal">
               Aucune arrivée à afficher pour cette journée. Voir le{" "}
-              <Link href="/programme" className="font-medium text-brand-gold-deep hover:underline">
+              <Link href="/programme" className="font-medium text-brand-gold-dark hover:underline">
                 programme du jour
               </Link>
               .
@@ -166,18 +166,18 @@ export async function ResultatsJour({ jour }: { jour: string }) {
 
         <Section title="Autres journées">
           <nav className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
-            <Link href={`/resultats/${veille}`} className="font-medium text-brand-gold-deep hover:underline">
+            <Link href={`/resultats/${veille}`} className="font-medium text-brand-gold-dark hover:underline">
               ← Résultats du {jourCourt(veille)}
             </Link>
             {!estAujourdhui && (
-              <Link href="/resultats" className="font-medium text-brand-gold-deep hover:underline">
+              <Link href="/resultats" className="font-medium text-brand-gold-dark hover:underline">
                 Résultats d&apos;aujourd&apos;hui
               </Link>
             )}
             {!estAujourdhui && lendemainDisponible && (
               <Link
                 href={lendemain === jourParis() ? "/resultats" : `/resultats/${lendemain}`}
-                className="font-medium text-brand-gold-deep hover:underline"
+                className="font-medium text-brand-gold-dark hover:underline"
               >
                 Résultats du {jourCourt(lendemain)} →
               </Link>

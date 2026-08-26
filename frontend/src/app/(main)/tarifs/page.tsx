@@ -105,7 +105,7 @@ export default function TarifsPage() {
         <p className="text-muted-foreground text-sm sm:text-lg max-w-xl mx-auto">
           Commencez gratuitement. Annulez à tout moment.
         </p>
-        <div className="mt-4 inline-flex items-center gap-2 text-sm text-brand-gold">
+        <div className="mt-4 inline-flex items-center gap-2 text-sm text-brand-gold-dark">
           <Zap className="h-4 w-4" />
           -20% avec l&apos;abonnement annuel
         </div>
@@ -155,9 +155,9 @@ export default function TarifsPage() {
                 { label: "Historique 6 mois", icon: null },
               ].map((f) => (
                 <li key={f.label} className="flex items-center gap-2 text-sm">
-                  <Check className="h-4 w-4 text-brand-gold flex-shrink-0" />
+                  <Check className="h-4 w-4 text-brand-gold-dark flex-shrink-0" />
                   {f.label}
-                  {f.icon && <span className="text-brand-gold">{f.icon}</span>}
+                  {f.icon && <span className="text-brand-gold-dark">{f.icon}</span>}
                 </li>
               ))}
             </ul>
@@ -195,7 +195,7 @@ export default function TarifsPage() {
                 "Support prioritaire",
               ].map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm">
-                  <Check className="h-4 w-4 text-brand-emerald flex-shrink-0" />
+                  <Check className="h-4 w-4 text-brand-emerald-dark flex-shrink-0" />
                   {f}
                 </li>
               ))}
@@ -216,8 +216,8 @@ export default function TarifsPage() {
       <div className="sm:hidden space-y-4 mb-12">
         {[
           { name: "Découverte", key: "free" as const, color: "text-muted-foreground" },
-          { name: "Standard", key: "standard" as const, color: "text-brand-gold" },
-          { name: "Expert", key: "expert" as const, color: "text-brand-emerald" },
+          { name: "Standard", key: "standard" as const, color: "text-brand-gold-dark" },
+          { name: "Expert", key: "expert" as const, color: "text-brand-emerald-dark" },
         ].map((plan) => (
           <div key={plan.name} className="rounded-2xl border border-border p-4">
             <h3 className={`font-semibold mb-3 ${plan.color}`}>{plan.name}</h3>
@@ -243,8 +243,8 @@ export default function TarifsPage() {
             <tr className="border-b border-border bg-muted/30">
               <th className="text-left p-4 font-semibold">Fonctionnalité</th>
               <th className="text-center p-4 font-semibold">Découverte</th>
-              <th className="text-center p-4 font-semibold text-brand-gold">Standard</th>
-              <th className="text-center p-4 font-semibold text-brand-emerald">Expert</th>
+              <th className="text-center p-4 font-semibold text-brand-gold-dark">Standard</th>
+              <th className="text-center p-4 font-semibold text-brand-emerald-dark">Expert</th>
             </tr>
           </thead>
           <tbody>
@@ -258,13 +258,13 @@ export default function TarifsPage() {
                 </td>
                 <td className="p-4 text-center">
                   {typeof row.standard === "string"
-                    ? <span className="text-brand-gold text-xs font-medium">{row.standard}</span>
-                    : row.standard ? <Check className="h-4 w-4 text-brand-gold mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
+                    ? <span className="text-brand-gold-dark text-xs font-medium">{row.standard}</span>
+                    : row.standard ? <Check className="h-4 w-4 text-brand-gold-dark mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
                 </td>
                 <td className="p-4 text-center">
                   {typeof row.expert === "string"
-                    ? <span className="text-brand-emerald text-xs font-medium">{row.expert}</span>
-                    : row.expert ? <Check className="h-4 w-4 text-brand-emerald mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
+                    ? <span className="text-brand-emerald-dark text-xs font-medium">{row.expert}</span>
+                    : row.expert ? <Check className="h-4 w-4 text-brand-emerald-dark mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
                 </td>
               </tr>
             ))}

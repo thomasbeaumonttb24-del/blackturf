@@ -68,7 +68,7 @@ export function Footer() {
                 Black<span className="text-gradient">Turf</span>
               </span>
             </div>
-            <p className="text-xs text-gray-500 leading-relaxed max-w-xs">
+            <p className="text-xs text-gray-600 leading-relaxed max-w-xs">
               Le terminal algorithmique des parieurs gagnants.<br />
               Analyses propulsées par XGBoost + LightGBM + CatBoost.
             </p>
@@ -86,7 +86,7 @@ export function Footer() {
             {/* Contact */}
             <a
               href="mailto:contact@blackturf.fr"
-              className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 transition-colors hover:text-brand-gold-deep"
+              className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 transition-colors hover:text-brand-gold-dark"
             >
               <Mail className="h-3.5 w-3.5" /> contact@blackturf.fr
             </a>
@@ -96,10 +96,10 @@ export function Footer() {
           {COLUMNS.map((col) => (
             <div key={col.title}>
               <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-900 mb-3">{col.title}</h3>
-              <ul className="space-y-2 text-sm text-gray-500">
+              <ul className="space-y-2 text-sm text-gray-600">
                 {col.links.map((l) => (
                   <li key={l.label}>
-                    <Link href={l.href} className="transition-colors hover:text-brand-gold-deep">
+                    <Link href={l.href} className="transition-colors hover:text-brand-gold-dark">
                       {l.label}
                     </Link>
                   </li>
@@ -110,10 +110,10 @@ export function Footer() {
         </div>
 
         <div className="mt-10 pt-8 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-600">
             © 2026 BlackTurf. Tous droits réservés.
           </p>
-          <p className="text-xs text-gray-500 text-center">
+          <p className="text-xs text-gray-600 text-center">
             Le jeu peut être dangereux. Jouez de façon responsable. Interdit aux mineurs.{" "}
             <a
               href="https://www.joueurs-info-service.fr"

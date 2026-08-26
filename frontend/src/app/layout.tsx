@@ -5,14 +5,21 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/useAuth";
 
+// « latin-ext » en plus de « latin » : les partants PMU portent des noms étrangers
+// (roumains, polonais, scandinaves) dont les lettres sortent du bloc latin de base. Ces
+// noms n'arrivent qu'APRÈS l'hydratation — le HTML rendu côté serveur n'en contient
+// aucun. Le navigateur découvrait donc la sous-police latin-ext trop tard, la
+// substituait en cours de route et faisait reflower tout le bloc : 0,303 de CLS sur la
+// page course, à elle seule 21 points de performance. Déclarer le sous-ensemble le fait
+// précharger avec le reste.
 const inter = Inter({
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
   variable: "--font-inter",
   display: "swap",
 });
 
 const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
   variable: "--font-space-grotesk",
   display: "swap",
   weight: ["400", "500", "600", "700"],

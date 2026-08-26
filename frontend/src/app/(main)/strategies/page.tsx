@@ -183,7 +183,7 @@ export default function StrategiesPage() {
         <h1 className="text-2xl sm:text-3xl font-bold mb-3">Créateur de stratégies</h1>
         <p className="text-muted-foreground text-sm sm:text-base mb-8">
           Filtres multi-critères, simulation sur 18 mois, alertes automatiques.
-          Réservé au plan <strong className="text-brand-gold">Expert</strong>.
+          Réservé au plan <strong className="text-brand-gold-dark">Expert</strong>.
         </p>
         <Button variant="brand" size="lg" asChild>
           <Link href="/tarifs">Passer Expert — 19€/mois</Link>
@@ -331,7 +331,7 @@ export default function StrategiesPage() {
         <Card className="mb-6 border-brand-gold/20">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-brand-gold" />
+              <TrendingUp className="h-4 w-4 text-brand-gold-dark" />
               Résultat de la simulation — 90 derniers jours
             </CardTitle>
           </CardHeader>
@@ -339,7 +339,7 @@ export default function StrategiesPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               {[
                 { label: "Paris joués", value: backtest.nb_paris },
-                { label: "Rendement", value: `${backtest.roi_pct >= 0 ? "+" : ""}${backtest.roi_pct}%`, color: backtest.roi_pct >= 0 ? "text-brand-emerald" : "text-destructive" },
+                { label: "Rendement", value: `${backtest.roi_pct >= 0 ? "+" : ""}${backtest.roi_pct}%`, color: backtest.roi_pct >= 0 ? "text-brand-emerald-dark" : "text-destructive" },
                 { label: "Réussite", value: `${backtest.taux_reussite}%` },
                 { label: "Série perdante max", value: `${backtest.serie_max_perdante}` },
               ].map((m) => (

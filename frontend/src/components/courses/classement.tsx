@@ -97,10 +97,10 @@ function Rang({ rang, absent }: { rang: number; absent?: boolean }) {
     <span
       className={cn(
         "flex h-8 w-8 items-center justify-center rounded-xl font-display text-[13px] font-bold tabular-nums ring-1 transition-colors",
-        absent ? "bg-stone-50 text-stone-400 ring-stone-200"
+        absent ? "bg-stone-50 text-stone-600 ring-stone-200"
           : fav ? "bg-amber-100 text-amber-900 ring-amber-300 shadow-[0_1px_0_rgba(180,120,20,.18)]"
           : podium ? "bg-slate-100 text-slate-700 ring-slate-200"
-          : "bg-white text-stone-400 ring-stone-200",
+          : "bg-white text-stone-600 ring-stone-200",
       )}
     >
       {rang}
@@ -173,7 +173,7 @@ function LecturePrix({ marche, juste }: { marche: number | null; juste: number |
     return (
       <span
         title="Le modèle chiffre ce cheval en dessous du seuil où sa cote juste reste mesurable (plafonnée à 100) : l'écart au marché n'a pas de sens ici."
-        className="text-[11px] text-stone-400"
+        className="text-[11px] text-stone-600"
       >
         non chiffrable
       </span>
@@ -185,7 +185,7 @@ function LecturePrix({ marche, juste }: { marche: number | null; juste: number |
     return (
       <span
         title={`Le marché paie ${cote(marche)}, le modèle estime la cote juste à ${cote(juste)} : prix conforme.`}
-        className="inline-flex items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-500"
+        className="inline-flex items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-600"
       >
         au prix
       </span>
@@ -228,7 +228,7 @@ function BadgeArrivee({ position }: { position: number }) {
         "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums ring-1",
         position === 1 ? "bg-amber-100 text-amber-900 ring-amber-300"
           : position <= 3 ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-          : "bg-stone-100 text-slate-500 ring-stone-200",
+          : "bg-stone-100 text-slate-600 ring-stone-200",
       )}
       title="Position réelle à l'arrivée"
     >
@@ -269,7 +269,7 @@ function Signaux({ signaux }: { signaux: ClassementSignal[] }) {
         <button
           type="button"
           onClick={() => setOuvert(true)}
-          className="rounded-md px-1.5 py-[3px] text-[10.5px] font-semibold leading-none text-stone-500 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 hover:text-slate-700"
+          className="rounded-md px-1.5 py-[3px] text-[10.5px] font-semibold leading-none text-stone-600 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 hover:text-slate-700"
         >
           +{reste}
         </button>
@@ -278,7 +278,7 @@ function Signaux({ signaux }: { signaux: ClassementSignal[] }) {
         <button
           type="button"
           onClick={() => setOuvert(false)}
-          className="rounded-md px-1.5 py-[3px] text-[10.5px] font-medium leading-none text-stone-400 transition-colors hover:text-slate-600"
+          className="rounded-md px-1.5 py-[3px] text-[10.5px] font-medium leading-none text-stone-600 transition-colors hover:text-slate-600"
         >
           réduire
         </button>
@@ -308,31 +308,29 @@ function Synthese({
   const gagnant = Number.isFinite(gagnantNum) ? lignes.find((p) => p.numero === gagnantNum) : undefined;
 
   const horodatage = calculeA
-    ? new Date(calculeA).toLocaleString("fr-FR", {
-        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris",
-      })
+    ? new Date(calculeA).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
     : null;
 
   return (
     <div className="grid gap-px border-b border-stone-100 bg-stone-100 sm:grid-cols-3">
       <div className="bg-white px-4 py-3 sm:px-5">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Favori du modèle</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Favori du modèle</p>
         {fav ? (
           <p className="mt-1 truncate font-display text-[14px] font-bold text-slate-900">
-            <span className="font-mono text-[11px] font-normal text-stone-400">N°{fav.numero}</span>{" "}
+            <span className="font-mono text-[11px] font-normal text-stone-600">N°{fav.numero}</span>{" "}
             {fav.nom_cheval}
             <span className="ml-1.5 text-[13px] font-semibold tabular-nums text-amber-700">{pct(fav.proba_top1)}</span>
           </p>
         ) : (
-          <p className="mt-1 text-[13px] text-stone-400">—</p>
+          <p className="mt-1 text-[13px] text-stone-600">—</p>
         )}
       </div>
 
       <div className="bg-white px-4 py-3 sm:px-5">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Concentration du top 3</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Concentration du top 3</p>
         <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
           {pct(concentration)}
-          <span className="ml-1.5 text-[11.5px] font-normal text-stone-500">
+          <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">
             des chances de victoire
           </span>
         </p>
@@ -341,14 +339,14 @@ function Synthese({
       <div className="bg-white px-4 py-3 sm:px-5">
         {gagnant ? (
           <>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Vainqueur</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Vainqueur</p>
             <p className="mt-1 truncate font-display text-[14px] font-bold text-slate-900">
-              <span className="font-mono text-[11px] font-normal text-stone-400">N°{gagnant.numero}</span>{" "}
+              <span className="font-mono text-[11px] font-normal text-stone-600">N°{gagnant.numero}</span>{" "}
               {gagnant.nom_cheval}
               <span
                 className={cn(
                   "ml-1.5 text-[12px] font-semibold tabular-nums",
-                  gagnant.rang_predit === 1 ? "text-emerald-700" : gagnant.rang_predit <= 3 ? "text-slate-600" : "text-stone-500",
+                  gagnant.rang_predit === 1 ? "text-emerald-700" : gagnant.rang_predit <= 3 ? "text-slate-600" : "text-stone-600",
                 )}
               >
                 classé {ordinal(gagnant.rang_predit)}
@@ -357,17 +355,17 @@ function Synthese({
           </>
         ) : (
           <>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Écarts de prix détectés</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Écarts de prix détectés</p>
             <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
               {nbValeur}
-              <span className="ml-1.5 text-[11.5px] font-normal text-stone-500">
+              <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">
                 {nbValeur > 1 ? "chevaux payés au-dessus de leur chance" : nbValeur === 1 ? "cheval payé au-dessus de sa chance" : "— le marché est en ligne avec le modèle"}
               </span>
             </p>
           </>
         )}
         {horodatage && (
-          <p className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-stone-400">
+          <p className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-stone-600">
             <Clock3 className="h-3 w-3" aria-hidden="true" />
             calculé le {horodatage}
             {cotesFigees ? " · cotes figées" : " · cotes suivies en direct"}
@@ -421,7 +419,7 @@ export function ClassementAlgo({
             Le classement de l&apos;algorithme
           </h3>
           <p
-            className="mt-0.5 text-[11.5px] text-stone-500"
+            className="mt-0.5 text-[11.5px] text-stone-600"
             title="Le rang vient d'un modèle d'ordonnancement dédié, entraîné à ordonner les partants d'une même course. Il ne suit donc pas toujours l'ordre des probabilités : deux chevaux peuvent afficher le même pourcentage sans être au même rang."
           >
             {lignes.length} chevaux notés · ordre du modèle de classement
@@ -447,7 +445,7 @@ export function ClassementAlgo({
         {/* En-tête de colonnes — collant, masqué sur mobile où chaque ligne se lit en bloc */}
         <div
           className={cn(
-            "sticky top-0 z-10 hidden items-end gap-3 border-b border-stone-200 bg-stone-50/95 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400 backdrop-blur sm:grid",
+            "sticky top-0 z-10 hidden items-end gap-3 border-b border-stone-200 bg-stone-50/95 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-600 backdrop-blur sm:grid",
             grille,
           )}
         >
@@ -513,19 +511,19 @@ export function ClassementAlgo({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="truncate text-[14px] font-semibold leading-tight text-slate-900">
-                        <span className="font-mono text-[11px] font-normal text-stone-400">N°{p.numero}</span>{" "}
+                        <span className="font-mono text-[11px] font-normal text-stone-600">N°{p.numero}</span>{" "}
                         {p.nom_cheval}
                       </span>
                       {p.value_bet && !absent && <BadgeValeur ev={p.value_bet.ev_max} niveau={p.value_bet.niveau} />}
                       {absent && (
-                        <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                        <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
                           Non-partant
                         </span>
                       )}
                       {position != null && <BadgeArrivee position={position} />}
                       {position == null && nonClasse && !absent && (
                         <span
-                          className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-stone-200"
+                          className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-stone-200"
                           title="Parti mais absent du classement officiel : disqualifié, tombé ou arrêté."
                         >
                           non classé
@@ -543,7 +541,7 @@ export function ClassementAlgo({
                     </span>
                     {coteProno != null && (
                       <span
-                        className="block text-[10px] tabular-nums text-stone-400"
+                        className="block text-[10px] tabular-nums text-stone-600"
                         title="Cote de marché au moment où le modèle a calculé sa probabilité"
                       >
                         {cote(coteProno)} au prono
@@ -556,7 +554,7 @@ export function ClassementAlgo({
                     <span
                       className={cn(
                         "hidden text-right font-display text-[14px] tabular-nums sm:block",
-                        p.value_bet && !absent ? "font-bold text-emerald-700" : "text-slate-500",
+                        p.value_bet && !absent ? "font-bold text-emerald-700" : "text-slate-600",
                       )}
                       title={
                         p.cote_juste != null
@@ -589,13 +587,13 @@ export function ClassementAlgo({
                         {pct(p.proba_top1)}
                       </span>
                     </div>
-                    <div className="mt-1 flex items-baseline justify-between gap-2 text-[10.5px] tabular-nums text-stone-400">
+                    <div className="mt-1 flex items-baseline justify-between gap-2 text-[10.5px] tabular-nums text-stone-600">
                       <span>
                         {p.proba_top1_low != null && p.proba_top1_high != null
                           ? `fourchette ${Math.round(p.proba_top1_low * 100)}–${Math.round(p.proba_top1_high * 100)} %`
                           : ""}
                       </span>
-                      <span className="text-stone-500" title="Probabilité de terminer dans les trois premiers">
+                      <span className="text-stone-600" title="Probabilité de terminer dans les trois premiers">
                         top-3 <strong className="font-semibold text-slate-700">{pct(p.proba_top3)}</strong>
                       </span>
                     </div>
@@ -604,15 +602,15 @@ export function ClassementAlgo({
                   {/* Chiffres repliés sous le nom sur mobile */}
                   <dl className="col-span-2 grid grid-cols-3 gap-2 rounded-lg bg-stone-50 px-2.5 py-2 text-[11px] tabular-nums sm:hidden">
                     <div>
-                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-400">Cote</dt>
+                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Cote</dt>
                       <dd className="font-semibold text-slate-900">{marche != null ? cote(marche) : "—"}</dd>
                     </div>
                     <div>
-                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-400">Cote juste</dt>
+                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Cote juste</dt>
                       <dd className="font-semibold text-slate-700">{p.cote_juste != null ? cote(p.cote_juste) : "—"}</dd>
                     </div>
                     <div>
-                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-400">Prix</dt>
+                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Prix</dt>
                       <dd>{absent ? "—" : <LecturePrix marche={marche} juste={p.cote_juste} />}</dd>
                     </div>
                   </dl>
@@ -624,7 +622,7 @@ export function ClassementAlgo({
       </div>
 
       <footer className="border-t border-stone-100 bg-stone-50/60 px-4 py-3.5 sm:px-5">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10.5px] text-stone-500">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10.5px] text-stone-600">
           <span className="inline-flex items-center gap-1"><span className="text-emerald-700">▲</span> atout</span>
           <span className="inline-flex items-center gap-1"><span className="text-rose-700">▼</span> réserve</span>
           <span className="inline-flex items-center gap-1"><span className="text-amber-700">●</span> à surveiller</span>
@@ -639,7 +637,7 @@ export function ClassementAlgo({
             </span>
           )}
         </div>
-        <p className="mt-2 max-w-3xl text-[10.5px] leading-[1.5] text-stone-500">
+        <p className="mt-2 max-w-3xl text-[10.5px] leading-[1.5] text-stone-600">
           Le rang est donné par un modèle d&apos;ordonnancement dédié : il ne suit pas toujours
           l&apos;ordre des probabilités, et deux chevaux peuvent afficher le même pourcentage.
           Probabilités issues du modèle à 80+ critères (forme, ELO, association jockey/entraîneur, distance,
@@ -659,7 +657,7 @@ export function ClassementVerrouille({ titre, texte, action }: { titre: string; 
         <Lock className="h-4 w-4" aria-hidden="true" />
       </span>
       <h3 className="font-display text-[15.5px] font-bold text-slate-900">{titre}</h3>
-      <p className="mx-auto mt-2 max-w-md text-[13px] leading-6 text-stone-500">{texte}</p>
+      <p className="mx-auto mt-2 max-w-md text-[13px] leading-6 text-stone-600">{texte}</p>
       <div className="mt-4">{action}</div>
     </section>
   );
@@ -715,7 +713,7 @@ export function ClassementApercu({
           <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">
             Le classement de l&apos;algorithme
           </h3>
-          <p className="mt-0.5 text-[11.5px] text-stone-500">
+          <p className="mt-0.5 text-[11.5px] text-stone-600">
             {lignes.length} chevaux notés · ordre du modèle de classement
           </p>
         </div>
@@ -728,31 +726,31 @@ export function ClassementApercu({
       {!revele && (apercu.confiance != null || apercu.accord_marche != null || apercu.nb_ecartes > 0) && (
         <div className="grid gap-px border-y border-stone-100 bg-stone-100 sm:grid-cols-3">
           <div className="bg-white px-4 py-3 sm:px-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Confiance du modèle</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Confiance du modèle</p>
             <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
               {apercu.confiance != null ? apercu.confiance : "—"}
-              <span className="text-[11.5px] font-normal text-stone-400">/100</span>
+              <span className="text-[11.5px] font-normal text-stone-600">/100</span>
             </p>
           </div>
           <div className="bg-white px-4 py-3 sm:px-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Lecture du marché</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Lecture du marché</p>
             <p className="mt-1 text-[13px] font-semibold text-slate-900">
               {apercu.accord_marche == null ? "—"
                 : apercu.accord_marche ? "confirme le favori du marché" : "ne suit pas le marché"}
             </p>
           </div>
           <div className="bg-white px-4 py-3 sm:px-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Chevaux écartés</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Chevaux écartés</p>
             <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
               {apercu.nb_ecartes}
-              <span className="ml-1.5 text-[11.5px] font-normal text-stone-500">sous 3 % de chances</span>
+              <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">sous 3 % de chances</span>
             </p>
           </div>
         </div>
       )}
 
       {/* En-tête de colonnes — les colonnes RÉELLES de la table des abonnés */}
-      <div className={cn("hidden items-center gap-3 border-b border-stone-200 bg-stone-50/95 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400 sm:grid", GRILLE)}>
+      <div className={cn("hidden items-center gap-3 border-b border-stone-200 bg-stone-50/95 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-600 sm:grid", GRILLE)}>
         <span className="text-center">#</span>
         <span>Cheval</span>
         <span className="text-right">Cote</span>
@@ -775,13 +773,13 @@ export function ClassementApercu({
                   style={{ backgroundImage: "repeating-linear-gradient(115deg,#E7E5E4 0 6px,#F5F5F4 6px 12px)" }}
                   aria-hidden="true"
                 />
-                <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-500">
+                <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600">
                   <Lock className="h-3 w-3" aria-hidden="true" /> réservé
                 </span>
               </span>
 
               <span className="hidden text-right text-[13px] text-stone-300 sm:block" aria-hidden="true">•••</span>
-              <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-500 sm:block">
+              <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-600 sm:block">
                 {l.cote_juste != null ? cote(l.cote_juste) : "—"}
               </span>
 
@@ -801,13 +799,13 @@ export function ClassementApercu({
         ))}
 
         {resteMasque > 0 && (
-          <li className="bg-stone-50/60 px-4 py-3 text-center text-[11.5px] text-stone-500 sm:px-5">
+          <li className="bg-stone-50/60 px-4 py-3 text-center text-[11.5px] text-stone-600 sm:px-5">
             + {resteMasque} lignes, avec leurs probabilités, cotes justes et signaux — réservées aux abonnés
           </li>
         )}
 
         {!revele && nommees.length > 0 && (
-          <li className="bg-white px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400 sm:px-5">
+          <li className="bg-white px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-stone-600 sm:px-5">
             Visible gratuitement · le bas du classement
           </li>
         )}
@@ -823,17 +821,17 @@ export function ClassementApercu({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="truncate text-[14px] font-semibold leading-tight text-slate-900">
-                    <span className="font-mono text-[11px] font-normal text-stone-400">N°{l.numero}</span>{" "}
+                    <span className="font-mono text-[11px] font-normal text-stone-600">N°{l.numero}</span>{" "}
                     {l.nom}
                   </span>
                   {l.position != null && <BadgeArrivee position={l.position} />}
                   {!revele && (
-                    <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-500">
+                    <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600">
                       écarté par le modèle
                     </span>
                   )}
                 </div>
-                <div className="mt-1.5 flex items-center gap-3 text-[11px] tabular-nums text-stone-500 sm:hidden">
+                <div className="mt-1.5 flex items-center gap-3 text-[11px] tabular-nums text-stone-600 sm:hidden">
                   {l.cote != null && <span>Cote {cote(l.cote)}</span>}
                   {l.cote_juste != null && <span>Juste {cote(l.cote_juste)}</span>}
                   {l.proba_top3 != null && <span>Top-3 {pct(l.proba_top3)}</span>}
@@ -843,7 +841,7 @@ export function ClassementApercu({
               <span className="hidden text-right font-display text-[14px] font-semibold tabular-nums text-slate-900 sm:block">
                 {l.cote != null ? cote(l.cote) : "—"}
               </span>
-              <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-500 sm:block">
+              <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-600 sm:block">
                 {l.cote_juste != null ? cote(l.cote_juste) : "—"}
               </span>
 
@@ -882,7 +880,7 @@ export function ClassementApercu({
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <a
             href={connecte ? "/tarifs" : "/inscription"}
-            className="inline-flex min-h-10 items-center rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+            className="inline-flex min-h-10 items-center rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-brand-dark transition-colors hover:bg-amber-600"
           >
             {connecte ? "Voir le classement complet — 12€/mois" : "Essayer 7 jours gratuitement"}
           </a>
@@ -890,7 +888,7 @@ export function ClassementApercu({
             <button
               type="button"
               onClick={onLegende}
-              className="inline-flex items-center gap-1 text-[12px] font-medium text-stone-500 underline underline-offset-2 hover:text-amber-800"
+              className="inline-flex items-center gap-1 text-[12px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-800"
             >
               <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire ce classement
             </button>

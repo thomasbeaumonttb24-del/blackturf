@@ -240,3 +240,23 @@ export async function fetchResultats(id: string): Promise<SeoResultats | null> {
     return null;
   }
 }
+
+/* ── Compteur de paris de valeur (bandeau haut du programme) ──────────────────
+   Ce compteur était chargé UNIQUEMENT côté navigateur : le bandeau n'existait pas dans
+   le HTML, apparaissait après l'hydratation puis après l'aller-retour réseau, et devenait
+   au passage le plus gros bloc de texte de l'écran — donc l'élément LCP, mesuré à 4,0 s
+   sur mobile pour un premier rendu à 1,2 s. Le rendre côté serveur le fait exister dès le
+   premier octet ; SWR continue de le rafraîchir toutes les minutes par-dessus. */
+export async function fetchValueBetsCompteur(
+  niveauMin = 3,
+): Promise<{ count: number; niveau_min: number } | null> {
+  try {
+    const res = await fetch(`${API}/value-bets/compteur?niveau_min=${niveauMin}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { count: number; niveau_min: number };
+  } catch {
+    return null;
+  }
+}

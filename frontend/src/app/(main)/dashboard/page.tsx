@@ -21,7 +21,7 @@ const NIVEAU_LABELS: Record<number, string> = {
   1: "Intéressant", 2: "Bon", 3: "Fort", 4: "Exceptionnel",
 };
 const NIVEAU_COLORS: Record<number, string> = {
-  1: "text-zinc-500", 2: "text-blue-600", 3: "text-amber-600", 4: "text-emerald-600",
+  1: "text-zinc-600", 2: "text-blue-700", 3: "text-amber-700", 4: "text-emerald-700",
 };
 
 function StarRating({ n }: { n: number }) {
@@ -30,7 +30,7 @@ function StarRating({ n }: { n: number }) {
       {Array.from({ length: 4 }).map((_, i) => (
         <Star
           key={i}
-          className={`w-3 h-3 ${i < n ? "fill-amber-500 text-amber-500" : "text-zinc-600"}`}
+          className={`w-3 h-3 ${i < n ? "fill-amber-500 text-amber-700" : "text-zinc-600"}`}
         />
       ))}
     </span>
@@ -134,13 +134,13 @@ export default function DashboardPage() {
               <CardContent className="p-4 sm:p-5">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                   <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-0.5 shrink-0">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold">🎯 Pari du jour</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold-dark">🎯 Pari du jour</span>
                     <span className="text-[11px] text-muted-foreground">{pariDuJour.code} · {pariDuJour.hippodrome}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-foreground">N°{pariDuJour.numero} {pariDuJour.nom_cheval}</span>
-                      <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-500 font-semibold">
+                      <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-700 font-semibold">
                         EV +{((pariDuJour.ev ?? 0) * 100).toFixed(0)}%
                       </span>
                       {pariDuJour.edge_valide && (
@@ -160,7 +160,7 @@ export default function DashboardPage() {
                       <div className="text-lg font-bold tabular-nums">{((pariDuJour.proba_top1 ?? 0) * 100).toFixed(0)}%</div>
                       <div className="text-[10px] text-muted-foreground">gagnant{pariDuJour.cote_pmu ? ` · cote ${pariDuJour.cote_pmu}` : ""}</div>
                     </div>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-brand-gold transition-colors" />
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-brand-gold-dark transition-colors" />
                   </div>
                 </div>
               </CardContent>
@@ -172,7 +172,7 @@ export default function DashboardPage() {
         {parisProfils?.profils?.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2 px-0.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold">Le pari du jour, par profil</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold-dark">Le pari du jour, par profil</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {parisProfils.profils.map((p: {
@@ -194,10 +194,10 @@ export default function DashboardPage() {
                     <div className="mt-1.5 flex items-baseline gap-2">
                       <span className="text-lg font-bold tabular-nums">{Math.round((p.probabilite ?? 0) * 100)}%</span>
                       <span className="text-[10px] text-muted-foreground">de toucher</span>
-                      {p.ev > 0 && <span className="text-[10px] font-bold text-emerald-600">EV +{Math.round(p.ev * 100)}%</span>}
+                      {p.ev > 0 && <span className="text-[10px] font-bold text-emerald-700">EV +{Math.round(p.ev * 100)}%</span>}
                     </div>
-                    {p.raisons?.[0] && <p className="mt-1 text-[10px] text-muted-foreground/80 leading-snug line-clamp-2">{p.raisons[0]}</p>}
-                    <div className="mt-1 text-[10px] text-muted-foreground/60 truncate">{p.hippodrome}</div>
+                    {p.raisons?.[0] && <p className="mt-1 text-[10px] text-muted-foreground leading-snug line-clamp-2">{p.raisons[0]}</p>}
+                    <div className="mt-1 text-[10px] text-muted-foreground truncate">{p.hippodrome}</div>
                   </Link>
                 );
               })}
@@ -212,9 +212,9 @@ export default function DashboardPage() {
             <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-amber-50">
-                  <Wallet className="w-4 h-4 text-amber-600" />
+                  <Wallet className="w-4 h-4 text-amber-700" />
                 </div>
-                <span className={`text-xs font-medium flex items-center gap-1 ${roiPositive ? "text-emerald-600" : "text-red-600"}`}>
+                <span className={`text-xs font-medium flex items-center gap-1 ${roiPositive ? "text-emerald-700" : "text-red-700"}`}>
                   {roiPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                   {roi > 0 ? "+" : ""}{roi}%
                 </span>
@@ -233,11 +233,11 @@ export default function DashboardPage() {
             <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-blue-50">
-                  <BarChart3 className="w-4 h-4 text-blue-600" />
+                  <BarChart3 className="w-4 h-4 text-blue-700" />
                 </div>
                 <span className="text-xs text-muted-foreground">{bankrollStats?.nb_paris ?? 0} paris</span>
               </div>
-              <div className={`text-xl sm:text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <div className={`text-xl sm:text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}`}>
                 {bankrollStats ? `${bankrollStats.roi_ia_only > 0 ? "+" : ""}${bankrollStats.roi_ia_only}%` : "—"}
               </div>
               <div className="text-xs text-muted-foreground mt-1">Rendement algo</div>
@@ -249,7 +249,7 @@ export default function DashboardPage() {
             <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-emerald-50">
-                  <Zap className="w-4 h-4 text-emerald-600" />
+                  <Zap className="w-4 h-4 text-emerald-700" />
                 </div>
                 {(summary?.nb_vbs_premium ?? 0) > 0 && (
                   <Badge className="bg-amber-50 text-amber-700 border-0 text-xs">
@@ -269,10 +269,10 @@ export default function DashboardPage() {
             <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className="p-2 rounded-lg bg-purple-50">
-                  <Trophy className="w-4 h-4 text-purple-600" />
+                  <Trophy className="w-4 h-4 text-purple-700" />
                 </div>
                 {(summary?.nb_en_cours ?? 0) > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-emerald-600">
+                  <span className="flex items-center gap-1 text-xs text-emerald-700">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     En cours
                   </span>
@@ -297,7 +297,7 @@ export default function DashboardPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-amber-600" />
+                    <Zap className="w-4 h-4 text-amber-700" />
                     Meilleurs paris de valeur
                   </CardTitle>
                   <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground shrink-0">
@@ -310,7 +310,7 @@ export default function DashboardPage() {
               <CardContent className="space-y-3">
                 {!isPaid ? (
                   <div className="rounded-lg border border-dashed border-border/60 p-6 text-center">
-                    <Star className="w-8 h-8 text-amber-600 mx-auto mb-2" />
+                    <Star className="w-8 h-8 text-amber-700 mx-auto mb-2" />
                     <p className="text-sm font-medium text-foreground mb-1">Fonctionnalité Premium</p>
                     <p className="text-xs text-muted-foreground mb-3">
                       Accédez aux paris de valeur en temps réel à partir de Standard.
@@ -357,7 +357,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <div className="text-right">
-                          <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                          <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-700" : "text-red-700"}`}>
                             {vb.ev > 0 ? "+" : ""}{(vb.ev * 100).toFixed(0)}%
                           </div>
                           {vb.cote && (
@@ -377,7 +377,7 @@ export default function DashboardPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-blue-600" />
+                    <Calendar className="w-4 h-4 text-blue-700" />
                     {aDesProchaines ? "Prochaines courses" : "Programme du jour"}
                   </CardTitle>
                   <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
@@ -405,7 +405,7 @@ export default function DashboardPage() {
                         className="flex items-center gap-3 p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
                       >
                         {c.heure && (
-                          <span className="flex h-9 w-12 flex-shrink-0 flex-col items-center justify-center rounded-md bg-muted/50 font-mono text-xs font-bold text-amber-500 tabular-nums">
+                          <span className="flex h-9 w-12 flex-shrink-0 flex-col items-center justify-center rounded-md bg-muted/50 font-mono text-xs font-bold text-amber-700 tabular-nums">
                             {c.heure}
                           </span>
                         )}
@@ -428,13 +428,13 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         {c.statut === "en_cours" ? (
-                          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-500">
+                          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700">
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />En direct
                           </span>
                         ) : c.statut === "termine" ? (
                           <span className="shrink-0 text-xs text-muted-foreground">Terminée</span>
                         ) : (
-                          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 group-hover:text-brand-gold transition-colors" />
+                          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-brand-gold-dark transition-colors" />
                         )}
                       </Link>
                     ))}

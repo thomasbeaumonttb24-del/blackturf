@@ -48,7 +48,7 @@ export default function AdminInstagramPage() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-brand-gold" />
+        <Loader2 className="h-6 w-6 animate-spin text-brand-gold-dark" />
       </div>
     );
   }
@@ -126,7 +126,7 @@ export default function AdminInstagramPage() {
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <div className="mb-8 flex items-center gap-3">
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-100 to-white ring-1 ring-amber-200">
-          <Instagram className="h-5 w-5 text-brand-gold-deep" aria-hidden="true" />
+          <Instagram className="h-5 w-5 text-brand-gold-dark" aria-hidden="true" />
         </span>
         <div>
           <h1 className="font-display text-2xl font-bold text-gray-900">Publication Instagram</h1>
@@ -156,7 +156,7 @@ export default function AdminInstagramPage() {
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Expire le</dt>
-                  <dd className={alerte ? "font-semibold text-red-600" : ""}>
+                  <dd className={alerte ? "font-semibold text-red-700" : ""}>
                     {etat.expire_at ? formatDateTime(etat.expire_at) : "—"}
                     {typeof etat.jours_restants === "number" && (
                       <span className="ml-1 text-muted-foreground">
@@ -241,7 +241,7 @@ export default function AdminInstagramPage() {
                 href={LIEN_META}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-medium text-brand-gold-deep hover:underline"
+                className="inline-flex items-center gap-1 font-medium text-brand-gold-dark hover:underline"
               >
                 configuration Instagram de l&apos;app
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />

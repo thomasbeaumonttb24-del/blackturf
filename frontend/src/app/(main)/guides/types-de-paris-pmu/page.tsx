@@ -68,18 +68,18 @@ export default function GuideTypesParis() {
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl bg-white p-4 text-center ring-1 ring-amber-100">
               <div className="font-display text-2xl font-bold text-gradient">4 à 7</div>
-              <div className="mt-1 text-xs text-brand-charcoal/70">partants → 2 places (1er, 2e)</div>
+              <div className="mt-1 text-xs text-brand-charcoal">partants → 2 places (1er, 2e)</div>
             </div>
             <div className="rounded-xl bg-white p-4 text-center ring-1 ring-amber-100">
               <div className="font-display text-2xl font-bold text-gradient">8 +</div>
-              <div className="mt-1 text-xs text-brand-charcoal/70">partants → 3 places (1er, 2e, 3e)</div>
+              <div className="mt-1 text-xs text-brand-charcoal">partants → 3 places (1er, 2e, 3e)</div>
             </div>
             <div className="rounded-xl bg-white p-4 text-center ring-1 ring-amber-100">
-              <div className="font-display text-2xl font-bold text-brand-charcoal/40">&lt; 4</div>
-              <div className="mt-1 text-xs text-brand-charcoal/70">partants → pas de Placé</div>
+              <div className="font-display text-2xl font-bold text-brand-charcoal">&lt; 4</div>
+              <div className="mt-1 text-xs text-brand-charcoal">partants → pas de Placé</div>
             </div>
           </div>
-          <p className="mt-3 text-xs text-brand-charcoal/60">S&apos;applique au Simple Placé, au Couplé Placé et au Trio.</p>
+          <p className="mt-3 text-xs text-brand-charcoal">S&apos;applique au Simple Placé, au Couplé Placé et au Trio.</p>
         </div>
 
         <Section title="Sur un seul cheval">
@@ -125,7 +125,7 @@ export default function GuideTypesParis() {
                 <summary className="cursor-pointer list-none font-display text-sm font-semibold text-brand-dark marker:hidden">
                   {f.q}
                 </summary>
-                <p className="mt-2 text-sm leading-relaxed text-brand-charcoal/80">{f.a}</p>
+                <p className="mt-2 text-sm leading-relaxed text-brand-charcoal">{f.a}</p>
               </details>
             ))}
           </div>

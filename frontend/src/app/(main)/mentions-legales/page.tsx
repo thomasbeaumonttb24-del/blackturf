@@ -61,7 +61,7 @@ export default function MentionsLegalesPage() {
           </ul>
           <p className="mt-3">
             En cas de problème avec le jeu :{" "}
-            <a href="https://www.joueurs-info-service.fr" target="_blank" rel="noopener noreferrer" className="underline text-brand-gold">
+            <a href="https://www.joueurs-info-service.fr" target="_blank" rel="noopener noreferrer" className="underline text-brand-gold-dark">
               joueurs-info-service.fr
             </a>
             {" "}— <strong>09 74 75 13 13</strong> (appel gratuit, 7j/7, 8h-2h)
@@ -82,7 +82,7 @@ export default function MentionsLegalesPage() {
         <h2 className="text-lg font-bold mb-3">Données personnelles &amp; cookies</h2>
         <p className="text-muted-foreground">
           Le traitement des données personnelles est détaillé dans notre{" "}
-          <a href="/confidentialite" className="underline text-brand-gold">Politique de confidentialité</a>.
+          <a href="/confidentialite" className="underline text-brand-gold-dark">Politique de confidentialité</a>.
           Conformément au RGPD, vous disposez de droits d&apos;accès, de rectification, d&apos;effacement,
           de portabilité, de limitation et d&apos;opposition. Contact : privacy@blackturf.fr.
           Réclamation possible auprès de la CNIL (www.cnil.fr).
@@ -93,8 +93,8 @@ export default function MentionsLegalesPage() {
         <h2 className="text-lg font-bold mb-3">Conditions de vente</h2>
         <p className="text-muted-foreground">
           Les conditions applicables aux abonnements payants figurent dans nos{" "}
-          <a href="/cgv" className="underline text-brand-gold">Conditions Générales de Vente</a>{" "}
-          et nos <a href="/cgu" className="underline text-brand-gold">Conditions Générales d&apos;Utilisation</a>.
+          <a href="/cgv" className="underline text-brand-gold-dark">Conditions Générales de Vente</a>{" "}
+          et nos <a href="/cgu" className="underline text-brand-gold-dark">Conditions Générales d&apos;Utilisation</a>.
         </p>
       </section>
 

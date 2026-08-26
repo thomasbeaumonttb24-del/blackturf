@@ -88,7 +88,7 @@ const RISK_OPTIONS = [
     icon: "🛡️",
     label: "Prudent",
     desc: "Mises faibles, capital protégé",
-    color: "text-blue-600",
+    color: "text-blue-700",
     activeBorder: "border-blue-400 bg-blue-50",
     dot: "bg-blue-500",
   },
@@ -97,7 +97,7 @@ const RISK_OPTIONS = [
     icon: "⚖️",
     label: "Modéré",
     desc: "Risque / rendement équilibré",
-    color: "text-amber-600",
+    color: "text-amber-700",
     activeBorder: "border-amber-400 bg-amber-50",
     dot: "bg-amber-500",
   },
@@ -106,7 +106,7 @@ const RISK_OPTIONS = [
     icon: "🚀",
     label: "Risqué",
     desc: "Mises max, rendement visé",
-    color: "text-red-600",
+    color: "text-red-700",
     activeBorder: "border-red-400 bg-red-50",
     dot: "bg-red-500",
   },
@@ -126,13 +126,13 @@ function Field({
     <div className="space-y-1.5">
       <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide">{label}</label>
       {children}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-red-700">{error}</p>}
     </div>
   );
 }
 
 const inputCls =
-  "w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-800 outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder:text-gray-400 disabled:bg-gray-50 disabled:text-gray-400";
+  "w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-800 outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-100 placeholder:text-gray-600 disabled:bg-gray-50 disabled:text-gray-600";
 
 /* ─── Page ───────────────────────────────────────────────── */
 export default function ProfilPage() {
@@ -256,7 +256,7 @@ export default function ProfilPage() {
             {user.prenom ? `${user.prenom}${user.nom ? ` ${user.nom}` : ""}` : user.email}
           </h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="text-sm text-gray-500">{user.email}</span>
+            <span className="text-sm text-gray-600">{user.email}</span>
             <span className="text-gray-200">·</span>
             <span
               className={cn(
@@ -265,13 +265,13 @@ export default function ProfilPage() {
                   ? "bg-emerald-100 text-emerald-700"
                   : ["starter", "standard"].includes(planKey)
                   ? "bg-amber-100 text-amber-700"
-                  : "bg-gray-100 text-gray-500",
+                  : "bg-gray-100 text-gray-600",
               )}
             >
               {planLabel(planKey)}
             </span>
             {user.email_verified && (
-              <span className="text-xs text-emerald-600 flex items-center gap-0.5">
+              <span className="text-xs text-emerald-700 flex items-center gap-0.5">
                 <Check className="h-3 w-3" /> Vérifié
               </span>
             )}
@@ -280,7 +280,7 @@ export default function ProfilPage() {
         {isFree && (
           <Link
             href="/tarifs"
-            className="flex-shrink-0 self-start inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
+            className="flex-shrink-0 self-start inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-brand-dark text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
           >
             <Zap className="h-4 w-4" /> Passer Standard
           </Link>
@@ -317,7 +317,7 @@ export default function ProfilPage() {
             <form onSubmit={handleSubmit(onSave)}>
               <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Informations personnelles</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Vos données de compte et préférences IA</p>
+                <p className="text-xs text-gray-600 mt-0.5">Vos données de compte et préférences IA</p>
               </div>
               <div className="px-4 sm:px-6 py-5 space-y-5">
                 <div className="grid grid-cols-2 gap-4">
@@ -372,7 +372,7 @@ export default function ProfilPage() {
                         <div className={cn("text-xs font-bold", profilRisque === opt.value ? opt.color : "text-gray-700")}>
                           {opt.label}
                         </div>
-                        <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">{opt.desc}</div>
+                        <div className="text-[10px] text-gray-600 mt-0.5 leading-tight">{opt.desc}</div>
                         {profilRisque === opt.value && (
                           <span className={cn("absolute top-2 right-2 h-4 w-4 rounded-full flex items-center justify-center", opt.dot)}>
                             <Check className="h-2.5 w-2.5 text-white" />
@@ -401,7 +401,7 @@ export default function ProfilPage() {
             <div>
               <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Abonnement</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Gérez votre plan et votre facturation</p>
+                <p className="text-xs text-gray-600 mt-0.5">Gérez votre plan et votre facturation</p>
               </div>
               <div className="px-4 sm:px-6 py-5 space-y-5">
 
@@ -418,7 +418,7 @@ export default function ProfilPage() {
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Plan actuel</p>
+                      <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Plan actuel</p>
                       <p
                         className={cn(
                           "text-2xl font-bold",
@@ -433,7 +433,7 @@ export default function ProfilPage() {
                       </p>
                     </div>
                     {planKey === "expert" && <Star className="h-8 w-8 text-emerald-400" />}
-                    {["starter", "standard"].includes(planKey) && <TrendingUp className="h-8 w-8 text-amber-400" />}
+                    {["starter", "standard"].includes(planKey) && <TrendingUp className="h-8 w-8 text-amber-700" />}
                     {isFree && <Brain className="h-8 w-8 text-gray-300" />}
                   </div>
 
@@ -442,11 +442,11 @@ export default function ProfilPage() {
                     {features.map((f) => (
                       <div key={f.label} className="flex items-center gap-2 text-sm">
                         {f.included ? (
-                          <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                          <Check className="h-3.5 w-3.5 text-emerald-700 flex-shrink-0" />
                         ) : (
                           <Lock className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
                         )}
-                        <span className={f.included ? "text-gray-700" : "text-gray-400"}>{f.label}</span>
+                        <span className={f.included ? "text-gray-700" : "text-gray-600"}>{f.label}</span>
                       </div>
                     ))}
                   </div>
@@ -456,7 +456,7 @@ export default function ProfilPage() {
                 {isFree ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 space-y-3">
                     <div className="flex items-center gap-2">
-                      <Zap className="h-5 w-5 text-amber-500" />
+                      <Zap className="h-5 w-5 text-amber-700" />
                       <p className="font-semibold text-amber-800">Débloquez tout</p>
                     </div>
                     <p className="text-sm text-amber-700">
@@ -464,7 +464,7 @@ export default function ProfilPage() {
                     </p>
                     <Link
                       href="/tarifs"
-                      className="inline-flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-5 py-2.5 transition-colors"
+                      className="inline-flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-brand-dark text-sm font-semibold px-5 py-2.5 transition-colors"
                     >
                       Voir les offres <ChevronRight className="h-4 w-4" />
                     </Link>
@@ -483,7 +483,7 @@ export default function ProfilPage() {
                     <button
                       onClick={handleCancel}
                       disabled={loadingCancel}
-                      className="flex items-center gap-2 text-sm text-red-500 hover:text-red-600 font-medium transition-colors disabled:opacity-50"
+                      className="flex items-center gap-2 text-sm text-red-700 hover:text-red-700 font-medium transition-colors disabled:opacity-50"
                     >
                       {loadingCancel ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       Résilier mon abonnement
@@ -499,16 +499,16 @@ export default function ProfilPage() {
             <div>
               <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Notifications</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Alertes paris de valeur en temps réel</p>
+                <p className="text-xs text-gray-600 mt-0.5">Alertes paris de valeur en temps réel</p>
               </div>
               <div className="px-4 sm:px-6 py-5 space-y-4">
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 p-4">
                   <div>
                     <p className="text-sm font-semibold text-gray-800">Notifications</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Alertes de valeur instantanées sur votre appareil</p>
+                    <p className="text-xs text-gray-600 mt-0.5">Alertes de valeur instantanées sur votre appareil</p>
                   </div>
                   {isFree ? (
-                    <span className="flex items-center gap-1 text-xs text-gray-400 bg-gray-100 rounded-full px-3 py-1.5">
+                    <span className="flex items-center gap-1 text-xs text-gray-600 bg-gray-100 rounded-full px-3 py-1.5">
                       <Lock className="h-3 w-3" /> Standard requis
                     </span>
                   ) : (
@@ -527,9 +527,9 @@ export default function ProfilPage() {
                   )}
                 </div>
                 {isFree && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-600">
                     Les notifications sont disponibles à partir du plan Standard.{" "}
-                    <Link href="/tarifs" className="text-amber-600 font-medium hover:underline">
+                    <Link href="/tarifs" className="text-amber-700 font-medium hover:underline">
                       Voir les offres →
                     </Link>
                   </p>
@@ -543,7 +543,7 @@ export default function ProfilPage() {
             <div>
               <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
                 <h2 className="font-bold text-gray-900">Sécurité</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Statut de votre compte</p>
+                <p className="text-xs text-gray-600 mt-0.5">Statut de votre compte</p>
               </div>
               <div className="px-4 sm:px-6 py-5 space-y-3">
 
@@ -551,16 +551,16 @@ export default function ProfilPage() {
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 p-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-800">E-mail vérifié</p>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">{user.email}</p>
+                    <p className="text-xs text-gray-600 mt-0.5 truncate">{user.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {user.email_verified ? (
-                      <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-full px-2.5 py-1">
+                      <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2.5 py-1">
                         <Check className="h-3 w-3" /> Vérifié
                       </span>
                     ) : (
                       <>
-                        <span className="flex items-center gap-1 text-xs font-semibold text-amber-600 bg-amber-50 rounded-full px-2.5 py-1">
+                        <span className="flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 rounded-full px-2.5 py-1">
                           <X className="h-3 w-3" /> Non vérifié
                         </span>
                         <button
@@ -584,7 +584,7 @@ export default function ProfilPage() {
                 {/* Account creation */}
                 <div className="flex items-center justify-between rounded-2xl border border-gray-200 p-4">
                   <p className="text-sm font-semibold text-gray-800">Compte créé le</p>
-                  <span className="text-sm text-gray-500">{formatDate(user.created_at)}</span>
+                  <span className="text-sm text-gray-600">{formatDate(user.created_at)}</span>
                 </div>
               </div>
             </div>

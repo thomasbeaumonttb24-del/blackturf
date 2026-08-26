@@ -155,7 +155,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
         title="Rendement par type de pari"
         desc="ROI winsorisé à 50× la mise, sur les conseils réglés. Un type sous 150 gagnants est affiché mais jamais tranché."
         right={
-          <span className="text-[10px] text-gray-400">
+          <span className="text-[10px] text-gray-600">
             {types.length} types joués · fenêtre {data.fenetre_jours ?? "complète"}
             {data.fenetre_jours ? " j" : ""}
           </span>
@@ -202,7 +202,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
             </BarChart>
           </ResponsiveContainer>
         )}
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-gray-500">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-gray-600">
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-sm" style={{ background: DIVERGING_POS }} />
             gain
@@ -240,7 +240,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                     }}
                   />
                 </div>
-                <span className="w-12 shrink-0 text-right tabular-nums text-gray-500">
+                <span className="w-12 shrink-0 text-right tabular-nums text-gray-600">
                   {pct(m.part, 0)}
                 </span>
                 <span className="w-16 shrink-0 text-right font-mono font-bold tabular-nums">
@@ -256,7 +256,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
         </Section>
 
         <Section
-          title={<span className="flex items-center gap-2"><Scale className="h-4 w-4 text-amber-500" />Test de robustesse — {actif?.type}</span>}
+          title={<span className="flex items-center gap-2"><Scale className="h-4 w-4 text-amber-700" />Test de robustesse — {actif?.type}</span>}
           desc="Le ROI recalculé en retirant les plus gros gains. S'il s'effondre, le rendement tenait à une poignée de coups, pas à un avantage."
           right={
             <select
@@ -281,7 +281,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                   tick={axisTick} axisLine={axisLine} tickLine={tickLine}
                   tickFormatter={(v) => `${v} %`}
                 />
-                <ReferenceLine y={0} stroke="#9CA3AF" />
+                <ReferenceLine y={0} stroke="#4B5563" />
                 <Tooltip
                   cursor={{ fill: "rgba(148,163,184,0.08)" }}
                   content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />}
@@ -302,23 +302,23 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
           {actif && (
             <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
               <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-400">ROI brut</div>
+                <div className="text-gray-600">ROI brut</div>
                 <div className={`font-bold tabular-nums ${tone(actif.roi_brut_pct)}`}>
                   {signedPct(actif.roi_brut_pct)}
                 </div>
               </div>
               <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-400">ROI winsorisé</div>
+                <div className="text-gray-600">ROI winsorisé</div>
                 <div className={`font-bold tabular-nums ${tone(actif.roi_pct)}`}>
                   {signedPct(actif.roi_pct)}
                 </div>
               </div>
               <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-400">Plus gros gain</div>
+                <div className="text-gray-600">Plus gros gain</div>
                 <div className="font-bold tabular-nums text-gray-700">{eur(actif.gain_max)}</div>
               </div>
               <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-400">Gagnants</div>
+                <div className="text-gray-600">Gagnants</div>
                 <div className="font-bold tabular-nums text-gray-700">
                   {num(actif.n_gagnants)} / {num(actif.n_gagnants_requis ?? 150)} requis
                 </div>
@@ -393,7 +393,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                   tick={axisTick} axisLine={axisLine} tickLine={tickLine}
                   tickFormatter={(v) => `${v} %`}
                 />
-                <ReferenceLine y={0} stroke="#9CA3AF" strokeDasharray="3 3" />
+                <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />} />
                 <Legend
                   verticalAlign="bottom" height={30}
@@ -432,7 +432,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
         <div className="-mx-4 overflow-x-auto px-4">
           <table className="w-full min-w-[820px] text-xs">
             <thead>
-              <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-400">
+              <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
                 <th className="py-2 pr-3 text-left font-semibold">Type</th>
                 <th className="px-2 py-2 text-right font-semibold">Paris</th>
                 <th className="px-2 py-2 text-right font-semibold">Gagnants</th>
@@ -463,7 +463,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                   <td className={`px-2 py-2 text-right font-mono font-bold tabular-nums ${tone(t.net)}`}>
                     {signedEur(t.net)}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-400">
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">
                     {signedPct(t.roi_brut_pct)}
                   </td>
                   <td className={`px-2 py-2 text-right font-mono font-bold tabular-nums ${tone(t.roi_pct)}`}>
@@ -472,7 +472,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                   <td className="px-2 py-2">
                     <PolarityBar value={t.roi_pct ?? null} max={ROI_MAX_BAR} />
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-[10px] text-gray-500">
+                  <td className="px-2 py-2 text-right tabular-nums text-[10px] text-gray-600">
                     {t.ic90_roi_pct
                       ? `${signedPct(t.ic90_roi_pct[0], 0)} → ${signedPct(t.ic90_roi_pct[1], 0)}`
                       : "—"}
@@ -513,7 +513,7 @@ function MatriceProfil({ data }: { data: ParisPayload }) {
       <div className="-mx-4 overflow-x-auto px-4">
         <table className="w-full min-w-[640px] text-xs">
           <thead>
-            <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-400">
+            <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
               <th className="py-2 pr-3 text-left font-semibold">Profil</th>
               {typesM.map((t) => (
                 <th key={t} className="px-2 py-2 text-right font-semibold">{t}</th>
@@ -534,10 +534,10 @@ function MatriceProfil({ data }: { data: ParisPayload }) {
                   const solide = c.n_gagnants >= MIN_GAGNANTS_CELLULE;
                   return (
                     <td key={t} className="px-2 py-2.5 text-right">
-                      <div className={`font-mono text-xs font-bold tabular-nums ${solide ? tone(c.roi_pct) : "text-gray-400"}`}>
+                      <div className={`font-mono text-xs font-bold tabular-nums ${solide ? tone(c.roi_pct) : "text-gray-600"}`}>
                         {signedPct(c.roi_pct, 0)}
                       </div>
-                      <div className="text-[10px] tabular-nums text-gray-400">
+                      <div className="text-[10px] tabular-nums text-gray-600">
                         {num(c.n_paris)} paris · {num(c.n_gagnants)} gagn.
                       </div>
                     </td>

@@ -39,14 +39,14 @@ function AbonnementSuccesContent() {
       <div className="max-w-lg w-full text-center">
         {loading ? (
           <div className="space-y-4">
-            <Loader2 className="h-12 w-12 animate-spin text-brand-gold mx-auto" />
+            <Loader2 className="h-12 w-12 animate-spin text-brand-gold-dark mx-auto" />
             <p className="text-muted-foreground">Activation de votre abonnement…</p>
           </div>
         ) : (
           <div className="animate-fade-in space-y-6">
             {/* Success icon */}
             <div className="h-20 w-20 rounded-full bg-brand-emerald/15 border border-brand-emerald/30 flex items-center justify-center mx-auto gold-glow">
-              <CheckCircle className="h-10 w-10 text-brand-emerald" />
+              <CheckCircle className="h-10 w-10 text-brand-emerald-dark" />
             </div>
 
             <div>
@@ -66,7 +66,7 @@ function AbonnementSuccesContent() {
 
             <Card className="border-brand-gold/20 bg-brand-gold/5">
               <CardContent className="p-5 space-y-3">
-                <p className="text-sm font-semibold text-brand-gold mb-3">
+                <p className="text-sm font-semibold text-brand-gold-dark mb-3">
                   🎯 Pour commencer maintenant :
                 </p>
                 {[

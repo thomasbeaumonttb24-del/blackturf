@@ -129,14 +129,14 @@ function useCountdown(targetDate: string, statut: string) {
 function StatutBadge({ statut }: { statut: string }) {
   if (statut === "en_cours")
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-600 ring-1 ring-emerald-200 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200 whitespace-nowrap">
         <Radio className="h-2.5 w-2.5 animate-pulse" /> En direct
       </span>
     );
   if (statut === "termine")
     return <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-gray-200">Terminée</span>;
   if (statut === "annule")
-    return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] text-red-500 ring-1 ring-red-200">Annulée</span>;
+    return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] text-red-700 ring-1 ring-red-200">Annulée</span>;
   return null;
 }
 
@@ -263,11 +263,15 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
    à un compte non abonné. Visible tant que l'utilisateur n'est pas déjà payant
    (free/decouverte ou visiteur non connecté) : donne un signal de ce qui se
    joue EN CE MOMENT sans casser le paywall. */
-function ValueBetsCompteurBanner() {
+function ValueBetsCompteurBanner({ initial }: { initial?: { count: number; niveau_min: number } | null }) {
   const { data } = useSWR(
     "/value-bets-compteur-banner",
     () => predictionsApi.valueBetsCompteur(3).then((r) => r.data as { count: number; niveau_min: number }),
-    { refreshInterval: 60000 },
+    // `fallbackData` : le compteur est désormais résolu côté serveur et arrive dans le
+    // HTML. Sans lui, le bandeau restait absent jusqu'à l'aller-retour réseau, s'insérait
+    // en haut de page et devenait l'élément LCP — mesuré à 4,0 s sur mobile pour un
+    // premier rendu à 1,2 s. SWR le rafraîchit ensuite toutes les minutes.
+    { refreshInterval: 60000, fallbackData: initial ?? undefined },
   );
   if (!data || !data.count) return null;
   return (
@@ -329,7 +333,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
     >
       <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : !isDone && course.est_quinte ? "#F59E0B" : "transparent" }} />
       <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
-        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-600" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-700" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
           {formatTime(course.date_heure)}
         </span>
         {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-700">{countdown}</span>}
@@ -607,7 +611,7 @@ export default function ProgrammeClient({
         {nextRace && <NextRaceBanner item={nextRace} />}
 
         {/* ── Bandeau value bets actifs (Free/Découverte + visiteurs non connectés) ── */}
-        {!isPaid && <ValueBetsCompteurBanner />}
+        {!isPaid && <ValueBetsCompteurBanner initial={initialCompteurVB} />}
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (

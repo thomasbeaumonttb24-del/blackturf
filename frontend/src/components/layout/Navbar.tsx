@@ -70,7 +70,7 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-start justify-center pt-16 px-4" onClick={onClose}>
       <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-          <Search className="h-4 w-4 text-gray-500 flex-shrink-0" />
+          <Search className="h-4 w-4 text-gray-600 flex-shrink-0" />
           <input
             ref={inputRef}
             value={q}
@@ -78,7 +78,7 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
             placeholder="Rechercher un cheval, jockey, hippodrome..."
             className="flex-1 outline-none text-sm bg-transparent text-gray-900 placeholder-gray-400"
           />
-          <kbd className="text-[10px] text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">Esc</kbd>
+          <kbd className="text-[10px] text-gray-600 bg-gray-100 rounded px-1.5 py-0.5">Esc</kbd>
         </div>
         {results && results.length > 0 ? (
           <ul className="py-2 max-h-80 overflow-y-auto">
@@ -91,16 +91,16 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
                   <span className="text-base flex-shrink-0">{TYPE_ICONS[r.type] ?? "🔍"}</span>
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate">{r.label}</div>
-                    <div className="text-xs text-gray-500 truncate">{r.sub}</div>
+                    <div className="text-xs text-gray-600 truncate">{r.sub}</div>
                   </div>
                 </button>
               </li>
             ))}
           </ul>
         ) : debouncedQ.length >= 2 ? (
-          <div className="py-8 text-center text-sm text-gray-500">Aucun résultat pour "{debouncedQ}"</div>
+          <div className="py-8 text-center text-sm text-gray-600">Aucun résultat pour "{debouncedQ}"</div>
         ) : (
-          <div className="py-6 text-center text-xs text-gray-500">Saisissez au moins 2 caractères</div>
+          <div className="py-6 text-center text-xs text-gray-600">Saisissez au moins 2 caractères</div>
         )}
       </div>
     </div>
@@ -171,7 +171,7 @@ export function Navbar() {
               priority
             />
             <span className="text-xl font-bold tracking-tight text-gray-900">
-              Black<span className="text-brand-gold-deep">Turf</span>
+              Black<span className="text-brand-gold-dark">Turf</span>
             </span>
           </Link>
 
@@ -204,7 +204,7 @@ export function Navbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+              className="text-gray-600 hover:text-gray-800 hover:bg-gray-100"
               onClick={() => setSearchOpen(true)}
               aria-label="Rechercher (⌘K)"
             >
@@ -221,13 +221,13 @@ export function Navbar() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+                  className="relative text-gray-600 hover:text-gray-800 hover:bg-gray-100"
                   aria-label="Notifications"
                   onClick={() => router.push("/notifications")}
                 >
                   <Bell className="h-4 w-4" />
                   {nbNonLues > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center">
+                    <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-brand-dark flex items-center justify-center">
                       {nbNonLues > 9 ? "9+" : nbNonLues}
                     </span>
                   )}
@@ -242,7 +242,7 @@ export function Navbar() {
                     aria-haspopup="true"
                   >
                     <div className="h-6 w-6 rounded-full bg-brand-gold-tint flex items-center justify-center ring-1 ring-brand-gold/30">
-                      <User className="h-3 w-3 text-brand-gold-deep" />
+                      <User className="h-3 w-3 text-brand-gold-dark" />
                     </div>
                     <span className="hidden sm:block max-w-[100px] truncate text-gray-700 font-medium">
                       {user.prenom || user.email.split("@")[0]}
@@ -259,7 +259,7 @@ export function Navbar() {
                     >
                       {planLabel(user.plan)}
                     </Badge>
-                    <ChevronDown className="h-3 w-3 text-gray-500" />
+                    <ChevronDown className="h-3 w-3 text-gray-600" />
                   </button>
 
                   {userMenuOpen && (
@@ -270,7 +270,7 @@ export function Navbar() {
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <User className="h-4 w-4 text-gray-500" /> Mon profil
+                          <User className="h-4 w-4 text-gray-600" /> Mon profil
                         </Link>
                         <Link
                           href="/statistiques"
@@ -284,9 +284,9 @@ export function Navbar() {
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <Bell className="h-4 w-4 text-gray-500" /> Notifications
+                          <Bell className="h-4 w-4 text-gray-600" /> Notifications
                           {nbNonLues > 0 && (
-                            <span className="ml-auto h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center">
+                            <span className="ml-auto h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-brand-dark flex items-center justify-center">
                               {nbNonLues > 9 ? "9+" : nbNonLues}
                             </span>
                           )}
@@ -294,7 +294,7 @@ export function Navbar() {
                         {["free", "decouverte"].includes(user.plan) && (
                           <Link
                             href="/tarifs"
-                            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-brand-gold-deep font-medium hover:bg-brand-gold-tint/60 transition-colors"
+                            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-brand-gold-dark font-medium hover:bg-brand-gold-tint/60 transition-colors"
                             onClick={() => setUserMenuOpen(false)}
                           >
                             <Zap className="h-4 w-4" /> Passer Standard
@@ -321,7 +321,7 @@ export function Navbar() {
                         <div className="my-1 h-px bg-gray-100" />
                         <button
                           onClick={() => { setUserMenuOpen(false); logout(); }}
-                          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-red-700 hover:bg-red-50 transition-colors"
                         >
                           <LogOut className="h-4 w-4" /> Déconnexion
                         </button>
@@ -342,7 +342,7 @@ export function Navbar() {
                 </Button>
                 <Button
                   size="sm"
-                  className="btn-shimmer active:scale-[0.97] bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 transition-all"
+                  className="btn-shimmer active:scale-[0.97] bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-semibold shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 transition-all"
                   onClick={() => router.push("/inscription")}
                 >
                   Essai gratuit
@@ -394,7 +394,7 @@ export function Navbar() {
               </Button>
               <Button
                 size="sm"
-                className="flex-1 bg-brand-gold hover:bg-brand-gold-deep text-white font-semibold"
+                className="flex-1 bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-semibold"
                 onClick={() => { router.push("/inscription"); setMenuOpen(false); }}
               >
                 Essai gratuit

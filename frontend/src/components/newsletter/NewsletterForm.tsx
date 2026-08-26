@@ -84,7 +84,7 @@ export function NewsletterForm({
     >
       <div className="flex items-center gap-2">
         <Mail
-          className={`h-4 w-4 ${sombre ? "text-amber-300" : "text-brand-gold-deep"}`}
+          className={`h-4 w-4 ${sombre ? "text-amber-300" : "text-brand-gold-dark"}`}
           aria-hidden="true"
         />
         <h2
@@ -112,7 +112,7 @@ export function NewsletterForm({
           className={`w-full rounded-lg border px-3.5 py-2.5 text-sm outline-none transition-colors focus:ring-2 ${
             sombre
               ? "border-white/20 bg-white/10 text-white placeholder:text-white/40 focus:ring-amber-400/50"
-              : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:ring-amber-400"
+              : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-600 focus:ring-amber-400"
           }`}
         />
         <button
@@ -129,12 +129,12 @@ export function NewsletterForm({
       </form>
 
       {etat === "erreur" && (
-        <p className={`mt-2 text-sm ${sombre ? "text-rose-300" : "text-red-600"}`}>
+        <p className={`mt-2 text-sm ${sombre ? "text-rose-300" : "text-red-700"}`}>
           L&apos;envoi n&apos;a pas abouti. Réessayez dans un instant.
         </p>
       )}
 
-      <p className={`mt-3 text-xs leading-relaxed ${sombre ? "text-white/50" : "text-gray-500"}`}>
+      <p className={`mt-3 text-xs leading-relaxed ${sombre ? "text-white/50" : "text-gray-600"}`}>
         {CONSENTEMENT}
       </p>
     </div>

@@ -5,16 +5,16 @@ import type { ReactNode } from "react";
 /* Fil d'Ariane stylé */
 export function Breadcrumbs({ items }: { items: Array<{ label: string; href?: string }> }) {
   return (
-    <nav aria-label="Fil d'Ariane" className="flex flex-wrap items-center gap-1 text-xs text-brand-charcoal/60">
+    <nav aria-label="Fil d'Ariane" className="flex flex-wrap items-center gap-1 text-xs text-brand-charcoal">
       {items.map((it, i) => (
         <span key={i} className="inline-flex items-center gap-1">
           {i > 0 && <ChevronRight className="h-3 w-3 opacity-40" />}
           {it.href ? (
-            <Link href={it.href} className="transition-colors hover:text-brand-gold-deep">
+            <Link href={it.href} className="transition-colors hover:text-brand-gold-dark">
               {it.label}
             </Link>
           ) : (
-            <span className="text-brand-charcoal/80">{it.label}</span>
+            <span className="text-brand-charcoal">{it.label}</span>
           )}
         </span>
       ))}
@@ -110,14 +110,14 @@ export function LinkCard({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          {meta && <div className="mb-1 text-[11px] text-brand-charcoal/60">{meta}</div>}
-          <h3 className="font-display text-base font-semibold text-brand-dark transition-colors group-hover:text-brand-gold-deep">
+          {meta && <div className="mb-1 text-[11px] text-brand-charcoal">{meta}</div>}
+          <h2 className="font-display text-base font-semibold text-brand-dark transition-colors group-hover:text-brand-gold-dark">
             {title}
-          </h3>
-          {desc && <p className="mt-1 text-sm leading-relaxed text-brand-charcoal/80">{desc}</p>}
-          {accent && <div className="mt-2 text-xs font-medium text-brand-gold-deep">{accent}</div>}
+          </h2>
+          {desc && <p className="mt-1 text-sm leading-relaxed text-brand-charcoal">{desc}</p>}
+          {accent && <div className="mt-2 text-xs font-medium text-brand-gold-dark">{accent}</div>}
         </div>
-        <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-brand-gold/50 transition-all group-hover:translate-x-0.5 group-hover:text-brand-gold-deep" />
+        <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-brand-gold-dark/50 transition-all group-hover:translate-x-0.5 group-hover:text-brand-gold-dark" />
       </div>
     </Link>
   );
@@ -140,7 +140,7 @@ export function Callout({
         {href && cta && (
           <Link
             href={href}
-            className="btn-shimmer inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-gradient-gold px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-transform hover:scale-[1.02]"
+            className="btn-shimmer inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-gradient-gold px-4 py-2.5 text-sm font-semibold text-brand-dark shadow-sm transition-transform hover:scale-[1.02]"
           >
             {cta} <ArrowRight className="h-4 w-4" />
           </Link>
@@ -168,7 +168,7 @@ export function DefCard({ term, children }: { term: string; children: ReactNode 
   return (
     <div className="card-hover rounded-xl border border-gray-200 bg-white p-4">
       <h3 className="font-display text-[15px] font-semibold text-brand-dark">{term}</h3>
-      <p className="mt-1 text-sm leading-relaxed text-brand-charcoal/80">{children}</p>
+      <p className="mt-1 text-sm leading-relaxed text-brand-charcoal">{children}</p>
     </div>
   );
 }

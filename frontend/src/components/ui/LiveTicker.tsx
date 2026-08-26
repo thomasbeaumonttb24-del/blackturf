@@ -68,14 +68,14 @@ export function LiveTicker() {
         {items.map((b, i) => (
           <span key={i} className="flex items-center gap-3 px-6 shrink-0">
             <span className="text-amber-700 font-bold text-[10px] tracking-wider font-mono">{hippoCourt(b.hippodrome)}</span>
-            {b.code && <span className="text-gray-500 text-[10px] font-mono">{b.code}</span>}
+            {b.code && <span className="text-gray-600 text-[10px] font-mono">{b.code}</span>}
             <span className="text-gray-800 text-xs font-semibold">{b.type_pari}</span>
             {b.chevaux?.length > 0 && (
-              <span className="text-gray-500 text-[11px] font-mono">
+              <span className="text-gray-600 text-[11px] font-mono">
                 {b.chevaux.length === 1 ? `N°${b.chevaux[0]}` : b.chevaux.join(" · ")}
               </span>
             )}
-            <span className="text-xs text-gray-500 tabular-nums">
+            <span className="text-xs text-gray-600 tabular-nums">
               mise <span className="font-mono">{b.mise.toFixed(0)}€</span>
             </span>
             <span className="text-xs font-bold text-emerald-700 font-mono tabular-nums">+{b.gain.toFixed(0)}€</span>

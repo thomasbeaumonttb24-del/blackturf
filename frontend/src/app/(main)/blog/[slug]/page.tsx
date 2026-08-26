@@ -88,7 +88,7 @@ export default async function BlogArticle({ params }: { params: Promise<{ slug: 
         </article>
 
         <div className="mt-10 border-t border-gray-200 pt-6">
-          <Link href="/blog" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-gold-deep hover:underline">
+          <Link href="/blog" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-gold-dark hover:underline">
             <ArrowLeft className="h-4 w-4" /> Tous les articles
           </Link>
         </div>
@@ -99,11 +99,11 @@ export default async function BlogArticle({ params }: { params: Promise<{ slug: 
             <div className="mt-4 grid gap-4 sm:grid-cols-3">
               {related.map((r) => (
                 <Link key={r.slug} href={`/blog/${r.slug}`} className="glass-card group rounded-2xl p-4">
-                  <div className="text-[11px] text-brand-charcoal/55">{r.readingMinutes} min</div>
-                  <h3 className="mt-1 font-display text-sm font-semibold leading-snug text-brand-dark transition-colors group-hover:text-brand-gold-deep">
+                  <div className="text-[11px] text-brand-charcoal">{r.readingMinutes} min</div>
+                  <h3 className="mt-1 font-display text-sm font-semibold leading-snug text-brand-dark transition-colors group-hover:text-brand-gold-dark">
                     {r.title}
                   </h3>
-                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-gold-deep">
+                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-gold-dark">
                     Lire <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
                   </span>
                 </Link>
