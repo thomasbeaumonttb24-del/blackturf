@@ -128,7 +128,12 @@ export default async function QuinteDuJourPage() {
                     {(course.partants ?? []).map((p) => (
                       <tr
                         key={p.numero}
-                        className={`border-b border-amber-50 ${p.non_partant ? "opacity-40" : ""}`}
+                        // Les non-partants étaient grisés par `opacity-40`, ce qui faisait
+                        // tomber leur texte à 2,09:1 — illisible, et c'était le dernier
+                        // échec de contraste de la page. L'information est déjà portée par
+                        // la mention « (non-partant) » accolée au nom : un fond légèrement
+                        // teinté suffit à les distinguer sans toucher au contraste du texte.
+                        className={`border-b border-amber-50 ${p.non_partant ? "bg-stone-100/70" : ""}`}
                       >
                         <td className="py-2 pr-3 font-semibold tabular-nums">{p.numero}</td>
                         <td className="py-2 pr-3 font-medium text-brand-dark">

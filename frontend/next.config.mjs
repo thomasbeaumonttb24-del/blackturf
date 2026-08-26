@@ -18,10 +18,18 @@ const nextConfig = {
     // <style> inline, pendant que la feuille de 19 ko bloque le rendu ~600 ms sur chaque
     // page en mobile.
     //
-    // `inlineCss` est son équivalent App Router : les <link> deviennent des <style>, ce
-    // qui supprime l'aller-retour réseau bloquant. Compromis assumé et mesuré : le CSS
-    // n'est plus mis en cache séparément, il repart avec chaque réponse HTML.
-    inlineCss: true,
+    // `inlineCss` (l'équivalent App Router) a été ESSAYÉ en production le 26/08 puis
+    // retiré, sur mesure. Il fait bien ce qu'il annonce — plus aucun <link rel=stylesheet>,
+    // un seul <style> — mais il ne rapporte rien ici :
+    //   /tarifs           15,3 ko de HTML + 19,4 ko de CSS gzip en 2 requêtes
+    //                  -> 55,3 ko de HTML gzip en 1 requête, soit +20,6 ko
+    // Le CSS est dupliqué, une fois dans <style> et une fois dans la charge RSC — c'est
+    // une limitation documentée du drapeau. Les +100 ms de transfert à 1,6 Mbit/s annulent
+    // l'aller-retour économisé. Mesuré sur 3 passages PageSpeed par page : accueil est
+    // même passé de 1,1 s à 1,7 s de premier rendu, quinté de 99 à 91-97, la page course
+    // n'a pas bougé. À quoi s'ajoute une contrepartie certaine, elle : le CSS n'est plus
+    // mis en cache entre les pages, alors qu'un visiteur enchaîne programme → course →
+    // course. Ne pas le réactiver sans remesurer.
     //
     // Barils d'icônes et de graphiques : n'embarquer que les symboles réellement
     // importés au lieu du module entier (24 ko de JS inutilisé relevés sur l'accueil).
