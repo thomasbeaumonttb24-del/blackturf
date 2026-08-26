@@ -248,10 +248,10 @@ const DISCIPLINE_MASK: Record<string, { file: string; color: string }> = {
   Plat:     { file: "plat",     color: "#B45309" },
   "Attelé": { file: "attele",   color: "#0E7C66" },
   Monté:    { file: "monte",    color: "#2A5BD7" },
-  Obstacle: { file: "obstacle", color: "#C1502A" },
-  Haies:    { file: "obstacle", color: "#C1502A" },
+  Obstacle: { file: "obstacle", color: "#A8441F" },
+  Haies:    { file: "obstacle", color: "#A8441F" },
   Steeple:  { file: "obstacle", color: "#A32C3E" },
-  Cross:    { file: "obstacle", color: "#C1502A" },
+  Cross:    { file: "obstacle", color: "#A8441F" },
 };
 function discMask(discipline: string): { url: string; color: string } {
   const k = discipline ? discipline.charAt(0).toUpperCase() + discipline.slice(1).toLowerCase() : "";

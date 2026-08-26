@@ -81,7 +81,13 @@ function discMeta(discipline: string): DiscMeta {
   // « Haies ») : sans ce cas, ces courses tombaient sur le repli et s'affichaient
   // avec le cheval de plat en gris, sans la barrière — alors que la fiche course,
   // elle, avait bien son entrée « Obstacle ».
-  if (d.includes("obstacle") || d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v7.png" };
+  // #A8441F et non #C1502A : `color` sert aussi de couleur de TEXTE au nom de la
+  // discipline sur la carte de course, dont le fond est le crème #F5F4EF et non du
+  // blanc pur. #C1502A y donnait 4,28:1 — il passait sur blanc (4,72) et échouait
+  // sur crème. Les quatre autres disciplines tiennent (4,56 à 6,38) ; c'était la
+  // seule sous la barre. Toute nouvelle teinte de discipline doit être vérifiée
+  // contre #F5F4EF, pas contre du blanc.
+  if (d.includes("obstacle") || d.includes("haie")) return { color: "#A8441F", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v7.png" };
   if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v7.png" };
   return DISC_FALLBACK;
 }
