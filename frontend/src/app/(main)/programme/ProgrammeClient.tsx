@@ -424,6 +424,11 @@ export default function ProgrammeClient({
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(() => new Date(`${initialJour}T12:00:00`));
   const [programme, setProgramme] = useState<{ reunions: Reunion[]; nb_courses: number } | null>(initialProgramme);
+  // Jour auquel correspond `programme` (ref, pas état : lu dans l'effet de chargement,
+  // une valeur figée dans la fermeture donnerait un mauvais verdict). Sert à ne pas
+  // laisser les courses d'hier sous la date d'aujourd'hui quand un appel échoue.
+  const programmeJour = useRef<string | null>(initialProgramme ? initialJour : null);
+  const [erreurReseau, setErreurReseau] = useState(false);
   const [loading, setLoading] = useState(!initialProgramme);
   const [discFilter, setDiscFilter] = useState<string>("Tous");
   const [reunionFilter, setReunionFilter] = useState<number | "all">("all");
@@ -465,11 +470,27 @@ export default function ProgrammeClient({
       if (initial) setLoading(true);
       coursesApi
         .programme(dateStr)
-        .then((res) => { if (!cancelled) setProgramme(res.data); })
-        .catch(() => { if (!cancelled && initial) setProgramme({ reunions: [], nb_courses: 0 }); })
+        .then((res) => {
+          if (cancelled) return;
+          setProgramme(res.data);
+          programmeJour.current = dateStr;
+          setErreurReseau(false);
+        })
+        // Un appel qui échoue (429, coupure, 5xx) ne doit PAS effacer un programme
+        // déjà affiché : on vidait l'état, la page annonçait « Aucune course
+        // programmée » et se lisait comme « le PMU n'a rien prévu aujourd'hui »
+        // alors que les 42 courses étaient là, envoyées par le rendu serveur.
+        .catch(() => {
+          if (cancelled) return;
+          setErreurReseau(true);
+          if (programmeJour.current !== dateStr) setProgramme(null);
+        })
         .finally(() => { if (!cancelled && initial) setLoading(false); });
     };
-    load(true);
+    // Le rendu serveur a déjà fourni ce jour-là : pas de requête au montage. C'était
+    // un appel API par visite pour redemander ce qu'on venait de recevoir.
+    if (programmeJour.current === dateStr) setLoading(false);
+    else load(true);
     const iv = isToday ? setInterval(() => load(false), 60000) : null;
     return () => { cancelled = true; if (iv) clearInterval(iv); };
   }, [selectedDate, isToday]);
@@ -701,6 +722,15 @@ export default function ProgrammeClient({
           <div className="flex flex-col items-center justify-center gap-3 py-24">
             <Loader2 className="h-8 w-8 animate-spin text-gray-300" />
             <p className="text-sm text-gray-600">Chargement du programme…</p>
+          </div>
+        ) : !programme && erreurReseau ? (
+          /* Panne de lecture, pas journée vide : le distinguer évite d'annoncer
+             « aucune course » quand c'est l'API qui n'a pas répondu. */
+          <div className="flex flex-col items-center justify-center gap-3 py-24">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50"><Radio className="h-7 w-7 text-amber-600" /></div>
+            <p className="font-semibold text-gray-700">Programme momentanément indisponible</p>
+            <p className="text-sm text-gray-600">La connexion au service a échoué. Nouvelle tentative automatique dans une minute.</p>
+            <button onClick={() => window.location.reload()} className="mt-1 text-sm font-medium text-amber-700 hover:underline">Réessayer maintenant</button>
           </div>
         ) : !programme || programme.nb_courses === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-24">
