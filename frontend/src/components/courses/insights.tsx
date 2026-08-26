@@ -50,7 +50,7 @@ function EnteteCarte({ title, icon: Icon, aside, chevron }: {
       {aside && <div className="ml-auto text-[11px] text-muted-foreground">{aside}</div>}
       {chevron && (
         <ChevronDown
-          className={cn("h-4 w-4 shrink-0 text-stone-400 transition-transform group-open:rotate-180", aside ? "ml-1.5" : "ml-auto")}
+          className={cn("h-4 w-4 shrink-0 text-stone-600 transition-transform group-open:rotate-180", aside ? "ml-1.5" : "ml-auto")}
           aria-hidden="true"
         />
       )}
@@ -235,14 +235,24 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
           return (
             <li key={i} className="rounded-xl border border-stone-100 bg-stone-50/60 px-3 py-2.5">
               <div className="flex items-center gap-2 text-[13px]">
-                <span className={cn("min-w-0 flex-1 truncate", aMene ? "font-semibold text-slate-900" : "text-slate-600")}>
-                  N°{p.a_numero} {p.a_nom}
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
+                  <span className={cn("font-display text-[15px] font-bold tabular-nums", aMene ? "text-slate-900" : "text-stone-700")}>
+                    N°{p.a_numero}
+                  </span>
+                  <span className={cn("truncate text-[12.5px]", aMene ? "font-semibold text-slate-800" : "text-stone-600")}>
+                    {p.a_nom}
+                  </span>
                 </span>
                 <span className="shrink-0 rounded-md bg-white px-2 py-0.5 font-display text-xs font-bold tabular-nums text-slate-900 ring-1 ring-stone-200">
                   {p.a_victoires} – {p.b_victoires}
                 </span>
-                <span className={cn("min-w-0 flex-1 truncate text-right", bMene ? "font-semibold text-slate-900" : "text-slate-600")}>
-                  N°{p.b_numero} {p.b_nom}
+                <span className="flex min-w-0 flex-1 items-baseline justify-end gap-1.5 truncate">
+                  <span className={cn("font-display text-[15px] font-bold tabular-nums", bMene ? "text-slate-900" : "text-stone-700")}>
+                    N°{p.b_numero}
+                  </span>
+                  <span className={cn("truncate text-[12.5px]", bMene ? "font-semibold text-slate-800" : "text-stone-600")}>
+                    {p.b_nom}
+                  </span>
                 </span>
               </div>
               {p.derniere_rencontre && (
@@ -615,8 +625,8 @@ export function ApercuAnalyseCard({
                   )}
                 >
                   <span className="w-5 text-center font-display text-sm font-bold text-stone-600">{p.rang}</span>
-                  <span className="font-mono text-xs text-muted-foreground">N°{p.numero}</span>
-                  <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{p.nom}</span>
+                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900">N°{p.numero}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-stone-600">{p.nom}</span>
                   {place != null && (
                     <span className="rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                       {place === 1 ? "1ᵉʳ" : `${place}ᵉ`} à l&apos;arrivée
@@ -844,9 +854,16 @@ export function PreuvesRecentesCard() {
                   {ton.txt}
                 </span>
 
-                <span className="mt-1.5 truncate text-[13px] font-semibold text-slate-900">
-                  <span className="font-mono text-[11px] font-normal text-muted-foreground">N°{c.gagnant_numero}</span>{" "}
-                  {c.gagnant_nom ? titre(c.gagnant_nom) : "—"}
+                {/* Le NUMÉRO d'abord, en gros : c'est ce qu'on coche sur un ticket
+                    et ce qu'annonce le commentaire de course. Le nom sert à
+                    reconnaître le cheval, pas à jouer. */}
+                <span className="mt-1.5 flex items-baseline gap-1.5 truncate">
+                  <span className="font-display text-[16px] font-bold leading-none text-slate-900">
+                    N°{c.gagnant_numero}
+                  </span>
+                  <span className="truncate text-[12.5px] text-stone-600">
+                    {c.gagnant_nom ? titre(c.gagnant_nom) : "—"}
+                  </span>
                 </span>
 
                 <span className="mt-0.5 text-[11px] text-muted-foreground">

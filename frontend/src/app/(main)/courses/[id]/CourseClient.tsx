@@ -1390,9 +1390,12 @@ function PronosticVerdictSection({ predictions, classement }: {
               </span>
 
               <div className="min-w-0">
-                <span className="truncate text-[13.5px] font-semibold text-slate-900">
-                  <span className="font-mono text-[11px] font-normal text-muted-foreground">N°{p.numero}</span>{" "}
-                  {p.nom_cheval}
+                {/* Le NUMÉRO domine le nom : c'est lui qu'on coche sur un ticket,
+                    qu'annonce le commentaire de course et qu'on retrouve dans
+                    l'arrivée officielle. */}
+                <span className="flex items-baseline gap-1.5 truncate">
+                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900">N°{p.numero}</span>
+                  <span className="truncate text-[13px] text-stone-600">{p.nom_cheval}</span>
                 </span>
                 <div className="mt-1 flex items-center gap-2 sm:hidden">
                   <div className="h-1.5 w-16 overflow-hidden rounded-full bg-stone-100">

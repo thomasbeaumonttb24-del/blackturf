@@ -77,11 +77,29 @@ async def rate_limit_predictions(
     await _check(user, "predictions", 30, 500, redis)
 
 
+# Plafond par IP des endpoints publics, par minute.
+#
+# Il valait 60. Deux situations réelles le faisaient tomber sur des lectures
+# parfaitement normales :
+#   - le PARTAGE D'IP. Derrière une sortie d'entreprise ou un opérateur mobile,
+#     tous les lecteurs additionnent leurs requêtes dans le même seau ;
+#   - le RENDU SERVEUR. `NEXT_PUBLIC_API_URL` pointe sur le domaine public, donc
+#     les fetch SSR du conteneur Next repassent par nginx, qui pose un `X-Real-IP`
+#     unique — celui du conteneur. Toutes les pages rendues côté serveur, pour
+#     tous les visiteurs et tous les robots, partagent alors UNE seule IP.
+#
+# Ces endpoints sont en lecture seule et servis depuis un cache Redis (120 s à
+# 10 min) : un appel de plus coûte presque rien, alors qu'un 429 sur une page
+# publique se lit comme un site en panne. Le garde-fou reste là pour l'aspiration
+# massive, pas pour la lecture.
+PUBLIC_PAR_MINUTE = 240
+
+
 async def rate_limit_public(
     request: Request,
     redis: aioredis.Redis = Depends(get_redis),
 ) -> None:
-    """Rate limit by IP for public endpoints — 60 req/min."""
+    """Rate limit par IP des endpoints publics (cf. PUBLIC_PAR_MINUTE)."""
     from api.middleware.throttle import _client_ip
     ip = _client_ip(request)
     key = f"rl:public:min:{ip}"
@@ -89,7 +107,7 @@ async def rate_limit_public(
     pipe.incr(key)
     pipe.expire(key, 60)
     results = await pipe.execute()
-    if results[0] > 60:
+    if results[0] > PUBLIC_PAR_MINUTE:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Trop de requêtes — réessayez dans 1 minute",
