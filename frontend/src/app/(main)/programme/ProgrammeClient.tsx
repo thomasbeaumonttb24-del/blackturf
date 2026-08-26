@@ -9,10 +9,10 @@
  *
  * ⚠ ASSETS À COPIER dans le dossier /public :
  *   public/img/logo-horse.png
- *   public/img/disciplines/attele-v5.png
- *   public/img/disciplines/plat-v5.png
- *   public/img/disciplines/monte-v5.png
- *   public/img/disciplines/obstacle-v5.png
+ *   public/img/disciplines/attele-v6.png
+ *   public/img/disciplines/plat-v6.png
+ *   public/img/disciplines/monte-v6.png
+ *   public/img/disciplines/obstacle-v6.png
  * (fournis dans ce même paquet, sous /public)
  */
 
@@ -66,15 +66,15 @@ const enjeux = (v: number | null) => {
 
 /* ─── Palette des disciplines (couleur + silhouette détourée) ── */
 type DiscMeta = { color: string; bg: string; ring: string; mask: string };
-const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v5.png" };
+const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v6.png" };
 
 function discMeta(discipline: string): DiscMeta {
   const d = (discipline || "").toLowerCase();
-  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v5.png" };
-  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v5.png" };
-  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v5.png" };
-  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v5.png" };
-  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v5.png" };
+  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v6.png" };
+  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v6.png" };
+  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v6.png" };
+  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v6.png" };
+  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v6.png" };
   return DISC_FALLBACK;
 }
 
@@ -334,11 +334,12 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
         </span>
         {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-700">{countdown}</span>}
       </div>
-      <span className="hidden h-[42px] w-[50px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: isDone ? "#EFEDE4" : m.bg, border: `1px solid ${isDone ? "#E2DFD3" : m.ring}` }}>
-        {/* course finie : gris assez sombre pour rester lisible (3,8:1 sur #EFEDE4).
-            À #B7B2A0 le contraste tombait à 1,8:1 : jambes et driver disparaissaient
-            dans le fond, le cheval paraissait amputé. */}
-        <DiscIcon discipline={course.discipline} color={isDone ? "#7D7768" : undefined} />
+      {/* La pastille garde la couleur de la discipline même course finie : en gris
+          délavé (1,8:1 de contraste) jambes et driver se noyaient dans le fond et
+          le cheval paraissait amputé. L'heure barrée et le badge « Terminée »
+          suffisent à marquer le passé. */}
+      <span className="hidden h-[42px] w-[50px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: m.bg, border: `1px solid ${m.ring}` }}>
+        <DiscIcon discipline={course.discipline} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -369,7 +370,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
           ) : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
-          <span className="font-semibold" style={{ color: isDone ? "#4B5563" : m.color }}>{titleCase(course.discipline)}</span>
+          <span className="font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
           <span className="text-gray-300">·</span><span>{course.distance} m</span>
           <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
           {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-600 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
