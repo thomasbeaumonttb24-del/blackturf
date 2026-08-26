@@ -182,7 +182,7 @@ function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) 
             <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-white/70" : isToday ? "text-amber-700" : "text-gray-600")}>
               {topLabel}
             </span>
-            <span className="text-xl font-extrabold tabular-nums leading-none mt-1.5" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{format(d, "d")}</span>
+            <span className="text-xl font-extrabold tabular-nums leading-none mt-1.5" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{format(d, "d")}</span>
             <span className={cn("text-[9px] uppercase tracking-wide leading-none mt-1", isSel ? "text-white/50" : "text-gray-600")}>
               {format(d, "MMM", { locale: fr })}
             </span>
@@ -228,10 +228,10 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className="rounded-md px-2 py-0.5 text-[12px] font-bold tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#0F1520", background: "#E2E8F0" }}>
+            <span className="rounded-md px-2 py-0.5 text-[12px] font-bold tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif", color: "#0F1520", background: "#E2E8F0" }}>
               R{reunionNum}C{course.numero}
             </span>
-            <span className="text-lg sm:text-[22px] font-bold text-white tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{course.hippodrome_nom}</span>
+            <span className="text-lg sm:text-[22px] font-bold text-white tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{course.hippodrome_nom}</span>
           </div>
           {course.nom && <div className="mt-1.5 text-sm font-medium text-slate-300">{course.nom}</div>}
           <div className="mt-4 flex flex-wrap gap-2">
@@ -243,7 +243,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
         <div className="flex w-full flex-row items-end justify-between gap-3.5 border-t border-white/10 pt-4 sm:w-auto sm:flex-col sm:items-end sm:border-t-0 sm:border-l sm:border-white/10 sm:pt-0 sm:pl-6">
           <div className="text-left sm:text-right">
             <div className="text-[10px] font-bold uppercase tracking-[.16em] text-slate-600">Départ</div>
-            <div className="mt-1 text-[26px] sm:text-[30px] font-bold leading-none tracking-tight text-white tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{formatTime(course.date_heure)}</div>
+            <div className="mt-1 text-[26px] sm:text-[30px] font-bold leading-none tracking-tight text-white tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{formatTime(course.date_heure)}</div>
             {countdown && (
               <div className="mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>{countdown}</div>
             )}
@@ -337,7 +337,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
     >
       <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : !isDone && course.est_quinte ? "#F59E0B" : "transparent" }} />
       <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
-        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-700" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-700" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
           {formatTime(course.date_heure)}
         </span>
         {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-700">{countdown}</span>}
@@ -351,7 +351,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+          <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
             R{reunionNum}C{course.numero}
           </span>
           <span className={cn("max-w-full truncate text-sm font-semibold sm:max-w-[230px]", isDone ? "text-gray-600" : "text-gray-800")}>
@@ -611,7 +611,7 @@ export default function ProgrammeClient({
                 </button>
               )}
             </div>
-            <h1 className="text-[27px] sm:text-[38px] font-bold leading-[1.08] sm:leading-[1.04] tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            <h1 className="text-[27px] sm:text-[38px] font-bold leading-[1.08] sm:leading-[1.04] tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
               <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>{dayName}</span>
               <span className="text-gray-800"> {restDate}</span>
             </h1>
@@ -620,7 +620,7 @@ export default function ProgrammeClient({
               <div className="mt-5 flex flex-wrap gap-2.5">
                 {[{ n: programme.nb_courses, l: "Courses" }, { n: programme.reunions.length, l: "Réunions" }].map((s) => (
                   <div key={s.l} className="min-w-[118px] flex-1 rounded-2xl px-4 py-3.5" style={{ background: "rgba(255,255,255,.72)", backdropFilter: "blur(4px)", border: "1px solid rgba(0,0,0,.06)" }}>
-                    <div className="text-[29px] font-bold leading-none text-gray-900 tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{s.n}</div>
+                    <div className="text-[29px] font-bold leading-none text-gray-900 tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{s.n}</div>
                     <div className="mt-1.5 text-xs font-medium text-gray-600">{s.l}</div>
                   </div>
                 ))}
@@ -677,7 +677,7 @@ export default function ProgrammeClient({
                   onClick={() => setReunionFilter("all")}
                   className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
                     reunionFilter === "all" ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")}
-                  style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+                  style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}
                 >
                   Toutes
                 </button>
@@ -690,7 +690,7 @@ export default function ProgrammeClient({
                       className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
                         active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")}
                     >
-                      <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700 }}>R{r.numero}</span>
+                      <span style={{ fontFamily: "var(--font-space-grotesk), sans-serif", fontWeight: 700 }}>R{r.numero}</span>
                       {/* Pas d'`opacity-75` ici : le gris du bouton passé à 75 % donne
                           #78808A sur blanc, soit 3,99:1 — dernier échec de contraste du
                           site. La hiérarchie visuelle tient déjà sans lui : « R1 » est en
@@ -763,7 +763,7 @@ export default function ProgrammeClient({
                   <div className="mb-3.5 flex items-center gap-3.5">
                     <div
                       className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
-                      style={{ fontFamily: "'Space Grotesk', sans-serif", background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 4px 12px -4px rgba(217,119,6,.4)" }}
+                      style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 4px 12px -4px rgba(217,119,6,.4)" }}
                     >
                       {hour}
                     </div>

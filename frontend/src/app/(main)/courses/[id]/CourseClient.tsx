@@ -234,7 +234,7 @@ const CX = {
   surf1: "#FFFFFF", surf2: "#FAF7EF", surf3: "#F7F4EC", surf4: "#F3F1EA", surf5: "#F1EEE6",
   bd1: "#ECE7DC", bd2: "#EEE9DE", bd3: "#E7E1D3", bd4: "#F3EFE6",
   slate: "#475569",
-  sg: "'Space Grotesk',sans-serif",
+  sg: "var(--font-space-grotesk), sans-serif",
 } as const;
 
 // Fond de page (design handoff).
