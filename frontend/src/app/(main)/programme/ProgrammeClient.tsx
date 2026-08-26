@@ -66,7 +66,11 @@ const enjeux = (v: number | null) => {
 
 /* ─── Palette des disciplines (couleur + silhouette détourée) ── */
 type DiscMeta = { color: string; bg: string; ring: string; mask: string };
-const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v7.png" };
+// `color` sert aussi de couleur de TEXTE au nom de la discipline sur la carte de course.
+// #6B7280 y donnait 4,38:1 sur le fond creme #F5F4EF — le dernier echec de contraste du
+// site. #4B5563 passe a 6,86:1. Les cinq disciplines connues etaient deja assez foncees ;
+// seul ce repli, servi quand la discipline n'est pas reconnue, echouait.
+const DISC_FALLBACK: DiscMeta = { color: "#4B5563", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v7.png" };
 
 function discMeta(discipline: string): DiscMeta {
   const d = (discipline || "").toLowerCase();
