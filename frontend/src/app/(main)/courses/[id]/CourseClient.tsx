@@ -256,7 +256,7 @@ const DISCIPLINE_MASK: Record<string, { file: string; color: string }> = {
 function discMask(discipline: string): { url: string; color: string } {
   const k = discipline ? discipline.charAt(0).toUpperCase() + discipline.slice(1).toLowerCase() : "";
   const m = DISCIPLINE_MASK[k] ?? { file: "attele", color: "#0E7C66" };
-  return { url: `/img/disciplines/${m.file}-v3.png`, color: m.color };
+  return { url: `/img/disciplines/${m.file}-v4.png`, color: m.color };
 }
 
 // Feuille de style injectée (keyframes + responsive du .dc.html).
@@ -2843,7 +2843,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13.5px] text-slate-500">
               <span className="inline-flex items-center gap-2">
                 <span
-                  className="inline-block h-[18px] w-[32px]"
+                  className="inline-block h-[20px] w-[34px]"
                   style={{ background: disc.color, WebkitMask: `url(${disc.url}) center/contain no-repeat`, mask: `url(${disc.url}) center/contain no-repeat` }}
                   aria-hidden="true"
                 />

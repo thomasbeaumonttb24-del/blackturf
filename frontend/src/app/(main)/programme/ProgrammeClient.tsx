@@ -9,10 +9,10 @@
  *
  * ⚠ ASSETS À COPIER dans le dossier /public :
  *   public/img/logo-horse.png
- *   public/img/disciplines/attele-v3.png
- *   public/img/disciplines/plat-v3.png
- *   public/img/disciplines/monte-v3.png
- *   public/img/disciplines/obstacle-v3.png
+ *   public/img/disciplines/attele-v4.png
+ *   public/img/disciplines/plat-v4.png
+ *   public/img/disciplines/monte-v4.png
+ *   public/img/disciplines/obstacle-v4.png
  * (fournis dans ce même paquet, sous /public)
  */
 
@@ -66,20 +66,20 @@ const enjeux = (v: number | null) => {
 
 /* ─── Palette des disciplines (couleur + silhouette détourée) ── */
 type DiscMeta = { color: string; bg: string; ring: string; mask: string };
-const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v3.png" };
+const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v4.png" };
 
 function discMeta(discipline: string): DiscMeta {
   const d = (discipline || "").toLowerCase();
-  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v3.png" };
-  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v3.png" };
-  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v3.png" };
-  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v3.png" };
-  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v3.png" };
+  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v4.png" };
+  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v4.png" };
+  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v4.png" };
+  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v4.png" };
+  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v4.png" };
   return DISC_FALLBACK;
 }
 
 /* Icône discipline : silhouette détourée, teintée (fond transparent) */
-function DiscIcon({ discipline, w = 40, h = 28, color }: { discipline: string; w?: number; h?: number; color?: string }) {
+function DiscIcon({ discipline, w = 44, h = 28, color }: { discipline: string; w?: number; h?: number; color?: string }) {
   const m = discMeta(discipline);
   const url = `/img/disciplines/${m.mask}`;
   return (
@@ -690,7 +690,7 @@ export default function ProgrammeClient({
                     className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
                       active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900")}
                   >
-                    {d !== "Tous" && <DiscIcon discipline={d} w={30} h={20} color={active ? "#FFFFFF" : discMeta(d).color} />}
+                    {d !== "Tous" && <DiscIcon discipline={d} w={32} h={22} color={active ? "#FFFFFF" : discMeta(d).color} />}
                     {titleCase(d)}
                     <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>{count}</span>
                   </button>

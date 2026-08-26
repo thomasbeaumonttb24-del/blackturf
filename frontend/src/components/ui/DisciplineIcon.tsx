@@ -30,13 +30,13 @@ export function disciplineMeta(d: string) {
 
 /* Silhouettes détourées par discipline (masques transparents). */
 const DISCIPLINE_IMG: Record<string, string> = {
-  Plat:      "/img/disciplines/plat-v3.png",
-  "Attelé":  "/img/disciplines/attele-v3.png",
-  Monté:     "/img/disciplines/monte-v3.png",
-  Obstacle:  "/img/disciplines/obstacle-v3.png",
-  Haies:     "/img/disciplines/obstacle-v3.png",
-  Steeple:   "/img/disciplines/obstacle-v3.png",
-  Cross:     "/img/disciplines/obstacle-v3.png",
+  Plat:      "/img/disciplines/plat-v4.png",
+  "Attelé":  "/img/disciplines/attele-v4.png",
+  Monté:     "/img/disciplines/monte-v4.png",
+  Obstacle:  "/img/disciplines/obstacle-v4.png",
+  Haies:     "/img/disciplines/obstacle-v4.png",
+  Steeple:   "/img/disciplines/obstacle-v4.png",
+  Cross:     "/img/disciplines/obstacle-v4.png",
 };
 
 /** Silhouette teintée : le PNG sert de masque, la couleur vient de la discipline. */
