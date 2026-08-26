@@ -151,11 +151,19 @@ export function disciplineLabel(d?: string | null): string {
 
 export function titleCase(s?: string | null): string {
   if (!s) return "";
-  return s
-    .toLowerCase()
-    .replace(/(^|[\s'\-])([a-zà-ÿ])/g, (_m, p: string, c: string) => p + c.toUpperCase())
-    .replace(/^Hippodrome (De |Du |D'|Des |La |Le )/i, "")
-    .trim();
+  return (
+    s
+      .toLowerCase()
+      .replace(/(^|[\s'\-])([a-zà-ÿ])/g, (_m, p: string, c: string) => p + c.toUpperCase())
+      // Le préfixe administratif ne se retirait que suivi d'une particule : « Hippodrome
+      // De Vincennes » devenait « Vincennes », mais « Hippodrome Gelsenkirchen All »
+      // restait entier — et se retrouvait tel quel dans les titres et les descriptions
+      // envoyés à Google. Six hippodromes sur les soixante-quinze vus en trente jours
+      // étaient dans ce cas, tous étrangers. La particule est désormais facultative, et
+      // la forme abrégée « HIPPO DE » que porte le PMU est reconnue elle aussi.
+      .replace(/^Hippo(?:drome)? (?:De |Du |D'|Des |La |Le )?/i, "")
+      .trim()
+  );
 }
 
 /* ───────────────────────── Jour « courses » (Europe/Paris) ─────────────────────────
