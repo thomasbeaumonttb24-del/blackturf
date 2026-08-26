@@ -32,7 +32,14 @@ async def rate_limit_auth(
     try:
         pipe = redis.pipeline()
         pipe.incr(key)
-        pipe.expire(key, 300)
+        # TTL posé UNIQUEMENT à la création : réarmé à chaque tentative, il donnait
+        # une fenêtre GLISSANTE, et un utilisateur légitime qui se trompe puis
+        # réessaie toutes les minutes restait bloqué INDÉFINIMENT — chaque essai
+        # repoussait sa propre libération. La protection ne faiblit pas pour autant :
+        # 10 tentatives par tranche de 5 minutes plafonnent un attaquant à 120
+        # essais/heure, et le compteur repart de zéro seulement une fois la fenêtre
+        # réellement écoulée.
+        pipe.expire(key, 300, nx=True)
         n = (await pipe.execute())[0]
     except Exception:
         return  # fail-open : panne Redis ne doit pas verrouiller l'auth

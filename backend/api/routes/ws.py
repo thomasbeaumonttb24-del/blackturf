@@ -30,6 +30,22 @@ log = structlog.get_logger()
 router = APIRouter()
 
 
+def _est_deconnexion(err: Exception) -> bool:
+    """Cette exception traduit-elle une simple déconnexion du client ?
+
+    Starlette lève `RuntimeError("WebSocket is not connected. Need to call
+    'accept' first.")` quand on écrit sur une socket que le navigateur vient de
+    fermer — un onglet qu'on quitte, un téléphone qui se verrouille. C'est le
+    cours normal des choses, pas une panne : journalisé en `error`, ça remplit la
+    supervision de faux positifs et masque les vraies erreurs.
+    """
+    texte = str(err).lower()
+    return isinstance(err, (WebSocketDisconnect, ConnectionError)) or (
+        isinstance(err, RuntimeError)
+        and ("not connected" in texte or "websocket.close" in texte or "disconnect" in texte)
+    )
+
+
 async def fermer_ws(websocket: WebSocket, code: int = 1000) -> None:
     """Ferme un WebSocket AU PLUS UNE FOIS.
 
@@ -240,7 +256,10 @@ async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query
     except WebSocketDisconnect:
         log.info("ws.cotes.disconnect", course_id=course_id)
     except Exception as e:
-        log.error("ws.cotes.error", error=str(e))
+        if _est_deconnexion(e):
+            log.info("ws.cotes.disconnect", course_id=course_id)
+        else:
+            log.error("ws.cotes.error", error=str(e))
         try:
             await fermer_ws(websocket)
         except Exception:
@@ -443,7 +462,10 @@ async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
     except WebSocketDisconnect:
         log.info("ws.alertes.disconnect", user_id=user_id)
     except Exception as e:
-        log.error("ws.alertes.error", error=str(e))
+        if _est_deconnexion(e):
+            log.info("ws.alertes.disconnect", user_id=user_id)
+        else:
+            log.error("ws.alertes.error", error=str(e))
     finally:
         for task in [listen_task, ping_task]:
             if task and not task.done():

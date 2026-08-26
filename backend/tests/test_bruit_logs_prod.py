@@ -10,7 +10,7 @@ import asyncio
 import pytest
 from starlette.websockets import WebSocketState
 
-from api.routes.ws import fermer_ws
+from api.routes.ws import fermer_ws, _est_deconnexion
 from scraper.sources.pmu import PmuScraper
 
 
@@ -110,3 +110,20 @@ async def test_pmu_json_valide_toujours_servi(monkeypatch):
     monkeypatch.setattr(s._cb, "record_success", lambda *a, **k: None)
 
     assert await s._fetch_json("https://exemple/programme") == {"a": 1}
+
+
+def test_deconnexion_client_nest_pas_une_erreur():
+    """Écrire sur une socket que le navigateur vient de fermer — onglet quitté,
+    téléphone verrouillé — remonte un `RuntimeError` de Starlette. Journalisé en
+    `error`, il remplissait la supervision de faux positifs (constaté en prod le
+    26/08/2026 : `ws.alertes.error … Need to call "accept" first`)."""
+    from fastapi import WebSocketDisconnect
+
+    assert _est_deconnexion(RuntimeError('WebSocket is not connected. Need to call "accept" first.'))
+    assert _est_deconnexion(RuntimeError("Unexpected ASGI message 'websocket.close'"))
+    assert _est_deconnexion(WebSocketDisconnect(code=1001))
+    assert _est_deconnexion(ConnectionResetError("peer reset"))
+
+    # …mais une vraie panne doit rester une erreur.
+    assert not _est_deconnexion(ValueError("payload illisible"))
+    assert not _est_deconnexion(RuntimeError("redis indisponible"))

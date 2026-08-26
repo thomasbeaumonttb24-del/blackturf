@@ -38,9 +38,12 @@ async def _check(
 
     pipe = redis.pipeline()
     pipe.incr(key_min)
-    pipe.expire(key_min, 60)
+    # TTL posé UNIQUEMENT à la création (cf. rate_limit_public) : sinon la fenêtre
+    # glisse et le quota JOURNALIER ne se réinitialise jamais pour un compte qui
+    # appelle en continu — 24 h après son premier appel, il est toujours bloqué.
+    pipe.expire(key_min, 60, nx=True)
     pipe.incr(key_day)
-    pipe.expire(key_day, 86400)
+    pipe.expire(key_day, 86400, nx=True)
     results = await pipe.execute()
 
     count_min = results[0]
@@ -105,7 +108,14 @@ async def rate_limit_public(
     key = f"rl:public:min:{ip}"
     pipe = redis.pipeline()
     pipe.incr(key)
-    pipe.expire(key, 60)
+    # `nx=True` : on ne pose le TTL QU'À LA CRÉATION du compteur. Le réarmer à
+    # chaque appel faisait une fenêtre GLISSANTE — le compteur ne retombait
+    # jamais à zéro tant que l'IP continuait d'appeler, si bien qu'une fois le
+    # plafond franchi elle restait bloquée indéfiniment, alors même que son débit
+    # était redescendu. Un navigateur qui recharge la page entretenait donc son
+    # propre 429. Constaté le 26/08/2026, et vrai des trois compteurs de ce
+    # module. Redis 7 requis pour EXPIRE NX (ici 7.4).
+    pipe.expire(key, 60, nx=True)
     results = await pipe.execute()
     if results[0] > PUBLIC_PAR_MINUTE:
         raise HTTPException(

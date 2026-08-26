@@ -44,7 +44,7 @@ async def test_429_au_dela_du_plafond(monkeypatch):
         def incr(self, _k):
             return self
 
-        def expire(self, _k, _s):
+        def expire(self, _k, _s, **_kw):
             return self
 
         async def execute(self):
@@ -69,3 +69,42 @@ async def test_429_au_dela_du_plafond(monkeypatch):
         await rate_limit.rate_limit_public(_Request(), _Redis(rate_limit.PUBLIC_PAR_MINUTE + 1))
     assert exc.value.status_code == 429
     assert exc.value.headers.get("Retry-After") == "60"
+
+
+@pytest.mark.asyncio
+async def test_fenetre_fixe_le_ttl_nest_pose_qu_a_la_creation():
+    """Le TTL doit être posé avec `nx=True`.
+
+    Réarmé à chaque appel, il faisait une fenêtre GLISSANTE : le compteur ne
+    retombait jamais à zéro tant que l'IP appelait, donc une fois le plafond
+    franchi elle restait bloquée indéfiniment — un simple navigateur qui recharge
+    entretenait son propre 429. C'est ce qui rendait les 429 du 26/08/2026
+    permanents au lieu de durer une minute."""
+    from api.middleware import rate_limit as rl
+
+    appels = []
+
+    class _Pipeline:
+        def incr(self, _k):
+            return self
+
+        def expire(self, _k, ttl, **kwargs):
+            appels.append((ttl, kwargs))
+            return self
+
+        async def execute(self):
+            return [1, True]
+
+    class _Redis:
+        def pipeline(self):
+            return _Pipeline()
+
+    class _Request:
+        client = type("C", (), {"host": "203.0.113.10"})()
+        headers: dict = {}
+
+    await rl.rate_limit_public(_Request(), _Redis())
+
+    assert appels, "aucun TTL posé"
+    for ttl, kwargs in appels:
+        assert kwargs.get("nx") is True, f"TTL {ttl}s réarmé à chaque appel → fenêtre glissante"
