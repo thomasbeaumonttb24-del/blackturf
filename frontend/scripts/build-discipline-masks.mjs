@@ -1,114 +1,72 @@
 /**
- * Fabrique les masques de discipline utilisés par les icônes (`*-v4.png`).
+ * Fabrique les masques de discipline utilisés par les icônes (`*-v5.png`).
  *
- * Pourquoi : les originaux `-v2` sont des silhouettes photo-réalistes. Affichées
- * à 22-30 px de haut, les jambes et la tête tombent sous le pixel : le navigateur
- * les rééchantillonne en gris pâle et l'œil lit « cheval rogné ».
- * Trois passes corrigent ça, à la source :
- *   1. décors isolés (drapeau, piquet) supprimés — ils volaient de la place au cheval ;
- *   2. dilatation de l'alpha (~0,5 % de la largeur) : jambes, rênes et brancards
- *      épaissis pour survivre à la réduction ;
- *   3. recadrage au plus juste, pour que `mask-size: contain` remplisse la boîte.
+ * Trois passes, toutes motivées par un défaut vu à l'écran :
+ *   1. décors isolés supprimés (drapeau d'obstacle) — ils volaient la place au cheval ;
+ *   2. dilatation de l'alpha par un noyau EN DISQUE : à 22-30 px de haut, jambes et
+ *      rênes tombent sous le pixel et se délavent. Un noyau carré (essai precedent)
+ *      aplatit sabots et naseaux en moignons : le cheval parait scie. Le disque
+ *      epaissit sans casser les arrondis ;
+ *   3. marge transparente de 7 % conservee autour du sujet : sans elle, les sabots
+ *      touchent le bord de la zone peinte par `mask-size: contain` et l'oeil lit
+ *      « cheval coupe », meme quand l'image est entiere.
  *
  *   node scripts/build-discipline-masks.mjs
  */
 import sharp from 'sharp';
-
 const TH = 8;
+const R = Number(process.env.R || 2);
 
-async function alphaOf(path) {
-  const { data, info } = await sharp(path).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+function disk(r) {
+  const offs = [];
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r * r + 0.25) offs.push([dx, dy]);
+  return offs;
+}
+
+for (const name of ['attele', 'plat', 'monte', 'obstacle']) {
+  const { data, info } = await sharp(`public/img/disciplines/${name}-v2.png`).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: h, channels: c } = info;
   const a = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) a[i] = data[i * c + 3];
-  return { a, w, h };
-}
 
-function bbox(a, w, h) {
-  let minX = w, minY = h, maxX = -1, maxY = -1;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (a[y * w + x] > TH) {
-    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
-  }
-  return { minX, minY, maxX, maxY };
-}
-
-/* Composantes connexes (4-voisins) : sert à jeter les décors isolés (drapeau, piquet). */
-function components(a, w, h) {
-  const lab = new Int32Array(w * h).fill(-1);
-  const comps = [];
-  const stack = [];
+  // décors isolés (drapeau d'obstacle, piquet) : composantes < 8 % de la principale
+  const lab = new Int32Array(w * h).fill(-1), comps = [], st = [];
   for (let i = 0; i < w * h; i++) {
     if (a[i] <= TH || lab[i] !== -1) continue;
-    const id = comps.length; let n = 0;
-    stack.push(i); lab[i] = id;
-    while (stack.length) {
-      const p = stack.pop(); n++;
-      const x = p % w, y = (p - x) / w;
-      const nb = [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1];
-      for (const q of nb) if (q >= 0 && lab[q] === -1 && a[q] > TH) { lab[q] = id; stack.push(q); }
-    }
+    const id = comps.length; let n = 0; st.push(i); lab[i] = id;
+    while (st.length) { const p = st.pop(); n++; const x = p % w, y = (p - x) / w;
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1])
+        if (q >= 0 && lab[q] === -1 && a[q] > TH) { lab[q] = id; st.push(q); } }
     comps.push({ id, n });
   }
-  return { lab, comps };
-}
-
-/* Dilatation (max-filter séparable) : épaissit jambes, rênes et brancards pour qu'ils
-   survivent au rééchantillonnage du navigateur à 20-30 px. */
-function dilate(a, w, h, r) {
-  if (r <= 0) return a;
-  const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    let m = 0;
-    for (let d = -r; d <= r; d++) { const xx = x + d; if (xx >= 0 && xx < w) { const v = a[y * w + xx]; if (v > m) m = v; } }
-    tmp[y * w + x] = m;
-  }
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    let m = 0;
-    for (let d = -r; d <= r; d++) { const yy = y + d; if (yy >= 0 && yy < h) { const v = tmp[yy * w + x]; if (v > m) m = v; } }
-    out[y * w + x] = m;
-  }
-  return out;
-}
-
-const JOBS = [
-  { src: 'attele', dropGround: false },
-  { src: 'plat', dropGround: false },
-  { src: 'monte', dropGround: false },
-  { src: 'obstacle', dropGround: false },
-];
-
-for (const job of JOBS) {
-  const src = `public/img/disciplines/${job.src}-v2.png`;
-  let { a, w, h } = await alphaOf(src);
-
-  if (job.dropGround) {
-    // bandes du bas couvrant > 45 % de la largeur = herbe//obstacle au sol → supprimées
-    for (let y = h - 1; y > h * 0.5; y--) {
-      let n = 0; for (let x = 0; x < w; x++) if (a[y * w + x] > TH) n++;
-      if (n > w * 0.45) for (let x = 0; x < w; x++) a[y * w + x] = 0;
-    }
-  }
-
-  // jette les petits décors détachés (drapeau, piquet) : < 8 % de la plus grosse pièce
-  const { lab, comps } = components(a, w, h);
-  const max = comps.reduce((m, c) => Math.max(m, c.n), 0);
-  const keep = new Set(comps.filter((c) => c.n >= max * 0.08).map((c) => c.id));
+  const max = comps.reduce((m, x) => Math.max(m, x.n), 0);
+  const keep = new Set(comps.filter((x) => x.n >= max * 0.08).map((x) => x.id));
   for (let i = 0; i < w * h; i++) if (lab[i] >= 0 && !keep.has(lab[i])) a[i] = 0;
 
-  const r = Math.max(1, Math.round(w * 0.005));
-  a = dilate(a, w, h, r);
+  // dilatation DISQUE : un noyau carré aplatirait sabots, naseaux et roue en moignons
+  const offs = disk(R);
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let m = 0;
+    for (const [dx, dy] of offs) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+      const v = a[yy * w + xx]; if (v > m) m = v;
+    }
+    out[y * w + x] = m;
+  }
 
-  const b = bbox(a, w, h);
-  const pad = 2;
-  const left = Math.max(0, b.minX - pad), top = Math.max(0, b.minY - pad);
-  const width = Math.min(w - left, b.maxX - b.minX + 1 + 2 * pad);
-  const height = Math.min(h - top, b.maxY - b.minY + 1 + 2 * pad);
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (out[y * w + x] > TH) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const pad = Math.round((maxY - minY + 1) * (Number(process.env.MARGE)||0.07));
+  const left = Math.max(0, minX - pad), top = Math.max(0, minY - pad);
+  const width = Math.min(w - left, maxX - minX + 1 + 2 * pad), height = Math.min(h - top, maxY - minY + 1 + 2 * pad);
 
   const rgba = Buffer.alloc(w * h * 4);
-  for (let i = 0; i < w * h; i++) { rgba[i * 4] = 0; rgba[i * 4 + 1] = 0; rgba[i * 4 + 2] = 0; rgba[i * 4 + 3] = a[i]; }
-  await sharp(rgba, { raw: { width: w, height: h, channels: 4 } })
-    .extract({ left, top, width, height })
-    .png({ compressionLevel: 9 })
-    .toFile(`public/img/disciplines/${job.src}-v4.png`);
-  console.log(job.src, `dilate=${r}px`, `${width}x${height}`, `aspect=${(width / height).toFixed(2)}`);
+  for (let i = 0; i < w * h; i++) rgba[i * 4 + 3] = out[i];
+  const dst = process.env.OUT ? `${process.env.OUT}/${name}-v5.png` : `public/img/disciplines/${name}-v5.png`;
+  await sharp(rgba, { raw: { width: w, height: h, channels: 4 } }).extract({ left, top, width, height }).png({ compressionLevel: 9 }).toFile(dst);
+  console.log(name, `disque r=${R}`, `${width}x${height}`);
 }
