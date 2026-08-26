@@ -13,23 +13,34 @@ import { useAlertesStream } from "@/hooks/useWebSocket";
 import { notificationsApi } from "@/lib/api";
 import { planLabel, cn } from "@/lib/utils";
 
-const NAV_LINKS_PUBLIC = [
+/**
+ * `prive` → `rel="nofollow"`, même raison qu'au pied de page : ces destinations sont
+ * soit interdites d'exploration par robots.txt (`/assistant`, `/bankroll`), soit en
+ * `noindex` (`/value-bets`). Les lier depuis la barre de navigation de CHAQUE page, sans
+ * marque, revient à insister auprès de Google sur des adresses qu'il n'a pas le droit de
+ * lire — c'est ainsi qu'une URL finit « indexée malgré le blocage », sans contenu.
+ */
+type NavLink = { href: string; label: string; icon?: LucideIcon; prive?: boolean };
+
+const NAV_LINKS_PUBLIC: NavLink[] = [
   { href: "/programme", label: "Programme" },
   { href: "/quinte-du-jour", label: "Quinté+" },
   { href: "/resultats", label: "Résultats" },
-  { href: "/value-bets", label: "Paris de valeur" },
+  { href: "/value-bets", label: "Paris de valeur", prive: true },
   { href: "/track-record", label: "Palmarès" },
-  { href: "/assistant", label: "Assistant IA" },
+  { href: "/assistant", label: "Assistant IA", prive: true },
   { href: "/tarifs", label: "Tarifs" },
 ];
 
-const NAV_LINKS_AUTH: Array<{ href: string; label: string; icon?: LucideIcon }> = [
-  { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+// Jamais rendu pour un visiteur anonyme — donc jamais vu par un robot — mais marqué de
+// la même façon pour que les deux listes ne divergent pas.
+const NAV_LINKS_AUTH: NavLink[] = [
+  { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, prive: true },
   { href: "/programme", label: "Programme" },
-  { href: "/value-bets", label: "Paris de valeur" },
+  { href: "/value-bets", label: "Paris de valeur", prive: true },
   { href: "/track-record", label: "Palmarès" },
-  { href: "/bankroll", label: "Capital" },
-  { href: "/assistant", label: "Assistant IA" },
+  { href: "/bankroll", label: "Capital", prive: true },
+  { href: "/assistant", label: "Assistant IA", prive: true },
 ];
 
 // ── Search palette ──────────────────────────────────────────────────────────
@@ -183,6 +194,7 @@ export function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  rel={link.prive ? "nofollow" : undefined}
                   className={cn(
                     "relative px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5",
                     "after:absolute after:left-3.5 after:right-3.5 after:-bottom-0.5 after:h-0.5 after:rounded-full after:bg-gradient-gold after:transition-transform after:duration-200 after:origin-left",
@@ -371,6 +383,7 @@ export function Navbar() {
             <Link
               key={link.href}
               href={link.href}
+              rel={link.prive ? "nofollow" : undefined}
               className={cn(
                 "block rounded-xl px-4 py-2.5 text-sm font-medium transition-colors",
                 pathname === link.href
