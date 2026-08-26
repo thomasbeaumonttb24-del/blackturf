@@ -42,6 +42,9 @@ FETCH_KW = dict(headless=True, real_chrome=True, solve_cloudflare=True,
                 humanize=True, geoip=True, network_idle=True, timeout=90000)
 WATCHDOG_TIMEOUT_S = int(os.getenv("BT_GENYBET_CYCLE_TIMEOUT", "1200"))
 WATCHDOG_GRACE_S = int(os.getenv("BT_GENYBET_WATCHDOG_GRACE", "120"))
+# Cf. `zeturf_live_daemon` : même garde de stérilité, calibrée sur un cycle plus
+# long (SLOW_INTERVAL = 180 s), soit 6 cycles avant redémarrage.
+WATCHDOG_STERILE_S = int(os.getenv("BT_GENYBET_STERILE_TIMEOUT", "1080"))
 HEARTBEAT_PATH = os.getenv(
     "BT_GENYBET_HEARTBEAT", "/opt/blackturf_odds/genybet_heartbeat"
 )
@@ -59,6 +62,7 @@ _watchdog = CycleWatchdog(
     grace_s=WATCHDOG_GRACE_S,
     heartbeat_path=HEARTBEAT_PATH,
     log=log,
+    sterile_timeout_s=WATCHDOG_STERILE_S,
 )
 
 def fetch_html(url: str) -> str:
@@ -165,6 +169,9 @@ def main():
                     log("geny.wrote", course=cid, partants=n)
             log("genybet.cycle", prog_courses=len(gc), imminent=matched, wrote=wrote,
                 sec=round(time.time() - t0))
+            # Cycle mené à son terme : c'est ce qui réarme la garde de stérilité,
+            # pas le heartbeat (qui se pose aussi quand le cycle a échoué).
+            _watchdog.record_progress()
         except Exception as e:
             log("genybet.cycle_error", err=str(e)[:140])
         finally:

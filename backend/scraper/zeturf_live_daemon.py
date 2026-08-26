@@ -44,6 +44,11 @@ PAGE_WAIT_MS = 4500     # attente rendu cotes après navigation
 ENUM_VIDES_AVANT_RECREATION = 3
 WATCHDOG_TIMEOUT_S = int(os.getenv("BT_ZETURF_CYCLE_TIMEOUT", "1200"))
 WATCHDOG_GRACE_S = int(os.getenv("BT_ZETURF_WATCHDOG_GRACE", "120"))
+# Délai sans UN SEUL cycle lent mené à son terme avant de redémarrer le process.
+# 15 min = 10 cycles de SLOW_INTERVAL : assez pour absorber une rafale de
+# timeouts passagers, assez court pour ne pas perdre la fenêtre de cotes d'une
+# course (elles bougent surtout dans la dernière demi-heure).
+WATCHDOG_STERILE_S = int(os.getenv("BT_ZETURF_STERILE_TIMEOUT", "900"))
 HEARTBEAT_PATH = os.getenv(
     "BT_ZETURF_HEARTBEAT", "/opt/blackturf_odds/zeturf_heartbeat"
 )
@@ -93,16 +98,38 @@ _watchdog = CycleWatchdog(
     grace_s=WATCHDOG_GRACE_S,
     heartbeat_path=HEARTBEAT_PATH,
     log=log,
+    sterile_timeout_s=WATCHDOG_STERILE_S,
 )
 
 # ─── DB via docker exec psql ────────────────────────────────────────────────
+# Ces appels ne coûtent que ~0,1 s sur un serveur au repos, mais `docker exec`
+# démarre un process dans un conteneur : sous la charge des trois camoufox
+# (load 5-6 sur 4 cœurs, 2,4 Go de swap le 26/08/2026) l'ordonnancement seul
+# dépasse les 30 s d'origine. Une expiration ici faisait tomber TOUT le cycle
+# lent, `load_blackturf()` étant sa première étape.
+DB_TIMEOUT_S = int(os.getenv("BT_ZETURF_DB_TIMEOUT", "60"))
+
+
+def _psql(args: list[str], quoi: str) -> subprocess.CompletedProcess:
+    """Lance psql, avec UNE reprise : une expiration ici est un pic de charge,
+    pas une panne — abandonner au premier essai coûte le cycle entier.
+
+    Après la reprise on LÈVE, au lieu de rendre un résultat vide : un programme
+    vide et une base injoignable se ressemblent, et confondre les deux ferait
+    passer un daemon aveugle pour un daemon sans travail.
+    """
+    cmd = ["docker", "exec", DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME, *args]
+    for tentative in (1, 2):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=DB_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            log(f"{quoi}.timeout", tentative=tentative, timeout_s=DB_TIMEOUT_S)
+    raise RuntimeError(f"{quoi}: psql injoignable après 2 essais de {DB_TIMEOUT_S}s")
+
+
 def db_query(sql: str) -> list[list[str]]:
     """SELECT → liste de lignes (champs str). Séparateur | , non-aligné, sans en-tête."""
-    out = subprocess.run(
-        ["docker", "exec", DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME,
-         "-t", "-A", "-F", "\x1f", "-c", sql],
-        capture_output=True, text=True, timeout=30,
-    )
+    out = _psql(["-t", "-A", "-F", "\x1f", "-c", sql], "db_query")
     if out.returncode != 0:
         log("db_query.error", err=out.stderr.strip()[:120])
         return []
@@ -114,10 +141,7 @@ def db_query(sql: str) -> list[list[str]]:
     return rows
 
 def db_exec(sql: str) -> bool:
-    out = subprocess.run(
-        ["docker", "exec", DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME, "-q", "-c", sql],
-        capture_output=True, text=True, timeout=30,
-    )
+    out = _psql(["-q", "-c", sql], "db_exec")
     if out.returncode != 0:
         log("db_exec.error", err=out.stderr.strip()[:120])
         return False
@@ -368,6 +392,11 @@ def main():
                                 soonest = (dt_obj, cid, z["url"], bt[cid]["partants"])
                     imminent = (soonest[1], soonest[2], soonest[3]) if soonest else None
                     log("slow.done", matched=matched, imminent=(imminent[0] if imminent else None))
+                    # Seul un cycle lent ARRIVÉ ICI prouve que la chaîne complète
+                    # tient (DB joignable, programme énuméré, pages lues). C'est
+                    # le seul point du daemon qui a le droit de réarmer la garde
+                    # de stérilité : le heartbeat, lui, se pose même en échec.
+                    _watchdog.record_progress()
                 except Exception as e:
                     log("slow.error", err=str(e)[:140])
                     _exit_si_driver_mort(e)
