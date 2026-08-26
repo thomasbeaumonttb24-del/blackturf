@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Check, Loader2, Minus, Sparkles, Swords, Ticket, Timer, TrendingUp, Trophy, Lock, Info } from "lucide-react";
+import { Check, ChevronDown, Loader2, Minus, Sparkles, Swords, Ticket, Timer, TrendingUp, Trophy, Lock, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -35,21 +35,59 @@ const titre = (s: string) =>
     .replace(/^Hippodrome (De |Du |D'|Des |La |Le )/i, "")
     .trim();
 
-function Card({ title, icon: Icon, aside, children, className }: {
+function EnteteCarte({ title, icon: Icon, aside, chevron }: {
+  title: string;
+  icon: typeof Ticket;
+  aside?: React.ReactNode;
+  chevron?: boolean;
+}) {
+  return (
+    <>
+      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-800 ring-1 ring-amber-200">
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <h2 className="font-display text-[15px] font-bold text-slate-900">{title}</h2>
+      {aside && <div className="ml-auto text-[11px] text-muted-foreground">{aside}</div>}
+      {chevron && (
+        <ChevronDown
+          className={cn("h-4 w-4 shrink-0 text-stone-400 transition-transform group-open:rotate-180", aside ? "ml-1.5" : "ml-auto")}
+          aria-hidden="true"
+        />
+      )}
+    </>
+  );
+}
+
+/** Carte d'information. `repliable` la rend dépliable via `<details>` natif :
+ *  le contenu reste dans le HTML servi — donc lisible sans JavaScript et par un
+ *  robot d'indexation — mais ne mange plus la hauteur de la page tant que le
+ *  lecteur ne l'a pas demandé. */
+function Card({ title, icon: Icon, aside, children, className, repliable, ouvertParDefaut = false }: {
   title: string;
   icon: typeof Ticket;
   aside?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  repliable?: boolean;
+  ouvertParDefaut?: boolean;
 }) {
+  const cadre = cn("rounded-2xl border border-stone-200 bg-white", className);
+
+  if (repliable) {
+    return (
+      <details className={cn("group", cadre)} open={ouvertParDefaut}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 p-4 sm:p-5 [&::-webkit-details-marker]:hidden">
+          <EnteteCarte title={title} icon={Icon} aside={aside} chevron />
+        </summary>
+        <div className="px-4 pb-4 sm:px-5 sm:pb-5">{children}</div>
+      </details>
+    );
+  }
+
   return (
-    <section className={cn("rounded-2xl border border-stone-200 bg-white p-4 sm:p-5", className)}>
+    <section className={cn(cadre, "p-4 sm:p-5")}>
       <header className="mb-4 flex items-center gap-2">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-800 ring-1 ring-amber-200">
-          <Icon className="h-4 w-4" aria-hidden="true" />
-        </span>
-        <h3 className="font-display text-[15px] font-bold text-slate-900">{title}</h3>
-        {aside && <div className="ml-auto text-[11px] text-muted-foreground">{aside}</div>}
+        <EnteteCarte title={title} icon={Icon} aside={aside} />
       </header>
       {children}
     </section>
@@ -179,6 +217,7 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
       title="Confrontations directes"
       icon={Swords}
       aside={`${data?.nb_paires_avec_duel ?? paires.length} duels déjà courus`}
+      repliable
     >
       {meilleur && meilleur.bilan > 0 && (
         <p className="mb-4 rounded-xl bg-amber-50/70 px-3 py-2.5 text-xs leading-5 text-amber-900 ring-1 ring-amber-100">
@@ -203,7 +242,7 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
                   {p.a_victoires} – {p.b_victoires}
                 </span>
                 <span className={cn("min-w-0 flex-1 truncate text-right", bMene ? "font-semibold text-slate-900" : "text-slate-600")}>
-                  {p.b_nom} N°{p.b_numero}
+                  N°{p.b_numero} {p.b_nom}
                 </span>
               </div>
               {p.derniere_rencontre && (
@@ -294,7 +333,7 @@ export function PoolEvolutionCard({ courseId, poolTotalEur }: { courseId: string
               key={i}
               className="flex-1 rounded-t bg-gradient-to-t from-amber-200 to-amber-400"
               style={{ height: `${Math.max(4, (p.pool_total_eur / max) * 100)}%` }}
-              title={`${new Date(p.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · ${nf(p.pool_total_eur)} €`}
+              title={`${new Date(p.time).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" })} · ${nf(p.pool_total_eur)} €`}
             />
           ))}
         </div>
@@ -404,7 +443,7 @@ export function CompteurDepart({ dateHeure, statut }: { dateHeure: string; statu
         "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold tabular-nums ring-1",
         imminent ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-slate-900 text-white ring-slate-900",
       )}
-      title={`Départ à ${new Date(dateHeure).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`}
+      title={`Départ à ${new Date(dateHeure).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" })}`}
     >
       <Timer className="h-3.5 w-3.5" aria-hidden="true" />
       {h > 0 ? `${h} h ${String(m).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`}
@@ -466,7 +505,7 @@ export function useApercuAnalyse(courseId: string | null) {
 function Tuile({ valeur, unite, libelle, ton = "neutre" }: {
   valeur: string; unite?: string; libelle: string; ton?: "neutre" | "or" | "vert";
 }) {
-  const couleur = ton === "or" ? "text-amber-600" : ton === "vert" ? "text-emerald-600" : "text-slate-900";
+  const couleur = ton === "or" ? "text-amber-700" : ton === "vert" ? "text-emerald-700" : "text-slate-900";
   return (
     <div className="rounded-xl border border-stone-200 bg-stone-50/60 px-3 py-2.5">
       <div className="flex items-baseline gap-1">
@@ -549,7 +588,7 @@ export function ApercuAnalyseCard({
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-semibold",
                 v.gagnant_top1 ? "bg-emerald-600 text-white"
-                : v.gagnant_top3 ? "bg-amber-500 text-white"
+                : v.gagnant_top3 ? "bg-amber-500 text-brand-dark"
                 : "bg-stone-200 text-stone-700",
               )}
             >
@@ -575,7 +614,7 @@ export function ApercuAnalyseCard({
                     place ? "border-emerald-200 bg-emerald-50/50" : "border-stone-100 bg-stone-50/60",
                   )}
                 >
-                  <span className="w-5 text-center font-display text-sm font-bold text-stone-400">{p.rang}</span>
+                  <span className="w-5 text-center font-display text-sm font-bold text-stone-600">{p.rang}</span>
                   <span className="font-mono text-xs text-muted-foreground">N°{p.numero}</span>
                   <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-slate-900">{p.nom}</span>
                   {place != null && (
@@ -597,7 +636,7 @@ export function ApercuAnalyseCard({
             <p className="text-[13px] font-semibold text-amber-900">
               Ce classement était affiché sur cette page avant le départ.
             </p>
-            <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
+            <p className="mt-1.5 text-xs leading-5 text-amber-900">
               Probabilité de victoire et de place par cheval, cote juste, signaux retenus pour et contre :
               c&apos;est ce que les abonnés lisent sur les courses de ce soir, avant qu&apos;elles ne soient
               courues.{phrasePreuve}
@@ -605,7 +644,7 @@ export function ApercuAnalyseCard({
             {!abonne && (
               <a
                 href={cta.href}
-                className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+                className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-brand-dark transition-colors hover:bg-amber-600"
               >
                 {cta.txt}
               </a>
@@ -644,7 +683,7 @@ export function ApercuAnalyseCard({
               <span
                 className={cn(
                   "rounded-full px-3 py-1 text-xs font-semibold",
-                  apercu.accord_marche ? "bg-slate-900 text-white" : "bg-amber-500 text-white",
+                  apercu.accord_marche ? "bg-slate-900 text-brand-dark" : "bg-amber-500 text-brand-dark",
                 )}
               >
                 {apercu.accord_marche ? "Le modèle confirme le favori" : "Le modèle ne suit pas le marché"}
@@ -661,7 +700,7 @@ export function ApercuAnalyseCard({
             <p className="text-[13px] font-semibold text-amber-900">
               La cote dit qui les parieurs préfèrent. Elle ne dit pas qui a le plus de chances.
             </p>
-            <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
+            <p className="mt-1.5 text-xs leading-5 text-amber-900">
               Sur les {nbPartants} partants, l&apos;algorithme calcule une probabilité par cheval à partir de
               80 critères — forme, terrain, jockey, vitesse, mouvements de cote — puis la compare au prix du
               marché. L&apos;abonnement ouvre les noms, la probabilité de chaque cheval et le plan de mise
@@ -670,7 +709,7 @@ export function ApercuAnalyseCard({
             {!abonne && (
               <a
                 href={cta.href}
-                className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+                className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-brand-dark transition-colors hover:bg-amber-600"
               >
                 {cta.txt}
               </a>
@@ -687,14 +726,14 @@ export function ApercuAnalyseCard({
               ? "Cette course n'a pas été analysée par le modèle."
               : "L'analyse de cette course n'est pas encore publiée."}
           </p>
-          <p className="mt-1.5 text-xs leading-5 text-amber-900/80">
+          <p className="mt-1.5 text-xs leading-5 text-amber-900">
             Sur les courses couvertes, l&apos;algorithme calcule une probabilité par cheval à partir de
             80 critères, la compare au prix du marché et en tire un plan de mise sur votre budget.
             {phrasePreuve}
           </p>
           <a
             href={connecte ? "/programme" : "/inscription"}
-            className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-white transition-colors hover:bg-amber-600"
+            className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-brand-dark transition-colors hover:bg-amber-600"
           >
             {connecte ? "Voir les courses analysées" : "Essayer 7 jours gratuitement"}
           </a>
@@ -754,20 +793,20 @@ export function PreuvesRecentesCard() {
           rangée de cartes comme une vitrine de réussites choisies. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-stone-200 bg-stone-50/70 px-3.5 py-3">
         <span className="flex items-baseline gap-1.5">
-          <span className="font-display text-xl font-bold tabular-nums text-emerald-600">{n_gagnant_top1}</span>
+          <span className="font-display text-xl font-bold tabular-nums text-emerald-700">{n_gagnant_top1}</span>
           <span className="text-[12px] text-stone-600">
             gagnant{n_gagnant_top1 > 1 ? "s" : ""} donné{n_gagnant_top1 > 1 ? "s" : ""} 1ᵉʳ
           </span>
         </span>
         <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
         <span className="flex items-baseline gap-1.5">
-          <span className="font-display text-xl font-bold tabular-nums text-amber-600">{n_gagnant_top3}</span>
+          <span className="font-display text-xl font-bold tabular-nums text-amber-700">{n_gagnant_top3}</span>
           <span className="text-[12px] text-stone-600">
             gagnant{n_gagnant_top3 > 1 ? "s" : ""} dans le top 3
           </span>
         </span>
         <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
-        <span className="text-[12px] text-stone-500">
+        <span className="text-[12px] text-stone-600">
           sur les <span className="font-semibold text-slate-900 tabular-nums">{n_courses}</span> dernières
           courses courues — les plus récentes, pas les mieux réussies
         </span>
@@ -780,7 +819,7 @@ export function PreuvesRecentesCard() {
             ? { bd: "border-emerald-200", bg: "bg-emerald-50/60", fg: "text-emerald-700", txt: "gagnant donné 1ᵉʳ" }
             : c.gagnant_top3
               ? { bd: "border-amber-200", bg: "bg-amber-50/60", fg: "text-amber-700", txt: `gagnant donné ${rang ? ordinal(rang) : ""}` }
-              : { bd: "border-stone-200", bg: "bg-white", fg: "text-stone-500", txt: rang ? `gagnant donné ${ordinal(rang)}` : "gagnant hors classement" };
+              : { bd: "border-stone-200", bg: "bg-white", fg: "text-stone-600", txt: rang ? `gagnant donné ${ordinal(rang)}` : "gagnant hors classement" };
           return (
             <li key={c.course_id} className="min-w-[15rem] flex-shrink-0">
               <a
@@ -794,7 +833,7 @@ export function PreuvesRecentesCard() {
                   <span className="font-mono">{codeCourse(c.course_id)}</span>
                   <span className="truncate">{titre(c.hippodrome)}</span>
                   {c.est_quinte && (
-                    <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[9.5px] font-bold text-white">Q+</span>
+                    <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[9.5px] font-bold text-brand-dark">Q+</span>
                   )}
                 </span>
 
