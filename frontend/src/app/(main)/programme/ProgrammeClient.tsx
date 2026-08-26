@@ -77,7 +77,11 @@ function discMeta(discipline: string): DiscMeta {
   if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v7.png" };
   if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v7.png" };
   if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v7.png" };
-  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v7.png" };
+  // « Obstacle » est la valeur renvoyée telle quelle par l'API (au même titre que
+  // « Haies ») : sans ce cas, ces courses tombaient sur le repli et s'affichaient
+  // avec le cheval de plat en gris, sans la barrière — alors que la fiche course,
+  // elle, avait bien son entrée « Obstacle ».
+  if (d.includes("obstacle") || d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v7.png" };
   if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v7.png" };
   return DISC_FALLBACK;
 }
