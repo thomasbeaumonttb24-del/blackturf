@@ -1,5 +1,5 @@
 /**
- * Fabrique les masques de discipline utilisés par les icônes (`*-v6.png`).
+ * Fabrique les masques de discipline utilisés par les icônes (`*-v7.png`).
  *
  * Quatre passes, chacune corrige un défaut constaté à l'écran :
  *   1. roue de sulky reconstituée — l'illustration d'origine coupe le disque à
@@ -48,6 +48,21 @@ for (const name of ['attele', 'plat', 'monte', 'obstacle']) {
   /* Roue de sulky tronquee : l'illustration d'origine coupe le disque a hauteur
      d'essieu (le bas de la roue n'existe pas). A 26 px ca se lit comme une image
      rognee. Cercle releve sur l'image source, on remplit la moitie manquante. */
+  /* Museau tranché : dans l'illustration d'origine le bord droit de la tête est
+     parfaitement vertical sur 33 px — le nez a été rogné. On recolle une calotte
+     elliptique pour rendre un profil de chanfrein. */
+  const MUSEAUX = { attele: [{ x: 381, y0: 52, y1: 84, a: 7 }] }[name] || [];
+  for (const mz of MUSEAUX) {
+    const yc = (mz.y0 + mz.y1) / 2, b = (mz.y1 - mz.y0) / 2;
+    for (let y = mz.y0; y <= mz.y1; y++) {
+      const k = 1 - ((y - yc) / b) ** 2;
+      if (k <= 0) continue;
+      const dx = Math.round(mz.a * Math.sqrt(k));
+      for (let x = mz.x; x <= mz.x + dx && x < w; x++) a[y * w + x] = 255;
+    }
+    console.log('  ' + name + ': museau reconstitue (x=' + mz.x + ', lignes ' + mz.y0 + '-' + mz.y1 + ')');
+  }
+
   const ROUE = { attele: { cx: 74, cy: 207, r: 39 } }[name];
   if (ROUE) {
     const { cx, cy, r } = ROUE;
@@ -97,7 +112,7 @@ for (const name of ['attele', 'plat', 'monte', 'obstacle']) {
     if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
     rgba[(y * W2 + x) * 4 + 3] = out[sy * w + sx];
   }
-  const dst = (process.env.OUT || 'public/img/disciplines') + `/${name}-v6.png`;
+  const dst = (process.env.OUT || 'public/img/disciplines') + `/${name}-v7.png`;
   await sharp(rgba, { raw: { width: W2, height: H2, channels: 4 } }).png({ compressionLevel: 9 }).toFile(dst);
   console.log(name, `${meta.width}x${meta.height} → ${W2}x${H2}`);
 }
