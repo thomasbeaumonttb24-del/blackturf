@@ -142,7 +142,18 @@ export async function GET(
   ctx: { params: Promise<{ fichier: string }> },
 ) {
   const { fichier } = await ctx.params;
-  const nom = fichier.replace(/\.xml$/, "");
+
+  // L'extension est EXIGÉE. Sans ce contrôle, `/sitemaps/2025-09` répondait 200 au même
+  // titre que `/sitemaps/2025-09.xml` : deux adresses pour un contenu identique, dont une
+  // que rien ne référence. C'est précisément le genre de doublon qu'un sitemap est censé
+  // éviter, pas produire.
+  if (!fichier.endsWith(".xml")) {
+    return new Response("Sitemap inconnu : l'extension .xml est requise.", {
+      status: 404,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+  const nom = fichier.slice(0, -".xml".length);
 
   if (nom === "pages") return sitemapPages();
 
