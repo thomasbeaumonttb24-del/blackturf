@@ -11,11 +11,17 @@ const nextConfig = {
   },
   experimental: {
     // `optimizeCss` a été retiré : il était déclaré depuis longtemps et ne produisait
-    // RIEN. Vérifié des deux côtés — le HTML de production comme le HTML prérendu en
-    // local sortent avec deux <link rel="stylesheet"> et zéro <style> inline. Le plugin
-    // critters de Next ne s'applique pas au rendu App Router ; l'option donnait donc
-    // l'illusion d'un CSS critique inliné alors que la feuille de 19 ko bloque toujours
-    // le rendu (~600 ms mesurés sur chaque page en mobile).
+    // RIEN. Vérifié dans le code de Next — `postProcessHTML`, seul endroit qui appelle
+    // critters, n'est importé que par `server/render.js`, le rendu du routeur Pages.
+    // L'App Router ne passe jamais par là. Confirmé côté sortie : le HTML de production
+    // comme le HTML prérendu en local sortent avec deux <link rel="stylesheet"> et zéro
+    // <style> inline, pendant que la feuille de 19 ko bloque le rendu ~600 ms sur chaque
+    // page en mobile.
+    //
+    // `inlineCss` est son équivalent App Router : les <link> deviennent des <style>, ce
+    // qui supprime l'aller-retour réseau bloquant. Compromis assumé et mesuré : le CSS
+    // n'est plus mis en cache séparément, il repart avec chaque réponse HTML.
+    inlineCss: true,
     //
     // Barils d'icônes et de graphiques : n'embarquer que les symboles réellement
     // importés au lieu du module entier (24 ko de JS inutilisé relevés sur l'accueil).
