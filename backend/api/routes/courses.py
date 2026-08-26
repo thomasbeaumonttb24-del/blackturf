@@ -837,7 +837,26 @@ async def get_programme(
         if rid not in reunions_dict:
             reunions_dict[rid] = {
                 "reunion_id": rid,
-                "hippodrome": reunion.hippodrome_nom,
+                # Le nom vient de la COURSE, jamais de la réunion.
+                #
+                # Les lignes de `reunions` sont recyclées : la R2 porte « HIPPODROME DE
+                # TOULOUSE LA CEPIERE » à toutes les dates, quel que soit l'hippodrome
+                # réel. Mesuré le 2026-08-26 sur trois journées tirées au hasard : 51/51,
+                # 46/46 et 42/42 courses en désaccord avec `Course.hippodrome_nom`.
+                #
+                # Conséquence, avant ce correctif : la page « programme du jour » groupait
+                # les courses sous de faux hippodromes, et son `<title>` comme sa
+                # `meta description` annonçaient à Google des lieux où rien ne se courait
+                # — « 42 courses sur 5 réunions : Toulouse La Cepiere, Nancy-Brabois »
+                # quand les courses se disputaient à Vincennes et à Clairefontaine. Les
+                # fiches course, les arrivées et les rapports, eux, lisaient déjà
+                # `Course.hippodrome_nom` et disaient juste : le site se contredisait
+                # d'une page à l'autre.
+                #
+                # Le même travers était déjà connu sur le pays de la réunion (devises des
+                # gains de carrière, 2026-08-18) : `reunions` n'est fiable pour AUCUN
+                # attribut descriptif.
+                "hippodrome": course.hippodrome_nom or reunion.hippodrome_nom,
                 # N° public (PMU numExterne) pour matcher pmu.fr — porté par la course
                 # (numero_reunion) ; fallback sur reunion.numero (numOfficiel).
                 "numero": course.numero_reunion or reunion.numero,
