@@ -88,6 +88,33 @@ const COLS = {
 /*  Briques d'affichage                                                       */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** Identité d'un cheval : le NUMÉRO d'abord, en gros et en gras, le nom ensuite.
+ *  C'est le numéro qu'on coche sur un ticket, qu'annonce le commentaire de course
+ *  et qu'on relit dans l'arrivée officielle ; le nom sert à reconnaître le cheval,
+ *  pas à jouer. Une seule fabrique pour les quatre endroits où la paire apparaît,
+ *  sinon les tailles dérivent au premier ajustement. */
+function Identite({ numero, nom, taille = "normal", terne }: {
+  numero: number;
+  nom: string;
+  taille?: "normal" | "grand";
+  terne?: boolean;
+}) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-1.5">
+      <span className={cn(
+        "font-display font-bold tabular-nums",
+        taille === "grand" ? "text-[16px]" : "text-[15px]",
+        terne ? "text-stone-600" : "text-slate-900",
+      )}>
+        N°{numero}
+      </span>
+      <span className={cn("truncate", taille === "grand" ? "text-[13px]" : "text-[12.5px]", terne ? "text-stone-600" : "text-stone-700")}>
+        {nom}
+      </span>
+    </span>
+  );
+}
+
 /** Pastille de rang. Le dégradé de traitement (or → gris → contour seul) rend le
  *  podium du modèle lisible d'un coup d'œil, sans texte supplémentaire. */
 function Rang({ rang, absent }: { rang: number; absent?: boolean }) {
@@ -316,10 +343,9 @@ function Synthese({
       <div className="bg-white px-4 py-3 sm:px-5">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Favori du modèle</p>
         {fav ? (
-          <p className="mt-1 truncate font-display text-[14px] font-bold text-slate-900">
-            <span className="font-mono text-[11px] font-normal text-stone-600">N°{fav.numero}</span>{" "}
-            {fav.nom_cheval}
-            <span className="ml-1.5 text-[13px] font-semibold tabular-nums text-amber-700">{pct(fav.proba_top1)}</span>
+          <p className="mt-1 flex min-w-0 items-baseline gap-1.5 truncate">
+            <Identite numero={fav.numero} nom={fav.nom_cheval} taille="grand" />
+            <span className="shrink-0 text-[13px] font-semibold tabular-nums text-amber-700">{pct(fav.proba_top1)}</span>
           </p>
         ) : (
           <p className="mt-1 text-[13px] text-stone-600">—</p>
@@ -340,9 +366,8 @@ function Synthese({
         {gagnant ? (
           <>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Vainqueur</p>
-            <p className="mt-1 truncate font-display text-[14px] font-bold text-slate-900">
-              <span className="font-mono text-[11px] font-normal text-stone-600">N°{gagnant.numero}</span>{" "}
-              {gagnant.nom_cheval}
+            <p className="mt-1 flex min-w-0 items-baseline gap-1.5 truncate">
+              <Identite numero={gagnant.numero} nom={gagnant.nom_cheval} taille="grand" />
               <span
                 className={cn(
                   "ml-1.5 text-[12px] font-semibold tabular-nums",
@@ -510,10 +535,7 @@ export function ClassementAlgo({
                   {/* Cheval + signaux réels */}
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="truncate text-[14px] font-semibold leading-tight text-slate-900">
-                        <span className="font-mono text-[11px] font-normal text-stone-600">N°{p.numero}</span>{" "}
-                        {p.nom_cheval}
-                      </span>
+                      <Identite numero={p.numero} nom={p.nom_cheval} terne={absent} />
                       {p.value_bet && !absent && <BadgeValeur ev={p.value_bet.ev_max} niveau={p.value_bet.niveau} />}
                       {absent && (
                         <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
@@ -820,10 +842,7 @@ export function ClassementApercu({
 
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="truncate text-[14px] font-semibold leading-tight text-slate-900">
-                    <span className="font-mono text-[11px] font-normal text-stone-600">N°{l.numero}</span>{" "}
-                    {l.nom}
-                  </span>
+                  {l.numero != null && <Identite numero={l.numero} nom={l.nom ?? ""} terne={!revele} />}
                   {l.position != null && <BadgeArrivee position={l.position} />}
                   {!revele && (
                     <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600">
