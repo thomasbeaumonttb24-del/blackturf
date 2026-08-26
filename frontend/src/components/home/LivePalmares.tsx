@@ -55,48 +55,135 @@ function quand(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", " ·");
+  // `timeZone` explicite : sans lui, le rendu serveur prend le fuseau du
+  // conteneur (UTC) et affiche une heure de course fausse de deux heures avant
+  // que l'hydratation ne la corrige.
+  return d.toLocaleString("fr-FR", {
+    timeZone: "Europe/Paris",
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).replace(",", " ·");
 }
 const fmtInt = (n: number) => n.toLocaleString("fr-FR");
+/** Les montants du palmarès sont de l'argent : espace insécable avant l'euro et
+ *  séparateur de milliers, comme partout ailleurs sur le site. « +4526€ » se lit
+ *  moins vite que « +4 526 € », surtout empilé dix fois. */
+const fmtEur = (n: number) =>
+  `${n.toLocaleString("fr-FR", { maximumFractionDigits: 0 })} €`;
+const fmtRapport = (n: number) =>
+  n.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
 
 // Endpoint PUBLIC : `palmaresGagnants` est gardé par require_admin (401 visiteur) —
 // cette section, principale preuve sociale du site, n'était visible que par l'admin.
 const fetcher = () => statsApi.palmaresPublic().then((r) => r.data as PalmaresResp);
 
+function BadgeProfil({ profil, className = "" }: { profil: string; className?: string }) {
+  const pr = PROFIL[profil] ?? { label: profil, cls: "bg-gray-50 text-gray-600 ring-gray-200" };
+  return (
+    <span className={`inline-flex items-center justify-center rounded-full px-2 py-[3px] text-[9.5px] font-bold uppercase tracking-[0.06em] ring-1 ${pr.cls} ${className}`}>
+      {pr.label}
+    </span>
+  );
+}
+
+/** Une ligne de palmarès.
+ *
+ *  Mise en grille à colonnes FIXES, et non en `flex` : le bloc montant a une
+ *  largeur variable (« +4 526 € » contre « +412 € »), si bien que le badge de
+ *  profil qui le précédait se décalait d'une ligne à l'autre et la colonne
+ *  n'existait plus visuellement. Une grille cale badge et montant sur le même
+ *  axe pour les dix lignes. */
 function BetRow({ g, rank }: { g: Gagnant; rank?: number }) {
-  const pr = PROFIL[g.profil] ?? { label: g.profil, cls: "bg-gray-50 text-gray-600 ring-gray-200" };
   const podium = rank != null && rank < 3 ? PODIUM[rank] : null;
 
   return (
-    <div className={`metric-row flex items-center gap-3 rounded-xl border px-3 py-2.5 ${
-      podium ? "border-amber-200/70 bg-amber-50/30" : "border-transparent bg-gray-50/70"
-    }`}>
-      {rank != null && (
-        <span className={`num-display flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[11px] font-black ring-1 ${
-          podium ?? "bg-white text-gray-600 ring-gray-200"
-        }`}>
+    <li
+      className={`metric-row grid grid-cols-[1.75rem_minmax(0,1fr)_6.4rem] items-center gap-x-2 rounded-xl border border-transparent px-2 py-3 sm:grid-cols-[1.75rem_minmax(0,1fr)_4.75rem_6.75rem] sm:gap-x-3 sm:px-2.5 ${
+        podium ? "bg-amber-50/50" : "hover:bg-gray-50/80"
+      }`}
+    >
+      {rank != null ? (
+        <span
+          className={`num-display flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11.5px] font-black ring-1 ${
+            podium ?? "bg-white text-gray-600 ring-gray-200"
+          }`}
+        >
           {rank + 1}
         </span>
+      ) : (
+        // Sans classement, la colonne reste : les deux tableaux se lisent côte à
+        // côte, leurs libellés doivent démarrer au même endroit.
+        <span className="flex h-7 w-7 items-center justify-center" aria-hidden="true">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+        </span>
       )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[13px] font-semibold text-gray-900 truncate">{g.type_pari}</span>
-          <span className="text-[11px] font-mono text-gray-600">{chevauxStr(g.chevaux)}</span>
+
+      {/* `truncate` sur un conteneur flex ne tronque PAS ses enfants : il faut
+          le poser sur le texte lui-même, avec `min-w-0` sur la cellule. Sans
+          cela, à 390 px, « Couplé Gagnant » chevauchait ses numéros de chevaux
+          et le badge de profil recouvrait le nom de l'hippodrome. */}
+      <div className="min-w-0">
+        <p className="flex items-baseline gap-1.5">
+          <span className="truncate text-[13.5px] font-semibold tracking-tight text-gray-900">{g.type_pari}</span>
+          <span className="num-display shrink-0 text-[11.5px] text-gray-500">{chevauxStr(g.chevaux)}</span>
+        </p>
+        <p className="mt-0.5 flex items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate text-[10.5px] text-gray-500">
+            {hippoCourt(g.hippodrome)}
+            {g.code ? ` · ${g.code}` : ""}
+            {rank == null && g.date ? ` · ${quand(g.date)}` : ""}
+          </span>
+          {/* En dessous de `sm`, la colonne dédiée réduirait le nom du pari à
+              « Co… » : le badge redescend donc sous le libellé, où il reste
+              aligné puisque le texte qui le précède est tronqué. */}
+          <BadgeProfil profil={g.profil} className="w-[3.9rem] shrink-0 sm:hidden" />
+        </p>
+      </div>
+
+      <BadgeProfil profil={g.profil} className="hidden w-full sm:inline-flex" />
+
+      <div className="text-right">
+        <div className="num-display text-[15px] font-extrabold tabular-nums text-emerald-700">
+          +{fmtEur(g.gain)}
         </div>
-        <div className="text-[10px] text-gray-600 truncate">
-          {hippoCourt(g.hippodrome)}{g.code ? ` · ${g.code}` : ""}
-          {rank == null && g.date ? ` · ${quand(g.date)}` : ""}
+        <div className="mt-0.5 text-[10.5px] tabular-nums text-gray-500">
+          mise {fmtEur(g.mise)}
+          {g.rapport ? ` · ×${fmtRapport(g.rapport)}` : ""}
         </div>
       </div>
-      <span className={`inline-flex w-[54px] shrink-0 justify-center items-center rounded-full py-0.5 text-[9px] font-bold uppercase tracking-wide ring-1 ${pr.cls}`}>
-        {pr.label}
-      </span>
-      <div className="shrink-0 text-right">
-        <div className="num-display text-sm font-extrabold text-emerald-700 tabular-nums">+{g.gain.toFixed(0)}€</div>
-        <div className="text-[10px] text-gray-600 tabular-nums">
-          mise {g.mise.toFixed(0)}€{g.rapport ? ` · ×${g.rapport}` : ""}
+    </li>
+  );
+}
+
+/** Carte d'un tableau (top gains / derniers gagnés). Extraite pour que les deux
+ *  colonnes partagent exactement la même mise en page — c'est ce qui les rend
+ *  comparables d'un coup d'œil. */
+export function PalmaresCarte({
+  titre, aside, puce, lignes, avecRang,
+}: {
+  titre: string;
+  aside: string;
+  puce: React.ReactNode;
+  lignes: Gagnant[];
+  avecRang?: boolean;
+}) {
+  return (
+    <div className="glass-card flex h-full flex-col rounded-2xl p-5 sm:p-6">
+      <div className="mb-2 flex flex-col items-start gap-1 border-b border-gray-100 pb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+        <div className="flex items-center gap-2">
+          {puce}
+          <h3 className="font-display text-[15px] font-bold text-gray-900">{titre}</h3>
         </div>
+        <span className="text-[10.5px] text-gray-500">{aside}</span>
       </div>
+      <ul className="divide-y divide-gray-100/90">
+        {lignes.map((g, i) => (
+          <BetRow
+            key={`${g.code}-${g.type_pari}-${i}`}
+            g={g}
+            rank={avecRang ? i : undefined}
+          />
+        ))}
+      </ul>
     </div>
   );
 }
@@ -153,7 +240,7 @@ export function LivePalmares() {
               </div>
               <div className="glass-card rounded-2xl px-5 py-4 text-center">
                 <div className="num-display text-2xl font-extrabold text-emerald-700">
-                  {meilleurGain != null ? `+${meilleurGain.toFixed(0)}€` : "—"}
+                  {meilleurGain != null ? `+${fmtEur(meilleurGain)}` : "—"}
                 </div>
                 <div className="text-[11px] text-gray-600 mt-1">meilleur gain sur un pari</div>
               </div>
@@ -168,37 +255,24 @@ export function LivePalmares() {
             <p className="text-xs text-gray-600 mt-1">Dès la fin des prochaines courses, chaque pari gagné apparaît automatiquement.</p>
           </div>
         ) : (
-          <div className="grid lg:grid-cols-2 gap-5">
-            {/* ── Top 10 plus gros gains ── */}
+          <div className="grid gap-5 lg:grid-cols-2">
             <ScrollReveal>
-              <div className="glass-card rounded-2xl p-5 sm:p-6 h-full">
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <div className="flex items-center gap-2">
-                    <Flame className="h-4 w-4 text-brand-gold-dark" />
-                    <h3 className="font-semibold text-gray-900 text-sm">Top 10 des plus gros gains</h3>
-                  </div>
-                  <span className="text-[10px] text-gray-600">depuis le lancement</span>
-                </div>
-                <div className="space-y-1.5">
-                  {top.map((g, i) => <BetRow key={`${g.code}-${i}`} g={g} rank={i} />)}
-                </div>
-              </div>
+              <PalmaresCarte
+                titre="Top 10 des plus gros gains"
+                aside="depuis le lancement"
+                puce={<Flame className="h-4 w-4 text-brand-gold-dark" />}
+                lignes={top}
+                avecRang
+              />
             </ScrollReveal>
 
-            {/* ── 10 derniers paris gagnés ── */}
             <ScrollReveal delay={80}>
-              <div className="glass-card rounded-2xl p-5 sm:p-6 h-full">
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="live-dot inline-block w-2 h-2 rounded-full bg-emerald-500" />
-                    <h3 className="font-semibold text-gray-900 text-sm">10 derniers paris gagnés</h3>
-                  </div>
-                  <span className="text-[10px] text-gray-600">les plus récents</span>
-                </div>
-                <div className="space-y-1.5">
-                  {recent.map((g, i) => <BetRow key={`${g.code}-${g.type_pari}-${i}`} g={g} />)}
-                </div>
-              </div>
+              <PalmaresCarte
+                titre="10 derniers paris gagnés"
+                aside="les plus récents"
+                puce={<span className="live-dot inline-block h-2 w-2 rounded-full bg-emerald-500" />}
+                lignes={recent}
+              />
             </ScrollReveal>
           </div>
         )}
