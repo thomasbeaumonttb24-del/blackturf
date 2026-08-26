@@ -134,7 +134,7 @@ function StatutBadge({ statut }: { statut: string }) {
       </span>
     );
   if (statut === "termine")
-    return <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-500 ring-1 ring-gray-200">Terminée</span>;
+    return <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-gray-200">Terminée</span>;
   if (statut === "annule")
     return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] text-red-500 ring-1 ring-red-200">Annulée</span>;
   return null;
@@ -175,11 +175,11 @@ function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) 
                 : "bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
             )}
           >
-            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-white/70" : isToday ? "text-amber-600" : "text-gray-400")}>
+            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-white/70" : isToday ? "text-amber-700" : "text-gray-600")}>
               {topLabel}
             </span>
             <span className="text-xl font-extrabold tabular-nums leading-none mt-1.5" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{format(d, "d")}</span>
-            <span className={cn("text-[9px] uppercase tracking-wide leading-none mt-1", isSel ? "text-white/50" : "text-gray-400")}>
+            <span className={cn("text-[9px] uppercase tracking-wide leading-none mt-1", isSel ? "text-white/50" : "text-gray-600")}>
               {format(d, "MMM", { locale: fr })}
             </span>
           </button>
@@ -217,7 +217,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
       <div className="relative flex flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-5">
         <div className="flex-1 min-w-[230px]">
           <div className="flex items-center gap-2.5 mb-3">
-            <span className="text-[10.5px] font-bold uppercase tracking-[.16em] text-slate-400">Prochaine course</span>
+            <span className="text-[10.5px] font-bold uppercase tracking-[.16em] text-slate-600">Prochaine course</span>
             <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>
               <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
               {isLive ? "En piste" : "À venir"}
@@ -238,7 +238,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
         </div>
         <div className="flex w-full flex-row items-end justify-between gap-3.5 border-t border-white/10 pt-4 sm:w-auto sm:flex-col sm:items-end sm:border-t-0 sm:border-l sm:border-white/10 sm:pt-0 sm:pl-6">
           <div className="text-left sm:text-right">
-            <div className="text-[10px] font-bold uppercase tracking-[.16em] text-slate-500">Départ</div>
+            <div className="text-[10px] font-bold uppercase tracking-[.16em] text-slate-600">Départ</div>
             <div className="mt-1 text-[26px] sm:text-[30px] font-bold leading-none tracking-tight text-white tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{formatTime(course.date_heure)}</div>
             {countdown && (
               <div className="mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>{countdown}</div>
@@ -311,7 +311,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
   const isDone = course.statut === "termine" || course.statut === "annule";
   const countdown = useCountdown(course.date_heure, course.statut);
   const codeCls = isDone
-    ? "text-gray-400 bg-gray-100/70 ring-gray-200"
+    ? "text-gray-600 bg-gray-100/70 ring-gray-200"
     : course.est_quinte
     ? "text-amber-700 bg-amber-50 ring-amber-200"
     : isLive ? "text-emerald-700 bg-emerald-50 ring-emerald-200" : "text-gray-700 bg-gray-100 ring-gray-200";
@@ -329,13 +329,16 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
     >
       <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : !isDone && course.est_quinte ? "#F59E0B" : "transparent" }} />
       <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
-        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-600" : isDone ? "text-gray-400 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-600" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
           {formatTime(course.date_heure)}
         </span>
-        {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-600">{countdown}</span>}
+        {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-700">{countdown}</span>}
       </div>
       <span className="hidden h-[42px] w-[50px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: isDone ? "#EFEDE4" : m.bg, border: `1px solid ${isDone ? "#E2DFD3" : m.ring}` }}>
-        <DiscIcon discipline={course.discipline} color={isDone ? "#B7B2A0" : undefined} />
+        {/* course finie : gris assez sombre pour rester lisible (3,8:1 sur #EFEDE4).
+            À #B7B2A0 le contraste tombait à 1,8:1 : jambes et driver disparaissaient
+            dans le fond, le cheval paraissait amputé. */}
+        <DiscIcon discipline={course.discipline} color={isDone ? "#7D7768" : undefined} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -352,8 +355,8 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
               />
             )}
           </span>
-          <span className={cn("max-w-full truncate text-sm font-semibold sm:max-w-[230px]", isDone ? "text-gray-500" : "text-gray-800")}>
-            <span className="text-gray-400">{course.hippodrome_nom}</span>
+          <span className={cn("max-w-full truncate text-sm font-semibold sm:max-w-[230px]", isDone ? "text-gray-600" : "text-gray-800")}>
+            <span className="text-gray-600">{course.hippodrome_nom}</span>
             <span className="text-gray-300"> · </span>
             {course.nom || `Course ${course.numero}`}
           </span>
@@ -365,11 +368,11 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
             <span className="rounded-full border border-yellow-200 bg-yellow-50 px-1.5 text-[9px] font-bold uppercase tracking-wide text-yellow-700">Tiercé</span>
           ) : null}
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-400">
-          <span className="font-semibold" style={{ color: isDone ? "#9CA3AF" : m.color }}>{titleCase(course.discipline)}</span>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
+          <span className="font-semibold" style={{ color: isDone ? "#4B5563" : m.color }}>{titleCase(course.discipline)}</span>
           <span className="text-gray-300">·</span><span>{course.distance} m</span>
           <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
-          {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-500 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
+          {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-600 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
         </div>
         {/* Preuve qu'un modèle a travaillé sur CETTE course. Rien d'identifiant :
             un nombre de chevaux notés, une confiance, et le fait que le modèle
@@ -600,7 +603,7 @@ export default function ProgrammeClient({
                 {[{ n: programme.nb_courses, l: "Courses" }, { n: programme.reunions.length, l: "Réunions" }].map((s) => (
                   <div key={s.l} className="min-w-[118px] flex-1 rounded-2xl px-4 py-3.5" style={{ background: "rgba(255,255,255,.72)", backdropFilter: "blur(4px)", border: "1px solid rgba(0,0,0,.06)" }}>
                     <div className="text-[29px] font-bold leading-none text-gray-900 tabular-nums" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{s.n}</div>
-                    <div className="mt-1.5 text-xs font-medium text-gray-500">{s.l}</div>
+                    <div className="mt-1.5 text-xs font-medium text-gray-600">{s.l}</div>
                   </div>
                 ))}
               </div>
@@ -627,14 +630,14 @@ export default function ProgrammeClient({
                   onClick={() => setVbOnly((v) => !v)}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] font-semibold transition-all",
-                    vbOnly ? "bg-amber-500 text-white shadow-sm shadow-amber-200" : "border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
+                    vbOnly ? "bg-amber-500 text-brand-dark shadow-sm shadow-amber-200" : "border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
                   )}
                 >
                   <Zap className="h-3.5 w-3.5" /> Valeur
                 </button>
               )}
               <div className="relative min-w-[190px] flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" />
                 <input
                   value={hippoSearch}
                   onChange={(e) => setHippoSearch(e.target.value)}
@@ -643,7 +646,7 @@ export default function ProgrammeClient({
                 />
                 {hippoSearch && (
                   <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                    <X className="h-3.5 w-3.5 text-gray-400" />
+                    <X className="h-3.5 w-3.5 text-gray-600" />
                   </button>
                 )}
               </div>
@@ -692,7 +695,7 @@ export default function ProgrammeClient({
                   >
                     {d !== "Tous" && <DiscIcon discipline={d} w={34} h={24} color={active ? "#FFFFFF" : discMeta(d).color} />}
                     {titleCase(d)}
-                    <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500")}>{count}</span>
+                    <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600")}>{count}</span>
                   </button>
                 );
               })}
@@ -704,20 +707,20 @@ export default function ProgrammeClient({
         {loading ? (
           <div className="flex flex-col items-center justify-center gap-3 py-24">
             <Loader2 className="h-8 w-8 animate-spin text-gray-300" />
-            <p className="text-sm text-gray-400">Chargement du programme…</p>
+            <p className="text-sm text-gray-600">Chargement du programme…</p>
           </div>
         ) : !programme || programme.nb_courses === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-24">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100"><Trophy className="h-7 w-7 text-gray-300" /></div>
             <p className="font-semibold text-gray-600">Aucune course programmée</p>
-            <p className="text-sm text-gray-400">Essayez une autre date</p>
-            <button onClick={() => setSelectedDate(new Date())} className="mt-1 text-sm font-medium text-amber-600 hover:underline">Revenir à aujourd&apos;hui</button>
+            <p className="text-sm text-gray-600">Essayez une autre date</p>
+            <button onClick={() => setSelectedDate(new Date())} className="mt-1 text-sm font-medium text-amber-700 hover:underline">Revenir à aujourd&apos;hui</button>
           </div>
         ) : groups.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16">
             <Filter className="h-8 w-8 text-gray-300" />
-            <p className="text-sm text-gray-500">Aucune course ne correspond aux filtres</p>
-            <button onClick={resetFilters} className="text-sm font-medium text-amber-600 hover:underline">Effacer les filtres</button>
+            <p className="text-sm text-gray-600">Aucune course ne correspond aux filtres</p>
+            <button onClick={resetFilters} className="text-sm font-medium text-amber-700 hover:underline">Effacer les filtres</button>
           </div>
         ) : (
           /* ── TIMELINE ── */
@@ -733,7 +736,7 @@ export default function ProgrammeClient({
                     >
                       {hour}
                     </div>
-                    <span className="text-xs font-semibold text-gray-400">{items.length} course{items.length > 1 ? "s" : ""}</span>
+                    <span className="text-xs font-semibold text-gray-600">{items.length} course{items.length > 1 ? "s" : ""}</span>
                   </div>
                   <div className="ml-0 sm:ml-[62px] flex flex-col gap-2.5">
                     {items.map(({ course, reunionNum }, i) => (
