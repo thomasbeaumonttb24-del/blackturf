@@ -267,6 +267,9 @@ const CX_STYLE = `
 .cx-badges>span{white-space:nowrap}
 .cx-meta>span{white-space:nowrap}
 .cx-fade{animation:cxFadeUp .5s cubic-bezier(.16,1,.3,1) both}
+/* Ces animations partent de opacity:0 : sans cette regle, un visiteur qui demande la
+   reduction des animations voyait quand meme tout le contenu apparaitre en fondu. */
+@media (prefers-reduced-motion: reduce){.cx-fade{animation:none}.cx-bar,.cx-dot{animation:none !important}}
 .cx-plan button:focus-visible,.cx-plan input:focus-visible,.cx-plan summary:focus-visible{outline:2px solid #B45309 !important;outline-offset:2px}
 .cx-plan button:disabled{cursor:not-allowed !important}
 .cx-plan details>summary svg{transition:transform .2s ease}
@@ -2771,7 +2774,13 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
           direct. Le détail technique (pénétromètre, pluie, dotation, conditions
           officielles) vit dans la fiche technique de l'onglet Synthèse — l'avoir
           en en-tête noyait l'essentiel sous huit pastilles grises. */}
-      <header className="cx-fade relative mb-5 overflow-hidden rounded-3xl border border-amber-500/15 bg-gradient-to-b from-[#FFFBF0] to-white p-5 shadow-[0_1px_3px_rgba(0,0,0,.04),0_16px_44px_-26px_rgba(180,83,9,.18)] sm:p-7">
+      {/* Pas de `cx-fade` sur cet en-tête : il contient le <h1>, qui EST l'élément LCP de
+          la page (mesuré par PageSpeed). `cx-fade` part de `opacity: 0` avec un fill mode
+          `both` — le titre était donc invisible pour le navigateur pendant toute
+          l'animation, et le LCP ne se déclenchait qu'à la fin. Le contenu est déjà dans le
+          HTML rendu par le serveur : le faire apparaître en fondu ne fait que retarder son
+          affichage. Les blocs plus bas gardent l'animation, ils ne sont pas dans l'écran. */}
+      <header className="relative mb-5 overflow-hidden rounded-3xl border border-amber-500/15 bg-gradient-to-b from-[#FFFBF0] to-white p-5 shadow-[0_1px_3px_rgba(0,0,0,.04),0_16px_44px_-26px_rgba(180,83,9,.18)] sm:p-7">
         <span
           aria-hidden="true"
           className="pointer-events-none absolute bottom-4 right-6 hidden h-20 w-40 opacity-[0.09] sm:block"
