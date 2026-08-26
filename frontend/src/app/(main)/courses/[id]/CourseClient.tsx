@@ -248,10 +248,15 @@ const DISCIPLINE_MASK: Record<string, { file: string; color: string }> = {
   Plat:     { file: "plat",     color: "#B45309" },
   "Attelé": { file: "attele",   color: "#0E7C66" },
   Monté:    { file: "monte",    color: "#2A5BD7" },
-  Obstacle: { file: "obstacle", color: "#A8441F" },
-  Haies:    { file: "obstacle", color: "#A8441F" },
+  // Prune : a 10 degres de teinte du plat, l obstacle etait indistinguable de lui
+  // dans la rangee de filtres du programme. Les deux tables gardent la meme valeur,
+  // c est leur divergence qui avait cache le bug d origine. 7,48:1 sur le creme.
+  Obstacle: { file: "obstacle", color: "#86198F" },
+  Haies:    { file: "obstacle", color: "#86198F" },
   Steeple:  { file: "obstacle", color: "#A32C3E" },
-  Cross:    { file: "obstacle", color: "#A8441F" },
+  // Cross alignee sur Steeple, comme dans `discMeta` du programme : les deux tables
+  // divergeaient (#A8441F ici, #A32C3E la-bas) pour la meme course.
+  Cross:    { file: "obstacle", color: "#A32C3E" },
 };
 function discMask(discipline: string): { url: string; color: string } {
   const k = discipline ? discipline.charAt(0).toUpperCase() + discipline.slice(1).toLowerCase() : "";
