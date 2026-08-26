@@ -5,23 +5,36 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/useAuth";
 
-// « latin-ext » en plus de « latin » : les partants PMU portent des noms étrangers
-// (roumains, polonais, scandinaves) dont les lettres sortent du bloc latin de base. Ces
-// noms n'arrivent qu'APRÈS l'hydratation — le HTML rendu côté serveur n'en contient
-// aucun. Le navigateur découvrait donc la sous-police latin-ext trop tard, la
-// substituait en cours de route et faisait reflower tout le bloc : 0,303 de CLS sur la
-// page course, à elle seule 21 points de performance. Déclarer le sous-ensemble le fait
-// précharger avec le reste.
+// `display: "optional"` plutôt que `"swap"`, et on s'en tient au sous-ensemble `latin`.
+//
+// Le problème d'origine : les partants PMU portent des noms étrangers (roumains,
+// polonais, scandinaves) dont les lettres sortent du bloc latin de base. Ces noms
+// n'arrivent qu'APRÈS l'hydratation — le HTML rendu côté serveur n'en contient aucun. Le
+// navigateur découvrait donc la sous-police latin-ext en cours de route, la substituait,
+// et faisait reflower tout le bloc : 0,303 de CLS sur la page course.
+//
+// Première tentative : déclarer `latin-ext` pour le faire précharger. Corrigeait bien le
+// CLS, mais MESURÉ ensuite : le préchargement passait de 69 ko à 171 ko (Inter latin-ext
+// pèse 83 ko à lui seul), en priorité maximale sur le chemin critique. À 1,6 Mbit/s c'est
+// +510 ms — et le premier rendu de /quinte-du-jour passait de 0,9 s à 1,7 s sur mobile.
+// Un CLS réparé sur une page contre un demi-seconde perdue sur toutes : mauvais échange.
+//
+// `optional` supprime la période de substitution : une police qui arrive en retard n'est
+// jamais appliquée, donc plus aucun décalage possible — ni depuis latin-ext, ni depuis
+// latin. Et on ne précharge plus que les 69 ko utiles. Contrepartie assumée : sur une
+// première visite en connexion lente, le texte s'affiche dans la police de repli. Elle
+// est ajustée par next/font (`size-adjust`, `ascent-override`) sur les métriques de la
+// vraie police, donc la mise en page est identique au pixel près.
 const inter = Inter({
-  subsets: ["latin", "latin-ext"],
+  subsets: ["latin"],
   variable: "--font-inter",
-  display: "swap",
+  display: "optional",
 });
 
 const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin", "latin-ext"],
+  subsets: ["latin"],
   variable: "--font-space-grotesk",
-  display: "swap",
+  display: "optional",
   weight: ["400", "500", "600", "700"],
 });
 
