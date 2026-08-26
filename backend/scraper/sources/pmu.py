@@ -633,6 +633,29 @@ class PmuScraper(BaseScraper):
             log.warning("pmu.pool_data_error", course_id=course_id, error=str(e))
             return None
 
+    async def get_enjeux_par_cheval(self, reunion_id: str, course_id: str,
+                                    nb_partants: int | None = None) -> Optional[dict]:
+        """
+        Enjeux PMU PAR CHEVAL (simple gagnant + simple placé) via `combinaisons`.
+
+        `get_pool_data` ne dit que combien est misé SUR LA COURSE ; ici on sait
+        sur QUI. Retourne la vue de `services.pmu_enjeux.parser_enjeux`, ou None
+        si le PMU ne publie pas encore d'enjeux pour cette course.
+        """
+        from services.pmu_enjeux import parser_enjeux
+
+        c_num = int(course_id.split("C")[-1]) if "C" in str(course_id) else 1
+        d = jour_courses().strftime("%d%m%Y")
+        base = f"{BASE}/programme/{d}/R{reunion_id}/C{c_num}"
+
+        combinaisons = await self._fetch_json(f"{base}/combinaisons")
+        if not combinaisons:
+            return None
+        masse = await self._fetch_json(f"{base}/masse-enjeu")
+
+        vue = parser_enjeux(combinaisons, masse, nb_partants=nb_partants)
+        return vue if vue.get("simples") else None
+
     def _parse_partants(self, raw: list) -> list[PartantScrape]:
         partants = []
         for i, p in enumerate(raw):

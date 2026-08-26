@@ -2019,6 +2019,139 @@ async def get_pool_evolution(
     }
 
 
+@router.get("/courses/{course_id}/enjeux")
+async def get_enjeux_par_cheval(
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_pro),
+):
+    """
+    Où va l'argent, CHEVAL PAR CHEVAL : montant misé en simple gagnant et en
+    simple placé, part de la masse, et détection des afflux/grosses mises.
+
+    Source : enjeux réels publiés par le PMU (endpoint `combinaisons`), historisés
+    toutes les 5 min autour du départ + une lecture LIVE à la demande pour que le
+    dernier point soit celui de maintenant et non celui du dernier cycle scraper.
+    Réservé abonnés Standard+ (même règle que l'évolution du pool).
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    from db.models import EnjeuxCourseHistorique
+    from services.enjeux_analyse import analyser_enjeux
+    from services.pmu_enjeux import fetch_enjeux
+
+    course = (await db.execute(
+        select(Course).where(Course.course_id == course_id)
+    )).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+
+    rows = (await db.execute(
+        select(EnjeuxCourseHistorique)
+        .where(EnjeuxCourseHistorique.course_id == course_id)
+        .order_by(EnjeuxCourseHistorique.scraped_at)
+    )).scalars().all()
+
+    def _num_dict(brut) -> dict[int, int]:
+        # asyncpg décode le JSON en dict, SQLite peut rendre une chaîne : on
+        # accepte les deux plutôt que de faire confiance au driver.
+        if isinstance(brut, str):
+            try:
+                brut = _json.loads(brut)
+            except ValueError:
+                return {}
+        out: dict[int, int] = {}
+        for k, v in (brut or {}).items():
+            try:
+                out[int(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    snapshots = []
+    for r in rows:
+        enjeux = r.enjeux
+        if isinstance(enjeux, str):
+            try:
+                enjeux = _json.loads(enjeux)
+            except ValueError:
+                continue
+        snapshots.append({
+            "t": r.scraped_at,
+            "sg": _num_dict((enjeux or {}).get("SIMPLE_GAGNANT")),
+            "sp": _num_dict((enjeux or {}).get("SIMPLE_PLACE")),
+            "masse_sg": r.masse_gagnant_centimes,
+            "masse_sp": r.masse_place_centimes,
+            "autres_sg": r.autres_gagnant_centimes,
+            "autres_sp": r.autres_place_centimes,
+            "nb_autres": r.nb_autres,
+        })
+
+    # ── Relevé LIVE (cache court partagé) ────────────────────────────────────
+    # Le scraper passe toutes les 5 min : sans cette lecture, le « montant en
+    # cours de jeu » afficherait jusqu'à 5 minutes de retard juste avant le
+    # départ, c'est-à-dire pile au moment où il bouge le plus.
+    if course.statut in ("a_venir", "en_cours"):
+        cache_key = f"enjeux_live:{course_id}"
+        vue = None
+        redis = None
+        try:
+            redis = await get_redis()
+            cached = await redis.get(cache_key)
+            if cached:
+                vue = _json.loads(cached)
+        except Exception as e:
+            log.debug("courses.enjeux_cache_read_failed", error=str(e))
+        if vue is None:
+            vue = await fetch_enjeux(course_id, nb_partants=course.nb_partants)
+            if vue and redis is not None:
+                try:
+                    await redis.setex(cache_key, 20, _json.dumps(vue))
+                except Exception as e:
+                    log.debug("courses.enjeux_cache_write_failed", error=str(e))
+        simples = (vue or {}).get("simples") or {}
+        sg_live = simples.get("SIMPLE_GAGNANT") or {}
+        sp_live = simples.get("SIMPLE_PLACE") or {}
+        if sg_live.get("par_cheval") or sp_live.get("par_cheval"):
+            snapshots.append({
+                "t": datetime.now(timezone.utc),
+                "sg": {int(k): int(v) for k, v in (sg_live.get("par_cheval") or {}).items()},
+                "sp": {int(k): int(v) for k, v in (sp_live.get("par_cheval") or {}).items()},
+                "masse_sg": sg_live.get("masse_centimes"),
+                "masse_sp": sp_live.get("masse_centimes"),
+                "autres_sg": sg_live.get("autres_centimes"),
+                "autres_sp": sp_live.get("autres_centimes"),
+                "nb_autres": (max(sg_live.get("nb_autres") or 0, sp_live.get("nb_autres") or 0)
+                              if (sg_live.get("nb_autres") is not None
+                                  or sp_live.get("nb_autres") is not None) else None),
+            })
+
+    if not snapshots:
+        return {"course_id": course_id, "disponible": False, "par_cheval": [], "alertes": []}
+
+    noms = {
+        part.numero: cheval.nom
+        for part, cheval in (await db.execute(
+            select(Participation, Cheval)
+            .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+            .where(Participation.course_id == course_id)
+        )).all()
+    }
+
+    # Les datetimes venus de SQLite sont naïfs, ceux de PostgreSQL et du relevé
+    # live sont aware : sans normalisation la comparaison lève TypeError.
+    for s in snapshots:
+        t = s["t"]
+        if isinstance(t, datetime) and t.tzinfo is None:
+            s["t"] = t.replace(tzinfo=timezone.utc)
+
+    vue = analyser_enjeux(snapshots, noms=noms)
+    if not vue:
+        return {"course_id": course_id, "disponible": False, "par_cheval": [], "alertes": []}
+    return {"course_id": course_id, "disponible": True, **vue}
+
+
 @router.get("/courses/{course_id}/temps-passage")
 async def get_temps_passage(
     course_id: str,

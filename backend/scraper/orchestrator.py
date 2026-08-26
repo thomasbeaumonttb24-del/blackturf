@@ -48,6 +48,7 @@ from scraper.db_writer import (
     log_scrape_result,
     save_cote_bookmaker,
     save_pool_pmu,
+    save_enjeux_course,
     save_suspension,
     save_penetrometre,
     save_temps_passage,
@@ -157,6 +158,42 @@ async def _detect_smart_money(session, course_id: str) -> None:
     if prev > 0 and (latest - prev) / prev > 0.20:
         log.info("smart_money.detected", course_id=course_id,
                  variation_pct=round((latest - prev) / prev * 100, 1))
+
+
+# Fenêtre de relevé des enjeux par cheval, autour de l'heure de départ.
+# Avant T-4 h la masse est quasi nulle et ne bouge pas ; après le départ le PMU
+# fige les enjeux (on garde 15 min pour capter la photo finale, qui est celle qui
+# fixe les rapports).
+ENJEUX_AVANT_MIN = 4 * 60
+ENJEUX_APRES_MIN = 15
+
+
+def _fenetre_enjeux(date_heure, *, maintenant=None) -> bool:
+    """Vrai si la course est dans la fenêtre où ses enjeux évoluent.
+
+    `date_heure` vient du PMU : epoch ms (int ou str) ou ISO. Format inattendu →
+    True : mieux vaut un relevé de trop qu'un trou dans la série.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    now = maintenant or _dt.now(_tz.utc)
+    depart = None
+    try:
+        if isinstance(date_heure, (int, float)):
+            depart = _dt.fromtimestamp(date_heure / 1000, tz=_tz.utc)
+        elif isinstance(date_heure, str) and date_heure.isdigit() and len(date_heure) > 10:
+            depart = _dt.fromtimestamp(int(date_heure) / 1000, tz=_tz.utc)
+        elif isinstance(date_heure, _dt):
+            depart = date_heure
+        elif date_heure:
+            depart = _dt.fromisoformat(str(date_heure))
+    except (ValueError, OSError, OverflowError):
+        depart = None
+    if depart is None:
+        return True
+    if depart.tzinfo is None:
+        depart = depart.replace(tzinfo=_tz.utc)
+    minutes = (depart - now).total_seconds() / 60.0
+    return -ENJEUX_APRES_MIN <= minutes <= ENJEUX_AVANT_MIN
 
 
 def _is_deadlock(exc: Exception) -> bool:
@@ -834,18 +871,37 @@ class BlackTurfOrchestrator:
             # écrit pool_pmu_historique pendant que d'autres cycles touchent les mêmes
             # courses → la grosse txn globale deadlockait. Petites txns isolées = robuste.
             ok_n = 0
+            enjeux_n = 0
             for course in self._courses_today:
                 try:
                     pool_data = await pmu.get_pool_data(course.reunion_id, course.course_id)
-                    if pool_data:
-                        async def _w(session, _pd=pool_data, _cid=course.course_id):
-                            await save_pool_pmu(session, _pd)
-                            await _detect_smart_money(session, _cid)  # smart money indicator
+
+                    # Enjeux PAR CHEVAL : uniquement dans la fenêtre où ils bougent.
+                    # Une course à J+6 h a une masse figée à quelques centaines
+                    # d'euros ; relever toutes les 5 min toute la journée écrirait
+                    # des relevés identiques (filtrés en écriture, mais payés en
+                    # requêtes PMU). Cf. _fenetre_enjeux.
+                    vue = None
+                    if _fenetre_enjeux(course.date_heure):
+                        vue = await pmu.get_enjeux_par_cheval(
+                            course.reunion_id, course.course_id,
+                            nb_partants=getattr(course, "nb_partants", None) or None,
+                        )
+
+                    if pool_data or vue:
+                        async def _w(session, _pd=pool_data, _cid=course.course_id, _vue=vue):
+                            nonlocal enjeux_n
+                            if _pd:
+                                await save_pool_pmu(session, _pd)
+                                await _detect_smart_money(session, _cid)  # smart money indicator
+                            if _vue and await save_enjeux_course(session, _cid, _vue):
+                                enjeux_n += 1
                         if await self._commit_unit(_w):
                             ok_n += 1
                 except Exception as e:
                     log.warning("orchestrator.pool_pmu_course_failed",
                                 course_id=course.course_id, err=str(e)[:160])
+            log.info("orchestrator.pool_pmu_done", nb_courses=ok_n, nb_releves_enjeux=enjeux_n)
             await self._log_ok("pool_pmu", nb_courses=ok_n, duree_ms=int((time.time() - t0) * 1000))
         except Exception as e:
             log.error("orchestrator.pool_pmu_error", error=str(e))

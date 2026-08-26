@@ -18,7 +18,7 @@ import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import {
-  ParisDisponiblesCard, ConfrontationsCard, PoolEvolutionCard, TempsPassageCard,
+  ParisDisponiblesCard, ConfrontationsCard, EnjeuxParChevalCard, TempsPassageCard,
   CompteurDepart, ApercuAnalyseCard, PreuvesRecentesCard, useApercuAnalyse,
 } from "@/components/courses/insights";
 import {
@@ -3770,7 +3770,7 @@ export default function CoursePage({ initialCourse = null }: { initialCourse?: C
             </details>
           )}
             <ParisDisponiblesCard courseId={id} />
-            <PoolEvolutionCard courseId={id} poolTotalEur={course.pool_total_eur} />
+            <EnjeuxParChevalCard courseId={id} courseTerminee={course.statut === "termine"} poolTotalEur={course.pool_total_eur} />
           </>
         )}
 

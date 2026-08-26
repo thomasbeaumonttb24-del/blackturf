@@ -1183,6 +1183,43 @@ class PoolPMUHistorique(Base):
     )
 
 
+class EnjeuxCourseHistorique(Base):
+    """
+    Enjeux PMU PAR CHEVAL — timeseries (simple gagnant / simple placé).
+
+    `pool_pmu_historique` ne dit que COMBIEN est misé sur la course ; cette table
+    dit SUR QUI. Source : endpoint PMU `combinaisons` (cf. services/pmu_enjeux.py).
+
+    Un relevé = une ligne, avec la répartition en JSON plutôt qu'une ligne par
+    cheval : on lit toujours la série d'UNE course en entier, jamais un cheval
+    isolé, et le format étroit aurait produit ~250 000 lignes/jour pour la même
+    information (cf. le coût des requêtes sur `cotes_historique`).
+
+    `autres_*_centimes` : le PMU plafonne sa liste à 12 chevaux ; au-delà, la
+    queue du peloton est connue globalement (masse − somme des listés) mais pas
+    cheval par cheval. On la stocke comme telle au lieu de la répartir au hasard.
+    """
+    __tablename__ = "enjeux_course_historique"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), index=True)
+    scraped_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    # Heure de publication PMU du relevé (≠ heure de scrape) : le PMU republie la
+    # même photo tant que rien ne bouge.
+    maj_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    masse_gagnant_centimes: Mapped[int | None] = mapped_column(BigInteger)
+    masse_place_centimes: Mapped[int | None] = mapped_column(BigInteger)
+    # {"SIMPLE_GAGNANT": {"5": 1809300, ...}, "SIMPLE_PLACE": {...}} — centimes.
+    enjeux: Mapped[dict] = mapped_column(JSON)
+    autres_gagnant_centimes: Mapped[int | None] = mapped_column(BigInteger)
+    autres_place_centimes: Mapped[int | None] = mapped_column(BigInteger)
+    nb_autres: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("ix_enjeux_course_time", "course_id", "scraped_at"),
+    )
+
+
 class SuspensionProfessionnel(Base):
     """
     Suspensions officielles de jockeys et entraîneurs.

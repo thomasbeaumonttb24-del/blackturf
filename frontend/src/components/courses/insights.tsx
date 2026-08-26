@@ -6,7 +6,7 @@
  *
  *   - `/courses/{id}/paris-disponibles`  → les paris RÉELLEMENT jouables
  *   - `/courses/{id}/confrontations`     → qui a déjà battu qui dans ce champ
- *   - `/courses/{id}/pool-evolution`     → où va l'argent (abonnés)
+ *   - `/courses/{id}/enjeux`              → l'argent misé cheval par cheval (abonnés)
  *   - `/courses/{id}/temps-passage`      → les fractions, après l'arrivée
  *
  * Chaque bloc est autonome : il charge sa donnée, se tait s'il n'y en a pas
@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Loader2, Minus, Sparkles, Swords, Ticket, Timer, TrendingUp, Trophy, Lock, Info } from "lucide-react";
+import { Check, ChevronDown, Coins, Flame, Loader2, Minus, Sparkles, Swords, Ticket, Timer, Trophy, Lock, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -102,8 +102,11 @@ function Chargement() {
   );
 }
 
-/** Hook de chargement simple : null tant qu'on ne sait pas, `false` si indisponible. */
-function useEndpoint<T>(url: string | null): { data: T | null; erreur: number | null; charge: boolean } {
+/** Hook de chargement simple : null tant qu'on ne sait pas, `false` si indisponible.
+ *  `intervalMs` rejoue la requête périodiquement (données live). Un rechargement
+ *  périodique ne remet PAS `charge` à false : la carte ne doit pas clignoter en
+ *  squelette toutes les 30 secondes. */
+function useEndpoint<T>(url: string | null, intervalMs?: number): { data: T | null; erreur: number | null; charge: boolean } {
   const [data, setData] = useState<T | null>(null);
   const [erreur, setErreur] = useState<number | null>(null);
   const [charge, setCharge] = useState(false);
@@ -111,12 +114,16 @@ function useEndpoint<T>(url: string | null): { data: T | null; erreur: number | 
     if (!url) return;
     let vivant = true;
     setCharge(false);
-    api.get(url, { tolere401: true })
-      .then((r) => { if (vivant) setData(r.data as T); })
-      .catch((e) => { if (vivant) setErreur(e?.response?.status ?? 0); })
-      .finally(() => { if (vivant) setCharge(true); });
-    return () => { vivant = false; };
-  }, [url]);
+    const lire = (premier: boolean) =>
+      api.get(url, { tolere401: true })
+        .then((r) => { if (vivant) { setData(r.data as T); setErreur(null); } })
+        .catch((e) => { if (vivant && premier) setErreur(e?.response?.status ?? 0); })
+        .finally(() => { if (vivant) setCharge(true); });
+    lire(true);
+    if (!intervalMs) return () => { vivant = false; };
+    const t = setInterval(() => lire(false), intervalMs);
+    return () => { vivant = false; clearInterval(t); };
+  }, [url, intervalMs]);
   return { data, erreur, charge };
 }
 
@@ -283,81 +290,339 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
   );
 }
 
-// ─── Masse des enjeux (pool PMU) ──────────────────────────────────────────────
-interface PoolResp {
-  evolution: Array<{ time: string; pool_total_eur: number; pool_gagnant_eur: number; nb_parieurs: number | null }>;
-  smart_money_alerts: Array<{ time: string; variation_pct: number; pool_eur: number }>;
-  dernier_pool_eur: number;
+// ─── Enjeux par cheval (simple gagnant / simple placé) ────────────────────────
+// La masse d'une course ne dit que COMBIEN est joué ; le PMU publie aussi SUR QUI.
+// Ici on affiche l'argent réellement posé sur chaque partant, et surtout ce qui
+// vient d'entrer : un afflux se lit sur la PART de masse, jamais sur un montant
+// brut (la masse monte pour tout le monde à l'approche du départ).
+interface EnjeuxCheval {
+  numero: number;
+  nom: string | null;
+  enjeu_gagnant_eur: number | null;
+  enjeu_place_eur: number | null;
+  part_gagnant: number | null;
+  part_place: number | null;
+  ratio_place_gagnant: number | null;
+  delta_eur: number | null;
+  delta_part_pts: number | null;
+  afflux: boolean;
+  grosse_mise: boolean;
+  entre_dans_classement: boolean;
 }
 
-export function PoolEvolutionCard({ courseId, poolTotalEur }: { courseId: string; poolTotalEur?: number | null }) {
-  const { data, erreur, charge } = useEndpoint<PoolResp>(`/courses/${courseId}/pool-evolution`);
+interface EnjeuxResp {
+  disponible: boolean;
+  masse_gagnant_eur?: number;
+  masse_place_eur?: number;
+  autres?: { gagnant_eur: number; place_eur: number; nb_chevaux: number };
+  tronque?: boolean;
+  fenetre_min?: number | null;
+  flux_fenetre_eur?: number | null;
+  nb_releves?: number;
+  par_cheval: EnjeuxCheval[];
+  alertes: Array<{ numero: number; nom: string | null; type: string; delta_eur: number | null; delta_part_pts: number | null }>;
+}
 
-  // Réservé aux abonnés : on le DIT au lieu de masquer la carte, c'est un
-  // argument d'abonnement, pas une erreur.
+/** Une formule de pari = une couleur. Basculer de gagnant à placé change la
+ *  teinte des barres : le lecteur sait sans relire l'étiquette quelle masse il
+ *  regarde, et ne compare pas par inadvertance deux masses différentes. */
+const TEINTES = {
+  gagnant: { barre: "from-amber-300 to-amber-500", barreTete: "from-amber-400 to-amber-600" },
+  place: { barre: "from-sky-300 to-sky-500", barreTete: "from-sky-400 to-sky-600" },
+} as const;
+
+function BlocMasse({ label, valeur, accent }: { label: string; valeur: string; accent?: boolean }) {
+  return (
+    <div className="px-3.5 py-3">
+      <p className="text-[9.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+      <p className={cn("mt-1 font-display text-base font-bold tabular-nums",
+        accent ? "text-emerald-700" : "text-slate-900")}>{valeur}</p>
+    </div>
+  );
+}
+
+const mediane = (xs: number[]) => {
+  if (xs.length === 0) return null;
+  const t = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(t.length / 2);
+  return t.length % 2 ? t[m] : (t[m - 1] + t[m]) / 2;
+};
+
+/** Vue pure : reçoit la donnée, ne charge rien. Séparée du chargement pour
+ *  rester affichable en isolation (revue de rendu) et testable sans réseau. */
+export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; poolTotalEur?: number | null }) {
+  const [formule, setFormule] = useState<"gagnant" | "place">("gagnant");
+
+  const cle = formule === "gagnant" ? "enjeu_gagnant_eur" : "enjeu_place_eur";
+  const clePart = formule === "gagnant" ? "part_gagnant" : "part_place";
+  const teinte = TEINTES[formule];
+
+  const triees = [...data.par_cheval]
+    .filter((l) => l[cle] != null)
+    .sort((a, b) => (b[cle] ?? 0) - (a[cle] ?? 0));
+  if (triees.length === 0) return null;
+
+  const masse = (formule === "gagnant" ? data.masse_gagnant_eur : data.masse_place_eur) ?? 0;
+  const autres = (formule === "gagnant" ? data.autres?.gagnant_eur : data.autres?.place_eur) ?? 0;
+  const max = Math.max(1, ...triees.map((l) => l[cle] ?? 0));
+  const nbAutres = data.autres?.nb_chevaux ?? 0;
+  const alerte = data.alertes?.[0];
+
+  // Un montant entré ne s'affiche que s'il pèse : sous 2 % de l'argent entré sur
+  // la fenêtre, « +5 € » n'est pas une information, c'est du bruit qui dilue les
+  // vrais mouvements. Un afflux détecté passe toujours, quel que soit le montant.
+  const seuilDelta = Math.max(50, (data.flux_fenetre_eur ?? 0) * 0.02);
+  const montrerDelta = (l: EnjeuxCheval) =>
+    l.delta_eur != null && l.delta_eur > 0 && (l.afflux || l.grosse_mise || l.delta_eur >= seuilDelta);
+  // Colonne « entré » : réservée seulement quand il y a une fenêtre de
+  // comparaison (un premier relevé ne mesure aucun mouvement). Sinon elle laisse
+  // une bande vide à droite de chaque barre, et raccourcit les barres pour rien.
+  const colonneEntre = formule === "gagnant" && data.fenetre_min != null &&
+    triees.some((l) => montrerDelta(l));
+
+  // Caractère de l'argent (joué pour la gagne / pour la place) : jugé contre la
+  // MÉDIANE de la course, jamais contre un seuil absolu. Le ratio placé/gagnant
+  // se centre autour de 1,3 sur une course ordinaire — un seuil fixe étiquetait
+  // les trois quarts du champ et ne signalait donc plus rien. Trois marques au
+  // maximum, les plus écartées de la médiane.
+  const ratios = triees.map((l) => l.ratio_place_gagnant).filter((r): r is number => r != null);
+  const med = mediane(ratios);
+  const marques = new Map<number, "place" | "gagnant">();
+  if (med && ratios.length >= 5) {
+    triees
+      .filter((l) => l.ratio_place_gagnant != null &&
+        (l.ratio_place_gagnant >= med * 1.4 || l.ratio_place_gagnant <= med * 0.65))
+      .sort((a, b) => Math.abs((b.ratio_place_gagnant ?? 0) - med) - Math.abs((a.ratio_place_gagnant ?? 0) - med))
+      .slice(0, 3)
+      .forEach((l) => marques.set(l.numero, (l.ratio_place_gagnant ?? 0) >= med ? "place" : "gagnant"));
+  }
+
+  return (
+    <Card
+      title="L'argent, cheval par cheval"
+      icon={Coins}
+      aside={data.nb_releves ? `${nf(data.nb_releves)} relevé${data.nb_releves > 1 ? "s" : ""}` : undefined}
+    >
+      {/* Les deux masses côte à côte : elles ne se comparent pas entre elles,
+          mais chacune donne l'échelle de sa colonne de pourcentages. */}
+      <div className={cn(
+        "grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-stone-200/70 ring-1 ring-stone-200/70",
+        // Trois colonnes seulement s'il y a trois blocs : sinon la grille laisse
+        // une cellule grise vide, qui se lit comme une donnée manquante.
+        data.flux_fenetre_eur ? "sm:grid-cols-3" : "",
+      )}>
+        <div className="bg-stone-50/80">
+          <BlocMasse label="Simple gagnant" valeur={`${nf(data.masse_gagnant_eur ?? 0)} €`} />
+        </div>
+        <div className="bg-stone-50/80">
+          <BlocMasse label="Simple placé" valeur={`${nf(data.masse_place_eur ?? 0)} €`} />
+        </div>
+        {data.flux_fenetre_eur != null && data.fenetre_min != null && data.flux_fenetre_eur > 0 ? (
+          <div className="col-span-2 bg-stone-50/80 sm:col-span-1">
+            <BlocMasse
+              label={`Entré en ${nf(data.fenetre_min, 0)} min`}
+              valeur={`+${nf(data.flux_fenetre_eur)} €`}
+              accent
+            />
+          </div>
+        ) : poolTotalEur ? (
+          // À défaut de mouvement mesurable, la masse TOUTES formules (couplés,
+          // trio, quinté…) situe l'affluence de la course. C'est la seule chose
+          // que disait l'ancienne carte « Où va l'argent » : elle tient ici en un
+          // bloc, sans courbe qui monte toujours ni pourcentage à sept chiffres.
+          <div className="col-span-2 bg-stone-50/80 sm:col-span-1">
+            <BlocMasse label="Toutes formules" valeur={`${nf(poolTotalEur)} €`} />
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-full bg-stone-100 p-1 text-[11.5px] font-semibold">
+          {([["gagnant", "Simple gagnant"], ["place", "Simple placé"]] as const).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setFormule(v)}
+              aria-pressed={formule === v}
+              className={cn("rounded-full px-3.5 py-1.5 transition-all",
+                formule === v
+                  ? "bg-white text-slate-900 shadow-sm ring-1 ring-stone-200"
+                  : "text-slate-500 hover:text-slate-900")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* L'API ne mesure les entrées d'argent que sur la masse gagnante (la
+            masse placée bouge trop peu pour qu'un écart y soit interprétable) :
+            l'en-tête ne promet donc pas une colonne qui n'existe pas ici. */}
+        <span className="hidden text-[9.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground sm:inline">
+          {colonneEntre ? "Montant · part · entré" : "Montant · part"}
+        </span>
+      </div>
+
+      <ul className="mt-1 divide-y divide-stone-100">
+        {triees.map((l, rang) => {
+          const montant = l[cle] ?? 0;
+          const part = l[clePart];
+          const tete = rang === 0;
+          const marque = marques.get(l.numero);
+          return (
+            <li key={l.numero} className="-mx-1.5 rounded-xl px-1.5 py-3 transition-colors hover:bg-stone-50/70">
+              <div className="flex items-center gap-2.5">
+                <span className={cn(
+                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11.5px] font-bold tabular-nums ring-1",
+                  tete ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-stone-200")}>
+                  {l.numero}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-slate-800">
+                  {l.nom ? titre(l.nom) : "—"}
+                </span>
+
+                {/* Ces marques portent sur la masse GAGNANTE, y compris quand on
+                    regarde la colonne placé : le titre le dit, pour qu'on ne
+                    lise pas « grosse mise » comme un mouvement sur le placé. */}
+                {l.grosse_mise ? (
+                  <span
+                    title="Mouvement mesuré sur la masse du simple gagnant"
+                    className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-amber-900 ring-1 ring-amber-200">
+                    Grosse mise
+                  </span>
+                ) : l.afflux ? (
+                  <span
+                    title="Mouvement mesuré sur la masse du simple gagnant"
+                    className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
+                    Afflux
+                  </span>
+                ) : l.entre_dans_classement ? (
+                  <span
+                    title="Ce cheval vient d'entrer dans les 12 chevaux détaillés par le PMU"
+                    className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-slate-600">
+                    Nouveau
+                  </span>
+                ) : marque ? (
+                  <span className={cn("hidden shrink-0 rounded-full px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide ring-1 sm:inline",
+                    marque === "place" ? "bg-sky-50 text-sky-800 ring-sky-200" : "bg-amber-50 text-amber-900 ring-amber-200")}>
+                    {marque === "place" ? "joué placé" : "joué gagnant"}
+                  </span>
+                ) : null}
+
+                <span className="w-[5.25rem] shrink-0 text-right text-[13px] font-bold tabular-nums text-slate-900">
+                  {nf(montant)} €
+                </span>
+                {/* Sur mobile la part descend sous la barre : gardée ici, elle
+                    volait au nom du cheval la place qui lui manquait déjà. */}
+                <span className="hidden w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground sm:block">
+                  {part != null ? `${nf(part * 100, 1)}%` : "—"}
+                </span>
+              </div>
+
+              {/* La colonne « entré » a une largeur FIXE, et exactement celle des
+                  colonnes montant + part (5,25 + 0,625 + 2,5 rem) : la piste de
+                  toutes les barres se termine donc sous le montant, et deux
+                  barres restent comparables à l'œil d'une ligne à l'autre. */}
+              <div className="mt-2 flex items-center gap-3 pl-[2.375rem]">
+                <div
+                  className="h-2 flex-1 overflow-hidden rounded-full bg-stone-100"
+                  role="img"
+                  aria-label={`${nf(montant)} euros misés sur le ${l.numero}${part != null ? `, ${nf(part * 100, 1)} % de la masse` : ""}`}
+                >
+                  <div
+                    className={cn("h-full rounded-full bg-gradient-to-r transition-[width] duration-500",
+                      tete ? teinte.barreTete : teinte.barre)}
+                    style={{ width: `${Math.max(2, (montant / max) * 100)}%` }}
+                  />
+                </div>
+                <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground sm:hidden">
+                  {part != null ? `${nf(part * 100, 1)}%` : ""}
+                </span>
+                {colonneEntre && (
+                  <span className="w-[4.5rem] shrink-0 text-right sm:w-[8.375rem]">
+                    {montrerDelta(l) && (
+                      <span className={cn("inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ring-1",
+                        l.grosse_mise || l.afflux
+                          ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
+                          : "bg-stone-50 text-slate-600 ring-stone-200")}>
+                        +{nf(l.delta_eur ?? 0)} €
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
+
+        {/* Le PMU s'arrête à 12 chevaux : la queue du peloton existe, elle est
+            connue globalement, elle est dite — jamais répartie au jugé. */}
+        {data.tronque && autres > 0 && (
+          <li className="flex items-center gap-2.5 py-3 text-[11.5px] text-muted-foreground">
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-dashed border-stone-300 text-[10px] font-bold">
+              {nbAutres > 0 ? `+${nbAutres}` : "…"}
+            </span>
+            <span className="min-w-0 flex-1 leading-4">
+              {nbAutres > 0
+                ? `${nbAutres} autre${nbAutres > 1 ? "s" : ""} cheva${nbAutres > 1 ? "ux" : "l"}`
+                : "Chevaux non détaillés"}
+              <span className="hidden sm:inline"> — le PMU ne détaille que les 12 plus joués</span>
+            </span>
+            <span className="w-[5.25rem] shrink-0 text-right text-[12.5px] font-semibold tabular-nums text-slate-700">
+              {nf(autres)} €
+            </span>
+            <span className="w-10 shrink-0 text-right text-[11px] tabular-nums">
+              {masse > 0 ? `${nf((autres / masse) * 100, 1)}%` : "—"}
+            </span>
+          </li>
+        )}
+      </ul>
+
+      {alerte && data.fenetre_min != null && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-2xl bg-amber-50/80 px-3.5 py-3 ring-1 ring-amber-100">
+          <Flame className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
+          <p className="text-[11.5px] leading-5 text-amber-900">
+            <strong className="font-bold">
+              {alerte.type === "grosse_mise" ? "Grosse mise" : "Afflux"} sur le {alerte.numero}
+              {alerte.nom ? ` — ${titre(alerte.nom)}` : ""}
+            </strong>
+            {alerte.delta_eur != null && ` : +${nf(alerte.delta_eur)} €`}
+            {alerte.delta_part_pts != null && ` (+${nf(alerte.delta_part_pts, 1)} pt de la masse)`}
+            {` en ${nf(data.fenetre_min, 0)} min.`}
+            {data.alertes.length > 1 &&
+              ` ${data.alertes.length - 1} autre mouvement${data.alertes.length > 2 ? "s" : ""} détecté${data.alertes.length > 2 ? "s" : ""} sur la même fenêtre.`}
+          </p>
+        </div>
+      )}
+
+      <p className="mt-3 text-[10.5px] leading-4 text-muted-foreground">
+        Montants réellement misés au PMU (pari mutuel), pas une estimation tirée des cotes. Les deux
+        masses sont indépendantes : une part ne se compare qu&apos;à celles de la même formule.
+      </p>
+    </Card>
+  );
+}
+
+export function EnjeuxParChevalCard({ courseId, courseTerminee, poolTotalEur }: { courseId: string; courseTerminee?: boolean; poolTotalEur?: number | null }) {
+  // Course à venir : l'argent bouge, on relit toutes les 30 s (l'API sert un
+  // relevé live mis en cache 20 s côté serveur, le PMU n'est donc pas martelé).
+  const { data, erreur, charge } = useEndpoint<EnjeuxResp>(
+    `/courses/${courseId}/enjeux`, courseTerminee ? undefined : 30_000,
+  );
+
   if (erreur === 401 || erreur === 403) {
     return (
-      <Card title="Où va l'argent" icon={TrendingUp}>
+      <Card title="L'argent, cheval par cheval" icon={Coins}>
         <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
           <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" aria-hidden="true" />
-          L&apos;évolution de la masse des enjeux — et les afflux soudains qui trahissent l&apos;argent
-          averti — sont réservés aux abonnés.
+          Le montant réellement misé sur chaque cheval, en simple gagnant et en simple placé, et les
+          afflux d&apos;argent en direct : réservé aux abonnés.
         </p>
       </Card>
     );
   }
   if (!charge) return null;
+  if (!data?.disponible || (data.par_cheval?.length ?? 0) === 0) return null;
 
-  const pts = data?.evolution ?? [];
-  const dernier = data?.dernier_pool_eur || poolTotalEur || 0;
-  if (pts.length < 2 && !dernier) return null;
-
-  const max = Math.max(1, ...pts.map((p) => p.pool_total_eur));
-  const premier = pts[0]?.pool_total_eur ?? 0;
-  const variation = premier > 0 ? ((dernier - premier) / premier) * 100 : null;
-  const alertes = data?.smart_money_alerts ?? [];
-
-  return (
-    <Card
-      title="Où va l'argent"
-      icon={TrendingUp}
-      aside={pts.length > 1 ? `${pts.length} relevés` : undefined}
-    >
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <p className="font-display text-2xl font-bold tabular-nums text-slate-900">{nf(dernier)} €</p>
-          <p className="mt-1 text-[11px] text-muted-foreground">misés sur cette course (toutes formules)</p>
-        </div>
-        {variation != null && (
-          <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold tabular-nums ring-1",
-            variation >= 0 ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-stone-50 text-slate-600 ring-stone-200")}>
-            {variation >= 0 ? "+" : ""}{nf(variation, 0)} % depuis le premier relevé
-          </span>
-        )}
-      </div>
-
-      {pts.length > 1 && (
-        <div className="mt-4 flex h-16 items-end gap-[3px]" role="img" aria-label="Évolution de la masse des enjeux">
-          {pts.slice(-40).map((p, i) => (
-            <div
-              key={i}
-              className="flex-1 rounded-t bg-gradient-to-t from-amber-200 to-amber-400"
-              style={{ height: `${Math.max(4, (p.pool_total_eur / max) * 100)}%` }}
-              title={`${new Date(p.time).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" })} · ${nf(p.pool_total_eur)} €`}
-            />
-          ))}
-        </div>
-      )}
-
-      {alertes.length > 0 && (
-        <p className="mt-3 rounded-xl bg-amber-50/70 px-3 py-2 text-[11px] leading-4 text-amber-900 ring-1 ring-amber-100">
-          <strong className="font-semibold">Afflux détecté</strong> — {alertes.length} accélération
-          {alertes.length > 1 ? "s" : ""} de plus de 20 % de la masse en moins d&apos;un quart d&apos;heure.
-          Un pari massif vient d&apos;entrer.
-        </p>
-      )}
-    </Card>
-  );
+  return <EnjeuxParChevalVue data={data} poolTotalEur={poolTotalEur} />;
 }
 
 // ─── Temps de passage (post-course) ───────────────────────────────────────────

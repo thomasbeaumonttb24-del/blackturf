@@ -15,7 +15,7 @@ from db.models import (
     Equipement, Resultat, MeteoCourse, ScrapeLog, Hippodrome,
     CoteHistorique, PerformanceCarriere,
     # Nouvelles tables
-    CoteBookmaker, PoolPMUHistorique, SuspensionProfessionnel,
+    CoteBookmaker, PoolPMUHistorique, EnjeuxCourseHistorique, SuspensionProfessionnel,
     PenetrometreLog, TempsPassage, PronosticPresse,
     AssociationJockeyEntraineur, StatsJockey, StatsEntraineur,
 )
@@ -724,6 +724,55 @@ async def save_pool_pmu(session: AsyncSession, pool: PoolPMUScrape) -> None:
             updated_at=datetime.now(),
         )
     )
+
+
+async def save_enjeux_course(session: AsyncSession, course_id: str, vue: dict) -> bool:
+    """Historise un relevé d'enjeux PAR CHEVAL (cf. services/pmu_enjeux.parser_enjeux).
+
+    Retourne True si une ligne a été écrite, False si le relevé est IDENTIQUE au
+    précédent. Le PMU republie la même photo tant qu'aucun pari n'entre : sans ce
+    filtre, une course sans mouvement se paierait ~300 lignes par jour pour zéro
+    information, et la fenêtre « 15 minutes » d'analyse se remplirait de doublons
+    qui feraient croire à une stabilité alors qu'il n'y a eu aucun relevé neuf.
+    """
+    simples = (vue or {}).get("simples") or {}
+    sg = simples.get("SIMPLE_GAGNANT") or {}
+    sp = simples.get("SIMPLE_PLACE") or {}
+    if not sg.get("par_cheval") and not sp.get("par_cheval"):
+        return False
+
+    enjeux = {
+        "SIMPLE_GAGNANT": {str(n): int(v) for n, v in (sg.get("par_cheval") or {}).items()},
+        "SIMPLE_PLACE": {str(n): int(v) for n, v in (sp.get("par_cheval") or {}).items()},
+    }
+
+    dernier = (await session.execute(
+        select(EnjeuxCourseHistorique)
+        .where(EnjeuxCourseHistorique.course_id == course_id)
+        .order_by(EnjeuxCourseHistorique.scraped_at.desc())
+        .limit(1)
+    )).scalars().first()
+    if dernier is not None and dernier.enjeux == enjeux \
+            and dernier.masse_gagnant_centimes == sg.get("masse_centimes") \
+            and dernier.masse_place_centimes == sp.get("masse_centimes"):
+        return False
+
+    maj = sg.get("maj_at") or sp.get("maj_at")
+    session.add(EnjeuxCourseHistorique(
+        id=gen_uuid(),
+        course_id=course_id,
+        maj_at=_parse_datetime(maj) if maj else None,
+        masse_gagnant_centimes=sg.get("masse_centimes"),
+        masse_place_centimes=sp.get("masse_centimes"),
+        enjeux=enjeux,
+        autres_gagnant_centimes=sg.get("autres_centimes") or 0,
+        autres_place_centimes=sp.get("autres_centimes") or 0,
+        # None (nombre de partants inconnu au relevé) reste None : « on ne sait pas
+        # combien » ne doit pas se lire « aucun ».
+        nb_autres=(max(sg.get("nb_autres") or 0, sp.get("nb_autres") or 0)
+                   if (sg.get("nb_autres") is not None or sp.get("nb_autres") is not None) else None),
+    ))
+    return True
 
 
 async def save_suspension(session: AsyncSession, susp: SuspensionScrape) -> None:

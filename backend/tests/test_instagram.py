@@ -132,3 +132,23 @@ async def test_hote_par_defaut_est_la_voie_sans_page_facebook(monkeypatch):
 async def test_hote_reste_configurable(monkeypatch):
     monkeypatch.setattr(instagram.settings, "instagram_api_host", "graph.facebook.com", raising=False)
     assert instagram._base().startswith("https://graph.facebook.com/")
+
+
+async def test_le_jeton_reel_en_base_est_inatteignable_sous_pytest(monkeypatch):
+    """Le 2026-08-26, la gate exécutée dans l'image de production a publié pour de
+    bon vers Meta : `_configure()` lisait le jeton en base — donc la base de PROD —
+    alors que le test croyait n'avoir aucun jeton. Le verrou porte sur la lecture
+    en base, pas sur l'appel réseau (les tests le simulent déjà)."""
+    _configurer(monkeypatch, jeton="", actif=True)
+
+    def _interdit(*a, **kw):
+        raise AssertionError("la base a été interrogée pour un jeton depuis un test")
+
+    monkeypatch.setattr("db.database.AsyncSessionLocal", _interdit)
+
+    jeton, _ = await instagram._configure()
+
+    assert jeton is None
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+    assert res.publie is False
+    assert "jeton" in (res.raison or "")

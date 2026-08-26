@@ -15,6 +15,7 @@ Dans cet état, le service fait tout — construction, vérifications, journalis
 l'appel qui publie. Publier au nom d'une marque est irréversible et public : ça ne doit
 jamais démarrer parce qu'un jeton s'est trouvé présent dans l'environnement.
 """
+import os
 from typing import Optional
 
 import httpx
@@ -72,6 +73,17 @@ async def _configure() -> tuple[Optional[str], Optional[str]]:
     fichier ne se renouvelle pas tout seul et finit par expirer sans prevenir.
     """
     compte = getattr(settings, "instagram_user_id", "") or None
+
+    # Un test ne doit JAMAIS atteindre le vrai jeton. La suite tourne aussi dans
+    # l'image de production, où `AsyncSessionLocal` pointe la base de production :
+    # le 2026-08-26, `test_sans_jeton_rien_ne_part` — qui vérifie justement qu'on
+    # ne publie pas SANS jeton — a récupéré le jeton réel ici et lancé une vraie
+    # publication vers Meta (refusée par Meta, code 9007, avec un fbtrace_id).
+    # Neutraliser `settings.meta_access_token` ne suffisait pas : la base prime.
+    # Garde-fou aligné sur `send_email` : `PYTEST_CURRENT_TEST`, et non
+    # `ENVIRONMENT`, parce que la gate s'exécute avec le `.env` de production.
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return (getattr(settings, "meta_access_token", "") or None), compte
 
     try:
         from db.database import AsyncSessionLocal
