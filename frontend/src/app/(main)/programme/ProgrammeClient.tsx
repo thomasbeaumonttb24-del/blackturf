@@ -198,7 +198,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
   const url = `/img/disciplines/${m.mask}`;
   return (
     <div
-      className="relative overflow-hidden rounded-[22px] animate-[fadeUp_.5s_cubic-bezier(.16,1,.3,1)_both]"
+      className="relative overflow-hidden rounded-[22px]"
       style={{ border: "1px solid rgba(255,255,255,.08)", background: "linear-gradient(135deg,#0F1520 0%,#1A2230 100%)", boxShadow: "0 18px 40px -24px rgba(15,21,32,.7)" }}
     >
       <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: "linear-gradient(180deg,#F59E0B,#D97706)" }} />
@@ -576,7 +576,7 @@ export default function ProgrammeClient({
 
         {/* ── HERO ── */}
         <div
-          className="relative overflow-hidden rounded-[28px] px-5 pb-5 pt-6 sm:px-7 sm:pb-6 sm:pt-7 animate-[fadeUp_.5s_cubic-bezier(.16,1,.3,1)_both]"
+          className="relative overflow-hidden rounded-[28px] px-5 pb-5 pt-6 sm:px-7 sm:pb-6 sm:pt-7"
           style={{ border: "1px solid rgba(245,158,11,.18)", background: "linear-gradient(180deg,#FFFBF0 0%,#FFFFFF 100%)", boxShadow: "0 1px 3px rgba(0,0,0,.04),0 16px 44px -20px rgba(180,83,9,.18)" }}
         >
           <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 60% at 12% 8%,rgba(245,158,11,.10),transparent 62%),radial-gradient(55% 55% at 94% 20%,rgba(217,119,6,.07),transparent 60%)" }} />
