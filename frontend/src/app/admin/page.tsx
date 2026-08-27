@@ -1142,9 +1142,13 @@ export default function AdminPage() {
       {/* Scraper status */}
       {scraperStatus && (() => {
         const sources = Object.entries(scraperStatus);
-        // Un statut « ok_avec_echecs » (échecs comptés, sous le seuil d'anomalie) reste
-        // un statut sain : le traiter en échec ferait clignoter la page pour rien.
-        const sain = (s: string) => s.startsWith("ok");
+        // « ok_avec_echecs » (échecs comptés, sous le seuil d'anomalie) reste sain : le
+        // traiter en échec ferait clignoter la page pour rien. Liste EXPLICITE et jamais
+        // un préfixe « ok » : `sante_scrapers()` produit aussi `ok_but_empty` — que des
+        // succès, aucune donnée — et c'est le cas trompeur du projet (4 scrapers « ok »
+        // à zéro donnée pendant des semaines). Il doit rester rouge.
+        const SAINS = ["ok", "ok_avec_echecs"];
+        const sain = (s: string) => SAINS.includes(s);
         const ok = sources.filter(([, s]) => sain(s.statut)).length;
         return (
           <AdminSection
