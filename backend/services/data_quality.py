@@ -92,6 +92,15 @@ MIN_RUNS_POUR_JUGER_SCRAPER = 20
 MIN_ENVOIS_POUR_JUGER_CANAL = 5
 SEUIL_TAUX_ECHEC_ENVOI = 0.30
 
+# `degraded` se declenchait sur UN SEUL echec, quel que soit le volume : un echec
+# in-app isole sur 621 envois (27/08) a produit une alerte critique par heure
+# pendant 24 h, toutes identiques. Une anomalie qui se repete a l'identique sans
+# rien apprendre de neuf finit par etre ignoree, y compris quand elle est vraie.
+# Un canal n'est degrade que si les echecs sont a la fois assez NOMBREUX et assez
+# FREQUENTS pour ne plus s'expliquer par un destinataire isole.
+MIN_ECHECS_POUR_CANAL_DEGRADE = 3
+SEUIL_TAUX_ECHEC_DEGRADE = 0.02
+
 # Tâches de fond : en dessous de 5 échecs sur la fenêtre, c'est le bruit normal
 # d'un OOM isolé ou d'une course mal formée. Au-delà, quelque chose est cassé.
 SEUIL_ECHECS_TACHES_RECENTS = 5
@@ -438,8 +447,9 @@ async def livraison_alertes(session: AsyncSession, heures: int = 24) -> dict:
     recevait rien. Un canal peut être mort pendant deux mois sans que rien ne
     l'indique : on le mesure ici.
 
-    Statuts par canal : `ok`, `insufficient_data` (trop peu d'envois pour juger),
-    `degraded` (des échecs, mais minoritaires), `failing` (canal cassé).
+    Statuts par canal : `ok`, `ok_avec_echecs` (echecs residuels, sous le seuil de
+    signalement), `insufficient_data` (trop peu d'envois pour juger), `degraded`
+    (des echecs, mais minoritaires), `failing` (canal casse).
     """
     maintenant = datetime.now(timezone.utc)
     lignes = (await session.execute(text("""
@@ -460,8 +470,13 @@ async def livraison_alertes(session: AsyncSession, heures: int = 24) -> dict:
             statut = "insufficient_data"
         elif taux >= SEUIL_TAUX_ECHEC_ENVOI:
             statut = "failing"
-        elif n_echecs:
+        elif (n_echecs >= MIN_ECHECS_POUR_CANAL_DEGRADE
+              and taux >= SEUIL_TAUX_ECHEC_DEGRADE):
             statut = "degraded"
+        elif n_echecs:
+            # Echecs residuels : comptes et visibles dans le rapport, mais pas
+            # remontes en anomalie (voir MIN_ECHECS_POUR_CANAL_DEGRADE).
+            statut = "ok_avec_echecs"
         else:
             statut = "ok"
         canaux[str(canal)] = {

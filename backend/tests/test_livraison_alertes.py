@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import AlerteLog
 from services.data_quality import (
+    MIN_ECHECS_POUR_CANAL_DEGRADE,
     MIN_ENVOIS_POUR_JUGER_CANAL,
     livraison_alertes,
     rapport_qualite,
@@ -53,9 +54,27 @@ async def test_canal_totalement_casse(db: AsyncSession):
 
 async def test_quelques_echecs_isoles_ne_declenchent_pas_l_alerte_critique(db: AsyncSession):
     """Un push expiré ou une adresse en rebond ne veut pas dire canal mort."""
-    await _envois(db, "push", ok=19, echecs=1)
+    await _envois(db, "push", ok=80, echecs=MIN_ECHECS_POUR_CANAL_DEGRADE)
     out = await livraison_alertes(db)
     assert out["canaux"]["push"]["statut"] == "degraded"
+
+
+async def test_un_echec_unique_dans_un_gros_volume_ne_remonte_pas(db: AsyncSession):
+    """Cas réel du 27/08/2026 : 1 échec in-app sur 621 envois a produit une
+    anomalie identique toutes les heures pendant 24 h. Une alerte qui se répète
+    sans rien apprendre de neuf finit par être ignorée, y compris quand elle
+    dit vrai : l'échec reste compté, il n'est plus signalé."""
+    await _envois(db, "in-app", ok=620, echecs=1)
+
+    out = await livraison_alertes(db)
+    canal = out["canaux"]["in-app"]
+    assert canal["statut"] == "ok_avec_echecs"
+    assert canal["n_echecs"] == 1, "l'échec reste visible dans le rapport"
+
+    rapport = await rapport_qualite(db)
+    codes = [a["code"] for a in rapport["anomalies"]]
+    assert "canal_envoi_degrade" not in codes
+    assert "canal_envoi_casse" not in codes
 
 
 async def test_trop_peu_d_envois_pour_conclure(db: AsyncSession):
@@ -107,6 +126,49 @@ async def test_le_push_sans_cles_vapid_dit_pourquoi(monkeypatch):
 
     assert not resultat
     assert resultat.erreur and "VAPID" in resultat.erreur
+
+
+async def test_l_inapp_rejoue_une_socket_morte(monkeypatch):
+    """Cause racine du 27/08 : apres ~10 h sans course (aucune entre 23 h et 06 h
+    UTC), la premiere publication Redis du matin tombait sur une socket fermee et
+    echouait ; les 8 suivantes du meme lot passaient, redis-py ayant remplace la
+    connexion cassee. Une seule tentative = une alerte perdue pour de bon."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from services import alerts
+
+    appels = {"n": 0}
+
+    class _RedisFlaky:
+        async def publish(self, canal, msg):
+            appels["n"] += 1
+            if appels["n"] == 1:
+                raise RedisConnectionError("Connection closed by server")
+            return 1
+
+    async def _get_redis():
+        return _RedisFlaky()
+
+    monkeypatch.setattr("db.redis_client.get_redis", _get_redis)
+    resultat = await alerts.send_inapp("u1", "value_bet_digest", {"nb_value_bets": 1})
+
+    assert resultat, "la seconde tentative doit aboutir"
+    assert appels["n"] == 2
+
+
+async def test_un_inapp_rate_dit_pourquoi(monkeypatch):
+    """L'unique echec in-app de production portait `erreur = NULL` : l'appelant
+    n'enregistrait pas la raison, et les logs conteneur sont effaces au
+    redemarrage. La cause doit survivre au redemarrage."""
+    from services import alerts
+
+    async def _get_redis():
+        raise RuntimeError("redis injoignable")
+
+    monkeypatch.setattr("db.redis_client.get_redis", _get_redis)
+    resultat = await alerts.send_inapp("u1", "value_bet_digest", {})
+
+    assert not resultat
+    assert resultat.erreur and "redis injoignable" in resultat.erreur
 
 
 async def test_le_resultat_reste_utilisable_comme_un_booleen():

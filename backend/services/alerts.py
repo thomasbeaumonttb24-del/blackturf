@@ -240,17 +240,36 @@ async def send_web_push(subscription: dict, title: str, body: str,
 # ─────────────────────────────────────────────
 # In-app (WebSocket via Redis)
 # ─────────────────────────────────────────────
-async def send_inapp(user_id: str, type_alerte: str, payload: dict) -> bool:
-    """Publie une alerte in-app via Redis pour le WS handler."""
-    try:
-        from db.redis_client import get_redis
-        redis = await get_redis()
-        msg = json.dumps({"type": type_alerte, "data": payload, "ts": datetime.now(timezone.utc).isoformat()})
-        await redis.publish(f"alertes:{user_id}", msg)
-        return True
-    except Exception as e:
-        log.error("alerts.inapp.failed", user_id=user_id, error=str(e))
-        return False
+async def send_inapp(user_id: str, type_alerte: str, payload: dict) -> ResultatEnvoi:
+    """Publie une alerte in-app via Redis pour le WS handler.
+
+    Deux corrections par rapport a la version booleenne :
+
+    - la RAISON de l'echec est remontee (la colonne `alertes_log.erreur` restait
+      vide sur ce canal, et les logs conteneur disparaissent au redemarrage :
+      l'echec du 27/08 06:10 etait indiagnosticable a posteriori) ;
+    - une seconde tentative est faite sur socket morte. Le pool est desormais
+      controle (`db.redis_client`), mais une connexion peut toujours lacher entre
+      le controle et l'envoi : ne pas rejouer, c'est perdre l'alerte pour de bon.
+    """
+    from db.redis_client import get_redis
+
+    msg = json.dumps({"type": type_alerte, "data": payload,
+                      "ts": datetime.now(timezone.utc).isoformat()})
+    derniere: Optional[Exception] = None
+    for tentative in (1, 2):
+        try:
+            redis = await get_redis()
+            await redis.publish(f"alertes:{user_id}", msg)
+            if tentative > 1:
+                log.info("alerts.inapp.rejoue_ok", user_id=user_id)
+            return ResultatEnvoi(True)
+        except Exception as e:  # noqa: BLE001
+            derniere = e
+            log.warning("alerts.inapp.tentative_echouee", user_id=user_id,
+                        tentative=tentative, error=str(e)[:200])
+    log.error("alerts.inapp.failed", user_id=user_id, error=str(derniere))
+    return ResultatEnvoi(False, f"{type(derniere).__name__}: {derniere}"[:300])
 
 
 # ─────────────────────────────────────────────
@@ -271,7 +290,9 @@ async def _log_alerte(
         type_alerte=type_alerte,
         canal=canal,
         payload=payload,
-        envoye=envoye,
+        # Les expediteurs renvoient un `ResultatEnvoi` (utilisable comme booleen) :
+        # la colonne est un vrai `boolean` Postgres, asyncpg refuse tout autre type.
+        envoye=bool(envoye),
         erreur=erreur,
         created_at=datetime.now(timezone.utc),
     )
@@ -335,7 +356,8 @@ async def notify_value_bets(
         }
 
         ok_inapp = await send_inapp(user.user_id, "value_bet_digest", payload)
-        await _log_alerte(session, user.user_id, "value_bet_digest", "in-app", payload, ok_inapp)
+        await _log_alerte(session, user.user_id, "value_bet_digest", "in-app", payload,
+                          ok_inapp, _raison(ok_inapp))
         nb_notifies += 1
 
         # Au plus un push toutes les 4 heures par utilisateur, même après restart.
@@ -464,7 +486,8 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
 
     async def _envoyer(user: User, type_alerte: str, payload: dict, titre: str, corps: str):
         ok = await send_inapp(user.user_id, type_alerte, payload)
-        await _log_alerte(session, user.user_id, type_alerte, "in-app", payload, ok)
+        await _log_alerte(session, user.user_id, type_alerte, "in-app", payload,
+                          ok, _raison(ok))
         abo = _abonnement_push(user)
         if abo:
             ok_push = await send_web_push(abo, title=titre, body=corps, data=payload)
