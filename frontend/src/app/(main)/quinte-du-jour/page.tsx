@@ -35,15 +35,17 @@ export async function generateMetadata(): Promise<Metadata> {
   const jour = jourParis();
   const c = await quinteDuJour(jour);
 
+  // « pronostic IA » est ici la formulation exacte de ce que la page propose, et l'une
+  // des requêtes les plus tapées sur ce créneau.
   const title = c
-    ? `Quinté+ du ${jourCourt(jour)} — ${titleCase(c.hippodrome_nom)}, partants et arrivée`
-    : `Quinté+ du jour — partants, pronostic et arrivée`;
+    ? `Quinté+ du ${jourCourt(jour)} à ${titleCase(c.hippodrome_nom)} — pronostic IA`
+    : `Quinté+ du jour — pronostic IA, partants et arrivée`;
   // Extrait tronqué par Google vers 155-160 caractères : date, lieu et heure d'abord.
   const description = c
     ? `Quinté+ du ${jourLong(jour)} à ${titleCase(c.hippodrome_nom)} : ${
         c.nb_partants
-      } partants, départ à ${heureParis(c.date_heure)}. Partants, cotes, arrivée et rapports.`
-    : "Le Quinté+ du jour : hippodrome, partants, cotes, puis l'arrivée officielle et les rapports PMU.";
+      } partants, départ à ${heureParis(c.date_heure)}. Probabilité par cheval, arrivée et rapports.`
+    : "Le Quinté+ du jour analysé par l'IA : partants, probabilité par cheval, puis l'arrivée officielle et les rapports PMU.";
 
   return {
     title,

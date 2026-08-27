@@ -22,7 +22,8 @@ import { DISCIPLINES } from "@/lib/disciplines";
  *    porte donc une date qui correspond à une modification réelle de son contenu.
  *
  * Seules des URLs canoniques, en 200 et indexables, sont listées : `/login`, `/recherche`
- * et `/track-record` ont leur propre statut et n'y figurent pas.
+ * et `/value-bets` sont en `noindex` et n'y figurent donc pas — une URL en noindex
+ * listée dans un sitemap est un signal contradictoire.
  */
 export const revalidate = 3600;
 
@@ -43,6 +44,7 @@ const MAJ = {
   newsletter: "2026-08-24",
   inscription: "2026-08-23",
   archives: "2026-08-26",
+  pronosticsIa: "2026-08-27",
   legal: "2026-07-02",
 } as const;
 
@@ -88,6 +90,10 @@ function sitemapPages(): Response {
 
     { loc: BASE, lastmod: iso(MAJ.accueil) },
     { loc: `${BASE}/tarifs`, lastmod: iso(MAJ.tarifs) },
+    { loc: `${BASE}/pronostics-ia`, lastmod: iso(MAJ.pronosticsIa) },
+    // Le palmarès est passé en `index` le 2026-08-26 mais était resté hors du sitemap.
+    // Son contenu chiffré est régénéré toutes les quinze minutes.
+    { loc: `${BASE}/track-record`, lastmod: debutDeJournee },
     { loc: `${BASE}/guides`, lastmod: iso(MAJ.guides) },
     { loc: `${BASE}/guides/types-de-paris-pmu`, lastmod: iso(MAJ.guideTypesParis) },
     { loc: `${BASE}/guides/comment-lire-la-musique`, lastmod: iso(MAJ.guideMusique) },

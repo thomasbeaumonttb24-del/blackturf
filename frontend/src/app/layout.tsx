@@ -40,7 +40,11 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: {
-    default: "BlackTurf — pronostics PMU notés aux rapports réels",
+    // « IA » figure au titre parce que c'est littéralement ce que fait le site : un modèle
+    // statistique réentraîné chaque nuit calcule une probabilité par cheval. Le mot était
+    // absent du titre comme du h1, alors que le champ lexical revenait trente-cinq fois
+    // dans le corps de la page — la page traitait le sujet sans jamais le dire.
+    default: "BlackTurf — pronostics PMU par IA, notés aux rapports réels",
     // Pas de gabarit « %s | BlackTurf » : Google affiche déjà « blackturf.fr » comme nom
     // de site au-dessus du titre. Le suffixe répétait donc la marque une seconde fois et
     // mangeait la largeur disponible sur mobile, là où le titre est tronqué.
@@ -48,7 +52,7 @@ export const metadata: Metadata = {
   },
   // Google tronque autour de 155-160 caractères : l'essentiel passe devant.
   description:
-    "Programme PMU du jour, probabilité calculée pour chaque cheval et plan de mise ajusté à votre budget. Chaque pronostic est noté aux rapports réels du PMU.",
+    "Programme PMU analysé par une IA : probabilité calculée pour chaque cheval et plan de mise ajusté à votre budget. Pronostics notés aux rapports réels du PMU.",
   // `meta keywords` est ignorée par Google depuis 2009 — retirée.
   metadataBase: new URL("https://blackturf.fr"),
   manifest: "/manifest.json",
@@ -64,9 +68,9 @@ export const metadata: Metadata = {
     siteName: "BlackTurf",
     // Aligné sur le <title> : og:title est une des sources dont Google se sert pour
     // fabriquer le lien de titre, une divergence l'empêche de trancher.
-    title: "BlackTurf — pronostics PMU notés aux rapports réels",
+    title: "BlackTurf — pronostics PMU par IA, notés aux rapports réels",
     description:
-      "Programme PMU du jour, probabilité par cheval et plan de mise sur votre budget. Pronostics notés aux rapports réels.",
+      "Programme PMU du jour analysé par IA : probabilité par cheval et plan de mise sur votre budget. Pronostics notés aux rapports réels.",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "BlackTurf" }],
   },
   // Volontairement réduite à la seule forme de carte.

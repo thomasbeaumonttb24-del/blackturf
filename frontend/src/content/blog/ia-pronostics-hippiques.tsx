@@ -58,7 +58,14 @@ export default function Body() {
         BlackTurf estime la probabilité réelle de chaque cheval, la calibre après chaque journée de
         résultats, et la confronte à la cote PMU en direct pour signaler les{" "}
         <Link href="/guides/pari-de-valeur">paris de valeur</Link>. Aucune promesse magique : un outil
-        qui maximise les chances, honnêtement.{" "}
+        qui maximise les chances, honnêtement.
+      </p>
+      <p>
+        Le détail de la méthode — les données sur lesquelles le modèle apprend, la façon dont il est
+        réentraîné chaque nuit et les mesures qui servent à vérifier sa justesse — est exposé sur la
+        page <Link href="/pronostics-ia">comment fonctionne l&apos;algorithme</Link>. Les résultats
+        obtenus course après course, gains comme pertes, sont publiés dans le{" "}
+        <Link href="/track-record">palmarès</Link>.{" "}
         <Link href="/programme">Voir l&apos;analyse du jour →</Link>
       </p>
     </>

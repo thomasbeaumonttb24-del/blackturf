@@ -20,6 +20,7 @@ const COLUMNS: Array<{
     title: "Produit",
     links: [
       { href: "/programme", label: "Programme du jour" },
+      { href: "/pronostics-ia", label: "Comment marche l’IA" },
       { href: "/track-record", label: "Palmarès mesuré" },
       { href: "/value-bets", label: "Paris de valeur", prive: true },
       { href: "/bankroll", label: "Suivi du capital", prive: true },

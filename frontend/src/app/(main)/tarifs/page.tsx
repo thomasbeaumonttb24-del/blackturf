@@ -8,9 +8,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
 
 export const metadata: Metadata = {
-  title: "Tarifs — Gratuit, Standard, Expert",
+  // Le corps de la page employait déjà trente et une fois le vocabulaire de l'IA sans
+  // que le titre ni la description ne le disent.
+  title: "Tarifs — pronostics PMU par IA à partir de 12 €/mois",
   description:
-    "Trois formules : Gratuit (programme et cotes), Standard 12 €/mois, Expert 19 €/mois. Sans engagement, 7 jours d'essai.",
+    "Trois formules d'accès aux pronostics IA : Gratuit (programme et cotes), Standard 12 €/mois, Expert 19 €/mois. Sans engagement, 7 jours d'essai.",
   alternates: { canonical: "/tarifs" },
   openGraph: {
     title: "Tarifs BlackTurf — Gratuit, Standard, Expert",

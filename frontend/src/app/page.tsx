@@ -231,9 +231,13 @@ export default async function HomePage() {
         <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-transparent" />
 
         <div className="relative mx-auto max-w-5xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16 text-center">
+          {/* Le titre de la page ne nommait pas ce qui analyse les courses, alors que
+              c'est tout le sujet du site et que le champ lexical revient trente-cinq fois
+              plus bas. « par l'IA » n'est pas un ajout décoratif : un modèle statistique
+              réentraîné chaque nuit calcule bien la probabilité de chaque partant. */}
           <h1 className="font-display text-[2.4rem] leading-[1.04] sm:text-[4.25rem] sm:leading-[1.02] font-extrabold tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)]">
             Chaque course du PMU,{" "}
-            <span className="text-gradient-animated">analysée avant le départ.</span>
+            <span className="text-gradient-animated">analysée par l&apos;IA avant le départ.</span>
           </h1>
 
           <p className="mt-6 text-base sm:text-lg text-white/85 leading-relaxed max-w-2xl mx-auto">

@@ -583,6 +583,18 @@ export interface SeoTrackRecord {
     accuracy_top1: number;
     accuracy_top3: number;
   }>;
+  /**
+   * Closing Line Value : part des paris pris à une cote meilleure que la cote de clôture.
+   * C'est la mesure la plus exigeante d'un modèle — battre la ligne de clôture signifie
+   * avoir vu avant le marché qu'un cheval était sous-évalué, ce que le hasard produit
+   * difficilement sur plusieurs milliers de paris.
+   */
+  clv?: {
+    n: number;
+    pct_beat_line: number;
+    clv_implied: number;
+    clv_median: number;
+  } | null;
   updated_at?: string;
 }
 
