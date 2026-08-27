@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Brain, Database, RefreshCw, Target, Scale, AlertTriangle } from "lucide-react";
-import { fetchTrackRecord, ogBase, twitterBase, filAriane, jourCourtAnnee } from "@/lib/seo";
+import { fetchTrackRecord, ogBase, twitterBase, filAriane, jourCourtAnnee, jsonLd } from "@/lib/seo";
 import { SeoHero, Container, Section, Callout, Chip, DefCard } from "@/components/seo/kit";
 
 /**
@@ -52,7 +52,7 @@ export default async function PronosticsIaPage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumb) }}
       />
 
       <SeoHero

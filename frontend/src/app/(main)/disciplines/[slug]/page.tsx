@@ -11,6 +11,7 @@ import {
   resumeCourt,
   filAriane,
   OG_IMAGE,
+  jsonLd,
 } from "@/lib/seo";
 import { ProfilChiffreDiscipline } from "@/components/seo/ProfilChiffre";
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
@@ -90,7 +91,7 @@ export default async function DisciplinePage({ params }: { params: Promise<{ slu
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumb) }} />
 
       <SeoHero
         eyebrow="Discipline"

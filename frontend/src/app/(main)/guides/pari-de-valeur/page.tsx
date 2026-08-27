@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE } from "@/lib/seo";
+import { OG_IMAGE, jsonLd } from "@/lib/seo";
 import Link from "next/link";
 import { Target, TrendingUp } from "lucide-react";
 import { SeoHero, Container, Section, Callout, Chip } from "@/components/seo/kit";
@@ -39,8 +39,8 @@ export default function GuideValeur() {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(articleLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumb) }} />
 
       <SeoHero
         eyebrow="Guide"

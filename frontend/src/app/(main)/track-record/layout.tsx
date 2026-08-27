@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { fetchTrackRecord, ogBase, twitterBase } from "@/lib/seo";
+import { fetchTrackRecord, ogBase, twitterBase, jsonLd } from "@/lib/seo";
 import { PalmaresResume } from "@/components/seo/PalmaresResume";
 
 /**
@@ -47,7 +47,7 @@ export default async function TrackRecordLayout({ children }: { children: React.
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
       />
       {children}
       {/* Sous l'application, la même chose en toutes lettres : lisible sans JavaScript,

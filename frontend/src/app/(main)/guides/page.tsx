@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE, filAriane } from "@/lib/seo";
+import { OG_IMAGE, filAriane, jsonLd } from "@/lib/seo";
 import { Ticket, Music, Target, BookOpen } from "lucide-react";
 import { SeoHero, Container, LinkCard, Callout, Chip } from "@/components/seo/kit";
 
@@ -38,7 +38,7 @@ const GUIDES = [
 ];
 
 export default function GuidesIndex() {
-  const jsonLd = {
+  const itemListLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
     name: "Guides paris hippiques PMU",
@@ -52,8 +52,8 @@ export default function GuidesIndex() {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(filAriane([{ nom: "Accueil", url: "/" }, { nom: "Guides" }])) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(itemListLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(filAriane([{ nom: "Accueil", url: "/" }, { nom: "Guides" }])) }} />
 
       <SeoHero
         eyebrow="Ressources"

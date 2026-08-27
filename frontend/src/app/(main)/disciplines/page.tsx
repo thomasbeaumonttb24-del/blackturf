@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE, filAriane } from "@/lib/seo";
+import { OG_IMAGE, filAriane, jsonLd } from "@/lib/seo";
 import Link from "next/link";
 import { ArrowRight, Layers } from "lucide-react";
 import { DISCIPLINES } from "@/lib/disciplines";
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 };
 
 export default function DisciplinesIndex() {
-  const jsonLd = {
+  const itemListLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
     name: "Disciplines hippiques",
@@ -34,8 +34,8 @@ export default function DisciplinesIndex() {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(filAriane([{ nom: "Accueil", url: "/" }, { nom: "Disciplines" }])) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(itemListLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(filAriane([{ nom: "Accueil", url: "/" }, { nom: "Disciplines" }])) }} />
 
       <SeoHero
         eyebrow="Disciplines"

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE } from "@/lib/seo";
+import { OG_IMAGE, jsonLd } from "@/lib/seo";
 import Link from "next/link";
 import { Check, X, Zap, ChevronRight, Calculator } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -99,7 +99,7 @@ const FEATURES_COMPARISON: { label: string; free: Cellule; standard: Cellule; ex
 export default function TarifsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-10 sm:py-16">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(offersJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(offersJsonLd) }} />
       {/* Header */}
       <div className="text-center mb-10 sm:mb-16">
         <Badge variant="gold" className="mb-4">Tarifs</Badge>

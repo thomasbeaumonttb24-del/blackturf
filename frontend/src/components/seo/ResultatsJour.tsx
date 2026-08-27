@@ -13,6 +13,8 @@ import {
   PREMIER_JOUR_ARCHIVE,
   type SeoCourse,
   type SeoResultats,
+
+  jsonLd,
 } from "@/lib/seo";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
@@ -114,12 +116,12 @@ export async function ResultatsJour({ jour }: { jour: string }) {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
       />
       {itemListJsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: jsonLd(itemListJsonLd) }}
         />
       )}
 

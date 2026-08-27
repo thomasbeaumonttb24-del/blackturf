@@ -7,6 +7,7 @@ import {
   moisLong,
   ogBase,
   twitterBase,
+  jsonLd,
 } from "@/lib/seo";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 
@@ -65,7 +66,7 @@ export default async function ArchivesResultatsPage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
       />
 
       <SeoHero

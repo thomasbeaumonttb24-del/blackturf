@@ -12,6 +12,7 @@ import {
   disciplineLabel,
   OG_IMAGE,
   filAriane,
+  jsonLd,
 } from "@/lib/seo";
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
 import { ProfilChiffreLieu } from "@/components/seo/ProfilChiffre";
@@ -115,8 +116,8 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(placeLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(placeLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumb) }} />
 
       <SeoHero
         eyebrow={`${h.city} · ${h.region}`}

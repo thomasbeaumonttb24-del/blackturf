@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE } from "@/lib/seo";
+import { OG_IMAGE, jsonLd } from "@/lib/seo";
 import { Ticket } from "lucide-react";
 import { SeoHero, Container, Section, DefCard, Callout, Chip } from "@/components/seo/kit";
 
@@ -50,9 +50,9 @@ export default function GuideTypesParis() {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(articleLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(faqLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumb) }} />
 
       <SeoHero
         eyebrow="Guide"

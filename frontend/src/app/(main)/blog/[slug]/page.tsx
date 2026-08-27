@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE } from "@/lib/seo";
+import { OG_IMAGE, jsonLd } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Clock, ArrowRight, ArrowLeft } from "lucide-react";
@@ -81,8 +81,8 @@ export default async function BlogArticle({ params }: { params: Promise<{ slug: 
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(articleLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumb) }} />
 
       <SeoHero
         eyebrow={a.tags[0]}

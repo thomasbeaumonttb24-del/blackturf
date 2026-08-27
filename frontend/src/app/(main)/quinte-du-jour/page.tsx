@@ -14,6 +14,8 @@ import {
   ogBase,
   twitterBase,
   type SeoCourse,
+
+  jsonLd,
 } from "@/lib/seo";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
@@ -123,12 +125,12 @@ export default async function QuinteDuJourPage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
       />
       {eventJsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(eventJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: jsonLd(eventJsonLd) }}
         />
       )}
 

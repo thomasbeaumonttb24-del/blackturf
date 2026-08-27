@@ -10,6 +10,8 @@ import {
   disciplineLabel,
   ogBase,
   twitterBase,
+
+  jsonLd,
 } from "@/lib/seo";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import { PreuvesRecentesCard } from "@/components/courses/insights";
@@ -95,11 +97,11 @@ export default async function ProgrammePage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(itemListJsonLd) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
       />
       <ProgrammeClient initialProgramme={prog} initialJour={jour} initialCompteurVB={compteurVB} />
 

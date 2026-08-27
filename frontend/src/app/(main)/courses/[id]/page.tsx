@@ -16,6 +16,8 @@ import {
   twitterBase,
   type SeoCourseDetail,
   type SeoResultats,
+
+  jsonLd,
 } from "@/lib/seo";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import CourseClient from "./CourseClient";
@@ -227,13 +229,13 @@ export default async function CoursePage({ params }: Props) {
       {course && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdCourse(course, resultats)) }}
+          dangerouslySetInnerHTML={{ __html: jsonLd(jsonLdCourse(course, resultats)) }}
         />
       )}
       {breadcrumbJsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
         />
       )}
 

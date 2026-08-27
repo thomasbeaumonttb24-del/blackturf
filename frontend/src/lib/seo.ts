@@ -266,6 +266,22 @@ export function bornesDuMois(ym: string, aujourdhui = jourParis()): { debut: str
 }
 
 /**
+ * Sérialise un objet pour une balise `<script type="application/ld+json">`.
+ *
+ * `JSON.stringify` n'échappe PAS le caractère `<`. Un nom de course, de cheval ou
+ * d'hippodrome contenant la suite `</script>` refermerait donc la balise et ferait passer
+ * la suite pour du HTML — le navigateur exécuterait ce qui vient après. Ces noms viennent
+ * du scraping PMU : ils ne sont pas saisis par nous, et rien ne garantit leur contenu.
+ *
+ * `<` est la forme échappée de `<` : elle est comprise à l'identique par tout parseur
+ * JSON, et ne peut plus fermer la balise. À utiliser pour TOUT `dangerouslySetInnerHTML`
+ * qui sérialise des données structurées.
+ */
+export function jsonLd(objet: unknown): string {
+  return JSON.stringify(objet).replace(/</g, "\\u003c");
+}
+
+/**
  * Fil d'Ariane en données structurées.
  *
  * À n'employer que sur une page qui AFFICHE réellement son fil — c'est la règle la plus
