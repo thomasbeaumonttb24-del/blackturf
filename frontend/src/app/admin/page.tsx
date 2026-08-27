@@ -119,6 +119,15 @@ const MOUVEMENT_LABELS: Record<string, string> = {
   paiement_recu: "Paiement encaissé — accès rétabli",
   essai_refuse_carte_reutilisee: "Essai refusé — carte d'un autre compte",
   carte_refusee_autre_compte: "Abonnement refusé — carte d'un autre compte",
+  // Statuts Stripe bruts : `_handle_subscription_updated` les journalise tels quels
+  // quand le changement ne correspond à aucun mouvement métier nommé. Sans libellé,
+  // le journal affichait « past_due » en toutes lettres.
+  past_due: "Impayé — accès coupé, relances Stripe en cours",
+  unpaid: "Impayé définitif — relances Stripe épuisées",
+  canceled: "Abonnement clos chez Stripe",
+  incomplete: "Paiement jamais finalisé",
+  incomplete_expired: "Paiement abandonné — abonnement expiré",
+  paused: "Abonnement suspendu",
 };
 
 const MOUVEMENT_TONS: Record<string, "success" | "warning" | "destructive" | "secondary"> = {
@@ -135,11 +144,21 @@ const MOUVEMENT_TONS: Record<string, "success" | "warning" | "destructive" | "se
   paiement_recu: "success",
   essai_refuse_carte_reutilisee: "warning",
   carte_refusee_autre_compte: "destructive",
+  past_due: "destructive",
+  unpaid: "destructive",
+  canceled: "secondary",
+  incomplete: "warning",
+  incomplete_expired: "secondary",
+  paused: "warning",
 };
 
-/** Mouvements qui coupent l'accès ou font perdre un client : remontés hors du journal. */
+/** Mouvements qui coupent l'accès ou font perdre un client : remontés hors du journal.
+ *  `past_due` et `unpaid` en font partie : quand les relances Stripe s'épuisent,
+ *  l'abonnement bascule en impayé sans qu'aucune facture n'échoue au même instant. */
 const MOUVEMENTS_ECHEC = new Set([
   "paiement_echoue",
+  "past_due",
+  "unpaid",
   "essai_termine_sans_carte",
   "essai_refuse_carte_reutilisee",
   "carte_refusee_autre_compte",
@@ -756,10 +775,17 @@ export default function AdminPage() {
         // Un échec de paiement coupe l'accès : c'est l'information la plus urgente de
         // la page. Elle ne doit donc jamais dépendre du dépliage du journal — d'où la
         // pastille dans l'en-tête, la ligne d'alerte permanente et l'ouverture d'office.
-        const echecsRecents = abos.mouvements.filter(
-          (m) => MOUVEMENTS_ECHEC.has(m.type)
-            && Date.now() - new Date(m.created_at).getTime() < 7 * 86400_000,
-        );
+        const echecsRecents = abos.mouvements
+          .filter((m) => MOUVEMENTS_ECHEC.has(m.type)
+            && Date.now() - new Date(m.created_at).getTime() < 7 * 86400_000)
+          .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+        // Un seul incident écrit DEUX mouvements à quelques secondes d'écart (le statut
+        // Stripe `past_due`, puis `paiement_echoue`). Compter les lignes annoncerait
+        // deux échecs pour un. On compte les incidents : même compte, moins de 5 min.
+        const incidents = echecsRecents.filter((m, i) => !echecsRecents.slice(0, i).some(
+          (p) => p.email === m.email
+            && Math.abs(+new Date(p.created_at) - +new Date(m.created_at)) < 5 * 60_000,
+        ));
         const dernierEchec = echecsRecents[0];
         return (
         <AdminSection
@@ -772,7 +798,7 @@ export default function AdminPage() {
             <>
               {echecsRecents.length > 0 && (
                 <Puce ton="alerte">
-                  {echecsRecents.length} échec{echecsRecents.length > 1 ? "s" : ""} · 7 j
+                  {incidents.length} échec{incidents.length > 1 ? "s" : ""} · 7 j
                 </Puce>
               )}
               <Puce ton={abos.resume.abonnes_payants > 0 ? "ok" : "neutre"}>
@@ -922,9 +948,9 @@ export default function AdminPage() {
                 <span className="text-xs text-muted-foreground" title={formatDateTime(dernierEchec.created_at)}>
                   {depuis(dernierEchec.created_at)}
                 </span>
-                {echecsRecents.length > 1 && (
+                {incidents.length > 1 && (
                   <span className="text-xs text-muted-foreground">
-                    · {echecsRecents.length - 1} autre{echecsRecents.length > 2 ? "s" : ""} sur 7 j
+                    · {incidents.length - 1} autre{incidents.length > 2 ? "s" : ""} sur 7 j
                   </span>
                 )}
               </div>
@@ -939,7 +965,7 @@ export default function AdminPage() {
               ton={echecsRecents.length > 0 ? "alerte" : "neutre"}
               resume={
                 <>
-                  {echecsRecents.length > 0 && <Puce ton="alerte">{echecsRecents.length} échec{echecsRecents.length > 1 ? "s" : ""}</Puce>}
+                  {echecsRecents.length > 0 && <Puce ton="alerte">{incidents.length} échec{incidents.length > 1 ? "s" : ""}</Puce>}
                   <Puce>{abos.mouvements.length}</Puce>
                 </>
               }
