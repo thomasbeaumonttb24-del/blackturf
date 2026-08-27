@@ -14,13 +14,20 @@ services:
     shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-blackturf}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blackturf_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}
       POSTGRES_DB: ${POSTGRES_DB:-blackturf}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
     ports:
-      - "5432:5432"
+    # Lie a la boucle locale, JAMAIS a 0.0.0.0. Docker publie ses ports en
+    # ecrivant des regles DNAT en amont des chaines que ufw manipule : un
+    # pare-feu hote « classique » ne les couvre pas. Surtout, `docker-proxy`
+    # ecoute aussi sur [::], et la protection IPv4 en place (DOCKER-USER +
+    # pare-feu Hetzner) ne couvrait pas l'IPv6 : le 27/08/2026, Postgres,
+    # Redis et le frontend etaient joignables depuis Internet sur
+    # [2a01:4f8:c015:5441::1]. Le port n'a a etre publie que pour l'hote.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-blackturf}"]
       interval: 10s
@@ -31,13 +38,25 @@ services:
   redis:
     image: redis:7-alpine
     container_name: blackturf_redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_secret}
+    # `:?` et non `:-` : un repli silencieux sur un mot de passe ecrit en clair
+    # dans un depot public est pire que pas de mot de passe du tout, car rien
+    # ne signale la bascule. Une variable absente du .env doit faire ECHOUER le
+    # demarrage — c'est deja arrive sur ce projet (ACCESS_TOKEN_EXPIRE_MINUTES
+    # n'atteignait pas le conteneur, sans le moindre message).
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}
     ports:
-      - "6379:6379"
+    # Lie a la boucle locale, JAMAIS a 0.0.0.0. Docker publie ses ports en
+    # ecrivant des regles DNAT en amont des chaines que ufw manipule : un
+    # pare-feu hote « classique » ne les couvre pas. Surtout, `docker-proxy`
+    # ecoute aussi sur [::], et la protection IPv4 en place (DOCKER-USER +
+    # pare-feu Hetzner) ne couvrait pas l'IPv6 : le 27/08/2026, Postgres,
+    # Redis et le frontend etaient joignables depuis Internet sur
+    # [2a01:4f8:c015:5441::1]. Le port n'a a etre publie que pour l'hote.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-redis_secret}", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,8 +68,8 @@ services:
       dockerfile: Dockerfile
     container_name: blackturf_api
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:-blackturf_secret}@db:5432/${POSTGRES_DB:-blackturf}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secret}@redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
@@ -90,8 +109,8 @@ services:
       dockerfile: Dockerfile.scraper
     container_name: blackturf_scraper
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:-blackturf_secret}@db:5432/${POSTGRES_DB:-blackturf}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secret}@redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
       - BRIGHTDATA_PROXY=${BRIGHTDATA_PROXY}
       - SCRAPER_INTERVAL=${SCRAPER_INTERVAL:-5}
@@ -111,8 +130,8 @@ services:
     container_name: blackturf_worker
     command: python -m rq worker default ml --with-scheduler --url ${REDIS_URL:-redis://:redis_secret@redis:6379/0}
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:-blackturf_secret}@db:5432/${POSTGRES_DB:-blackturf}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secret}@redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - RESEND_API_KEY=${RESEND_API_KEY}
     depends_on:
@@ -144,7 +163,14 @@ services:
       - NEXT_PUBLIC_WS_URL=wss://api.blackturf.fr/ws
       - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
     ports:
-      - "3000:3000"
+    # Lie a la boucle locale, JAMAIS a 0.0.0.0. Docker publie ses ports en
+    # ecrivant des regles DNAT en amont des chaines que ufw manipule : un
+    # pare-feu hote « classique » ne les couvre pas. Surtout, `docker-proxy`
+    # ecoute aussi sur [::], et la protection IPv4 en place (DOCKER-USER +
+    # pare-feu Hetzner) ne couvrait pas l'IPv6 : le 27/08/2026, Postgres,
+    # Redis et le frontend etaient joignables depuis Internet sur
+    # [2a01:4f8:c015:5441::1]. Le port n'a a etre publie que pour l'hote.
+      - "127.0.0.1:3000:3000"
     depends_on:
       - api
     healthcheck:
