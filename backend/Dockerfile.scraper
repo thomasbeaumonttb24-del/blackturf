@@ -16,10 +16,33 @@ RUN apt-get update && apt-get install -y \
 # playwright → mismatch de version → "chromium-XXXX doesn't exist".
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Le navigateur s'installait sous /root/.cache/ms-playwright, donc INACCESSIBLE à
+# tout utilisateur non privilégié — c'est précisément ce qui obligeait ce conteneur
+# à tourner en root, seul des huit dans ce cas. On l'installe dans un chemin partagé
+# et lisible par tous, ce qui lève l'obstacle.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # apt-get update car les listes ont été purgées au-dessus ; --with-deps installe
 # les libs système du navigateur via apt.
-RUN apt-get update && playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod -R a+rX /ms-playwright
 
 COPY . .
+
+# uid 1001 : le MÊME que api, worker et scheduler, pour que les volumes partagés
+# (blackturf_scrape_data, blackturf_ml_models) aient un propriétaire cohérent —
+# sinon le heartbeat écrit ici en root deviendrait illisible pour les autres, et
+# réciproquement.
+#
+# Chromium tourne déjà avec --no-sandbox (scraper/base.py) : c'est ce qui rend ce
+# passage possible, et c'est d'ailleurs la configuration recommandée en conteneur.
+# En root, Chromium REFUSE de démarrer sans ce drapeau ; en non-root il n'en a plus
+# besoin pour la même raison de sécurité, mais le garder est sans effet néfaste.
+RUN useradd --uid 1001 --create-home --home-dir /home/appuser --shell /usr/sbin/nologin appuser \
+    && chown -R 1001:1001 /app /home/appuser
+ENV HOME=/home/appuser
+
+USER 1001:1001
 
 CMD ["python", "-m", "scraper.orchestrator", "--daemon"]
