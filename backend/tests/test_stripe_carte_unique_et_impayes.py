@@ -246,6 +246,32 @@ async def test_paiement_echoue_coupe_lacces_et_retrograde_en_free(db, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_le_journal_dit_letat_constate_et_non_une_comparaison(db, monkeypatch):
+    """Regression du 2026-08-27, premier impaye reel.
+
+    `customer.subscription.updated` arrive 4 s AVANT `invoice.payment_failed` et a
+    deja retrograde le compte : la comparaison avant/apres ne voyait plus aucun
+    changement et le journal annoncait << acces coupe : non >> alors que l'acces
+    etait coupe. Le detail doit porter l'ETAT CONSTATE.
+    """
+    _stripe_muet(monkeypatch)
+    user = await _user(db, plan="free")   # deja retrograde par l'autre webhook
+    abo = Subscription(sub_id=str(uuid.uuid4()), user_id=user.user_id,
+                       stripe_subscription_id="sub_deja_past_due", plan="expert",
+                       periodicite="monthly", **_periodes(), statut="past_due")
+    db.add(abo)
+    await db.commit()
+
+    await sr._handle_payment_failed(_facture("sub_deja_past_due"), db)
+
+    evt = (await db.execute(select(SubscriptionEvent).where(
+        SubscriptionEvent.user_id == user.user_id,
+        SubscriptionEvent.type == "paiement_echoue"))).scalar_one()
+    assert evt.detail["acces_ouvert"] is False
+    assert evt.detail["plan_apres"] == "free"
+
+
+@pytest.mark.asyncio
 async def test_paiement_encaisse_retablit_lacces(db, monkeypatch):
     _stripe_muet(monkeypatch)
     user = await _user(db, plan="free")

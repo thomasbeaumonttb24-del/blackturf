@@ -992,7 +992,10 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
                       detail={"facture": invoice.get("id"),
                               "motif": invoice.get("billing_reason"),
                               "premier_paiement_apres_essai": fin_dessai,
-                              "acces_retabli": reprise})
+                              # État CONSTATÉ après traitement, jamais une
+                              # comparaison avant/après : cf. `_handle_payment_failed`.
+                              "plan_apres": user.plan,
+                              "acces_ouvert": user.plan != "free"})
     await db.commit()
     log.info("stripe.acces_retabli" if reprise else "stripe.paiement_encaisse",
              user_id=user.user_id, plan=user.plan, montant_cents=montant)
@@ -1028,6 +1031,12 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
     # est écarté du calcul, un AUTRE abonnement vivant peut encore porter le compte.
     user.plan = await _plan_effectif(user.user_id, db, sauf_stripe_id=sub_id)
 
+    # L'état est CONSTATÉ, pas déduit d'une comparaison avant/après. Le premier
+    # impayé réel (2026-08-27) a montré pourquoi : `customer.subscription.updated`
+    # arrive 4 secondes AVANT `invoice.payment_failed` et a déjà rétrogradé le
+    # compte, si bien que le plan ne bougeait plus ici. Le journal affichait donc
+    # « accès coupé : non » alors que l'accès était bel et bien coupé — l'état
+    # juste avec l'étiquette qui ment, le pire des deux mondes pour qui relit.
     await journaliser(db, "paiement_echoue", user, sub,
                       plan_precedent=plan_precedent if plan_precedent != user.plan else None,
                       stripe_subscription_id=sub_id,
@@ -1035,7 +1044,8 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
                       detail={"facture": invoice.get("id"),
                               "tentative": invoice.get("attempt_count"),
                               "motif": invoice.get("billing_reason"),
-                              "acces_coupe": plan_precedent != user.plan})
+                              "plan_apres": user.plan,
+                              "acces_ouvert": user.plan != "free"})
     await db.commit()
 
     log.warning("stripe.payment_failed", customer=invoice.get("customer"),
