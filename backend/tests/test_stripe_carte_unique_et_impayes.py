@@ -217,6 +217,31 @@ async def test_politique_ignorer_retablit_lancien_comportement(db, monkeypatch):
     assert second.plan == "standard"
 
 
+def test_tout_type_journalise_possede_un_libelle():
+    """Aucun mouvement ne doit s'afficher en cle technique dans le suivi admin.
+
+    `_handle_subscription_updated` journalise le STATUT Stripe brut quand il
+    change sans correspondre a un mouvement metier nomme. Le premier impaye reel
+    (2026-08-27) a donc produit une ligne << past_due >> en toutes lettres.
+    """
+    from services.abonnements import LIBELLES, TYPES_NOTIFIES
+    from api.routes.stripe_routes import STATUTS_ACCES, STATUTS_VIVANTS
+
+    # Un statut qui donne acces est journalise sous le nom metier
+    # "abonnement_actif" ; seuls les AUTRES ressortent en clair.
+    statuts_bruts = (set(STATUTS_VIVANTS)
+                     | {"canceled", "unpaid", "incomplete", "incomplete_expired", "paused"}
+                     ) - set(STATUTS_ACCES) - {"trialing"}
+    manquants = {s for s in statuts_bruts if s not in LIBELLES}
+    assert not manquants, f"statuts sans libelle : {sorted(manquants)}"
+
+    # Un echec de paiement produit past_due PUIS paiement_echoue a 4 s d'ecart :
+    # notifier les deux enverrait deux e-mails pour un seul evenement.
+    assert "past_due" not in TYPES_NOTIFIES
+    assert "paiement_echoue" in TYPES_NOTIFIES
+    assert TYPES_NOTIFIES <= set(LIBELLES), "un type notifie sans libelle"
+
+
 # ─────────────────────────────────────────────
 # 2. Impayé : accès coupé, puis rendu au paiement
 # ─────────────────────────────────────────────
