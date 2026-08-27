@@ -99,7 +99,10 @@ def enum_program(html: str, today_utc: datetime) -> list[dict]:
         out.append({"id": gid, "cnum": cnum, "dt_utc": dt_local.astimezone(timezone.utc)})
     return out
 
-_H1_REUNION = re.compile(r"<h1[^>]*>\s*R(\d+)\s*-\s*([^<]+)</h1>")
+# Les courses ETRANGERES prefixent le pays : « USA - R6 - Saratoga », quand une
+# reunion francaise donne « R5 - Pornichet-La Baule ». Ancrer sur le debut du <h1>
+# rejetait donc toutes les courses etrangeres — 96 sautees en trois heures.
+_H1_REUNION = re.compile(r"<h1[^>]*>[^<]*?R(\d+)\s*-\s*([^<]+)</h1>")
 
 
 def read_course(gid: str) -> tuple[dict[int, float], int | None, str]:
@@ -123,7 +126,17 @@ def read_course(gid: str) -> tuple[dict[int, float], int | None, str]:
         if not mn:
             continue
         num = int(mn.group(1))
-        mc = re.search(r'img-cote[^>]*>\s*(\d{1,3}[.,]\d)', blk)
+        # La cote appartient à la LIGNE du partant : on borne au premier </tr>.
+        # Sans cette borne, le bloc s'étend jusqu'au partant suivant et `re.search`
+        # repart sur le `img-cote` d'un AUTRE cheval dès que celui-ci n'a pas de
+        # cote au format attendu — la cote du voisin était alors écrite ici.
+        ligne = blk.split("</tr>", 1)[0]
+        # Décimale OPTIONNELLE : GenyBet affiche « 7.4 » sous 10 mais « 12 », « 15 »,
+        # « 126 » au-dessus. L'ancien motif exigeait `[.,]\d` et jetait donc EN SILENCE
+        # toute cote >= 10 : sur 476 479 lignes d'historique geny, le maximum relevé
+        # était 9,9 et pas une seule valeur au-dessus de 10, quand unibet en compte
+        # 1,7 million. La source ne livrait que les favoris, décalés d'un cheval.
+        mc = re.search(r'img-cote[^>]*>\s*(\d{1,3}(?:[.,]\d)?)\s*<', ligne)
         if mc:
             cotes[num] = float(mc.group(1).replace(",", "."))
     return cotes, rnum, hippo
