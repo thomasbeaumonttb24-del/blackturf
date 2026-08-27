@@ -189,9 +189,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile.scraper
     container_name: blackturf_scraper
-    # NOTE sécu : durcissement non-root/cap_drop NON appliqué au scraper — il utilise
-    # Dockerfile.scraper (Playwright/chromium) qui nécessite un user/des perms
-    # spécifiques (sandbox chromium). À durcir séparément (adapter Dockerfile.scraper).
+    # Le scraper tournait en root, seul des huit conteneurs dans ce cas, parce que
+    # Playwright installait chromium sous /root/.cache/ms-playwright — inaccessible
+    # à un utilisateur non privilégié. Dockerfile.scraper l'installe désormais dans
+    # /ms-playwright, lisible par tous, et le conteneur tourne en uid 1001 comme api,
+    # worker et scheduler. Possible parce que scraper/base.py lance déjà chromium avec
+    # --no-sandbox, qui est la configuration recommandée en conteneur.
     environment:
       # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
       # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
