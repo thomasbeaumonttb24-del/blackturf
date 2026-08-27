@@ -1290,7 +1290,10 @@ async def revenue_stats(
 PRIX_MENSUEL_CENTS = {"standard": 1200, "expert": 1900, "starter": 1200, "pro": 1900}
 
 # Doit rester aligné sur `stripe_routes.STATUTS_ACCES` / `STATUT_SANS_CARTE`.
-STATUTS_ACCES_ADMIN = ("active", "past_due", "cancel_at_period_end")
+# `past_due` en est sorti le 2026-08-27 : un paiement en échec ne donne plus accès
+# au produit, il ne doit donc plus être compté comme un abonné servi (le MRR le
+# comptait comme encaissé alors qu'il ne l'était pas).
+STATUTS_ACCES_ADMIN = ("active", "cancel_at_period_end")
 STATUT_SANS_CARTE_ADMIN = "essai_sans_carte"
 
 

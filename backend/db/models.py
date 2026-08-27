@@ -889,7 +889,8 @@ class SubscriptionEvent(Base):
 
     # essai_ouvert / carte_ajoutee / abonnement_actif / changement_plan /
     # resiliation_demandee / resilie / essai_bientot_fini / paiement_echoue /
-    # essai_termine_sans_carte
+    # paiement_recu / essai_termine_sans_carte / essai_refuse_carte_reutilisee /
+    # carte_refusee_autre_compte
     type: Mapped[str] = mapped_column(String(40), index=True)
 
     plan: Mapped[str | None] = mapped_column(String(10))
@@ -909,6 +910,45 @@ class SubscriptionEvent(Base):
     __table_args__ = (
         Index("ix_subscription_events_user_date", "user_id", "created_at"),
     )
+
+
+class CarteConnue(Base):
+    """Empreinte des cartes déjà utilisées sur le site — anti « essais en série ».
+
+    L'essai gratuit est verrouillé par compte (`users.essai_utilise_at`), mais
+    rien n'empêchait de recréer un compte avec une autre adresse e-mail et LA
+    MÊME carte pour repartir pour 7 jours gratuits, indéfiniment.
+
+    `empreinte` est le `fingerprint` que Stripe attribue à un numéro de carte :
+    il est STABLE d'un client à l'autre à l'intérieur d'un même compte Stripe, y
+    compris quand le `payment_method` change (nouveau checkout = nouveau `pm_…`,
+    même empreinte). C'est donc le seul identifiant qui survive au changement
+    d'adresse e-mail.
+
+    On ne stocke JAMAIS le numéro : l'empreinte est un condensé opaque produit
+    par Stripe. Marque et 4 derniers chiffres ne servent qu'à rendre le suivi
+    admin lisible.
+    """
+    __tablename__ = "cartes_connues"
+
+    empreinte: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    # Compte qui a présenté cette carte EN PREMIER — c'est lui qui la « possède ».
+    # Nullable pour survivre à une suppression RGPD sans perdre le verrou.
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), index=True)
+    email: Mapped[str | None] = mapped_column(String(255))
+
+    stripe_payment_method_id: Mapped[str | None] = mapped_column(String(100))
+    marque: Mapped[str | None] = mapped_column(String(20))       # visa / mastercard…
+    dernier4: Mapped[str | None] = mapped_column(String(4))
+    financement: Mapped[str | None] = mapped_column(String(15))  # credit / debit / prepaid
+
+    # Nombre de fois où la carte a été présentée par un AUTRE compte. Un compteur
+    # qui grimpe désigne une fraude organisée, pas un couple qui partage une carte.
+    tentatives_autres_comptes: Mapped[int] = mapped_column(Integer, default=0)
+
+    premiere_vue: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    derniere_vue: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ─────────────────────────────────────────────

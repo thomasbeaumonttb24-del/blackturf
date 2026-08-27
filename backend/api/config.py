@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     # Admin
     admin_email: str = "admin@blackturf.fr"
 
+    # Carte déjà vue sur un AUTRE compte (empreinte Stripe `card.fingerprint`) :
+    #   "refus_essai" — l'essai gratuit est refusé, l'abonnement payant reste
+    #                   possible. Coupe la fraude « nouvel e-mail, même carte »
+    #                   sans punir un couple qui partage une carte. DÉFAUT.
+    #   "blocage"     — la carte ne peut pas être rattachée à un second compte :
+    #                   l'abonnement est annulé sur-le-champ.
+    #   "ignorer"     — aucun contrôle (comportement d'avant le 2026-08-27).
+    carte_reutilisee_politique: str = "refus_essai"
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": False,

@@ -36,7 +36,10 @@ LIBELLES = {
     "essai_termine_sans_carte": "Essai terminé sans carte — abonnement annulé",
     "resiliation_demandee": "Résiliation demandée",
     "resilie": "Abonnement résilié",
-    "paiement_echoue": "Paiement en échec",
+    "paiement_echoue": "Paiement en échec — accès coupé",
+    "paiement_recu": "Paiement encaissé — accès rétabli",
+    "essai_refuse_carte_reutilisee": "Essai refusé — carte déjà vue sur un autre compte",
+    "carte_refusee_autre_compte": "Abonnement refusé — carte rattachée à un autre compte",
 }
 
 # Mouvements qui coûtent ou rapportent de l'argent, ou qui demandent une action.

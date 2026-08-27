@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from api.config import get_settings
 from api.routes.auth import get_current_user, require_verified_email
 from db.database import get_db
-from db.models import User, Subscription
+from db.models import CarteConnue, Subscription, User
 from services.abonnements import journaliser
 
 settings = get_settings()
@@ -68,11 +68,18 @@ STATUT_SANS_CARTE = "essai_sans_carte"
 STATUTS_VIVANTS = ("active", "trialing", "past_due", "cancel_at_period_end",
                    STATUT_SANS_CARTE)
 
-# Statuts qui DONNENT ACCÈS au produit. `past_due` en fait partie : Stripe retente
-# le paiement plusieurs jours, couper l'accès au premier échec punirait une carte
-# expirée. `cancel_at_period_end` est notre statut maison — résilié, mais payé
-# jusqu'à l'échéance. `essai_sans_carte` n'en fait volontairement PAS partie.
-STATUTS_ACCES = ("active", "past_due", "cancel_at_period_end")
+# Statuts qui DONNENT ACCÈS au produit. `cancel_at_period_end` est notre statut
+# maison — résilié, mais payé jusqu'à l'échéance. `essai_sans_carte` n'en fait
+# volontairement PAS partie.
+#
+# `past_due` en a été RETIRÉ le 2026-08-27 (décision de l'exploitant). Il y était
+# au motif que Stripe retente le paiement plusieurs jours et qu'une carte expirée
+# ne méritait pas une coupure immédiate — sauf que la fenêtre de relance dure
+# jusqu'à trois semaines : c'était trois semaines de produit livré à qui n'avait
+# rien payé, exactement le scénario de la carte prépayée vidée après l'essai.
+# Le paiement qui finit par passer rend l'accès immédiatement, cf.
+# `_handle_payment_succeeded`.
+STATUTS_ACCES = ("active", "cancel_at_period_end")
 
 # Ordre des plans, pour choisir lequel accorder quand il en reste plusieurs.
 RANG_PLAN = {"free": 0, "standard": 1, "expert": 2}
@@ -146,6 +153,157 @@ def _a_moyen_de_paiement(sub: dict) -> bool:
         return False
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Empreinte de carte : une carte n'ouvre qu'UN essai gratuit, quel que soit l'e-mail
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `users.essai_utilise_at` verrouille l'essai par COMPTE. Le contournement est
+# évident : nouvelle adresse e-mail, même carte, 7 jours gratuits de plus, en
+# boucle. Stripe attribue à chaque numéro de carte une empreinte stable dans le
+# compte (`card.fingerprint`) qui survit au changement d'e-mail, de client et de
+# `payment_method` — c'est cette empreinte qu'on mémorise.
+
+def _cartes_du_client(sub: dict) -> list[dict]:
+    """Cartes rattachées à cet abonnement/ce client, avec leur empreinte Stripe.
+
+    On ratisse large volontairement : la carte du checkout est attachée au CLIENT,
+    et selon le moment où le webhook arrive elle n'est pas encore recopiée dans
+    `default_payment_method`. Ne regarder que ce champ laissait passer la moitié
+    des cas.
+
+    Renvoie une liste vide si Stripe est injoignable : un webhook qui lève est
+    rejoué en boucle par Stripe, ce qui coûterait plus cher que la fraude qu'on
+    cherche à bloquer. L'échec est journalisé en `warning` pour rester visible.
+    """
+    cartes: list[dict] = []
+    vues: set[str] = set()
+
+    def _ajouter(pm: dict) -> None:
+        carte = (pm or {}).get("card") or {}
+        empreinte = carte.get("fingerprint")
+        if not empreinte or empreinte in vues:
+            return
+        vues.add(empreinte)
+        cartes.append({
+            "empreinte": empreinte,
+            "pm": pm.get("id"),
+            "marque": carte.get("brand"),
+            "dernier4": carte.get("last4"),
+            "financement": carte.get("funding"),
+        })
+
+    pm_abo = sub.get("default_payment_method")
+    if isinstance(pm_abo, dict):
+        _ajouter(pm_abo)
+
+    customer = sub.get("customer")
+    if isinstance(customer, dict):
+        customer = customer.get("id")
+    if not customer or not settings.stripe_secret_key:
+        return cartes
+
+    try:
+        for pm in stripe.PaymentMethod.list(customer=customer, type="card",
+                                            limit=10).get("data", []):
+            _ajouter(pm)
+    except Exception as e:  # noqa: BLE001
+        log.warning("stripe.empreintes_indisponibles", customer=customer,
+                    error=str(e)[:120])
+    return cartes
+
+
+async def _carte_dun_autre_compte(user: User, cartes: list[dict],
+                                  db: AsyncSession) -> Optional[CarteConnue]:
+    """Première carte de la liste déjà rattachée à un AUTRE compte, sinon None."""
+    for carte in cartes:
+        connue = await db.get(CarteConnue, carte["empreinte"])
+        if connue is not None and connue.user_id and connue.user_id != user.user_id:
+            return connue
+    return None
+
+
+async def _memoriser_cartes(user: User, cartes: list[dict], db: AsyncSession) -> None:
+    """Enregistre les cartes vues. Le PREMIER compte qui présente une carte la garde.
+
+    Une carte présentée par un second compte n'est pas réattribuée : on incrémente
+    seulement son compteur de tentatives, qui sert de signal de fraude organisée.
+    """
+    maintenant = datetime.now(timezone.utc)
+    for carte in cartes:
+        connue = await db.get(CarteConnue, carte["empreinte"])
+        if connue is None:
+            db.add(CarteConnue(
+                empreinte=carte["empreinte"],
+                user_id=user.user_id,
+                email=user.email,
+                stripe_payment_method_id=carte.get("pm"),
+                marque=carte.get("marque"),
+                dernier4=carte.get("dernier4"),
+                financement=carte.get("financement"),
+                premiere_vue=maintenant,
+                derniere_vue=maintenant,
+            ))
+            continue
+        connue.derniere_vue = maintenant
+        if connue.user_id in (None, user.user_id):
+            connue.user_id = user.user_id
+            connue.email = user.email
+            connue.stripe_payment_method_id = carte.get("pm") or connue.stripe_payment_method_id
+        else:
+            connue.tentatives_autres_comptes = (connue.tentatives_autres_comptes or 0) + 1
+
+
+async def _controler_carte(user: User, sub: dict,
+                           db: AsyncSession) -> tuple[str, Optional[CarteConnue]]:
+    """Verdict sur les cartes de cet abonnement : "ok", "essai_refuse" ou "bloque".
+
+    Politique réglée par `CARTE_REUTILISEE_POLITIQUE` (cf. api/config.py). Le défaut
+    `refus_essai` coupe la fraude sans punir un couple qui partage une carte : le
+    second compte peut s'abonner, il paie simplement dès le premier jour.
+    """
+    politique = (settings.carte_reutilisee_politique or "refus_essai").strip().lower()
+    cartes = _cartes_du_client(sub)
+    if not cartes:
+        return "ok", None
+
+    conflit = None if politique == "ignorer" else await _carte_dun_autre_compte(user, cartes, db)
+    await _memoriser_cartes(user, cartes, db)
+    if conflit is None:
+        return "ok", None
+
+    log.warning("stripe.carte_reutilisee", user_id=user.user_id,
+                empreinte=conflit.empreinte, compte_dorigine=conflit.email,
+                tentatives=conflit.tentatives_autres_comptes, politique=politique)
+    return ("bloque" if politique == "blocage" else "essai_refuse"), conflit
+
+
+def _detail_carte(connue: Optional[CarteConnue]) -> dict:
+    """Résumé lisible pour le journal admin — jamais de numéro de carte."""
+    if connue is None:
+        return {}
+    return {
+        "carte": f"{connue.marque or 'carte'} ••{connue.dernier4 or '????'}",
+        "compte_dorigine": connue.email,
+        "tentatives": connue.tentatives_autres_comptes,
+    }
+
+
+async def _empreintes_deja_prises(user: User, db: AsyncSession) -> bool:
+    """Le client Stripe de CE compte porte-t-il déjà une carte vue ailleurs ?
+
+    Contrôle d'entrée du checkout : il évite d'ouvrir un essai qu'on annulerait
+    trois secondes plus tard par webhook. Ne couvre que les cartes DÉJÀ
+    enregistrées (client qui revient) — une carte saisie pendant le checkout n'est
+    connue qu'après, d'où le double contrôle côté webhook.
+    """
+    if not user.stripe_customer_id:
+        return False
+    cartes = _cartes_du_client({"customer": user.stripe_customer_id})
+    if not cartes:
+        return False
+    return await _carte_dun_autre_compte(user, cartes, db) is not None
+
+
 class CheckoutRequest(BaseModel):
     plan: str         # standard / expert (ou starter / pro compat)
     periodicite: str  # monthly / annual
@@ -206,6 +364,21 @@ async def create_checkout(
     # compte). La consommation est enregistrée par le webhook, quand Stripe
     # confirme l'essai — un checkout abandonné ne brûle donc rien.
     droit_a_lessai = user.essai_utilise_at is None
+
+    # 2 bis) Carte déjà vue sur un autre compte : l'essai ne se rouvre pas avec une
+    # nouvelle adresse e-mail. Le contrôle définitif est côté webhook (la carte du
+    # checkout n'existe pas encore ici) ; celui-ci sert au client qui REVIENT avec
+    # une carte déjà enregistrée, et évite d'ouvrir un essai pour l'annuler aussitôt.
+    if droit_a_lessai or settings.carte_reutilisee_politique == "blocage":
+        if await _empreintes_deja_prises(user, db):
+            if settings.carte_reutilisee_politique == "blocage":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cette carte bancaire est déjà rattachée à un autre compte "
+                           "BlackTurf. Utilisez le compte d'origine ou une autre carte.",
+                )
+            droit_a_lessai = False
+            log.warning("stripe.essai_refuse_carte_connue", user_id=user.user_id)
 
     subscription_data: dict = {
         "metadata": {"user_id": user.user_id, "plan": plan_cible},
@@ -541,10 +714,51 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
     import uuid
     statut_reel = sub.get("status")
     est_active = statut_reel in ("active", "trialing")
+
+    # Carte déjà présentée par un AUTRE compte : c'est le contournement du verrou
+    # d'essai (nouvelle adresse e-mail, même carte). Contrôle définitif — ici la
+    # carte du checkout est enfin connue de Stripe.
+    verdict_carte, carte_connue = await _controler_carte(user, sub, db)
+    if verdict_carte == "bloque":
+        try:
+            stripe.Subscription.delete(sub["id"])
+        except Exception as e:  # noqa: BLE001
+            log.error("stripe.annulation_carte_refusee_echouee", sub=sub.get("id"),
+                      error=str(e)[:150])
+        await journaliser(db, "carte_refusee_autre_compte", user, None, plan=plan,
+                          stripe_subscription_id=sub["id"],
+                          montant_cents=_montant_cents(sub),
+                          detail=_detail_carte(carte_connue))
+        await db.commit()
+        log.warning("stripe.abonnement_refuse_carte", user_id=user.user_id,
+                    sub=sub.get("id"))
+        return
+
+    # Essai refusé : on coupe la période gratuite SUR-LE-CHAMP côté Stripe, ce qui
+    # déclenche la facturation immédiate. Le compte n'obtient l'accès qu'au
+    # paiement effectif (`invoice.payment_succeeded`), jamais avant.
+    essai_refuse = (verdict_carte == "essai_refuse"
+                    and statut_reel == "trialing"
+                    and _ts(sub, "trial_end") is not None)
+    if essai_refuse:
+        try:
+            maj = stripe.Subscription.modify(sub["id"], trial_end="now")
+            statut_reel = maj.get("status") or statut_reel
+        except Exception as e:  # noqa: BLE001
+            # On n'a pas pu couper l'essai : on refuse quand même l'accès. L'essai
+            # courra chez Stripe, mais sans rien livrer — l'inverse (accès accordé
+            # « en attendant ») serait précisément le produit offert qu'on bloque.
+            log.error("stripe.fin_essai_forcee_echouee", sub=sub.get("id"),
+                      error=str(e)[:150])
+        est_active = False
+
     # Essai ouvert sans carte : l'abonnement est enregistré, mais il n'ouvre
     # aucun accès tant qu'un moyen de paiement n'est pas rattaché.
     sans_carte = (statut_reel == "trialing" and not _a_moyen_de_paiement(sub))
-    if sans_carte:
+    if essai_refuse:
+        statut_local = "incomplete"
+        sans_carte = False
+    elif sans_carte:
         statut_local = STATUT_SANS_CARTE
     elif est_active:
         statut_local = "active"
@@ -560,7 +774,9 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
         statut=statut_local,
         periode_debut=_ts(sub, "current_period_start"),
         periode_fin=_ts(sub, "current_period_end"),
-        essai_fin=_ts(sub, "trial_end"),
+        # Essai refusé = essai inexistant : le garder en base ferait croire au
+        # suivi admin (et au client) qu'une période gratuite court encore.
+        essai_fin=None if essai_refuse else _ts(sub, "trial_end"),
     )
     db.add(subscription)
 
@@ -581,7 +797,11 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
         if not sans_carte:
             user.plan = plan
 
-    if statut_local in (STATUT_SANS_CARTE, "active"):
+    if essai_refuse:
+        await journaliser(db, "essai_refuse_carte_reutilisee", user, subscription,
+                          montant_cents=_montant_cents(sub),
+                          detail=_detail_carte(carte_connue))
+    elif statut_local in (STATUT_SANS_CARTE, "active"):
         await journaliser(
             db,
             STATUT_SANS_CARTE if sans_carte
@@ -593,7 +813,7 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
     await db.commit()
     log.info("stripe.subscription_created", user_id=user.user_id, plan=plan,
              statut=statut_reel, plan_accorde=est_active and not sans_carte,
-             sans_carte=sans_carte)
+             sans_carte=sans_carte, essai_refuse=essai_refuse)
 
 
 async def _handle_subscription_updated(sub: dict, db: AsyncSession):
@@ -692,26 +912,128 @@ async def _handle_subscription_deleted(sub: dict, db: AsyncSession):
              plan_restant=user.plan if user else None)
 
 
+def _sub_id_facture(invoice: dict) -> Optional[str]:
+    """Abonnement auquel se rattache une facture.
+
+    `invoice.subscription` a DISPARU des versions d'API récentes (le compte tourne
+    en 2026-05-27.dahlia) : l'identifiant est descendu dans
+    `parent.subscription_details.subscription`, et en dernier recours sur la ligne
+    de facture. Sans ce repli, `invoice.payment_failed` ne retrouvait jamais
+    l'abonnement — l'échec de paiement était donc journalisé sans JAMAIS couper
+    l'accès (constaté le 2026-08-27, avant tout premier débit réel).
+    """
+    def _id(v) -> Optional[str]:
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            return v.get("id")
+        return None
+
+    direct = _id(invoice.get("subscription"))
+    if direct:
+        return direct
+
+    details = (invoice.get("parent") or {}).get("subscription_details") or {}
+    via_parent = _id(details.get("subscription"))
+    if via_parent:
+        return via_parent
+
+    try:
+        ligne = invoice["lines"]["data"][0]
+        details_ligne = (ligne.get("parent") or {}).get("subscription_item_details") or {}
+        return _id(details_ligne.get("subscription")) or _id(ligne.get("subscription"))
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
 async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
-    log.info("stripe.payment_succeeded", invoice_id=invoice["id"])
+    """Un paiement passe : l'accès est rendu immédiatement.
+
+    Contrepartie indispensable du blocage sur échec (cf. `_handle_payment_failed`) :
+    sans ce traitement, un client dont la carte finit par passer resterait coupé
+    jusqu'au prochain remous de son abonnement.
+
+    Les factures à 0 € (ouverture d'un essai) ne prouvent aucun paiement et ne
+    rendent donc aucun accès.
+    """
+    sub_id = _sub_id_facture(invoice)
+    montant = invoice.get("amount_paid") or 0
+    log.info("stripe.payment_succeeded", invoice_id=invoice.get("id"),
+             sub=sub_id, montant_cents=montant)
+    if not sub_id or montant <= 0:
+        return
+
+    user = await _find_user_by_customer(invoice.get("customer"), db)
+    if not user:
+        return
+    sub = (await db.execute(
+        select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
+    )).scalar_one_or_none()
+    if sub is None:
+        return
+
+    reprise = sub.statut not in STATUTS_ACCES
+    if reprise:
+        sub.statut = "active"
+    # Un essai facturé est un essai terminé : la date de fin ne doit plus laisser
+    # croire à une période gratuite en cours.
+    if sub.essai_fin is not None:
+        sub.essai_fin = None
+    user.plan = await _plan_effectif(user.user_id, db)
+
+    if reprise:
+        await journaliser(db, "paiement_recu", user, sub,
+                          montant_cents=montant,
+                          detail={"facture": invoice.get("id"),
+                                  "motif": invoice.get("billing_reason")})
+    await db.commit()
+    log.info("stripe.acces_retabli" if reprise else "stripe.paiement_encaisse",
+             user_id=user.user_id, plan=user.plan, montant_cents=montant)
 
 
 async def _handle_payment_failed(invoice: dict, db: AsyncSession):
-    user = await _find_user_by_customer(invoice["customer"], db)
-    if user:
-        result = await db.execute(
-            select(Subscription).where(Subscription.stripe_subscription_id == invoice.get("subscription"))
-        )
-        sub = result.scalar_one_or_none()
-        if sub:
-            sub.statut = "past_due"
-        await journaliser(db, "paiement_echoue", user, sub,
-                          stripe_subscription_id=invoice.get("subscription"),
-                          montant_cents=invoice.get("amount_due"),
-                          detail={"facture": invoice.get("id")})
-        await db.commit()
+    """Paiement en échec : accès coupé, compte rétrogradé.
 
-    log.warning("stripe.payment_failed", customer=invoice["customer"])
+    Décision de l'exploitant du 2026-08-27. Avant, l'abonnement passait `past_due`
+    et `past_due` donnait accès : Stripe relançant la carte jusqu'à trois semaines,
+    le produit restait livré tout ce temps sans un centime encaissé — le scénario
+    exact de la carte prépayée vidée à la fin de l'essai.
+
+    L'abonnement Stripe, lui, N'EST PAS annulé : les relances suivent leur cours et
+    le premier paiement qui passe rend l'accès dans la seconde.
+    """
+    sub_id = _sub_id_facture(invoice)
+    user = await _find_user_by_customer(invoice.get("customer"), db)
+    if not user:
+        log.warning("stripe.payment_failed_user_inconnu", customer=invoice.get("customer"))
+        return
+
+    sub = None
+    if sub_id:
+        sub = (await db.execute(
+            select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
+        )).scalar_one_or_none()
+    if sub is not None:
+        sub.statut = "past_due"
+
+    plan_precedent = user.plan
+    # `past_due` ne fait plus partie des statuts d'accès : l'abonnement en échec
+    # est écarté du calcul, un AUTRE abonnement vivant peut encore porter le compte.
+    user.plan = await _plan_effectif(user.user_id, db, sauf_stripe_id=sub_id)
+
+    await journaliser(db, "paiement_echoue", user, sub,
+                      plan_precedent=plan_precedent if plan_precedent != user.plan else None,
+                      stripe_subscription_id=sub_id,
+                      montant_cents=invoice.get("amount_due"),
+                      detail={"facture": invoice.get("id"),
+                              "tentative": invoice.get("attempt_count"),
+                              "motif": invoice.get("billing_reason"),
+                              "acces_coupe": plan_precedent != user.plan})
+    await db.commit()
+
+    log.warning("stripe.payment_failed", customer=invoice.get("customer"),
+                sub=sub_id, plan_precedent=plan_precedent, plan=user.plan,
+                abonnement_connu=sub is not None)
 
 
 async def _handle_trial_will_end(sub: dict, db: AsyncSession):
@@ -748,6 +1070,10 @@ async def _handle_moyen_paiement_ajoute(objet: dict, db: AsyncSession):
     if not user:
         return
 
+    # Toute carte qui passe par ici est mémorisée, qu'un essai soit bloqué ou non :
+    # c'est ce qui alimente le verrou « une carte = un seul essai gratuit ».
+    verdict_carte, carte_connue = await _controler_carte(user, {"customer": customer_id}, db)
+
     bloques = (await db.execute(
         select(Subscription).where(
             Subscription.user_id == user.user_id,
@@ -755,6 +1081,7 @@ async def _handle_moyen_paiement_ajoute(objet: dict, db: AsyncSession):
         )
     )).scalars().all()
     if not bloques:
+        await db.commit()
         return
 
     debloques = 0
@@ -769,6 +1096,22 @@ async def _handle_moyen_paiement_ajoute(objet: dict, db: AsyncSession):
             continue
         if not _a_moyen_de_paiement(sub_stripe):
             continue
+
+        # La carte qui débloque l'essai appartient à un autre compte : elle
+        # régularise le moyen de paiement, elle n'offre pas 7 jours de plus.
+        if verdict_carte != "ok" and sub_stripe.get("status") == "trialing":
+            try:
+                stripe.Subscription.modify(abo.stripe_subscription_id, trial_end="now")
+            except Exception as e:  # noqa: BLE001
+                log.error("stripe.fin_essai_forcee_echouee", sub=abo.stripe_subscription_id,
+                          error=str(e)[:150])
+            abo.statut = "incomplete"
+            abo.essai_fin = None
+            await journaliser(db, "essai_refuse_carte_reutilisee", user, abo,
+                              montant_cents=_montant_cents(sub_stripe),
+                              detail=_detail_carte(carte_connue))
+            continue
+
         abo.statut = "active"
         debloques += 1
         await journaliser(db, "carte_ajoutee", user, abo,
