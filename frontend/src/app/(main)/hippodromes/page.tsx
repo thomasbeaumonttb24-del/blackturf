@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE } from "@/lib/seo";
+import { OG_IMAGE, filAriane } from "@/lib/seo";
 import Link from "next/link";
 import { MapPin, Trophy, ArrowRight } from "lucide-react";
 import { HIPPODROMES } from "@/lib/hippodromes";
@@ -36,6 +36,7 @@ export default function HippodromesIndex() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(filAriane([{ nom: "Accueil", url: "/" }, { nom: "Hippodromes" }])) }} />
 
       <SeoHero
         eyebrow="Hippodromes"

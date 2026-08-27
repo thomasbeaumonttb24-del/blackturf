@@ -3,7 +3,16 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Check, ChevronRight, CalendarDays } from "lucide-react";
 import { DISCIPLINES, getDiscipline, matchDiscipline } from "@/lib/disciplines";
-import { fetchProgramme, disciplineLabel, titleCase, OG_IMAGE } from "@/lib/seo";
+import {
+  fetchProgramme,
+  fetchProfilLieux,
+  disciplineLabel,
+  titleCase,
+  resumeCourt,
+  filAriane,
+  OG_IMAGE,
+} from "@/lib/seo";
+import { ProfilChiffreDiscipline } from "@/components/seo/ProfilChiffre";
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
 
 export const dynamicParams = false;
@@ -20,8 +29,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return {
     title: d.name,
     // Google tronque vers 155-160 caractères : l'intro de la discipline suffit, on
-    // n'ajoute plus de queue promotionnelle qui serait coupée de toute façon.
-    description: d.intro.slice(0, 155),
+    // n'ajoute plus de queue promotionnelle qui serait coupée de toute façon. La coupe
+    // respecte les mots — `slice(0, 155)` s'arrêtait sur « avec Vincenne ».
+    description: resumeCourt(d.intro),
     alternates: { canonical: `/disciplines/${d.slug}` },
     openGraph: { title: `${d.name}`, description: d.intro, url: `https://blackturf.fr/disciplines/${d.slug}`, images: [OG_IMAGE] },
   };
@@ -43,14 +53,39 @@ export default async function DisciplinePage({ params }: { params: Promise<{ slu
       .map((c) => ({ ...c, hippo: r.hippodrome })),
   );
 
-  const breadcrumb = {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Disciplines", item: "https://blackturf.fr/disciplines" },
-      { "@type": "ListItem", position: 2, name: d.short, item: `https://blackturf.fr/disciplines/${d.slug}` },
-    ],
-  };
+  /* Profil chiffré de la discipline, sur l'historique complet du site. La page n'avait
+   * qu'un paragraphe d'introduction et le programme du jour : 327 mots, dont 243 propres.
+   * Les libellés PMU sont plus fins que nos trois familles (« TROT_ATTELE »,
+   * « TROT_MONTE », « HAIES », « STEEPLE »…) : on additionne ceux qui relèvent de la
+   * même discipline, avec la règle de correspondance déjà utilisée pour le programme. */
+  const profils = await fetchProfilLieux();
+  const profil = (() => {
+    const parts = Object.entries(profils?.disciplines ?? {}).filter(([nom]) =>
+      matchDiscipline(nom, d),
+    );
+    if (!parts.length) return null;
+    const nb = parts.reduce((s, [, p]) => s + p.nb_courses, 0) || 1;
+    return {
+      nb_courses: nb,
+      nb_hippodromes: Math.max(...parts.map(([, p]) => p.nb_hippodromes)),
+      distance_min: Math.min(...parts.map(([, p]) => p.distance_min ?? Infinity)),
+      distance_max: Math.max(...parts.map(([, p]) => p.distance_max ?? 0)),
+      // Moyennes repondérées par le volume de chaque libellé, sinon un libellé rare
+      // pèserait autant que la famille principale.
+      distance_moyenne: Math.round(
+        parts.reduce((s, [, p]) => s + p.distance_moyenne * p.nb_courses, 0) / nb,
+      ),
+      partants_moyen:
+        Math.round((parts.reduce((s, [, p]) => s + p.partants_moyen * p.nb_courses, 0) / nb) * 10) / 10,
+    };
+  })();
+
+  // Le fil balisé partait de « Disciplines » quand le fil affiché commence par « Accueil ».
+  const breadcrumb = filAriane([
+    { nom: "Accueil", url: "/" },
+    { nom: "Disciplines", url: "/disciplines" },
+    { nom: d.short },
+  ]);
   const low = d.short.toLowerCase();
 
   return (
@@ -78,6 +113,12 @@ export default async function DisciplinePage({ params }: { params: Promise<{ slu
             ))}
           </div>
         </Section>
+
+        {profil && (
+          <Section title={`Le ${low} en chiffres`}>
+            <ProfilChiffreDiscipline nom={d.short} p={profil} />
+          </Section>
+        )}
 
         <Section title={`Courses de ${low} du jour`}>
           {courses.length > 0 ? (

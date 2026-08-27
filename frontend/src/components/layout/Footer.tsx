@@ -40,12 +40,17 @@ const COLUMNS: Array<{
       { href: "/newsletter", label: "La lettre du lundi" },
       { href: "/quinte-du-jour", label: "Quinté+ du jour" },
       { href: "/resultats", label: "Résultats et rapports" },
+      // Ces deux entrées manquaient. Le pied de page est ce qui donne à une rubrique un
+      // lien depuis CHAQUE page du site : sans elle, « lire la musique » n'était atteint
+      // que depuis deux pages sur quinze, et les archives depuis trois.
+      { href: "/resultats/archives", label: "Archives des arrivées" },
       { href: "/blog", label: "Blog" },
       { href: "/hippodromes", label: "Hippodromes" },
       { href: "/disciplines", label: "Disciplines" },
       { href: "/guides", label: "Guides paris PMU" },
       { href: "/guides/types-de-paris-pmu", label: "Types de paris" },
       { href: "/guides/pari-de-valeur", label: "Pari de valeur" },
+      { href: "/guides/comment-lire-la-musique", label: "Lire la musique" },
     ],
   },
   {

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE } from "@/lib/seo";
+import { OG_IMAGE, filAriane } from "@/lib/seo";
 import Link from "next/link";
 import { ArrowRight, Layers } from "lucide-react";
 import { DISCIPLINES } from "@/lib/disciplines";
@@ -8,7 +8,7 @@ import { SeoHero, Container, Callout, Chip } from "@/components/seo/kit";
 export const metadata: Metadata = {
   title: "Disciplines hippiques : trot, plat, obstacle",
   description:
-    "Trot, plat, obstacle : comprendre les trois disciplines des courses PMU, leurs facteurs clés et leurs paris. Et le programme du jour course par course, par discipline.",
+    "Trot, plat, obstacle : les trois disciplines des courses PMU, leurs facteurs clés et le programme du jour, course par course.",
   alternates: { canonical: "/disciplines" },
   openGraph: {
     title: "Disciplines hippiques : trot, plat, obstacle",
@@ -35,6 +35,7 @@ export default function DisciplinesIndex() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(filAriane([{ nom: "Accueil", url: "/" }, { nom: "Disciplines" }])) }} />
 
       <SeoHero
         eyebrow="Disciplines"

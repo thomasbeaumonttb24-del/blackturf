@@ -644,6 +644,125 @@ async def get_seo_arrivees(
     return result
 
 
+@router.get("/seo/profil-lieux")
+async def get_seo_profil_lieux(
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Profil chiffré de chaque hippodrome et de chaque discipline, sur l'historique complet.
+
+    Pourquoi cet endpoint. Les fiches d'hippodrome et de discipline ne portaient qu'un
+    paragraphe d'introduction et le programme du jour : 260 mots pour Vincennes, dont 171
+    propres à la page (mesuré le 2026-08-27). Sur des requêtes où le site officiel de
+    l'hippodrome et l'encyclopédie occupent déjà le terrain, un texte d'introduction
+    générique n'a aucune raison d'être préféré.
+
+    Ce que BlackTurf peut dire et que personne d'autre ne dit : ce qui se court RÉELLEMENT
+    à cet endroit, mesuré sur toutes les courses de sa base — volume, disciplines
+    pratiquées, distances effectives, taille des pelotons. Des chiffres vérifiables,
+    différents d'une fiche à l'autre, tirés de données que le site possède déjà.
+
+    Ce n'est pas du remplissage : c'est la seule information de ces pages qu'un visiteur
+    ne trouve pas ailleurs.
+    """
+    import json
+
+    cache_key = "seo:profil-lieux"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        log.debug("courses.seo_profil_cache_read_failed", error=str(e))
+
+    base = (
+        select(
+            Course.hippodrome_nom.label("lieu"),
+            Course.discipline,
+            func.count().label("nb"),
+            func.min(Course.distance).label("dist_min"),
+            func.max(Course.distance).label("dist_max"),
+            func.avg(Course.distance).label("dist_moy"),
+            func.avg(Course.nb_partants).label("part_moy"),
+            func.count(func.distinct(func.date(Course.date_heure))).label("nb_journees"),
+        )
+        .where(Course.statut == "termine")
+        .where(Course.distance.isnot(None))
+        .group_by(Course.hippodrome_nom, Course.discipline)
+    )
+    rows = (await db.execute(base)).all()
+
+    lieux: dict = {}
+    disciplines: dict = {}
+    for r in rows:
+        d = (r.discipline or "").upper()
+        # Par hippodrome
+        e = lieux.setdefault(
+            r.lieu,
+            {"nb_courses": 0, "nb_journees": 0, "disciplines": {}, "dist_min": None,
+             "dist_max": None, "somme_dist": 0.0, "somme_part": 0.0},
+        )
+        e["nb_courses"] += int(r.nb)
+        e["nb_journees"] = max(e["nb_journees"], int(r.nb_journees or 0))
+        e["disciplines"][d] = e["disciplines"].get(d, 0) + int(r.nb)
+        if r.dist_min is not None:
+            e["dist_min"] = r.dist_min if e["dist_min"] is None else min(e["dist_min"], r.dist_min)
+        if r.dist_max is not None:
+            e["dist_max"] = r.dist_max if e["dist_max"] is None else max(e["dist_max"], r.dist_max)
+        e["somme_dist"] += float(r.dist_moy or 0) * int(r.nb)
+        e["somme_part"] += float(r.part_moy or 0) * int(r.nb)
+
+        # Par discipline, tous lieux confondus
+        g = disciplines.setdefault(
+            d, {"nb_courses": 0, "lieux": set(), "somme_dist": 0.0, "somme_part": 0.0,
+                "dist_min": None, "dist_max": None},
+        )
+        g["nb_courses"] += int(r.nb)
+        g["lieux"].add(r.lieu)
+        g["somme_dist"] += float(r.dist_moy or 0) * int(r.nb)
+        g["somme_part"] += float(r.part_moy or 0) * int(r.nb)
+        if r.dist_min is not None:
+            g["dist_min"] = r.dist_min if g["dist_min"] is None else min(g["dist_min"], r.dist_min)
+        if r.dist_max is not None:
+            g["dist_max"] = r.dist_max if g["dist_max"] is None else max(g["dist_max"], r.dist_max)
+
+    def _fini(e: dict, extra: dict) -> dict:
+        n = e["nb_courses"] or 1
+        return {
+            "nb_courses": e["nb_courses"],
+            "distance_min": e["dist_min"],
+            "distance_max": e["dist_max"],
+            "distance_moyenne": round(e["somme_dist"] / n),
+            "partants_moyen": round(e["somme_part"] / n, 1),
+            **extra,
+        }
+
+    result = {
+        "lieux": {
+            lieu: _fini(e, {
+                "nb_journees": e["nb_journees"],
+                # Triées par volume : la première est la discipline maison.
+                "disciplines": dict(sorted(e["disciplines"].items(), key=lambda kv: -kv[1])),
+            })
+            for lieu, e in lieux.items()
+        },
+        "disciplines": {
+            d: _fini(g, {"nb_hippodromes": len(g["lieux"])})
+            for d, g in disciplines.items()
+        },
+    }
+
+    try:
+        redis = await get_redis()
+        # L'historique complet ne bouge qu'à la marge d'un jour sur l'autre.
+        await redis.setex(cache_key, 21600, json.dumps(result, default=str))  # 6 h
+    except Exception as e:
+        log.debug("courses.seo_profil_cache_write_failed", error=str(e))
+
+    return result
+
+
 @router.get("/seo/jours-resultats")
 async def get_seo_jours_resultats(
     db: AsyncSession = Depends(get_db),

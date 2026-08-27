@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { OG_IMAGE } from "@/lib/seo";
+import { OG_IMAGE, filAriane } from "@/lib/seo";
 import Link from "next/link";
 import { Clock, ArrowRight, Newspaper } from "lucide-react";
 import { ARTICLES, formatDateFr } from "@/lib/blog";
@@ -42,6 +42,7 @@ export default function BlogIndex() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(blogLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(filAriane([{ nom: "Accueil", url: "/" }, { nom: "Blog" }])) }} />
 
       <SeoHero
         eyebrow="Le Blog"

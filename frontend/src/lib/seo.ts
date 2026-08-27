@@ -265,6 +265,58 @@ export function bornesDuMois(ym: string, aujourdhui = jourParis()): { debut: str
   };
 }
 
+/**
+ * Fil d'Ariane en données structurées.
+ *
+ * À n'employer que sur une page qui AFFICHE réellement son fil — c'est la règle la plus
+ * sanctionnée de toutes : baliser ce qui n'existe pas à l'écran expose à une action
+ * manuelle. Toutes les pages qui appellent ce helper rendent leur fil via `SeoHero`.
+ *
+ * L'intérêt concret : dans ses résultats, Google remplace l'URL par le fil d'Ariane. Une
+ * ligne « blackturf.fr › Guides › Pari de valeur » se lit mieux qu'une adresse brute.
+ */
+export function filAriane(
+  etapes: Array<{ nom: string; url?: string }>,
+): Record<string, unknown> {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: etapes.map((e, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: e.nom,
+      // La dernière étape est la page courante : schema.org admet qu'elle n'ait pas
+      // d'`item`, et c'est préférable à un lien vers soi-même.
+      ...(e.url ? { item: e.url.startsWith("http") ? e.url : `https://blackturf.fr${e.url}` } : {}),
+    })),
+  };
+}
+
+/**
+ * Raccourcit un texte pour une `meta description`, sans jamais couper un mot.
+ *
+ * Un simple `slice(0, 155)` produisait des extraits qui s'arrêtaient au milieu d'un
+ * mot — « …la discipline la plus représentée au PMU, avec Vincenne », « …sur les
+ * grandes pistes comme P ». C'est ce que voit l'internaute dans les résultats de
+ * recherche, et ça donne d'un site l'impression exacte inverse du soin qu'on y met.
+ *
+ * On s'arrête de préférence à la fin d'une phrase ; à défaut, au dernier mot entier,
+ * suivi de points de suspension.
+ */
+export function resumeCourt(texte: string, max = 155): string {
+  const t = texte.trim();
+  if (t.length <= max) return t;
+
+  const coupe = t.slice(0, max);
+  // Une phrase complète se termine par un point, un point d'exclamation ou
+  // d'interrogation suivi d'une espace — ou par la fin du texte.
+  const finPhrase = Math.max(coupe.lastIndexOf(". "), coupe.lastIndexOf("! "), coupe.lastIndexOf("? "));
+  if (finPhrase > max * 0.55) return coupe.slice(0, finPhrase + 1);
+
+  const finMot = coupe.lastIndexOf(" ");
+  return `${coupe.slice(0, finMot > 0 ? finMot : max).replace(/[,;:]$/, "")}…`;
+}
+
 /** "2026-08" → "août 2026" (regroupement par mois des archives) */
 export function moisLong(ym: string): string {
   const d = new Date(`${ym}-01T12:00:00Z`);
@@ -440,6 +492,44 @@ export async function fetchArriveesDuJour(
     if (!res.ok) return null;
     const d = (await res.json()) as { arrivees?: Record<string, SeoResultats> };
     return d.arrivees ?? {};
+  } catch {
+    return null;
+  }
+}
+
+/* ─────────────── Profil chiffré des lieux et des disciplines ───────────────
+ * Ce que le site sait et que personne d'autre ne publie : ce qui se court réellement à
+ * un endroit donné, mesuré sur l'ensemble de sa base. Sert à donner aux fiches
+ * d'hippodrome et de discipline un contenu qui leur soit propre — elles n'avaient qu'un
+ * paragraphe d'introduction et le programme du jour.
+ */
+export interface ProfilLieu {
+  nb_courses: number;
+  nb_journees: number;
+  distance_min: number | null;
+  distance_max: number | null;
+  distance_moyenne: number;
+  partants_moyen: number;
+  disciplines: Record<string, number>;
+}
+
+export interface ProfilDiscipline {
+  nb_courses: number;
+  nb_hippodromes: number;
+  distance_min: number | null;
+  distance_max: number | null;
+  distance_moyenne: number;
+  partants_moyen: number;
+}
+
+export async function fetchProfilLieux(): Promise<{
+  lieux: Record<string, ProfilLieu>;
+  disciplines: Record<string, ProfilDiscipline>;
+} | null> {
+  try {
+    const res = await fetch(`${API}/seo/profil-lieux`, { next: { revalidate: 21600 } });
+    if (!res.ok) return null;
+    return await res.json();
   } catch {
     return null;
   }

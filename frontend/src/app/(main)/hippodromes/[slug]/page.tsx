@@ -5,13 +5,16 @@ import { MapPin, Trophy, ChevronRight, CalendarDays } from "lucide-react";
 import { HIPPODROMES, getHippodrome, matchHippodrome } from "@/lib/hippodromes";
 import {
   fetchProgramme,
+  fetchProfilLieux,
   fetchSeoIndex,
   decalerJours,
   jourCourtAnnee,
   disciplineLabel,
   OG_IMAGE,
+  filAriane,
 } from "@/lib/seo";
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
+import { ProfilChiffreLieu } from "@/components/seo/ProfilChiffre";
 
 export const dynamicParams = false;
 export const revalidate = 300;
@@ -73,6 +76,27 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
     .sort((a, b) => b[0].localeCompare(a[0]))
     .slice(0, 12);
 
+  /* Profil chiffré du lieu, tiré de l'historique complet du site.
+   *
+   * Les noms d'hippodrome de la base sont ceux du PMU (« HIPPODROME DE PARIS-VINCENNES ») ;
+   * on retrouve le bon en réutilisant la règle de correspondance qui sert déjà au
+   * programme du jour, plutôt qu'en pariant sur une égalité de chaînes. Plusieurs
+   * libellés peuvent désigner le même lieu : on les additionne. */
+  const profils = await fetchProfilLieux();
+  const profil = (() => {
+    const parts = Object.entries(profils?.lieux ?? {}).filter(([nom]) => matchHippodrome(nom, h));
+    if (!parts.length) return null;
+    return parts.reduce((acc, [, p]) => {
+      if (!acc) return { ...p, disciplines: { ...p.disciplines } };
+      acc.nb_courses += p.nb_courses;
+      acc.nb_journees += p.nb_journees;
+      acc.distance_min = Math.min(acc.distance_min ?? p.distance_min ?? 0, p.distance_min ?? Infinity);
+      acc.distance_max = Math.max(acc.distance_max ?? 0, p.distance_max ?? 0);
+      for (const [d, n] of Object.entries(p.disciplines)) acc.disciplines[d] = (acc.disciplines[d] ?? 0) + n;
+      return acc;
+    }, null as null | (typeof parts)[0][1]);
+  })();
+
   const placeLd = {
     "@context": "https://schema.org",
     "@type": "SportsActivityLocation",
@@ -81,14 +105,13 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
     url: `https://blackturf.fr/hippodromes/${h.slug}`,
     description: h.intro,
   };
-  const breadcrumb = {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Hippodromes", item: "https://blackturf.fr/hippodromes" },
-      { "@type": "ListItem", position: 2, name: h.name, item: `https://blackturf.fr/hippodromes/${h.slug}` },
-    ],
-  };
+  // Le fil balisé partait de « Hippodromes » alors que le fil AFFICHÉ commence par
+  // « Accueil » : les deux disent maintenant la même chose.
+  const breadcrumb = filAriane([
+    { nom: "Accueil", url: "/" },
+    { nom: "Hippodromes", url: "/hippodromes" },
+    { nom: h.name },
+  ]);
 
   return (
     <>
@@ -141,6 +164,12 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
             </div>
           )}
         </Section>
+
+        {profil && (
+          <Section title={`Ce qui se court à ${h.city}`}>
+            <ProfilChiffreLieu nom={h.name} p={profil} />
+          </Section>
+        )}
 
         {dernieresReunions.length > 0 && (
           <Section title={`Dernières réunions à ${h.city}`}>
