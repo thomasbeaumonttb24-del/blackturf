@@ -40,11 +40,34 @@ LIBELLES = {
     "paiement_recu": "Paiement encaissé — accès rétabli",
     "essai_refuse_carte_reutilisee": "Essai refusé — carte déjà vue sur un autre compte",
     "carte_refusee_autre_compte": "Abonnement refusé — carte rattachée à un autre compte",
+
+    # Statuts Stripe bruts. `_handle_subscription_updated` journalise le STATUT
+    # lui-même quand il change sans correspondre à un mouvement métier nommé :
+    # sans ces entrées, le suivi admin affichait la clé technique telle quelle
+    # (« past_due » en toutes lettres, constaté sur le premier impayé réel du
+    # 2026-08-27). Ils sont libellés mais NON notifiés, cf. TYPES_NOTIFIES.
+    "past_due": "Impayé — accès coupé, relances Stripe en cours",
+    "canceled": "Abonnement clos chez Stripe",
+    "unpaid": "Impayé définitif — relances Stripe épuisées",
+    "incomplete": "Paiement jamais finalisé",
+    "incomplete_expired": "Paiement abandonné — abonnement expiré",
+    "paused": "Abonnement suspendu",
 }
 
-# Mouvements qui coûtent ou rapportent de l'argent, ou qui demandent une action.
-# Les autres sont journalisés sans réveiller personne.
-TYPES_NOTIFIES = set(LIBELLES)
+# Mouvements qui réveillent l'exploitant par e-mail : ceux qui coûtent ou
+# rapportent de l'argent, ou qui demandent une action.
+#
+# La liste est EXPLICITE et non plus `set(LIBELLES)` : depuis qu'on libelle aussi
+# les statuts Stripe bruts, tout libellé ajouté déclencherait sinon un e-mail de
+# plus. Or un échec de paiement produit DEUX mouvements à 4 secondes d'écart
+# (`past_due` puis `paiement_echoue`) — deux e-mails pour un seul événement.
+TYPES_NOTIFIES = {
+    "essai_ouvert", "essai_sans_carte", "carte_ajoutee", "abonnement_actif",
+    "changement_plan", "essai_bientot_fini", "essai_termine_sans_carte",
+    "resiliation_demandee", "resilie", "paiement_echoue", "paiement_recu",
+    "essai_refuse_carte_reutilisee", "carte_refusee_autre_compte",
+    "unpaid",
+}
 
 
 def _euros(cents: Optional[int]) -> str:
