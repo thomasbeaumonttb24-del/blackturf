@@ -8,9 +8,12 @@ scrapling.StealthyFetcher (Chrome réel, ~15-25 s). Impossible de faire du 5 s l
 ne fetch QUE les pages des courses imminentes (fenêtre IMMINENT_H heures) pour borner
 le coût des CF-solves.
 
-Énumération (1 seul fetch/cycle) : la home liste toutes les courses du jour avec, par
-lien, l'hippodrome + le n° de course (« Clairefontaine-Deauville C3 ») et l'heure. Le n°
-de réunion GenyBet = n° PMU. Mapping BlackTurf = hippodrome (fuzzy) + n° course.
+Énumération (1 seul fetch/cycle) : la timeline du programme donne, par course, son id
+GenyBet, son n° de course et son heure de départ — mais NI l'hippodrome NI le n° de
+réunion. Elle ne sert donc qu'à décider quelles pages fetcher. L'appariement BlackTurf
+se fait ensuite sur le <h1> de la page course (« R5 - Pornichet-La Baule ») : le n° de
+réunion GenyBet est celui du PMU, donc RxCy identifie la course sans ambiguïté, et
+l'hippodrome sert de seconde ceinture.
 
 Extraction cote/course : chaque <tr id="partant-N"> porte le numéro ; la cote (gagnant)
 est le texte juste après l'image de tendance `.img-cote`. Marché partiel toléré (GenyBet
@@ -96,11 +99,23 @@ def enum_program(html: str, today_utc: datetime) -> list[dict]:
         out.append({"id": gid, "cnum": cnum, "dt_utc": dt_local.astimezone(timezone.utc)})
     return out
 
-def read_course(gid: str) -> dict[int, float]:
-    """Page course GenyBet → {numero: cote_gagnant}. Marché partiel toléré."""
+_H1_REUNION = re.compile(r"<h1[^>]*>\s*R(\d+)\s*-\s*([^<]+)</h1>")
+
+
+def read_course(gid: str) -> tuple[dict[int, float], int | None, str]:
+    """Page course GenyBet → ({numero: cote_gagnant}, n° réunion, hippodrome normalisé).
+
+    Le <h1> de la page porte « R5 - Pornichet-La Baule » : le numéro de réunion
+    GenyBet est celui du PMU, donc RxCy identifie la course SANS ambiguïté. C'est
+    la seule identification fiable disponible — la timeline du programme ne donne
+    ni hippodrome ni n° de réunion. Marché partiel toléré.
+    """
     html = fetch_html(COURSE.format(id=gid))
     if not html:
-        return {}
+        return {}, None, ""
+    m = _H1_REUNION.search(html)
+    rnum = int(m.group(1)) if m else None
+    hippo = norm(m.group(2)) if m else ""
     cotes: dict[int, float] = {}
     # découpe par ligne partant pour éviter le cross-match
     for blk in re.split(r'(?=id="partant-\d+")', html):
@@ -111,7 +126,7 @@ def read_course(gid: str) -> dict[int, float]:
         mc = re.search(r'img-cote[^>]*>\s*(\d{1,3}[.,]\d)', blk)
         if mc:
             cotes[num] = float(mc.group(1).replace(",", "."))
-    return cotes
+    return cotes, rnum, hippo
 
 def write_geny(course_id: str, partants: dict[int, str], cotes: dict[int, float]) -> int:
     sets, hist = [], []
@@ -156,18 +171,50 @@ def main():
                 dh = (g["dt_utc"] - now).total_seconds() / 3600.0
                 if dh < -0.25 or dh > IMMINENT_H:
                     continue
-                # match BlackTurf : même n° course + heure proche (±14 min)
+                # Pré-filtre BON MARCHÉ : au moins UNE course BlackTurf porte ce numéro
+                # à cette heure. Il ne sert qu'à éviter un solve Cloudflare inutile — il ne
+                # DÉSIGNE PLUS la course (voir l'appariement autoritaire juste en dessous).
+                if not any(c["cnum"] == g["cnum"] and c.get("dt_obj")
+                           and abs((c["dt_obj"] - g["dt_utc"]).total_seconds()) <= 14 * 60
+                           for c in bt.values()):
+                    continue
+
+                cotes, rnum, hippo_geny = read_course(g["id"])
+
+                # Appariement AUTORITAIRE sur R+C lus dans le <h1> de la page course.
+                # L'ancien appariement ne comparait QUE le n° de course et l'heure (±14 min)
+                # et retenait le PREMIER dict qui passait — l'hippodrome n'était jamais
+                # comparé, malgré ce que promet l'en-tête de ce module. Le 26/08/2026, trois
+                # paires Vincennes/Gelsenkirchen partageaient le même Cx à moins de 14 min :
+                # les cotes allemandes ont été écrites sur les partants français (corrélation
+                # geny↔cote PMU de -0,13 sur 26082026R2C7, quand unibet était à +0,85).
+                if rnum is None:
+                    log("genybet.reunion_illisible", geny_id=g["id"], cnum=g["cnum"])
+                    continue
+                suffixe = f"R{rnum}C{g['cnum']}"
                 cid = None
                 for bcid, c in bt.items():
-                    if c["cnum"] != g["cnum"] or not c.get("dt_obj"):
+                    # L'heure reste exigée : `bt` contient aujourd'hui ET demain, deux
+                    # journées peuvent porter le même RxCy.
+                    if not bcid.endswith(suffixe) or not c.get("dt_obj"):
                         continue
-                    if abs((c["dt_obj"] - g["dt_utc"]).total_seconds()) <= 14 * 60:
-                        cid = bcid
-                        break
+                    if abs((c["dt_obj"] - g["dt_utc"]).total_seconds()) > 14 * 60:
+                        continue
+                    # Seconde ceinture, comme le daemon ZEturf : l'hippodrome doit
+                    # concorder. Un RxCy qui colle avec un hippodrome qui ne colle pas
+                    # signale une numérotation décalée, pas un appariement.
+                    if hippo_geny and c["hippo"] and not (
+                            c["hippo"] in hippo_geny or hippo_geny in c["hippo"]):
+                        log("genybet.hippodrome_discordant", course=bcid,
+                            geny=hippo_geny[:24], blackturf=c["hippo"][:24])
+                        continue
+                    cid = bcid
+                    break
                 if not cid:
+                    log("genybet.sans_correspondance", geny_id=g["id"], suffixe=suffixe,
+                        hippo=hippo_geny[:24])
                     continue
                 matched += 1
-                cotes = read_course(g["id"])
                 n = write_geny(cid, bt[cid]["partants"], cotes)
                 if n:
                     wrote += 1
