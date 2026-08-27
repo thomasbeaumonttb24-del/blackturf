@@ -213,9 +213,13 @@ interface MisePlan {
 
 // Profils de mise (source unique : formulaire + switch rapide dans le plan).
 const PROFILS_MISE = [
-  { key: "conservateur", label: "Prudent", desc: "Favorise la régularité et limite l’exposition." },
-  { key: "equilibre", label: "Modéré", desc: "Équilibre la régularité et le rendement." },
-  { key: "agressif", label: "Risqué", desc: "Accepte plus de variance pour viser plus haut." },
+  // `bande` = tranche de gain visée SUR LA MISE TOTALE. Ce sont les bornes réelles
+  // du moteur (backend/services/mise_calculator.py : gain_cible_mult / rapport_max),
+  // pas un argument commercial : les afficher évite de choisir un profil à l'aveugle,
+  // et elles doivent bouger en même temps que le backend.
+  { key: "conservateur", label: "Prudent", bande: "×1,8 à ×5", desc: "Favorise la régularité et limite l’exposition." },
+  { key: "equilibre", label: "Modéré", bande: "×4 à ×15", desc: "Équilibre la régularité et le rendement." },
+  { key: "agressif", label: "Risqué", bande: "≥ ×10", desc: "Accepte plus de variance pour viser plus haut." },
 ] as const;
 
 // ─── Palette du reskin (tokens du design handoff) ─────────────────────────────
@@ -277,6 +281,19 @@ const CX_STYLE = `
 @media (prefers-reduced-motion: reduce){.cx-fade{animation:none}.cx-bar,.cx-dot{animation:none !important}}
 .cx-plan button:focus-visible,.cx-plan input:focus-visible,.cx-plan summary:focus-visible{outline:2px solid #B45309 !important;outline-offset:2px}
 .cx-plan button:disabled{cursor:not-allowed !important}
+/* Les fleches du champ nombre cassaient l alignement du gros chiffre du budget. */
+.cx-plan input[type=number]::-webkit-outer-spin-button,.cx-plan input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.cx-plan input[type=number]{-moz-appearance:textfield}
+.cx-profil{transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease}
+.cx-profil[aria-selected=false]:hover{background:#FFFFFF !important;border-color:#E7E1D3 !important;transform:translateY(-1px)}
+.cx-chip{transition:background-color .18s ease,border-color .18s ease,color .18s ease}
+.cx-chip:hover{border-color:#F5DCA8 !important;background:#FEF6E7 !important;color:#92400E !important}
+.cx-cta{transition:filter .18s ease,box-shadow .18s ease,transform .18s ease}
+.cx-cta:not(:disabled):hover{filter:brightness(1.06);transform:translateY(-1px);box-shadow:0 14px 26px -14px rgba(146,64,14,.7)}
+.cx-cta:not(:disabled):active{transform:translateY(0)}
+.cx-budget:focus-within{border-color:#F5DCA8 !important;box-shadow:0 0 0 4px rgba(217,119,6,.10) !important}
+@media (prefers-reduced-motion:reduce){.cx-profil,.cx-cta,.cx-chip{transition:none !important;transform:none !important}}
+@media (max-width:430px){.cx-profil{padding:11px 6px !important}.cx-profil-bande{display:none !important}}
 .cx-plan details>summary svg{transition:transform .2s ease}
 .cx-plan details[open]>summary svg:last-child{transform:rotate(180deg)}
 @media (max-width:840px){ .cx-main{grid-template-columns:1fr !important} .cx-sticky-mise{position:static !important;top:auto !important} }
@@ -861,7 +878,7 @@ function MiseCalculatorWidget({
   );
 
   return (
-    <div className="cx-plan">
+    <div className="cx-plan" style={{ maxWidth: 620 }}>
       {isFreeTier && (
         <p style={{ margin: "0 0 10px", fontSize: 11.5, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 9, padding: "7px 10px" }}>
           {quotaRestant === null
@@ -871,12 +888,14 @@ function MiseCalculatorWidget({
               : "Dernier essai gratuit du jour utilisé."}
         </p>
       )}
-      <p style={{ margin: "0 0 16px", fontSize: 12, lineHeight: 1.5, color: CX.gray500 }}>
-        Définissez votre budget et votre niveau de risque.
-      </p>
-      {/* Profil de risque — change quels paris ET la répartition */}
-      <div style={{ fontSize: 10.5, fontWeight: 650, color: CX.gray500, marginBottom: 7 }}>Profil de risque</div>
-      <div role="tablist" aria-label="Profil de risque" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 4, borderRadius: 13, background: CX.surf4, padding: 4, marginBottom: 16 }}>
+      {/* Étape 1 — le profil décide QUELS paris entrent dans le plan et comment la
+          mise se répartit ; la tranche affichée est celle du moteur, sur la mise TOTALE. */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 9 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 17, height: 17, borderRadius: 999, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, fontFamily: CX.sg, fontSize: 10, fontWeight: 700, color: CX.goldDeep }}>1</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: CX.ink2 }}>Profil de risque</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: CX.gray500 }} title="Tranche de gain visée par le moteur, rapportée à la mise totale du plan.">gain visé / mise totale</span>
+      </div>
+      <div role="tablist" aria-label="Profil de risque" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 7, marginBottom: 10 }}>
         {PROFILS_MISE.map((p) => {
           const active = profilChoisi === p.key;
           const Icon = p.key === "conservateur" ? ShieldCheck : p.key === "equilibre" ? Gauge : Flame;
@@ -884,54 +903,113 @@ function MiseCalculatorWidget({
             <button
               key={p.key}
               role="tab"
+              className="cx-profil"
               aria-selected={active}
               onClick={() => setProfilChoisi(p.key)}
-              style={{ minHeight: 44, border: active ? `1px solid ${CX.goldBd}` : "1px solid transparent", background: active ? CX.surf1 : "transparent", color: active ? CX.goldDeep : CX.gray500, borderRadius: 10, padding: "8px 5px", fontSize: 11.5, fontWeight: active ? 700 : 600, cursor: "pointer", transition: "background-color .2s, border-color .2s, color .2s, box-shadow .2s", boxShadow: active ? "0 1px 3px rgba(17,24,39,.08)" : "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              title={p.desc}
+              style={{
+                minHeight: 76, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5,
+                padding: "12px 8px", borderRadius: 14, cursor: "pointer", textAlign: "center",
+                border: active ? `1.5px solid ${CX.goldBd2}` : `1px solid ${CX.bd3}`,
+                background: active ? CX.surf1 : CX.surf3,
+                boxShadow: active ? "0 10px 22px -16px rgba(146,64,14,.55)" : "none",
+              }}
             >
-              <Icon className="h-3.5 w-3.5" aria-hidden="true" /> {p.label}
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 9,
+                  background: active ? CX.goldBg : CX.surf1,
+                  border: `1px solid ${active ? CX.goldBd : CX.bd3}`,
+                  color: active ? CX.goldDeep : CX.gray500,
+                }}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span style={{ fontFamily: CX.sg, fontSize: 12.5, fontWeight: 700, color: active ? CX.goldDeep : CX.gray700, lineHeight: 1 }}>{p.label}</span>
+              <span className="cx-profil-bande" style={{ fontSize: 10.5, fontWeight: 600, color: active ? CX.gold : CX.gray500, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{p.bande}</span>
             </button>
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ position: "relative", flex: 1 }}>
-          <input
-            ref={inputRef}
-            type="number"
-            min="1"
-            max="10000"
-            step="1"
-            value={montant}
-            onChange={(e) => setMontant(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && generate()}
-            placeholder="10"
-            aria-label="Montant du budget"
-            style={{ width: "100%", minHeight: 48, border: `1px solid ${CX.bd3}`, borderRadius: 12, background: CX.surf1, padding: "11px 30px 11px 13px", fontSize: 14, fontFamily: CX.sg, fontWeight: 700, color: CX.ink2, outline: "none" }}
-          />
-          <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: CX.gray400, fontSize: 14 }}>€</span>
-        </div>
-        <button
-          onClick={() => generate()}
-          disabled={!montant || parseFloat(montant) <= 0 || loading}
-          style={{ minHeight: 48, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${CX.goldDeep}`, cursor: loading ? "wait" : "pointer", background: CX.goldDeep, color: "#FFFFFF", fontWeight: 700, fontSize: 12.5, padding: "0 16px", borderRadius: 12, boxShadow: "0 5px 14px -9px rgba(146,64,14,.65)", opacity: !montant || parseFloat(montant) <= 0 || loading ? 0.55 : 1 }}
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
-            <>Générer <ChevronRight className="h-3.5 w-3.5" /></>
-          )}
-        </button>
+      <p style={{ margin: "0 2px 16px", fontSize: 11.5, lineHeight: 1.45, color: CX.gray500 }}>
+        {PROFILS_MISE.find((p) => p.key === profilChoisi)?.desc}
+      </p>
+
+      {/* Étape 2 — budget. Le champ porte le montant en gros : c'est le chiffre que
+          le lecteur relit avant de valider, pas un réglage parmi d'autres. */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 9 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 17, height: 17, borderRadius: 999, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, fontFamily: CX.sg, fontSize: 10, fontWeight: 700, color: CX.goldDeep }}>2</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: CX.ink2 }}>Budget de la course</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: CX.gray500 }}>de 1 € à 10 000 €</span>
       </div>
-      {/* Quick amounts */}
-      <div aria-label="Montants suggérés" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginTop: 8 }}>
-        {[5, 10, 20, 30].map((v) => (
-          <button
-            key={v}
-            onClick={() => setMontant(String(v))}
-            style={{ minHeight: 40, fontSize: 11, fontFamily: CX.sg, fontWeight: 650, padding: "7px 8px", borderRadius: 9, border: `1px solid ${CX.bd3}`, background: CX.surf1, color: CX.gray600, cursor: "pointer", transition: "background-color .2s, border-color .2s" }}
-          >
-            {v}€
-          </button>
-        ))}
+      <div
+        className="cx-budget"
+        style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 62, border: `1px solid ${CX.bd3}`, borderRadius: 16, background: CX.surf1, padding: "0 16px", transition: "border-color .18s ease, box-shadow .18s ease" }}
+      >
+        <span aria-hidden="true" style={{ fontFamily: CX.sg, fontSize: 22, fontWeight: 700, color: montant ? CX.goldDeep : CX.gray400, lineHeight: 1 }}>€</span>
+        <input
+          ref={inputRef}
+          type="number"
+          min="1"
+          max="10000"
+          step="1"
+          value={montant}
+          onChange={(e) => setMontant(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && generate()}
+          placeholder="10"
+          aria-label="Montant du budget"
+          style={{ flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", padding: "12px 0", fontFamily: CX.sg, fontSize: 26, fontWeight: 700, color: CX.ink, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}
+        />
       </div>
+
+      {/* Raccourcis — secondaires par rapport au champ : pastilles compactes, pas
+          quatre barres pleine largeur qui pesaient autant que le budget lui-même. */}
+      <div aria-label="Montants suggérés" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 9 }}>
+        <span style={{ fontSize: 10.5, color: CX.gray500, marginRight: 2 }}>Raccourcis</span>
+        {[5, 10, 20, 30, 50].map((v) => {
+          const actif = montant === String(v);
+          return (
+            <button
+              key={v}
+              className="cx-chip"
+              aria-pressed={actif}
+              onClick={() => setMontant(String(v))}
+              style={{
+                minHeight: 34, padding: "0 13px", borderRadius: 999, cursor: "pointer",
+                fontFamily: CX.sg, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                border: `1px solid ${actif ? CX.goldBd : CX.bd3}`,
+                background: actif ? CX.goldBg : CX.surf1,
+                color: actif ? CX.goldDeep : CX.gray600,
+              }}
+            >
+              {v} €
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        className="cx-cta"
+        onClick={() => generate()}
+        disabled={!montant || parseFloat(montant) <= 0 || loading}
+        style={{
+          width: "100%", minHeight: 52, marginTop: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+          border: "none", borderRadius: 15, cursor: loading ? "wait" : "pointer",
+          background: `linear-gradient(135deg,${CX.gold},${CX.goldDeep})`, color: "#FFFFFF", fontFamily: CX.sg, fontSize: 14, fontWeight: 700,
+          boxShadow: "0 10px 22px -14px rgba(146,64,14,.75)",
+          opacity: !montant || parseFloat(montant) <= 0 || loading ? 0.5 : 1,
+        }}
+      >
+        {loading ? (
+          <><Loader2 className="h-4 w-4 animate-spin" /> Calcul du plan…</>
+        ) : (
+          <>Générer mon plan <ChevronRight className="h-4 w-4" /></>
+        )}
+      </button>
+      <p style={{ margin: "9px 2px 0", fontSize: 10.5, lineHeight: 1.45, color: CX.gray500, textAlign: "center" }}>
+        {PROFILS_MISE.find((p) => p.key === profilChoisi)?.label} · {montant ? `${montant} €` : "budget à définir"} · gain visé {PROFILS_MISE.find((p) => p.key === profilChoisi)?.bande} de la mise totale
+      </p>
     </div>
   );
 }
