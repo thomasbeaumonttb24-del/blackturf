@@ -308,13 +308,23 @@ export function resumeCourt(texte: string, max = 155): string {
   if (t.length <= max) return t;
 
   const coupe = t.slice(0, max);
-  // Une phrase complète se termine par un point, un point d'exclamation ou
-  // d'interrogation suivi d'une espace — ou par la fin du texte.
+  // S'arrêter sur une phrase complète est plus élégant, mais pas au prix du quart de
+  // l'espace disponible : l'intro du trot tombait à 93 caractères sur 155. On ne le fait
+  // donc que si la phrase occupe déjà l'essentiel de la place.
   const finPhrase = Math.max(coupe.lastIndexOf(". "), coupe.lastIndexOf("! "), coupe.lastIndexOf("? "));
-  if (finPhrase > max * 0.55) return coupe.slice(0, finPhrase + 1);
+  if (finPhrase > max * 0.82) return coupe.slice(0, finPhrase + 1);
 
-  const finMot = coupe.lastIndexOf(" ");
-  return `${coupe.slice(0, finMot > 0 ? finMot : max).replace(/[,;:]$/, "")}…`;
+  // Couper au mot ne suffit pas : s'arrêter sur « avec… » ou « comme… » laisse une phrase
+  // en suspens sur un mot-outil, ce qui se lit mal dans un résultat de recherche. On
+  // remonte tant que le dernier mot n'apporte rien à lui seul.
+  const OUTILS = new Set([
+    "à", "au", "aux", "avec", "comme", "dans", "de", "des", "du", "en", "et", "la", "le",
+    "les", "ou", "par", "pour", "sans", "sur", "un", "une", "vers", "chez", "sous", "dont",
+    "que", "qui", "d'un", "d'une", "l'", "son", "sa", "ses", "leur", "leurs", "ce", "cet",
+  ]);
+  let mots = coupe.slice(0, coupe.lastIndexOf(" ")).split(" ");
+  while (mots.length > 3 && OUTILS.has(mots[mots.length - 1].toLowerCase())) mots.pop();
+  return `${mots.join(" ").replace(/[,;:]$/, "")}…`;
 }
 
 /** "2026-08" → "août 2026" (regroupement par mois des archives) */
