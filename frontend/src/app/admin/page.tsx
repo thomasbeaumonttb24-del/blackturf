@@ -189,7 +189,10 @@ function StatCard({
         >
           <Icon className="h-3.5 w-3.5" />
         </span>
-        <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {/* Pas de `truncate` : « Alertes en erreur » se coupait en « ALERTES EN ERRE… »
+            à 390 px. Un libellé de tuile doit s'écrire en entier, quitte à passer
+            sur deux lignes — c'est ce qui nomme le chiffre juste en dessous. */}
+        <span className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground sm:text-[11px]">
           {label}
         </span>
       </div>

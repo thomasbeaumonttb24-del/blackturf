@@ -78,9 +78,13 @@ export function AdminSection({
           >
             {icone}
           </span>
+          {/* Aucun `truncate` ici : à 390 px, « Erreurs récentes » se coupait en
+              « Erreurs réc… » et son sous-titre en « Exceptions API et sc… ». Un
+              en-tête qui porte le résumé d'une section repliée doit se lire en
+              entier — il passe sur deux lignes plutôt que de perdre ses mots. */}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
-              <span className="truncate text-sm font-bold sm:text-base">{titre}</span>
+              <span className="text-sm font-bold leading-tight sm:text-base">{titre}</span>
               <ChevronDown
                 className={cn(
                   "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:text-foreground",
@@ -89,7 +93,7 @@ export function AdminSection({
               />
             </span>
             {sousTitre && (
-              <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">
+              <span className="mt-0.5 block text-[11px] leading-tight text-muted-foreground">
                 {sousTitre}
               </span>
             )}
@@ -149,7 +153,7 @@ export function Tuile({
     >
       <div className="flex items-center gap-1.5">
         {icone && <span className="shrink-0 text-muted-foreground">{icone}</span>}
-        <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:text-[11px]">
+        <span className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground sm:text-[11px]">
           {label}
         </span>
       </div>
@@ -163,7 +167,7 @@ export function Tuile({
       >
         {valeur}
       </div>
-      {sub && <div className="mt-0.5 truncate text-[10px] text-muted-foreground sm:text-[11px]">{sub}</div>}
+      {sub && <div className="mt-0.5 text-[10px] text-muted-foreground sm:text-[11px]">{sub}</div>}
     </div>
   );
 }
