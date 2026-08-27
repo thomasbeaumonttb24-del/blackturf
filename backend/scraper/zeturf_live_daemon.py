@@ -147,6 +147,29 @@ def db_exec(sql: str) -> bool:
         return False
     return True
 
+
+_TAG = re.compile(r"^(?:UPDATE|INSERT|DELETE)\s+(?:\d+\s+)?(\d+)\s*$", re.M)
+
+
+def db_exec_rows(sql: str) -> int:
+    """Comme db_exec, mais rend le nombre de lignes REELLEMENT touchees (-1 si echec).
+
+    `db_exec` ne rendait qu'un booleen, et les daemons journalisaient le nombre de
+    clauses SET CONSTRUITES : `wrote=3` s'affichait meme quand la base n'avait rien
+    modifie. C'est ce qui a laisse participations.cote_geny vide sans qu'aucune
+    alerte ne parte. On lance donc psql SANS -q pour lire son etiquette de commande
+    (« UPDATE 12 »), seule source de verite sur ce qui a ete ecrit.
+    """
+    out = _psql(["-c", sql], "db_exec_rows")
+    if out.returncode != 0:
+        log("db_exec.error", err=out.stderr.strip()[:120])
+        return -1
+    tags = _TAG.findall(out.stdout or "")
+    if not tags:
+        log("db_exec.tag_absente", extrait=(out.stdout or "").strip()[:80])
+        return -1
+    return int(tags[-1])
+
 # ─── Normalisation hippodrome ───────────────────────────────────────────────
 _STOP = re.compile(r"\b(hippodrome|de|du|des|la|le|l|d|suisse|allemagne|angleterre|prix|grand)\b")
 def norm(s: str) -> str:
@@ -219,13 +242,17 @@ def write_odds(course_id: str, partants: dict[int, str], cotes: dict[int, float]
         f"UPDATE participations SET cote_unibet = CASE {' '.join(sets)} ELSE cote_unibet END "
         f"WHERE participation_id IN ({ids});"
     )
-    db_exec(sql)
+    lignes = db_exec_rows(sql)
     # historique (best-effort ; table cotes_bookmakers)
     db_exec(
         "INSERT INTO cotes_bookmakers(id,participation_id,course_id,source,cote,est_cote_ouverture,scraped_at) "
         f"VALUES {','.join(hist)} ON CONFLICT DO NOTHING;"
     )
-    return len(sets)
+    if lignes != len(sets):
+        # Ecart = quelqu'un d'autre a la main sur la colonne, ou l'UPDATE a echoue.
+        log("cotes.ecriture_non_confirmee", source="unibet", course=course_id,
+            attendu=len(sets), confirme=lignes)
+    return max(lignes, 0)
 
 # ─── Scraping ZEturf ────────────────────────────────────────────────────────
 def _parse_course_links(hrefs: list[str]) -> list[dict]:

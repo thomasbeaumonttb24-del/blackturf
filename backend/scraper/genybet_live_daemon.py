@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, "/opt/blackturf_odds")
-from zeturf_live_daemon import db_exec, norm, load_blackturf, log  # helpers partagés
+from zeturf_live_daemon import db_exec, db_exec_rows, norm, load_blackturf, log  # helpers partagés
 from live_daemon_watchdog import CycleWatchdog
 from scrapling.fetchers import StealthyFetcher
 
@@ -124,7 +124,7 @@ def write_geny(course_id: str, partants: dict[int, str], cotes: dict[int, float]
     if not sets:
         return 0
     ids = ",".join(f"'{partants[n]}'" for n in cotes if partants.get(n))
-    db_exec(
+    lignes = db_exec_rows(
         f"UPDATE participations SET cote_geny = CASE {' '.join(sets)} ELSE cote_geny END "
         f"WHERE participation_id IN ({ids});"
     )
@@ -132,7 +132,12 @@ def write_geny(course_id: str, partants: dict[int, str], cotes: dict[int, float]
         "INSERT INTO cotes_bookmakers(id,participation_id,course_id,source,cote,est_cote_ouverture,scraped_at) "
         f"VALUES {','.join(hist)} ON CONFLICT DO NOTHING;"
     )
-    return len(sets)
+    if lignes != len(sets):
+        # On rendait len(sets) : le nombre de clauses CONSTRUITES. Le journal affichait
+        # donc « wrote=3 » alors que zero ligne bougeait. Ce que la base confirme fait foi.
+        log("cotes.ecriture_non_confirmee", source="geny", course=course_id,
+            attendu=len(sets), confirme=lignes)
+    return max(lignes, 0)
 
 def main():
     log("genybet_daemon.start", slow=SLOW_INTERVAL, imminent_h=IMMINENT_H)

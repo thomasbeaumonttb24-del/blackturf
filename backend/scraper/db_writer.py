@@ -409,7 +409,13 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             constraint="uq_participation_course_numero",
             set_={
                 "cote_pmu": cote_pmu_v,
-                "cote_geny": cote_geny_v,
+                # cote_geny N'EST PAS fournie par la source PMU (seul geny.py la lit,
+                # et le daemon GenyBet l'ecrit hors Docker). L'inclure inconditionnellement
+                # revenait a reecrire NULL par-dessus la cote du daemon a CHAQUE re-scrape :
+                # la colonne n'a jamais rien retenu (0 valeur non nulle depuis 2025-09,
+                # ~250 ecrasements/jour) alors que l'historique cotes_bookmakers, lui, se
+                # remplissait. Ecriture CONDITIONNELLE : on ne denormalise que ce qu'on a.
+                **({"cote_geny": cote_geny_v} if cote_geny_v is not None else {}),
                 "rang_pronostic_pmu": partant.rang_pronostic_pmu,
                 # le mouvement de cote évolue → réactualisé à chaque cycle
                 "cote_reference": cote_ref_v,
@@ -675,8 +681,19 @@ async def save_cote_bookmaker(
             "betclic": Participation.cote_betclic,
             "unibet": Participation.cote_unibet,
             "betfair": Participation.cote_betfair_exchange,
+            # Sources absentes jusqu'au 27/08/2026 : la ligne d'historique partait,
+            # la colonne denormalisee restait NULL, et `col is None` ne disait rien.
+            "geny": Participation.cote_geny,
+            "bzh": Participation.cote_bzh,
+            "bet365": Participation.cote_bet365,
+            "ladbrokes": Participation.cote_ladbrokes,
         }
         col = col_map.get(cote_scrape.source)
+        if col is None:
+            # Une source sans colonne denormalisee n'est pas une erreur en soi, mais
+            # elle doit se voir : c'est ce silence qui a masque le trou ci-dessus.
+            log.warning("db_writer.bookmaker_sans_colonne_denormalisee",
+                        source=cote_scrape.source, participation_id=participation_id)
         if col is not None:
             await session.execute(
                 update(Participation)
