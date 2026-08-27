@@ -5,14 +5,15 @@ import useSWR from "swr";
 import { toast } from "sonner";
 import {
   Users, Brain, Activity, AlertTriangle, RefreshCw, Loader2,
-  CheckCircle, XCircle, Clock, X, Wallet, TrendingUp, CreditCard
+  CheckCircle, XCircle, Clock, X, Wallet, TrendingUp, CreditCard,
+  History, Radio, UserCog
 } from "lucide-react";
+import { AdminSection, Puce, Tuile, VoirPlus, depuis } from "@/components/admin/Section";
 
 const PROFIL_NET_LABELS: Record<string, string> = {
   conservateur: "Prudent", equilibre: "Modéré", agressif: "Risqué",
 };
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { adminApi, statsApi } from "@/lib/api";
@@ -136,20 +137,48 @@ const MOUVEMENT_TONS: Record<string, "success" | "warning" | "destructive" | "se
   carte_refusee_autre_compte: "destructive",
 };
 
-function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string | number; sub?: string }) {
+/** Mouvements qui coupent l'accès ou font perdre un client : remontés hors du journal. */
+const MOUVEMENTS_ECHEC = new Set([
+  "paiement_echoue",
+  "essai_termine_sans_carte",
+  "essai_refuse_carte_reutilisee",
+  "carte_refusee_autre_compte",
+]);
+
+function StatCard({
+  icon: Icon, label, value, sub, ton = "neutre",
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string | number;
+  sub?: string;
+  ton?: "neutre" | "ok" | "alerte" | "attention";
+}) {
   return (
-    <Card>
-      <CardContent className="p-3 sm:p-5">
-        <div className="flex items-center gap-2 sm:gap-3 mb-2">
-          <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-brand-gold/10 flex items-center justify-center shrink-0">
-            <Icon className="h-4 w-4 text-brand-gold-dark" />
-          </div>
-          <span className="text-xs sm:text-sm text-muted-foreground leading-tight">{label}</span>
-        </div>
-        <div className="text-xl sm:text-2xl font-bold">{value}</div>
-        {sub && <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">{sub}</div>}
-      </CardContent>
-    </Card>
+    <div
+      className={cn(
+        "rounded-2xl border bg-card p-3 shadow-sm transition-colors sm:p-4",
+        ton === "alerte" ? "border-destructive/30 bg-destructive/[0.03]" : "border-border hover:border-brand-gold/40",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+            ton === "alerte" ? "bg-destructive/10 text-destructive" : "bg-brand-gold/10 text-brand-gold-dark",
+          )}
+        >
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </span>
+      </div>
+      <div className={cn("mt-2 text-2xl font-bold tabular-nums", ton === "alerte" && "text-destructive")}>
+        {value}
+      </div>
+      {sub && <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{sub}</div>}
+    </div>
   );
 }
 
@@ -394,6 +423,10 @@ export default function AdminPage() {
   const { user, loading: authLoading } = useRequireAuth();
   const [retraining, setRetraining] = useState(false);
   const [deployingVersion, setDeployingVersion] = useState<number | null>(null);
+  // Listes longues : on n'affiche que la tête, le reste à la demande.
+  const [toutErreurs, setToutErreurs] = useState(false);
+  const [toutModeles, setToutModeles] = useState(false);
+  const [toutMouvements, setToutMouvements] = useState(false);
 
   const { data: dashboard } = useSWR<DashboardData>(
     user?.is_admin ? "/admin-dashboard" : null,
@@ -512,9 +545,15 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-5 sm:space-y-8">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl sm:text-2xl font-bold">Back-office</h1>
+    <div className="mx-auto max-w-7xl space-y-4 px-3 py-4 sm:space-y-5 sm:px-6 sm:py-7 lg:px-8">
+      {/* En-tête collante : le bouton de retrain reste atteignable en bas de page. */}
+      <div className="sticky top-0 z-20 -mx-3 flex items-center justify-between gap-2 border-b border-border/60 bg-background/85 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6">
+        <div className="min-w-0">
+          <h1 className="truncate text-lg font-bold sm:text-2xl">Back-office</h1>
+          <p className="hidden text-[11px] text-muted-foreground sm:block">
+            Actualisation automatique · données live
+          </p>
+        </div>
         <Button variant="brand" size="sm" onClick={handleRetrain} disabled={retraining}>
           {retraining ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           <span className="hidden sm:inline">Retraining manuel</span>
@@ -524,46 +563,65 @@ export default function AdminPage() {
 
       {/* Stats */}
       {dashboard && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-4">
           <StatCard icon={Users} label="Utilisateurs" value={dashboard.users.total} sub={`+${dashboard.users.nouveaux_7j} cette semaine`} />
-          <StatCard icon={Users} label="Abonnés actifs" value={dashboard.users.abonnes_actifs} />
+          <StatCard icon={CreditCard} label="Abonnés actifs" value={dashboard.users.abonnes_actifs} />
           <StatCard icon={Activity} label="Courses 24h" value={dashboard.courses_24h} />
-          <StatCard icon={AlertTriangle} label="Alertes en erreur" value={dashboard.alertes_erreur} sub={dashboard.alertes_erreur > 0 ? "⚠ À vérifier" : "✓ OK"} />
+          <StatCard
+            icon={AlertTriangle}
+            label="Alertes en erreur"
+            value={dashboard.alertes_erreur}
+            sub={dashboard.alertes_erreur > 0 ? "à vérifier" : "tout est passé"}
+            ton={dashboard.alertes_erreur > 0 ? "alerte" : "neutre"}
+          />
         </div>
       )}
 
-      {/* Erreurs runtime LIVE (exceptions API + scrapers échoués) — identifier ce qui casse. */}
-      {errorsData && errorsData.errors.length > 0 && (
-        <Card className="border-brand-red/40">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-brand-red" />
-              Erreurs récentes
-              <span className="text-xs font-normal text-muted-foreground">({errorsData.errors.length} · 72h · live)</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-border/50 max-h-[28rem] overflow-auto">
-              {errorsData.errors.map((e, i) => (
-                <details key={e.id ?? `s${i}`} className="px-4 py-2.5 text-xs">
-                  <summary className="cursor-pointer list-none flex items-start justify-between gap-3">
-                    <span className="flex-1 min-w-0">
-                      <span className="flex items-center gap-2 flex-wrap">
-                        <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]",
+      {/* Erreurs runtime LIVE (exceptions API + scrapers échoués) — identifier ce qui casse.
+          Repliée par défaut : c'est une pile de détails, pas un indicateur. */}
+      {errorsData && errorsData.errors.length > 0 && (() => {
+        const nonResolues = errorsData.errors.filter((e) => !e.resolved).length;
+        const visibles = toutErreurs ? errorsData.errors : errorsData.errors.slice(0, 8);
+        return (
+          <AdminSection
+            id="erreurs"
+            titre="Erreurs récentes"
+            sousTitre="Exceptions API et scrapers échoués sur 72 h"
+            icone={<AlertTriangle className="h-4 w-4" />}
+            ton="alerte"
+            defaut={false}
+            bodyClassName="p-0 sm:p-0"
+            resume={
+              <>
+                <Puce ton={nonResolues > 0 ? "alerte" : "ok"}>{nonResolues} ouverte{nonResolues > 1 ? "s" : ""}</Puce>
+                <Puce>{errorsData.errors.length} sur 72 h</Puce>
+              </>
+            }
+          >
+            <div className="divide-y divide-border/50">
+              {visibles.map((e, i) => (
+                <details key={e.id ?? `s${i}`} className="group px-3 py-2.5 text-xs sm:px-5">
+                  <summary className="flex cursor-pointer list-none flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold",
                           e.kind === "scraper" ? "bg-amber-500/15 text-amber-700" : "bg-red-500/15 text-red-700")}>
                           {e.source}
                         </span>
-                        {e.endpoint && <span className="font-mono text-muted-foreground truncate">{e.endpoint}</span>}
-                        {e.resolved && <span className="text-emerald-700 text-[10px]">✓ résolu</span>}
+                        {e.endpoint && <span className="truncate font-mono text-[10px] text-muted-foreground">{e.endpoint}</span>}
+                        {e.resolved && <span className="text-[10px] font-semibold text-emerald-700">✓ résolu</span>}
                       </span>
-                      <span className="block mt-1 font-medium text-foreground break-words">{e.message}</span>
+                      <span className="mt-1 block break-words font-medium text-foreground">{e.message}</span>
                     </span>
-                    <span className="text-muted-foreground font-mono shrink-0 text-[11px]">
-                      {e.created_at ? formatDateTime(e.created_at) : "—"}
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground sm:text-[11px]">
+                      {e.created_at ? depuis(e.created_at) : "—"}
                     </span>
                   </summary>
+                  {e.created_at && (
+                    <div className="mt-1 font-mono text-[10px] text-muted-foreground">{formatDateTime(e.created_at)}</div>
+                  )}
                   {e.detail && (
-                    <pre className="mt-2 max-h-60 overflow-auto rounded bg-muted/40 p-2 text-[11px] whitespace-pre-wrap break-words">{e.detail}</pre>
+                    <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2 text-[11px]">{e.detail}</pre>
                   )}
                   {e.kind === "api" && e.id != null && !e.resolved && (
                     <Button
@@ -578,45 +636,49 @@ export default function AdminPage() {
                 </details>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div className="px-3 pb-3 sm:px-5">
+              <VoirPlus
+                total={errorsData.errors.length}
+                montres={8}
+                tout={toutErreurs}
+                onToggle={() => setToutErreurs((v) => !v)}
+              />
+            </div>
+          </AdminSection>
+        );
+      })()}
 
       {/* Rentabilité réelle par profil (NET + ROI) — admin only, déplacé du palmarès public.
           Affiche le bénéfice net (peut être négatif) pour suivre l'évolution réelle. */}
-      <Card className="border-brand-gold/30">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Wallet className="h-4 w-4 text-brand-gold-dark" /> Rentabilité réelle par profil (net)
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-1">
-            10€/profil/course, rapports PMU réels. Net réel (peut être négatif), suivi admin.
-          </p>
-        </CardHeader>
-        <CardContent>
+      <AdminSection
+        id="rentabilite"
+        titre="Rentabilité réelle par profil"
+        sousTitre="10 €/profil/course, rapports PMU réels — net réel, peut être négatif"
+        icone={<Wallet className="h-4 w-4" />}
+        ton="or"
+        resume={palmares ? (
+          <>
+            <Puce ton={(palmares.total_benefice ?? 0) >= 0 ? "ok" : "alerte"}>
+              {(palmares.total_benefice ?? 0) >= 0 ? "+" : ""}{(palmares.total_benefice ?? 0).toFixed(0)} €
+            </Puce>
+            <Puce>{palmares.n_courses ?? 0} courses</Puce>
+          </>
+        ) : undefined}
+      >
+        <>
           {!palmares ? (
             <div className="py-6 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
           ) : (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-                <div className="rounded-lg bg-muted/30 p-3 text-center">
-                  <div className="text-xs text-muted-foreground">Bénéfice net total</div>
-                  <div className={cn("text-xl font-bold tabular-nums", (palmares.total_benefice ?? 0) >= 0 ? "text-green-700" : "text-destructive")}>
-                    {(palmares.total_benefice ?? 0) >= 0 ? "+" : ""}{(palmares.total_benefice ?? 0).toFixed(0)}€
-                  </div>
-                </div>
-                <div className="rounded-lg bg-muted/30 p-3 text-center">
-                  <div className="text-xs text-muted-foreground">Total gagné</div>
-                  <div className="text-xl font-bold tabular-nums text-green-700">{(palmares.total_gain ?? 0).toFixed(0)}€</div>
-                </div>
-                <div className="rounded-lg bg-muted/30 p-3 text-center">
-                  <div className="text-xs text-muted-foreground">Paris gagnés</div>
-                  <div className="text-xl font-bold tabular-nums">{palmares.n}</div>
-                </div>
-                <div className="rounded-lg bg-muted/30 p-3 text-center">
-                  <div className="text-xs text-muted-foreground">Courses</div>
-                  <div className="text-xl font-bold tabular-nums">{palmares.n_courses ?? 0}</div>
-                </div>
+              <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-4">
+                <Tuile
+                  label="Bénéfice net total"
+                  valeur={`${(palmares.total_benefice ?? 0) >= 0 ? "+" : ""}${(palmares.total_benefice ?? 0).toFixed(0)} €`}
+                  ton={(palmares.total_benefice ?? 0) >= 0 ? "ok" : "alerte"}
+                />
+                <Tuile label="Total gagné" valeur={`${(palmares.total_gain ?? 0).toFixed(0)} €`} ton="ok" />
+                <Tuile label="Paris gagnés" valeur={palmares.n} />
+                <Tuile label="Courses" valeur={palmares.n_courses ?? 0} />
               </div>
               {palmares.profils && palmares.profils.length > 0 && (
                 <>
@@ -686,40 +748,63 @@ export default function AdminPage() {
               )}
             </>
           )}
-        </CardContent>
-      </Card>
+        </>
+      </AdminSection>
 
       {/* Abonnements — essais, cartes manquantes, journal des mouvements */}
-      {abos && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <CreditCard className="h-4 w-4 text-brand-gold-dark" /> Abonnements
-            </CardTitle>
-            {abos.resume.en_essai_sans_carte > 0 && (
-              <Badge variant="warning">
-                {abos.resume.en_essai_sans_carte} sans carte
-              </Badge>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-              {[
-                { label: "Payants", value: abos.resume.abonnes_payants },
-                { label: "En essai", value: abos.resume.en_essai_avec_carte },
-                { label: "Sans carte", value: abos.resume.en_essai_sans_carte, alerte: abos.resume.en_essai_sans_carte > 0 },
-                { label: "Fin d'essai < 3j", value: abos.resume.fin_essai_sous_3j, alerte: abos.resume.fin_essai_sous_3j > 0 },
-                { label: "MRR", value: formatEuro(abos.resume.mrr) },
-                { label: "Résiliations 30j", value: abos.resume.resiliations_30j },
-              ].map((s) => (
-                <div key={s.label} className={cn("text-center p-3 rounded-lg bg-muted/30", s.alerte && "bg-amber-100/60")}>
-                  <div className="text-xs text-muted-foreground">{s.label}</div>
-                  <div className="text-lg font-bold">{s.value}</div>
-                </div>
-              ))}
+      {abos && (() => {
+        // Un échec de paiement coupe l'accès : c'est l'information la plus urgente de
+        // la page. Elle ne doit donc jamais dépendre du dépliage du journal — d'où la
+        // pastille dans l'en-tête, la ligne d'alerte permanente et l'ouverture d'office.
+        const echecsRecents = abos.mouvements.filter(
+          (m) => MOUVEMENTS_ECHEC.has(m.type)
+            && Date.now() - new Date(m.created_at).getTime() < 7 * 86400_000,
+        );
+        const dernierEchec = echecsRecents[0];
+        return (
+        <AdminSection
+          id="abonnements"
+          titre="Abonnements"
+          sousTitre="Essais en cours, cartes manquantes, journal des mouvements"
+          icone={<CreditCard className="h-4 w-4" />}
+          ton={echecsRecents.length > 0 ? "alerte" : "neutre"}
+          resume={
+            <>
+              {echecsRecents.length > 0 && (
+                <Puce ton="alerte">
+                  {echecsRecents.length} échec{echecsRecents.length > 1 ? "s" : ""} · 7 j
+                </Puce>
+              )}
+              <Puce ton={abos.resume.abonnes_payants > 0 ? "ok" : "neutre"}>
+                {abos.resume.abonnes_payants} payant{abos.resume.abonnes_payants > 1 ? "s" : ""}
+              </Puce>
+              <Puce>{abos.resume.en_essai_avec_carte} en essai</Puce>
+              {abos.resume.en_essai_sans_carte > 0 && (
+                <Puce ton="attention">{abos.resume.en_essai_sans_carte} sans carte</Puce>
+              )}
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+              <Tuile label="Payants" valeur={abos.resume.abonnes_payants} />
+              <Tuile label="En essai" valeur={abos.resume.en_essai_avec_carte} />
+              <Tuile
+                label="Sans carte"
+                valeur={abos.resume.en_essai_sans_carte}
+                ton={abos.resume.en_essai_sans_carte > 0 ? "attention" : "neutre"}
+                sub={abos.resume.en_essai_sans_carte > 0 ? "accès bloqué" : undefined}
+              />
+              <Tuile
+                label="Fin d'essai < 3j"
+                valeur={abos.resume.fin_essai_sous_3j}
+                ton={abos.resume.fin_essai_sous_3j > 0 ? "attention" : "neutre"}
+              />
+              <Tuile label="MRR" valeur={formatEuro(abos.resume.mrr)} sub={`ARR ${formatEuro(abos.resume.arr)}`} />
+              <Tuile label="Résiliations 30j" valeur={abos.resume.resiliations_30j} />
             </div>
 
-            <p className="text-xs text-muted-foreground">
+            <p className="rounded-lg border border-border/60 bg-muted/20 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
               Sur 30 jours : {abos.resume.essais_ouverts_30j} essai(s) ouvert(s),{" "}
               {abos.resume.essais_perdus_30j} perdu(s) faute de carte,{" "}
               {abos.resume.resiliations_pendant_essai_30j} résiliation(s) survenue(s)
@@ -728,141 +813,231 @@ export default function AdminPage() {
             </p>
 
             {abos.abonnes.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-xs text-muted-foreground border-b border-border">
-                    <tr>
-                      <th className="text-left py-2 font-medium">Compte</th>
-                      <th className="text-left py-2 font-medium">Formule</th>
-                      <th className="text-left py-2 font-medium">État</th>
-                      <th className="text-left py-2 font-medium">Fin d&apos;essai</th>
-                      <th className="text-right py-2 font-medium">Montant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {abos.abonnes.map((a) => (
-                      <tr key={a.stripe_subscription_id ?? a.user_id} className="border-b border-border/50">
-                        <td className="py-2 pr-3 truncate max-w-[220px]">{a.email}</td>
-                        <td className="py-2 pr-3 capitalize">
-                          {a.plan}
-                          <span className="text-muted-foreground text-xs">
-                            {a.periodicite === "annual" ? " / an" : " / mois"}
-                          </span>
-                        </td>
-                        <td className="py-2 pr-3">
-                          {!a.carte_enregistree ? (
-                            <Badge variant="warning" className="text-[10px]">Carte manquante — accès bloqué</Badge>
-                          ) : a.en_essai ? (
-                            <Badge variant="secondary" className="text-[10px]">Essai en cours</Badge>
-                          ) : a.acces_ouvert ? (
-                            <Badge variant="success" className="text-[10px]">Actif</Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px]">{a.statut}</Badge>
+              <>
+                {/* Mobile : une carte par abonnement — le tableau à 5 colonnes déborde. */}
+                <div className="space-y-2 sm:hidden">
+                  {abos.abonnes.map((a) => (
+                    <div key={a.stripe_subscription_id ?? a.user_id} className="rounded-xl border border-border p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{a.email}</span>
+                        <span className="shrink-0 text-sm font-bold tabular-nums">{formatEuro(a.montant_cents / 100)}</span>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <Badge variant="secondary" className="text-[10px] capitalize">
+                          {a.plan}{a.periodicite === "annual" ? " / an" : " / mois"}
+                        </Badge>
+                        {!a.carte_enregistree ? (
+                          <Badge variant="warning" className="text-[10px]">Carte manquante</Badge>
+                        ) : a.en_essai ? (
+                          <Badge variant="secondary" className="text-[10px]">Essai en cours</Badge>
+                        ) : a.acces_ouvert ? (
+                          <Badge variant="success" className="text-[10px]">Actif</Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px]">{a.statut}</Badge>
+                        )}
+                      </div>
+                      {a.essai_fin && (
+                        <div className="mt-1.5 text-[11px] text-muted-foreground">
+                          Fin d&apos;essai {formatDateTime(a.essai_fin)}
+                          {a.jours_essai_restants !== null && (
+                            <span className={cn("ml-1", a.jours_essai_restants <= 3 && "font-semibold text-amber-700")}>
+                              (J-{a.jours_essai_restants})
+                            </span>
                           )}
-                        </td>
-                        <td className="py-2 pr-3 whitespace-nowrap">
-                          {a.essai_fin ? (
-                            <>
-                              {formatDateTime(a.essai_fin)}
-                              {a.jours_essai_restants !== null && (
-                                <span className={cn("ml-1 text-xs",
-                                  a.jours_essai_restants <= 3 ? "text-amber-700 font-semibold" : "text-muted-foreground")}>
-                                  (J-{a.jours_essai_restants})
-                                </span>
-                              )}
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="py-2 text-right whitespace-nowrap">
-                          {formatEuro(a.montant_cents / 100)}
-                        </td>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {/* Desktop : tableau */}
+                <div className="hidden overflow-x-auto rounded-xl border border-border/70 sm:block">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Compte</th>
+                        <th className="px-3 py-2 text-left font-medium">Formule</th>
+                        <th className="px-3 py-2 text-left font-medium">État</th>
+                        <th className="px-3 py-2 text-left font-medium">Fin d&apos;essai</th>
+                        <th className="px-3 py-2 text-right font-medium">Montant</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {abos.abonnes.map((a) => (
+                        <tr key={a.stripe_subscription_id ?? a.user_id} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
+                          <td className="max-w-[240px] truncate px-3 py-2">{a.email}</td>
+                          <td className="px-3 py-2 capitalize">
+                            {a.plan}
+                            <span className="text-xs text-muted-foreground">
+                              {a.periodicite === "annual" ? " / an" : " / mois"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            {!a.carte_enregistree ? (
+                              <Badge variant="warning" className="text-[10px]">Carte manquante — accès bloqué</Badge>
+                            ) : a.en_essai ? (
+                              <Badge variant="secondary" className="text-[10px]">Essai en cours</Badge>
+                            ) : a.acces_ouvert ? (
+                              <Badge variant="success" className="text-[10px]">Actif</Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-[10px]">{a.statut}</Badge>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2">
+                            {a.essai_fin ? (
+                              <>
+                                {formatDateTime(a.essai_fin)}
+                                {a.jours_essai_restants !== null && (
+                                  <span className={cn("ml-1 text-xs",
+                                    a.jours_essai_restants <= 3 ? "text-amber-700 font-semibold" : "text-muted-foreground")}>
+                                    (J-{a.jours_essai_restants})
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                            {formatEuro(a.montant_cents / 100)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             ) : (
-              <p className="text-muted-foreground text-sm">Aucun abonnement en cours.</p>
+              <p className="text-sm text-muted-foreground">Aucun abonnement en cours.</p>
             )}
 
-            <div>
-              <h3 className="text-sm font-semibold mb-2">Derniers mouvements</h3>
+            {dernierEchec && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                <span className="font-semibold text-destructive">
+                  {MOUVEMENT_LABELS[dernierEchec.type] ?? dernierEchec.type}
+                </span>
+                <span className="max-w-[220px] truncate text-xs sm:text-sm">
+                  {dernierEchec.email ?? "compte supprimé"}
+                </span>
+                <span className="text-xs text-muted-foreground" title={formatDateTime(dernierEchec.created_at)}>
+                  {depuis(dernierEchec.created_at)}
+                </span>
+                {echecsRecents.length > 1 && (
+                  <span className="text-xs text-muted-foreground">
+                    · {echecsRecents.length - 1} autre{echecsRecents.length > 2 ? "s" : ""} sur 7 j
+                  </span>
+                )}
+              </div>
+            )}
+
+            <AdminSection
+              id="abonnements-mouvements"
+              titre="Derniers mouvements"
+              sousTitre="Journal Stripe : essais, cartes, encaissements, résiliations"
+              icone={<History className="h-4 w-4" />}
+              defaut={echecsRecents.length > 0}
+              ton={echecsRecents.length > 0 ? "alerte" : "neutre"}
+              resume={
+                <>
+                  {echecsRecents.length > 0 && <Puce ton="alerte">{echecsRecents.length} échec{echecsRecents.length > 1 ? "s" : ""}</Puce>}
+                  <Puce>{abos.mouvements.length}</Puce>
+                </>
+              }
+            >
               {abos.mouvements.length > 0 ? (
-                <ul className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
-                  {abos.mouvements.map((m) => (
-                    <li key={m.event_id} className="flex flex-wrap items-center gap-2 text-sm">
-                      <Badge variant={MOUVEMENT_TONS[m.type] ?? "secondary"} className="text-[10px]">
-                        {MOUVEMENT_LABELS[m.type] ?? m.type}
-                      </Badge>
-                      <span className="truncate max-w-[220px]">{m.email ?? "compte supprimé"}</span>
-                      {m.plan && (
-                        <span className="text-muted-foreground text-xs capitalize">
-                          {m.plan_precedent ? `${m.plan_precedent} → ${m.plan}` : m.plan}
+                <>
+                  <ul className="space-y-1">
+                    {(toutMouvements ? abos.mouvements : abos.mouvements.slice(0, 10)).map((m) => (
+                      <li
+                        key={m.event_id}
+                        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 text-sm odd:bg-muted/20"
+                      >
+                        <Badge variant={MOUVEMENT_TONS[m.type] ?? "secondary"} className="text-[10px]">
+                          {MOUVEMENT_LABELS[m.type] ?? m.type}
+                        </Badge>
+                        <span className="max-w-[200px] truncate text-xs sm:max-w-[260px] sm:text-sm">
+                          {m.email ?? "compte supprimé"}
                         </span>
-                      )}
-                      {m.pendant_essai && (
-                        <span className="text-xs text-amber-700">pendant l&apos;essai</span>
-                      )}
-                      <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">
-                        {formatDateTime(m.created_at)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                        {m.plan && (
+                          <span className="text-xs capitalize text-muted-foreground">
+                            {m.plan_precedent ? `${m.plan_precedent} → ${m.plan}` : m.plan}
+                          </span>
+                        )}
+                        {m.pendant_essai && <span className="text-xs text-amber-700">pendant l&apos;essai</span>}
+                        <span
+                          className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground"
+                          title={formatDateTime(m.created_at)}
+                        >
+                          {depuis(m.created_at)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <VoirPlus
+                    total={abos.mouvements.length}
+                    montres={10}
+                    tout={toutMouvements}
+                    onToggle={() => setToutMouvements((v) => !v)}
+                  />
+                </>
               ) : (
-                <p className="text-muted-foreground text-sm">Aucun mouvement enregistré.</p>
+                <p className="text-sm text-muted-foreground">Aucun mouvement enregistré.</p>
               )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            </AdminSection>
+          </div>
+        </AdminSection>
+        );
+      })()}
 
       {/* Modèle actif */}
       {dashboard?.modele && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Brain className="h-4 w-4 text-brand-gold-dark" /> Modèle actif
-            </CardTitle>
-            {dashboard.modele.version && (
-              <Badge variant="success">v{dashboard.modele.version}</Badge>
-            )}
-          </CardHeader>
-          <CardContent>
-            {dashboard.modele.version ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-                <div className="text-center p-3 rounded-lg bg-muted/30">
-                  <div className="text-xs text-muted-foreground">AUC-ROC</div>
-                  <div className="text-lg sm:text-xl font-bold">{dashboard.modele.auc_roc?.toFixed(4)}</div>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-muted/30">
-                  <div className="text-xs text-muted-foreground">Précision Top-3</div>
-                  <div className="text-lg sm:text-xl font-bold">{((dashboard.modele.precision_top3 || 0) * 100).toFixed(1)}%</div>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-muted/30 col-span-2 sm:col-span-1">
-                  <div className="text-xs text-muted-foreground">Entraîné le</div>
-                  <div className="text-sm font-bold">{formatDateTime(dashboard.modele.trained_at)}</div>
-                </div>
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-sm">Aucun modèle déployé.</p>
-            )}
-          </CardContent>
-        </Card>
+        <AdminSection
+          id="modele-actif"
+          titre="Modèle actif"
+          sousTitre={dashboard.modele.trained_at ? `Entraîné ${depuis(dashboard.modele.trained_at)}` : "Aucun modèle déployé"}
+          icone={<Brain className="h-4 w-4" />}
+          resume={dashboard.modele.version ? <Puce ton="ok">v{dashboard.modele.version}</Puce> : <Puce ton="alerte">aucun</Puce>}
+        >
+          {dashboard.modele.version ? (
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              <Tuile label="AUC-ROC" valeur={dashboard.modele.auc_roc?.toFixed(4) ?? "—"} />
+              <Tuile label="Précision Top-3" valeur={`${((dashboard.modele.precision_top3 || 0) * 100).toFixed(1)} %`} />
+              <Tuile
+                label="Entraîné le"
+                valeur={<span className="text-sm">{formatDateTime(dashboard.modele.trained_at)}</span>}
+                sub={depuis(dashboard.modele.trained_at)}
+                className="col-span-2 sm:col-span-1"
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Aucun modèle déployé.</p>
+          )}
+        </AdminSection>
       )}
 
       {/* Versions modèles */}
-      {models && models.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Historique des modèles</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+      {models && models.length > 0 && (() => {
+        const actif = models.find((m) => m.est_actif);
+        const visibles = toutModeles ? models : models.slice(0, 5);
+        return (
+        <AdminSection
+          id="modeles-historique"
+          titre="Historique des modèles"
+          sousTitre="Versions entraînées, métriques et redéploiement"
+          icone={<History className="h-4 w-4" />}
+          defaut={false}
+          bodyClassName="p-0 sm:p-0"
+          resume={
+            <>
+              <Puce>{models.length} version{models.length > 1 ? "s" : ""}</Puce>
+              {actif && <Puce ton="ok">actif v{actif.version_num}</Puce>}
+            </>
+          }
+        >
+          <>
             {/* Mobile : cartes par version */}
-            <div className="sm:hidden space-y-2 p-3">
-              {models.map((m) => (
+            <div className="space-y-2 p-3 sm:hidden">
+              {visibles.map((m) => (
                 <div key={m.version_num} className={cn("rounded-lg border border-border p-3", m.est_actif && "bg-brand-gold/5 border-brand-gold/30")}>
                   <div className="flex items-center justify-between">
                     <span className="font-mono font-bold">v{m.version_num}</span>
@@ -896,10 +1071,13 @@ export default function AdminPage() {
                   </div>
                 </div>
               ))}
+              <div className="px-0">
+                <VoirPlus total={models.length} montres={5} tout={toutModeles} onToggle={() => setToutModeles((v) => !v)} />
+              </div>
             </div>
             {/* Desktop : tableau */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-sm min-w-[480px]">
+            <div className="hidden overflow-x-auto p-3 sm:block sm:p-4">
+              <table className="w-full min-w-[480px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
                     <th className="text-left p-3">Version</th>
@@ -914,7 +1092,7 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {models.map((m) => (
+                  {visibles.map((m) => (
                     <tr key={m.version_num} className={cn("border-b border-border/50", m.est_actif && "bg-brand-gold/5")}>
                       <td className="p-3 font-mono font-bold">v{m.version_num}</td>
                       <td className="p-3 text-right">{m.auc_roc.toFixed(4)}</td>
@@ -954,66 +1132,102 @@ export default function AdminPage() {
                   ))}
                 </tbody>
               </table>
+              <VoirPlus total={models.length} montres={5} tout={toutModeles} onToggle={() => setToutModeles((v) => !v)} />
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </>
+        </AdminSection>
+        );
+      })()}
 
       {/* Scraper status */}
-      {scraperStatus && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className="h-4 w-4" /> Scraper — Statut par source
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {Object.entries(scraperStatus).map(([source, status]) => (
-                <div key={source} className="rounded-lg border border-border p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    {status.statut === "ok" ? (
-                      <CheckCircle className="h-4 w-4 text-green-700" />
+      {scraperStatus && (() => {
+        const sources = Object.entries(scraperStatus);
+        // Un statut « ok_avec_echecs » (échecs comptés, sous le seuil d'anomalie) reste
+        // un statut sain : le traiter en échec ferait clignoter la page pour rien.
+        const sain = (s: string) => s.startsWith("ok");
+        const ok = sources.filter(([, s]) => sain(s.statut)).length;
+        return (
+          <AdminSection
+            id="scrapers"
+            titre="Scrapers"
+            sousTitre="Statut et fraîcheur par source"
+            icone={<Radio className="h-4 w-4" />}
+            defaut={false}
+            ton={ok < sources.length ? "alerte" : "neutre"}
+            resume={
+              <>
+                <Puce ton={ok === sources.length ? "ok" : "alerte"}>{ok}/{sources.length} OK</Puce>
+                {ok < sources.length && <Puce ton="alerte">{sources.length - ok} en échec</Puce>}
+              </>
+            }
+          >
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {sources.map(([source, status]) => (
+                <div
+                  key={source}
+                  className={cn(
+                    "rounded-xl border p-3",
+                    sain(status.statut) ? "border-border bg-muted/10" : "border-destructive/30 bg-destructive/[0.04]",
+                  )}
+                >
+                  <div className="mb-1 flex items-center gap-2">
+                    {sain(status.statut) ? (
+                      <CheckCircle className={cn("h-4 w-4 shrink-0", status.statut === "ok" ? "text-emerald-600" : "text-amber-600")} />
                     ) : (
-                      <XCircle className="h-4 w-4 text-destructive" />
+                      <XCircle className="h-4 w-4 shrink-0 text-destructive" />
                     )}
-                    <span className="font-semibold capitalize">{source}</span>
+                    <span className="truncate text-sm font-semibold capitalize">{source}</span>
+                    {sain(status.statut) && status.statut !== "ok" && (
+                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                        {status.statut}
+                      </span>
+                    )}
+                    {status.duree_ms != null && (
+                      <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        {status.duree_ms} ms
+                      </span>
+                    )}
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    <div className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {status.derniere_maj ? formatDateTime(status.derniere_maj) : "Jamais"}
-                    </div>
-                    {status.duree_ms && <div>{status.duree_ms}ms</div>}
-                    {status.erreur && <div className="text-destructive truncate">{status.erreur}</div>}
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Clock className="h-3 w-3 shrink-0" />
+                    <span title={status.derniere_maj ? formatDateTime(status.derniere_maj) : undefined}>
+                      {status.derniere_maj ? depuis(status.derniere_maj) : "jamais"}
+                    </span>
                   </div>
+                  {status.erreur && (
+                    <div className="mt-1 break-words text-[11px] text-destructive">{status.erreur}</div>
+                  )}
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </AdminSection>
+        );
+      })()}
 
       {/* Gestion des comptes */}
       {users && (
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-              <CardTitle className="text-base">Comptes ({(users as unknown[]).length})</CardTitle>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <input
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Rechercher…"
-                  className="rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm flex-1 sm:w-56 sm:flex-none focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
-                />
-                <button onClick={exportUsers} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:border-brand-gold/50 hover:text-brand-gold-dark transition-colors whitespace-nowrap">
-                  ⬇ CSV
-                </button>
-              </div>
+        <AdminSection
+          id="comptes"
+          titre="Comptes"
+          sousTitre="Portefeuilles, abonnements et actions par compte"
+          icone={<UserCog className="h-4 w-4" />}
+          bodyClassName="p-0 sm:p-0"
+          resume={<Puce>{(users as unknown[]).length}</Puce>}
+          action={
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <input
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder="Rechercher…"
+                className="flex-1 rounded-lg border border-input bg-muted/30 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-gold/40 sm:w-56 sm:flex-none"
+              />
+              <button onClick={exportUsers} className="whitespace-nowrap rounded-lg border border-border px-3 py-1.5 text-xs font-semibold transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark">
+                ⬇ CSV
+              </button>
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
+          }
+        >
+          <>
             {/* Mobile : cartes par compte */}
             <div className="sm:hidden space-y-2 p-3">
               {(users as Array<{
@@ -1072,8 +1286,8 @@ export default function AdminPage() {
               })}
             </div>
           {/* Desktop : tableau complet */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-sm min-w-[1120px]">
+          <div className="hidden overflow-x-auto p-3 sm:block sm:p-4">
+            <table className="w-full min-w-[1120px] text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="text-left p-3">Utilisateur</th>
@@ -1152,8 +1366,8 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
-          </CardContent>
-        </Card>
+          </>
+        </AdminSection>
       )}
 
       {selectedUser && (
