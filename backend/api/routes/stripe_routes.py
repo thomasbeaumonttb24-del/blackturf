@@ -977,15 +977,22 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
         sub.statut = "active"
     # Un essai facturé est un essai terminé : la date de fin ne doit plus laisser
     # croire à une période gratuite en cours.
-    if sub.essai_fin is not None:
+    fin_dessai = sub.essai_fin is not None
+    if fin_dessai:
         sub.essai_fin = None
     user.plan = await _plan_effectif(user.user_id, db)
 
-    if reprise:
-        await journaliser(db, "paiement_recu", user, sub,
-                          montant_cents=montant,
-                          detail={"facture": invoice.get("id"),
-                                  "motif": invoice.get("billing_reason")})
+    # Journalisé à CHAQUE encaissement réel, pas seulement quand l'accès reprend.
+    # Un abonnement déjà `active` qui bascule de l'essai au payant ne changeait
+    # aucun statut : le tout premier euro encaissé serait passé sans un mot, ni
+    # dans le journal admin ni par e-mail. C'est le mouvement que l'exploitant
+    # attend le plus.
+    await journaliser(db, "paiement_recu", user, sub,
+                      montant_cents=montant,
+                      detail={"facture": invoice.get("id"),
+                              "motif": invoice.get("billing_reason"),
+                              "premier_paiement_apres_essai": fin_dessai,
+                              "acces_retabli": reprise})
     await db.commit()
     log.info("stripe.acces_retabli" if reprise else "stripe.paiement_encaisse",
              user_id=user.user_id, plan=user.plan, montant_cents=montant)

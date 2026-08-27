@@ -114,7 +114,10 @@ const MOUVEMENT_LABELS: Record<string, string> = {
   essai_termine_sans_carte: "Essai perdu (sans carte)",
   resiliation_demandee: "Résiliation demandée",
   resilie: "Résilié",
-  paiement_echoue: "Paiement échoué",
+  paiement_echoue: "Paiement échoué — accès coupé",
+  paiement_recu: "Paiement encaissé — accès rétabli",
+  essai_refuse_carte_reutilisee: "Essai refusé — carte d'un autre compte",
+  carte_refusee_autre_compte: "Abonnement refusé — carte d'un autre compte",
 };
 
 const MOUVEMENT_TONS: Record<string, "success" | "warning" | "destructive" | "secondary"> = {
@@ -128,6 +131,9 @@ const MOUVEMENT_TONS: Record<string, "success" | "warning" | "destructive" | "se
   resiliation_demandee: "destructive",
   resilie: "destructive",
   paiement_echoue: "destructive",
+  paiement_recu: "success",
+  essai_refuse_carte_reutilisee: "warning",
+  carte_refusee_autre_compte: "destructive",
 };
 
 function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string | number; sub?: string }) {
@@ -185,8 +191,10 @@ function subBadge(statut: string | null, stripeClient: boolean) {
     return <Badge variant="success" className="text-[10px]">{statut === "trialing" ? "Essai" : "Actif"}</Badge>;
   if (statut === "cancel_at_period_end")
     return <Badge variant="warning" className="text-[10px]">Résilié (fin période)</Badge>;
+  // Depuis le 2026-08-27, `past_due` ne donne PLUS accès au produit : Stripe
+  // relance la carte pendant des semaines, l'accès est coupé dès le premier échec.
   if (statut === "past_due")
-    return <Badge variant="secondary" className="text-[10px] text-destructive">Paiement échoué</Badge>;
+    return <Badge variant="secondary" className="text-[10px] text-destructive">Impayé — accès coupé</Badge>;
   if (statut === "canceled")
     return <Badge variant="secondary" className="text-[10px] text-muted-foreground">Résilié</Badge>;
   if (statut === "incomplete" || statut === "incomplete_expired")
