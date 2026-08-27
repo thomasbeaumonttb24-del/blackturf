@@ -458,6 +458,46 @@ def ev_band_multiplier(ev: float, perf: dict | None) -> float:
 # (estimé × facteur) : un type qui paie systématiquement sous la bande de son profil est
 # ÉCARTÉ — c'est l'apprentissage qui empêche la violation des tranches sur le réel.
 # Aucune valeur inventée : facteur 1.0 (neutre) tant que < RC_MIN_WINS gagnants.
+# ── CALIBRAGE PAR ZONE : HYPOTHÈSE MESURÉE, PUIS ÉCARTÉE (2026-08-27) ────────
+# Constat de départ, solide : le rapport payé rapporté à l'estimé vaut 0,95 en France
+# et 0,89 à l'étranger pour un Simple Gagnant (0,99 contre 0,91 pour un Simple Placé),
+# parce que sur une réunion étrangère l'argent entre dans le pool APRÈS le figeage du
+# pronostic. Et le défaut produit est réel : 34 % des paris gagnants à l'étranger
+# payaient sous la tranche de leur profil, contre 22 % en France.
+#
+# D'où l'hypothèse : ajouter la clé (zone × type) au facteur, pour que les gates de
+# bande travaillent sur un rapport attendu propre à chaque marché. `compute_rapport_
+# calibration` produit donc la clé "zones" et `rapport_realization_factor` sait la
+# lire — MAIS AUCUN CHEMIN PRODUIT NE PASSE DE ZONE. Le rejeu A/B l'a écartée.
+#
+# Rejeu sur 2 626 courses figées avant départ, cote figée, réglées aux rapports PMU
+# (scripts/ab_zone_calibration.py) — A = production, B = zone (ratio des sommes),
+# C = zone (ratio médian, statistique robuste) :
+#
+#                      ROI réel                    paris gagnants hors bande
+#                    A       B       C              A       B       C
+#   FRA prudent    -10,1 %  -9,8 %  -8,5 %        15,6 %  18,5 %  15,5 %
+#   FRA modéré      -6,9 %  -0,8 %  -8,1 %         8,6 %  11,7 %  10,3 %
+#   FRA risqué     -48,7 % -44,1 % -49,0 %        26,6 %  24,1 %  25,0 %   (winsorisé)
+#   ETR prudent    -16,7 % -21,9 % -21,3 %        34,1 %  33,6 %  29,8 %
+#   ETR modéré     -16,6 % -27,3 % -15,9 %        21,7 %  26,8 %  23,5 %   (winsorisé)
+#   ETR risqué     -33,6 % -38,3 % -29,6 %        29,4 %  31,9 %  23,6 %   (winsorisé)
+#
+# Aucune des deux variantes ne gagne : les signes s'inversent d'un segment à l'autre,
+# et sur l'agrégat pondéré le prudent se DÉGRADE (-12,1 % → -12,4 % en C). Surtout,
+# le défaut visé n'est pas corrigé : au mieux 34 % → 30 % de paris hors bande.
+#
+# La raison est structurelle, et vaut pour toute tentative future : durcir un gate sur
+# le rapport ESTIMÉ ne fait pas respecter le rapport PAYÉ, il déplace la sélection vers
+# des rapports plus hauts — c'est-à-dire vers les tranches dont NOS PROPRES mesures
+# disent qu'elles rendent le moins (Simple Placé ×4-8 : -25 % ; Simple Gagnant ≥×15 :
+# -15,4 %). Et le rapport d'un placé ou d'un couplé n'est de toute façon pas
+# connaissable avant la clôture des paris : il dépend de QUELS autres chevaux arrivent.
+# La réponse retenue est donc l'AFFICHAGE (rapport visé à côté du rapport payé, cf.
+# api/routes/stats._rapports_vises), pas un durcissement du gate.
+#
+# Le mécanisme est CONSERVÉ, non câblé, pour pouvoir re-mesurer quand l'échantillon
+# étranger aura grossi : `scripts/ab_zone_calibration.py` rejoue les trois branches.
 RC_K_SHRINK = 12.0          # pseudo-gagnants shrinkant le facteur vers 1.0 (anti petit n)
 RC_MIN_WINS = 8             # nb de gagnants min (avec estimé connu) avant d'appliquer un facteur
 RC_F_MIN, RC_F_MAX = 0.40, 1.30   # bornes du facteur (correction prudente)
@@ -718,14 +758,12 @@ def rapport_realization_factor(profil: str | None, type_pari: str | None,
 
     Ordre de lecture, du plus explicatif au plus général :
 
-      1. (zone × type)   — le rapport parimutuel se forme sur le MARCHÉ où l'argent
-                           entre. Mesuré : Simple Gagnant 0,807 à l'étranger contre
-                           0,939 en France ; Simple Placé 0,883 contre 0,977. C'est
-                           l'écart le plus fort et le seul qui ait une cause connue
-                           (l'argent étranger entre après le figeage du pronostic).
-      2. (profil × type) — conservé pour ne rien perdre de l'apprentissage existant
-                           quand la zone est inconnue ou sous le seuil de gagnants.
-      3. (type)          — pool global tous profils, tous pays.
+      1. (zone × type)   — UNIQUEMENT si un appelant fournit une zone. Aucun chemin
+                           produit ne le fait : l'hypothèse a été mesurée en rejeu A/B
+                           et écartée (cf. la note « CALIBRAGE PAR ZONE » plus haut).
+                           Le paramètre reste pour pouvoir re-mesurer.
+      2. (profil × type) — le comportement réellement en service.
+      3. (type)          — pool global tous profils.
 
     Un niveau à 1.0 signifie « rien d'appris ici » (< RC_MIN_WINS gagnants) et fait
     descendre au niveau suivant : jamais de correction sur un échantillon trop mince,

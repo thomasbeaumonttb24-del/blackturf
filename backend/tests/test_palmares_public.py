@@ -54,3 +54,4 @@ async def test_palmares_gagnants_reste_interdit_sans_auth(client: AsyncClient):
     """Le paywall d'origine sur la version admin ne doit PAS avoir sauté."""
     resp = await client.get("/api/v1/stats/palmares-gagnants")
     assert resp.status_code in (401, 403)
+

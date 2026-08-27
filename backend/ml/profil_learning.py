@@ -165,9 +165,9 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
     if not rows:
         return 0
 
-    # `h.pays` : zone de marché de la réunion (cf. services/hippodromes) — le rapport
-    # parimutuel se forme sur le marché où l'argent entre, et l'argent étranger entre
-    # APRÈS ce figeage. LEFT JOIN : hippodrome inconnu → NULL → aucune correction de zone.
+    # `h.pays` sert au CONSTAT (zone de marché de la réunion, cf. services/hippodromes) ;
+    # il n'entre PAS dans la génération du plan — l'hypothèse a été mesurée et écartée,
+    # cf. la note « CALIBRAGE PAR ZONE » dans ml/signal_performance.
     course = (await session.execute(text("""
         SELECT c.statut, c.nb_partants, c.est_quinte, c.est_quarte, c.est_tierce, c.est_2sur4,
                c.paris_disponibles, c.discipline, c.date_heure, h.pays
@@ -184,8 +184,6 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
     # afficherait un plan différent de celui vu avant la course. Le DERNIER prono
     # émis avant le départ fait foi.
     _date_heure = course[8]
-    from services.hippodromes import zone_depuis_pays
-    _zone = zone_depuis_pays(course[9])
     if _date_heure is not None:
         from datetime import datetime as _dt, timezone as _tz
         _now = _dt.now(_tz.utc) if _date_heure.tzinfo else _dt.now()
@@ -257,8 +255,7 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             # à ce que l'utilisateur voit, donc identique au bilan affiché après course.
             plan = generer_plan(MISE_REF, profil, preds, course_info,
                                 None, roi_weights, heat, sig_mults, respect_montant=True,
-                                rapport_calib=rapport_calib, ev_band_perf=ev_band_perf,
-                                zone=_zone)
+                                rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
             plan_d = plan_to_dict(plan)
         except Exception as e:
             log.warning("profil_learning.plan_failed", course_id=course_id,

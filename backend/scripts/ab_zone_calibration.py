@@ -48,6 +48,9 @@ from services.hippodromes import zone_depuis_pays
 from services.mise_calculator import PROFIL_CONFIG, generer_plan, plan_to_dict
 
 MISE = 10.0          # mise de référence, identique au plan figé (ml/profil_learning)
+RC_MIN_WINS = 8      # même seuil que ml/signal_performance
+RC_K_SHRINK = 12.0
+RC_F_MIN, RC_F_MAX = 0.40, 1.30
 WINSOR_CAP = 30.0    # plafond du gain (× mise) pour le ROI winsorisé
 PROFILS = ("conservateur", "equilibre", "agressif")
 
@@ -115,6 +118,72 @@ async def _charger(session, limite: int):
     return data
 
 
+async def _facteurs_zone_median(session) -> dict:
+    """Variante C — facteur de zone calculé sur le ratio MÉDIAN, pas le ratio des sommes.
+
+    Pourquoi la question se pose : `_factor` divise Σréel par Σestimé. Cette
+    statistique est dominée par les plus gros tickets. Mesuré sur le Couplé Gagnant
+    étranger, 60 % de la masse estimée vient de paris estimés au-delà de ×100 : le
+    ratio des sommes y vaut 0,404 quand le ratio MÉDIAN vaut 0,725. Le facteur
+    corrige donc le pari TYPIQUE avec l'erreur de la queue, ce qui déplace la
+    sélection vers des rapports encore plus hauts — l'inverse du but.
+
+    Même seuil, même shrink, mêmes bornes que la production : seule la statistique
+    centrale change, pour que la comparaison ne porte que sur elle.
+    """
+    rows = (await session.execute(text("""
+        WITH pl AS (
+          SELECT r.course_id, r.profil, pp->>'type' AS tp,
+            (SELECT string_agg(ch->>'numero', ',' ORDER BY ch->>'numero')
+               FROM jsonb_array_elements(pp->'chevaux') ch) AS nums,
+            (pp->>'gain_potentiel')::float / nullif((pp->>'mise')::float, 0) AS est
+          FROM profil_run_log r JOIN courses c ON c.course_id = r.course_id,
+               jsonb_array_elements(r.plan->'niveaux') niv,
+               jsonb_array_elements(niv->'paris') pp
+          WHERE r.statut = 'settled' AND c.date_heure IS NOT NULL
+            AND r.created_at < c.date_heure
+            AND COALESCE(r.meta->>'backfill', '') <> 'true'
+        ), re AS (
+          SELECT r.course_id, r.profil, rp->>'type' AS tp,
+            (SELECT string_agg(ch->>'numero', ',' ORDER BY ch->>'numero')
+               FROM jsonb_array_elements(rp->'chevaux') ch) AS nums,
+            (rp->>'rapport_reel')::float AS reel
+          FROM profil_run_log r JOIN courses c ON c.course_id = r.course_id,
+               jsonb_array_elements(r.resultat->'paris') rp
+          WHERE r.statut = 'settled' AND rp->>'statut' = 'gagne'
+            AND rp->>'rapport_reel' IS NOT NULL AND c.date_heure IS NOT NULL
+            AND r.created_at < c.date_heure
+            AND COALESCE(r.meta->>'backfill', '') <> 'true'
+        )
+        SELECT h.pays, pl.tp, count(*) AS n,
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY re.reel / pl.est) AS med
+        FROM pl
+        JOIN re ON re.course_id = pl.course_id AND re.profil = pl.profil
+               AND re.tp = pl.tp AND re.nums = pl.nums
+        JOIN courses c ON c.course_id = pl.course_id
+        JOIN hippodromes h ON h.nom = c.hippodrome_nom
+        WHERE pl.est > 0
+        GROUP BY h.pays, pl.tp
+    """))).all()
+    brut: dict = {}
+    for pays, tp, n, med in rows:
+        zone = zone_depuis_pays(pays)
+        if not zone or med is None:
+            continue
+        a = brut.setdefault((zone, tp), [0, 0.0])
+        a[0] += int(n)
+        a[1] += float(med) * int(n)      # médianes par pays, repondérées par effectif
+    zones: dict = {}
+    for (zone, tp), (n, somme) in brut.items():
+        if n < RC_MIN_WINS:
+            continue
+        med = somme / n
+        w = n / (n + RC_K_SHRINK)
+        f = max(RC_F_MIN, min(RC_F_MAX, 1.0 + (med - 1.0) * w))
+        zones.setdefault(zone, {})[tp] = {"factor": round(f, 3), "n_win": n}
+    return zones
+
+
 def _stat():
     return {"mise": 0.0, "gain": 0.0, "gainw": 0.0, "n": 0, "win": 0,
             "hors_bande": 0, "courses": set(), "attente": 0}
@@ -171,7 +240,16 @@ async def main(limite=4000):
             if cle in calib_a and cle not in calib_b:
                 calib_b[cle] = calib_a[cle]
 
+        # C = clé de zone, mais facteur bâti sur le ratio MÉDIAN.
+        calib_c = copy.deepcopy(calib_b)
+        calib_c["zones"] = await _facteurs_zone_median(s)
+
         print(f"heat={heat}")
+        print("   -- variante C (mediane) --")
+        for zone, types in sorted(calib_c["zones"].items()):
+            for t, e in sorted(types.items(), key=lambda kv: -kv[1]["n_win"]):
+                print(f"   {zone:4s} {t:18s} n_win={e['n_win']:5d} facteur={e['factor']}")
+        print("   -- branche B (ratio des sommes) --")
         for zone, types in sorted((calib_b.get("zones") or {}).items()):
             for t, e in sorted(types.items(), key=lambda kv: -kv[1]["n_win"]):
                 if e["n_win"] >= 8:
@@ -184,7 +262,8 @@ async def main(limite=4000):
     for d in data:
         zone_lbl = d["zone"] or "?"
         for profil in PROFILS:
-            for branche, calib, zone in (("A", calib_a, None), ("B", calib_b, d["zone"])):
+            for branche, calib, zone in (("A", calib_a, None), ("B", calib_b, d["zone"]),
+                                         ("C", calib_c, d["zone"])):
                 try:
                     plan = plan_to_dict(generer_plan(
                         MISE, profil, d["preds"], d["course_info"], None, rw, heat,
@@ -204,7 +283,7 @@ async def main(limite=4000):
     for zone in ("FRA", "ETR", "?"):
         for profil in PROFILS:
             vu = False
-            for branche in ("A", "B"):
+            for branche in ("A", "B", "C"):
                 a = agg.get((branche, zone, profil))
                 if not a or not a["n"]:
                     continue

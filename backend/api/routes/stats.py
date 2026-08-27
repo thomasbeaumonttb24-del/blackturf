@@ -1253,6 +1253,27 @@ async def stats_profils(
     return data
 
 
+def _rapports_vises(plan) -> dict:
+    """Rapport ANNONCÉ par un plan figé, indexé par (type de pari, numéros triés).
+
+    Le plan ne stocke pas le rapport mais le gain potentiel du ticket : le rapport
+    visé s'en déduit par gain_potentiel / mise. Les numéros sont triés parce que
+    l'ordre des chevaux d'une combinaison n'est pas stable entre le plan et le
+    bilan — apparier sur la liste brute perdrait la moitié des combinés.
+    """
+    plan_d = (plan if isinstance(plan, dict) else json.loads(plan or "{}")) or {}
+    out: dict = {}
+    for niv in plan_d.get("niveaux", []):
+        for p in niv.get("paris", []):
+            mise = float(p.get("mise") or 0)
+            if mise <= 0:
+                continue
+            nums = tuple(sorted(int(h["numero"]) for h in (p.get("chevaux") or [])
+                                if h.get("numero") is not None))
+            out[(p.get("type"), nums)] = float(p.get("gain_potentiel") or 0) / mise
+    return out
+
+
 async def _palmares_rows(db: AsyncSession) -> dict:
     """Cœur du palmarès, partagé par la version admin et la version publique.
 
@@ -1297,15 +1318,7 @@ async def _palmares_rows(db: AsyncSession) -> dict:
         #     dépend, pour un placé ou un couplé, de QUELS autres chevaux arrivent.
         # N'afficher que le réel donnait un palmarès qui semble contredire la tranche du
         # profil (un ticket risqué figé à ×14,1 payé ×3,3 le 2026-08-27 à Saratoga).
-        plan_d = (plan if isinstance(plan, dict) else json.loads(plan or "{}")) or {}
-        vise: dict = {}
-        for _niv in plan_d.get("niveaux", []):
-            for _p in _niv.get("paris", []):
-                _m = float(_p.get("mise") or 0)
-                if _m > 0:
-                    _nums = tuple(sorted(int(h["numero"]) for h in (_p.get("chevaux") or [])
-                                         if h.get("numero") is not None))
-                    vise[(_p.get("type"), _nums)] = float(_p.get("gain_potentiel") or 0) / _m
+        vise = _rapports_vises(plan)
         courses_reglees.add(cid)
         agg = by_profil.get(profil)
         if agg is not None:
