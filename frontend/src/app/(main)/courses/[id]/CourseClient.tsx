@@ -292,8 +292,13 @@ const CX_STYLE = `
 .cx-cta:not(:disabled):hover{filter:brightness(1.06);transform:translateY(-1px);box-shadow:0 14px 26px -14px rgba(146,64,14,.7)}
 .cx-cta:not(:disabled):active{transform:translateY(0)}
 .cx-budget:focus-within{border-color:#F5DCA8 !important;box-shadow:0 0 0 4px rgba(217,119,6,.10) !important}
+.cx-plan-row{display:grid;grid-template-columns:1fr;gap:12px}
+.cx-plan-act{display:flex;flex-direction:column}
+/* Le decalage rend le bouton exactement a la hauteur du champ (hauteur du libelle
+   de l etape + sa marge), sinon il flotte entre le champ et les raccourcis. */
+@media (min-width:920px){.cx-plan-row{grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}.cx-plan-act{padding-top:26px}}
 @media (prefers-reduced-motion:reduce){.cx-profil,.cx-cta,.cx-chip{transition:none !important;transform:none !important}}
-@media (max-width:430px){.cx-profil{padding:11px 6px !important}.cx-profil-bande{display:none !important}}
+@media (max-width:430px){.cx-profil{padding:11px 5px !important;gap:4px !important}.cx-profil-bande{font-size:10px !important}}
 .cx-plan details>summary svg{transition:transform .2s ease}
 .cx-plan details[open]>summary svg:last-child{transform:rotate(180deg)}
 @media (max-width:840px){ .cx-main{grid-template-columns:1fr !important} .cx-sticky-mise{position:static !important;top:auto !important} }
@@ -878,7 +883,7 @@ function MiseCalculatorWidget({
   );
 
   return (
-    <div className="cx-plan" style={{ maxWidth: 620 }}>
+    <div className="cx-plan">
       {isFreeTier && (
         <p style={{ margin: "0 0 10px", fontSize: 11.5, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 9, padding: "7px 10px" }}>
           {quotaRestant === null
@@ -936,80 +941,87 @@ function MiseCalculatorWidget({
         {PROFILS_MISE.find((p) => p.key === profilChoisi)?.desc}
       </p>
 
-      {/* Étape 2 — budget. Le champ porte le montant en gros : c'est le chiffre que
-          le lecteur relit avant de valider, pas un réglage parmi d'autres. */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 9 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 17, height: 17, borderRadius: 999, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, fontFamily: CX.sg, fontSize: 10, fontWeight: 700, color: CX.goldDeep }}>2</span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: CX.ink2 }}>Budget de la course</span>
-        <span style={{ marginLeft: "auto", fontSize: 10, color: CX.gray500 }}>de 1 € à 10 000 €</span>
-      </div>
-      <div
-        className="cx-budget"
-        style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 62, border: `1px solid ${CX.bd3}`, borderRadius: 16, background: CX.surf1, padding: "0 16px", transition: "border-color .18s ease, box-shadow .18s ease" }}
-      >
-        <span aria-hidden="true" style={{ fontFamily: CX.sg, fontSize: 22, fontWeight: 700, color: montant ? CX.goldDeep : CX.gray400, lineHeight: 1 }}>€</span>
-        <input
-          ref={inputRef}
-          type="number"
-          min="1"
-          max="10000"
-          step="1"
-          value={montant}
-          onChange={(e) => setMontant(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && generate()}
-          placeholder="10"
-          aria-label="Montant du budget"
-          style={{ flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", padding: "12px 0", fontFamily: CX.sg, fontSize: 26, fontWeight: 700, color: CX.ink, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}
-        />
-      </div>
+      {/* Étape 2 — budget et action sur une seule rangée : le champ porte le montant
+          en gros (c'est le chiffre qu'on relit avant de valider), l'action reste à
+          hauteur d'oeil à côté plutôt qu'au bout d'une colonne à moitié vide. */}
+      <div className="cx-plan-row">
+        <div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 9 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 17, height: 17, borderRadius: 999, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, fontFamily: CX.sg, fontSize: 10, fontWeight: 700, color: CX.goldDeep }}>2</span>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: CX.ink2 }}>Budget de la course</span>
+            <span style={{ marginLeft: "auto", fontSize: 10, color: CX.gray500 }}>de 1 € à 10 000 €</span>
+          </div>
+          <div
+            className="cx-budget"
+            style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 62, border: `1px solid ${CX.bd3}`, borderRadius: 16, background: CX.surf1, padding: "0 16px", transition: "border-color .18s ease, box-shadow .18s ease" }}
+          >
+            <span aria-hidden="true" style={{ fontFamily: CX.sg, fontSize: 22, fontWeight: 700, color: montant ? CX.goldDeep : CX.gray400, lineHeight: 1 }}>€</span>
+            <input
+              ref={inputRef}
+              type="number"
+              min="1"
+              max="10000"
+              step="1"
+              value={montant}
+              onChange={(e) => setMontant(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && generate()}
+              placeholder="10"
+              aria-label="Montant du budget"
+              style={{ flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", padding: "12px 0", fontFamily: CX.sg, fontSize: 26, fontWeight: 700, color: CX.ink, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}
+            />
+          </div>
 
-      {/* Raccourcis — secondaires par rapport au champ : pastilles compactes, pas
-          quatre barres pleine largeur qui pesaient autant que le budget lui-même. */}
-      <div aria-label="Montants suggérés" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 9 }}>
-        <span style={{ fontSize: 10.5, color: CX.gray500, marginRight: 2 }}>Raccourcis</span>
-        {[5, 10, 20, 30, 50].map((v) => {
-          const actif = montant === String(v);
-          return (
-            <button
-              key={v}
-              className="cx-chip"
-              aria-pressed={actif}
-              onClick={() => setMontant(String(v))}
-              style={{
-                minHeight: 34, padding: "0 13px", borderRadius: 999, cursor: "pointer",
-                fontFamily: CX.sg, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                border: `1px solid ${actif ? CX.goldBd : CX.bd3}`,
-                background: actif ? CX.goldBg : CX.surf1,
-                color: actif ? CX.goldDeep : CX.gray600,
-              }}
-            >
-              {v} €
-            </button>
-          );
-        })}
-      </div>
+          {/* Raccourcis — secondaires par rapport au champ : pastilles compactes, pas
+              quatre barres pleine largeur qui pesaient autant que le budget lui-même. */}
+          <div aria-label="Montants suggérés" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 9 }}>
+            <span style={{ fontSize: 10.5, color: CX.gray500, marginRight: 2 }}>Raccourcis</span>
+            {[5, 10, 20, 30, 50].map((v) => {
+              const actif = montant === String(v);
+              return (
+                <button
+                  key={v}
+                  className="cx-chip"
+                  aria-pressed={actif}
+                  onClick={() => setMontant(String(v))}
+                  style={{
+                    minHeight: 34, padding: "0 13px", borderRadius: 999, cursor: "pointer",
+                    fontFamily: CX.sg, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                    border: `1px solid ${actif ? CX.goldBd : CX.bd3}`,
+                    background: actif ? CX.goldBg : CX.surf1,
+                    color: actif ? CX.goldDeep : CX.gray600,
+                  }}
+                >
+                  {v} €
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-      <button
-        className="cx-cta"
-        onClick={() => generate()}
-        disabled={!montant || parseFloat(montant) <= 0 || loading}
-        style={{
-          width: "100%", minHeight: 52, marginTop: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
-          border: "none", borderRadius: 15, cursor: loading ? "wait" : "pointer",
-          background: `linear-gradient(135deg,${CX.gold},${CX.goldDeep})`, color: "#FFFFFF", fontFamily: CX.sg, fontSize: 14, fontWeight: 700,
-          boxShadow: "0 10px 22px -14px rgba(146,64,14,.75)",
-          opacity: !montant || parseFloat(montant) <= 0 || loading ? 0.5 : 1,
-        }}
-      >
-        {loading ? (
-          <><Loader2 className="h-4 w-4 animate-spin" /> Calcul du plan…</>
-        ) : (
-          <>Générer mon plan <ChevronRight className="h-4 w-4" /></>
-        )}
-      </button>
-      <p style={{ margin: "9px 2px 0", fontSize: 10.5, lineHeight: 1.45, color: CX.gray500, textAlign: "center" }}>
-        {PROFILS_MISE.find((p) => p.key === profilChoisi)?.label} · {montant ? `${montant} €` : "budget à définir"} · gain visé {PROFILS_MISE.find((p) => p.key === profilChoisi)?.bande} de la mise totale
-      </p>
+        <div className="cx-plan-act">
+          <button
+            className="cx-cta"
+            onClick={() => generate()}
+            disabled={!montant || parseFloat(montant) <= 0 || loading}
+            style={{
+              width: "100%", minHeight: 62, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+              border: "none", borderRadius: 16, cursor: loading ? "wait" : "pointer",
+              background: `linear-gradient(135deg,${CX.gold},${CX.goldDeep})`, color: "#FFFFFF", fontFamily: CX.sg, fontSize: 14.5, fontWeight: 700,
+              boxShadow: "0 10px 22px -14px rgba(146,64,14,.75)",
+              opacity: !montant || parseFloat(montant) <= 0 || loading ? 0.5 : 1,
+            }}
+          >
+            {loading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Calcul du plan…</>
+            ) : (
+              <>Générer mon plan <ChevronRight className="h-4 w-4" /></>
+            )}
+          </button>
+          <p style={{ margin: "9px 2px 0", fontSize: 10.5, lineHeight: 1.45, color: CX.gray500, textAlign: "center" }}>
+            {PROFILS_MISE.find((p) => p.key === profilChoisi)?.label} · {montant ? `${montant} €` : "budget à définir"} · gain visé {PROFILS_MISE.find((p) => p.key === profilChoisi)?.bande}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
