@@ -68,7 +68,16 @@ services:
       dockerfile: Dockerfile
     container_name: blackturf_api
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
+      # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
+      # moteur le refuse — et un superutilisateur peut executer des commandes
+      # shell via COPY ... TO PROGRAM : la moindre injection SQL vaudrait alors
+      # execution de code dans le conteneur. bt_app herite des privileges de
+      # proprietaire de blackturf (donc tout fonctionne, y compris les tables
+      # creees a l'execution et les migrations) mais n'herite PAS de l'attribut
+      # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
+      # basculer dessus par SET ROLE.
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -109,7 +118,16 @@ services:
       dockerfile: Dockerfile.scraper
     container_name: blackturf_scraper
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
+      # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
+      # moteur le refuse — et un superutilisateur peut executer des commandes
+      # shell via COPY ... TO PROGRAM : la moindre injection SQL vaudrait alors
+      # execution de code dans le conteneur. bt_app herite des privileges de
+      # proprietaire de blackturf (donc tout fonctionne, y compris les tables
+      # creees a l'execution et les migrations) mais n'herite PAS de l'attribut
+      # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
+      # basculer dessus par SET ROLE.
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
       - BRIGHTDATA_PROXY=${BRIGHTDATA_PROXY}
@@ -130,7 +148,16 @@ services:
     container_name: blackturf_worker
     command: python -m rq worker default ml --with-scheduler --url ${REDIS_URL:-redis://:redis_secret@redis:6379/0}
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-blackturf}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
+      # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
+      # moteur le refuse — et un superutilisateur peut executer des commandes
+      # shell via COPY ... TO PROGRAM : la moindre injection SQL vaudrait alors
+      # execution de code dans le conteneur. bt_app herite des privileges de
+      # proprietaire de blackturf (donc tout fonctionne, y compris les tables
+      # creees a l'execution et les migrations) mais n'herite PAS de l'attribut
+      # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
+      # basculer dessus par SET ROLE.
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - RESEND_API_KEY=${RESEND_API_KEY}

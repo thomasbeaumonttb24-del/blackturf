@@ -96,7 +96,16 @@ services:
     # seul ingress. Republier ce port sur 0.0.0.0 ouvrirait l'usurpation d'IP.
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log --proxy-headers --forwarded-allow-ips=*
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
+      # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
+      # moteur le refuse — et un superutilisateur peut executer des commandes
+      # shell via COPY ... TO PROGRAM : la moindre injection SQL vaudrait alors
+      # execution de code dans le conteneur. bt_app herite des privileges de
+      # proprietaire de blackturf (donc tout fonctionne, y compris les tables
+      # creees a l'execution et les migrations) mais n'herite PAS de l'attribut
+      # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
+      # basculer dessus par SET ROLE.
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       # Lue par services/data_quality : sans elle, le moniteur signale comme
       # « scraper muet » une source volontairement mise en sommeil.
@@ -184,7 +193,16 @@ services:
     # Dockerfile.scraper (Playwright/chromium) qui nécessite un user/des perms
     # spécifiques (sandbox chromium). À durcir séparément (adapter Dockerfile.scraper).
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
+      # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
+      # moteur le refuse — et un superutilisateur peut executer des commandes
+      # shell via COPY ... TO PROGRAM : la moindre injection SQL vaudrait alors
+      # execution de code dans le conteneur. bt_app herite des privileges de
+      # proprietaire de blackturf (donc tout fonctionne, y compris les tables
+      # creees a l'execution et les migrations) mais n'herite PAS de l'attribut
+      # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
+      # basculer dessus par SET ROLE.
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ENVIRONMENT=${ENVIRONMENT:-production}
@@ -250,7 +268,16 @@ services:
       - ALL
     command: rq worker ml default --with-scheduler --url ${REDIS_URL}
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
+      # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
+      # moteur le refuse — et un superutilisateur peut executer des commandes
+      # shell via COPY ... TO PROGRAM : la moindre injection SQL vaudrait alors
+      # execution de code dans le conteneur. bt_app herite des privileges de
+      # proprietaire de blackturf (donc tout fonctionne, y compris les tables
+      # creees a l'execution et les migrations) mais n'herite PAS de l'attribut
+      # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
+      # basculer dessus par SET ROLE.
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -381,7 +408,16 @@ services:
       - ALL
     command: python scheduler_main.py
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Role applicatif, PAS le superutilisateur PostgreSQL. Le role bootstrap
+      # (POSTGRES_USER) ne peut pas perdre son attribut superutilisateur — le
+      # moteur le refuse — et un superutilisateur peut executer des commandes
+      # shell via COPY ... TO PROGRAM : la moindre injection SQL vaudrait alors
+      # execution de code dans le conteneur. bt_app herite des privileges de
+      # proprietaire de blackturf (donc tout fonctionne, y compris les tables
+      # creees a l'execution et les migrations) mais n'herite PAS de l'attribut
+      # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
+      # basculer dessus par SET ROLE.
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       # Le job horaire data_quality_check tourne ici : il doit distinguer une
       # source en sommeil assumé d'un scraper réellement tombé.
