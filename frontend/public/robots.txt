@@ -16,6 +16,13 @@ Disallow: /assistant
 Disallow: /dashboard
 Disallow: /notifications
 Disallow: /studio
+
+# Prefetch interne de Next.js. Ces adresses portent un jeton qui change a chaque
+# deploiement et renvoient la page ENTIERE en HTML : autant de doublons, dans un espace
+# d URL sans fin. Le canonical les rattache bien a la page propre, mais l exploration,
+# elle, etait perdue — 117 des 221 requetes de Googlebot en neuf heures, soit plus de la
+# moitie du budget d un site qui en a deja tres peu (mesure le 2026-08-27).
+Disallow: /*_rsc=
 Disallow: /desabonnement
 Disallow: /abonnement/
 Disallow: /verifier-email
@@ -44,5 +51,12 @@ Disallow: /assistant
 Disallow: /dashboard
 Disallow: /notifications
 Disallow: /studio
+
+# Prefetch interne de Next.js. Ces adresses portent un jeton qui change a chaque
+# deploiement et renvoient la page ENTIERE en HTML : autant de doublons, dans un espace
+# d URL sans fin. Le canonical les rattache bien a la page propre, mais l exploration,
+# elle, etait perdue — 117 des 221 requetes de Googlebot en neuf heures, soit plus de la
+# moitie du budget d un site qui en a deja tres peu (mesure le 2026-08-27).
+Disallow: /*_rsc=
 
 Sitemap: https://blackturf.fr/sitemap.xml
