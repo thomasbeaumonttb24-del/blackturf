@@ -20,8 +20,8 @@
  * rapproché de l'arrivée réelle. Jamais une appréciation inventée.
  */
 
-import { useState } from "react";
-import { HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ApercuAnalyse } from "@/components/courses/insights";
 
@@ -76,6 +76,9 @@ const COTE_JUSTE_MAX = 100;
 /** Écart minimal entre la cote affichée et la cote du pronostic pour rappeler
  *  cette dernière. En dessous, le rappel n'apprend rien et alourdit la ligne. */
 const ECART_RAPPEL_COTE = 0.2;
+
+/** Préférence d'affichage des signaux, conservée d'une course à l'autre. */
+const CLE_SIGNAUX = "bt.classement.signaux";
 
 /** Gabarit de colonnes partagé par l'en-tête et les lignes : une seule source,
  *  sinon les deux dérivent au premier ajustement. */
@@ -265,29 +268,24 @@ function BadgeArrivee({ position }: { position: number }) {
   );
 }
 
-/** Signaux d'un cheval, repliés au-delà de trois. Les masquer purement et
- *  simplement revenait à cacher des réserves déjà calculées ; le compteur les
- *  rend au moins consultables. */
+/** Signaux d'un cheval — volontairement DISCRETS.
+ *  Les pastilles pleines (fond vert / rouge) répétées sur huit lignes noyaient
+ *  les colonnes chiffrées, qui sont l'information de décision. Le texte reste
+ *  intégral ; seule la couleur est ramenée à la flèche, et deux signaux
+ *  s'affichent — le reste tient derrière le compteur. */
 function Signaux({ signaux }: { signaux: ClassementSignal[] }) {
   const [ouvert, setOuvert] = useState(false);
   if (!signaux.length) return null;
-  const visibles = ouvert ? signaux : signaux.slice(0, 3);
+  const visibles = ouvert ? signaux : signaux.slice(0, 2);
   const reste = signaux.length - visibles.length;
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1">
+    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] leading-tight text-stone-600">
       {visibles.map((s, i) => {
         const st = SENS[s.sens] ?? SENS.neutre;
         return (
-          <span
-            key={`${s.label}-${i}`}
-            title={s.detail || undefined}
-            className={cn(
-              "inline-flex cursor-help items-center gap-1 rounded-md px-1.5 py-[3px] text-[10.5px] font-semibold leading-none ring-1",
-              st.bg, st.fg, st.ring,
-            )}
-          >
-            <span className="text-[8px]" aria-hidden="true">{st.fleche}</span>
+          <span key={`${s.label}-${i}`} title={s.detail || undefined} className="inline-flex cursor-help items-center gap-1">
+            <span className={cn("text-[7px]", st.fg)} aria-hidden="true">{st.fleche}</span>
             {nettoie(s.label)}
           </span>
         );
@@ -296,16 +294,16 @@ function Signaux({ signaux }: { signaux: ClassementSignal[] }) {
         <button
           type="button"
           onClick={() => setOuvert(true)}
-          className="rounded-md px-1.5 py-[3px] text-[10.5px] font-semibold leading-none text-stone-600 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 hover:text-slate-700"
+          className="font-semibold text-stone-500 underline decoration-dotted underline-offset-2 transition-colors hover:text-slate-700"
         >
           +{reste}
         </button>
       )}
-      {ouvert && signaux.length > 3 && (
+      {ouvert && signaux.length > 2 && (
         <button
           type="button"
           onClick={() => setOuvert(false)}
-          className="rounded-md px-1.5 py-[3px] text-[10.5px] font-medium leading-none text-stone-600 transition-colors hover:text-slate-600"
+          className="text-stone-500 underline decoration-dotted underline-offset-2 transition-colors hover:text-slate-700"
         >
           réduire
         </button>
@@ -435,6 +433,23 @@ export function ClassementAlgo({
   const lignes = [...predictions].sort((a, b) => a.rang_predit - b.rang_predit);
   const aCoteJuste = lignes.some((p) => p.cote_juste != null);
   const grille = aCoteJuste ? COLS.avecJuste : COLS.sansJuste;
+  const nbSignaux = lignes.reduce((n, p) => n + (signauxParNumero[p.numero]?.length ?? 0), 0);
+
+  // Les signaux sont repliés par défaut : huit lignes de pastilles écrasaient les
+  // colonnes chiffrées, qui portent la décision. Le choix est mémorisé, sinon le
+  // lecteur qui les veut rouvre le tiroir à chaque course.
+  const [signauxOuverts, setSignauxOuverts] = useState(false);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(CLE_SIGNAUX) === "1") setSignauxOuverts(true);
+    } catch { /* stockage indisponible : on reste sur le repli par défaut */ }
+  }, []);
+  const basculeSignaux = () => {
+    setSignauxOuverts((v) => {
+      try { window.localStorage.setItem(CLE_SIGNAUX, v ? "0" : "1"); } catch { /* idem */ }
+      return !v;
+    });
+  };
 
   return (
     <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(28,25,23,.04)]">
@@ -450,13 +465,26 @@ export function ClassementAlgo({
             {lignes.length} chevaux notés · ordre du modèle de classement
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onLegende}
-          className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 text-[11.5px] font-semibold text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50/60 hover:text-amber-900"
-        >
-          <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {nbSignaux > 0 && (
+            <button
+              type="button"
+              onClick={basculeSignaux}
+              aria-pressed={signauxOuverts}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 text-[11.5px] font-semibold text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50/60 hover:text-amber-900"
+            >
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", signauxOuverts && "rotate-180")} aria-hidden="true" />
+              {signauxOuverts ? "Masquer les signaux" : "Signaux"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onLegende}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 text-[11.5px] font-semibold text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50/60 hover:text-amber-900"
+          >
+            <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire
+          </button>
+        </div>
       </header>
 
       <Synthese
@@ -475,7 +503,7 @@ export function ClassementAlgo({
           )}
         >
           <span className="text-center">#</span>
-          <span>Cheval &amp; signaux</span>
+          <span>Cheval</span>
           <span className="text-right">Cote</span>
           {aCoteJuste && (
             <span className="text-right leading-tight" title="Cote à partir de laquelle le pari devient rentable selon le modèle">
@@ -553,7 +581,7 @@ export function ClassementAlgo({
                       )}
                     </div>
 
-                    <Signaux signaux={signaux} />
+                    {signauxOuverts && <Signaux signaux={signaux} />}
                   </div>
 
                   {/* Cote de marché */}
@@ -643,29 +671,12 @@ export function ClassementAlgo({
         </ol>
       </div>
 
-      <footer className="border-t border-stone-100 bg-stone-50/60 px-4 py-3.5 sm:px-5">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10.5px] text-stone-600">
-          <span className="inline-flex items-center gap-1"><span className="text-emerald-700">▲</span> atout</span>
-          <span className="inline-flex items-center gap-1"><span className="text-rose-700">▼</span> réserve</span>
-          <span className="inline-flex items-center gap-1"><span className="text-amber-700">●</span> à surveiller</span>
-          <span className="inline-flex items-center gap-1">
-            <span className="h-2 w-4 rounded-full bg-stone-200" aria-hidden="true" />
-            fourchette du modèle
-          </span>
-          {aCoteJuste && (
-            <span className="inline-flex items-center gap-1">
-              <span className="rounded bg-emerald-50 px-1 font-semibold text-emerald-700 ring-1 ring-emerald-200/70">+x %</span>
-              le marché paie au-dessus de la cote juste
-            </span>
-          )}
-        </div>
-        <p className="mt-2 max-w-3xl text-[10.5px] leading-[1.5] text-stone-600">
-          Le rang est donné par un modèle d&apos;ordonnancement dédié : il ne suit pas toujours
-          l&apos;ordre des probabilités, et deux chevaux peuvent afficher le même pourcentage.
-          Probabilités issues du modèle à 80+ critères (forme, ELO, association jockey/entraîneur, distance,
-          terrain, marché). La « lecture du prix » est l&apos;écart entre les deux cotes affichées, pas une
-          promesse de rendement. Aide à la décision — aucune garantie de gain.
-        </p>
+      {/* Pied minimal : la légende des pastilles et le détail du modèle vivent
+          dans « Comment lire » (même contenu, en plus complet). Les répéter sous
+          chaque table ajoutait un pavé que personne ne lit. Seule la mention
+          obligatoire reste à vue. */}
+      <footer className="border-t border-stone-100 bg-stone-50/60 px-4 py-2.5 text-[10.5px] text-stone-500 sm:px-5">
+        Aide à la décision — aucune garantie de gain.
       </footer>
     </section>
   );

@@ -3216,6 +3216,20 @@ export default function CoursePage({
                       <span className="h-1 w-10 rounded-full bg-brand-gold flex-shrink-0" />
                       <span className="text-muted-foreground">La barre dorée = niveau de conviction du modèle (sa proba de victoire).</span>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-1 w-10 rounded-full bg-stone-300 flex-shrink-0" />
+                      <span className="text-muted-foreground">La zone grise = la fourchette du modèle autour de cette probabilité.</span>
+                    </div>
+                    {/* Rapatrié du pied de la table du classement, qui répétait ce pavé
+                        sous chaque course sans que personne ne le lise. */}
+                    <p className="pt-1 text-muted-foreground">
+                      <strong className="text-foreground">Le rang</strong> vient d&apos;un modèle d&apos;ordonnancement dédié : il ne suit pas
+                      toujours l&apos;ordre des probabilités, et deux chevaux peuvent afficher le même pourcentage.
+                    </p>
+                    <p className="text-muted-foreground">
+                      <strong className="text-foreground">La lecture du prix</strong> est l&apos;écart entre la cote du marché et la cote juste
+                      du modèle — pas une promesse de rendement.
+                    </p>
                   </section>
 
                   {/* Les pastilles */}
