@@ -227,6 +227,32 @@ interface UserDetail {
   }>;
 }
 
+// Habillage d'une ligne de journal. La pastille colorée porte le TON, le libellé
+// reste du texte : mis dans une pastille, il faisait varier la largeur du simple
+// au quadruple (« Essai ouvert » contre « Impayé — accès coupé, relances Stripe
+// en cours ») et plus aucune colonne ne s'alignait d'une ligne à l'autre.
+const TON_MOUVEMENT: Record<string, { point: string; texte: string; rail: string; fond: string }> = {
+  success:     { point: "bg-green-600",           texte: "text-green-800",  rail: "border-l-green-500/60",   fond: "bg-green-50/50" },
+  warning:     { point: "bg-amber-500",           texte: "text-amber-800",  rail: "border-l-amber-400/70",   fond: "bg-amber-50/50" },
+  destructive: { point: "bg-destructive",         texte: "text-destructive", rail: "border-l-destructive/60", fond: "bg-destructive/[0.04]" },
+  secondary:   { point: "bg-muted-foreground/40", texte: "text-foreground",  rail: "border-l-border",         fond: "" },
+};
+
+/** « Aujourd'hui » / « Hier » / « mardi 24 août » — sépare le journal par journée. */
+function jourMouvement(iso: string): string {
+  const d = new Date(iso);
+  const minuit = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const jours = Math.round((minuit(new Date()) - minuit(d)) / 86_400_000);
+  if (jours <= 0) return "Aujourd'hui";
+  if (jours === 1) return "Hier";
+  return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function montantMouvement(cents: number | null): string | null {
+  if (cents == null || cents === 0) return null;
+  return `${(cents / 100).toFixed(2).replace(".", ",")} €`;
+}
+
 function resultBadge(r: string | null) {
   if (r === "gagne") return <Badge variant="success" className="text-[10px]">Gagné</Badge>;
   if (r === "perd") return <Badge variant="secondary" className="text-[10px] text-destructive">Perdu</Badge>;
@@ -241,17 +267,24 @@ function subBadge(statut: string | null, stripeClient: boolean) {
   if (statut === "active" || statut === "trialing")
     return <Badge variant="success" className="text-[10px]">{statut === "trialing" ? "Essai" : "Actif"}</Badge>;
   if (statut === "cancel_at_period_end")
-    return <Badge variant="warning" className="text-[10px]">Résilié (fin période)</Badge>;
+    return <Badge variant="warning" className="whitespace-nowrap text-[10px]" title="Résilié, mais payé jusqu'à la fin de la période en cours">Fin de période</Badge>;
   // Depuis le 2026-08-27, `past_due` ne donne PLUS accès au produit : Stripe
   // relance la carte pendant des semaines, l'accès est coupé dès le premier échec.
+  //
+  // Libellé COURT dans le tableau, phrase entière en `title` : le libellé complet
+  // occupait trois lignes dans sa cellule et repliait la pastille en un ovale.
   if (statut === "past_due")
-    return <Badge variant="secondary" className="text-[10px] text-destructive">Impayé — accès coupé</Badge>;
+    return <Badge variant="secondary" className="whitespace-nowrap text-[10px] text-destructive" title="Impayé — accès coupé, relances Stripe en cours">Impayé</Badge>;
+  if (statut === "unpaid")
+    return <Badge variant="secondary" className="whitespace-nowrap text-[10px] text-destructive" title="Impayé définitif — relances Stripe épuisées">Impayé définitif</Badge>;
   if (statut === "canceled")
-    return <Badge variant="secondary" className="text-[10px] text-muted-foreground">Résilié</Badge>;
+    return <Badge variant="secondary" className="whitespace-nowrap text-[10px] text-muted-foreground">Résilié</Badge>;
   if (statut === "incomplete" || statut === "incomplete_expired")
-    return <Badge variant="secondary" className="text-[10px] text-amber-700">Paiement incomplet</Badge>;
+    return <Badge variant="secondary" className="whitespace-nowrap text-[10px] text-amber-700" title="Paiement jamais finalisé">Incomplet</Badge>;
+  if (statut === "essai_sans_carte")
+    return <Badge variant="warning" className="whitespace-nowrap text-[10px]" title="Essai ouvert sans carte — aucun accès tant qu'un moyen de paiement n'est pas rattaché">Sans carte</Badge>;
   if (stripeClient)
-    return <Badge variant="secondary" className="text-[10px] text-muted-foreground" title="Client Stripe créé, jamais d'abonnement finalisé">Checkout abandonné</Badge>;
+    return <Badge variant="secondary" className="whitespace-nowrap text-[10px] text-muted-foreground" title="Client Stripe créé, jamais d'abonnement finalisé">Checkout abandonné</Badge>;
   return <span className="text-muted-foreground text-xs">—</span>;
 }
 
@@ -975,33 +1008,58 @@ export default function AdminPage() {
             >
               {abos.mouvements.length > 0 ? (
                 <>
-                  <ul className="space-y-1">
-                    {(toutMouvements ? abos.mouvements : abos.mouvements.slice(0, 10)).map((m) => (
-                      <li
-                        key={m.event_id}
-                        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 text-sm odd:bg-muted/20"
-                      >
-                        <Badge variant={MOUVEMENT_TONS[m.type] ?? "secondary"} className="text-[10px]">
-                          {MOUVEMENT_LABELS[m.type] ?? m.type}
-                        </Badge>
-                        <span className="max-w-[200px] truncate text-xs sm:max-w-[260px] sm:text-sm">
-                          {m.email ?? "compte supprimé"}
-                        </span>
-                        {m.plan && (
-                          <span className="text-xs capitalize text-muted-foreground">
-                            {m.plan_precedent ? `${m.plan_precedent} → ${m.plan}` : m.plan}
-                          </span>
-                        )}
-                        {m.pendant_essai && <span className="text-xs text-amber-700">pendant l&apos;essai</span>}
-                        <span
-                          className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground"
-                          title={formatDateTime(m.created_at)}
-                        >
-                          {depuis(m.created_at)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <ol className="space-y-1">
+                    {(toutMouvements ? abos.mouvements : abos.mouvements.slice(0, 10)).map((m, i, liste) => {
+                      const st = TON_MOUVEMENT[MOUVEMENT_TONS[m.type] ?? "secondary"];
+                      const libelle = MOUVEMENT_LABELS[m.type] ?? m.type;
+                      const montant = montantMouvement(m.montant_cents);
+                      const jour = jourMouvement(m.created_at);
+                      // Séparateur de journée : le journal mélangeait « il y a 5 h »
+                      // et « il y a 7 j » sans repère, on ne voyait plus ce qui
+                      // s'était passé aujourd'hui.
+                      const nouveauJour = i === 0 || jour !== jourMouvement(liste[i - 1].created_at);
+                      return (
+                        <li key={m.event_id}>
+                          {nouveauJour && (
+                            <div className="flex items-center gap-2 px-1 pb-1 pt-3 first:pt-0">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                {jour}
+                              </span>
+                              <span className="h-px flex-1 bg-border" />
+                            </div>
+                          )}
+                          <div className={cn("flex items-start gap-3 rounded-lg border-l-2 py-2 pl-3 pr-2", st.rail, st.fond)}>
+                            <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", st.point)} aria-hidden />
+                            <div className="min-w-0 flex-1">
+                              <div className={cn("text-sm font-semibold leading-snug", st.texte)}>{libelle}</div>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                                <span className="truncate" title={m.email ?? undefined}>
+                                  {m.email ?? "compte supprimé"}
+                                </span>
+                                {m.plan && (
+                                  <span className="capitalize">
+                                    · {m.plan_precedent ? `${m.plan_precedent} → ${m.plan}` : m.plan}
+                                  </span>
+                                )}
+                                {m.pendant_essai && <span className="text-amber-700">· pendant l&apos;essai</span>}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              {montant && (
+                                <div className="text-sm font-semibold tabular-nums">{montant}</div>
+                              )}
+                              <div
+                                className="whitespace-nowrap text-[11px] text-muted-foreground"
+                                title={formatDateTime(m.created_at)}
+                              >
+                                {depuis(m.created_at)}
+                              </div>
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
                   <VoirPlus
                     total={abos.mouvements.length}
                     montres={10}
@@ -1320,21 +1378,19 @@ export default function AdminPage() {
             </div>
           {/* Desktop : tableau complet */}
           <div className="hidden overflow-x-auto p-3 sm:block sm:p-4">
-            <table className="w-full min-w-[1120px] text-sm">
+            {/* 13 colonnes débordaient : « Actions » était coupée au milieu du mot.
+                « Profil » et « Statut » sont descendues sous le nom, les quatre
+                colonnes de chiffres sont regroupées deux à deux. */}
+            <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="text-left p-3">Utilisateur</th>
                   <th className="text-center p-3">Plan</th>
-                  <th className="text-center p-3">Profil</th>
-                  <th className="text-right p-3">Solde</th>
-                  <th className="text-right p-3">Misé</th>
-                  <th className="text-right p-3">Net</th>
-                  <th className="text-right p-3">ROI</th>
-                  <th className="text-center p-3">Paris</th>
-                  <th className="text-center p-3">Statut</th>
                   <th className="text-center p-3">Abonnement</th>
-                  <th className="text-right p-3">Dernière connexion</th>
-                  <th className="text-right p-3">Inscrit le</th>
+                  <th className="text-right p-3">Portefeuille</th>
+                  <th className="text-right p-3">Résultat</th>
+                  <th className="text-center p-3">Paris</th>
+                  <th className="text-right p-3">Activité</th>
                   <th className="text-center p-3">Actions</th>
                 </tr>
               </thead>
@@ -1349,49 +1405,77 @@ export default function AdminPage() {
                 }>).map((u) => {
                   const nom = [u.prenom, u.nom].filter(Boolean).join(" ") || "—";
                   return (
-                  <tr key={u.user_id} className="border-b border-border/50 hover:bg-muted/20">
+                  <tr key={u.user_id} className={cn("border-b border-border/50 transition-colors hover:bg-muted/20", !u.is_active && "opacity-55")}>
                     <td className="p-3">
                       <button
                         onClick={() => setSelectedUser(u.user_id)}
-                        className="font-medium flex items-center gap-1.5 text-left hover:text-brand-gold-dark transition-colors"
+                        className="flex items-center gap-1.5 text-left font-medium transition-colors hover:text-brand-gold-dark"
                         title="Voir l'historique complet">
                         {nom}
                         {u.is_admin && <Badge variant="secondary" className="text-[9px]">ADMIN</Badge>}
+                        {/* Un compte suspendu se lisait à une coche dans une colonne
+                            dédiée, identique pour 21 lignes sur 22. Il se lit
+                            maintenant là où il compte : à côté du nom. */}
+                        {!u.is_active && <Badge variant="secondary" className="text-[9px] text-destructive">SUSPENDU</Badge>}
                       </button>
-                      <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                        {u.email}
-                        <span className="text-[9px]" title={u.auth_method === "google" ? "Google" : "Email"}>{u.auth_method === "google" ? "🔵 G" : "✉"}</span>
-                        {u.email_verified ? <span className="text-[9px] text-green-700" title="Email vérifié">✓</span> : <span className="text-[9px] text-amber-700" title="Non vérifié">⚠</span>}
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="truncate" title={u.email}>{u.email}</span>
+                        <span className="text-[9px]" title={u.auth_method === "google" ? "Inscription Google" : "Inscription e-mail"}>{u.auth_method === "google" ? "🔵 G" : "✉"}</span>
+                        {u.email_verified ? <span className="text-[9px] text-green-700" title="Adresse confirmée">✓</span> : <span className="text-[9px] text-amber-700" title="Adresse jamais confirmée">⚠</span>}
                         {u.stripe_client && <span className="text-[9px] text-violet-700" title="Client Stripe">💳</span>}
                       </div>
+                      <div className="mt-0.5 text-[11px] capitalize text-muted-foreground/70">{u.profil_risque}</div>
                     </td>
                     <td className="p-3 text-center">
                       <Badge variant={u.plan === "expert" ? "expert" : ["starter", "standard"].includes(u.plan) ? "gold" : "secondary"} className="text-[10px]">{u.plan}</Badge>
                     </td>
-                    <td className="p-3 text-center text-xs text-muted-foreground capitalize">{u.profil_risque}</td>
-                    <td className="p-3 text-right font-mono tabular-nums">{u.solde_actuel?.toFixed(0)}€</td>
-                    <td className="p-3 text-right font-mono tabular-nums text-muted-foreground">{u.mise_totale?.toFixed(0)}€</td>
-                    <td className={cn("p-3 text-right font-mono tabular-nums font-semibold", u.gain_net >= 0 ? "text-green-700" : "text-destructive")}>{u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€</td>
-                    <td className={cn("p-3 text-right font-mono tabular-nums", u.roi == null ? "text-muted-foreground" : u.roi >= 0 ? "text-green-700" : "text-destructive")}>{u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}</td>
-                    <td className="p-3 text-center text-xs tabular-nums">{u.nb_gagnes}/{u.nb_paris}</td>
-                    <td className="p-3 text-center">{u.is_active ? <CheckCircle className="h-4 w-4 text-green-700 mx-auto" /> : <XCircle className="h-4 w-4 text-destructive mx-auto" />}</td>
                     <td className="p-3 text-center">{subBadge(u.abonnement_statut, u.stripe_client)}</td>
-                    <td className="p-3 text-right text-muted-foreground text-xs whitespace-nowrap">{lastLoginLabel(u.last_login)}</td>
-                    <td className="p-3 text-right text-muted-foreground text-xs">{formatDateTime(u.created_at)}</td>
-                    <td className="p-3 text-center whitespace-nowrap">
-                      <button
-                        onClick={() => toggleActive(u.user_id, u.is_active)}
-                        className={cn("rounded px-2 py-1 text-[10px] font-semibold border transition-colors mr-1",
-                          u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-700 hover:bg-green-500/10")}
-                        title={u.is_active ? "Suspendre le compte" : "Réactiver le compte"}>
-                        {u.is_active ? "Suspendre" : "Réactiver"}
-                      </button>
-                      <button
-                        onClick={() => adjustBankroll(u.user_id, u.email)}
-                        className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold-dark transition-colors"
-                        title="Créditer / débiter le portefeuille">
-                        💰 Ajuster
-                      </button>
+                    <td className="p-3 text-right">
+                      <div className="font-mono tabular-nums">{u.solde_actuel?.toFixed(0)}€</div>
+                      <div className="text-[11px] tabular-nums text-muted-foreground" title="Total misé">
+                        {u.mise_totale ? `${u.mise_totale.toFixed(0)}€ misés` : "aucune mise"}
+                      </div>
+                    </td>
+                    <td className="p-3 text-right">
+                      <div className={cn("font-mono font-semibold tabular-nums", u.gain_net >= 0 ? "text-green-700" : "text-destructive")}>
+                        {u.gain_net >= 0 ? "+" : ""}{u.gain_net?.toFixed(0)}€
+                      </div>
+                      {/* Un ROI calculé sur un ou deux paris n'apprend rien : « +600 % »
+                          sur un seul pari gagné se lisait comme une performance. Il est
+                          grisé sous 5 paris pour ne plus être pris au sérieux. */}
+                      <div
+                        className={cn("text-[11px] tabular-nums",
+                          u.roi == null ? "text-muted-foreground"
+                            : u.nb_paris < 5 ? "text-muted-foreground/60"
+                            : u.roi >= 0 ? "text-green-700" : "text-destructive")}
+                        title={u.roi != null && u.nb_paris < 5 ? `ROI sur ${u.nb_paris} pari${u.nb_paris > 1 ? "s" : ""} — non significatif` : "Retour sur investissement"}
+                      >
+                        {u.roi == null ? "—" : `${u.roi >= 0 ? "+" : ""}${u.roi}%`}
+                      </div>
+                    </td>
+                    <td className="p-3 text-center text-xs tabular-nums">
+                      {u.nb_paris === 0 ? <span className="text-muted-foreground">—</span> : `${u.nb_gagnes}/${u.nb_paris}`}
+                    </td>
+                    <td className="whitespace-nowrap p-3 text-right text-xs text-muted-foreground">
+                      <div title="Dernière connexion">{lastLoginLabel(u.last_login)}</div>
+                      <div className="text-[11px] text-muted-foreground/70" title="Date d'inscription">inscrit {formatDateTime(u.created_at)}</div>
+                    </td>
+                    <td className="whitespace-nowrap p-3 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => toggleActive(u.user_id, u.is_active)}
+                          className={cn("rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors",
+                            u.is_active ? "border-destructive/40 text-destructive hover:bg-destructive/10" : "border-green-500/40 text-green-700 hover:bg-green-500/10")}
+                          title={u.is_active ? "Suspendre le compte" : "Réactiver le compte"}>
+                          {u.is_active ? "Suspendre" : "Réactiver"}
+                        </button>
+                        <button
+                          onClick={() => adjustBankroll(u.user_id, u.email)}
+                          className="rounded-md border border-border px-2 py-1 text-[10px] font-semibold text-muted-foreground transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark"
+                          title="Créditer / débiter le portefeuille">
+                          💰 Ajuster
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   );
