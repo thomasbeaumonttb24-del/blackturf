@@ -6,9 +6,12 @@ export const meta = {
   description:
     "Machine learning et pronostics hippiques : ce que l'IA sait faire, ses limites face au prélèvement PMU, et ce qu'elle vaut.",
   date: "2026-06-23",
-  updated: "2026-06-23",
+  // Développé le 2026-08-27 : l'article expédiait son sujet en 585 mots. Trois sections
+  // ajoutées — la comparaison avec les jeux à information complète, la distinction entre
+  // bien prédire et gagner, et les signes d'une fausse promesse.
+  updated: "2026-08-27",
   tags: ["IA", "Machine learning", "Pronostics"],
-  readingMinutes: 6,
+  readingMinutes: 9,
 };
 
 export default function Body() {
@@ -37,12 +40,81 @@ export default function Body() {
         de 15 à 30 %</Link> est un mur : il faut un avantage réel rien que pour l&apos;effacer.
       </p>
 
+      <h2>Pourquoi c&apos;est plus dur qu&apos;aux échecs</h2>
+      <p>
+        On oppose souvent les deux, à tort. Aux échecs, la machine affronte un adversaire aux règles
+        fixes et à l&apos;information complète : le progrès est cumulatif et définitif. Aux courses,
+        l&apos;adversaire est un <strong>marché</strong> — la somme des paris de milliers de
+        personnes, dont certaines disposent d&apos;informations que le modèle n&apos;aura jamais :
+        l&apos;état du cheval au matin, une intention d&apos;écurie, un travail à l&apos;entraînement.
+      </p>
+      <p>
+        Ce marché se corrige en permanence. Si une inefficacité devient exploitable et connue,
+        l&apos;argent s&apos;y déplace et la cote s&apos;ajuste : l&apos;avantage disparaît de
+        lui-même. Une IA hippique ne « résout » donc jamais le problème, elle court après une cible
+        qui bouge — d&apos;où la nécessité de réentraîner en continu plutôt que de figer un modèle
+        performant.
+      </p>
+      <p>
+        S&apos;ajoute une difficulté que les échecs ignorent : le prélèvement. Deux joueurs
+        d&apos;échecs se partagent une victoire entière ; au pari mutuel, une part de la mise
+        disparaît avant tout partage. Il ne suffit pas d&apos;être meilleur que la moyenne des
+        parieurs, il faut l&apos;être <em>de plus que le prélèvement</em> — un seuil qu&apos;aucune
+        prouesse technique ne fait baisser.
+      </p>
+
+      <h2>« Battre les courses » veut dire deux choses</h2>
+      <p>
+        La confusion vient de là. <strong>Bien prédire</strong> et <strong>gagner de
+        l&apos;argent</strong> sont deux problèmes distincts, et le premier ne suffit pas au second.
+        Un modèle peut désigner le vainqueur bien plus souvent que le hasard tout en perdant de
+        l&apos;argent, simplement parce qu&apos;il désigne des favoris que le marché paie déjà à leur
+        juste prix — voire trop cher.
+      </p>
+      <p>
+        Le seul critère qui relie les deux est l&apos;écart entre la probabilité estimée et la cote
+        proposée. C&apos;est pourquoi un modèle sérieux se juge moins à son taux de réussite
+        qu&apos;à sa <strong>calibration</strong>, et à sa capacité à repérer une cote trop
+        généreuse avant que le marché ne la corrige.
+      </p>
+
       <h2>Le vrai test : la calibration</h2>
       <p>
         Une bonne IA est <em>calibrée</em> : quand elle annonce 30 % de victoire, le cheval gagne
         bien ~30 % du temps sur le long terme. C&apos;est mesurable (ECE, score de Brier). Une IA qui
         annonce 90 % de réussite est suspecte — ce niveau n&apos;existe pas aux courses, où une AUC
         de 0,70 à 0,75 est déjà excellente.
+      </p>
+
+      <h2>Reconnaître une fausse promesse</h2>
+      <p>
+        Le mot « intelligence artificielle » est devenu un argument commercial, souvent posé sur des
+        outils qui n&apos;en contiennent pas. Quelques signes qui ne trompent pas :
+      </p>
+      <ul>
+        <li>
+          <strong>Un taux de réussite annoncé sans dénominateur.</strong> « 80 % de réussite » ne
+          veut rien dire si l&apos;on ignore sur combien de courses, sur quelle période, et ce
+          qu&apos;on appelle une réussite.
+        </li>
+        <li>
+          <strong>Aucune trace des pertes.</strong> Un historique qui ne montre que des journées
+          gagnantes n&apos;est pas un historique, c&apos;est une sélection.
+        </li>
+        <li>
+          <strong>Des pronostics non horodatés.</strong> Sans preuve que la prédiction existait
+          avant le départ, rien ne distingue une analyse d&apos;une reconstitution après coup.
+        </li>
+        <li>
+          <strong>Une promesse de gain.</strong> Aucun modèle ne peut la tenir : le prélèvement rend
+          la rentabilité durable très difficile, et un vendeur qui l&apos;ignore soit se trompe, soit
+          le sait.
+        </li>
+      </ul>
+      <p>
+        À l&apos;inverse, ce qu&apos;on peut légitimement demander : le nombre de courses mesurées,
+        la comparaison avec le hasard, un score de calibration, et un historique complet — périodes
+        perdantes comprises.
       </p>
 
       <h2>IA + discipline humaine</h2>
