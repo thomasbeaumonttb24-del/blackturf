@@ -265,6 +265,32 @@ async def test_paiement_encaisse_retablit_lacces(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fin_dessai_facturee_est_journalisee_meme_sans_changement_de_statut(db, monkeypatch):
+    """Le tout premier euro encaisse doit laisser une trace.
+
+    L'abonnement est deja `active` pendant l'essai : la bascule essai -> paye ne
+    change AUCUN statut. Sans journalisation inconditionnelle, le premier
+    paiement reel passait sans un mot, ni journal admin ni e-mail.
+    """
+    _stripe_muet(monkeypatch)
+    user = await _user(db, plan="expert")
+    abo = Subscription(sub_id=str(uuid.uuid4()), user_id=user.user_id,
+                       stripe_subscription_id="sub_essai_fini", plan="expert",
+                       periodicite="monthly", **_periodes(), statut="active",
+                       essai_fin=datetime.now(timezone.utc))
+    db.add(abo)
+    await db.commit()
+
+    await sr._handle_payment_succeeded(_facture("sub_essai_fini", paye=1900), db)
+
+    await db.refresh(user)
+    await db.refresh(abo)
+    assert user.plan == "expert"
+    assert abo.essai_fin is None, "un essai facture n'est plus un essai en cours"
+    assert "paiement_recu" in await _types_journal(db, user)
+
+
+@pytest.mark.asyncio
 async def test_facture_a_zero_euro_nouvre_aucun_acces(db, monkeypatch):
     _stripe_muet(monkeypatch)
     user = await _user(db, plan="free")
