@@ -143,7 +143,10 @@ def db_query(sql: str) -> list[list[str]]:
 def db_exec(sql: str) -> bool:
     out = _psql(["-q", "-c", sql], "db_exec")
     if out.returncode != 0:
-        log("db_exec.error", err=out.stderr.strip()[:120])
+        # `rc` journalise le code de sortie : un stderr VIDE avec rc != 0 n'est pas
+        # une erreur SQL (psql ecrit toujours son ERROR) mais un `docker exec` qui a
+        # echoue — les deux se ressemblaient dans le journal.
+        log("db_exec.error", rc=out.returncode, err=out.stderr.strip()[:120])
         return False
     return True
 
@@ -162,11 +165,13 @@ def db_exec_rows(sql: str) -> int:
     """
     out = _psql(["-c", sql], "db_exec_rows")
     if out.returncode != 0:
-        log("db_exec.error", err=out.stderr.strip()[:120])
+        # Cle DISTINCTE de celle de db_exec : les deux partageaient « db_exec.error »,
+        # et une ligne d'erreur ne disait plus laquelle des deux requetes avait echoue.
+        log("db_exec_rows.error", rc=out.returncode, err=out.stderr.strip()[:120])
         return -1
     tags = _TAG.findall(out.stdout or "")
     if not tags:
-        log("db_exec.tag_absente", extrait=(out.stdout or "").strip()[:80])
+        log("db_exec_rows.tag_absente", extrait=(out.stdout or "").strip()[:80])
         return -1
     return int(tags[-1])
 
