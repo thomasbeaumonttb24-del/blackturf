@@ -92,3 +92,10 @@ _backup_*_env_*
 # build, reconstructible depuis git. Les versionner alourdirait l'historique
 # definitivement, meme apres suppression.
 blackturf-deploy-*.tar
+
+# Certificat PUBLIC de chiffrement des sauvegardes. Non secret, mais propre a
+# CETTE installation : il est la moitie publique de la cle privee detenue par
+# l exploitant, hors serveur. Le suivre en git lierait le depot a une paire de
+# cles precise. Son absence fait ECHOUER db_backup.sh volontairement, plutot que
+# de produire un dump en clair — echec ferme, jamais de repli silencieux.
+.backup-cert.pem
