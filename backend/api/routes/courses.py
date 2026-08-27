@@ -1624,13 +1624,18 @@ async def get_mise_plan(
     except Exception:
         roi_weights, heat = {}, 0.0
 
-    # Calibration estimé→réel du rapport (par profil × type) : recale les rapports sur les
-    # paiements PMU RÉELS appris → fait respecter les tranches de cote dans le bilan réel.
+    # Calibration estimé→réel du rapport (par zone × type, puis profil × type) : recale les
+    # rapports sur les paiements PMU RÉELS appris → fait respecter les tranches de cote dans
+    # le bilan réel.
     try:
         from ml.signal_performance import load_rapport_calibration
         rapport_calib = await load_rapport_calibration(db)
     except Exception:
         rapport_calib = None
+    # Zone de marché de la réunion (France / étranger) : MÊME entrée que le plan FIGÉ
+    # (ml/profil_learning.record_profil_runs), sinon le plan affiché diverge du plan réglé.
+    from services.hippodromes import zone_hippodrome
+    zone = await zone_hippodrome(db, getattr(course, "hippodrome_nom", None))
     # ROI réel appris PAR BANDE D'EV → la mise se déplace vers les bandes rentables et
     # s'allège sur les zones toxiques (levier ROI direct du moteur de mise).
     try:
@@ -1673,7 +1678,7 @@ async def get_mise_plan(
     try:
         plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
                             signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True,
-                            rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
+                            rapport_calib=rapport_calib, ev_band_perf=ev_band_perf, zone=zone)
         out = plan_to_dict(plan)
     except HTTPException:
         raise
@@ -1709,7 +1714,7 @@ async def get_mise_plan(
         db, course=course, out=out, profil=profil, montant=montant,
         bankroll=bankroll, preds=preds, heat=heat, roi_weights=roi_weights,
         signal_mults=signal_mults, rapport_calib=rapport_calib,
-        ev_band_perf=ev_band_perf, user=user, origin="mise_plan",
+        ev_band_perf=ev_band_perf, user=user, origin="mise_plan", zone=zone,
     )
     return out
 
@@ -1718,6 +1723,7 @@ async def _record_plan_emission(
     db, *, course, out: dict, profil: str, montant: float, bankroll,
     preds: list[dict], heat: float, roi_weights: dict, signal_mults: dict,
     rapport_calib, ev_band_perf, user=None, origin: str = "mise_plan",
+    zone: str | None = None,
 ) -> None:
     """Journalise un plan émis dans ``bet_plan_snapshots`` (append-only).
 
@@ -1747,6 +1753,11 @@ async def _record_plan_emission(
             "cfg": _effective_config(profil, float(heat or 0.0)),
             "palier": _palier(int(montant)),
             "respect_montant": True,
+            # Zone de marché : à profil et heat identiques, un plan France et un plan
+            # étranger ne sortent PAS du même calibrage de rapport. Sans cette clé les
+            # deux seraient agrégés sous la même version d'algo dans les mesures de
+            # rentabilité, et l'effet du calibrage par zone deviendrait invisible.
+            "zone": zone,
             "flags": {
                 "devig_gates": bool(getattr(FLAGS, "devig_gates", False)),
                 "calib_on_raw": bool(getattr(FLAGS, "calib_on_raw", False)),
@@ -1876,9 +1887,14 @@ async def enregistrer_paris(
     except Exception:
         ev_band_perf = None
 
+    # Zone de marché : même entrée que l'aperçu /mise-plan → le plan ENREGISTRÉ est
+    # celui qui a été montré (invariant « ce que tu vois = ce que tu enregistres »).
+    from services.hippodromes import zone_hippodrome
+    zone = await zone_hippodrome(db, getattr(course, "hippodrome_nom", None))
     plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None,
                                      roi_weights, heat, signal_mults, respect_montant=True,
-                                     rapport_calib=rapport_calib, ev_band_perf=ev_band_perf))
+                                     rapport_calib=rapport_calib, ev_band_perf=ev_band_perf,
+                                     zone=zone))
 
     # Bankroll principale
     main = (await db.execute(
@@ -2158,11 +2174,13 @@ async def get_bilan_pronostic(
                 ev_band_perf_p = await _levb(db)
             except Exception:
                 ev_band_perf_p = None
+            from services.hippodromes import zone_hippodrome as _zh
+            zone_p = await _zh(db, getattr(course, "hippodrome_nom", None))
             plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None,
                                                roi_weights_p, heat, sig_mults_p,
                                                respect_montant=True,
                                                rapport_calib=rapport_calib_p,
-                                               ev_band_perf=ev_band_perf_p))
+                                               ev_band_perf=ev_band_perf_p, zone=zone_p))
             bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants,
                                   getattr(resultat, "rapports_detail", None), non_partants)
             source = "simulation"

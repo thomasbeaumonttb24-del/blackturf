@@ -491,6 +491,7 @@ def generer_plan(
     respect_montant: bool = False,
     rapport_calib: Optional[dict] = None,
     ev_band_perf: Optional[dict] = None,
+    zone: Optional[str] = None,
 ) -> MisePlan:
     """Plan de mise INTELLIGENT & ADAPTATIF — relie analyse, apprentissage, résultats.
 
@@ -596,7 +597,12 @@ def generer_plan(
                  if h.get("numero") is not None), default=0.0)
 
     # CALIBRATION estimé→réel : recale le rapport (et donc l'EV) de chaque candidat sur le
-    # rapport RÉEL appris par (profil × type), AVANT les gates de bande. Un Placé estimé
+    # rapport RÉEL appris par (zone × type) puis (profil × type), AVANT les gates de bande.
+    # `zone` = marché de la réunion (France / étranger, cf. services/hippodromes) : sur une
+    # réunion étrangère l'argent entre dans le pool APRÈS le figeage du pronostic, donc le
+    # rapport payé y vaut 0,81× l'estimé contre 0,94× en France. Sans cette clé, un seul
+    # facteur moyen mélangeait les deux marchés et laissait passer des paris étrangers dont
+    # le rapport réel tombait sous la tranche du profil (52 % des prudents gagnants). Un Placé estimé
     # ×1.9 mais qui paie ×1.3 en réalité voit son rapport ramené sous la bande prudent →
     # écarté. C'est ce qui fait RESPECTER les tranches sur le réel (bilan), pas l'estimé.
     # edge (modèle vs marché) inchangé : il ne dépend pas du rapport parimutuel.
@@ -604,7 +610,8 @@ def generer_plan(
         try:
             from ml.signal_performance import rapport_realization_factor
             for c in cands:
-                f = rapport_realization_factor(profil, c.get("type_pari"), rapport_calib)
+                f = rapport_realization_factor(profil, c.get("type_pari"), rapport_calib,
+                                               zone=zone)
                 if f and f != 1.0:
                     c["rapport_estime"] = round(float(c["rapport_estime"]) * f, 1)
                     c["ev"] = round(float(c["proba_gain"]) * c["rapport_estime"] - 1.0, 4)

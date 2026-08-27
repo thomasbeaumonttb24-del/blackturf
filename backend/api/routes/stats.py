@@ -1265,7 +1265,8 @@ async def _palmares_rows(db: AsyncSession) -> dict:
     try:
         rows = (await db.execute(_text("""
             SELECT r.profil, r.resultat, r.settled_at, r.created_at,
-                   c.hippodrome_nom, c.date_heure, c.course_id, c.numero_reunion, c.numero
+                   c.hippodrome_nom, c.date_heure, c.course_id, c.numero_reunion, c.numero,
+                   r.plan
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
@@ -1286,8 +1287,25 @@ async def _palmares_rows(db: AsyncSession) -> dict:
     courses_reglees: set = set()
     by_profil: dict = {p: {"courses": set(), "mise": 0.0, "gain": 0.0,
                            "courses_benef": 0, "paris_gagnes": 0} for p in PROFIL_LBL}
-    for profil, resultat, settled_at, created_at, hippo, dh, cid, n_reunion, n_course in rows:
+    for profil, resultat, settled_at, created_at, hippo, dh, cid, n_reunion, n_course, plan in rows:
         res = resultat if isinstance(resultat, dict) else json.loads(resultat or "{}")
+        # RAPPORT VISÉ = celui du plan FIGÉ avant le départ (gain_potentiel / mise), à
+        # côté du rapport RÉELLEMENT payé. Les deux sont nécessaires et différents :
+        #   • la tranche d'un profil (prudent ×1,8-5, modéré ×4-15, risqué ≥×10) est un
+        #     engagement pris AVANT la course, sur le rapport estimé ;
+        #   • le rapport parimutuel réel n'est connu qu'après la clôture des paris et
+        #     dépend, pour un placé ou un couplé, de QUELS autres chevaux arrivent.
+        # N'afficher que le réel donnait un palmarès qui semble contredire la tranche du
+        # profil (un ticket risqué figé à ×14,1 payé ×3,3 le 2026-08-27 à Saratoga).
+        plan_d = (plan if isinstance(plan, dict) else json.loads(plan or "{}")) or {}
+        vise: dict = {}
+        for _niv in plan_d.get("niveaux", []):
+            for _p in _niv.get("paris", []):
+                _m = float(_p.get("mise") or 0)
+                if _m > 0:
+                    _nums = tuple(sorted(int(h["numero"]) for h in (_p.get("chevaux") or [])
+                                         if h.get("numero") is not None))
+                    vise[(_p.get("type"), _nums)] = float(_p.get("gain_potentiel") or 0) / _m
         courses_reglees.add(cid)
         agg = by_profil.get(profil)
         if agg is not None:
@@ -1310,6 +1328,9 @@ async def _palmares_rows(db: AsyncSession) -> dict:
             else:
                 _m = re.search(r"(R\d+C\d+)", str(cid))
                 _code = _m.group(1) if _m else None
+            _nums_g = tuple(sorted(int(c["numero"]) for c in pari.get("chevaux", [])
+                                   if c.get("numero") is not None))
+            _vise = vise.get((pari.get("type"), _nums_g))
             gagnants.append({
                 "profil": profil,
                 "course_id": cid,
@@ -1322,6 +1343,9 @@ async def _palmares_rows(db: AsyncSession) -> dict:
                 "gain": round(gain, 2),
                 "benefice": round(gain - mise, 2),
                 "rapport": round(gain / mise, 2) if mise > 0 else None,
+                # Rapport annoncé par le plan figé (None si le pari n'est pas retrouvé
+                # dans le plan — run legacy dont le plan ne portait pas gain_potentiel).
+                "rapport_vise": round(_vise, 2) if _vise else None,
                 # Preuve d'intégrité : prono figé AVANT le départ, réglé après l'arrivée.
                 "fige_avant_course": True,
                 "fige_le": created_at.isoformat() if created_at else None,

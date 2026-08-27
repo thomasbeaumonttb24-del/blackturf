@@ -485,10 +485,24 @@ def _bet_key(type_pari, chevaux) -> tuple:
     return (type_pari, nums)
 
 
+def _seau_vide() -> dict:
+    """Accumulateur d'un couple (clé × type de pari). Une seule définition : deux
+    seaux divergents produiraient des facteurs incomparables entre profil et zone."""
+    return {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
+            "n": 0, "mise": 0.0, "gain": 0.0,
+            "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0}
+
+
 async def compute_rapport_calibration(session: AsyncSession) -> dict:
-    """Facteur rapport_réel / rapport_estimé par (profil × type), depuis profil_run_log
-    réglé (figé AVANT départ). Lecture seule. Mêmes gardes anti-leakage que
-    compute_profil_weights (flag oos_weights → pronos pré-départ non backfillés)."""
+    """Facteur rapport_réel / rapport_estimé par (profil × type) ET par (zone × type),
+    depuis profil_run_log réglé (figé AVANT départ). Lecture seule. Mêmes gardes
+    anti-leakage que compute_profil_weights (flag oos_weights → pronos pré-départ
+    non backfillés).
+
+    La ZONE (France / étranger, cf. services/hippodromes) est le découpage le plus
+    explicatif : le rapport parimutuel se forme sur le marché où l'argent entre, et
+    l'argent étranger entre APRÈS le figeage du pronostic."""
+    from services.hippodromes import zone_depuis_pays
     try:
         from ml.algo_flags import FLAGS as _AF
         oos = bool(getattr(_AF, "oos_weights", False))
@@ -496,17 +510,27 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
         oos = False
     guard = ("AND c.date_heure IS NOT NULL AND r.created_at < c.date_heure "
              "AND COALESCE(r.meta->>'backfill','') <> 'true'") if oos else ""
+    # LEFT JOIN sur `hippodromes` : un hippodrome absent de la table laisse `pays`
+    # à NULL → zone None → le pari alimente les agrégats profil/global mais AUCUNE
+    # zone. Jamais de zone devinée (cf. services/hippodromes).
     rows = (await session.execute(text(f"""
-        SELECT r.profil, r.plan, r.resultat
+        SELECT r.profil, r.plan, r.resultat, h.pays
         FROM profil_run_log r
         JOIN courses c ON c.course_id = r.course_id
+        LEFT JOIN hippodromes h ON h.nom = c.hippodrome_nom
         WHERE r.statut = 'settled' AND r.resultat IS NOT NULL AND r.plan IS NOT NULL
           {guard}
     """))).all()
 
     # agg[profil][type] = {n_win, sum_est, sum_real, n, mise, gain}
     agg: dict = {}
-    for profil, plan, resultat in rows:
+    # agg_zone[zone][type] = idem, mais par ZONE DE MARCHÉ (France / étranger).
+    # Le rapport parimutuel dépend du marché où l'argent entre, pas du profil qui
+    # joue : c'est la clé la plus explicative dont on dispose (SG 0,807 à
+    # l'étranger contre 0,939 en France, cf. services/hippodromes).
+    agg_zone: dict = {}
+    for profil, plan, resultat, _pays in rows:
+        zone = zone_depuis_pays(_pays)
         plan_d = plan if isinstance(plan, dict) else json.loads(plan)
         res = resultat if isinstance(resultat, dict) else json.loads(resultat)
         # rapport ESTIMÉ par pari, reconstruit depuis le plan figé (gain_potentiel/mise)
@@ -522,30 +546,35 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
                 if isinstance(pr, (int, float)) and 0.0 < float(pr) <= 1.0:
                     proba_annoncee[cle] = float(pr)
         pa = agg.setdefault(profil, {})
+        za = agg_zone.setdefault(zone, {}) if zone else None
         for p in res.get("paris", []):
             if p.get("statut") == "rembourse":
                 continue                          # NP : neutre, jamais compté
             t = p.get("type")
             if not t:
                 continue
-            ta = pa.setdefault(t, {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
-                                   "n": 0, "mise": 0.0, "gain": 0.0,
-                                   "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0})
-            ta["n"] += 1
-            ta["mise"] += float(p.get("mise") or 0)
+            # Le MÊME pari alimente le seau du profil et celui de sa zone : ce sont
+            # deux découpages de la même population, pas deux populations.
+            seaux = [pa.setdefault(t, _seau_vide())]
+            if za is not None:
+                seaux.append(za.setdefault(t, _seau_vide()))
             pr = proba_annoncee.get(_bet_key(t, p.get("chevaux")))
-            if pr is not None:
-                ta["n_proba"] += 1
-                ta["sum_proba"] += pr
-                if p.get("statut") == "gagne":
-                    ta["n_gagne_proba"] += 1
-            if p.get("statut") == "gagne" and p.get("rapport_reel"):
-                re_ = est.get(_bet_key(t, p.get("chevaux")))
-                ta["gain"] += float(p.get("gain") or 0)
-                if re_ and re_ > 0:               # estimé connu → couple (estimé, réel)
-                    ta["n_win"] += 1
-                    ta["sum_est"] += re_
-                    ta["sum_real"] += float(p["rapport_reel"])
+            re_ = est.get(_bet_key(t, p.get("chevaux")))
+            gagne = p.get("statut") == "gagne" and bool(p.get("rapport_reel"))
+            for ta in seaux:
+                ta["n"] += 1
+                ta["mise"] += float(p.get("mise") or 0)
+                if pr is not None:
+                    ta["n_proba"] += 1
+                    ta["sum_proba"] += pr
+                    if p.get("statut") == "gagne":
+                        ta["n_gagne_proba"] += 1
+                if gagne:
+                    ta["gain"] += float(p.get("gain") or 0)
+                    if re_ and re_ > 0:           # estimé connu → couple (estimé, réel)
+                        ta["n_win"] += 1
+                        ta["sum_est"] += re_
+                        ta["sum_real"] += float(p["rapport_reel"])
 
     def _factor(a: dict) -> float:
         if a["n_win"] >= RC_MIN_WINS and a["sum_est"] > 0:
@@ -588,20 +617,23 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
     # Couplé Ordre estimé ×40 payé ×11 mais 5 gagnants en risqué (< RC_MIN_WINS)
     # → facteur neutre à vie PAR profil alors que le pool tous-profils (21 gagnants)
     # prouve la surestimation. Le rapport parimutuel ne dépend pas du profil.
-    out = {"profils": {}, "global": {}, "n_runs": len(rows)}
+    out = {"profils": {}, "global": {}, "zones": {}, "n_runs": len(rows)}
     glob: dict = {}
     for profil, types in agg.items():
         po = {}
         for t, a in types.items():
             po[t] = _entry(a)
-            g = glob.setdefault(t, {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
-                                    "n": 0, "mise": 0.0, "gain": 0.0,
-                                    "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0})
+            g = glob.setdefault(t, _seau_vide())
             for k in g:
                 g[k] += a[k]
         out["profils"][profil] = po
     for t, a in glob.items():
         out["global"][t] = _entry(a)
+    # ZONES : mêmes paris, découpés par marché. Le seuil RC_MIN_WINS s'y applique
+    # à l'identique — une zone sans assez de gagnants garde un facteur 1.0 et
+    # l'appelant retombe alors sur le profil puis le global.
+    for zone, types in agg_zone.items():
+        out["zones"][zone] = {t: _entry(a) for t, a in types.items()}
     return out
 
 
@@ -681,17 +713,36 @@ async def load_rapport_calibration(session: AsyncSession) -> dict | None:
 
 
 def rapport_realization_factor(profil: str | None, type_pari: str | None,
-                               calib: dict | None) -> float:
-    """Facteur estimé→réel pour ce (profil × type). Fallback sur le POOL GLOBAL du
-    type (tous profils) quand le couple (profil × type) n'a pas de facteur appris —
-    le rapport parimutuel réel ne dépend pas du profil qui joue. 1.0 (neutre) si pas
-    de table / type inconnu / échantillon insuffisant → aucun effet (cold-start sûr)."""
-    if not calib or not profil or not type_pari:
+                               calib: dict | None, zone: str | None = None) -> float:
+    """Facteur estimé→réel pour ce pari. 1.0 (neutre) = aucun effet (cold-start sûr).
+
+    Ordre de lecture, du plus explicatif au plus général :
+
+      1. (zone × type)   — le rapport parimutuel se forme sur le MARCHÉ où l'argent
+                           entre. Mesuré : Simple Gagnant 0,807 à l'étranger contre
+                           0,939 en France ; Simple Placé 0,883 contre 0,977. C'est
+                           l'écart le plus fort et le seul qui ait une cause connue
+                           (l'argent étranger entre après le figeage du pronostic).
+      2. (profil × type) — conservé pour ne rien perdre de l'apprentissage existant
+                           quand la zone est inconnue ou sous le seuil de gagnants.
+      3. (type)          — pool global tous profils, tous pays.
+
+    Un niveau à 1.0 signifie « rien d'appris ici » (< RC_MIN_WINS gagnants) et fait
+    descendre au niveau suivant : jamais de correction sur un échantillon trop mince,
+    jamais de zone devinée.
+    """
+    if not calib or not type_pari:
         return 1.0
-    t = (calib.get("profils") or {}).get(profil, {}).get(type_pari)
-    f = float((t or {}).get("factor", 1.0) or 1.0)
-    if f != 1.0:
-        return f
+    if zone:
+        z = ((calib.get("zones") or {}).get(zone) or {}).get(type_pari)
+        f = float((z or {}).get("factor", 1.0) or 1.0)
+        if f != 1.0:
+            return f
+    if profil:
+        t = (calib.get("profils") or {}).get(profil, {}).get(type_pari)
+        f = float((t or {}).get("factor", 1.0) or 1.0)
+        if f != 1.0:
+            return f
     g = (calib.get("global") or {}).get(type_pari)
     return float((g or {}).get("factor", 1.0) or 1.0)
 

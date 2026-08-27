@@ -120,6 +120,12 @@ interface WinningBet {
   gain: number;
   benefice: number;
   rapport: number | null;
+  // Rapport ANNONCÉ par le plan figé avant le départ. Différent du rapport réel :
+  // la tranche d'un profil (prudent ×1,8-5, modéré ×4-15, risqué ≥×10) est un
+  // engagement pris sur l'estimé, alors que le rapport parimutuel n'est connu
+  // qu'après la clôture des paris. Afficher les deux évite un palmarès qui semble
+  // contredire la tranche annoncée.
+  rapport_vise?: number | null;
   fige_avant_course?: boolean;   // prono figé avant le départ (preuve d'intégrité)
   fige_le?: string | null;       // horodatage du gel pré-course
   regle_le?: string | null;      // horodatage du règlement post-arrivée
@@ -348,7 +354,7 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
               </div>
               <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border/60 pt-3 text-xs">
                 <div><span className="block text-muted-foreground">Pari</span><span className="mt-0.5 block font-medium">{b.type_pari} · {b.chevaux.map((n) => `N°${n}`).join(" + ")}</span></div>
-                <div className="text-right"><span className="block text-muted-foreground">Mise / rapport</span><span className="mt-0.5 block font-medium tabular-nums">{b.mise.toFixed(0)}€{b.rapport ? ` · ×${b.rapport.toFixed(1)}` : ""}</span></div>
+                <div className="text-right"><span className="block text-muted-foreground">Mise / rapport</span><span className="mt-0.5 block font-medium tabular-nums">{b.mise.toFixed(0)}€{b.rapport ? ` · ×${b.rapport.toFixed(1)}` : ""}</span>{ecartVise(b) && <span className="mt-0.5 block text-[10px] text-muted-foreground tabular-nums">visé ×{b.rapport_vise!.toFixed(1)}</span>}</div>
                 <div className="flex items-center gap-1.5 text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />{b.date ? new Date(b.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : "Date indisponible"}</div>
                 <div className="flex justify-end"><span className={cn("inline-flex items-center rounded-full px-2 py-1 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span></div>
               </div>
@@ -369,7 +375,7 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
             <th scope="col" className="px-3 py-3 text-left font-semibold">Course</th>
             <th scope="col" className="px-3 py-3 text-left font-semibold">Pari</th>
             <th scope="col" className="px-3 py-3 text-right font-semibold">Mise</th>
-            <th scope="col" className="px-3 py-3 text-right font-semibold">Rapport</th>
+            <th scope="col" className="px-3 py-3 text-right font-semibold">Rapport payé</th>
             <th scope="col" className="px-3 py-3 text-left font-semibold">Profil</th>
             <th scope="col" className="rounded-r-xl px-3 py-3 text-right font-semibold">Gain net</th>
           </tr>
@@ -389,7 +395,10 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
                 </td>
                 <td className="px-3 py-4"><span className="font-medium">{b.type_pari}</span><span className="block text-[11px] text-muted-foreground">{b.chevaux.map((n) => `N°${n}`).join(" + ")}</span></td>
                 <td className="px-3 py-4 text-right font-mono tabular-nums text-muted-foreground">{b.mise.toFixed(0)}€</td>
-                <td className="px-3 py-4 text-right font-mono tabular-nums">{b.rapport ? `×${b.rapport.toFixed(1)}` : "—"}</td>
+                <td className="px-3 py-4 text-right font-mono tabular-nums">
+                  {b.rapport ? `×${b.rapport.toFixed(1)}` : "—"}
+                  {ecartVise(b) && <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">visé ×{b.rapport_vise!.toFixed(1)}</span>}
+                </td>
                 <td className="px-3 py-4">
                   <span className={cn("inline-flex justify-center items-center w-[68px] rounded-full py-0.5 text-[10px] font-semibold ring-1", pm.cls)}>{pm.label}</span>
                 </td>
@@ -403,7 +412,26 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
         </tbody>
       </table>
       </div>
+      {bets.some(ecartVise) && (
+        <p className="mt-3 px-3 text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">Rapport payé</span> = le rapport PMU officiel
+          à l&apos;arrivée. <span className="font-medium text-foreground">Visé</span> = celui annoncé par
+          le plan au moment où il a été figé, avant le départ. Les deux diffèrent quand l&apos;argent
+          entre dans les enjeux après le figeage — surtout sur les réunions étrangères, où les paris
+          se clôturent après notre pronostic.
+        </p>
+      )}
     </>
+  );
+}
+
+/** Vrai si le rapport visé mérite d'être affiché à côté du rapport payé.
+ *  On masque l'écart négligeable (< 0,1×) : répéter deux fois le même chiffre
+ *  n'apprend rien et alourdit une ligne déjà dense. */
+function ecartVise(b: WinningBet): boolean {
+  return (
+    typeof b.rapport_vise === "number" && b.rapport_vise > 0 &&
+    (b.rapport === null || Math.abs(b.rapport_vise - b.rapport) >= 0.1)
   );
 }
 

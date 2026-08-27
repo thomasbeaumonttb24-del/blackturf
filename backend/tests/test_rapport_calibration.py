@@ -14,6 +14,7 @@ from services.mise_calculator import (
     generer_plan, plan_to_dict, PROFIL_CONFIG, reprice_plan_live,
 )
 from ml.signal_performance import rapport_realization_factor
+from services.hippodromes import ZONE_ETRANGER, ZONE_FRANCE, zone_depuis_pays
 
 
 # ── Champ synthétique riche (tous types offerts) ─────────────────────────────
@@ -91,6 +92,86 @@ class TestFacteurCalibration:
         calib = {"profils": {"agressif": {"Couplé Gagnant": {"factor": 0.713}}},
                  "global": {"Couplé Gagnant": {"factor": 0.90}}}
         assert rapport_realization_factor("agressif", "Couplé Gagnant", calib) == 0.713
+
+
+# ── 1 bis. ZONE DE MARCHÉ (France / étranger) ────────────────────────────────
+# Le rapport parimutuel se forme sur le marché où l'argent entre. Mesuré sur les
+# pronostics figés puis réglés : Simple Gagnant 0,939 en France contre 0,807 à
+# l'étranger ; Simple Placé 0,977 contre 0,883. Sans cette clé, un facteur moyen
+# unique mélangeait les deux marchés — et 52 % des paris prudents gagnants sur
+# réunion étrangère payaient sous la tranche ×1,8 du profil (22 % en France).
+class TestZoneMarche:
+    def test_pays_vers_zone(self):
+        assert zone_depuis_pays("FRA") == ZONE_FRANCE
+        assert zone_depuis_pays("fra") == ZONE_FRANCE
+        assert zone_depuis_pays("FR") == ZONE_FRANCE      # lignes anciennes
+        assert zone_depuis_pays("USA") == ZONE_ETRANGER
+        assert zone_depuis_pays("GBR") == ZONE_ETRANGER
+
+    def test_pays_inconnu_ne_devine_aucune_zone(self):
+        """None plutôt que « étranger » : un pays manquant ne prouve rien, et se
+        tromper appliquerait le facteur étranger à des courses françaises."""
+        for valeur in (None, "", "  ", "UNK", "unknown"):
+            assert zone_depuis_pays(valeur) is None
+
+    def test_zone_prime_sur_profil_et_global(self):
+        calib = {"zones": {ZONE_ETRANGER: {"Simple Gagnant": {"factor": 0.80}}},
+                 "profils": {"agressif": {"Simple Gagnant": {"factor": 0.95}}},
+                 "global": {"Simple Gagnant": {"factor": 0.93}}}
+        assert rapport_realization_factor(
+            "agressif", "Simple Gagnant", calib, zone=ZONE_ETRANGER) == 0.80
+        # même calibration, zone France non apprise → on redescend sur le profil
+        assert rapport_realization_factor(
+            "agressif", "Simple Gagnant", calib, zone=ZONE_FRANCE) == 0.95
+
+    def test_zone_neutre_redescend_sur_profil_puis_global(self):
+        """Facteur 1.0 = « rien d'appris ici » (< RC_MIN_WINS gagnants) → niveau suivant."""
+        calib = {"zones": {ZONE_ETRANGER: {"Trio": {"factor": 1.0, "n_win": 3}}},
+                 "profils": {"agressif": {"Trio": {"factor": 1.0, "n_win": 5}}},
+                 "global": {"Trio": {"factor": 0.82, "n_win": 35}}}
+        assert rapport_realization_factor(
+            "agressif", "Trio", calib, zone=ZONE_ETRANGER) == 0.82
+
+    def test_sans_zone_comportement_inchange(self):
+        """Non-régression : un appel sans zone lit exactement ce qu'il lisait avant."""
+        calib = {"zones": {ZONE_ETRANGER: {"Simple Placé": {"factor": 0.50}}},
+                 "profils": {"conservateur": {"Simple Placé": {"factor": 0.90}}},
+                 "global": {"Simple Placé": {"factor": 0.96}}}
+        assert rapport_realization_factor("conservateur", "Simple Placé", calib) == 0.90
+        assert rapport_realization_factor(None, "Simple Placé", calib) == 0.96
+
+    def test_zone_appliquee_au_plan_et_bande_toujours_respectee(self):
+        """Bout en bout : la zone rabote les rapports AVANT les gates, donc le plan
+        étranger est plus sévère que le plan France — et dans les deux cas aucun
+        ticket ne sort de la tranche du profil."""
+        types_eq = list(PROFIL_CONFIG["equilibre"]["types"])
+        calib = {"zones": {ZONE_ETRANGER: {t: {"factor": 0.55} for t in types_eq},
+                           ZONE_FRANCE: {t: {"factor": 1.0} for t in types_eq}}}
+        gmin = PROFIL_CONFIG["equilibre"]["gain_cible_mult"]
+        gmax = PROFIL_CONFIG["equilibre"]["gain_cible_max"]
+        etr = plan_to_dict(generer_plan(20, "equilibre", _field(10), COURSE,
+                                        respect_montant=True, rapport_calib=calib,
+                                        zone=ZONE_ETRANGER))
+        fra = plan_to_dict(generer_plan(20, "equilibre", _field(10), COURSE,
+                                        respect_montant=True, rapport_calib=calib,
+                                        zone=ZONE_FRANCE))
+        for plan_d, nom in ((etr, "etranger"), (fra, "france")):
+            ratios = _gains_vs_total(plan_d)
+            assert ratios, f"plan {nom} vide"
+            for t, g in ratios:
+                assert g >= gmin - 0.1, f"{nom}/{t} ×{g:.2f} sous la bande {gmin}"
+                assert g <= gmax + 0.1, f"{nom}/{t} ×{g:.2f} au-dessus de {gmax}"
+        # La zone étranger doit RÉELLEMENT changer quelque chose (sélection ou rapports).
+        assert _rapports_selectionnes(etr) != _rapports_selectionnes(fra)
+
+    def test_zone_sans_calibration_reste_neutre(self):
+        """Cold-start : tant que rien n'est appris par zone, passer une zone ne change
+        rien au plan (aucune correction inventée)."""
+        a = plan_to_dict(generer_plan(20, "agressif", _field(10), COURSE,
+                                      respect_montant=True))
+        b = plan_to_dict(generer_plan(20, "agressif", _field(10), COURSE,
+                                      respect_montant=True, zone=ZONE_ETRANGER))
+        assert _rapports_selectionnes(a) == _rapports_selectionnes(b)
 
 
 # ── 2. TRANCHES respectées par profil (sans calibration) ─────────────────────
