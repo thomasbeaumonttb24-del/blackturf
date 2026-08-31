@@ -6,7 +6,7 @@ import { SeoHero, Container, Section, DefCard, Callout, Chip } from "@/component
 export const metadata: Metadata = {
   title: "Tous les types de paris PMU expliqués",
   description:
-    "Guide complet des paris PMU : Simple Gagnant et Placé, Couplé, Trio, Tiercé, Quarté+, Quinté+, 2sur4, Multi, Pick5. Conditions de gain, places payées selon le nombre de partants.",
+    "Tous les paris PMU : Simple, Couplé, Trio, Tiercé, Quarté+, Quinté+, 2sur4, Multi, Pick5. Conditions de gain et places payées selon le nombre de partants.",
   alternates: { canonical: "/guides/types-de-paris-pmu" },
   openGraph: {
     title: "Tous les types de paris PMU expliqués",

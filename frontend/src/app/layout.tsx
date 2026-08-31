@@ -53,7 +53,7 @@ export const metadata: Metadata = {
   },
   // Google tronque autour de 155-160 caractères : l'essentiel passe devant.
   description:
-    "Programme PMU analysé par une IA : probabilité calculée pour chaque cheval et plan de mise ajusté à votre budget. Pronostics notés aux rapports réels du PMU.",
+    "Programme PMU analysé par IA : une probabilité par cheval et un plan de mise ajusté à votre budget. Pronostics notés aux rapports réels du PMU.",
   // `meta keywords` est ignorée par Google depuis 2009 — retirée.
   metadataBase: new URL("https://blackturf.fr"),
   manifest: "/manifest.json",

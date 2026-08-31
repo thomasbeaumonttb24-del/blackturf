@@ -15,8 +15,13 @@ export const metadata: Metadata = {
     "Trois formules d'accès aux pronostics IA : Gratuit (programme et cotes), Standard 12 €/mois, Expert 19 €/mois. Sans engagement, 7 jours d'essai.",
   alternates: { canonical: "/tarifs" },
   openGraph: {
-    title: "Tarifs BlackTurf — Gratuit, Standard, Expert",
-    description: "Prédictions IA, paris de valeur et calculateur de mise. Sans engagement.",
+    // ALIGNÉ SUR LE <title>, et ce n'est pas cosmétique : `og:title` est l'une des
+    // sources dont Google se sert pour fabriquer le lien de titre en résultat. Deux
+    // formulations sans rapport — « Tarifs BlackTurf — Gratuit, Standard, Expert »
+    // contre « Tarifs — pronostics PMU par IA à partir de 12 €/mois » — le laissent
+    // trancher seul, et il peut retenir celle qui ne dit ni le prix ni l'IA.
+    title: "Tarifs — pronostics PMU par IA à partir de 12 €/mois",
+    description: "Trois formules : Gratuit, Standard 12 €/mois, Expert 19 €/mois. Sans engagement, 7 jours d'essai.",
     url: "https://blackturf.fr/tarifs",
     images: [OG_IMAGE],
   },

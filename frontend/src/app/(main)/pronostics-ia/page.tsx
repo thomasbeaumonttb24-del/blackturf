@@ -21,9 +21,9 @@ import { SeoHero, Container, Section, Callout, Chip, DefCard } from "@/component
  */
 export const revalidate = 900;
 
-const TITLE = "Pronostics hippiques par IA : comment fonctionne l'algorithme";
+const TITLE = "Pronostic hippique par IA : comment fonctionne l'algorithme";
 const DESCRIPTION =
-  "L'intelligence artificielle appliquée aux courses PMU : sur quelles données le modèle apprend, comment il calcule une probabilité par cheval, et comment sa justesse est mesurée.";
+  "L'IA appliquée aux courses PMU : sur quelles données le modèle apprend, comment il calcule une probabilité par cheval, et comment sa justesse est mesurée.";
 
 export const metadata: Metadata = {
   title: TITLE,

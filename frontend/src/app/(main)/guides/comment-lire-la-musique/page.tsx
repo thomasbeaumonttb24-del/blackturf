@@ -6,7 +6,7 @@ import { SeoHero, Container, Section, Callout, Chip } from "@/components/seo/kit
 export const metadata: Metadata = {
   title: "Comment lire la musique d'un cheval",
   description:
-    "Apprenez à lire la musique d'un cheval de course (1a 2p 0a Da…) : signification des chiffres, des lettres de discipline et des abréviations de disqualification pour juger la forme.",
+    "Lire la musique d'un cheval (1a 2p 0a Da…) : ce que disent les chiffres, les lettres de discipline et les abréviations de disqualification.",
   alternates: { canonical: "/guides/comment-lire-la-musique" },
   openGraph: {
     title: "Comment lire la musique d'un cheval",
