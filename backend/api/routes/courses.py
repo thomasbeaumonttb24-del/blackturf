@@ -1285,9 +1285,11 @@ async def get_paris_disponibles(course_id: str, db: AsyncSession = Depends(get_d
 async def get_cotes_historique(
     course_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_pro),
+    _: User = Depends(get_current_user),
 ):
-    """Historique des cotes (réservé abonnés). Données TimescaleDB."""
+    """Historique des cotes — accessible à TOUT compte connecté, Découverte
+    comprise (décision produit 2026-08-31 : le marché des cotes n'est plus une
+    donnée payante, cf. get_cotes_live). Données TimescaleDB."""
     from db.models import CoteHistorique, Participation
     q = (
         select(CoteHistorique)
@@ -1310,12 +1312,22 @@ async def get_cotes_historique(
 @router.get("/courses/{course_id}/cotes-live")
 async def get_cotes_live(
     course_id: str,
-    _: User = Depends(require_pro),
+    _: User = Depends(get_current_user),
 ):
     """
     Cotes PMU EN DIRECT pour une course (lecture à la demande de l'API PMU).
     Cache court partagé (4 s) pour rester proche du temps réel sans marteler le PMU.
     Retourne {"time": iso, "cotes": [{"numero", "cote"}]}.
+
+    Accessible à TOUT compte connecté, Découverte comprise (décision produit
+    2026-08-31) : la cote PMU est une donnée publique, déjà diffusée sans
+    condition de plan par le flux WebSocket `/ws/courses/{id}/cotes` et par
+    `GET /courses/{id}/comparaison-cotes`. La gater ici privait la page course
+    d'un compte Découverte du widget « Marché des cotes » alors que le reste du
+    produit affichait la même donnée. Ce qui reste payant, c'est l'ANALYSE
+    (prédictions, value bets, pool-evolution), pas la cote brute.
+    Le cache Redis de 4 s est partagé entre tous les plans : l'ouverture
+    n'ajoute aucun appel à l'API PMU.
     """
     import json
     from datetime import datetime, timezone

@@ -283,3 +283,81 @@ async def test_favori_ia_resultat_gain_absent_si_rapport_non_publie(client: Asyn
     assert data["disponible"] is True
     assert data["a_gagne"] is True
     assert data["gain_reference_10e"] is None
+
+
+# ─────────────────────────────────────────────
+# Marché des cotes en direct — ouvert à tous les comptes connectés
+# (décision produit 2026-08-31)
+# ─────────────────────────────────────────────
+async def _headers_for_plan(client: AsyncClient, db: AsyncSession, plan: str) -> dict:
+    """Crée un compte au plan demandé et retourne ses headers JWT."""
+    from api.routes.auth import _hash
+    from db.models import User
+
+    email = f"{plan}-{uuid.uuid4().hex[:8]}@blackturf.fr"
+    db.add(User(user_id=str(uuid.uuid4()), email=email,
+                hashed_password=_hash("TestPassword123!"), plan=plan))
+    await db.commit()
+    resp = await client.post("/api/v1/auth/login",
+                             data={"username": email, "password": "TestPassword123!"})
+    assert resp.status_code == 200, f"login {plan} failed: {resp.text}"
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+@pytest.mark.parametrize("plan", ["free", "decouverte", "starter", "standard", "expert"])
+async def test_cotes_historique_ouvert_a_tous_les_plans(
+    client: AsyncClient, db: AsyncSession, plan: str
+):
+    """Le graphe du widget « Marché des cotes » se base sur l'historique : le
+    gater sur require_pro privait Découverte du marché en direct alors que la
+    grille tarifaire annonce les cotes comme incluses dès le plan gratuit."""
+    await _create_test_course(db)
+    headers = await _headers_for_plan(client, db, plan)
+    resp = await client.get("/api/v1/courses/R1C1/cotes-historique", headers=headers)
+    assert resp.status_code == 200, f"plan={plan} devrait lire l'historique des cotes"
+    assert isinstance(resp.json(), list)
+
+
+async def test_cotes_live_requires_auth(client: AsyncClient, db: AsyncSession):
+    """Ouvert à tous les PLANS, pas au public : la lecture reste authentifiée
+    (l'appel tape l'API PMU, on ne l'expose pas anonymement)."""
+    await _create_test_course(db)
+    resp = await client.get("/api/v1/courses/R1C1/cotes-live")
+    assert resp.status_code == 401
+
+
+@pytest.mark.parametrize("plan", ["free", "decouverte", "starter", "standard", "expert"])
+async def test_cotes_live_ouvert_a_tous_les_plans(
+    client: AsyncClient, db: AsyncSession, monkeypatch, plan: str
+):
+    """Régression protégée : `cotes-live` était sous `require_pro`, si bien qu'un
+    compte Découverte recevait 403 et voyait une page course sans aucune cote en
+    direct. La cote PMU brute n'est pas une donnée payante (le flux WebSocket
+    `/ws/courses/{id}/cotes` la diffuse déjà sans condition de plan) — seule
+    l'analyse (prédictions, value bets) l'est."""
+    import api.routes.courses as courses_mod
+    import services.pmu_cotes as pmu_cotes
+
+    async def _fake_fetch(course_id: str):
+        return [{"numero": 1, "cote": 3.5}]
+
+    async def _no_redis():
+        raise RuntimeError("redis indisponible en test")
+
+    monkeypatch.setattr(pmu_cotes, "fetch_live_cotes", _fake_fetch)
+    monkeypatch.setattr(courses_mod, "get_redis", _no_redis)
+
+    await _create_test_course(db)
+    headers = await _headers_for_plan(client, db, plan)
+    resp = await client.get("/api/v1/courses/R1C1/cotes-live", headers=headers)
+    assert resp.status_code == 200, f"plan={plan} devrait lire les cotes live"
+    assert resp.json()["cotes"] == [{"numero": 1, "cote": 3.5}]
+
+
+async def test_pool_evolution_reste_reserve_aux_abonnes(client: AsyncClient, db: AsyncSession):
+    """Garde-fou : ouvrir les cotes ne doit PAS ouvrir l'analyse « smart money »
+    (évolution du pool), qui reste un avantage payant."""
+    await _create_test_course(db)
+    headers = await _headers_for_plan(client, db, "decouverte")
+    resp = await client.get("/api/v1/courses/R1C1/pool-evolution", headers=headers)
+    assert resp.status_code == 403
