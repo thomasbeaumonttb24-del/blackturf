@@ -34,6 +34,22 @@ def test_courbe_cir_strictement_croissante():
     assert len(np.unique(ys)) == len(ys)
 
 
+def test_pas_de_quasi_palier():
+    """Un pas strictement positif ne suffit pas : un y qui bouge de 1e-4 quand x
+    bouge de 40 % est un palier déguisé, invisible à l'affichage. Régression du
+    lissage bloc-par-bloc qui cassait la monotonie de PAVA (mesuré en prod : x de
+    0.0473 à 0.0675 pour 0,02 % de y)."""
+    x, y = _jeu_realiste()
+    c = centered_isotonic_curve(x, y)
+    xs = np.asarray(c["x"], dtype=float)
+    ys = np.asarray(c["y"], dtype=float)
+    dx = np.diff(xs) / xs[:-1]
+    dy = np.diff(ys) / ys[:-1]
+    suspects = [(float(xs[i]), float(dx[i]), float(dy[i]))
+                for i in range(len(dx)) if dx[i] > 0.10 and dy[i] < 0.001]
+    assert not suspects, f"quasi-paliers (x bouge >10 %, y <0,1 %) : {suspects}"
+
+
 def test_cir_conserve_lordre_et_la_distinction_intra_course():
     """Douze probas distinctes en entrée → douze probas distinctes en sortie, même ordre."""
     x, y = _jeu_realiste()

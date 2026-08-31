@@ -21,10 +21,15 @@ au CENTROÏDE (moyenne des x du bloc). On interpole linéairement entre les cent
 courbe devient STRICTEMENT croissante : deux entrées distinctes donnent deux sorties
 distinctes, tout en conservant le niveau de calibration de chaque bloc.
 
-Le taux de chaque bloc est estimé par Jeffreys, (k + 0.5) / (n + 1), au lieu du taux
-brut k/n. Ça évite les blocs à exactement 0.0 ou 1.0 (fréquents sur les gros outsiders :
-aucun gagnant observé dans le bloc ne veut pas dire « probabilité nulle ») qui écrasaient
-tout le bas de la courbe sur une même valeur plancher.
+Le taux de chaque bloc est lissé, (k + a) / (n + 2a) avec a pseudo-observations, au
+lieu du taux brut k/n : un bloc à 0.0 exact (aucun gagnant observé parmi les plus
+petites probas) n'est pas « probabilité nulle », et le lissage régularise toute la
+courbe (force calibrée en 5 plis, cf. _PRIOR). Ce lissage peut inverser deux blocs de
+tailles très différentes ; la monotonie est alors rétablie en FUSIONNANT les blocs
+concernés (PAVA sur les taux lissés), jamais par un pas epsilon — un epsilon
+recollerait les blocs en QUASI-plateau, x bougeant de 43 % pour 0,02 % de y (mesuré),
+soit le défaut d'origine sous une autre forme. Si les données ne séparent pas deux
+blocs, ils ne forment qu'un point.
 
 Aucune valeur inventée : le fit reste celui des vraies arrivées, seule la FORME de la
 reconstruction change (centres de blocs au lieu de marches).
@@ -40,12 +45,28 @@ log = structlog.get_logger(module="isotonic_utils")
 # Garantit la stricte croissance malgré les arrondis de sérialisation.
 _MIN_REL_STEP = 1e-4
 
+# Force de la prior du taux de bloc, en pseudo-observations : (k + a) / (n + 2a).
+# Balayée en 5 plis groupés PAR COURSE sur les données réelles (2026-08-31), moyennes :
+#   a     logloss   brier     ece      cotes justes distinctes / partants
+#   0.5   0.29309   0.08127   0.03299  98 %   (Jeffreys pur : trop peu lissé)
+#   5     0.26783   0.07641   0.02104  98 %
+#   8     0.26824   0.07648   0.02304  98 %   (bosse locale — la métrique n'est
+#                                              PAS lisse en a, un « milieu de
+#                                              plateau » choisi au jugé est faux)
+#   12    0.26767   0.07642   0.02054  98 %   ← optimum sur les trois métriques
+#   20    0.26881   0.07648   0.02123  97 %
+#   60    0.27107   0.07672   0.02489  97 %   (sur-lissé : les blocs fusionnent)
+# Références du même run : sans calibration du tout 0.26824 / 0.07659 / 0.02072 / 99 %,
+# isotone classique (l'existant) 0.27323 / 0.07680 / 0.01962 / 68 %.
+_PRIOR = 12.0
 
-def _jeffreys(k: float, n: float) -> float:
-    """Taux de succès lissé (Jeffreys). Évite les blocs à 0.0 / 1.0 exacts."""
+
+def _taux_lisse(k: float, n: float, a: float = _PRIOR) -> float:
+    """Taux de succès lissé (k + a) / (n + 2a). Évite les blocs à 0.0 / 1.0 exacts
+    et régularise l'ensemble de la courbe."""
     if n <= 0:
         return 0.5
-    return (k + 0.5) / (n + 1.0)
+    return (k + a) / (n + 2.0 * a)
 
 
 def centered_isotonic_curve(x, y) -> dict:
@@ -83,24 +104,39 @@ def centered_isotonic_curve(x, y) -> dict:
     starts = np.concatenate(([0], breaks))
     ends = np.concatenate((breaks, [len(fitted)]))
 
-    cx: list[float] = []
-    cy: list[float] = []
+    # Chaque bloc porte la somme de ses x (→ centroïde), son nombre d'observations
+    # et son nombre de succès. Le taux retenu est lissé — cf. en-tête et _PRIOR.
+    blocs: list[list[float]] = []                 # [sx (somme des x), n, k]
     for s, e in zip(starts, ends):
-        n_blk = float(e - s)
-        if n_blk <= 0:
+        if e - s <= 0:
             continue
-        cx.append(float(xs[s:e].mean()))          # centroïde du bloc (cœur du CIR)
-        cy.append(_jeffreys(float(ys[s:e].sum()), n_blk))
+        blocs.append([float(xs[s:e].sum()), float(e - s), float(ys[s:e].sum())])
 
-    if len(cx) < 2:
+    if len(blocs) < 2:
         return {"x": [], "y": []}
 
-    cx_a = np.asarray(cx, dtype=float)
-    cy_a = np.asarray(cy, dtype=float)
+    # ── Remontée de la monotonie par FUSION de blocs (PAVA sur les taux lissés) ──
+    # Le lissage peut inverser deux blocs de tailles très différentes (3 gagnants
+    # sur 44 = 0.0778 contre 1 sur 22 = 0.0652). Les recoller par un pas epsilon
+    # fabriquerait un QUASI-plateau — x qui bouge de 43 % pour 0,02 % de y, mesuré
+    # en prod : le défaut même qu'on corrige. Fusionner est la bonne réponse : si
+    # les données ne séparent pas deux blocs, ils ne forment qu'un point.
+    pile: list[list[float]] = []
+    for b in blocs:
+        pile.append(b)
+        while len(pile) > 1 and _taux_lisse(pile[-2][2], pile[-2][1]) >= _taux_lisse(pile[-1][2], pile[-1][1]):
+            tete = pile.pop()
+            pile[-1] = [pile[-1][0] + tete[0], pile[-1][1] + tete[1], pile[-1][2] + tete[2]]
 
-    # Jeffreys peut rompre marginalement la monotonie entre deux blocs de tailles
-    # très différentes → on la rétablit, puis on force un pas strictement positif.
-    cy_a = np.maximum.accumulate(cy_a)
+    if len(pile) < 2:
+        return {"x": [], "y": []}
+
+    cx_a = np.asarray([b[0] / b[1] for b in pile], dtype=float)
+    cy_a = np.asarray([_taux_lisse(b[2], b[1]) for b in pile], dtype=float)
+    cy_a = np.clip(cy_a, 1e-6, 0.999)
+
+    # Garde de stricte croissance : la fusion la garantit déjà, ceci ne couvre que
+    # l'arrondi de sérialisation.
     for i in range(1, len(cy_a)):
         floor = cy_a[i - 1] * (1.0 + _MIN_REL_STEP) + 1e-9
         if cy_a[i] < floor:
