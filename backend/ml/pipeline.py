@@ -298,6 +298,32 @@ def _edge_gate_ok(em: dict) -> bool:
 H2H_MIN_ROWS = 2000
 
 
+def _borne_hors_echantillon(current_mv) -> tuple[object, str]:
+    """Date après laquelle une course n'a été vue par AUCUN des deux modèles.
+
+    Renvoie `(borne, source)`, la source servant au diagnostic : sur `created_at` un
+    échantillon minuscule est ATTENDU et ne signale rien d'autre qu'un champion trop
+    ancien pour porter `train_fin`.
+
+    `train_fin` (migration 0043) est la date de la dernière course RÉELLEMENT apprise.
+    `created_at` est la date de PROMOTION, et les deux sont séparées par toute la
+    largeur du hold-out : `train()` réserve les 20 % de courses les plus récentes, soit
+    environ 73 jours sur une fenêtre de 12 mois. Prendre `created_at` pour borne jetait
+    donc ces 73 jours de hold-out valides et ne laissait qu'une journée de courses —
+    381 lignes contre 2 000 exigées, mesuré chaque nuit jusqu'au 2026-08-31, d'où un
+    arbitrage qui ne s'est jamais exécuté depuis son installation.
+
+    Le repli sur `created_at` est VOLONTAIREMENT conservateur : il sous-estime la
+    fenêtre utilisable, ce qui fait au pire renoncer au test. L'erreur inverse —
+    surestimer — ferait noter le champion sur des courses qu'il a apprises et lui
+    donnerait un avantage mécanique, c'est-à-dire un verdict faux plutôt qu'absent.
+    """
+    train_fin = getattr(current_mv, "train_fin", None)
+    if train_fin is not None:
+        return train_fin, "train_fin"
+    return current_mv.created_at, "created_at"
+
+
 async def _head_to_head_auc(
     session: AsyncSession,
     challenger: BlackTurfEnsemble,
@@ -308,9 +334,21 @@ async def _head_to_head_auc(
     """AUC du champion ET du challenger sur EXACTEMENT le même échantillon.
 
     L'échantillon = le hold-out temporel du challenger (courses qu'il n'a pas vues),
-    RESTREINT aux courses postérieures à la création du champion — donc hors-échantillon
-    pour les DEUX modèles. Sans cette restriction le champion aurait un avantage
-    mécanique : il a été entraîné sur une partie de ce hold-out.
+    RESTREINT aux courses postérieures à la FIN D'ENTRAÎNEMENT du champion — donc
+    hors-échantillon pour les DEUX modèles. Sans cette restriction le champion aurait un
+    avantage mécanique : il aurait appris une partie de ce hold-out.
+
+    La borne est `train_fin` (migration 0043) et NON `created_at`. Confondre les deux
+    rendait ce test inexécutable : `train()` réserve les 20 % de courses les plus
+    récentes en hold-out, si bien qu'un champion promu la veille s'est arrêté
+    d'apprendre environ 73 jours plus tôt. Borner à sa promotion jetait ces ~73 jours
+    de hold-out valides pour n'en garder qu'un — mesuré chaque nuit jusqu'au
+    2026-08-31 : 381 lignes contre 2 000 exigées, donc `None` systématique et repli
+    permanent sur le walk-forward, que ce fichier déclare pourtant non comparable d'une
+    génération de données à l'autre.
+
+    Tant que le champion n'a pas de `train_fin` (versions antérieures à la migration),
+    on garde la borne stricte : une borne inventée serait pire que pas de test.
 
     Coût : de l'inférence pure, pas de ré-entraînement. Le champion est chargé puis
     libéré immédiatement (le garder en RAM à côté du challenger ET du dataset était la
@@ -324,10 +362,12 @@ async def _head_to_head_auc(
     if "course_id" not in X_hold.columns or len(X_hold) == 0:
         return None
 
+    borne, borne_source = _borne_hors_echantillon(current_mv)
+
     try:
         rows = await session.execute(
             text("SELECT course_id FROM courses WHERE date_heure > :cutoff"),
-            {"cutoff": current_mv.created_at},
+            {"cutoff": borne},
         )
         oos_courses = {r[0] for r in rows}
     except Exception as e:
@@ -337,7 +377,11 @@ async def _head_to_head_auc(
     mask = X_hold["course_id"].isin(oos_courses).to_numpy()
     n_rows = int(mask.sum())
     if n_rows < H2H_MIN_ROWS:
-        log.info("pipeline.h2h.sample_too_small", n_rows=n_rows, min_rows=H2H_MIN_ROWS)
+        # `borne_source` est la première chose à lire ici : sur `created_at`, un
+        # échantillon minuscule est ATTENDU (le champion vient d'être promu) et ne
+        # signale rien d'autre qu'un champion trop ancien pour porter `train_fin`.
+        log.info("pipeline.h2h.sample_too_small", n_rows=n_rows,
+                 min_rows=H2H_MIN_ROWS, borne_source=borne_source, borne=str(borne))
         return None
 
     X_oos, y_oos = X_hold[mask], y_hold[mask]
@@ -1252,6 +1296,28 @@ async def _do_retraining(mois: int, label: str) -> None:
         from ml.models import temporal_holdout_mask
         _hm = temporal_holdout_mask(X)
         X_hold, y_hold = X[_hm].copy(), y[_hm].copy()
+        # Dernière course RÉELLEMENT apprise (migration 0043). Elle sera la borne de
+        # l'arbitrage champion/challenger de la nuit suivante, où `created_at` — la date
+        # de PROMOTION — ne vaut rien : le hold-out couvre les 20 % de courses les plus
+        # récentes, soit ~73 jours pendant lesquels ce modèle n'a rien appris.
+        # X est trié chronologiquement (le dataset sort en ORDER BY c.date_heure), donc
+        # le dernier course_id du côté entraînement est bien le plus récent appris. La
+        # date elle-même n'est pas dans X (le dataset ne porte que les features et les
+        # identifiants) : une requête d'une ligne la donne.
+        _train_fin = None
+        try:
+            _dernier = X.loc[~_hm, "course_id"].iloc[-1] if "course_id" in X.columns else None
+            if _dernier is not None:
+                _train_fin = (await session.execute(
+                    text("SELECT date_heure FROM courses WHERE course_id = :cid"),
+                    {"cid": _dernier},
+                )).scalar()
+        except Exception as _e:
+            # Best-effort : sans cette date le head-to-head retombe sur la borne
+            # stricte, exactement le comportement d'avant. Ne jamais faire échouer un
+            # retrain pour une colonne d'observabilité.
+            log.warning("pipeline.retrain.train_fin_indisponible", err=str(_e)[:160])
+        log.info(f"pipeline.{label}.train_fin", train_fin=str(_train_fin) if _train_fin else None)
         # X/y/y_win ne servent plus à la décision de promotion (métriques déjà calculées)
         # → on libère avant la phase métriques/edge_monitor pour ne pas cumuler le pic RAM.
         n_train_rows = len(X)
@@ -1378,6 +1444,8 @@ async def _do_retraining(mois: int, label: str) -> None:
                 # (MIN_RELIABLE_TRAIN, data_jump) s'y comparent. On ne change
                 # donc pas l'unité, on a corrigé les libellés qui l'affichaient.
                 nb_courses_train=n_train_rows,
+                # Borne de l'arbitrage champion/challenger de la nuit suivante.
+                train_fin=_train_fin,
                 est_actif=True,
                 est_synthetique=False,  # entraîné sur de vraies courses
                 feature_importance=model.feature_importance,

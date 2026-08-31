@@ -1042,6 +1042,16 @@ class ModelVersion(Base):
     market_rank_auc: Mapped[float | None] = mapped_column(Float)
     rank_delta_market: Mapped[float | None] = mapped_column(Float)
     feature_importance: Mapped[dict | None] = mapped_column(JSON)
+    # ── Fin d'entraînement (migration 0043) ───────────────────────────────────
+    # Date de la dernière course RÉELLEMENT apprise, à ne pas confondre avec
+    # `created_at` qui est la date de PROMOTION. `train()` réserve les 20 % de
+    # courses les plus récentes en hold-out : un modèle promu hier s'est arrêté
+    # d'apprendre environ 73 jours plus tôt. L'arbitrage champion/challenger a
+    # besoin de cette borne-là pour savoir quelles courses aucun des deux modèles
+    # n'a vues ; borné à `created_at`, il ne trouvait qu'une journée de courses et
+    # ne s'exécutait jamais. NULL = versions antérieures au 31/08/2026, jamais
+    # reconstruit après coup (le dataset a changé).
+    train_fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
