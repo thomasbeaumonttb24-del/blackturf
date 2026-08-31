@@ -26,6 +26,7 @@ déclaré sain : sur trois partants, 0 % de couverture ne prouve rien.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -47,6 +48,29 @@ SOURCES_COTES: dict[str, str] = {
     "winamax": "cote_winamax",
     "betclic": "cote_betclic",
 }
+
+# Sources dont on refuse d'AFFICHER la cote, faute de savoir qu'elle porte sur le
+# bon cheval. Ce n'est pas une question de disponibilité mais de VÉRACITÉ.
+#
+# Test décisif, et il est simple : deux carnets honnêtes désignent le même favori
+# dans 90 à 95 % des courses. Mesuré en production sur les courses où la source
+# couvre au moins 80 % des partants :
+#
+#     bet365   81,9 %      unibet   81,4 %      ladbrokes  78,8 %
+#     betfair  75,5 %      geny     61,8 %  (audit du 2026-08-31, 199 courses)
+#
+# GenyBet a été corrigé le 2026-08-27 (cotes plafonnées à 9,9, décalage d'un cheval,
+# appariement sans le lieu). RE-MESURÉ APRÈS ce correctif, sur les 4 derniers jours
+# seuls : 64,5 % d'accord sur 200 courses, corrélation 0,749 sur 2 159 partants.
+# Le correctif n'a donc pas suffi : plus d'une course sur trois lui voit un autre
+# favori que le PMU. Une cote qui porte sur le mauvais cheval n'est pas une cote
+# imprécise, c'est une donnée fausse — et elle entrait dans le « meilleur prix »
+# affiché au visiteur (`cote_min`, `LEAST(...)`), où la valeur la PLUS BASSE gagne :
+# une erreur y est donc systématiquement retenue plutôt que noyée.
+#
+# Le modèle ne l'apprend pas (`ml/models.py` META_COLS), donc aucun impact ML. La
+# réintégrer suppose de repasser au-dessus de 90 % sur ce même test.
+SOURCES_COTES_NON_FIABLES = ("geny",)
 
 # Sources dont l'absence EMPÊCHE de pronostiquer : sans cote PMU, ni EV ni plan
 # de mise ne sont calculables. Les autres enrichissent la comparaison de marché.
@@ -104,6 +128,33 @@ SEUIL_TAUX_ECHEC_DEGRADE = 0.02
 # Tâches de fond : en dessous de 5 échecs sur la fenêtre, c'est le bruit normal
 # d'un OOM isolé ou d'une course mal formée. Au-delà, quelque chose est cassé.
 SEUIL_ECHECS_TACHES_RECENTS = 5
+
+# Features mortes. `ml/feature_health` mesure chaque nuit les features à variance
+# nulle et persiste le résultat — mais PERSONNE ne le lisait : 54 snapshots en base,
+# aucune alerte, et 29 features constantes sur 185 (15,7 % du vecteur) découvertes
+# par un audit manuel le 2026-08-31. Une chaîne de scrape peut donc mourir sans que
+# rien ne le dise, exactement comme la colonne `ecart_longueurs` restée NULL sur
+# 330 145 lignes.
+# Le seuil n'est pas zéro : quelques features légitimement constantes existent
+# (`saison_code` l'est sur toute fenêtre courte). 12 est au-dessus de ce bruit de
+# fond et bien en dessous des 29 constatées.
+SEUIL_FEATURES_MORTES = 12
+# Une hausse BRUSQUE compte autant que le niveau : +5 features mortes d'un snapshot
+# à l'autre, c'est une source qui vient de tomber, même si le total reste sous le
+# seuil absolu.
+SEUIL_HAUSSE_FEATURES_MORTES = 5
+
+# Calibration par bande de probabilité. Une probabilité de X % doit gagner X % du
+# temps ; sinon la « cote juste » affichée est fausse, et l'espérance de gain qui en
+# découle l'est aussi. Sous 0,40 la calibration est excellente (écart mesuré
+# -0,0013 sur 46 500 partants) ; au-dessus elle dérive, mais toute cette queue ne
+# pèse que ~1 % de la population. D'où le seuil de PREUVE : on n'alerte pas sur
+# 96 observations, on attend d'en avoir assez pour que l'écart signifie quelque
+# chose. À 300 observations, l'écart-type binomial autour de 0,5 vaut 2,9 points :
+# un écart de 5 points est alors à ~1,7 sigma et mérite d'être regardé.
+MIN_OBS_BANDE_CALIBRATION = 300
+SEUIL_ECART_CALIBRATION = 0.05
+BANDES_CALIBRATION = ((0.0, 0.40), (0.40, 0.50), (0.50, 0.60), (0.60, 0.70), (0.70, 1.01))
 
 
 def _as_dt(valeur) -> datetime | None:
@@ -534,6 +585,186 @@ def sante_files_taches(heures: int = 24) -> dict:
     return resultat
 
 
+async def sante_features(session: AsyncSession) -> dict:
+    """Les features apprises portent-elles encore de l'information ?
+
+    `ml/feature_health` calcule cette mesure chaque nuit depuis des mois et la
+    persiste dans `feature_health`. Rien ne la LISAIT : 54 snapshots en base, zéro
+    alerte, et 29 features à variance strictement nulle — toute la chaîne « presse »
+    et toute la chaîne « dynamique de course » — découvertes par un audit manuel.
+    Une mesure que personne ne consulte n'est pas une supervision.
+
+    On compare aussi au snapshot précédent : une source qui tombe fait bondir le
+    compte d'un coup, et ce saut doit alerter même sous le seuil absolu.
+    """
+    # `feature_health` est créée à la volée par `persist_feature_health` : elle
+    # n'existe pas tant que le calcul nocturne n'a jamais tourné (base neuve, tests).
+    # On ne juge pas, mais on DÉSEMPOISONNE : sous PostgreSQL, une requête échouée
+    # avorte la transaction entière et toutes les suivantes lèvent, avec un message
+    # sans rapport avec la cause (panne du 20/08/2026, cf. db.database.desempoisonner).
+    try:
+        lignes = (await session.execute(text("""
+            SELECT data, created_at FROM feature_health
+            ORDER BY created_at DESC LIMIT 2
+        """))).all()
+    except Exception as e:                                        # noqa: BLE001
+        from db.database import desempoisonner
+        await desempoisonner(session)
+        log.info("data_quality.feature_health_absente", err=str(e)[:160])
+        return {"disponible": False, "raison": "table feature_health absente"}
+    if not lignes:
+        return {"disponible": False, "raison": "aucun instantané feature_health"}
+
+    actuel = lignes[0][0] or {}
+    if isinstance(actuel, str):
+        actuel = json.loads(actuel)
+    if actuel.get("insufficient"):
+        return {"disponible": False, "raison": "échantillon trop court"}
+
+    mortes = list(actuel.get("dead") or [])
+    precedent = None
+    if len(lignes) > 1:
+        p = lignes[1][0] or {}
+        if isinstance(p, str):
+            p = json.loads(p)
+        if not p.get("insufficient"):
+            precedent = list(p.get("dead") or [])
+
+    nouvelles = sorted(set(mortes) - set(precedent)) if precedent is not None else []
+    n_features = int(actuel.get("n_features") or 0)
+    return {
+        "disponible": True,
+        # `_as_dt` : aiosqlite (tests) rend un TEXTE là où asyncpg rend un datetime.
+        "mesure_a": (lambda d: d.isoformat() if d else None)(_as_dt(lignes[0][1])),
+        "n_features": n_features,
+        "n_mortes": len(mortes),
+        "part_mortes": round(len(mortes) / n_features, 3) if n_features else None,
+        # Les noms sont bornés : une anomalie doit rester lisible dans une alerte.
+        "mortes": sorted(mortes)[:40],
+        "nouvelles_mortes": nouvelles[:20],
+        "n_nouvelles_mortes": len(nouvelles),
+    }
+
+
+async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
+    """Une probabilité de X % gagne-t-elle X % du temps ?
+
+    Ce que la mesure a établi le 2026-08-31, et qui motive une SURVEILLANCE plutôt
+    qu'un correctif :
+
+      bande      n servi   réel    écart
+      0,00-0,40  46 497  0,0880  0,0893  -0,0013   <- excellent
+      0,40-0,50     338  0,4427  0,3639  +0,0788
+      0,50-0,60     138  0,5429  0,4855  +0,0574
+      0,70+          29  0,7936  0,4138  +0,3798
+
+    MÉCANISME IDENTIFIÉ : ce n'est pas la courbe isotone qui échoue, c'est la
+    RENORMALISATION Σ=1 appliquée APRÈS elle. Mesuré dans la bande 0,70+ : la courbe
+    rend 0,6122, c'est 0,7973 qui est servi, et le réel vaut 0,4074. La division par
+    la somme redonne au favori la confiance que la calibration venait de lui retirer.
+
+    CE QUI A ÉTÉ TESTÉ ET REJETÉ, en 5 plis GROUPÉS PAR COURSE (protocole du
+    calibrage de `_PRIOR`), 4 375 courses / 47 045 partants, hors échantillon :
+
+      A. renorm(courbe(brut))  — l'actuel     logloss 0,27463  ECE 0,00265  Σ=1,000
+      B. deuxième passe sur le servi          logloss 0,27455  ECE 0,00358  Σ=1,000
+      C. deuxième passe sans renorm finale    logloss 0,27485  ECE 0,00706  Σ=1,073
+      D. aucune renormalisation               logloss 0,27522  ECE 0,00616  Σ=1,066
+      E. plafond au sommet de la courbe       logloss 0,27459  ECE 0,00258  (36 lignes)
+
+    Aucune ne domine. B redresse la bande 0,50-0,60 (+0,127 -> +0,013) mais sur
+    96 observations contre 71 : l'écart tient dans 2 sigma de bruit binomial, et
+    l'ECE global se dégrade. C et D cassent Σ=1 pour un résultat pire. E ne touche
+    que 0,08 % des lignes. Toute la queue >= 0,40 pèse ~490 partants sur 47 045 :
+    à ce volume, aucune méthode de calibration ne peut être départagée.
+
+    On ne change donc pas la calibration sur ces données-là. On rend la dérive
+    VISIBLE, avec un seuil de preuve, pour qu'elle devienne actionnable le jour où
+    le volume le permettra — plutôt que d'être redécouverte par un audit.
+    """
+    # SQL volontairement PORTABLE : ni `LATERAL`, ni `jsonb_array_elements`, ni
+    # `make_interval` — la suite tourne sur SQLite, et une supervision dont
+    # l'invariant n'est pas testable ne vaut rien (même parti pris que
+    # `/seo/analyse-du-jour`). Le vainqueur est extrait en Python : ~3 500 classements
+    # sur la fenêtre, contre une jointure latérale par partant.
+    depuis = datetime.now(timezone.utc) - timedelta(days=int(jours))
+    partants = (await session.execute(text("""
+        SELECT p.course_id, pa.numero, p.proba_top1
+        FROM prediction_evaluation p
+        JOIN participations pa ON pa.participation_id = p.participation_id
+        JOIN courses c ON c.course_id = p.course_id
+        WHERE c.statut = 'termine'
+          AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+          AND p.created_at < c.date_heure
+          AND c.date_heure >= :depuis
+          AND pa.non_partant = false
+          AND p.proba_top1 IS NOT NULL
+    """), {"depuis": depuis})).all()
+    if not partants:
+        return {"disponible": False, "raison": "cohorte trop courte", "n": 0}
+
+    resultats = (await session.execute(text("""
+        SELECT r.course_id, r.classement
+        FROM resultats r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE c.date_heure IS NOT NULL AND c.date_heure >= :depuis
+    """), {"depuis": depuis})).all()
+
+    vainqueur: dict[str, int] = {}
+    for course_id, classement in resultats:
+        if isinstance(classement, str):
+            try:
+                classement = json.loads(classement)
+            except (TypeError, ValueError):
+                continue
+        if not isinstance(classement, list):
+            continue
+        for entree in classement:
+            # `position == 1` et JAMAIS l'index 0 : le classement n'est pas garanti
+            # trié (même convention que `_naive_favorite_roi`).
+            if isinstance(entree, dict):
+                try:
+                    if int(entree.get("position")) == 1:
+                        vainqueur[course_id] = int(entree.get("numero"))
+                        break
+                except (TypeError, ValueError):
+                    continue
+
+    lignes: list[tuple[float, int]] = []
+    for course_id, numero, proba in partants:
+        gagnant = vainqueur.get(course_id)
+        if gagnant is None:
+            continue                      # course sans arrivée exploitable
+        try:
+            lignes.append((float(proba), 1 if int(numero) == gagnant else 0))
+        except (TypeError, ValueError):
+            continue
+
+    if len(lignes) < MIN_OBS_BANDE_CALIBRATION:
+        return {"disponible": False, "raison": "cohorte trop courte", "n": len(lignes)}
+
+    bandes = []
+    for bas, haut in BANDES_CALIBRATION:
+        pris = [(p, g) for p, g in lignes if bas <= p < haut]
+        if not pris:
+            continue
+        n = len(pris)
+        servi = sum(p for p, _ in pris) / n
+        reel = sum(g for _, g in pris) / n
+        bandes.append({
+            "bande": f"{bas:.2f}-{min(haut, 1.0):.2f}",
+            "n": n,
+            "proba_moyenne": round(servi, 4),
+            "taux_reel": round(reel, 4),
+            "ecart": round(servi - reel, 4),
+            # `concluant` : au-dessus, l'écart n'est plus explicable par le seul bruit
+            # d'échantillonnage. En dessous, le chiffre est PUBLIÉ mais n'autorise
+            # aucune conclusion — c'est la différence entre mesurer et conclure.
+            "concluant": n >= MIN_OBS_BANDE_CALIBRATION,
+        })
+    return {"disponible": True, "fenetre_jours": jours, "n": len(lignes), "bandes": bandes}
+
+
 async def rapport_qualite(session: AsyncSession) -> dict:
     """Rapport complet + liste des anomalies à signaler."""
     couverture = await couverture_sources(session)
@@ -543,6 +774,8 @@ async def rapport_qualite(session: AsyncSession) -> dict:
     incompletes = await courses_non_pronosticables(session)
     scrapers = await sante_scrapers(session)
     livraison = await livraison_alertes(session)
+    features = await sante_features(session)
+    calibration = await calibration_par_bande(session)
     files = sante_files_taches()
 
     anomalies: list[dict] = []
@@ -588,6 +821,37 @@ async def rapport_qualite(session: AsyncSession) -> dict:
                 "code": "scraper_en_echec",
                 "gravite": "warning",
                 "message": f"Scraper '{nom}' : {info['n_runs']} exécutions, aucune réussie",
+            })
+
+    if features.get("disponible"):
+        if features["n_nouvelles_mortes"] >= SEUIL_HAUSSE_FEATURES_MORTES:
+            anomalies.append({
+                "code": "features_devenues_mortes",
+                "gravite": "critical",
+                "message": (f"{features['n_nouvelles_mortes']} features sont devenues "
+                            f"constantes depuis la dernière mesure "
+                            f"({', '.join(features['nouvelles_mortes'][:8])}) — une source "
+                            "de données vient probablement de tomber"),
+            })
+        elif features["n_mortes"] >= SEUIL_FEATURES_MORTES:
+            anomalies.append({
+                "code": "features_mortes",
+                "gravite": "warning",
+                "message": (f"{features['n_mortes']} features sur {features['n_features']} "
+                            "sont à variance nulle : le modèle les apprend comme du bruit "
+                            f"({', '.join(features['mortes'][:8])}…)"),
+            })
+
+    for bande in (calibration.get("bandes") or []):
+        if bande["concluant"] and abs(bande["ecart"]) >= SEUIL_ECART_CALIBRATION:
+            anomalies.append({
+                "code": "calibration_derive",
+                "gravite": "warning",
+                "message": (f"Probabilités de la bande {bande['bande']} : annoncées "
+                            f"{bande['proba_moyenne']:.1%}, réalisées {bande['taux_reel']:.1%} "
+                            f"({bande['ecart']:+.1%} sur {bande['n']} partants) — la cote "
+                            "juste affichée et l'espérance qui en découle sont faussées "
+                            "d'autant"),
             })
 
     if fraicheur["statut"] == "stale":
@@ -658,6 +922,8 @@ async def rapport_qualite(session: AsyncSession) -> dict:
         "courses_incompletes": incompletes,
         "sante_scrapers": scrapers,
         "livraison_alertes": livraison,
+        "sante_features": features,
+        "calibration_par_bande": calibration,
         "files_taches": files,
         "anomalies": anomalies,
         "statut_global": ("critical" if any(a["gravite"] == "critical" for a in anomalies)

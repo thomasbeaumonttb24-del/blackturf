@@ -18,6 +18,7 @@ import {
   type SeoResultats,
 
   jsonLd,
+  fetchApercuCourse,
 } from "@/lib/seo";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import CourseClient from "./CourseClient";
@@ -192,7 +193,15 @@ export default async function CoursePage({ params }: Props) {
   if (res.status === "notfound") notFound();
 
   const course = res.status === "ok" ? res.course : null;
-  const resultats = course?.statut === "termine" ? await fetchResultats(id) : null;
+  // En parallèle : l'arrivée (course terminée) et l'aperçu de l'analyse. Les deux
+  // appels sont indépendants — les enchaîner ajouterait leur latence l'une à
+  // l'autre sur le chemin du rendu, et cette page est rendue à la demande.
+  const [resultats, apercu] = course
+    ? await Promise.all([
+        course.statut === "termine" ? fetchResultats(id) : Promise.resolve(null),
+        fetchApercuCourse(id),
+      ])
+    : [null, null];
 
   const jour = course ? jourDeCourseId(course.course_id) : null;
   const estAujourdhui = jour === jourParis();
@@ -336,6 +345,89 @@ export default async function CoursePage({ params }: Props) {
                   {course.conditions_texte}
                 </p>
               </div>
+            )}
+
+            {/* ── L'ANALYSE, EN CLAIR DANS LE HTML SERVI ──────────────────────
+                Le HTML d'une fiche course ne contenait AUCUNE probabilité :
+                `grep proba_top1 course.html` renvoyait 0, sur ~17 000 fiches
+                publiées. Tout arrivait par un `fetch` du navigateur — donc
+                invisible pour un moteur de recherche, et invisible pour un
+                visiteur avant l'hydratation, sur la page même censée convertir.
+
+                Rien de nouveau n'est publié ici : le masquage est appliqué CÔTÉ
+                SERVEUR par `/courses/{id}/apercu` (ligne non révélée → ni numéro
+                ni nom ne quittent l'API ; seuls le rang, les probabilités et la
+                cote juste sortent, et la cote juste n'est que 1/proba). C'est le
+                même contenu que l'application affiche déjà, simplement présent
+                dès le premier octet. */}
+            {apercu && apercu.classement.length > 0 && (
+              <>
+                <h3 className="mt-6 font-display text-[15px] font-bold text-slate-900">
+                  Analyse BlackTurf ({apercu.nb_analyses} chevaux notés)
+                </h3>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-stone-600">
+                  {apercu.proba_top1 != null && (
+                    <>
+                      Le premier du classement est donné gagnant à{" "}
+                      {(apercu.proba_top1 * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %
+                      {apercu.confiance != null ? `, avec une confiance de ${apercu.confiance}/100` : ""}.{" "}
+                    </>
+                  )}
+                  {apercu.accord_marche === true && "Il est aussi le favori des cotes. "}
+                  {apercu.accord_marche === false && "Le marché, lui, en désigne un autre. "}
+                  {apercu.nb_ecartes > 0 && `${apercu.nb_ecartes} chevaux sont crédités de moins de 3 % de chances. `}
+                  La cote juste est l&apos;inverse de la probabilité : au-dessus, le cheval est
+                  payé plus qu&apos;il ne vaut ; en dessous, moins.
+                </p>
+                <div className="mt-3 overflow-x-auto rounded-xl border border-stone-200">
+                  <table className="w-full min-w-[460px] border-collapse text-[13px]">
+                    <caption className="sr-only">
+                      Classement prédit par BlackTurf, probabilité de victoire et cote juste
+                    </caption>
+                    <thead>
+                      <tr className="bg-stone-50 text-left text-[11px] uppercase tracking-[0.08em] text-stone-600">
+                        <th scope="col" className="px-3 py-2 font-semibold">Rang</th>
+                        <th scope="col" className="px-3 py-2 font-semibold">Cheval</th>
+                        <th scope="col" className="px-3 py-2 text-right font-semibold">Proba. victoire</th>
+                        <th scope="col" className="px-3 py-2 text-right font-semibold">Cote juste</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {apercu.classement.map((l) => (
+                        <tr key={l.rang} className="border-t border-stone-100 text-stone-600">
+                          <td className="px-3 py-2 font-display font-bold tabular-nums text-slate-900">
+                            {l.rang}
+                          </td>
+                          <td className="px-3 py-2 font-medium text-slate-900">
+                            {l.revele && l.nom ? (
+                              <>
+                                {l.numero != null && (
+                                  <span className="mr-1.5 tabular-nums text-stone-600">{l.numero}</span>
+                                )}
+                                {titleCase(l.nom)}
+                              </>
+                            ) : (
+                              // Masqué PAR LE SERVEUR : le nom n'existe pas dans la
+                              // réponse. Pas un flou CSS, qui se retire en deux clics.
+                              <span className="text-stone-500">Réservé aux abonnés</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {l.proba_top1 != null
+                              ? `${(l.proba_top1 * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`
+                              : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {l.cote_juste != null
+                              ? l.cote_juste.toLocaleString("fr-FR", { maximumFractionDigits: 1 })
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
 
             <h3 className="mt-6 font-display text-[15px] font-bold text-slate-900">

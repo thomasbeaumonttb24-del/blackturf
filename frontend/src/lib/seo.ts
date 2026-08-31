@@ -445,6 +445,53 @@ export async function fetchResultats(id: string): Promise<SeoResultats | null> {
   }
 }
 
+/* ── Aperçu PUBLIC de l'analyse d'une course ──────────────────────────────────
+   Le HTML servi d'une fiche course ne contenait AUCUNE probabilité : `grep proba_top1`
+   renvoyait 0 sur les ~17 000 fiches publiées. Tout arrivait par un `fetch` du
+   navigateur — donc invisible pour un moteur de recherche, et invisible pour un
+   visiteur avant l'hydratation, sur la page même qui est censée convertir.
+
+   L'endpoint applique déjà le masquage CÔTÉ SERVEUR (`revele: false` → ni numéro
+   ni nom ne quittent l'API, seuls le rang, les probabilités et la cote juste
+   sortent). Le rendre ici ne publie donc rien de plus que ce que l'application
+   affiche déjà : c'est le même contenu, simplement présent dès le premier octet. */
+export interface SeoApercuLigne {
+  rang: number;
+  proba_top1: number | null;
+  proba_top3: number | null;
+  cote_juste: number | null;
+  revele: boolean;
+  numero?: number;
+  nom?: string;
+  cote?: number | null;
+  position?: number;
+}
+
+export interface SeoApercuCourse {
+  disponible: boolean;
+  statut: string;
+  nb_analyses: number;
+  confiance: number | null;
+  proba_top1: number | null;
+  accord_marche: boolean | null;
+  nb_ecartes: number;
+  nb_value_bets: number;
+  classement: SeoApercuLigne[];
+}
+
+export async function fetchApercuCourse(id: string): Promise<SeoApercuCourse | null> {
+  try {
+    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}/apercu`, {
+      next: { revalidate: 120 },
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as SeoApercuCourse;
+    return d?.disponible ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ── Compteur de paris de valeur (bandeau haut du programme) ──────────────────
    Ce compteur était chargé UNIQUEMENT côté navigateur : le bandeau n'existait pas dans
    le HTML, apparaissait après l'hydratation puis après l'aller-retour réseau, et devenait

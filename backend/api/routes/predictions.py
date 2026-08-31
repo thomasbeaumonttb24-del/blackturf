@@ -801,7 +801,11 @@ async def get_pari_du_jour(
     conf = round(float(pred.confidence_score or 0))
     # cote_pmu peut être None (value bet détecté via une autre source) → éviter
     # le crash f"{None:.1f}" et formater la cote seulement si présente.
-    _cote_aff = part.cote_pmu or part.cote_geny or part.cote_betclic or part.cote_winamax or None
+    # `cote_geny` retirée du repli d'affichage : sur plus d'une course sur trois
+    # elle porte sur un autre cheval que celui qu'on affiche (cf.
+    # `services.data_quality.SOURCES_COTES_NON_FIABLES`). Mieux vaut ne pas
+    # afficher de cote qu'en afficher une fausse.
+    _cote_aff = part.cote_pmu or part.cote_betclic or part.cote_winamax or None
     return {
         "course_id": cid,
         "code": code,
@@ -899,8 +903,13 @@ async def get_course_analysis(
                PredictionModel.proba_top3, PredictionModel.proba_top1, PredictionModel.rang_predit,
                Participation.numero, Cheval.nom,
                Participation.cote_pmu,
+               # `cote_geny` hors du meilleur prix : la source désigne un autre
+               # favori que le PMU sur plus d'une course sur trois (64,5 %, 200
+               # courses, APRÈS le correctif du 27/08). `least` retient la valeur la
+               # plus BASSE : une cote posée sur le mauvais cheval y gagne
+               # systématiquement. Cf. `services.data_quality.SOURCES_COTES_NON_FIABLES`.
                func.least(
-                   Participation.cote_pmu, Participation.cote_geny, Participation.cote_bzh,
+                   Participation.cote_pmu, Participation.cote_bzh,
                    Participation.cote_winamax, Participation.cote_betclic, Participation.cote_unibet,
                ).label("cote_min"),)
         .join(PredictionModel, PredictionModel.participation_id == FeatureML.participation_id, isouter=True)

@@ -114,6 +114,178 @@ def _extract_commentaire(course_obj: dict, moi: dict | None):
                 return t
     return None
 
+# ── Écart à l'arrivée : du libellé PMU aux longueurs ────────────────────────────
+#
+# `distanceAvecPrecedent` n'est PAS un nombre, c'est un objet
+# `{"knownValue": "UN_NEZ", "rawValue": "Nez"}`. Le writer testait
+# `isinstance(ecart, (int, float))` : la valeur était donc écartée à CHAQUE ligne,
+# et `historique_courses.ecart_longueurs` valait NULL sur les 330 145 lignes de la
+# table. Quatre features en dépendent (`ecart_moyen_recent`, `proximite_vainqueur`,
+# `nb_defaites_courtes`, `defaite_courte_derniere`) : toutes constantes, donc
+# apprises comme du bruit.
+#
+# Barème en longueurs, aligné sur l'usage des chronos français (1 longueur ≈ 2,4 m).
+# Table établie sur les valeurs RÉELLEMENT observées : 802 courses passées relevées
+# le 2026-08-31, 33 libellés distincts, tous couverts ci-dessous.
+_ECART_MOTS = {
+    "DEAD_HEAT": 0.0, "DEAD_HEAT_ALT": 0.0,
+    "UN_NEZ": 0.05, "COURTE_TETE": 0.10, "UNE_TETE": 0.15, "TETE": 0.15,
+    "COURTE_ENCOLURE": 0.20, "UNE_ENCOLURE": 0.30, "ENCOLURE": 0.30,
+    "DEMI_LONGUEUR": 0.50, "TROIS_QUARTS_DE_LONGUEUR": 0.75,
+    # « Loin » / « Distancé » : le PMU ne chiffre pas. 25 longueurs est au-delà de
+    # tout écart utile et sous le plafond de 30 appliqué par la feature — la valeur
+    # ne prétend donc pas à une précision qu'elle n'a pas, elle dit « très loin ».
+    "LOIN": 25.0, "DISTANCE": 25.0,
+}
+_ECART_UNITES = {
+    "UNE": 1, "DEUX": 2, "TROIS": 3, "QUATRE": 4, "CINQ": 5, "SIX": 6, "SEPT": 7,
+    "HUIT": 8, "NEUF": 9, "DIX": 10, "ONZE": 11, "DOUZE": 12, "TREIZE": 13,
+    "QUATORZE": 14, "QUINZE": 15, "SEIZE": 16, "DIX_SEPT": 17, "DIX_HUIT": 18,
+    "DIX_NEUF": 19, "VINGT": 20, "VINGT_CINQ": 25, "TRENTE": 30,
+}
+_ECART_FRACTIONS = {
+    "": 0.0, "_ET_DEMIE": 0.5, "_ET_DEMI": 0.5, "_ET_QUART": 0.25,
+    "_TROIS_QUARTS": 0.75,
+}
+
+
+def _ecart_texte_en_longueurs(brut: str | None):
+    """Repli sur `rawValue` : « 1 L 1/2 », « 3/4 L », « Courte tête », « Nez »…
+
+    Indispensable, et pas théorique : 30 des 802 écarts relevés portent
+    `knownValue = "INCONNU"` alors que `rawValue` dit précisément « Courte tête »,
+    « Tête » ou « Courte encolure ». Sans ce repli, ces marges seraient perdues.
+    """
+    if not isinstance(brut, str):
+        return None
+    t = " ".join(brut.strip().lower().split())
+    mots = {
+        "dead-heat": 0.0, "dead heat": 0.0,
+        "nez": 0.05, "courte tête": 0.10, "courte tete": 0.10,
+        "tête": 0.15, "tete": 0.15,
+        "courte encolure": 0.20, "encolure": 0.30,
+        "loin": 25.0, "distancé": 25.0, "distance": 25.0,
+    }
+    if t in mots:
+        return mots[t]
+    # Formes chiffrées : « 2 L », « 1 L 1/2 », « 3/4 L », « 1/2 L ».
+    m = re.match(r"^(?:(\d+)\s*l)?\s*(?:(\d)\s*/\s*(\d))?\s*(?:l)?$", t)
+    if not m or not (m.group(1) or m.group(2)):
+        return None
+    total = float(m.group(1) or 0)
+    if m.group(2) and m.group(3) and float(m.group(3)) != 0:
+        total += float(m.group(2)) / float(m.group(3))
+    return total
+
+
+def _ecart_en_longueurs(valeur):
+    """Marge SUR LE CHEVAL PRÉCÉDENT, en longueurs. None si indéchiffrable."""
+    if isinstance(valeur, (int, float)) and not isinstance(valeur, bool):
+        return float(valeur)
+    if not isinstance(valeur, dict):
+        return None
+    connu = valeur.get("knownValue")
+    if isinstance(connu, str):
+        cle = connu.strip().upper()
+        if cle in _ECART_MOTS:
+            return _ECART_MOTS[cle]
+        for suffixe, fraction in sorted(_ECART_FRACTIONS.items(), key=lambda kv: -len(kv[0])):
+            if suffixe and not cle.endswith(suffixe):
+                continue
+            racine = cle[:len(cle) - len(suffixe)] if suffixe else cle
+            for terminaison in ("_LONGUEURS", "_LONGUEUR"):
+                if racine.endswith(terminaison):
+                    unite = _ECART_UNITES.get(racine[:-len(terminaison)])
+                    if unite is not None:
+                        return float(unite) + fraction
+            break
+    return _ecart_texte_en_longueurs(valeur.get("rawValue"))
+
+
+def _ecart_au_vainqueur(course_obj: dict, moi: dict | None):
+    """Longueurs CUMULÉES entre le vainqueur et `moi`.
+
+    Le PMU publie la marge sur le cheval PRÉCÉDENT ; la feature, elle, lit
+    « 0 = vainqueur » et calcule une proximité au vainqueur. Reporter la marge
+    brute aurait donc sous-estimé tout le champ — un 6ᵉ battu d'un nez sur le 5ᵉ
+    serait passé pour un cheval collé au gagnant.
+
+    La liste `participants` d'une course passée est TRONQUÉE au cheval concerné
+    (vérifié : 6 lignes pour une course de 11 partants, `moi` en 6ᵉ position),
+    ce qui suffit exactement : la chaîne des places 2..moi est complète.
+
+    Renvoie None si un maillon de la chaîne est illisible — une somme partielle
+    serait un chiffre faux, ce qui est pire que pas de chiffre.
+    """
+    place_moi = (moi or {}).get("place")
+    if not isinstance(place_moi, dict):
+        return None
+    try:
+        rang_moi = int(place_moi.get("place"))
+    except (TypeError, ValueError):
+        return None
+    if rang_moi <= 1:
+        return 0.0
+
+    marges: dict[int, float] = {}
+    for pp in (course_obj.get("participants") or []):
+        pl = pp.get("place")
+        if not isinstance(pl, dict):
+            continue
+        try:
+            rang = int(pl.get("place"))
+        except (TypeError, ValueError):
+            continue
+        if rang <= 1 or rang > rang_moi:
+            continue
+        marge = _ecart_en_longueurs(pp.get("distanceAvecPrecedent"))
+        if marge is None:
+            return None
+        marges[rang] = marge
+
+    if len(marges) != rang_moi - 1:
+        return None          # chaîne incomplète : on ne devine pas
+    return round(sum(marges.values()), 2)
+
+
+# Allocation : plafond de VRAISEMBLANCE, pas de normalisation d'unité.
+#
+# La course la mieux dotée au monde tourne autour de 20 M€. Le plafond retenu —
+# 50 M€ LU EN CENTIMES, soit 5 000 000 000 — est volontairement le plus GÉNÉREUX
+# des deux lectures possibles, parce que la colonne d'historique porte les DEUX
+# unités selon la ligne. Un seuil posé à 50 000 000 « euros » écartait 1 455 lignes
+# dont 1 192 entre 50 M et 238 M, qui valent 500 k€ à 2,4 M€ une fois lues en
+# centimes : des grands prix parfaitement réels. Ne reste impossible que ce qui
+# l'est DANS LES DEUX UNITÉS — 16 lignes en base, jusqu'à 109 000 000 000, soit
+# 1,09 milliard d'euros pour un prix de province.
+#
+# ATTENTION AUX UNITÉS, elles diffèrent et ce n'est pas corrigé ici :
+#   `courses.allocation`            = CENTIMES (`montantTotalOffert` × 100)
+#   `historique_courses.allocation` = EUROS pour les lignes externes, CENTIMES pour
+#                                     celles rattachées à une course interne
+# Vérifié en base : sur les 186 770 lignes rattachées, le rapport
+# `historique.allocation / courses.allocation` vaut exactement 1.000 —
+# `ml/features.py` a donc raison de ne diviser par 100 que ces lignes-là
+# (`h.course_id IS NOT NULL`). Normaliser la colonne en masse changerait
+# `class_drop_ratio` AU SERVICE alors que le modèle actif a été entraîné sur les
+# unités mélangées : ce serait un écart train/serve, pas une correction.
+ALLOCATION_PLAFOND = 5_000_000_000
+
+
+def _allocation_vraisemblable(valeur, plafond: int = ALLOCATION_PLAFOND):
+    """Montant, ou None s'il est impossible quelle que soit l'unité lue.
+
+    On ne RAMÈNE PAS au plafond : un montant faux ramené à 50 M€ resterait faux et
+    passerait alors pour une donnée. Absent, il est traité comme absent.
+    """
+    if not isinstance(valeur, (int, float)) or isinstance(valeur, bool):
+        return None
+    if valeur < 0 or valeur > plafond:
+        log.warning("pmu.allocation_invraisemblable", valeur=valeur, plafond=plafond)
+        return None
+    return valeur
+
+
 DISCIPLINE_MAP = {
     "PLAT": "Plat",
     "TROT_ATTELE": "Attelé",
@@ -290,7 +462,8 @@ class PmuScraper(BaseScraper):
 
                 # Dotation en centimes
                 dotation_raw = c_data.get("montantTotalOffert")
-                dotation = int(dotation_raw * 100) if dotation_raw else None
+                dotation = _allocation_vraisemblable(
+                    int(dotation_raw * 100) if dotation_raw else None)
 
                 course = CourseScrape(
                     reunion_id=r_id,
@@ -397,10 +570,13 @@ class PmuScraper(BaseScraper):
                     "hippodrome": c.get("hippodrome"),
                     "discipline": c.get("discipline"),
                     "distance": c.get("distance"),
-                    "allocation": c.get("allocation"),
+                    "allocation": _allocation_vraisemblable(c.get("allocation")),
                     "nb_partants": c.get("nbParticipants"),
                     "position": place.get("place") if isinstance(place, dict) else None,
-                    "ecart": (moi or {}).get("distanceAvecPrecedent"),
+                    # Longueurs CUMULÉES depuis le vainqueur (pas la marge sur le
+                    # cheval précédent) : c'est ce que lit la feature. Cf.
+                    # `_ecart_au_vainqueur` pour le pourquoi et les garde-fous.
+                    "ecart": _ecart_au_vainqueur(c, moi),
                     "reduction_km": round(rk / 1000.0, 2) if isinstance(rk, (int, float)) and rk else None,
                     "vitesse_ms": vitesse_ms,
                     # ── Données API jusque-là inexploitées ──────────────────────

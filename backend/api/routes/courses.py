@@ -287,7 +287,12 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     partants = []
     for p, ch, j, en, eq, pc, fm in rows:
         # Cotes disponibles
-        cotes = [c for c in [p.cote_pmu, p.cote_geny, p.cote_winamax,
+        # `cote_geny` EXCLUE du meilleur/pire prix : la source désigne un autre
+        # favori que le PMU sur plus d'une course sur trois (64,5 % d'accord, 200
+        # courses, APRÈS le correctif du 27/08). Ici la valeur la plus BASSE gagne :
+        # une cote portant sur le mauvais cheval est donc systématiquement retenue
+        # plutôt que noyée dans la moyenne. Cf. `SOURCES_COTES_NON_FIABLES`.
+        cotes = [c for c in [p.cote_pmu, p.cote_winamax,
                               p.cote_betclic, p.cote_unibet, p.cote_bet365,
                               p.cote_ladbrokes, p.cote_betfair_exchange]
                  if c and c > 1.0]
@@ -2922,7 +2927,9 @@ async def get_portfolio(
             ch.nom AS nom_cheval,
             pa.cote_pmu,
             pa.cote_geny,
-            LEAST(pa.cote_pmu, pa.cote_geny, pa.cote_bzh, pa.cote_winamax,
+            -- `cote_geny` exclue du meilleur prix (cf. SOURCES_COTES_NON_FIABLES) :
+            -- 64,5 % d'accord seulement avec le PMU sur le favori, après correctif.
+            LEAST(pa.cote_pmu, pa.cote_bzh, pa.cote_winamax,
                   pa.cote_betclic, pa.cote_unibet) AS cote_min,
             fm.features
         FROM predictions p

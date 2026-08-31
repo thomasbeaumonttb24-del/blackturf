@@ -239,3 +239,58 @@ def test_seul_un_driver_mort_declenche_la_sortie(message, doit_sortir, monkeypat
     declenche = any(s in message.lower() for s in signatures)
     assert declenche is doit_sortir, (
         f"{message!r} -> sortie={declenche}, attendu {doit_sortir}")
+
+
+@pytest.mark.asyncio
+async def test_le_calcul_des_associations_journalise_ce_qu_il_a_produit(db):
+    """`associations` n'est pas un scraper : ses compteurs de courses/partants
+    étaient nuls PAR NATURE.
+
+    Un audit y a lu « 13 exécutions, 13 stériles, statut ok » et conclu à une panne,
+    alors que `associations_jockey_entraineur` portait 11 749 lignes mises à jour le
+    jour même. Le vrai défaut est l'inverse : le jour où ce calcul ne produirait
+    plus rien, il laisserait EXACTEMENT la même trace. On journalise donc le volume
+    réellement écrit, et l'absence de production devient un statut distinct.
+    """
+    from scraper.db_writer import log_scrape_result
+    from sqlalchemy import text
+
+    await log_scrape_result(db, "associations", "ok", nb_partants=11749)
+    await log_scrape_result(db, "associations", "empty", nb_partants=0)
+    await db.commit()
+
+    lignes = (await db.execute(text(
+        "SELECT statut, nb_partants FROM scrape_log WHERE source = 'associations'"
+        " ORDER BY nb_partants DESC"))).all()
+    assert [(s, int(n)) for s, n in lignes] == [("ok", 11749), ("empty", 0)]
+
+
+def test_genybet_est_declaree_non_fiable_et_hors_du_meilleur_prix():
+    """Une cote posée sur le mauvais cheval n'est pas imprécise : elle est fausse.
+
+    Test décisif : deux carnets honnêtes désignent le même favori dans 90 à 95 %
+    des courses. GenyBet, RE-MESURÉ APRÈS son correctif du 2026-08-27 et sur les
+    4 derniers jours seuls, tombe à 64,5 % d'accord avec le PMU (200 courses,
+    corrélation 0,749 sur 2 159 partants). Le correctif n'a pas suffi.
+
+    L'endroit où ça coûte : le « meilleur prix » (`cote_min`, `LEAST(...)`) retient
+    la valeur la plus BASSE. Une erreur y est donc systématiquement sélectionnée
+    plutôt que noyée dans une moyenne — le visiteur voit un prix qui n'existe pas.
+    Le modèle, lui, ne l'apprend pas (META_COLS) : aucun impact ML.
+    """
+    from services.data_quality import SOURCES_COTES, SOURCES_COTES_NON_FIABLES
+
+    assert "geny" in SOURCES_COTES_NON_FIABLES
+    # La source reste SURVEILLÉE (on veut voir si elle se répare) mais pas servie.
+    assert "geny" in SOURCES_COTES
+
+    racine = pathlib.Path(__file__).resolve().parents[1]
+    for chemin, motif in (
+        ("api/routes/courses.py", re.compile(r"LEAST\((?:(?!\)).)*cote_geny", re.S)),
+        ("api/routes/predictions.py", re.compile(r"func\.least\((?:(?!\)\.label).)*cote_geny", re.S)),
+    ):
+        source = (racine / chemin).read_text(encoding="utf-8")
+        assert not motif.search(source), (
+            f"{chemin} fait à nouveau entrer `cote_geny` dans un meilleur prix : "
+            "tant que l'accord sur le favori n'est pas remonté au-dessus de 90 %, "
+            "c'est afficher une cote qui porte sur un autre cheval.")

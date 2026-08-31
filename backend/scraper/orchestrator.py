@@ -1090,14 +1090,28 @@ class BlackTurfOrchestrator:
         saison = dt.now().year
         try:
             async with AsyncSessionLocal() as session:
-                await compute_and_save_jockey_entraineur_assoc(session, saison)
+                nb_paires = await compute_and_save_jockey_entraineur_assoc(session, saison)
                 await session.commit()
                 # Stats globales jockey/entraîneur calculées depuis nos résultats
                 # (Turfoo 403 → tables à 0 sinon → features qualité acteur mortes).
-                await compute_and_save_acteur_stats(session)
+                nb_jockeys, nb_entraineurs = await compute_and_save_acteur_stats(session)
                 await session.commit()
-                await log_scrape_result(session, "associations", "ok")
+                # VOLUME RÉELLEMENT PRODUIT, et non les compteurs d'un scraper.
+                # `associations` est un CALCUL INTERNE : il ne visite ni course ni
+                # partant, donc `nb_courses`/`nb_partants` restaient à 0 quoi qu'il
+                # arrive. Un audit y a lu « 13 exécutions, 13 stériles, statut ok »
+                # et conclu à une panne, alors que la table portait 11 749 lignes
+                # fraîches — et surtout, une VRAIE panne aurait laissé la trace
+                # EXACTEMENT identique. On journalise donc ce qui a été écrit.
+                produit = nb_paires + nb_jockeys + nb_entraineurs
+                await log_scrape_result(
+                    session, "associations",
+                    "ok" if produit else "empty",
+                    nb_partants=produit,
+                )
                 await session.commit()
+                log.info("orchestrator.associations_done", nb_paires=nb_paires,
+                         nb_jockeys=nb_jockeys, nb_entraineurs=nb_entraineurs)
         except Exception as e:
             log.error("orchestrator.associations_error", error=str(e))
             await self._log_error("associations", e)

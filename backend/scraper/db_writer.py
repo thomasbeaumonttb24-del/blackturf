@@ -961,10 +961,16 @@ async def save_running_style(session: AsyncSession, rs: RunningStyleScrape) -> N
 
 async def compute_and_save_jockey_entraineur_assoc(
     session: AsyncSession, saison: int
-) -> None:
-    """
-    Calcule et sauvegarde les stats d'association jockey × entraîneur depuis les données existantes.
-    Lance une requête d'agrégation sur participations + résultats.
+) -> int:
+    """Stats d'association jockey × entraîneur, calculées depuis les données en base.
+
+    Retourne le NOMBRE DE PAIRES écrites. Ce n'était rien auparavant, et c'est
+    précisément ce qui rendait la panne invisible : le cycle journalisait
+    `("associations", "ok")` avec `nb_courses = nb_partants = 0` — les compteurs
+    d'un SCRAPER, alors que c'est un calcul interne. Un audit y a lu « 13 exécutions,
+    13 stériles, statut ok » et conclu à une panne, alors que la table portait
+    11 749 lignes fraîches. À l'inverse, le jour où ce calcul ne produirait
+    réellement plus rien, la trace serait rigoureusement la même.
     """
     from sqlalchemy import text
     result = await session.execute(text("""
@@ -1027,6 +1033,7 @@ async def compute_and_save_jockey_entraineur_assoc(
         await session.execute(stmt)
 
     log.info("db_writer.asso_jockey_entraineur", nb_paires=len(rows), saison=saison)
+    return len(rows)
 
 
 async def detect_jockey_change(
