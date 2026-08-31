@@ -40,13 +40,14 @@ async def _seed_value_bet(
     detecte_avant_depart: bool = True,
     rapport_sg: float | None = 5.0,
     statut: str = "termine",
+    date_heure: datetime | None = None,
 ) -> None:
     hippo_id = f"h-{course_id}"
     hippo_nom = f"Test Hippo {course_id}"
     db.add(Hippodrome(hippodrome_id=hippo_id, nom=hippo_nom, code=course_id[:3]))
     db.add(Reunion(reunion_id=f"R-{course_id}", date=date.today(), hippodrome_id=hippo_id,
                     hippodrome_nom=hippo_nom, numero=1))
-    date_heure = NOW - timedelta(days=days_ago)
+    date_heure = date_heure if date_heure is not None else NOW - timedelta(days=days_ago)
     db.add(Course(
         course_id=course_id, reunion_id=f"R-{course_id}", numero=1, nom="Prix Test",
         date_heure=date_heure, hippodrome_nom=hippo_nom, discipline="Plat",
@@ -79,13 +80,18 @@ async def _seed_value_bet(
     await db.commit()
 
 
-async def _make_user(db: AsyncSession, plan: str, *, push: bool = False) -> User:
+async def _make_user(db: AsyncSession, plan: str, *, push: bool = False,
+                     email_verified: bool = True) -> User:
+    # `email_verified=True` par défaut : depuis services/email_verification, un
+    # envoi n'atteint plus une adresse que personne n'a confirmée. Un destinataire
+    # de test représente un vrai destinataire.
     u = User(
         user_id=str(uuid.uuid4()),
         email=f"{plan}_{uuid.uuid4().hex[:6]}@blackturf.fr",
         hashed_password=_hash("Passw0rd!"),
         plan=plan,
         is_active=True,
+        email_verified=email_verified,
         push_subscription={"endpoint": "https://push.test/x"} if push else None,
     )
     db.add(u)
@@ -238,6 +244,24 @@ async def test_envoi_exclut_les_desabonnes(db: AsyncSession, monkeypatch):
     assert desabonne.email not in sent_to
 
 
+async def test_envoi_exclut_les_adresses_non_confirmees(db: AsyncSession, monkeypatch):
+    """C'est dans les comptes gratuits que vivent les adresses bidon : chaque
+    rebond abîme la délivrabilité de TOUS les envois, y compris ceux des abonnés
+    payants. On n'écrit donc qu'aux adresses confirmées."""
+    await _seed_value_bet(db, "V11", ev=0.30, rapport_sg=5.0)
+    mock_email = AsyncMock(return_value=True)
+    monkeypatch.setattr("services.alerts.send_email", mock_email)
+
+    confirme = await _make_user(db, "free")
+    non_confirme = await _make_user(db, "free", email_verified=False)
+
+    await send_weekly_best_value_bet(db)
+
+    sent_to = {call.kwargs["to"] for call in mock_email.await_args_list}
+    assert confirme.email in sent_to
+    assert non_confirme.email not in sent_to
+
+
 async def test_endpoint_desabonnement_pose_l_opt_out(client, db: AsyncSession):
     user = await _make_user(db, "free")
     assert user.marketing_opt_out_at is None
@@ -303,7 +327,27 @@ async def test_digest_html_regroupe_tous_les_value_bets_et_desabonnement():
 
 
 async def test_digest_quotidien_idempotent(db: AsyncSession, monkeypatch):
-    await _seed_value_bet(db, "DIGEST1", days_ago=-0.05, statut="a_venir")
+    # Horloge GELÉE à 12:00 Paris, course seedée à 15:00 Paris le même jour.
+    # Avant : la course était seedée à « maintenant + 72 min ». `send_morning_digest`
+    # ne retient que les courses du JOUR CALENDAIRE parisien encore à venir → dès que
+    # la suite tournait après 22:48 heure de Paris, ces 72 min franchissaient minuit,
+    # la course sortait de la fenêtre et le test échouait (constaté 2026-08-17 à 22:52).
+    # Le geler supprime la dépendance à l'heure d'exécution.
+    from zoneinfo import ZoneInfo
+    _paris = ZoneInfo("Europe/Paris")
+    _midi = datetime.now(_paris).replace(hour=12, minute=0, second=0, microsecond=0)
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return _midi.astimezone(tz) if tz else _midi.replace(tzinfo=None)
+
+    monkeypatch.setattr("services.alerts.datetime", _FrozenDatetime)
+
+    await _seed_value_bet(
+        db, "DIGEST1", statut="a_venir",
+        date_heure=_midi.replace(hour=15).astimezone(timezone.utc),
+    )
     user = await _make_user(db, "standard")
     mock_email = AsyncMock(return_value=True)
     monkeypatch.setattr("services.alerts.send_email", mock_email)

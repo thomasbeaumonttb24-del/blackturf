@@ -12,9 +12,10 @@ import re
 import asyncio
 import httpx
 import structlog
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
+from services.temps_courses import jour_courses
 from scraper.base import CourseScrape, PartantScrape, ResultatScrape, PoolPMUScrape, BaseScraper, human_delay, get_circuit_breaker
 
 log = structlog.get_logger(source="pmu")
@@ -31,6 +32,46 @@ def make_course_id(date_ddmmyyyy: str, reunion_id, course_num) -> str:
     `course_id.split("C")[-1]` continue de donner le numéro de course.
     """
     return f"{date_ddmmyyyy}R{reunion_id}C{course_num}"
+
+
+def _fmt_date_pmu(course_date=None) -> str:
+    """Normalise une date vers le format d'URL PMU `ddmmyyyy`.
+
+    Accepte : None (= aujourd'hui), str ddmmyyyy (préfixe de course_id) ou ISO,
+    epoch ms (heureDepart PMU), date/datetime. Tolérant : sert juste à bâtir l'URL.
+    """
+    if course_date is None:
+        return jour_courses().strftime("%d%m%Y")
+    if isinstance(course_date, str):
+        return (course_date if (len(course_date) == 8 and course_date.isdigit())
+                else jour_courses().strftime("%d%m%Y"))
+    if isinstance(course_date, bool):  # garde-fou : bool est un int en Python
+        return jour_courses().strftime("%d%m%Y")
+    if isinstance(course_date, (int, float)):
+        return datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
+    return course_date.strftime("%d%m%Y")
+
+
+def _epoch_ms_to_dt(value) -> "datetime | None":
+    """Epoch millisecondes PMU → datetime UTC. None si absent ou aberrant.
+
+    Le PMU date ses rapports en ms depuis l'époque. On rejette les valeurs hors
+    d'une plage plausible (2000→2100) plutôt que de fabriquer une date en 1970 à
+    partir d'un champ vide : une date fausse serait pire que pas de date, elle
+    ferait passer une cote périmée pour fraîche.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        ms = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (946_684_800_000 <= ms <= 4_102_444_800_000):   # 2000-01-01 → 2100-01-01
+        return None
+    try:
+        return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _first_poids(p: dict):
@@ -159,7 +200,7 @@ class PmuScraper(BaseScraper):
         target_date : date|datetime|str(ddmmyyyy). Défaut = aujourd'hui. Permet le
         BACKFILL historique (programme + arrivées d'une date passée)."""
         if target_date is None:
-            today_str = date.today().strftime("%d%m%Y")
+            today_str = jour_courses().strftime("%d%m%Y")
         elif isinstance(target_date, str) and len(target_date) == 8 and target_date.isdigit():
             today_str = target_date
         else:
@@ -270,6 +311,12 @@ class PmuScraper(BaseScraper):
                     categorie_particularite=c_data.get("categorieParticularite"),
                     montant_offert_1er=c_data.get("montantOffert1er"),
                     nombre_declares_partants=c_data.get("nombreDeclaresPartants"),
+                    # Statut PMU BRUT (PROGRAMMEE / FIN_COURSE / ARRIVEE_DEFINITIVE_*
+                    # / COURSE_ANNULEE). Ignoré jusqu'au 2026-08-17 → une course
+                    # annulée n'avait aucun moyen de quitter 'a_venir' (le PMU ne
+                    # publie jamais son ordreArrivee). Cf. services/course_resolution.
+                    statut_pmu=(str(c_data.get("statut")).strip().upper()
+                                if c_data.get("statut") else None),
                     source="pmu",
                 )
                 courses.append(course)
@@ -284,7 +331,7 @@ class PmuScraper(BaseScraper):
         BACKFILL : le programme d'une date passée renvoie participants=[] en inline,
         mais l'endpoint /participants dédié les contient."""
         if course_date is None:
-            d = date.today().strftime("%d%m%Y")
+            d = jour_courses().strftime("%d%m%Y")
         elif isinstance(course_date, str) and len(course_date) == 8 and course_date.isdigit():
             d = course_date
         else:
@@ -310,7 +357,7 @@ class PmuScraper(BaseScraper):
             {date_ms, hippodrome, discipline, distance, allocation, nb_partants,
              position, ecart, reduction_km, jockey, adversaires:[noms]}, ...]}]
         """
-        d = date.today().strftime("%d%m%Y")
+        d = jour_courses().strftime("%d%m%Y")
         url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/performances-detaillees/pretty"
         await human_delay(0.3, 0.8)
         data = await self._fetch_json(url)
@@ -373,16 +420,7 @@ class PmuScraper(BaseScraper):
         - rapports (dividendes) : endpoint /rapports-definitifs (LISTE de typePari)
         course_date : date de la course (date|datetime|str ddmmyyyy). Défaut = aujourd'hui.
         """
-        if course_date is None:
-            d = date.today().strftime("%d%m%Y")
-        elif isinstance(course_date, str):
-            # déjà au format ddmmyyyy (préfixe course_id) ou ISO → on garde 8 chiffres
-            d = course_date if (len(course_date) == 8 and course_date.isdigit()) else date.today().strftime("%d%m%Y")
-        elif isinstance(course_date, (int, float)):
-            # epoch ms → date (heure de départ). Tolérant : sert juste à bâtir l'URL.
-            d = datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
-        else:
-            d = course_date.strftime("%d%m%Y")
+        d = _fmt_date_pmu(course_date)
 
         c_id = make_course_id(d, reunion_id, course_num)
         base_rc = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}"
@@ -498,12 +536,32 @@ class PmuScraper(BaseScraper):
             source="pmu",
         )
 
+    async def get_statut_course(
+        self, reunion_id: str, course_num: int, course_date=None
+    ) -> Optional[str]:
+        """Statut PMU BRUT d'une course (PROGRAMMEE / FIN_COURSE /
+        ARRIVEE_DEFINITIVE_COMPLETE / COURSE_ANNULEE …), None si indisponible.
+
+        Indispensable pour clôturer les courses ANNULÉES : le PMU ne publie jamais
+        d'ordreArrivee pour elles, donc `get_rapports_definitifs` renvoie None à vie
+        et la course restait 'a_venir' indéfiniment (159 cas en prod au 2026-08-17,
+        100 % COURSE_ANNULEE). Cf. services/course_resolution.py.
+        """
+        d = _fmt_date_pmu(course_date)
+        url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}?specialisation=INTERNET"
+        data = await self._fetch_json(url)
+        if not isinstance(data, dict):
+            return None
+        course = data.get("course") if isinstance(data.get("course"), dict) else data
+        statut = course.get("statut")
+        return str(statut).strip().upper() if statut else None
+
     async def get_cotes_live(self, reunion_id: str, course_num: int) -> dict[int, float]:
         """
         Récupère les cotes en temps réel.
         Retourne {numero_partant: cote}.
         """
-        d = date.today().strftime("%d%m%Y")
+        d = jour_courses().strftime("%d%m%Y")
         url = f"{BASE}/programme/{d}/R{reunion_id}/C{course_num}/participants?specialisation=INTERNET"
         data = await self._fetch_json(url)
         if not data:
@@ -527,7 +585,7 @@ class PmuScraper(BaseScraper):
         """
         from scraper.base import PoolPMUScrape
         c_num = int(course_id.split("C")[-1]) if "C" in str(course_id) else 1
-        d = date.today().strftime("%d%m%Y")
+        d = jour_courses().strftime("%d%m%Y")
         # Endpoint masse-enjeu : liste de {typePari, totalEnjeu (centimes)}.
         url = f"{BASE}/programme/{d}/R{reunion_id}/C{c_num}/masse-enjeu"
         data = await self._fetch_json(url)
@@ -598,6 +656,11 @@ class PmuScraper(BaseScraper):
             tendance = rd.get("indicateurTendance")  # "+" / "-" / "="
             tendance_force = rd.get("nombreIndicateurTendance")
             est_favori = rd.get("favoris")
+            # Heure de publication RÉELLE de la cote par le PMU (epoch ms). Le
+            # scrape peut avoir lieu bien après, et le PMU republie la même cote
+            # tant que rien ne bouge : sans cette date on ne peut ni dater
+            # honnêtement une cote figée, ni détecter un flux de cotes gelé.
+            cote_dt = _epoch_ms_to_dt(rd.get("dateRapport"))
 
             # robe / race : PMU peut renvoyer un dict {code, libelleCourt, libelleLong}
             def _libelle(v):
@@ -644,6 +707,7 @@ class PmuScraper(BaseScraper):
                 rang_pronostic_pmu=p.get("ordreArriveePronostic"),
                 # ── Enrichissements PMU ──
                 cote_reference=float(cote_ref) if cote_ref else None,
+                cote_pmu_datetime=cote_dt,
                 mouvement_cote_pct=mouvement_pct,
                 tendance_cote=tendance,
                 tendance_force=float(tendance_force) if isinstance(tendance_force, (int, float)) else None,

@@ -39,6 +39,9 @@ SLOW_INTERVAL = 90      # s — ré-énumération complète du programme
 FAST_INTERVAL = 5       # s — relecture cote de la course imminente
 MATCH_MIN = 14          # ±minutes pour matcher course zeturf ↔ BlackTurf
 PAGE_WAIT_MS = 4500     # attente rendu cotes après navigation
+# Énumérations vides consécutives avant de recréer la page — même correctif que
+# le daemon oddschecker (18/08/2026). 3 cycles de SLOW_INTERVAL = 4,5 min.
+ENUM_VIDES_AVANT_RECREATION = 3
 WATCHDOG_TIMEOUT_S = int(os.getenv("BT_ZETURF_CYCLE_TIMEOUT", "1200"))
 WATCHDOG_GRACE_S = int(os.getenv("BT_ZETURF_WATCHDOG_GRACE", "120"))
 HEARTBEAT_PATH = os.getenv(
@@ -55,6 +58,33 @@ signal.signal(signal.SIGINT, _stop)
 def log(msg: str, **kv):
     extra = " ".join(f"{k}={v}" for k, v in kv.items())
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg} {extra}".rstrip(), flush=True)
+
+
+# Signatures d'un driver Playwright MORT : le process Node qui pilote le
+# navigateur a crashé, plus aucun appel ne pourra aboutir.
+_DRIVER_MORT = (
+    "connection closed",
+    "target closed",
+    "browser has been closed",
+    "browser closed",
+)
+
+
+def _exit_si_driver_mort(exc: BaseException) -> None:
+    """Sort du process quand le driver est mort, pour que systemd relance.
+
+    Observé sur le daemon oddschecker le 18/08/2026 : le driver Node de
+    Playwright crashe sur un bug interne, puis CHAQUE appel échoue avec
+    « Connection closed while reading from the driver » — mais le process Python
+    reste vivant, attrape l'exception, dort et recommence indéfiniment. Le
+    watchdog ne se déclenche jamais (les cycles échouent VITE, loin de leur
+    timeout) et `Restart=always` ne sert à rien tant que le process ne meurt pas.
+    Recréer la page ne suffit pas : `browser.new_page()` échoue aussi.
+    """
+    message = str(exc).lower()
+    if any(signature in message for signature in _DRIVER_MORT):
+        log("driver.dead_exit", err=str(exc)[:120])
+        os._exit(1)   # systemd Restart=always relance avec un driver neuf
 
 
 _watchdog = CycleWatchdog(
@@ -270,6 +300,7 @@ def main():
     with Camoufox(headless=True, geoip=True) as browser:
         page = browser.new_page()
         last_slow = 0.0
+        enum_vides = 0
         bt = {}
         imminent = None  # (course_id, url, partants)
         while _run:
@@ -296,6 +327,28 @@ def main():
                             continue
                         visit.append(z)
                     log("enum", zeturf=len(zc), blackturf=len(bt), fenetre_3h=len(visit))
+
+                    # AUTO-RÉPARATION D'UNE SESSION FIGÉE — même défaut que le
+                    # daemon oddschecker, corrigé le 18/08/2026 : la page Camoufox
+                    # vit aussi longtemps que le process, et une session figée
+                    # (bannière de consentement, redirection géo, session expirée)
+                    # ne se rétablit jamais. Le watchdog ne voit rien : aucun cycle
+                    # ne dépasse son timeout, le daemon tourne « sainement » en ne
+                    # ramenant plus rien. Correctif préventif ici : zeturf alimente
+                    # `cote_unibet`, la meilleure couverture hors PMU (88 %), sa
+                    # perte silencieuse coûterait la comparaison de marché.
+                    if zc:
+                        enum_vides = 0
+                    else:
+                        enum_vides += 1
+                        if enum_vides >= ENUM_VIDES_AVANT_RECREATION:
+                            log("session.recreate", enum_vides=enum_vides)
+                            try:
+                                page.close()
+                            except Exception as e:
+                                log("session.close_error", err=str(e)[:90])
+                            page = browser.new_page()
+                            enum_vides = 0
                     matched = 0
                     soonest = None
                     for z in visit:
@@ -317,6 +370,7 @@ def main():
                     log("slow.done", matched=matched, imminent=(imminent[0] if imminent else None))
                 except Exception as e:
                     log("slow.error", err=str(e)[:140])
+                    _exit_si_driver_mort(e)
             # ── RAPIDE : relit la cote de la course imminente ──
             if imminent:
                 try:
@@ -327,6 +381,7 @@ def main():
                         log("fast", course=cid, partants=n)
                 except Exception as e:
                     log("fast.error", err=str(e)[:120])
+                    _exit_si_driver_mort(e)
             _watchdog.finish_cycle()
             time.sleep(FAST_INTERVAL)
     log("zeturf_daemon.stop")

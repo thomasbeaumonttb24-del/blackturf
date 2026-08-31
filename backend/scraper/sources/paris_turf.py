@@ -20,6 +20,7 @@ from typing import Optional
 import httpx
 from bs4 import BeautifulSoup
 
+from services.temps_courses import jour_courses
 from scraper.base import BaseScraper, human_delay, PronosticPresseScrape, random_user_agent
 
 log = structlog.get_logger()
@@ -65,7 +66,7 @@ class ParisTurfScraper(BaseScraper):
         rare octet 0x81 non défini) afin d'obtenir des accents corrects.
         """
         results: list[PronosticPresseScrape] = []
-        today = date.today().isoformat()
+        today = jour_courses().isoformat()
 
         headers = {
             "User-Agent": random_user_agent(),
@@ -232,7 +233,7 @@ class ParisTurfScraper(BaseScraper):
         résolution EXACTE par suffixe R{r}C{c} dans l'orchestrateur).
         """
         results: list[PronosticPresseScrape] = []
-        today = date.today().isoformat()
+        today = jour_courses().isoformat()
         headers = {
             "User-Agent": random_user_agent(),
             "Accept": "application/json",

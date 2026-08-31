@@ -16,7 +16,7 @@ import { coursesApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { cn, formatMontantDevise } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface EloPoint {
@@ -48,6 +48,7 @@ interface Performances {
   nb_places: number;
   gains_total: number;
   gains_annee_n: number;
+  gains_devise: string | null;   // ISO 4217 — devise locale de la réunion PMU
   nb_courses_annee: number;
   nb_victoires_annee: number;
   meilleur_temps_all: string | null;
@@ -122,6 +123,9 @@ const RUNNING_STYLE_CONFIG: Record<string, { label: string; color: string }> = {
   ferme:     { label: "Ferme",      color: "bg-emerald-50 text-emerald-700 border-emerald-500/30" },
 };
 
+// EUR en dur : réservé aux montants réellement libellés en euros (prix de vente
+// yearling, gains rapportés par course). Les gains de CARRIÈRE viennent du PMU dans
+// la devise locale de la réunion → passer par formatMontantDevise().
 function formatGains(val: number | null) {
   if (!val) return "—";
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(val);
@@ -340,9 +344,18 @@ export default function ChevalPage() {
                       color: "#F59E0B",
                     },
                     {
+                      // Gains PMU = devise LOCALE de la réunion (ARS, HKD, TRY…),
+                      // pas des euros. Sans devise connue → "—" plutôt qu'un
+                      // montant dans une unité inventée.
                       label: "Gains totaux",
-                      value: formatGains(data.performances.gains_total),
-                      sub: `${formatGains(data.performances.gains_annee_n)} en N`,
+                      value: formatMontantDevise(
+                        data.performances.gains_total,
+                        data.performances.gains_devise,
+                      ),
+                      sub: `${formatMontantDevise(
+                        data.performances.gains_annee_n,
+                        data.performances.gains_devise,
+                      )} en N`,
                       color: "#10B981",
                     },
                     {

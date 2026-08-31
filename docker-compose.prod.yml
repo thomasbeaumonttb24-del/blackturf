@@ -8,6 +8,14 @@ services:
   db:
     image: timescale/timescaledb:latest-pg16
     container_name: blackturf_db
+    # /dev/shm : Docker plafonne à 64 Mo par défaut, et PostgreSQL y alloue la
+    # mémoire partagée DYNAMIQUE de ses workers parallèles (~8 Mo par segment).
+    # Sous 64 Mo, tout plan parallèle sur une grosse table meurt en
+    # « could not resize shared memory segment : No space left on device » —
+    # panne constatée le 20/08/2026 : /admin/api/dashboard en 500 (transaction
+    # avortée) et 9 `post_course_sync` en échec par jour. 256 Mo = 4x l'usage
+    # observé, et reste très en dessous du plafond mémoire du conteneur.
+    shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -79,11 +87,28 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log
+    # --proxy-headers : sans lui uvicorn ignore le X-Forwarded-Proto de nginx et
+    # construit ses redirections 307 en http:// — le navigateur, sur une page https,
+    # refuse de les suivre (contenu mixte) et la requête meurt en silence.
+    # `--forwarded-allow-ips=*` fait confiance aux en-têtes X-Forwarded-* de
+    # l'appelant : ce n'est acceptable que parce que le port 8000 est publié sur
+    # la LOOPBACK (`127.0.0.1:8000:8000`, docker-compose.yml) et que nginx est le
+    # seul ingress. Republier ce port sur 0.0.0.0 ouvrirait l'usurpation d'IP.
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log --proxy-headers --forwarded-allow-ips=*
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Lue par services/data_quality : sans elle, le moniteur signale comme
+      # « scraper muet » une source volontairement mise en sommeil.
+      - SCRAPER_DISABLED_SOURCES=${SCRAPER_DISABLED_SOURCES:-}
       - SECRET_KEY=${SECRET_KEY}
+      # Duree de vie des jetons. ABSENTE de ce bloc jusqu'au 19/08 : le .env
+      # declarait ACCESS_TOKEN_EXPIRE_MINUTES=60 mais la variable n'atteignait
+      # jamais le conteneur, qui retombait sur le defaut du code (720 min). Un
+      # jeton d'acces vivait donc 12 h au lieu de l'heure configuree, et rien ne
+      # le signalait puisque la valeur voulue etait bien dans .env.
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
       - BETFAIR_INGEST_TOKEN=${BETFAIR_INGEST_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
@@ -95,6 +120,7 @@ services:
       - STRIPE_PRICE_PRO_MONTHLY=${STRIPE_PRICE_PRO_MONTHLY}
       - STRIPE_PRICE_PRO_ANNUAL=${STRIPE_PRICE_PRO_ANNUAL}
       - RESEND_API_KEY=${RESEND_API_KEY}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
@@ -220,6 +246,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       - RESEND_API_KEY=${RESEND_API_KEY}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ENVIRONMENT=production
       # ── Flags algo (cf. api) — le retrain nightly + calibrations + gate ROI tournent ici (rq).
       - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
@@ -234,8 +261,18 @@ services:
       - BT_TEMP_FIT=${BT_TEMP_FIT:-1}
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
       - BT_RANKER_BLEND=${BT_RANKER_BLEND:-1}
-      # Fenêtre compatible avec le worker 6 Gio (~40k partants actuellement).
+      # Fenêtre compatible avec le plafond du worker (~40k partants actuellement).
       - RETRAIN_HISTORY_MONTHS=${RETRAIN_HISTORY_MONTHS:-3}
+      # Nombre de cœurs pris par xgboost/lightgbm/catboost. Chaque thread porte
+      # sa propre copie de travail : au-delà de 2 le pic RAM grimpe plus vite
+      # que le temps de calcul ne descend sur un VPS 4 vCPU.
+      - BT_TRAIN_NJOBS=${BT_TRAIN_NJOBS:-2}
+      # glibc alloue jusqu'à 8 arènes par cœur ; chacune garde ses pages libérées
+      # au lieu de les rendre au noyau. Sur un process qui alloue des gigas par
+      # rafales (dataset puis modèles), la fragmentation seule coûtait plusieurs
+      # centaines de Mio de RSS résiduel. 2 arènes suffisent : le retrain est
+      # séquentiel, il ne se dispute pas l'allocateur.
+      - MALLOC_ARENA_MAX=2
     depends_on:
       db:
         condition: service_healthy
@@ -244,12 +281,24 @@ services:
     volumes:
       - ml_models:/app/models
     restart: unless-stopped
+    # Le worker doit être le DERNIER candidat de l'OOM killer, jamais le premier.
+    # Le 20/08/2026 le kernel a déclenché un OOM global depuis un daemon de cotes
+    # et a désigné rq comme victime au seul motif qu'il portait le plus gros RSS
+    # (4,9 Gio de retrain). Or c'est le seul process de la machine dont la mort
+    # coûte une nuit entière d'apprentissage — les autres redémarrent seuls.
+    oom_score_adj: -800
     deploy:
       resources:
         limits:
-          # 6G : plafond du retrain 3 mois, sans affamer les services web/DB.
-          # L'hôte (7,6G RAM + 6G swap) ne peut pas global-OOM tant que ce cap tient.
-          memory: 6G
+          # 4G : au-dessus du pic réel du retrain 3 mois une fois le dataset
+          # streamé et les arènes rendues au noyau (cf. logs `pipeline.rss`).
+          # Le point n'est PAS d'accorder le maximum possible : c'est de faire
+          # échouer un retrain devenu glouton DANS son cgroup, tué seul, plutôt
+          # que de laisser le kernel arbitrer à l'échelle de l'hôte. L'ancien
+          # commentaire affirmait qu'un cap de 6G rendait l'OOM global
+          # impossible — c'était faux : les daemons de cotes vivent hors Docker
+          # et n'étaient couverts par aucune limite.
+          memory: 4G
         reservations:
           memory: 256M
 
@@ -316,6 +365,9 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Le job horaire data_quality_check tourne ici : il doit distinguer une
+      # source en sommeil assumé d'un scraper réellement tombé.
+      - SCRAPER_DISABLED_SOURCES=${SCRAPER_DISABLED_SOURCES:-}
       - SECRET_KEY=${SECRET_KEY}
       - BETFAIR_INGEST_TOKEN=${BETFAIR_INGEST_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}

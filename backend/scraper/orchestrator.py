@@ -25,6 +25,7 @@ import structlog
 from datetime import datetime
 
 from api.config import get_settings
+from services.temps_courses import jour_courses
 from db.database import AsyncSessionLocal
 from scraper.base import make_stealth_browser
 from scraper.sources.pmu import PmuScraper
@@ -82,6 +83,13 @@ CYCLE_TIMEOUT_S = int(os.getenv("BT_SCRAPER_CYCLE_TIMEOUT", "1200"))  # 20 min
 # sinon les deux mécanismes se déclencheraient au même instant (course).
 WATCHDOG_GRACE_S = int(os.getenv("BT_SCRAPER_WATCHDOG_GRACE", "120"))
 HEARTBEAT_PATH = os.getenv("BT_SCRAPER_HEARTBEAT", "/app/data/scraper_heartbeat")
+
+# Durée de conservation d'un job post-course RATÉ dans la FailedJobRegistry de RQ.
+# Le défaut de RQ est UN AN : la file de production en avait accumulé 527 depuis
+# juin 2026, dont les causes (libgomp manquant, dtypes XGBoost) étaient corrigées
+# depuis longtemps — mais leur seul décompte continuait de nourrir l'alerte
+# qualité. 7 jours : assez pour diagnostiquer, trop court pour devenir un passif.
+POST_COURSE_FAILURE_TTL_S = 7 * 24 * 3600
 
 # Monotonic du début du cycle en cours ; None = aucun cycle en vol.
 _cycle_started_at: float | None = None
@@ -195,6 +203,22 @@ class BlackTurfOrchestrator:
         #   moitié moins de requêtes = moins de risque de ban au démarrage).
         # SCRAPER_DISABLED_SOURCES   : CSV des sources à NE PAS scraper
         #   (ex. "racing_post,france_galop" pour les sites les plus protégés).
+        #
+        # Sources mises en sommeil le 18/08/2026 après vérification une par une
+        # depuis le conteneur — elles produisaient TOUTES 0 cote sur 7 jours :
+        #   geny     : geny.com répond « Accès refusé » y compris avec le
+        #              navigateur furtif (HTTP 200 dont le corps est une page
+        #              d'erreur 403). Seul un solve_cloudflare via scrapling y
+        #              accède, et scrapling n'est pas dans cette image.
+        #   betclic  : HTTP 403 « Accès refusé - Betclic », navigateur furtif inclus.
+        #   winamax  : la page /courses-hippiques répond 200 mais ne contient plus
+        #              aucun lien de course — la rubrique a disparu de cette URL.
+        #   unibet   : unibet.fr/turf redirige vers zeturf.fr ; la source est déjà
+        #              couverte par le daemon zeturf (cote_unibet, 73 % de
+        #              couverture). Le scraper retourne [] depuis 2026-06.
+        # Aucune donnée perdue : elles n'en fournissaient plus. Les réactiver
+        # demande de traiter le blocage (proxy résidentiel ou solve_cloudflare),
+        # pas de corriger un sélecteur.
         try:
             mult = float(os.environ.get("SCRAPER_INTERVAL_MULTIPLIER", "1.0"))
         except ValueError:
@@ -391,6 +415,7 @@ class BlackTurfOrchestrator:
         try:
             geny = GenyScraper(page)
             data = await geny.get_partants_du_jour()
+            n_cotes = 0
 
             # Enrichir les cotes Geny en DB
             async with AsyncSessionLocal() as session:
@@ -426,11 +451,27 @@ class BlackTurfOrchestrator:
                             .values(**vals)
                         )
                         await session.execute(stmt)
+                        n_cotes += 1
 
                 await session.commit()
                 duree = int((time.time() - t0) * 1000)
-                await log_scrape_result(session, "geny", "ok", duree_ms=duree)
+                # Compteurs RÉELS + statut honnête : le cycle se journalisait « ok »
+                # même quand Geny renvoyait sa page d'erreur en HTTP 200 (0 course
+                # extraite). La source est ainsi restée muette des semaines sans
+                # qu'aucune alerte ne parte.
+                await log_scrape_result(
+                    session, "geny",
+                    "ok" if n_cotes else "erreur",
+                    nb_courses=len(data),
+                    nb_partants=n_cotes,
+                    erreur=(None if n_cotes else
+                            "aucune cote extraite (source bloquée ou structure changée)"),
+                    duree_ms=duree,
+                )
                 await session.commit()
+            if not n_cotes:
+                # Alimente le backoff : inutile de marteler une source qui bloque.
+                self._failed_this_cycle.add("geny")
 
         except Exception as e:
             log.error("orchestrator.geny_error", error=str(e))
@@ -602,6 +643,16 @@ class BlackTurfOrchestrator:
 
                 saison = dt.now().year
 
+                # Le ROI scrape n'ECRASE le ROI calcule que s'il vaut vraiment
+                # quelque chose. Turfoo ne le publie pas (et 403 depuis le VPS) :
+                # `stats.get("roi", 0.0)` ecrivait donc 0.0 par-dessus le ROI
+                # calcule sur nos propres reglements, remettant la feature a plat.
+                def _maj_roi(stats: dict, colonnes: dict) -> dict:
+                    roi = stats.get("roi")
+                    if isinstance(roi, (int, float)) and roi:
+                        colonnes["roi_global"] = float(roi)
+                    return colonnes
+
                 # Jockeys du jour
                 result = await session.execute(
                     sa_select(Jockey.jockey_id, Jockey.nom).distinct()
@@ -619,18 +670,17 @@ class BlackTurfOrchestrator:
                         victoires_saison=stats.get("victoires_saison", 0),
                         taux_victoire_global=stats.get("taux_victoire", 0.0),
                         taux_place_global=stats.get("taux_place", 0.0),
-                        roi_global=stats.get("roi", 0.0),
                         taux_par_distance=stats.get("stats_par_distance"),
                         taux_par_hippodrome=stats.get("stats_par_hippodrome"),
                         taux_par_terrain=stats.get("stats_par_terrain"),
+                        **_maj_roi(stats, {}),
                     ).on_conflict_do_update(
                         constraint="stats_jockeys_jockey_id_saison_key",
-                        set_={
+                        set_=_maj_roi(stats, {
                             "victoires_saison": stats.get("victoires_saison", 0),
                             "taux_victoire_global": stats.get("taux_victoire", 0.0),
-                            "roi_global": stats.get("roi", 0.0),
                             "updated_at": datetime.now(),
-                        },
+                        }),
                     )
                     await session.execute(stmt)
 
@@ -651,17 +701,16 @@ class BlackTurfOrchestrator:
                         victoires_saison=stats.get("victoires_saison", 0),
                         taux_victoire_global=stats.get("taux_victoire", 0.0),
                         taux_place_global=stats.get("taux_place", 0.0),
-                        roi_global=stats.get("roi", 0.0),
                         taux_par_distance=stats.get("stats_par_distance"),
                         taux_par_hippodrome=stats.get("stats_par_hippodrome"),
+                        **_maj_roi(stats, {}),
                     ).on_conflict_do_update(
                         constraint="stats_entraineurs_entraineur_id_saison_key",
-                        set_={
+                        set_=_maj_roi(stats, {
                             "victoires_saison": stats.get("victoires_saison", 0),
                             "taux_victoire_global": stats.get("taux_victoire", 0.0),
-                            "roi_global": stats.get("roi", 0.0),
                             "updated_at": datetime.now(),
-                        },
+                        }),
                     )
                     await session.execute(stmt)
 
@@ -694,7 +743,15 @@ class BlackTurfOrchestrator:
         ]
 
         for source_name, ScraperClass in scrapers:
+            # Gating PAR BOOKMAKER : `_should_run` ne filtre que le groupe
+            # « bookmakers », si bien qu'un bookmaker mis dans
+            # SCRAPER_DISABLED_SOURCES continuait d'être ouvert, chargé et
+            # attendu à chaque cycle — pour rien, et en polluant scrape_log.
+            if source_name in self._disabled:
+                log.info("orchestrator.bookmaker_disabled", source=source_name)
+                continue
             page = await browser_context.new_page()
+            nb_source = 0
             try:
                 scraper = ScraperClass(page)
 
@@ -735,10 +792,23 @@ class BlackTurfOrchestrator:
                             session, cote_scrape, pid_row[0], real_course_id
                         )
                         nb_total += 1
+                        nb_source += 1
 
                     await session.commit()
+                    # Compteurs RÉELS : ils n'étaient jamais transmis, si bien que
+                    # scrape_log enregistrait 0 partant même pour un scrape réussi.
+                    # Un bookmaker bloqué (Betclic 403, Winamax sans contenu
+                    # hippique) apparaissait donc « ok » indéfiniment, et la panne
+                    # restait invisible côté back-office. `nb_extrait` distingue en
+                    # plus « rien récupéré du site » de « récupéré mais non
+                    # rattaché à une participation connue ».
                     await log_scrape_result(
-                        session, source_name, "ok",
+                        session, source_name,
+                        "ok" if nb_source else "erreur",
+                        nb_partants=nb_source,
+                        erreur=(None if nb_source else
+                                f"aucune cote enregistrée ({len(cotes_list)} extraite(s) "
+                                "du site, 0 rattachée à une participation)"),
                         duree_ms=int((time.time() - t0) * 1000),
                     )
                     await session.commit()
@@ -986,8 +1056,9 @@ class BlackTurfOrchestrator:
         try:
             from sqlalchemy import text as sa_text
             async with AsyncSessionLocal() as session:
-                from datetime import date as dt_date
-                today = dt_date.today()
+                # Journée PARISIENNE : en UTC, l'enrichissement des partants du
+                # jour ne démarrait qu'à 02 h heure française (cf. temps_courses).
+                today = jour_courses()
 
                 # Query SQL directe pour éviter le problème de cast SQLAlchemy
                 result = await session.execute(sa_text("""
@@ -1203,6 +1274,7 @@ class BlackTurfOrchestrator:
 
     async def poll_resultats(self) -> None:
         """Polling résultats toutes les 3 minutes pour courses en cours."""
+        from services.course_resolution import STATUT_ANNULE, statut_interne_depuis_pmu
         pmu = PmuScraper()
         t0 = time.time()
         try:
@@ -1225,7 +1297,8 @@ class BlackTurfOrchestrator:
                 from sqlalchemy import text as _text
                 courses = (await session.execute(_text("""
                     SELECT c.course_id AS course_id, c.reunion_id AS reunion_id,
-                           c.date_heure AS date_heure
+                           c.date_heure AS date_heure, c.statut AS statut,
+                           (c.date_heure < now() - interval '30 minutes') AS depart_ancien
                     FROM courses c
                     LEFT JOIN resultats r ON r.course_id = c.course_id
                     WHERE c.date_heure < :now AND c.date_heure > :win
@@ -1248,6 +1321,7 @@ class BlackTurfOrchestrator:
             # grosse transaction globale deadlockait en boucle (resultats KO depuis des
             # semaines). Chaque course = sa propre petite txn, indépendante et rejouable.
             ok_n = 0
+            annule_n = 0
             for course in courses:
                 try:
                     r_id = course.reunion_id
@@ -1260,16 +1334,51 @@ class BlackTurfOrchestrator:
                         if await self._commit_unit(_w):
                             ok_n += 1
                             log.info("orchestrator.resultat_polled", course_id=course.course_id)
-                            # Déclencher le pipeline post-course via RQ
-                            from rq import Queue
+                            # Déclencher le pipeline post-course via RQ.
+                            # `retry` : un échec de post_course_sync est le plus
+                            # souvent TRANSITOIRE (base momentanément indisponible,
+                            # worker tué par le OOM killer) ; sans réessai, la
+                            # course perd définitivement son apprentissage.
+                            # `failure_ttl` : sans lui, RQ garde les jobs ratés un
+                            # AN dans la FailedJobRegistry — 527 entrées empilées
+                            # depuis juin en production, dont le décompte polluait
+                            # chaque alerte qualité bien après correction des causes.
+                            from rq import Queue, Retry
                             import redis
                             rq = Queue(connection=redis.from_url(settings.redis_url))
-                            rq.enqueue("ml.pipeline.post_course_sync", course.course_id)
+                            rq.enqueue(
+                                "ml.pipeline.post_course_sync", course.course_id,
+                                retry=Retry(max=2, interval=[120, 600]),
+                                failure_ttl=POST_COURSE_FAILURE_TTL_S,
+                            )
+                        continue
+
+                    # Pas d'arrivée : course ANNULÉE ? Le PMU ne publiera JAMAIS
+                    # d'ordreArrivee pour elle — sans ce test la course tourne en
+                    # boucle jusqu'à sortir de la fenêtre 36h, puis reste 'a_venir'
+                    # à vie (159 cas en prod au 2026-08-17, 100 % COURSE_ANNULEE).
+                    # Sonde seulement passé 30 min après l'heure de départ : entre la
+                    # fin de course et la publication de l'arrivée l'absence
+                    # d'ordreArrivee est NORMALE, inutile de payer une requête de plus.
+                    if course.statut == "a_venir" and course.depart_ancien:
+                        statut_pmu = await pmu.get_statut_course(r_id, c_num, cid_prefix)
+                        if statut_interne_depuis_pmu(statut_pmu) == STATUT_ANNULE:
+                            async def _wa(session, _cid=course.course_id):
+                                await session.execute(_text(
+                                    "UPDATE courses SET statut = :s, updated_at = now() "
+                                    "WHERE course_id = :c"),
+                                    {"s": STATUT_ANNULE, "c": _cid})
+                            if await self._commit_unit(_wa):
+                                annule_n += 1
+                                log.info("orchestrator.course_annulee",
+                                         course_id=course.course_id, statut_pmu=statut_pmu)
                 except Exception as e:  # une course fautive n'arrête pas le poll
                     log.warning("orchestrator.resultat_course_failed",
                                 course_id=course.course_id, err=str(e)[:160])
 
             await self._log_ok("resultats", nb_courses=ok_n, duree_ms=int((time.time() - t0) * 1000))
+            if annule_n:
+                log.info("orchestrator.resultats_annulees", n=annule_n)
         except Exception as e:
             log.error("orchestrator.resultats_error", error=str(e))
             await self._log_error("resultats", e)

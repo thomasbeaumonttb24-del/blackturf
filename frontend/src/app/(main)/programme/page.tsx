@@ -9,10 +9,10 @@
  *
  * ⚠ ASSETS À COPIER dans le dossier /public :
  *   public/img/logo-horse.png
- *   public/img/disciplines/attele-m.png
- *   public/img/disciplines/plat-m.png
- *   public/img/disciplines/monte-m.png
- *   public/img/disciplines/obstacle-m.png
+ *   public/img/disciplines/attele-v2.png
+ *   public/img/disciplines/plat-v2.png
+ *   public/img/disciplines/monte-v2.png
+ *   public/img/disciplines/obstacle-v2.png
  * (fournis dans ce même paquet, sous /public)
  */
 
@@ -65,15 +65,15 @@ const enjeux = (v: number | null) => {
 
 /* ─── Palette des disciplines (couleur + silhouette détourée) ── */
 type DiscMeta = { color: string; bg: string; ring: string; mask: string };
-const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-m.png" };
+const DISC_FALLBACK: DiscMeta = { color: "#6B7280", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v2.png" };
 
 function discMeta(discipline: string): DiscMeta {
   const d = (discipline || "").toLowerCase();
-  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-m.png" };
-  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-m.png" };
-  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-m.png" };
-  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-m.png" };
-  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-m.png" };
+  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v2.png" };
+  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v2.png" };
+  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v2.png" };
+  if (d.includes("haie")) return { color: "#C1502A", bg: "#FDF1EA", ring: "#F3CDB8", mask: "obstacle-v2.png" };
+  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v2.png" };
   return DISC_FALLBACK;
 }
 

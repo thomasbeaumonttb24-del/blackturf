@@ -1,7 +1,7 @@
 """
 Tests backtest ROI (Phase 4) — règlement pur + métriques + runner DB.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -10,7 +10,7 @@ from ml.backtest import (
     value_bet_strategy, portfolio_strategy, run_backtest,
     bet_won, arrivee_order,
 )
-from db.models import Course, Participation, Prediction, Resultat
+from db.models import Course, Participation, Prediction, PredictionSnapshot, Resultat
 
 
 # ── Règlement pur ──────────────────────────────────────────────
@@ -172,10 +172,14 @@ def test_value_bet_strategy_pas_de_pari_sans_edge():
 # ── Runner DB ──────────────────────────────────────────────────
 # proba=0.8 → proba_top1=0.4 ; à cote 3.0, EV gagnant = 3.0×0.4−1 = +0.2 → vrai
 # value bet (le runner détecte sur P(victoire), pas sur la proba placé).
-async def _seed_course(db, cid, num1_pos, cote=3.0, proba=0.8, cote_figee=None):
+async def _seed_course(
+    db, cid, num1_pos, cote=3.0, proba=0.8, cote_figee=None,
+    snapshot_replayable=True,
+):
+    depart = datetime(2026, 1, int(cid[-1]) + 1, 13, 0, tzinfo=timezone.utc)
     db.add(Course(
         course_id=cid, reunion_id="R1", numero=1, nom="Test",
-        date_heure=datetime(2026, 1, int(cid[-1]) + 1, 13, 0, tzinfo=timezone.utc),
+        date_heure=depart,
         hippodrome_nom="Pau", discipline="Plat", distance=2000,
         nb_partants=10, statut="termine",
     ))
@@ -187,6 +191,26 @@ async def _seed_course(db, cid, num1_pos, cote=3.0, proba=0.8, cote_figee=None):
         prediction_id=f"pred-{cid}-1", participation_id=f"p-{cid}-1",
         course_id=cid, proba_top1=proba / 2, proba_top3=proba, rang_predit=1,
         cote_figee=cote_figee,
+        created_at=depart - timedelta(minutes=10),
+    ))
+    db.add(PredictionSnapshot(
+        snapshot_id=f"snap-{cid}-1",
+        prediction_run_id=f"run-{cid}",
+        prediction_id=f"pred-{cid}-1",
+        participation_id=f"p-{cid}-1",
+        course_id=cid,
+        features={},
+        features_hash="a" * 64,
+        feature_schema_hash="b" * 64,
+        proba_top1=proba / 2,
+        proba_top3=proba,
+        rang_predit=1,
+        cote_figee=cote_figee,
+        observed_at=depart - timedelta(minutes=10),
+        course_start_at=depart,
+        is_pre_course=True,
+        origin="live",
+        is_replayable=snapshot_replayable,
     ))
     # Arrivée réaliste : le cheval prédit (#1) + un autre (#2) comme gagnant de secours
     autre_pos = 1 if num1_pos != 1 else 2
@@ -224,6 +248,19 @@ async def test_run_backtest_selection_cote_figee_gain_cote_finale(db):
     assert res.nb_bets == 1
     assert res.nb_wins == 1
     assert res.total_returned == pytest.approx(res.total_staked * 5.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_run_backtest_exclut_prediction_post_course(db):
+    await _seed_course(db, "C4", num1_pos=1, snapshot_replayable=False)
+    pred = await db.get(Prediction, "pred-C4-1")
+    course = await db.get(Course, "C4")
+    pred.created_at = course.date_heure + timedelta(minutes=1)
+    await db.commit()
+
+    res = await run_backtest(db, ["C4"], bankroll=100.0)
+    assert res.nb_courses == 0
+    assert res.nb_bets == 0
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 from sqlalchemy import (
     String, Integer, Float, Boolean, Text, DateTime, Date,
-    BigInteger, ForeignKey, UniqueConstraint, Index, func,
+    BigInteger, ForeignKey, UniqueConstraint, Index, func, text,
     JSON, Enum as SAEnum
 )
 # UUID and JSON: use standard types for SQLite/PostgreSQL compatibility
@@ -252,7 +252,15 @@ class Course(Base):
     paris_disponibles: Mapped[list | None] = mapped_column(JSON)
 
     # Statut
-    statut: Mapped[str] = mapped_column(String(20), default="a_venir")  # a_venir/en_cours/termine/annule
+    # a_venir / en_cours / termine / annule / sans_resultat
+    #   annule        : le PMU a annulé la course (statut PMU COURSE_ANNULEE) — elle
+    #                   n'aura jamais d'arrivée.
+    #   sans_resultat : passée, non annulée, mais aucun résultat n'est arrivé après
+    #                   plusieurs jours (statut terminal posé par
+    #                   services/course_resolution.py). Sans ces deux statuts la
+    #                   course restait 'a_venir' à vie une fois hors de la fenêtre
+    #                   36h de poll_resultats.
+    statut: Mapped[str] = mapped_column(String(20), default="a_venir")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -308,6 +316,12 @@ class Participation(Base):
     cote_bet365: Mapped[float | None] = mapped_column(Float)              # via oddschecker (2026-07-03)
     cote_ladbrokes: Mapped[float | None] = mapped_column(Float)           # via oddschecker (LD, repli Coral)
     cote_betfair_exchange: Mapped[float | None] = mapped_column(Float)    # marché d'échange
+    # Heure de publication de la cote PAR LA SOURCE (PMU dernierRapportDirect
+    # .dateRapport). Distincte de `updated_at`, qui est l'heure du scrape : le PMU
+    # republie la même cote tant que rien ne bouge, donc un scrape récent ne prouve
+    # pas une cote fraîche. Sert à dater honnêtement la cote figée d'un pronostic
+    # et à détecter un flux de cotes gelé.
+    cote_pmu_datetime: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     mouvement_cote_pct: Mapped[float | None] = mapped_column(Float)       # % mouvement cote (ouverture→actuelle)
     cote_reference: Mapped[float | None] = mapped_column(Float)           # cote d'ouverture (dernierRapportReference)
     tendance_cote: Mapped[str | None] = mapped_column(String(2))          # "+" / "-" / "="
@@ -534,6 +548,210 @@ class Prediction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PredictionSnapshot(Base):
+    """État append-only exact d'une prédiction à un instant pré-course.
+
+    ``predictions`` reste la projection courante, mutable et compatible avec les
+    lecteurs existants. Cette table est le journal causal utilisé pour l'audit,
+    le replay et les futures mesures réellement point-in-time.
+    """
+    __tablename__ = "prediction_snapshots"
+
+    snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    prediction_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    prediction_id: Mapped[str] = mapped_column(ForeignKey("predictions.prediction_id"), index=True)
+    participation_id: Mapped[str] = mapped_column(ForeignKey("participations.participation_id"), index=True)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), index=True)
+    model_version_id: Mapped[str | None] = mapped_column(ForeignKey("model_versions.version_id"))
+
+    features: Mapped[dict] = mapped_column(JSON)
+    features_hash: Mapped[str] = mapped_column(String(64))
+    feature_schema_hash: Mapped[str] = mapped_column(String(64))
+    proba_top1: Mapped[float] = mapped_column(Float)
+    proba_top3: Mapped[float] = mapped_column(Float)
+    proba_top1_raw: Mapped[float | None] = mapped_column(Float)
+    proba_top3_raw: Mapped[float | None] = mapped_column(Float)
+    proba_top1_low: Mapped[float | None] = mapped_column(Float)
+    proba_top1_high: Mapped[float | None] = mapped_column(Float)
+    rang_predit: Mapped[int] = mapped_column(Integer)
+    confidence_score: Mapped[float | None] = mapped_column(Float)
+    cote_figee: Mapped[float | None] = mapped_column(Float)
+
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    odds_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    course_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_pre_course: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    origin: Mapped[str] = mapped_column(String(30), nullable=False, default="live")
+    is_replayable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "prediction_run_id", "participation_id",
+            name="uq_prediction_snapshot_run_participation",
+        ),
+        Index("ix_prediction_snapshots_course_observed", "course_id", "observed_at"),
+        Index(
+            "ix_prediction_snapshots_pre_course",
+            "course_start_at",
+            postgresql_where=text("is_pre_course = true"),
+        ),
+        Index(
+            "ix_prediction_snapshots_latest_eval",
+            "participation_id", "observed_at",
+            postgresql_where=text("is_pre_course = true AND is_replayable = true"),
+        ),
+    )
+
+
+class PredictionEvaluation(Base):
+    """Projection historique : dernier snapshot pré-course, sinon ligne legacy.
+
+    En PostgreSQL, ``prediction_evaluation`` est une vue créée par la migration
+    0030. La déclaration ORM garde les backtests/API typés et permet aux tests
+    SQLite de créer une table équivalente sans SQL spécifique à PostgreSQL.
+    """
+    __tablename__ = "prediction_evaluation"
+
+    evaluation_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    prediction_id: Mapped[str] = mapped_column(String(36), index=True)
+    participation_id: Mapped[str] = mapped_column(String(36), index=True)
+    course_id: Mapped[str] = mapped_column(String(30), index=True)
+    model_version_id: Mapped[str | None] = mapped_column(String(36))
+    proba_top1: Mapped[float] = mapped_column(Float)
+    proba_top3: Mapped[float] = mapped_column(Float)
+    proba_top1_raw: Mapped[float | None] = mapped_column(Float)
+    proba_top3_raw: Mapped[float | None] = mapped_column(Float)
+    proba_top1_low: Mapped[float | None] = mapped_column(Float)
+    proba_top1_high: Mapped[float | None] = mapped_column(Float)
+    rang_predit: Mapped[int] = mapped_column(Integer)
+    score_borda: Mapped[float | None] = mapped_column(Float)
+    confidence_score: Mapped[float | None] = mapped_column(Float)
+    cote_figee: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    features: Mapped[dict | None] = mapped_column(JSON)
+    features_hash: Mapped[str | None] = mapped_column(String(64))
+    feature_schema_hash: Mapped[str | None] = mapped_column(String(64))
+    source_origin: Mapped[str] = mapped_column(String(30))
+    is_snapshot: Mapped[bool] = mapped_column(Boolean)
+    is_replayable: Mapped[bool] = mapped_column(Boolean)
+
+
+class BetPlanSnapshot(Base):
+    """Conseil de mise EXACT tel qu'émis, figé avant le départ (append-only).
+
+    ``prediction_snapshots`` fige la PROBABILITÉ ; cette table fige le CONSEIL
+    qui en découle — sélection, mises, cotes retenues, EV, configuration de
+    l'algorithme. Sans elle, un ROI ne peut être que reconstruit après coup,
+    donc contaminé par la connaissance du résultat.
+
+    Idempotence : une même requête (même course, même plan, même destinataire)
+    n'insère qu'une ligne — l'unicité porte sur le hash canonique du plan.
+    """
+    __tablename__ = "bet_plan_snapshots"
+
+    plan_snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), index=True)
+    # Cohorte de prédiction dont ce plan est issu (NULL si aucun snapshot de
+    # prédiction n'existait encore pour la course — jamais inventé).
+    prediction_run_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    model_version_id: Mapped[str | None] = mapped_column(ForeignKey("model_versions.version_id"))
+
+    # Destinataire pseudonymisé (HMAC) ou 'system' pour les plans émis par les
+    # jobs internes. Jamais l'identifiant utilisateur en clair.
+    subject_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="system")
+    profil: Mapped[str] = mapped_column(String(20), nullable=False)
+    montant_demande: Mapped[float] = mapped_column(Float, nullable=False)
+    bankroll: Mapped[float | None] = mapped_column(Float)
+
+    plan: Mapped[dict] = mapped_column(JSON, nullable=False)
+    plan_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Cotes RÉELLEMENT utilisées pour chiffrer ce plan : {numero: cote}. Le
+    # règlement ne doit jamais relire une cote qui a bougé depuis l'émission.
+    cotes_utilisees: Mapped[dict] = mapped_column(JSON, nullable=False)
+    algo_config: Mapped[dict] = mapped_column(JSON, nullable=False)
+    algo_version: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    nb_paris: Mapped[int] = mapped_column(Integer, nullable=False)
+    montant_joue: Mapped[float] = mapped_column(Float, nullable=False)
+    ev_estimee: Mapped[float | None] = mapped_column(Float)
+    esperance_gain: Mapped[float | None] = mapped_column(Float)
+
+    emitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    course_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_pre_course: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    origin: Mapped[str] = mapped_column(String(30), nullable=False, default="mise_plan")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id", "subject_hash", "plan_hash",
+            name="uq_bet_plan_snapshot_idempotence",
+        ),
+        Index("ix_bet_plan_snapshots_course_emitted", "course_id", "emitted_at"),
+        Index(
+            "ix_bet_plan_snapshots_pre_course",
+            "course_start_at",
+            postgresql_where=text("is_pre_course = true"),
+        ),
+    )
+
+
+class BetPlanSettlement(Base):
+    """Règlement d'un plan figé sur les VRAIS rapports PMU (append-only).
+
+    Séparée du snapshot : le conseil émis n'est jamais réécrit une fois le
+    résultat connu. Un rapport publié tardivement produit une NOUVELLE ligne de
+    règlement ; l'historique complet reste auditable et le dernier
+    ``settled_at`` fait foi.
+    """
+    __tablename__ = "bet_plan_settlements"
+
+    settlement_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    plan_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("bet_plan_snapshots.plan_snapshot_id"), index=True
+    )
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), index=True)
+
+    bilan: Mapped[dict] = mapped_column(JSON, nullable=False)
+    montant_mise: Mapped[float] = mapped_column(Float, nullable=False)
+    montant_retour: Mapped[float] = mapped_column(Float, nullable=False)
+    net: Mapped[float] = mapped_column(Float, nullable=False)
+    roi: Mapped[float | None] = mapped_column(Float)
+    nb_paris: Mapped[int] = mapped_column(Integer, nullable=False)
+    nb_gagnes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 'settled' = tous les rapports connus ; 'partial' = au moins un rapport PMU
+    # pas encore publié. Un 'partial' n'entre dans aucune mesure de rentabilité.
+    statut: Mapped[str] = mapped_column(String(20), nullable=False)
+    settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_bet_plan_settlements_plan_settled", "plan_snapshot_id", "settled_at"),
+    )
+
+
+class BetPlanSegmentGate(Base):
+    """Décision de gate persistée par segment (dimension × clé de segment).
+
+    Calculée nightly depuis ``ml/bet_plan_performance.py`` sur les plans
+    RÉELLEMENT réglés ; lue à chaque sélection de mise via
+    ``ml/bet_performance.get_learned_type_weights``. Un segment absent de cette
+    table est implicitement ``active`` (facteur 1.0).
+    """
+    __tablename__ = "bet_plan_segment_gates"
+
+    dimension: Mapped[str] = mapped_column(String(20), primary_key=True)
+    segment_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    factor: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    reason: Mapped[str | None] = mapped_column(Text)
+    roi_pct: Mapped[float | None] = mapped_column(Float)
+    n_paris: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_bet_plan_segment_gates_status", "dimension", "status"),
+    )
+
+
 class ValueBet(Base):
     __tablename__ = "value_bets"
 
@@ -607,6 +825,12 @@ class User(Base):
     plan: Mapped[str] = mapped_column(String(10), default="free")  # free/standard/expert (legacy: starter/pro)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(100), unique=True)
 
+    # Essai gratuit : une seule fois par compte. NULL = jamais utilisé. Renseignée
+    # par le webhook dès qu'un abonnement assorti d'un essai devient trialing/active.
+    # Stripe ne déduplique PAS les essais par client : sans ce champ, un compte
+    # rouvrait un checkout et repartait pour 7 jours, indéfiniment.
+    essai_utilise_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Push notifications
     push_subscription: Mapped[dict | None] = mapped_column(JSON)
 
@@ -643,6 +867,48 @@ class Subscription(Base):
     essai_fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SubscriptionEvent(Base):
+    """Journal APPEND-ONLY des mouvements d'abonnement.
+
+    `subscriptions` ne garde que l'ÉTAT COURANT : une ligne écrasée à chaque
+    webhook ne dit pas si le client a résilié avant ou après la fin de son essai,
+    ni quand la carte est arrivée. Ce journal conserve chaque mouvement tel qu'il
+    s'est produit — c'est lui qui alimente le suivi admin et les notifications.
+
+    `email` est dénormalisé volontairement : le journal doit rester lisible même
+    si le compte est supprimé (RGPD : purger l'utilisateur n'efface pas l'historique
+    comptable, qui se conserve).
+    """
+    __tablename__ = "subscription_events"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), index=True)
+    email: Mapped[str | None] = mapped_column(String(255))
+
+    # essai_ouvert / carte_ajoutee / abonnement_actif / changement_plan /
+    # resiliation_demandee / resilie / essai_bientot_fini / paiement_echoue /
+    # essai_termine_sans_carte
+    type: Mapped[str] = mapped_column(String(40), index=True)
+
+    plan: Mapped[str | None] = mapped_column(String(10))
+    plan_precedent: Mapped[str | None] = mapped_column(String(10))
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(100), index=True)
+
+    montant_cents: Mapped[int | None] = mapped_column(Integer)
+    essai_fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    periode_fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Vrai si le mouvement s'est produit AVANT la fin de l'essai : c'est la
+    # question que pose l'exploitant devant une résiliation.
+    pendant_essai: Mapped[bool | None] = mapped_column(Boolean)
+
+    detail: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_subscription_events_user_date", "user_id", "created_at"),
+    )
 
 
 # ─────────────────────────────────────────────
@@ -724,6 +990,17 @@ class ModelVersion(Base):
     est_synthetique: Mapped[bool] = mapped_column(Boolean, default=False)  # prior cold-start
     walk_forward_auc: Mapped[float | None] = mapped_column(Float)
     walk_forward_variance: Mapped[float | None] = mapped_column(Float)
+    # ── Classement intra-course (migration 0035) ──────────────────────────────
+    # `auc_roc` et `walk_forward_auc` sont POOLÉES : elles mélangent la variance
+    # inter-course et le classement intra-course, et flattent un simple lecteur de
+    # cote. Ces trois-ci mesurent ce que le produit fait — ordonner les partants
+    # d'UNE course — et le confrontent à la référence qu'il faut battre pour
+    # exister. `rank_delta_market` négatif = le produit ferait mieux avec un
+    # `ORDER BY cote_pmu`. NULL = non mesuré (versions antérieures au 20/08/2026),
+    # jamais 0.0 qui se lirait « à égalité avec le marché ».
+    rank_auc: Mapped[float | None] = mapped_column(Float)
+    market_rank_auc: Mapped[float | None] = mapped_column(Float)
+    rank_delta_market: Mapped[float | None] = mapped_column(Float)
     feature_importance: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -735,7 +1012,7 @@ class AlerteLog(Base):
     __tablename__ = "alertes_log"
 
     alerte_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
-    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), index=True)
     type_alerte: Mapped[str] = mapped_column(String(50))
     canal: Mapped[str] = mapped_column(String(20))  # push/email/in-app
     payload: Mapped[dict | None] = mapped_column(JSON)
@@ -743,6 +1020,13 @@ class AlerteLog(Base):
     lue: Mapped[bool] = mapped_column(Boolean, default=False)
     erreur: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Le centre de notifications lit toujours « les alertes d'UN utilisateur, les plus
+    # récentes d'abord » : sans cet index c'était un seq scan sur 200 000+ lignes à
+    # chaque ouverture de page (cf. migration 0028).
+    __table_args__ = (
+        Index("ix_alertes_log_user_created", "user_id", "created_at"),
+    )
 
 
 class ScrapeLog(Base):

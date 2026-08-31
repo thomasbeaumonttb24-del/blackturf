@@ -1,16 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import {
-  Trophy, Star, Receipt, Coins, ArrowRight, ShieldCheck, BadgeCheck,
-  Clock3, Database, ExternalLink, LockKeyhole, BarChart3, RefreshCw,
-  CheckCircle2, CalendarDays, Target, Crown, ChevronDown,
+  Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
+import {
+  Trophy, Star, Receipt, Coins, ArrowRight, ShieldCheck, Database,
+  ExternalLink, LockKeyhole, BarChart3, RefreshCw, CheckCircle2,
+  CalendarDays, Target, Crown, ChevronDown, TrendingUp, Dices,
+  LineChart, Gauge, Sparkles, Users, Bell, Wallet, Brain,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { DisciplineImg } from "@/components/ui/DisciplineIcon";
+import { axisTick, GRID, ChartTooltip } from "@/components/charts/chart-kit";
 import { statsApi } from "@/lib/api";
+import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -20,7 +27,17 @@ interface TrackRecord {
     accuracy_top3: number;
     brier_moyen: number;
     nb_courses_analysees: number;
+    // Sous-ensemble strictement rejouable (snapshots immuables). Toujours ≤
+    // nb_courses_analysees : sert la mention « vérifiable », pas les taux.
+    nb_courses_rejouables?: number;
+    // Date de la plus ancienne course mesurée (ISO) — la cohorte publiée retient
+    // toute course dont le pronostic était figé AVANT le départ.
+    mesure_depuis?: string | null;
     nb_surprises: number;
+    // Repères « hasard » calculés sur le champ réel de chaque course.
+    hasard_top3?: number | null;
+    hasard_top1?: number | null;
+    nb_partants_moyen?: number | null;
     favori_win_rate: number;
     favori_place_rate: number;
     nb_favoris_evalues: number;
@@ -38,10 +55,20 @@ interface TrackRecord {
     nb_predictions: number;
     nb_surprises: number;
   }>;
+  // Série longue (30 j) — les jours sans course mesurée sont ABSENTS du tableau.
+  tendance_30j?: Array<{
+    date: string;
+    jour: string;
+    nb_predictions: number;
+    accuracy_top3: number;
+    accuracy_top1: number;
+  }>;
   by_discipline: Array<{
     discipline: string;
     nb_courses: number;
     accuracy_top3: number;
+    accuracy_top1?: number;
+    brier_moyen?: number | null;
   }>;
   best_pronostics: Array<{
     course_id: string;
@@ -104,66 +131,192 @@ const PROFIL_LABELS: Record<string, { label: string; cls: string }> = {
   agressif: { label: "Risqué", cls: "bg-rose-50 text-rose-700 ring-rose-200" },
 };
 
+const nf = (n: number, d = 0) =>
+  n.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
 // ─── Compteur animé (count-up) — déclenché quand l'élément entre à l'écran ───
+/**
+ * Compteur animé (count-up) déclenché à l'entrée dans le viewport.
+ *
+ * L'état initial est la VRAIE valeur, jamais 0 : l'animation est un bonus, pas la
+ * source de vérité. Un rendu serveur, un IntersectionObserver absent, un onglet en
+ * arrière-plan ou une capture automatisée doivent afficher « 3 630 courses
+ * analysées », jamais « 0 courses analysées » — un titre à zéro détruirait la
+ * crédibilité de la page. Un filet de sécurité repose la valeur exacte si
+ * l'animation n'a pas abouti dans le temps imparti.
+ */
 function useCountUp(target: number, duration = 1400) {
-  const [val, setVal] = useState(0);
+  const [val, setVal] = useState(target);
   const ref = useRef<HTMLSpanElement>(null);
   const started = useRef(false);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (typeof IntersectionObserver === "undefined"
+        || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setVal(target);
+      return;
+    }
+    let raf = 0;
+    let garde: ReturnType<typeof setTimeout> | undefined;
+    let fini = false;
     const run = () => {
       if (started.current) return;
       started.current = true;
-      if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        setVal(target);
-        return;
-      }
       const t0 = performance.now();
+      setVal(0);
       const tick = (now: number) => {
         const p = Math.min((now - t0) / duration, 1);
         const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
         setVal(target * eased);
-        if (p < 1) requestAnimationFrame(tick);
-        else setVal(target);
+        if (p < 1) raf = requestAnimationFrame(tick);
+        else { fini = true; setVal(target); }
       };
-      requestAnimationFrame(tick);
+      raf = requestAnimationFrame(tick);
+      garde = setTimeout(() => { if (!fini) { cancelAnimationFrame(raf); setVal(target); } }, duration + 800);
     };
     const io = new IntersectionObserver(
       (entries) => entries.forEach((e) => e.isIntersecting && run()),
       { threshold: 0.3 },
     );
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      io.disconnect();
+      cancelAnimationFrame(raf);
+      if (garde) clearTimeout(garde);
+    };
   }, [target, duration]);
   return { val, ref };
 }
 
-function CountUpEuro({ value, className, decimals = 0, prefix = "" }: { value: number; className?: string; decimals?: number; prefix?: string }) {
+function CountUp({ value, decimals = 0, suffix = "", prefix = "", className }: {
+  value: number; decimals?: number; suffix?: string; prefix?: string; className?: string;
+}) {
   const { val, ref } = useCountUp(value);
-  return (
-    <span ref={ref} className={className}>
-      {prefix}{val.toLocaleString("fr-FR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}€
-    </span>
-  );
+  return <span ref={ref} className={className}>{prefix}{nf(val, decimals)}{suffix}</span>;
 }
 
-function SectionHeading({ eyebrow, title, description, icon: Icon }: {
+function CountUpEuro({ value, className, decimals = 0, prefix = "" }: { value: number; className?: string; decimals?: number; prefix?: string }) {
+  return <CountUp value={value} decimals={decimals} prefix={prefix} suffix="€" className={className} />;
+}
+
+function SectionHeading({ eyebrow, title, description, icon: Icon, align = "left" }: {
   eyebrow: string;
   title: string;
   description: string;
   icon: typeof Trophy;
+  align?: "left" | "center";
 }) {
   return (
-    <div className="flex items-start gap-3 sm:gap-4">
+    <div className={cn("flex items-start gap-3 sm:gap-4", align === "center" && "flex-col items-center text-center")}>
       <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-800">
         <Icon className="h-5 w-5" aria-hidden="true" />
       </span>
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">{eyebrow}</p>
         <h2 className="mt-1 font-display text-xl font-bold tracking-tight text-foreground sm:text-2xl">{title}</h2>
-        <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
+        <p className={cn("mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground", align === "center" && "mx-auto")}>{description}</p>
       </div>
+    </div>
+  );
+}
+
+// ─── Courbe de tendance (30 jours) ────────────────────────────
+type PointTendance = { jour: string; top3: number | null; nb: number };
+
+/**
+ * Complète la série renvoyée par l'API avec les jours SANS course mesurée.
+ * L'API ne renvoie que les jours peuplés : sans ce remplissage, un trou de
+ * collecte (ex. 12→15/08) se lirait comme une continuité — la courbe raconterait
+ * une régularité que les données n'ont pas. On insère `null` (trou visible) au
+ * lieu de 0 %, qui se lirait comme un échec du modèle.
+ */
+function completerJours(
+  serie: Array<{ date: string; jour: string; accuracy_top3: number; nb_predictions: number }>,
+  jours = 30,
+): PointTendance[] {
+  if (serie.length === 0) return [];
+  const parDate = new Map(serie.map((p) => [p.date, p]));
+  const fin = new Date(`${serie[serie.length - 1].date}T12:00:00Z`);
+  const out: PointTendance[] = [];
+  for (let i = jours - 1; i >= 0; i--) {
+    const d = new Date(fin);
+    d.setUTCDate(d.getUTCDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    const p = parDate.get(iso);
+    out.push({
+      jour: `${iso.slice(8, 10)}/${iso.slice(5, 7)}`,
+      top3: p ? p.accuracy_top3 : null,
+      nb: p ? p.nb_predictions : 0,
+    });
+  }
+  return out;
+}
+
+function TendanceChart({ data, moyenne, hasard }: { data: PointTendance[]; moyenne: number; hasard: number | null }) {
+  return (
+    <div className="h-[260px] w-full sm:h-[300px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 12, right: 8, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="tendanceFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.35} />
+              <stop offset="100%" stopColor="#F59E0B" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid {...GRID} />
+          <XAxis
+            dataKey="jour"
+            tick={axisTick}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+            minTickGap={28}
+          />
+          <YAxis
+            domain={[0, 100]}
+            ticks={[0, 25, 50, 75, 100]}
+            tick={axisTick}
+            axisLine={false}
+            tickLine={false}
+            width={52}
+            tickFormatter={(v: number) => `${v}%`}
+          />
+          {hasard != null && (
+            <ReferenceLine
+              y={hasard}
+              stroke="#94A3B8"
+              strokeDasharray="4 4"
+              label={{ value: `hasard ${nf(hasard, 0)} %`, position: "insideBottomRight", fontSize: 10, fill: "#94A3B8" }}
+            />
+          )}
+          <ReferenceLine
+            y={moyenne}
+            stroke="#059669"
+            strokeDasharray="5 3"
+            label={{ value: `moyenne ${nf(moyenne, 1)} %`, position: "insideTopRight", fontSize: 10, fill: "#059669" }}
+          />
+          <Tooltip
+            content={
+              <ChartTooltip
+                labelMap={{ top3: "Top-3" }}
+                valueFormatter={(v) => `${nf(v, 1)} %`}
+              />
+            }
+          />
+          <Area
+            type="monotone"
+            dataKey="top3"
+            name="Top-3"
+            stroke="#B45309"
+            strokeWidth={2}
+            fill="url(#tendanceFill)"
+            connectNulls={false}
+            isAnimationActive={false}
+            dot={false}
+            activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -254,6 +407,173 @@ function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: bool
   );
 }
 
+// ─── Carte discipline ─────────────────────────────────────────
+function DisciplineCard({ d, maxCourses, hasard }: {
+  d: TrackRecord["by_discipline"][number];
+  maxCourses: number;
+  hasard: number | null;
+}) {
+  const partVolume = maxCourses > 0 ? Math.round((d.nb_courses / maxCourses) * 100) : 0;
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-stone-200 bg-white p-5 transition-all hover:border-amber-200 hover:shadow-[0_20px_45px_-38px_rgba(180,83,9,.75)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-stone-50 ring-1 ring-stone-200">
+            <DisciplineImg discipline={d.discipline} className="h-7 w-8" />
+          </span>
+          <div>
+            <span className="block text-sm font-semibold capitalize text-foreground">{d.discipline}</span>
+            <span className="mt-0.5 block text-xs tabular-nums text-muted-foreground">
+              {nf(d.nb_courses)} course{d.nb_courses > 1 ? "s" : ""} analysée{d.nb_courses > 1 ? "s" : ""}
+            </span>
+          </div>
+        </div>
+        <div className="text-right">
+          <span className={cn("block whitespace-nowrap font-display text-2xl font-bold tabular-nums",
+            d.accuracy_top3 >= 55 ? "text-emerald-700" : d.accuracy_top3 >= 40 ? "text-amber-700" : "text-slate-600")}>
+            {nf(d.accuracy_top3, 1)} %
+          </span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Top-3</span>
+        </div>
+      </div>
+
+      {/* Barre Top-3 + repère hasard */}
+      <div className="relative mt-5 h-2.5 overflow-hidden rounded-full bg-stone-100" role="img"
+        aria-label={`${d.discipline} : ${nf(d.accuracy_top3, 1)} % de présence du gagnant dans le Top-3, sur ${nf(d.nb_courses)} courses`}>
+        <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-600 transition-all duration-700"
+          style={{ width: `${Math.min(d.accuracy_top3, 100)}%` }} />
+      </div>
+      {hasard != null && (
+        <div className="relative h-3">
+          <span className="absolute top-0 -translate-x-1/2 text-[9px] font-medium text-slate-400"
+            style={{ left: `${Math.min(hasard, 100)}%` }}>▲ hasard</span>
+        </div>
+      )}
+
+      <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-stone-100 pt-3 text-center">
+        <div>
+          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">Top-1</dt>
+          <dd className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
+            {d.accuracy_top1 != null ? `${nf(d.accuracy_top1, 1)} %` : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">Brier</dt>
+          <dd className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
+            {d.brier_moyen != null ? nf(d.brier_moyen, 3) : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">Volume</dt>
+          <dd className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">{partVolume} %</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+// ─── FAQ ──────────────────────────────────────────────────────
+function Faq({ q, children }: { q: string; children: React.ReactNode }) {
+  return (
+    <details className="group rounded-2xl border border-stone-200 bg-white px-5 py-4 open:border-amber-200 open:bg-amber-50/30">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-foreground marker:content-none">
+        {q}
+        <ChevronDown className="h-4 w-4 shrink-0 text-amber-700 transition-transform group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="mt-3 text-sm leading-6 text-muted-foreground">{children}</div>
+    </details>
+  );
+}
+
+// ─── Barre comparative « nous vs hasard » ─────────────────────
+// Deux barres sur la MÊME échelle 0-100 : sans le repère du hasard juste en
+// dessous, « 59,8 % » ne dit rien au lecteur — c'est l'écart qui informe.
+function ComparBar({ label, aide, nous, hasard, facteur }: {
+  label: string;
+  aide: string;
+  nous: number;
+  hasard: number | null;
+  facteur: number | null;
+}) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h3 className="text-sm font-semibold text-foreground">{label}</h3>
+        <p className="font-display text-2xl font-bold tabular-nums text-amber-800">{nf(nous, 1)} %</p>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{aide}</p>
+
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center gap-3">
+          <span className="w-24 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-amber-800">BlackTurf</span>
+          <div className="h-3 flex-1 overflow-hidden rounded-full bg-stone-100">
+            <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-600"
+              style={{ width: `${Math.min(nous, 100)}%` }} />
+          </div>
+          <span className="w-14 shrink-0 text-right text-xs font-semibold tabular-nums text-amber-800">{nf(nous, 1)} %</span>
+        </div>
+        {hasard != null && (
+          <div className="flex items-center gap-3">
+            <span className="w-24 shrink-0 text-[11px] font-medium uppercase tracking-wider text-slate-400">Hasard</span>
+            <div className="h-3 flex-1 overflow-hidden rounded-full bg-stone-100">
+              <div className="h-full rounded-full bg-slate-300" style={{ width: `${Math.min(hasard, 100)}%` }} />
+            </div>
+            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-slate-500">{nf(hasard, 1)} %</span>
+          </div>
+        )}
+      </div>
+
+      {facteur && (
+        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 ring-1 ring-amber-200">
+          <TrendingUp className="h-3 w-3" aria-hidden="true" /> {nf(facteur, 1)} fois mieux que le hasard
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Échelle de Brier ─────────────────────────────────────────
+// Un score de Brier nu n'évoque rien : on le place sur son échelle, entre la
+// prédiction parfaite (0) et le pile ou face (0,25).
+function BrierScale({ value }: { value: number }) {
+  const position = Math.max(0, Math.min(1, value / 0.25)) * 100;
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-stone-50/70 p-5">
+      <div className="flex items-baseline justify-between gap-4">
+        <h3 className="text-sm font-semibold text-foreground">Calibration des probabilités</h3>
+        <p className="font-display text-xl font-bold tabular-nums text-slate-900">{nf(value, 3)}</p>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        Score de Brier : l&apos;écart moyen entre la probabilité annoncée et ce qui s&apos;est réellement
+        produit. Une probabilité juste vaut autant qu&apos;un bon classement — c&apos;est elle qui décide
+        d&apos;une mise.
+      </p>
+      <div className="relative mt-6 h-2 rounded-full bg-gradient-to-r from-emerald-300 via-amber-300 to-rose-300">
+        <span
+          className="absolute -top-1 h-4 w-1 -translate-x-1/2 rounded-full bg-slate-900 ring-2 ring-white"
+          style={{ left: `${position}%` }}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="mt-2 flex justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span>0 · parfait</span>
+        <span>0,25 · pile ou face</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Cellule du bandeau de chiffres du hero ───────────────────
+function StatCell({ value, label, note }: { value: React.ReactNode; label: string; note?: string }) {
+  return (
+    <div className="px-5 py-6 sm:px-6 sm:py-7">
+      <p className="font-display text-3xl font-bold leading-none tabular-nums text-slate-900 sm:text-[2.1rem]">{value}</p>
+      <p className="mt-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">{label}</p>
+      {note && <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{note}</p>}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────
 export default function TrackRecordPage() {
   const [recentLimit, setRecentLimit] = useState(10);
@@ -271,9 +591,40 @@ export default function TrackRecordPage() {
     updated_at?: string;
   }>(
     "palmares-gagnants",
-    () => statsApi.palmaresGagnants().then((r) => r.data),
+    // `palmaresGagnants` est gardé par require_admin → 401 pour un visiteur, et cette
+    // page est PUBLIQUE : sans repli, tout prospect voyait un palmarès vide. On tente
+    // d'abord la version admin (agrégats ROI/profil en plus), et on retombe sur la
+    // version publique sinon. Les blocs ROI se masquent d'eux-mêmes quand `profils`
+    // est absent — le ROI reste donc admin-only, conformément à la règle produit.
+    async () => {
+      try {
+        return (await statsApi.palmaresGagnants()).data;
+      } catch {
+        const pub = (await statsApi.palmaresPublic()).data;
+        return {
+          gagnants: pub.gagnants ?? [],
+          top_gains: pub.top_gains ?? [],
+          n: pub.nb_paris_gagnes ?? 0,
+          n_courses: pub.nb_courses_reglees ?? 0,
+          updated_at: pub.updated_at,
+        };
+      }
+    },
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
+
+  // Série 30 j complétée + moyenne pondérée par le volume de courses du jour
+  // (une moyenne simple donnerait autant de poids à un jour de 3 courses qu'à un
+  // jour de 60 → une journée creuse déformerait la ligne de référence).
+  const tendance = useMemo(() => {
+    const brute = data?.tendance_30j ?? [];
+    const points = completerJours(brute);
+    const total = brute.reduce((s, p) => s + p.nb_predictions, 0);
+    const moyenne = total > 0
+      ? brute.reduce((s, p) => s + p.accuracy_top3 * p.nb_predictions, 0) / total
+      : 0;
+    return { points, moyenne, totalCourses: total, jours: brute.length };
+  }, [data?.tendance_30j]);
 
   if (isLoading) {
     return (
@@ -282,7 +633,7 @@ export default function TrackRecordPage() {
           <div className="h-5 w-36 rounded-full bg-stone-200" />
           <div className="h-12 max-w-2xl rounded-2xl bg-stone-200" />
           <div className="h-5 max-w-xl rounded-full bg-stone-100" />
-          <div className="grid gap-4 sm:grid-cols-3"><div className="h-28 rounded-2xl bg-white" /><div className="h-28 rounded-2xl bg-white" /><div className="h-28 rounded-2xl bg-white" /></div>
+          <div className="grid gap-4 sm:grid-cols-4"><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /></div>
           <div className="h-80 rounded-3xl bg-white" />
         </div>
       </div>
@@ -304,69 +655,228 @@ export default function TrackRecordPage() {
   }
 
   const g = data.global;
+  // `total_gain` n'existe que sur la version admin du palmarès (règle produit :
+  // les montants agrégés ne sont pas publics). Sans ce garde-fou, un visiteur lisait
+  // « Total réglé aux rapports officiels : +0 € ».
+  const gainConnu = typeof gagnantsData?.total_gain === "number" && (gagnantsData?.total_gain ?? 0) > 0;
+  const nbGagnants = gagnantsData?.n ?? 0;
+  const nbCoursesReglees = gagnantsData?.n_courses ?? 0;
+  const hasard3 = g.hasard_top3 ?? null;
+  const hasard1 = g.hasard_top1 ?? null;
+  const facteur3 = hasard3 && hasard3 > 0 ? g.accuracy_top3 / hasard3 : null;
+  const facteur1 = hasard1 && hasard1 > 0 ? g.accuracy_top1 / hasard1 : null;
+  const depuis = g.mesure_depuis
+    ? new Date(g.mesure_depuis).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+    : null;
+  const maxCourses = Math.max(1, ...data.by_discipline.map((d) => d.nb_courses));
+  const clv = data.clv;
 
   return (
     <div className="min-h-screen bg-[#FCFBF8]">
 
-      {/* ── Hero éditorial : preuve avant promesse ─────────────────────── */}
-      <header className="border-b border-stone-200/80 bg-white">
-        <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-12 sm:px-6 sm:py-16 lg:grid-cols-[1.05fr_.95fr] lg:py-20">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-800">
-              <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> Palmarès vérifié
-            </div>
-            <h1 className="mt-6 max-w-3xl font-display text-4xl font-bold leading-[1.04] tracking-[-0.035em] text-slate-950 sm:text-5xl lg:text-6xl">
-              Les résultats parlent.<br /><span className="text-amber-800">Chaque gain est consultable.</span>
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-slate-600 sm:text-lg">
-              Les pronostics sont figés avant le départ, puis réglés avec les rapports PMU officiels. Ici, vous voyez les résultats — pas une promesse.
-            </p>
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-6 shadow-none">
-                <Link href="/tarifs">Découvrir l&apos;offre Pro <ArrowRight className="ml-1 h-4 w-4" /></Link>
-              </Button>
-              <Button asChild variant="outline" size="lg" className="min-h-12 rounded-xl border-stone-300 bg-white px-6">
-                <a href="#preuves">Voir les résultats</a>
-              </Button>
-            </div>
-            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
-              <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" /> Pronostics horodatés</span>
-              <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" /> Rapports officiels</span>
-              <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" /> Mise à jour continue</span>
-            </div>
+      {/* ── Hero : bande photo pleine largeur + bandeau de chiffres ──────────
+          L'image n'est pas décorative : ce sont les stalles AVANT l'ouverture,
+          c'est-à-dire exactement l'instant que la page prouve — le pronostic est
+          figé avant que les portes s'ouvrent. */}
+      <header className="relative isolate overflow-hidden bg-slate-950">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/img/palmares-hero-1600.webp"
+          srcSet="/img/palmares-hero-640.webp 640w, /img/palmares-hero-1024.webp 1024w, /img/palmares-hero-1600.webp 1600w"
+          sizes="100vw"
+          alt=""
+          aria-hidden="true"
+          fetchPriority="high"
+          className="absolute inset-0 h-full w-full object-cover object-[center_42%]"
+        />
+        {/* Voile en deux passes : dégradé horizontal pour tenir le contraste du
+            texte à gauche (AA sur fond photo), voile vertical léger pour que la
+            photo reste LISIBLE à droite — un aplat uniforme la transformait en
+            texture grise et annulait l'intérêt de l'image. */}
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/85 to-slate-950/25" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/5 to-slate-950/55" aria-hidden="true" />
+
+        <div className="relative mx-auto max-w-7xl px-4 pb-36 pt-14 sm:px-6 sm:pb-44 sm:pt-20 lg:pb-52 lg:pt-24">
+          <p className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-300">
+            <span className="h-px w-8 bg-amber-400/80" aria-hidden="true" />
+            Palmarès public
+          </p>
+
+          <h1 className="mt-7 max-w-4xl font-display text-[2.5rem] font-bold leading-[1.03] tracking-[-0.04em] text-white sm:text-6xl lg:text-[4.25rem]">
+            <CountUp value={g.nb_courses_analysees} /> courses analysées.
+            <span className="mt-2 block text-amber-300">Tous les résultats sont publics.</span>
+          </h1>
+
+          <p className="mt-7 max-w-xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
+            On note chaque pronostic à l&apos;arrivée, aux rapports PMU officiels.
+            Les bons comme les mauvais.
+          </p>
+
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-6 shadow-none">
+              <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-4 w-4" /></Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg" className="min-h-12 rounded-xl border border-white/25 bg-white/5 px-6 text-white hover:bg-white/10 hover:text-white">
+              <a href="#preuves">Voir la méthode</a>
+            </Button>
           </div>
 
-          <div className="relative overflow-hidden rounded-[2rem] bg-slate-950 p-6 text-white shadow-[0_24px_70px_-38px_rgba(15,23,42,.75)] sm:p-8">
-            <div className="absolute inset-0 opacity-15 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:24px_24px]" aria-hidden="true" />
-            <div className="relative">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300">Preuve en chiffres</p>
-              <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10">
-                <div className="bg-slate-950/90 p-5 sm:p-6">
-                  <p className="text-3xl font-bold tabular-nums sm:text-4xl">{g.accuracy_top3.toLocaleString("fr-FR", { maximumFractionDigits: 1 })}%</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-400">Précision Top-3</p>
-                </div>
-                <div className="bg-slate-950/90 p-5 sm:p-6">
-                  <p className="text-3xl font-bold tabular-nums sm:text-4xl">{g.nb_courses_analysees.toLocaleString("fr-FR")}</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-400">Courses analysées</p>
-                </div>
-                <div className="col-span-2 bg-slate-950/90 p-5 sm:p-6">
-                  <div className="flex items-end justify-between gap-4">
-                    <div><p className="text-3xl font-bold tabular-nums text-emerald-300 sm:text-5xl">{gagnantsData ? `+${(gagnantsData.total_gain ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 0 })}€` : "—"}</p><p className="mt-2 text-xs text-slate-400">Gains encaissés documentés</p></div>
-                    <div className="text-right"><p className="text-xl font-bold tabular-nums">{gagnantsData?.n.toLocaleString("fr-FR") ?? "—"}</p><p className="mt-1 text-[11px] text-slate-400">paris gagnés</p></div>
-                  </div>
-                </div>
-              </div>
-              {data.updated_at && <p className="mt-5 flex items-center gap-2 text-[11px] text-slate-400"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Actualisé le {new Date(data.updated_at).toLocaleDateString("fr-FR")} à {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>}
-            </div>
-          </div>
+          <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Horodaté avant le départ</span>
+            <span className="text-slate-600" aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Rapports PMU officiels</span>
+            <span className="text-slate-600" aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Aucun prélèvement pendant l&apos;essai</span>
+          </p>
         </div>
       </header>
 
-      <main id="preuves" className="mx-auto max-w-7xl space-y-16 px-4 py-12 sm:px-6 sm:py-16 lg:space-y-20">
+      {/* Bandeau de chiffres à cheval sur la photo : la preuve est lisible avant
+          tout scroll, sans réempiler une carte sombre par-dessus une photo sombre. */}
+      <div className="relative z-10 mx-auto -mt-24 max-w-6xl px-4 sm:-mt-28 sm:px-6">
+        <div className="grid grid-cols-2 divide-x divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_34px_70px_-45px_rgba(15,23,42,.6)] sm:grid-cols-4 sm:divide-y-0">
+          <StatCell
+            value={<CountUp value={g.accuracy_top3} decimals={1} suffix=" %" />}
+            label="Gagnant dans le Top-3"
+            note={hasard3 != null ? `Hasard : ${nf(hasard3, 0)} %` : undefined}
+          />
+          <StatCell
+            value={<CountUp value={g.accuracy_top1} decimals={1} suffix=" %" />}
+            label="Favori qui gagne"
+            note={hasard1 != null ? `Hasard : ${nf(hasard1, 1)} %` : undefined}
+          />
+          <StatCell
+            value={<CountUp value={g.nb_courses_analysees} />}
+            label="Courses analysées"
+            note={depuis ? `Depuis le ${depuis}` : undefined}
+          />
+          <StatCell
+            value={!gagnantsData ? "—" : gainConnu
+              ? <CountUpEuro value={gagnantsData.total_gain ?? 0} prefix="+" />
+              : <CountUp value={nbGagnants} />}
+            label={gainConnu ? "Gains encaissés" : "Paris gagnés"}
+            note={gainConnu ? `${nf(nbGagnants)} paris gagnés` : `Sur ${nf(nbCoursesReglees)} courses réglées`}
+          />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-start gap-1.5">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700" aria-hidden="true" />
+            Cohorte mesurée : toute course dont le pronostic existait avant le départ
+            {g.nb_courses_rejouables ? `, dont ${nf(g.nb_courses_rejouables)} rejouables à l'identique` : ""}.
+          </span>
+          {data.updated_at && (
+            <span className="inline-flex items-center gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              Actualisé à {new Date(data.updated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+        <EchantillonNotice nbCourses={g.nb_courses_analysees} mesureDepuis={g.mesure_depuis} />
+      </div>
+
+      <main id="preuves" className="mx-auto max-w-7xl space-y-16 px-4 py-12 sm:px-6 sm:py-16 lg:space-y-24">
+
+        {/* ── 50 derniers paris gagnés (tous profils) ───────────────────────── */}
+        <section aria-label="Derniers paris gagnés" className="space-y-6">
+          <SectionHeading
+            eyebrow="En direct"
+            title="Les derniers paris gagnés"
+            description="Les 50 plus récents, tous profils confondus. Cliquez une course : vous voyez le pari, la mise, le rapport officiel."
+            icon={Receipt}
+          />
+        <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-none">
+          <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-stone-100 p-4 sm:px-6">
+            <p className="inline-flex items-center gap-2 text-xs font-medium text-emerald-800"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Données actualisées</p>
+            <p className="text-xs text-muted-foreground">Mise de référence : 10€ / course</p>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6">
+            {!gagnantsData ? (
+              <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
+            ) : gagnantsData.gagnants.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Les paris gagnants apparaîtront ici dès les prochaines arrivées (l&apos;historique se construit en temps réel).
+              </div>
+            ) : (
+              <>
+                <BetsTable bets={gagnantsData.gagnants.slice(0, recentLimit)} />
+                {(() => {
+                  const dispo = Math.min(50, gagnantsData.gagnants.length);
+                  const reste = dispo - recentLimit;
+                  return (
+                    <div className="mt-5 flex flex-wrap justify-center gap-3">
+                      {reste > 0 && (
+                        <Button onClick={() => setRecentLimit((n) => Math.min(n + 10, 50))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
+                          Voir plus de paris <span className="text-muted-foreground">({Math.min(10, reste)} de plus)</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {recentLimit > 10 && (
+                        <Button onClick={() => setRecentLimit(10)} variant="ghost" className="min-h-11 rounded-xl text-muted-foreground">
+                          Réduire <ChevronDown className="h-4 w-4 rotate-180" />
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })()}
+                <p className="mt-5 border-t border-stone-100 pt-4 text-[11px] text-muted-foreground">
+                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total ·
+                  {Math.min(recentLimit, gagnantsData.gagnants.length)} résultat{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""} affiché{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""}.
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+        </section>
+
+        {/* ── 30 meilleurs gains ────────────────────────────────────────────── */}
+        {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
+          <section aria-label="Plus gros gains" className="space-y-6">
+            <SectionHeading
+              eyebrow="Records"
+              title="Les plus gros gains"
+              description="Nos 30 meilleurs coups, réglés aux rapports officiels. Chacun était figé avant le départ."
+              icon={Star}
+            />
+          <Card className="overflow-hidden rounded-3xl border-amber-200 bg-white shadow-none">
+            <CardContent className="p-4 sm:p-6">
+              <BetsTable bets={gagnantsData.top_gains.slice(0, recordsLimit)} ranked />
+              {(() => {
+                const dispo = Math.min(30, gagnantsData.top_gains!.length);
+                const reste = dispo - recordsLimit;
+                return (
+                  <div className="mt-5 flex flex-wrap justify-center gap-3">
+                    {reste > 0 && (
+                      <Button onClick={() => setRecordsLimit((n) => Math.min(n + 10, 30))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
+                        Voir plus de records <span className="text-muted-foreground">({Math.min(10, reste)} de plus)</span>
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {recordsLimit > 10 && (
+                      <Button onClick={() => setRecordsLimit(10)} variant="ghost" className="min-h-11 rounded-xl text-muted-foreground">
+                        Réduire <ChevronDown className="h-4 w-4 rotate-180" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })()}
+              <p className="mt-5 border-t border-stone-100 pt-4 text-[11px] text-muted-foreground">
+                {Math.min(recordsLimit, gagnantsData.top_gains!.length)} record{Math.min(recordsLimit, gagnantsData.top_gains!.length) > 1 ? "s" : ""} affiché{Math.min(recordsLimit, gagnantsData.top_gains!.length) > 1 ? "s" : ""} sur {Math.min(30, gagnantsData.top_gains!.length)}.
+              </p>
+            </CardContent>
+          </Card>
+          </section>
+        )}
 
         {/* ── TOTAL DES GAINS générés par l'algorithme, par profil ───────────── */}
         <section aria-label="Gains vérifiés" className="space-y-6">
-          <SectionHeading eyebrow="Vue d'ensemble" title="Les gains vérifiés" description="Une lecture consolidée des gains encaissés et de leur répartition par profil de risque." icon={Coins} />
+          <SectionHeading
+            eyebrow="Vue d'ensemble"
+            title="Les paris qui sont passés"
+            description={gainConnu
+              ? "Les gains encaissés, profil par profil, avec le nombre de courses réglées en face."
+              : "Le total des paris gagnés — et, juste à côté, le nombre de courses réglées. Sans ce second chiffre, n'afficher que les gagnants serait malhonnête."}
+            icon={Coins}
+          />
         <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,.5)]">
           <CardContent className="p-5 sm:p-8">
             {gagnantsError ? (
@@ -380,17 +890,22 @@ export default function TrackRecordPage() {
                   <div className="flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
                     <div>
                       <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-800 sm:justify-start">
-                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Total réglé aux rapports officiels
+                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        {gainConnu ? "Total réglé aux rapports officiels" : "Paris gagnants réglés aux rapports officiels"}
                       </div>
-                      <CountUpEuro
-                        value={gagnantsData.total_gain ?? 0}
-                        prefix="+"
-                        className="mt-3 block text-4xl font-bold leading-none tabular-nums text-emerald-800 sm:text-6xl"
-                      />
+                      {gainConnu ? (
+                        <CountUpEuro
+                          value={gagnantsData.total_gain ?? 0}
+                          prefix="+"
+                          className="mt-3 block text-4xl font-bold leading-none tabular-nums text-emerald-800 sm:text-6xl"
+                        />
+                      ) : (
+                        <CountUp value={nbGagnants} className="mt-3 block text-4xl font-bold leading-none tabular-nums text-emerald-800 sm:text-6xl" />
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-6 text-center sm:text-right">
-                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{gagnantsData.n.toLocaleString("fr-FR")}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Paris gagnés</div></div>
-                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{(gagnantsData.n_courses ?? 0).toLocaleString("fr-FR")}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Courses réglées</div></div>
+                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{nf(nbGagnants)}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Paris gagnés</div></div>
+                      <div><div className="text-2xl font-bold tabular-nums text-foreground">{nf(nbCoursesReglees)}</div><div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Courses réglées</div></div>
                     </div>
                   </div>
                 </div>
@@ -411,7 +926,7 @@ export default function TrackRecordPage() {
                           const pm = PROFIL_LABELS[p.profil] ?? { label: p.label, cls: "bg-muted text-muted-foreground ring-border" };
                           const bar = PROFIL_BAR[p.profil] ?? { from: "from-amber-400", to: "to-amber-600", dot: "bg-amber-500" };
                           const gain = p.gain_total ?? 0;
-                          const pct = Math.round((gain / maxGain) * 100);
+                          const part = Math.round((gain / maxGain) * 100);
                           return (
                             <div key={p.profil}>
                               <div className="flex items-center justify-between mb-1.5">
@@ -425,7 +940,7 @@ export default function TrackRecordPage() {
                               <div className="h-2.5 overflow-hidden rounded-full bg-stone-100">
                                 <div
                                   className={cn("h-full rounded-full bg-gradient-to-r bar-grow", bar.from, bar.to)}
-                                  style={{ ["--bar-pct" as string]: `${pct}%` }}
+                                  style={{ ["--bar-pct" as string]: `${part}%` }}
                                 />
                               </div>
                             </div>
@@ -476,14 +991,17 @@ export default function TrackRecordPage() {
           <div className="grid gap-6 md:grid-cols-[.8fr_2.2fr] md:items-center">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">Traçabilité</p>
-              <h2 className="mt-2 font-display text-2xl font-bold tracking-tight">Comment un gain devient une preuve</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">Trois étapes simples, consultables course par course.</p>
+              <h2 className="mt-2 font-display text-2xl font-bold tracking-tight">Comment un pronostic devient une preuve</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Trois étapes, vérifiables course par course — c&apos;est ce qui sépare un palmarès d&apos;une
+                capture d&apos;écran.
+              </p>
             </div>
             <ol className="grid gap-3 sm:grid-cols-3">
               {[
-                { icon: LockKeyhole, n: "01", title: "Pronostic figé", text: "La sélection est horodatée avant le départ." },
-                { icon: Database, n: "02", title: "Rapport officiel", text: "Le résultat est réglé avec les données PMU." },
-                { icon: ExternalLink, n: "03", title: "Preuve consultable", text: "Chaque ligne renvoie vers la course concernée." },
+                { icon: LockKeyhole, n: "01", title: "Figé avant le départ", text: "La sélection, les cotes retenues et le plan de mise sont enregistrés et horodatés pendant que la course est encore à venir." },
+                { icon: Database, n: "02", title: "Réglé au rapport officiel", text: "À l'arrivée, le pari est réglé au rapport PMU publié — jamais à une cote choisie après coup." },
+                { icon: ExternalLink, n: "03", title: "Consultable une par une", text: "Chaque ligne renvoie vers sa course : partants, cotes, arrivée. Rien ne repose sur notre parole." },
               ].map((step) => (
                 <li key={step.n} className="rounded-2xl bg-stone-50 p-4">
                   <div className="flex items-center justify-between"><step.icon className="h-4 w-4 text-amber-800" aria-hidden="true" /><span className="font-display text-[10px] font-bold tracking-widest text-stone-400">{step.n}</span></div>
@@ -495,124 +1013,291 @@ export default function TrackRecordPage() {
           </div>
         </section>
 
-        {/* ── 50 derniers paris gagnés (tous profils) ───────────────────────── */}
-        <section aria-label="Derniers paris gagnés" className="space-y-6">
-          <SectionHeading eyebrow="Historique en direct" title="Les derniers paris gagnés" description="Les 50 résultats les plus récents, tous profils confondus. Ouvrez une course pour contrôler le détail." icon={Receipt} />
-        <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-none">
-          <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-stone-100 p-4 sm:px-6">
-            <p className="inline-flex items-center gap-2 text-xs font-medium text-emerald-800"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Données actualisées</p>
-            <p className="text-xs text-muted-foreground">Mise de référence : 10€ / course</p>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-6">
-            {!gagnantsData ? (
-              <div className="py-8 text-center text-sm text-muted-foreground animate-pulse">Chargement…</div>
-            ) : gagnantsData.gagnants.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Les paris gagnants apparaîtront ici dès les prochaines arrivées (l&apos;historique se construit en temps réel).
-              </div>
-            ) : (
-              <>
-                <BetsTable bets={gagnantsData.gagnants.slice(0, recentLimit)} />
-                {recentLimit < Math.min(50, gagnantsData.gagnants.length) && (
-                  <div className="mt-5 flex justify-center">
-                    <Button onClick={() => setRecentLimit((n) => Math.min(n + 10, 50))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">
-                      Afficher 10 résultats supplémentaires <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  </div>
-                )}
-                <p className="mt-5 border-t border-stone-100 pt-4 text-[11px] text-muted-foreground">
-                  {gagnantsData.n} pari{gagnantsData.n > 1 ? "s" : ""} gagnant{gagnantsData.n > 1 ? "s" : ""} au total ·
-                  {Math.min(recentLimit, gagnantsData.gagnants.length)} résultat{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""} affiché{Math.min(recentLimit, gagnantsData.gagnants.length) > 1 ? "s" : ""}.
-                </p>
-              </>
-            )}
-          </CardContent>
-        </Card>
+        {/* ── Nos résultats comparés au hasard ──────────────────────────── */}
+        <section aria-label="Nos résultats comparés au hasard" className="grid gap-10 lg:grid-cols-[1.1fr_.9fr] lg:gap-14">
+          <div>
+            <SectionHeading
+              eyebrow="Qualité du modèle"
+              title="Ce que valent vraiment ces pourcentages"
+              description="Un pourcentage seul ne veut rien dire. On le compare donc à ce que ferait un tirage au sort sur les mêmes courses."
+              icon={Gauge}
+            />
+            <div className="mt-8 space-y-9">
+              <ComparBar
+                label="Le gagnant figure dans notre Top-3"
+                aide={`Sur ${nf(g.nb_courses_analysees)} courses réglées, champ moyen de ${g.nb_partants_moyen ? nf(g.nb_partants_moyen, 1) : "11"} partants.`}
+                nous={g.accuracy_top3}
+                hasard={hasard3}
+                facteur={facteur3}
+              />
+              <ComparBar
+                label="Notre favori gagne la course"
+                aide="Le cheval classé numéro 1 par l'algorithme franchit la ligne en tête."
+                nous={g.accuracy_top1}
+                hasard={hasard1}
+                facteur={facteur1}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4 lg:pt-4">
+            <BrierScale value={g.brier_moyen} />
+            <div className="rounded-2xl border border-stone-200 bg-white p-5">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ShieldCheck className="h-4 w-4 text-amber-700" aria-hidden="true" /> Ce que ces chiffres ne disent pas
+              </h3>
+              <ul className="mt-3 space-y-2.5 text-xs leading-5 text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                  Ce n&apos;est pas un taux de paris gagnants : un cheval bien classé ne fait pas gagner un
+                  Simple Gagnant, et le prélèvement PMU s&apos;applique à chaque mise.
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                  Ce n&apos;est pas une promesse : les performances passées ne préjugent pas des suivantes,
+                  et jouer comporte un risque de perte.
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+                  C&apos;est en revanche vérifiable course par course : chaque ligne du palmarès renvoie
+                  vers la course concernée et son rapport officiel.
+                </li>
+              </ul>
+            </div>
+          </div>
         </section>
 
-        {/* ── 30 meilleurs gains ────────────────────────────────────────────── */}
-        {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
-          <section aria-label="Plus gros gains" className="space-y-6">
-            <SectionHeading eyebrow="Records" title="Les plus gros gains" description="Les 30 meilleures performances nettes enregistrées et réglées aux rapports officiels." icon={Star} />
-          <Card className="overflow-hidden rounded-3xl border-amber-200 bg-white shadow-none">
-            <CardContent className="p-4 sm:p-6">
-              <BetsTable bets={gagnantsData.top_gains.slice(0, recordsLimit)} ranked />
-              {recordsLimit < gagnantsData.top_gains.length && (
-                <div className="mt-5 flex justify-center">
-                  <Button onClick={() => setRecordsLimit((n) => Math.min(n + 10, 30))} variant="outline" className="min-h-11 rounded-xl border-stone-300 bg-white">Afficher plus de records <ChevronDown className="h-4 w-4" /></Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        {/* ── Tendance 30 jours ─────────────────────────────────────────── */}
+        {tendance.points.length > 0 && (
+          <section aria-label="Tendance sur 30 jours" className="space-y-6">
+            <SectionHeading
+              eyebrow="Régularité"
+              title="Jour après jour, sur 30 jours"
+              description="Une bonne journée ne prouve rien. Ce qui compte, c'est que la courbe reste au-dessus du hasard, jour après jour."
+              icon={LineChart}
+            />
+            <Card className="overflow-hidden rounded-3xl border-stone-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,.5)]">
+              <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0 border-b border-stone-100 p-4 sm:px-6">
+                <p className="inline-flex items-center gap-2 text-xs font-medium text-emerald-800">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> {nf(tendance.totalCourses)} courses sur {tendance.jours} jours mesurés
+                </p>
+                <p className="text-xs text-muted-foreground">Moyenne pondérée : <span className="font-bold tabular-nums text-foreground">{nf(tendance.moyenne, 1)} %</span></p>
+              </CardHeader>
+              <CardContent className="p-3 sm:p-6">
+                <TendanceChart data={tendance.points} moyenne={tendance.moyenne} hasard={hasard3} />
+                <p className="mt-4 border-t border-stone-100 pt-4 text-[11px] leading-5 text-muted-foreground">
+                  Les journées sans course mesurée (interruption de collecte) apparaissent en trou plutôt qu&apos;à
+                  zéro : afficher 0 % laisserait croire à un échec du modèle là où il n&apos;y a simplement pas de donnée.
+                </p>
+              </CardContent>
+            </Card>
           </section>
         )}
 
+        {/* ── Précision par discipline ──────────────────────────────────── */}
+        <section aria-label="Précision par discipline" className="space-y-6">
+          <SectionHeading
+            eyebrow="Par spécialité"
+            title="La précision, discipline par discipline"
+            description="Le trot et le galop ne se lisent pas pareil. Voici, sans tri, ce que l'algorithme donne sur chacun."
+            icon={Sparkles}
+          />
+          {data.by_discipline.length === 0 ? (
+            <Card className="rounded-3xl border-stone-200 bg-white shadow-none">
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">Aucune donnée pour le moment</CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {data.by_discipline.map((d) => (
+                <DisciplineCard key={d.discipline} d={d} maxCourses={maxCourses} hasard={hasard3} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── Le favori IA face au marché ───────────────────────────────── */}
+        <section aria-label="Le favori de l'algorithme face au marché" className="space-y-6">
+          <SectionHeading
+            eyebrow="Face au marché"
+            title="Notre favori contre la cote des parieurs"
+            description="Recopier la cote, tout le monde sait faire. La vraie question : nos favoris tiennent-ils à l'arrivée, et le marché nous suit-il ?"
+            icon={Users}
+          />
+          <div className="grid gap-4 lg:grid-cols-[.9fr_1.1fr] lg:gap-6">
+            <div className="relative min-h-[240px] overflow-hidden rounded-3xl bg-slate-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/img/palmares-duel.webp"
+                alt="Trois chevaux au coude à coude dans la ligne droite"
+                className="absolute inset-0 h-full w-full object-cover"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-transparent" aria-hidden="true" />
+              <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300">Closing line value</p>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-200">
+                  Quand la cote d&apos;un cheval baisse entre notre pronostic et le départ, c&apos;est le marché
+                  qui vient nous rejoindre. De tous les signaux, c&apos;est le plus difficile à maquiller.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-3xl border border-stone-200 bg-white p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori placé</p>
+                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-emerald-700">
+                  <CountUp value={g.favori_place_rate} decimals={1} suffix=" %" />
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Notre cheval numéro 1 termine dans les 3 premiers, sur {nf(g.nb_favoris_evalues)} courses
+                  confrontées à l&apos;arrivée officielle.
+                </p>
+              </div>
+              <div className="rounded-3xl border border-stone-200 bg-white p-6">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Favori gagnant</p>
+                <p className="mt-3 font-display text-4xl font-bold tabular-nums text-slate-900">
+                  <CountUp value={g.favori_win_rate} decimals={1} suffix=" %" />
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Il gagne franchement la course, contre {hasard1 != null ? `${nf(hasard1, 1)} %` : "—"} pour un
+                  choix au hasard sur le même champ.
+                </p>
+              </div>
+              <div className={cn("rounded-3xl border p-6 sm:col-span-2", clv ? "border-amber-200 bg-gradient-to-br from-amber-50/90 to-white" : "border-stone-200 bg-white")}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">Le marché se déplace vers nous</p>
+                {clv ? (
+                  <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-2">
+                    <p className="font-display text-4xl font-bold tabular-nums text-amber-800">
+                      <CountUp value={clv.pct_beat_line} decimals={1} suffix=" %" />
+                    </p>
+                    <p className="max-w-md text-sm leading-6 text-muted-foreground">
+                      de nos favoris voient leur cote <strong className="font-semibold text-foreground">baisser</strong> entre
+                      notre pronostic et le départ, sur {nf(clv.n)} courses mesurées.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                    Indicateur en cours de constitution : il exige l&apos;historique complet des cotes, de notre
+                    pronostic jusqu&apos;au départ.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Ce que débloque l'abonnement ──────────────────────────────── */}
+        <section aria-label="Ce que débloque l'abonnement" className="space-y-6">
+          <SectionHeading
+            eyebrow="Passer à l'action"
+            title="Le palmarès est public. Les pronostics du jour ne le sont pas."
+            description="Ici, vous voyez ce qui s'est déjà joué. L'abonnement donne les pronostics des courses de tout à l'heure."
+            icon={Crown}
+          />
+          <div className="grid gap-4 lg:grid-cols-3">
+            {[
+              { icon: Brain, title: "Les pronostics complets", text: "Le classement complet de chaque course, les probabilités par cheval et les intervalles de confiance — pas seulement les 3 premiers.", pro: true },
+              { icon: Dices, title: "Les paris de valeur", text: "Les chevaux dont la cote du marché est supérieure à notre probabilité, notés de ★ à ★★★★, mis à jour en continu.", pro: true },
+              { icon: Wallet, title: "Le plan de mise", text: "Combien miser, sur quel type de pari, selon votre profil de risque et votre bankroll — figé avant le départ.", pro: true },
+              { icon: Bell, title: "Les alertes en direct", text: "Notification dès qu'un pari de valeur apparaît ou qu'une cote décroche sur une course qui vous intéresse.", pro: true },
+              { icon: LineChart, title: "Le suivi de vos résultats", text: "Votre capital, vos paris et votre ROI suivis course après course, avec le même degré d'honnêteté que cette page.", pro: true },
+              { icon: CalendarDays, title: "Le programme et les cotes", text: "Le programme du jour, les partants et les cotes en direct restent accessibles gratuitement, sans carte bancaire.", pro: false },
+            ].map((f) => (
+              <div key={f.title} className={cn("rounded-2xl border p-5", f.pro ? "border-amber-200 bg-white" : "border-stone-200 bg-stone-50/60")}>
+                <div className="flex items-center justify-between">
+                  <span className={cn("inline-flex h-9 w-9 items-center justify-center rounded-xl", f.pro ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200" : "bg-white text-slate-500 ring-1 ring-stone-200")}>
+                    <f.icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider", f.pro ? "bg-amber-100 text-amber-900" : "bg-stone-200/70 text-slate-600")}>
+                    {f.pro ? "Abonnés" : "Gratuit"}
+                  </span>
+                </div>
+                <h3 className="mt-4 text-sm font-semibold text-foreground">{f.title}</h3>
+                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{f.text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         {/* ── Conversion après démonstration de valeur ────────────────────── */}
-        <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-6 py-10 text-white sm:px-10 sm:py-12" aria-labelledby="cta-pro-title">
+        <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-6 py-10 text-white sm:px-10 sm:py-14" aria-labelledby="cta-pro-title">
+          <div
+            className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-20"
+            style={{ backgroundImage: "url(/img/palmares-gagnant.webp)" }}
+            aria-hidden="true"
+          />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/95 to-slate-950/70" aria-hidden="true" />
           <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-amber-500/10 blur-3xl" aria-hidden="true" />
           <div className="relative grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
             <div>
               <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300"><Crown className="h-3.5 w-3.5" aria-hidden="true" /> BlackTurf Pro</div>
               <h2 id="cta-pro-title" className="mt-4 max-w-2xl font-display text-3xl font-bold tracking-tight sm:text-4xl">Passez des résultats aux décisions.</h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">Retrouvez les analyses complètes, les probabilités et les plans de mise qui ont produit ce palmarès. Les performances passées ne garantissent pas les résultats futurs.</p>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+                Retrouvez les analyses complètes, les probabilités et les plans de mise qui ont produit ce palmarès.
+                7 jours d&apos;essai : carte requise, aucun prélèvement avant la fin de l&apos;essai, annulable à tout moment. Les performances passées ne garantissent pas les résultats futurs.
+              </p>
               <ul className="mt-6 grid gap-2 text-sm text-slate-200 sm:grid-cols-3">
                 <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-300" aria-hidden="true" /> Pronostics complets</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-300" aria-hidden="true" /> Plans de mise</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-300" aria-hidden="true" /> Cotes en direct</li>
               </ul>
             </div>
-            <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-7 shadow-none">
-              <Link href="/tarifs">Voir les offres Pro <ArrowRight className="ml-1 h-4 w-4" /></Link>
-            </Button>
+            <div className="flex flex-col gap-3">
+              <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-7 shadow-none">
+                <Link href="/tarifs">Démarrer l&apos;essai gratuit <ArrowRight className="ml-1 h-4 w-4" /></Link>
+              </Button>
+              <p className="text-center text-[11px] text-slate-400">Standard 12€/mois · Expert 19€/mois · sans engagement</p>
+            </div>
           </div>
         </section>
 
-        {/* ── Précision par discipline (donnée simple, lisible) ───────────── */}
-        <section aria-label="Précision par discipline" className="space-y-6">
-          <SectionHeading eyebrow="Qualité du modèle" title="La précision par discipline" description="Une vue simple du taux de présence dans le Top-3, rapportée au volume de courses analysées." icon={Target} />
-
-          {/* By discipline */}
-          <Card className="rounded-3xl border-stone-200 bg-white shadow-none">
-            <CardContent className="p-5 sm:p-8">
-              {data.by_discipline.length === 0 ? (
-                <div className="py-6 text-center text-sm text-muted-foreground">
-                  Aucune donnée pour le moment
-                </div>
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {data.by_discipline.map((d) => (
-                    <div key={d.discipline} className="rounded-2xl border border-stone-200 bg-stone-50/60 p-4">
-                      <div className="mb-4 flex items-start justify-between gap-3">
-                        <div>
-                          <span className="block text-sm font-semibold text-foreground">{d.discipline}</span>
-                          <span className="mt-1 block text-xs text-muted-foreground">{d.nb_courses} courses analysées</span>
-                        </div>
-                        <span className={cn("text-lg font-bold tabular-nums",
-                          d.accuracy_top3 >= 50 ? "text-emerald-600" :
-                          d.accuracy_top3 >= 35 ? "text-amber-600" : "text-muted-foreground"
-                        )}>
-                          {d.accuracy_top3}%
-                        </span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-stone-200" role="img" aria-label={`${d.discipline} : ${d.accuracy_top3}% de précision Top-3`}>
-                        <div
-                          className="h-full rounded-full bg-amber-600 transition-all"
-                          style={{ width: `${Math.min(d.accuracy_top3, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        {/* ── FAQ ──────────────────────────────────────────────────────── */}
+        <section aria-label="Questions fréquentes" className="space-y-6">
+          <SectionHeading
+            eyebrow="Transparence"
+            title="Les questions qu'on nous pose"
+            description="Les réponses gênantes en premier — c'est à ça qu'on reconnaît un palmarès honnête."
+            icon={ShieldCheck}
+          />
+          <div className="grid gap-3 lg:grid-cols-2">
+            <Faq q="Est-ce que je vais gagner de l'argent ?">
+              Personne ne peut vous le garantir, et nous ne le ferons pas. Cette page mesure la <strong>qualité de l&apos;analyse</strong> :
+              à quelle fréquence le gagnant figure dans nos favoris, et à quel point nos probabilités sont calibrées.
+              Le pari hippique reste soumis au prélèvement de l&apos;opérateur et au hasard : le risque de perte est réel.
+            </Faq>
+            <Faq q="Comment sont calculés ces chiffres ?">
+              Chaque course pronostiquée est journalisée au moment de l&apos;analyse, <strong>avant le départ</strong>, puis confrontée à
+              l&apos;arrivée officielle PMU. Une course n&apos;entre dans les statistiques que si son pronostic existait avant le départ —
+              cela exclut mécaniquement toute reconstruction a posteriori.
+              {g.nb_courses_rejouables ? ` Sur les ${nf(g.nb_courses_analysees)} courses mesurées, ${nf(g.nb_courses_rejouables)} sont en plus rejouables à l'identique (les données d'entrée sont figées et archivées).` : ""}
+            </Faq>
+            <Faq q="Pourquoi ne montrez-vous pas un ROI global ?">
+              Parce qu&apos;un ROI dépend entièrement de la mise, du type de pari et du profil de risque : un chiffre unique
+              n&apos;aurait aucun sens et servirait surtout à vendre. Nous affichons ce qui est vérifiable : les gains réellement
+              encaissés, pari par pari, chacun consultable sur sa course.
+            </Faq>
+            <Faq q="« Précision Top-3 », qu'est-ce que ça veut dire exactement ?">
+              La part des courses où le cheval qui a gagné figurait parmi nos trois premiers choix.
+              {hasard3 != null && ` Sur ces mêmes courses — ${g.nb_partants_moyen ? `${nf(g.nb_partants_moyen, 1)} partants en moyenne` : "champ réel"} — un tirage au sort atteindrait ${nf(hasard3, 0)} %.`}
+              {" "}Ce n&apos;est pas un taux de paris gagnants : un cheval placé ne fait pas gagner un pari Simple Gagnant.
+            </Faq>
+            <Faq q="À quelle fréquence cette page est-elle mise à jour ?">
+              À chaque arrivée. Dès qu&apos;une course est réglée, son résultat entre dans les taux ci-dessus et
+              la course apparaît, gagnante ou perdante, dans l&apos;historique. Rien n&apos;est saisi à la main :
+              c&apos;est la même chaîne qui produit les pronostics et qui les note.
+            </Faq>
+            <Faq q="Pourquoi montrer des taux moyens plutôt que vos plus beaux coups ?">
+              Parce que n&apos;importe qui peut publier une capture d&apos;écran d&apos;un Trio à 450 contre 1 — nous en
+              avons, ils sont plus bas dans la page. Un gros gain isolé ne prouve rien sur la méthode ;
+              {" "}{nf(g.nb_courses_analysees)} courses mesurées, avec leur dénominateur et leurs échecs, si.
+            </Faq>
+          </div>
         </section>
 
-        {/* Détails techniques (Brier, calibration, apprentissage) déplacés dans
-            l'espace admin — le palmarès public reste sur des résultats simples. */}
         <p className="mx-auto max-w-3xl border-t border-stone-200 pt-6 text-center text-[11px] leading-5 text-muted-foreground">
           Résultats réels, recalculés à chaque fin de course. Aucune donnée simulée hors des
-          backtests explicitement étiquetés.
+          backtests explicitement étiquetés. Jouer comporte des risques : endettement, isolement, dépendance.
+          Interdit aux mineurs. Appelez le 09 74 75 13 13 (appel non surtaxé).
         </p>
       </main>
     </div>

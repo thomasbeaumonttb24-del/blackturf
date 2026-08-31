@@ -17,7 +17,12 @@ from db.models import User
 from api.routes import stripe_routes
 
 
-def _fake_sub(status: str, price_id: str = "price_test_standard", sub_id: str | None = None) -> dict:
+def _fake_sub(status: str, price_id: str = "price_test_standard", sub_id: str | None = None,
+              carte: bool = True) -> dict:
+    """Abonnement Stripe factice. `carte=True` par défaut : depuis le 2026-08-20 un
+    essai SANS moyen de paiement n'ouvre plus aucun accès (cf.
+    test_stripe_essai_et_changement_plan.py), or ces tests-ci portent sur le
+    statut de l'abonnement, pas sur la carte."""
     now = int(time.time())
     return {
         "id": sub_id or str(uuid.uuid4()),
@@ -27,6 +32,7 @@ def _fake_sub(status: str, price_id: str = "price_test_standard", sub_id: str | 
         "current_period_start": now,
         "current_period_end": now + 30 * 86400,
         "trial_end": None,
+        "default_payment_method": "pm_test" if carte else None,
     }
 
 
@@ -88,3 +94,36 @@ async def test_active_subscription_grants_plan(db, monkeypatch):
 
     await db.refresh(user)
     assert user.plan == "standard"
+
+
+@pytest.mark.asyncio
+async def test_checkout_ouvre_bien_un_essai_de_7_jours(db, monkeypatch):
+    """L'essai de 7 jours est promis sur l'accueil, sur /tarifs et dans les CGU :
+    la session Checkout doit réellement le porter.
+
+    La carte est exigée depuis le 2026-08-20 (`always`). L'ancien `if_required`
+    — « essai sans carte » — laissait passer des essais qu'aucun moyen de paiement
+    ne pouvait convertir ; le détail du nouveau contrat est couvert par
+    test_stripe_essai_et_changement_plan.py."""
+    import api.routes.stripe_routes as sr
+
+    captured = {}
+
+    def _fake_create(**kwargs):
+        captured.update(kwargs)
+        return type("S", (), {"url": "https://checkout.stripe.test/x"})()
+
+    monkeypatch.setattr(sr.stripe.checkout.Session, "create", _fake_create)
+    monkeypatch.setattr(sr, "PRICE_MAP", {"standard_monthly": "price_test_standard"})
+
+    user = User(user_id=str(uuid.uuid4()), email="essai@blackturf.fr",
+                plan="free", stripe_customer_id="cus_test")
+    db.add(user)
+    await db.commit()
+
+    await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, user)
+
+    assert captured["payment_method_collection"] == "always"
+    assert captured["subscription_data"]["trial_period_days"] == 7
+    assert (captured["subscription_data"]["trial_settings"]["end_behavior"]
+            ["missing_payment_method"]) == "cancel"

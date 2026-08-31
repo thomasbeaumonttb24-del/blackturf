@@ -117,6 +117,21 @@ class AlgoFlags:
     # p~0.11), neutre top3/ndcg. Réversible. Nécessite un modèle entraîné AVEC ranker.
     ranker_blend: bool = field(default_factory=lambda: _env_bool("BT_RANKER_BLEND"))
     ranker_blend_weight: float = field(default_factory=lambda: _env_float("BT_RANKER_BLEND_WEIGHT", 1.0))
+    # ── Gate marché (diagnostic 2026-08-20) ──────────────────────────────────
+    # Refuse la promotion d'un modèle dont le CLASSEMENT intra-course ne bat pas
+    # un simple `ORDER BY cote_pmu` sur le même hold-out (cf. ml/ranking_metrics).
+    #
+    # DÉFAUT OFF, volontairement. Mesuré sur 3 322 courses pré-course, AUCUN modèle
+    # actuel ne passe ce gate : le modèle complet est à 0,7340 contre 0,7351 pour la
+    # cote qu'il a vue. L'activer aujourd'hui gèlerait le modèle indéfiniment —
+    # exactement le blocage de 48 jours de l'audit 2026-08-16, qu'on ne rejoue pas.
+    #
+    # L'écart au marché est donc MESURÉ, PERSISTÉ et remonté en rouge dans le
+    # rapport nocturne à chaque nuit, sans bloquer. À activer quand l'entraînement
+    # sur le résidu du marché (point 2 du diagnostic) rendra le delta positif.
+    market_gate: bool = field(default_factory=lambda: _env_bool("BT_MARKET_GATE", False))
+    # Marge exigée quand le gate est actif. 0.0 = il suffit d'égaler la cote.
+    market_gate_margin: float = field(default_factory=lambda: _env_float("BT_MARKET_GATE_MARGIN", 0.0))
 
     def as_dict(self) -> dict:
         return {
@@ -137,6 +152,8 @@ class AlgoFlags:
             "temp_fit": self.temp_fit,
             "ranker_blend": self.ranker_blend,
             "ranker_blend_weight": self.ranker_blend_weight,
+            "market_gate": self.market_gate,
+            "market_gate_margin": self.market_gate_margin,
         }
 
 

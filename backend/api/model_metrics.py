@@ -11,10 +11,13 @@ valeurs aberrantes.
 
 Pattern d'origine : assistant.py get_model_metrics (commit b9121ca).
 """
-from sqlalchemy import func, select
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import ModelVersion, RaceLearningLog
+from db.database import desempoisonner
+from db.models import ModelVersion
+
+log = structlog.get_logger(module="model_metrics")
 
 # ROI simulé considéré crédible uniquement dans cette plage (fraction, pas %).
 ROI_MIN_PLAUSIBLE = -0.5   # -50%
@@ -29,10 +32,6 @@ AUC_MIN_PLAUSIBLE = 0.5
 AUC_MAX_PLAUSIBLE = 1.0
 # Minimum de courses évaluées avant de publier une précision réelle.
 MIN_RACES_FOR_PRECISION = 10
-
-
-class _FallbackToRaw(Exception):
-    """Sentinelle interne : aucune course pré-départ trouvée → comptage brut."""
 
 
 def plausible_roi(roi_simule: float | None) -> float | None:
@@ -98,40 +97,48 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
     # pronostic existait AVANT le départ (predictions.created_at < courses.date_heure).
     # Sans ça, les entrées backfillées (analyse post-course d'historique) gonflent la
     # précision « réelle » avec du hindsight. created_at n'est jamais réécrit par les
-    # re-prédictions (on_conflict ne le touche pas) → garde fiable. Fallback ORM si
-    # la requête échoue (jamais d'erreur 500 sur le dashboard).
+    # re-prédictions (on_conflict ne le touche pas) → garde fiable. En cas d'échec,
+    # on échoue fermé (0 observation), jamais vers un comptage brut contaminable.
     from sqlalchemy import text as _text
     try:
         _guard = """
             FROM race_learning_log rll
             WHERE EXISTS (
-                SELECT 1 FROM predictions pr
+                SELECT 1 FROM prediction_evaluation pr
                 JOIN courses c ON c.course_id = pr.course_id
                 WHERE pr.course_id = rll.course_id
                   AND c.date_heure IS NOT NULL
                   AND pr.created_at IS NOT NULL
                   AND pr.created_at < c.date_heure
+                  AND pr.is_replayable = true
             )
         """
         rll_total = (await db.execute(_text(f"SELECT count(*) {_guard}"))).scalar() or 0
         rll_top3 = (await db.execute(_text(
             f"SELECT count(*) {_guard} AND rll.gagnant_rang_predit <= 3"
         ))).scalar() or 0
-        # Fallback : aucune course avec prono pré-départ liée (ex. historique sans
-        # predictions, ou base de test) → on retombe sur le comptage brut plutôt que
-        # d'afficher "—". Quand de vraies prédictions pré-départ existent, le guard
-        # prime (exclut le hindsight backfill).
-        if rll_total == 0:
-            raise _FallbackToRaw
-    except Exception:
-        rll_total = (await db.execute(
-            select(func.count(RaceLearningLog.log_id))
-        )).scalar() or 0
-        rll_top3 = (await db.execute(
-            select(func.count(RaceLearningLog.log_id)).where(
-                RaceLearningLog.gagnant_rang_predit <= 3
-            )
-        )).scalar() or 0
+    except Exception as e:  # noqa: BLE001
+        # La transaction est AVORTÉE côté PostgreSQL : sans rollback, toutes les
+        # requêtes suivantes de l'appelant échouent en cascade (cf.
+        # `desempoisonner`). On échoue fermé (0 observation) ET on trace : une
+        # sonde muette a caché deux mois de pannes /dev/shm.
+        await desempoisonner(db)
+        log.warning("model_metrics.rll_indisponible", err=str(e)[:200])
+        rll_total = 0
+        rll_top3 = 0
+
+    try:
+        from ml.prediction_evaluation import evaluation_coverage
+        prediction_data_quality = await evaluation_coverage(db)
+    except Exception as e:  # noqa: BLE001
+        await desempoisonner(db)
+        log.warning("model_metrics.coverage_indisponible", err=str(e)[:200])
+        prediction_data_quality = {
+            "n_total": 0, "n_replayable": 0, "n_legacy": 0,
+            "coverage_pct": 0.0, "courses_total": 0,
+            "courses_replayable": 0, "first_replayable_at": None,
+            "last_replayable_at": None,
+        }
 
     # AUC crédible (ou None). Sert aussi de garde-fou : si le modèle actif n'est
     # pas crédible (AUC hors [0.5,1]), sa précision observée n'est pas représentative
@@ -157,7 +164,9 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
             "WHERE statut = 'settled' AND roi_reel IS NOT NULL"))).scalar()
         if _r is not None:
             roi_reel = round(float(_r), 4)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        await desempoisonner(db)
+        log.warning("model_metrics.roi_reel_indisponible", err=str(e)[:200])
         roi_reel = None
 
     return {
@@ -166,4 +175,5 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
         "roi_simule": roi,
         "roi_reel": roi_reel,
         "nb_courses_evaluees": rll_total,
+        "prediction_data_quality": prediction_data_quality,
     }

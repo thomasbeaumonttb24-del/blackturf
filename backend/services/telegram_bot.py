@@ -38,6 +38,12 @@ async def set_webhook(webhook_url: str) -> bool:
     """Configure le webhook Telegram."""
     if not settings.telegram_bot_token:
         return False
+    # Sans `secret_token`, Telegram appelle la route sans en-tête d'authentification
+    # et n'importe qui peut se faire passer pour lui. On refuse d'enregistrer un
+    # webhook dans cet état plutôt que d'ouvrir la porte.
+    if not settings.telegram_webhook_secret:
+        log.error("telegram.webhook_refuse", raison="TELEGRAM_WEBHOOK_SECRET absent")
+        return False
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(

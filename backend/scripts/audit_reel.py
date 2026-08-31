@@ -83,7 +83,11 @@ async def section_leakage(s) -> dict:
           count(*) FILTER (WHERE pr.created_at <  c.date_heure)   AS pre_course,
           count(*) FILTER (WHERE pr.created_at >= c.date_heure)   AS post_ou_pendant,
           count(DISTINCT c.course_id)                                                  AS courses,
-          count(DISTINCT c.course_id) FILTER (WHERE pr.created_at >= c.date_heure)      AS courses_avec_leak
+          count(DISTINCT c.course_id) FILTER (WHERE pr.created_at >= c.date_heure)      AS courses_avec_leak,
+          array_agg(pr.prediction_id ORDER BY pr.created_at)
+            FILTER (WHERE pr.created_at >= c.date_heure) AS contaminated_prediction_ids,
+          array_agg(DISTINCT c.course_id)
+            FILTER (WHERE pr.created_at >= c.date_heure) AS contaminated_course_ids
         FROM predictions pr
         JOIN courses c ON c.course_id = pr.course_id
         WHERE c.statut = 'termine' AND c.date_heure IS NOT NULL

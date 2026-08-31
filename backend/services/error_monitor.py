@@ -15,7 +15,7 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.database import AsyncSessionLocal
+from db.database import AsyncSessionLocal, desempoisonner
 
 log = structlog.get_logger()
 
@@ -67,12 +67,16 @@ async def error_count(session: AsyncSession, hours: int = 24) -> int:
             "SELECT COUNT(*) FROM system_errors WHERE resolved = false "
             "AND created_at >= now() - (:h * INTERVAL '1 hour')"), {"h": hours})).scalar() or 0
     except Exception:
+        # Requête ratée ⇒ transaction avortée : sans rollback, l'appelant se
+        # prend « current transaction is aborted » sur ses requêtes SUIVANTES.
+        await desempoisonner(session)
         n_sys = 0
     try:
         n_scrape = (await session.execute(text(
             "SELECT COUNT(*) FROM scrape_log WHERE statut = 'error' "
             "AND created_at >= now() - (:h * INTERVAL '1 hour')"), {"h": hours})).scalar() or 0
     except Exception:
+        await desempoisonner(session)
         n_scrape = 0
     return int(n_sys) + int(n_scrape)
 
@@ -93,6 +97,7 @@ async def recent_errors(session: AsyncSession, hours: int = 72, limit: int = 50)
                 "endpoint": r.endpoint, "resolved": bool(r.resolved),
             })
     except Exception as e:  # noqa: BLE001
+        await desempoisonner(session)
         log.warning("error_monitor.recent_sys_failed", err=str(e)[:200])
     try:
         rows = (await session.execute(text(
@@ -108,6 +113,7 @@ async def recent_errors(session: AsyncSession, hours: int = 72, limit: int = 50)
                 "endpoint": None, "resolved": False,
             })
     except Exception as e:  # noqa: BLE001
+        await desempoisonner(session)
         log.warning("error_monitor.recent_scrape_failed", err=str(e)[:200])
     out.sort(key=lambda x: (x["created_at"] is not None, x["created_at"]), reverse=True)
     return out[:limit]
@@ -122,5 +128,6 @@ async def resolve_error(session: AsyncSession, error_id: int) -> bool:
         await session.commit()
         return True
     except Exception as e:  # noqa: BLE001
+        await desempoisonner(session)
         log.warning("error_monitor.resolve_failed", err=str(e)[:200])
         return False

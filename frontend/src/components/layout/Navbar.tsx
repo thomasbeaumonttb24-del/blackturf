@@ -9,6 +9,8 @@ import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashbo
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
+import { useAlertesStream } from "@/hooks/useWebSocket";
+import { notificationsApi } from "@/lib/api";
 import { planLabel, cn } from "@/lib/utils";
 
 const NAV_LINKS_PUBLIC = [
@@ -131,13 +133,26 @@ export function Navbar() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // Notification unread count
-  const { data: notifData } = useSWR(
-    user ? "/api/v1/notifications/count-unread" : null,
-    (url) => fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem("access_token")}` } })
-      .then((r) => r.ok ? r.json() : { count: 0 }),
+  // Compteur de notifications non lues. Passe par le client axios (`notificationsApi`)
+  // et non par un `fetch` d'URL relative : l'API vit sur un autre hôte
+  // (api.blackturf.fr) et c'est le client axios qui porte la baseURL, le
+  // rafraîchissement de jeton et l'en-tête Authorization.
+  const { data: notifData, mutate: mutateNotifCount } = useSWR(
+    user ? "notif-count-unread" : null,
+    () => notificationsApi.countUnread().then((r) => r.data as { count: number }),
     { refreshInterval: 60000 },
   );
+
+  // Alerte poussée en direct (WS `/ws/user/alertes`) → le badge monte immédiatement
+  // au lieu d'attendre le prochain sondage de 60 s. Le canal existait côté backend
+  // depuis le début mais AUCUN écran ne s'y abonnait.
+  const { alertes } = useAlertesStream(!!user);
+  const nbAlertesWs = alertes.length;
+  useEffect(() => {
+    if (nbAlertesWs > 0) mutateNotifCount();
+  }, [nbAlertesWs, mutateNotifCount]);
+
+  const nbNonLues = notifData?.count ?? 0;
 
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-white/90 backdrop-blur-md shadow-sm shadow-black/[0.04]">
@@ -210,9 +225,9 @@ export function Navbar() {
                   onClick={() => router.push("/notifications")}
                 >
                   <Bell className="h-4 w-4" />
-                  {notifData?.count > 0 && (
+                  {nbNonLues > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center">
-                      {notifData.count > 9 ? "9+" : notifData.count}
+                      {nbNonLues > 9 ? "9+" : nbNonLues}
                     </span>
                   )}
                 </Button>
@@ -269,9 +284,9 @@ export function Navbar() {
                           onClick={() => setUserMenuOpen(false)}
                         >
                           <Bell className="h-4 w-4 text-gray-500" /> Notifications
-                          {notifData?.count > 0 && (
+                          {nbNonLues > 0 && (
                             <span className="ml-auto h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center">
-                              {notifData.count > 9 ? "9+" : notifData.count}
+                              {nbNonLues > 9 ? "9+" : nbNonLues}
                             </span>
                           )}
                         </Link>

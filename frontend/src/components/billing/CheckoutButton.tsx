@@ -32,12 +32,20 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
     setLoading(true);
     try {
       const response = await api.post("/stripe/checkout", { plan, periodicite });
+      // Compte déjà abonné à une AUTRE formule : le backend a modifié l'abonnement
+      // existant au lieu d'en ouvrir un second (aucun passage par Stripe Checkout,
+      // donc aucun second prélèvement). Il n'y a plus qu'à confirmer.
+      if (response.data.change_de_plan) {
+        toast.success(response.data.message || "Votre formule a été modifiée");
+      }
       window.location.assign(response.data.url);
     } catch (error: unknown) {
       const response = (error as { response?: { data?: { detail?: string }; status?: number } })?.response;
       const detail = response?.data?.detail;
       toast.error(detail || "Impossible d'ouvrir le paiement sécurisé");
-      if (response?.status === 409) {
+      // 409 = compte déjà abonné à cette formule ; 403 = adresse e-mail pas encore
+      // confirmée. Dans les deux cas la suite se joue sur le profil.
+      if (response?.status === 409 || response?.status === 403) {
         router.push("/profil");
       }
       setLoading(false);

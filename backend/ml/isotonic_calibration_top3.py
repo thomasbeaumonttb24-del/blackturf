@@ -37,17 +37,17 @@ async def _fetch_proba_top3_outcomes(session: AsyncSession) -> list[tuple[float,
     rétro-compat. Flag off → comportement historique (cf. ml/isotonic_calibration)."""
     from ml.algo_flags import FLAGS as _AF
     _col = "COALESCE(pr.proba_top3_raw, pr.proba_top3)" if _AF.calib_on_raw else "pr.proba_top3"
-    _guard = ("AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL "
-              "AND pr.created_at < c.date_heure") if _AF.calib_on_raw else ""
-    _join_c = "JOIN courses c ON c.course_id = pr.course_id" if _AF.calib_on_raw else ""
     rows = await session.execute(text(f"""
         SELECT {_col}, pa.numero, pr.course_id, r.classement
-        FROM predictions pr
+        FROM prediction_evaluation pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN resultats r       ON r.course_id        = pr.course_id
-        {_join_c}
+        JOIN courses c         ON c.course_id        = pr.course_id
         WHERE {_col} IS NOT NULL AND r.classement IS NOT NULL
-          {_guard}
+          AND c.date_heure IS NOT NULL
+          AND pr.created_at IS NOT NULL
+          AND pr.created_at < c.date_heure
+          AND pr.is_replayable = true
     """))
     out: list[tuple[float, int]] = []
     for proba, numero, course_id, classement in rows.fetchall():
@@ -74,6 +74,14 @@ async def compute_and_store(session: AsyncSession) -> dict:
     """Fit régression isotone (proba_top3 → fréquence réelle top-3), stocke en DB."""
     data = await _fetch_proba_top3_outcomes(session)
     curve: dict = {"x": [], "y": [], "n_obs": len(data)}
+
+    if len(data) < MIN_OBS:
+        log.warning(
+            "isotonic_top3.skipped_insufficient_replayable_data",
+            n_obs=len(data), min_obs=MIN_OBS,
+        )
+        curve["status"] = "skipped_insufficient_replayable_data"
+        return curve
 
     if len(data) >= MIN_OBS:
         try:

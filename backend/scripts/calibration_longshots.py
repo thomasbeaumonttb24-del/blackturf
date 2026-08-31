@@ -2,7 +2,7 @@
 Calibration longshots — diagnostic READ-ONLY (n'écrit rien en DB).
 
 Compare, par bucket de cote, la proba de victoire PRÉDITE par le modèle
-(predictions.proba_top1) à la fréquence RÉELLE de victoire observée
+(prediction_evaluation.proba_top1) à la fréquence RÉELLE de victoire observée
 (resultats.classement, position == 1).
 
 But : objectiver le biais longshot qui produit les value bets à EV absurde
@@ -47,24 +47,29 @@ async def fetch_rows(session, cote_col: str):
     Récupère (proba_top1, cote, numero, course_id) pour toutes les prédictions
     dont la course a un résultat. cote_col ∈ {cote_pmu, cote_betfair, ...}.
     """
-    # FLAG calib_on_raw : facteurs longshot appris sur la proba BRUTE (proba_top1_raw)
-    # + garde pré-départ. COALESCE rétro-compat. Flag off → comportement historique.
+    # FLAG calib_on_raw : choix de la proba BRUTE ou finale uniquement. La garde
+    # pré-départ est inconditionnelle : aucun flag ne peut réactiver le hindsight.
     from ml.algo_flags import FLAGS as _AF
     _col = "COALESCE(pr.proba_top1_raw, pr.proba_top1)" if _AF.calib_on_raw else "pr.proba_top1"
-    _guard = ("AND c.date_heure IS NOT NULL AND pr.created_at IS NOT NULL "
-              "AND pr.created_at < c.date_heure") if _AF.calib_on_raw else ""
-    _join_c = "JOIN courses c ON c.course_id = pr.course_id" if _AF.calib_on_raw else ""
     rows = await session.execute(text(f"""
-        SELECT {_col}, pa.{cote_col} AS cote, pa.numero, pr.course_id
-        FROM predictions pr
+        SELECT {_col},
+               CASE WHEN :use_frozen THEN COALESCE(pr.cote_figee, pa.cote_pmu)
+                    ELSE pa.{cote_col} END AS cote,
+               pa.numero, pr.course_id
+        FROM prediction_evaluation pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN resultats r       ON r.course_id        = pr.course_id
-        {_join_c}
+        JOIN courses c         ON c.course_id        = pr.course_id
         WHERE {_col} IS NOT NULL
-          AND pa.{cote_col}  IS NOT NULL
-          AND pa.{cote_col}  > 1.0
-          {_guard}
-    """))
+          AND (CASE WHEN :use_frozen THEN COALESCE(pr.cote_figee, pa.cote_pmu)
+                    ELSE pa.{cote_col} END) IS NOT NULL
+          AND (CASE WHEN :use_frozen THEN COALESCE(pr.cote_figee, pa.cote_pmu)
+                    ELSE pa.{cote_col} END) > 1.0
+          AND c.date_heure IS NOT NULL
+          AND pr.created_at IS NOT NULL
+          AND pr.created_at < c.date_heure
+          AND pr.is_replayable = true
+    """), {"use_frozen": cote_col == "cote_pmu"})
     return rows.fetchall()
 
 

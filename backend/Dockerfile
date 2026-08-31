@@ -30,4 +30,14 @@ RUN mkdir -p /app/models /app/data && chown -R 1001:1001 /app
 
 USER 1001
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# --proxy-headers : l'app est TOUJOURS derrière nginx, qui envoie X-Forwarded-Proto.
+# Sans ce flag uvicorn croit parler en http et construit ses redirections en http —
+# un 307 (ex. /api/v1/notifications → /notifications/) renvoyait le navigateur vers
+# http:// depuis une page https, qui refuse de suivre (contenu mixte) : requête morte
+# et écran vide, sans la moindre erreur visible. --forwarded-allow-ips=* est sûr ici :
+# nginx est le SEUL ingress. `--forwarded-allow-ips=*` n'est sûr QU'À CETTE
+# CONDITION : le port 8000 est publié sur la loopback uniquement (cf. le mapping
+# `127.0.0.1:8000:8000` dans docker-compose.yml). Republier ce port sur 0.0.0.0
+# rendrait l'usurpation de X-Forwarded-For possible depuis Internet.
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", \
+     "--proxy-headers", "--forwarded-allow-ips=*"]

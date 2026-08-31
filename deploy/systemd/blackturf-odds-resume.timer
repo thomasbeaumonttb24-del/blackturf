@@ -1,0 +1,12 @@
+[Unit]
+Description=Relance les daemons de cotes une fois le retrain termine
+
+[Timer]
+# 03:10 UTC : le retrain nocturne complet dure ~10 min quand il va au bout
+# (02:00 -> 02:10). 03:10 laisse une heure de marge et reste bien avant la
+# premiere course (06:00 UTC).
+OnCalendar=*-*-* 03:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

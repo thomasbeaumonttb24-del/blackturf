@@ -13,8 +13,27 @@ import math
 # plancher EFFECTIF du moteur, indépendant des minima PMU ci-dessous.
 MISE_PLANCHER = 2
 
+# Pénalité de mise sur l'incertitude du modèle (largeur IC proba_top1_high−low),
+# appliquée en staking Kelly : discount = 1/(1 + CI_WIDTH_PENALTY × largeur).
+# Ex. largeur 0.30 (grosse incertitude) → mise ×0.53 ; largeur 0.10 → ×0.77 ;
+# largeur 0 (ou absente) → ×1.0 (aucun effet). Valeur POLICY, à valider Point 11.
+CI_WIDTH_PENALTY = 3.0
+
 # Montant minimum PMU par type de pari (référence réglementaire ; le moteur
 # applique MISE_PLANCHER=2€ par-dessus).
+def _cout_minimum_pmu(type_pari: str) -> float:
+    """Prix du ticket le moins cher réellement achetable pour ce type (0 si inconnu).
+
+    Ne lève jamais : un type absent du catalogue de référence ne doit pas empêcher
+    de proposer un plan.
+    """
+    try:
+        from services.pmu_paris_reference import cout_minimum
+        return float(cout_minimum(type_pari))
+    except Exception:
+        return 0.0
+
+
 MISE_MIN = {
     "Simple Gagnant":   1.0,
     "Simple Placé":     1.0,
@@ -148,6 +167,74 @@ def _palier(montant: int) -> dict:
 #     • RISQUÉ   : gros rapport, au moins ×10            → rapport_min = 10.
 #   Les bandes se chevauchent volontairement : le profil module aussi probabilité,
 #   type de pari et allocation. Le « pourquoi » reste justifié par le gain du ticket.
+# ─────────────────────────────────────────────────────────────
+# PLAFOND DE RANG PRÉDIT — le plan doit se corréler au classement de l'IA
+# ─────────────────────────────────────────────────────────────
+# Le classement est le composant le plus fiable du système. Mesuré sur 459 courses
+# réglées (14 jours) : le n°1 prédit gagne 27,0 % et se place 55,3 % ; le vrai gagnant
+# est dans le top-3 prédit 61,7 % du temps, dans le top-5 81,3 %, dans le top-8 95,9 %.
+#
+# Or les plans ne le suivaient pas : seulement 47 % des chevaux joués en RISQUÉ tombaient
+# dans le top-3 prédit, et 17,8 % au rang 8 ou au-delà — là où le classement dit que le
+# gagnant ne sort que 4 % du temps. En cause, l'objectif "gain" du risqué, qui multiplie
+# la probabilité par le rapport et écrase donc le classement.
+#
+# `rang_max` borne le rang prédit du PIRE cheval d'un pari. Les bornes suivent les
+# cumulés ci-dessus : le prudent reste dans le top-5 (81 % des gagnants), le modéré dans
+# le top-6 (87 %), le risqué dans le top-8 (96 %) — au-delà, on ne joue plus un outsider,
+# on joue contre son propre modèle. Les paris de type PLACÉ sont exemptés d'un cran
+# (RANG_MAX_BONUS_PLACE) : un cheval du milieu de tableau se place bien plus souvent
+# qu'il ne gagne.
+# Interrupteurs d'ESSAI (désactivés par défaut) : ils servent à MESURER en rejeu A/B
+# sur des courses déjà courues, jamais à changer le produit en douce.
+#
+# `_ANC_NEUTRE` neutralise le bonus de conviction porté par le rang du pied libre
+# d'une combinaison ancrée. Résultat du rejeu sur 400 courses (2026-08-23) : effet
+# NUL (−33,3 % avec, −33,3 % sans ; Trio −62,9 % contre −62,0 %). Le facteur ne nuit
+# pas mais n'apporte rien de mesurable — il reposait sur 17 gagnants.
+_ANC_NEUTRE = False
+# `_ANCRE_HORS_BANDE` exempte les combinaisons ANCRÉES sur les 2 premiers du plancher
+# de rapport du profil. Ce plancher est un CONTRAT PRODUIT (tranché le 2026-08-20).
+#
+# Ce qu'il coûte, mesuré : sur 120 courses, le Couplé Gagnant ancré du profil risqué
+# est écarté 73 fois par le seul plancher ×10 (son rapport vaut 2 à 9 — deux favoris
+# ne paient pas ×10), n'est pas offert 14 fois, et ne passe que 16 fois. C'est ce qui
+# explique que 17 % seulement des couplés gagnants joués soient ancrés, alors que
+# l'ancrage vaut +14 points sur ce type.
+#
+# MAIS le relâcher ne suffit PAS, et le rejeu A/B sur 400 courses le montre :
+#   plancher respecté  : risqué −33,3 %  modéré −14,4 %  prudent −21,6 %
+#   ancrés exemptés    : risqué −34,8 %  modéré −17,5 %  prudent −22,6 %
+# Parce que les deux contraintes sont couplées : un ticket ancré à ×6 doit être
+# dimensionné à ceil(cible/rapport) pour tenir la cible de gain, soit 34 € sur un plan
+# de 20 € — infinançable — pendant que le filtre d'ancrage a écarté les tickets non
+# ancrés qui, eux, tenaient la cible. Arbitrer réellement demande de toucher AUSSI au
+# multiple de gain du profil : c'est une décision produit, pas un réglage.
+_ANCRE_HORS_BANDE = False
+
+RANG_MAX_BONUS_PLACE = 2
+# Le plafond absolu ne suffit pas : dans un champ de 8 partants, le rang 8 EST le dernier
+# cheval — le jouer, c'est parier contre son propre classement. Le plafond est donc aussi
+# borné par une fraction du CHAMP. 0.60 : on ne descend jamais sous les 60 % supérieurs
+# du classement, quel que soit le profil.
+RANG_MAX_FRACTION_CHAMP = 0.60
+
+
+def _rang_max_effectif(rang_max_profil, nb_partants) -> Optional[int]:
+    """Plafond de rang prédit réellement appliqué = le plus contraignant entre le plafond
+    du profil et les 60 % supérieurs du champ (plancher 4, sinon les petits champs ne
+    laisseraient plus aucun pari combiné)."""
+    if rang_max_profil is None:
+        return None
+    r = int(rang_max_profil)
+    if nb_partants:
+        try:
+            r = min(r, max(4, math.ceil(float(nb_partants) * RANG_MAX_FRACTION_CHAMP)))
+        except (TypeError, ValueError):
+            pass
+    return r
+
+
 PROFIL_CONFIG = {
     # PRUDENT — privilégie le PLACÉ : Simple Placé, Duo Placé (Couplé Placé), 2/4.
     # Cote des chevaux COURTE (cote_max 9) = gain quasi assuré, MAIS on exige un
@@ -181,6 +268,8 @@ PROFIL_CONFIG = {
         "types": {"Simple Placé", "Simple Gagnant", "Couplé Placé", "2sur4",
                   "Multi en 6", "Multi en 7"},
         "objectif": "proba",
+        # top-5 prédit = 81,3 % des vrais gagnants (mesure du 2026-08-20).
+        "rang_max": 5,
         "var_cap": 1.0,
         "risk_pref": {"securite": 1.5, "rendement": 1.0, "surprise": 0.4, "coup": 0.2},
     },
@@ -227,6 +316,8 @@ PROFIL_CONFIG = {
                   "Couplé Ordre", "2sur4", "Trio",
                   "Multi en 5", "Multi en 6", "Multi en 7"},
         "objectif": "ev",
+        # top-6 prédit = 86,9 % des vrais gagnants (mesure du 2026-08-20).
+        "rang_max": 6,
         # var_cap 0.30 : un pari haute-variance (Trio/2sur4-jackpot) ne prend JAMAIS plus de
         # 30% du budget → force ≥2 tickets décorrélés (Trio capé). Anti « tout sur un Trio ».
         "var_cap": 0.30,
@@ -272,11 +363,38 @@ PROFIL_CONFIG = {
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre",
                   "Multi en 4", "Multi en 5", "Pick5"},
         "objectif": "gain",
-        # var_cap 0.35 (resserré de 0.45) : le risqué reste 100% gros rapport, MAIS jamais
-        # plus de 35% du budget sur un seul ticket → la mise s'étale sur ≥3 gros-rapports
-        # DÉCORRÉLÉS (demande user : « plus de mises différentes en risqué », fini le
-        # 10€ sur un seul Simple Gagnant).
-        "var_cap": 0.35,
+        # top-8 prédit = 95,9 % des vrais gagnants (mesure du 2026-08-20). Au-delà, le
+        # « gros rapport » n'est plus un outsider à valeur : c'est un pari contre le
+        # classement, et c'est ce qui remplissait 17,8 % des tickets risqués.
+        "rang_max": 8,
+        # var_cap 0.20 (0.45 → 0.35 → 0.20) : le risqué reste 100% gros rapport, MAIS
+        # jamais plus de 20% du budget sur un seul ticket TOUT-OU-RIEN → la mise s'étale
+        # sur plusieurs gros-rapports DÉCORRÉLÉS (demande user : « plus de mises
+        # différentes en risqué », fini le 10€ sur un seul Simple Gagnant).
+        #
+        # 0.35 → 0.20, mesuré le 2026-08-23 par rejeu A/B sur TOUT l'historique rejouable
+        # (3 900 courses, 10 600 paris), seul var_cap changeant :
+        #     0.35  →  −43,3 %       0.20  →  −39,6 %       soit +3,7 points.
+        #
+        # ⚠ MÉTHODE — ce chiffre a été obtenu en TROISIÈME lecture, les deux premières
+        # étaient fausses, et l'erreur est instructive :
+        #   1. fenêtre glissante (« 400 dernières courses ») : elle se décale à chaque
+        #      arrivée, donc les deux branches ne portaient pas sur le même échantillon.
+        #      Elle annonçait +13 à +19 points « de façon régulière ». Artefact.
+        #   2. fenêtre figée mais COURTE : 400 courses donnent ~25 gagnants au profil
+        #      risqué (1,8 % de réussite). Deux fenêtres voisines donnaient +29,5 et
+        #      +0,5 point. Bruit pur.
+        # Le profil risqué ne se mesure PAS sur quelques centaines de courses : à ce taux
+        # de réussite il faut tout l'historique pour sortir du bruit.
+        #
+        # Le mécanisme reste sain : à 0.35 un plan de 20 € pouvait poser 7 € sur un Trio
+        # (mesuré −58,6 % sur 2 443 paris) ; à 0.20 il en pose 4 au plus, et le reste va
+        # sur les couplés et les simples. Gain modeste mais jamais négatif — six mesures.
+        #
+        # Ni la tranche ×10, ni les types, ni le nombre de tickets ne changent : c'est un
+        # plafond de CONCENTRATION, pas un changement d'identité du profil (arbitrage
+        # utilisateur du 2026-08-23 : la tranche ×10 est conservée telle quelle).
+        "var_cap": 0.20,
         # alloc "spread" : la bande ≥×10 s'applique PAR PARI (chaque ticket gagnant paie
         # ≥×10 SA mise) — le dutching à retour égal sur la mise TOTALE collapsait presque
         # toujours sur UN seul ticket (coef total < 10 dès le 2e pari) = l'inverse du
@@ -332,6 +450,14 @@ def _effective_config(profil: str, heat: float) -> dict:
         # Plafond de mise sur UN pari haute-variance (fraction du montant) — garde-fou
         # anti « tout sur un Trio ». Contrat produit → NON modulé par le heat.
         "var_cap": base.get("var_cap", 1.0),
+        # Plafond de rang prédit — corrélation au classement de l'IA. Contrat produit
+        # (le classement ne devient pas moins fiable quand le modèle est « chaud »)
+        # → NON modulé par le heat.
+        "rang_max": base.get("rang_max"),
+        # Ancrage des combinaisons sur les 2 premiers du classement (cf.
+        # _filtrer_ancrage_top2). Contrat produit mesuré → NON modulé par le heat :
+        # un modèle « chaud » ne rend pas un couplé non ancré rentable.
+        "ancrage_top2": base.get("ancrage_top2", True),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -407,6 +533,11 @@ def generer_plan(
     cfg = _effective_config(profil, heat)
 
     preds = []
+    # Largeur de l'intervalle de confiance de proba_top1, PAR CHEVAL — sert à réduire la
+    # mise Kelly (cf. _allocate_kelly.weight) quand l'incertitude du modèle est large,
+    # sans toucher à combo_bets.py (la proba SIMULÉE reste inchangée, seul le STAKING en
+    # tient compte). Absent → 0.0 (aucune pénalité, jamais d'incertitude inventée).
+    ci_width_by_num: dict[int, float] = {}
     for p in predictions:
         if p.get("non_partant"):
             continue
@@ -417,10 +548,52 @@ def generer_plan(
             "proba_top3": p.get("proba_top3"),
             "cote_pmu": p.get("cote_pmu"),
         })
+        lo, hi = p.get("proba_top1_low"), p.get("proba_top1_high")
+        if lo is not None and hi is not None:
+            try:
+                ci_width_by_num[int(p["numero"])] = max(0.0, float(hi) - float(lo))
+            except (TypeError, ValueError):
+                pass
+
+    # RANG PRÉDIT par cheval = ordre de proba_top1 décroissante (même classement que
+    # celui affiché à l'utilisateur). Chaque candidat porte le rang de son PIRE cheval :
+    # c'est lui qui détermine si le pari suit le classement ou le contredit.
+    _rang_par_num: dict[int, int] = {}
+    for _i, _p in enumerate(sorted(preds, key=lambda x: float(x.get("proba_top1") or 0.0),
+                                   reverse=True), start=1):
+        try:
+            _rang_par_num[int(_p["numero"])] = _i
+        except (TypeError, ValueError, KeyError):
+            continue
 
     cands = enumerate_bet_candidates(preds, course_info)
     if not cands:
         return _plan_vide(montant, profil)
+    # Les deux premiers du classement : le point d'appui des combinaisons
+    # (cf. _filtrer_ancrage_top2 — 14 à 67 points de ROI selon le type).
+    _top2 = {n for n, r in _rang_par_num.items() if r <= 2}
+    for c in cands:
+        _rgs = [_rang_par_num.get(int(h["numero"])) for h in c.get("chevaux", [])
+                if h.get("numero") is not None]
+        _rgs = [r for r in _rgs if r]
+        c["_rang_max"] = max(_rgs) if _rgs else None
+        _nums = {int(h["numero"]) for h in c.get("chevaux", [])
+                 if h.get("numero") is not None}
+        c["_ancre_top2"] = len(_top2) == 2 and _top2.issubset(_nums)
+        c["_ancre_nums"] = frozenset(_top2) if len(_top2) == 2 else frozenset()
+        # Rang du meilleur pied HORS ancre : sur un Trio ancré, c'est lui qui fait le
+        # rapport. Mesure du 2026-08-23 (winsorisée) : 3ᵉ pied au rang 3 → −80 % de ROI
+        # (le 3ᵉ favori écrase le rapport sans rien garantir), rangs 4-5 → −21 %,
+        # rangs 6-8 → +92 % (n=388), rang 9+ → −100 %. Le bon 3ᵉ pied est un outsider
+        # que le modèle croit encore, pas le favori suivant.
+        _hors = [r for n, r in ((n, _rang_par_num.get(n)) for n in _nums)
+                 if r and n not in _top2]
+        c["_rang_hors_ancre"] = min(_hors) if _hors else None
+    if ci_width_by_num:
+        for c in cands:
+            c["_ci_width"] = max(
+                (ci_width_by_num.get(int(h["numero"]), 0.0) for h in c.get("chevaux", [])
+                 if h.get("numero") is not None), default=0.0)
 
     # CALIBRATION estimé→réel : recale le rapport (et donc l'EV) de chaque candidat sur le
     # rapport RÉEL appris par (profil × type), AVANT les gates de bande. Un Placé estimé
@@ -439,8 +612,58 @@ def generer_plan(
         except Exception:
             pass
 
+    # CALIBRATION de la PROBABILITÉ, mesurée le 2026-08-19 sur 19 968 paris réglés :
+    # le modèle annonce systématiquement plus souvent qu'il ne réalise (Simple
+    # Gagnant 10,9 % annoncés → 8,9 % réels, Trio 5,3 % → 2,4 %). Comme
+    # EV = proba × rapport − 1, une proba gonflée de 22 % affiche +10 % là où le
+    # réel est −10 % : c'est ce qui rendait les bandes d'EV incapables de trier
+    # (toutes à −8/−9 % de ROI réel) et le ROI global négatif.
+    #
+    # On corrige la proba AVANT l'EV et AVANT les gates, pour que tout l'aval —
+    # sélection, dimensionnement, tranche de rapport — travaille sur une
+    # probabilité qui tient devant les résultats.
+    if rapport_calib:
+        try:
+            from ml.signal_performance import proba_realization_factor
+            for c in cands:
+                fp = proba_realization_factor(c.get("type_pari"), rapport_calib)
+                if fp and fp != 1.0:
+                    c["proba_gain"] = round(float(c["proba_gain"]) * fp, 4)
+                    c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
+                    c["_proba_cal_f"] = round(float(fp), 3)
+        except Exception:
+            pass
+
+    # TILT PAR TRANCHE DE RAPPORT — le signal le plus solide de nos données (19 972
+    # paris réglés) : le ROI réel décroît continûment avec le rapport visé. Simple
+    # Gagnant ×4-8 rend -1,7 % ; le même pari au-delà de ×15 rend -15,4 %. Simple
+    # Placé sous ×4 rend -7 % ; au-delà de ×4, -25 %. C'est le biais favori/outsider,
+    # mesuré chez nous.
+    #
+    # C'est un TILT de préférence entre candidats, pas une barrière : la tranche de
+    # rapport propre à chaque profil et la promesse d'un plan sur CHAQUE course
+    # restent intactes.
+    if rapport_calib:
+        try:
+            from ml.signal_performance import payout_bucket_multiplier
+            for c in cands:
+                c["_pb_mult"] = float(payout_bucket_multiplier(
+                    c.get("type_pari"), c.get("rapport_estime"), rapport_calib))
+        except Exception:
+            pass
+
+    # pool_couverture : candidats validés par les gates du profil mais écartés de la
+    # sélection (conviction plus faible). Vivier des tickets de COUVERTURE.
+    pool_couverture: list[dict] = []
+    # Plafond de rang appliqué à CETTE course : le profil borne le rang, le champ le
+    # borne encore (cf. _rang_max_effectif).
+    cfg = dict(cfg)
+    cfg["rang_max"] = _rang_max_effectif(cfg.get("rang_max"),
+                                         (course_info or {}).get("nb_partants"))
+
     selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
-                                  respect_montant=respect_montant, ev_band_perf=ev_band_perf)
+                                  respect_montant=respect_montant, ev_band_perf=ev_band_perf,
+                                  pool_out=pool_couverture)
     if not selected:
         # Predictions existent mais AUCUN pari ne tombe dans la tranche de rapport du
         # profil (x2 / x2-10 / >=x10) -> plan vide honnete plutot qu un pari hors-regle.
@@ -470,7 +693,9 @@ def generer_plan(
             # ∝ conviction (proba×rapport, edge outsider, signal, bande d'EV).
             _min_stake_eff = max(MISE_PLANCHER,
                                  round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
-            _allocate_spread(selected, montant, cfg, _min_stake_eff)
+            _allocate_spread(selected, montant, cfg, _min_stake_eff,
+                             pool=pool_couverture,
+                             nb_partants=(course_info or {}).get("nb_partants"))
         else:
             # PRUDENT : RESPECT STRICT DE LA TRANCHE DE COEFFICIENT (×1.8-4) SUR LA MISE
             # COMPLÈTE par DUTCHING : chaque gagnant unique rend le même total = coef ×
@@ -482,9 +707,56 @@ def generer_plan(
         min_keep = 2 if (len(selected) >= 2 and not _solo_confident(selected[0])) else 1
         _allocate_kelly(selected, montant, palier, cfg, respect_montant=respect_montant,
                         min_keep=min_keep)  # remplit "mise"
+        # DISCIPLINE DE MISE — on ne joue pas la même somme sur une course où
+        # l'argent revient et sur une course où il ne revient pas. Contrefactuel
+        # mesuré sur 19 996 paris réglés : tout jouer rend −16,0 % ; concentrer sur
+        # Simple Gagnant ×4-15 + Placé <×4 rend −6,1 % ; sur Simple Gagnant ×4-8
+        # seul, −1,9 %. Le plan reste servi sur CHAQUE course : c'est la somme
+        # engagée qui s'ajuste, le reliquat part en réserve (montant_reserve).
+        #
+        # Jamais appliqué quand l'utilisateur a SAISI un montant : il a demandé à
+        # jouer cette somme-là, on la déploie en entier.
+        _appliquer_discipline_mise(selected, montant, palier, cfg)
     ecartes = _paris_ecartes(cands, selected, cfg)
     return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
                           facteurs_chevaux=facteurs_chevaux, ecartes=ecartes)
+
+
+# Qualité mesurée d'une cellule (type × tranche de rapport), telle qu'apprise par
+# `payout_bucket_multiplier` : 1.0 = tranche neutre, 0.60 = tranche qui a
+# historiquement rendu le moins. On engage la mise pleine sur une cellule saine et
+# on descend jusqu'à ce plancher sur les pires — sans jamais tomber à zéro, sinon
+# le plan disparaîtrait.
+DISCIPLINE_RATIO_PLANCHER = 0.40
+
+
+def _appliquer_discipline_mise(selected: list[dict], montant: int,
+                               palier: dict, cfg: dict) -> None:
+    """Réduit la somme engagée quand les paris retenus tombent dans des tranches
+    de rapport historiquement peu rentables. Modifie `selected` sur place."""
+    if not selected:
+        return
+    plancher = max(MISE_PLANCHER,
+                   round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
+    for c in selected:
+        avant = float(c.get("mise") or 0)
+        if avant <= 0:
+            continue
+        # Ratio PAR PARI, sur sa propre cellule : un ticket sain ne doit pas être
+        # rogné parce qu'un petit ticket annexe tombe dans une mauvaise tranche.
+        # C'est aussi ce qui déplace le MÉLANGE de l'argent vers les bonnes
+        # cellules, et pas seulement le total engagé.
+        qualite = float(c.get("_pb_mult", 1.0) or 1.0)
+        if qualite >= 1.0:
+            continue
+        # 0.60 (pire tranche mesurée) → 40 % de la mise ; 1.00 (neutre) → mise pleine.
+        ratio = (DISCIPLINE_RATIO_PLANCHER
+                 + (qualite - 0.60) * (1.0 - DISCIPLINE_RATIO_PLANCHER) / 0.40)
+        ratio = max(DISCIPLINE_RATIO_PLANCHER, min(1.0, ratio))
+        if ratio >= 0.995:
+            continue
+        c["mise"] = max(plancher, int(round(avant * ratio)))
+        c["_discipline_ratio"] = round(ratio, 2)
 
 
 def _dutch_coef(bets: list[dict]) -> float:
@@ -555,7 +827,178 @@ def _allocate_dutch(selected: list[dict], montant: float, cfg: dict) -> None:
     selected[:] = bets
 
 
-def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake: int) -> None:
+# ─────────────────────────────────────────────────────────────
+# TICKETS DE COUVERTURE
+# ─────────────────────────────────────────────────────────────
+# Le contrat produit « un ticket gagnant rend ≥ gain_cible_mult × la MISE TOTALE »
+# (02/07) est arithmétiquement anti-diversification : financer N tickets exige
+# Σ(1/rapport_i) ≤ 1/g. En modéré (g=4, bande ×4-15) ça plafonne à 1-3 tickets — et
+# depuis la calibration des rapports et des probabilités (19/08), qui a fait baisser
+# `rapport_estime` de 4 à 20 %, le besoin par ticket a monté et le plan tombait à UN
+# SEUL ticket sur ~97 % des courses (mesuré : 1,55 → 1,00 pari/plan en modéré).
+# Une seule chance de toucher par course = le joueur ne rejoue pas.
+#
+# On emploie donc le RELIQUAT — l'argent qui ne faisait sinon que grossir les mêmes
+# tickets — à financer des paris D'APPOINT au plancher de mise. Décision produit du
+# 2026-08-20 : ils portent EXACTEMENT le même contrat que les autres (≥ ×g de la MISE
+# TOTALE), la tranche du profil se mesurant sur la mise totale SANS EXCEPTION. À 2€ de
+# mise, cela impose un rapport ≥ cible/2 : peu de tickets qualifient, mais tous sont
+# dans la tranche annoncée.
+# Nombre de tickets de couverture visé selon le CHAMP de la course. Plus il y a de
+# partants, plus l'issue est incertaine et plus il y a de combinaisons PMU réellement
+# jouables : couvrir davantage y a du sens. À l'inverse, sur un champ réduit les
+# combinaisons se ressemblent toutes — les multiplier n'ajoute pas de chances, ça
+# ne fait que diviser la mise.
+COUVERTURE_PAR_CHAMP = ((8, 2), (13, 3), (10 ** 9, 4))
+# Part du budget mise de côté pour la couverture QUAND le contrat ne finance qu'un seul
+# ticket. Bornée à 0.60 : le ticket principal doit garder de quoi tenir la cible de gain
+# du profil, sinon on troque la promesse contre du saupoudrage.
+COUVERTURE_PART_MAX = 0.60
+
+
+def _couverture_max(nb_partants: Optional[int]) -> int:
+    """Nb max de tickets de couverture selon le nombre de partants (None → valeur
+    médiane : on n'invente pas un grand champ quand l'info manque)."""
+    if not nb_partants:
+        return 3
+    for seuil, n in COUVERTURE_PAR_CHAMP:
+        if int(nb_partants) <= seuil:
+            return n
+    return COUVERTURE_PAR_CHAMP[-1][1]
+
+
+def _ordre_couverture(restants: list[dict]) -> list[dict]:
+    """Ordre de financement de la couverture : on ALTERNE deux logiques au lieu d'en
+    empiler une seule.
+
+      • FRÉQUENCE — le pari le plus probable : il fait monter les chances de toucher.
+      • GROS LOT  — le plus gros rapport : petite mise qui peut rapporter beaucoup,
+        « ça élargit le champ des possibles » (demande user 2026-08-20).
+
+    Trois tickets de couverture triés par la seule probabilité finissent par être trois
+    variantes du même pari ; alterner donne un vrai éventail. Tous les candidats ont déjà
+    passé les gates du profil, donc le « gros lot » reste dans la bande du profil."""
+    par_freq = sorted(restants, key=lambda b: (float(b.get("proba_gain") or 0.0),
+                                               float(b.get("rapport_estime") or 0.0)),
+                      reverse=True)
+    par_gain = sorted(restants, key=lambda b: (float(b.get("rapport_estime") or 0.0),
+                                               float(b.get("proba_gain") or 0.0)),
+                      reverse=True)
+    ordre, vus = [], set()
+    for i in range(max(len(par_freq), len(par_gain))):
+        for source in (par_freq, par_gain):
+            if i < len(source) and id(source[i]) not in vus:
+                vus.add(id(source[i]))
+                ordre.append(source[i])
+    return ordre
+
+
+def _chevaux_set(b: dict) -> frozenset:
+    return frozenset(int(h["numero"]) for h in b.get("chevaux", [])
+                     if h.get("numero") is not None)
+
+
+def _couvre_deja(b: dict, deja: list[dict]) -> bool:
+    """Un ticket de couverture n'a d'intérêt que s'il couvre AUTRE CHOSE que ce qui est
+    déjà joué. Même règle de doublon que la sélection : même combinaison, combo du même
+    type ne différant que d'un cheval, ou recouvrement ≥ 67 %."""
+    hs = _chevaux_set(b)
+    ancre = frozenset(b.get("_ancre_nums") or ())
+    for s in deja:
+        ss = _chevaux_set(s)
+        if hs == ss:
+            return True
+        if s.get("type_pari") != b.get("type_pari"):
+            continue
+        # Deux combos ancrés sur les 2 premiers du classement partagent leur appui par
+        # CONSTRUCTION : ce qui les distingue est le pied libre. Même exception qu'à la
+        # sélection, sinon un seul trio ancré peut être financé par course.
+        if b.get("_ancre_top2") and ancre and ancre <= ss:
+            continue
+        inter = len(hs & ss)
+        if len(hs) >= 3 and inter >= max(len(hs), len(ss)) - 1:
+            return True
+        if inter / max(len(hs | ss), 1) >= 0.67:
+            return True
+    return False
+
+
+def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
+                         montant: int, cfg: dict,
+                         pool: Optional[list[dict]] = None,
+                         cov_max: int = 3, cible: float = 0.0,
+                         besoin_fn=None, cap_fn=None) -> int:
+    """Finance des paris D'APPOINT sur le reliquat, DIMENSIONNÉS COMME LES AUTRES.
+
+    Chaque ticket reçoit `besoin = ceil(cible / rapport)` — exactement la règle des
+    tickets principaux — et non la mise plancher. C'est ce qui sépare un plan à ticket
+    unique d'un plan fourni : au plancher de 2€, atteindre la cible exigeait un rapport
+    ≥ cible/2 (×20 en modéré, ×50 en risqué) que presque aucun candidat n'offre.
+    Dimensionné au besoin, un rapport ×8 en modéré coûte 5€ et un rapport ×25 en risqué
+    coûte 4€ — la tranche du profil restant tenue par construction (mise × rapport ≥ cible).
+
+    Les mises obtenues couvrent donc naturellement les fourchettes voulues (demande user
+    2026-08-20) : 2 à 8€ en risqué, 5 à 10€ en modéré, la mise entière quand un seul
+    pari domine.
+
+    Aucun pari inventé ni hors profil : ils sortent de `selected` ou de `pool`, deux
+    listes qui ont déjà passé TOUTES les gates du profil (type autorisé, bande de
+    rapport, cote, probabilité, EV) — ils étaient simplement moins convaincants."""
+    if not kept:
+        return reste
+    mise_cov = MISE_PLANCHER
+    if reste < mise_cov:
+        return reste
+    pris = {id(b) for b in kept}
+    # D'abord les paris SÉLECTIONNÉS non financés (les plus convaincants), puis le vivier
+    # des candidats validés par les gates du profil mais écartés par la bande de
+    # conviction. Sans ce vivier, un plan dont la sélection tient en 1 pari (cas du
+    # prudent) n'a jamais de couverture possible.
+    restants = [b for b in selected if id(b) not in pris]
+    if pool:
+        vus = pris | {id(b) for b in restants}
+        restants += [b for b in pool if id(b) not in vus]
+    if not restants:
+        return reste
+    var_cap = float(cfg.get("var_cap", 1.0) or 1.0)
+    cap_hv = max(mise_cov, int(montant * var_cap)) if var_cap < 1.0 else montant
+
+    def _besoin_defaut(b):
+        r = max(float(b.get("rapport_estime") or 1.0), 1.01)
+        return max(mise_cov, math.ceil(cible / r)) if cible > 0 else mise_cov
+
+    besoin = besoin_fn or _besoin_defaut
+    plafond = cap_fn or (lambda b: cap_hv if _is_high_variance(b) else montant)
+
+    restants = _ordre_couverture(restants)
+    ajoutes = 0
+    for b in restants:
+        if ajoutes >= cov_max or reste < mise_cov:
+            break
+        n = besoin(b)
+        # Le budget restant doit couvrir le besoin CONTRACTUEL du ticket : c'est ce qui
+        # garantit mise × rapport ≥ cible, donc la tranche du profil, sans exception.
+        if n > reste or n > plafond(b):
+            continue
+        if _couvre_deja(b, kept):
+            continue                      # ne couvre rien de nouveau → inutile
+        # RÈGLE PRODUIT : le Simple Placé n'est JAMAIS éclaté en plusieurs tickets (il
+        # paie moins que la mise totale → deux placés dont un seul passe = perdant).
+        # Pour couvrir deux chevaux au placé, c'est le Couplé Placé, pas 2 Simple Placé.
+        if (b.get("type_pari") == "Simple Placé"
+                and any(k.get("type_pari") == "Simple Placé" for k in kept)):
+            continue
+        b["mise"] = n
+        b["_besoin"] = n
+        kept.append(b)
+        reste -= n
+        ajoutes += 1
+    return reste
+
+
+def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake: int,
+                     pool: Optional[list[dict]] = None,
+                     nb_partants: Optional[int] = None) -> None:
     """Allocation « SPREAD » (modéré/risqué, calculateur manuel & pronos figés).
 
     CONTRAT DE GAIN vs MISE TOTALE (demande user 2026-07-02) : chaque ticket GAGNANT
@@ -627,8 +1070,8 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
         r = max(float(b.get("rapport_estime") or 1.0), 1.01)
         return max(min_stake, math.ceil(cible / r))
 
-    def _fund(order, cible):
-        kept, reste = [], M
+    def _fund(order, cible, budget=None):
+        kept, reste = [], (M if budget is None else int(budget))
         for b in order:
             n = _besoin(b, cible)
             if n <= reste and n <= _cap(b):
@@ -636,12 +1079,13 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
                 reste -= n
         return kept, reste
 
-    def _best_diversified(cible):
+    def _best_diversified(cible, budget=None):
         """Meilleur plan pour une cible : ordre conviction, repli ordre besoin croissant
         (les plus gros rapports coûtent le moins → plus de tickets). Rend le plus fourni."""
-        k1, r1 = _fund(selected, cible)
+        k1, r1 = _fund(selected, cible, budget)
         if len(k1) < 2 and len(selected) > 1:
-            k2, r2 = _fund(sorted(selected, key=lambda b: (_besoin(b, cible), -_w(b))), cible)
+            k2, r2 = _fund(sorted(selected, key=lambda b: (_besoin(b, cible), -_w(b))),
+                           cible, budget)
             if len(k2) > len(k1):
                 return k2, r2, cible
         return k1, r1, cible
@@ -652,6 +1096,35 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # RESPECTÉE > plus de tickets hors bande.
     cible = g * M
     kept, reste, cible = _best_diversified(cible)
+    # RÉSERVE DE COUVERTURE — le contrat ×g est glouton : dimensionné sur le budget
+    # ENTIER il finance souvent UN seul ticket qui absorbe tout, et la course n'offre
+    # alors qu'une seule chance de toucher. Quand c'est le cas, on met de côté une part
+    # du budget AVANT de dimensionner le ticket principal, pour financer des paris de
+    # couverture. On ne le fait PAS si le contrat finance déjà ≥2 tickets : un ticket
+    # contractuel (multiplicateur du profil tenu) vaut mieux qu'un ticket de couverture.
+    # QUASI-CERTITUDE : quand le modèle est vraiment sûr d'un pari, on ne dilue pas —
+    # toute la mise part dessus, sans réserve ni couverture (demande user : « si confiant
+    # d'un cheval jouer un seul, sinon proposer plusieurs »). Le nombre de paris est donc
+    # piloté par l'ANALYSE de la course, pas par un cap fixe.
+    solo = bool(selected) and _solo_confident(selected[0])
+    # Le nombre de tickets de couverture suit le CHAMP de la course : 2 sur un champ
+    # réduit (≤8), 3 jusqu'à 13, 4 au-delà. Un grand champ = issue plus incertaine et
+    # plus de combinaisons PMU réellement jouables → couvrir davantage a du sens.
+    cov_max = _couverture_max(nb_partants)
+    # RÉSERVE DE COUVERTURE — systématique, pas seulement quand le contrat ne finance
+    # qu'un ticket. Dimensionné sur le budget ENTIER, le contrat ×g est glouton : deux
+    # tickets contractuels à 4€ et 6€ absorbent un plan de 10€ et il ne reste rien pour
+    # élargir l'éventail. On met donc la part de couverture de côté AVANT de dimensionner
+    # les tickets contractuels, et on la rend par paliers de 2€ tant qu'aucun ticket
+    # contractuel n'entre dans le budget restant — la promesse ×g passe avant le nombre.
+    if not solo and (len(selected) > 1 or pool):
+        res = min(cov_max * MISE_PLANCHER, int(M * COUVERTURE_PART_MAX))
+        while res >= MISE_PLANCHER:
+            k2, r2, _ = _best_diversified(cible, M - res)
+            if k2:
+                kept, reste = k2, r2 + res
+                break
+            res -= MISE_PLANCHER          # le principal n'entre plus : on rend du budget
     if not kept:
         # Aucun ticket n'atteint la cible sous son plafond (ne peut arriver que via le
         # filet hors-bande) → tout le budget sur le plus convaincant NON haute-variance
@@ -665,6 +1138,14 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     for b in kept:
         b["mise"] = _besoin(b, cible)
         b["_besoin"] = b["mise"]                       # plancher contractuel (trace)
+    # COUVERTURE : le reliquat finance d'ABORD des paris SUPPLÉMENTAIRES (cf.
+    # _financer_couverture) avant de grossir les tickets contractuels. Objectif =
+    # augmenter le nombre de chances de toucher sur la course, pas le gain d'un ticket.
+    if not solo:
+        reste = _financer_couverture(kept, selected, reste, M, cfg, pool=pool,
+                                     cov_max=cov_max, cible=cible,
+                                     besoin_fn=lambda b: _besoin(b, cible),
+                                     cap_fn=_cap)
     # Reliquat ∝ conviction — les mises ne font que MONTER (gain ≥ cible préservé). Le
     # plancher de bande (×g du total) est STRICT (dimensionnement `besoin`). Le PLAFOND de
     # bande (gain ≤ gmax×total) borne le reliquat : on ne charge pas un ticket au-delà de sa
@@ -672,11 +1153,16 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
     # de tickets pour absorber la totalité. Le filet final conserve l'invariant produit
     # « montant saisi = montant joué » même sur une course atypique.
     if reste > 0:
-        ws = [_w(b) for b in kept]
+        # Tous les tickets sont dimensionnés par le même besoin contractuel : le reliquat
+        # (ce qui reste quand plus aucun ticket supplémentaire n'entre dans le budget) se
+        # répartit sur l'ensemble, proportionnellement à la conviction, borné par le
+        # plafond haut de bande.
+        cibles = kept
+        ws = [_w(b) for b in cibles]
         tw = sum(ws) or 1.0
         add = _largest_remainder([reste * w / tw for w in ws], reste)
         overflow = 0
-        for b, a in zip(kept, add):
+        for b, a in zip(cibles, add):
             take = min(a, max(_cap(b) - b["mise"], 0))
             b["mise"] += take
             overflow += a - take
@@ -752,9 +1238,9 @@ def _solo_confident(c: dict) -> bool:
     p = float(c.get("proba_gain", 0.0) or 0.0)
     edge = float(c.get("edge", 0.0) or 0.0)
     sig = float(c.get("_sig", 1.0) or 1.0)
-    return (p >= 0.42
-            or (p >= 0.32 and edge > 0.0)
-            or (p >= 0.26 and edge > 0.02 and sig >= 1.10))
+    return (p >= 0.55
+            or (p >= 0.45 and edge > 0.0)
+            or (p >= 0.38 and edge > 0.02 and sig >= 1.10))
 
 
 def _bet_cote_max(c: dict) -> float:
@@ -763,14 +1249,79 @@ def _bet_cote_max(c: dict) -> float:
     return max(cotes) if cotes else 0.0
 
 
+# ─────────────────────────────────────────────────────────────
+# ANCRAGE SUR LES DEUX PREMIERS DU CLASSEMENT
+# ─────────────────────────────────────────────────────────────
+# Le plafond de rang (`rang_max`) borne le PIRE cheval d'un pari. C'est un plafond,
+# pas un point d'appui — et la mesure dit que c'est le point d'appui qui rapporte.
+#
+# Mesure du 2026-08-23 sur les conseils réglés (gains winsorisés à 50× la mise, donc
+# aucun rapport isolé ne raconte l'histoire) :
+#
+#   Couplé Gagnant  contenant les 2 premiers prédits : 13,8 % de réussite, ROI  +0,5 %
+#                   sans                              :  3,8 %,             ROI −13,9 %
+#   Trio            contenant les 2 premiers prédits :  3,7 %,             ROI  −8,1 %
+#                   sans                              :  0,7 %,             ROI −75,5 %
+#
+# 14 points d'écart sur le couplé gagnant, 67 sur le trio. Un Couplé Gagnant ancré
+# rend +0,5 % sur un pool qui prélève 23 % : c'est le seul pari du catalogue qui
+# batte franchement sa maison. Le moteur ne le jouait que dans 11 % de ses couplés.
+#
+# La règle : parmi les combinaisons qui ONT DÉJÀ PASSÉ les gates du profil (bande de
+# rapport comprise — on ne contourne jamais le contrat de tranche), on ne garde que
+# celles ancrées sur les deux premiers prédits. S'il n'y en a AUCUNE, on garde tout :
+# la promesse d'un plan sur chaque course reste intacte.
+# Le COUPLÉ PLACÉ est le seul type que l'ancrage dégrade, et deux mesures
+# indépendantes le disent :
+#   • historique, au niveau course : ancré −32,8 % contre −27,6 % non ancré ;
+#   • rejeu A/B sur 400 courses (2026-08-23) : porter l'ancrage de 58 % à 76 % des
+#     couplés placés fait passer le type de −8,1 % à −24,2 %, et entraîne avec lui
+#     le prudent (−16,3 → −21,6) et le modéré (−10,3 → −14,4).
+# La raison tient à la structure du pari : il faut DEUX chevaux dans les trois
+# premiers, et les deux premiers du classement sont deux cotes courtes — le rapport
+# tombe vers ×3 pour un pool qui prélève 23 %. Associer le favori à un cheval plus
+# coté paie bien mieux pour une perte de fréquence modeste. L'ancrage vaut pour les
+# paris qui exigent l'ORDRE ou la victoire (couplé gagnant, trio), pas pour ceux qui
+# se contentent d'une place.
+TYPES_SANS_ANCRAGE = frozenset({"Couplé Placé"})
+
+
+def _filtrer_ancrage_top2(ranked: list[dict], cfg: dict) -> list[dict]:
+    """Ne conserve que les combinaisons ancrées sur les 2 premiers du classement.
+
+    Les paris à un seul cheval ne sont jamais touchés (il n'y a pas d'ancrage à
+    faire), les types de `TYPES_SANS_ANCRAGE` non plus, et le repli est total :
+    sans candidat ancré, la liste revient inchangée.
+    """
+    if not ranked or not cfg.get("ancrage_top2", True):
+        return ranked
+    combos = [c for c in ranked if len(c.get("chevaux", [])) >= 2
+              and c.get("type_pari") not in TYPES_SANS_ANCRAGE]
+    if not combos:
+        return ranked
+    ancres = [c for c in combos if c.get("_ancre_top2")]
+    if not ancres:
+        return ranked                      # aucune combinaison ancrée → on ne prive de rien
+    garde = {id(c) for c in ancres}
+    return [c for c in ranked
+            if len(c.get("chevaux", [])) < 2
+            or c.get("type_pari") in TYPES_SANS_ANCRAGE
+            or id(c) in garde]
+
+
 def _select_conviction(
     cands: list[dict], montant: int, palier: dict, cfg: dict, roi_weights: dict,
     signal_mults: Optional[dict] = None, respect_montant: bool = False,
-    ev_band_perf: Optional[dict] = None,
+    ev_band_perf: Optional[dict] = None, pool_out: Optional[list] = None,
 ) -> list[dict]:
     """Sélectionne PEU de paris à FORTE conviction (EV × proba × edge × ROI passé),
     filtrés par les GATES du profil EFFECTIF (cote_max, min_proba, ev_min, max_coup).
     Profitabilité d'abord ; concentre. Le profil change donc VRAIMENT quels paris.
+
+    `pool_out` (optionnel) reçoit TOUS les candidats ayant passé les gates du profil,
+    y compris ceux écartés par la bande de conviction ou le plafond de paris. C'est le
+    vivier des tickets de COUVERTURE : des paris déjà validés par la méthode du profil,
+    simplement moins convaincants que le principal — jamais des paris hors profil.
     """
     # Mise plancher EFFECTIVE : le profil peut réduire l'EXTRA réparti (<1) pour
     # saupoudrer de PETITES mises sur PLUSIEURS combinaisons (équilibré/risqué), ou
@@ -792,6 +1343,7 @@ def _select_conviction(
     # QUE si, même au plancher de mise, le gain dépasse la bande : rap > rapport_max × M / min_stake.
     rapport_max_eff = (rapport_max * montant / max(min_stake, 1)) if rapport_max is not None else None
     min_proba = cfg["min_proba"]
+    rang_max_eff = cfg.get("rang_max")
     ev_min = cfg["ev_min"]
     allowed_types = cfg.get("types")                         # None = toutes
     objectif = cfg.get("objectif", "ev")
@@ -836,10 +1388,38 @@ def _select_conviction(
         except Exception:
             return 1.0
 
+    def anc_factor(c):
+        """Qualité MESURÉE du pied hors ancre d'une combinaison ancrée sur le top-2.
+
+        Sur un Trio ancré, c'est le 3ᵉ cheval qui fait le rapport. Mesure du
+        2026-08-23 (winsorisée à 50×) : rang 3 → −80 % de ROI, rangs 4-5 → −21 %,
+        rangs 6-8 → +92 %, rang 9+ → −100 %. Prendre le 3ᵉ favori écrase le rapport
+        sans rien garantir ; le pied qui paie est l'outsider que le modèle croit
+        encore. Neutre sur les paris non ancrés et sur les paris à 2 chevaux (pas de
+        pied libre)."""
+        if _ANC_NEUTRE or not c.get("_ancre_top2"):
+            return 1.0
+        r = c.get("_rang_hors_ancre")
+        if r is None:
+            return 1.0
+        if r == 3:
+            return 0.70
+        if r <= 5:
+            return 1.0
+        if r <= 8:
+            return 1.25
+        return 0.70
+
     def conviction(c):
         """Classement selon l'OBJECTIF du profil (× ROI réel passé du type × signal ×
-        ROI réel de la bande d'EV)."""
-        rw = roi_w(c) * sig_factor(c) * evb(c)
+        ROI réel de la bande d'EV × ROI réel de la TRANCHE DE RAPPORT).
+
+        La tranche de rapport est, de loin, le facteur le mieux étayé : le ROI réel
+        y décroît continûment (Simple Gagnant −1,7 % en ×4-8 contre −15,4 % au-delà
+        de ×15, sur des milliers de paris). La bande d'EV, elle, ne trie rien.
+        """
+        rw = (roi_w(c) * sig_factor(c) * evb(c) * anc_factor(c)
+              * float(c.get("_pb_mult", 1.0) or 1.0))
         if objectif == "proba":
             # PRUDENT : MAX de victoires DANS la contrainte ≥1.8× (le rapport_min 1.8 garantit
             # déjà le multiplicateur ; on ne touche PAS aux gains). On classe par PROBA de placé
@@ -882,6 +1462,12 @@ def _select_conviction(
     def passes_gates(c):
         if allowed_types is not None and _fam(c["type_pari"]) not in allowed_types:
             return False                                     # hors méthode du profil
+        # ACHETABLE AU GUICHET : le Multi est le seul pari dont le PRIX dépend du
+        # nombre de chevaux (3 € en 4, 15 € en 5, 45 € en 6, 105 € en 7 — on couvre
+        # C(n,4) combinaisons). Un plan de 10 € qui conseille « Multi en 7 » conseille
+        # un ticket que le PMU ne vend pas. On l'écarte plutôt que de l'afficher.
+        if _cout_minimum_pmu(c["type_pari"]) > montant:
+            return False
         # GATE DUR appris : un type au poids ~0 = bucket (type×contexte) PROUVÉ perdant
         # (ROI réel ≤ seuil sur n suffisant, cf. profil_learning.suppressed) → on ne le
         # propose plus du tout pour ce profil dans ce contexte. Couper > sous-pondérer.
@@ -897,12 +1483,21 @@ def _select_conviction(
         # BANDE DE RAPPORT = séparateur produit (×1.8–5 / ×4–15 / ≥×10). Le pari doit
         # rapporter dans la fourchette du profil, sinon il appartient à un autre profil.
         rap = float(c.get("rapport_estime", 0.0) or 0.0)
-        if rap < rapport_min:                                # rapport trop faible pour ce profil
+        _exempt_bande = _ANCRE_HORS_BANDE and c.get("_ancre_top2")
+        if rap < rapport_min and not _exempt_bande:          # rapport trop faible pour ce profil
             return False
         if rapport_max_eff is not None and rap > rapport_max_eff:  # même au plancher, gain hors bande haute
             return False
         if c["proba_gain"] < min_proba:                      # trop improbable
             return False
+        # CORRÉLATION AU CLASSEMENT (demande user 2026-08-20) : le classement de l'IA est
+        # sa partie la plus fiable. Un pari dont un cheval sort du top `rang_max` prédit
+        # va contre le modèle qui le produit. Les paris de type PLACÉ ont deux crans de
+        # marge (se placer est bien plus fréquent que gagner).
+        if rang_max_eff is not None and c.get("_rang_max") is not None:
+            _plafond = rang_max_eff + (RANG_MAX_BONUS_PLACE if "Placé" in c["type_pari"] else 0)
+            if int(c["_rang_max"]) > _plafond:
+                return False
         # GATE DOMINANCE du SIMPLE GAGNANT : le gagnant sec n'entre dans un profil que si
         # le cheval a la proba de victoire requise (prudent 0.34 = domine la course ;
         # modéré 0.11 = chance réelle ; risqué 0 = pas de gate). La bande de rapport fait
@@ -956,6 +1551,9 @@ def _select_conviction(
     # sécurité (dyn_ceil) + dédoublonnage (pas de quasi-doublons) + quota de tickets
     # purement spéculatifs (max_coup) pour la renta long terme.
     ranked = [c for c in sorted(cands, key=conviction, reverse=True) if passes_gates(c)]
+    ranked = _filtrer_ancrage_top2(ranked, cfg)
+    if pool_out is not None:
+        pool_out[:] = ranked
     keep_frac = float(cfg.get("keep_frac", 0.5))
     dyn_ceil = int(cfg.get("dyn_ceil", 8))
     selected: list[dict] = []
@@ -972,6 +1570,7 @@ def _select_conviction(
             if conviction(c) < keep_frac * best_conv:
                 break
             hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+            _ancre_nums = frozenset(c.get("_ancre_nums") or ())
             # Dédup : même combinaison déjà prise, OU combo de MÊME type qui ne diffère
             # que d'1 cheval (ex. Trio 6-4-8 vs 6-4-3 : corrélés, pas une vraie
             # couverture → un seul), OU fort recouvrement (≥67%).
@@ -981,6 +1580,13 @@ def _select_conviction(
                 if t != c["type_pari"]:
                     return False
                 inter = len(hs & s)
+                # Deux combos ANCRÉS sur les 2 premiers ne diffèrent que par leur pied
+                # libre : c'est la structure VOULUE (même appui mesuré comme rentable,
+                # rapports différents), pas un faux doublon. Sans cette exception, la
+                # règle « ne diffèrent que d'1 cheval » ne laissait qu'UN seul trio
+                # ancré et vidait le spectre du profil risqué.
+                if c.get("_ancre_top2") and s >= _ancre_nums and _ancre_nums:
+                    return False
                 if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
                     return True                          # combos qui ne diffèrent que d'1 cheval
                 return inter / max(len(hs | s), 1) >= 0.67
@@ -1066,8 +1672,12 @@ def _select_conviction(
                 learned = max(0.10, min(2.0, roi_w(c)))
                 signal = max(0.50, min(2.0, sig_factor(c)))
                 band = max(0.50, min(1.60, evb(c)))
+                # Même tilt qu'en sélection normale : c'est justement sur ce chemin
+                # de secours, où toutes les gates ont échoué, qu'il faut éviter de
+                # retomber sur la tranche de rapport la moins rentable.
+                tranche = max(0.60, min(1.40, float(c.get("_pb_mult", 1.0) or 1.0)))
                 base = p if objectif == "proba" else p * min(r, 40.0)
-                return base * (1.0 + 2.0 * edge) * learned * signal * band
+                return base * (1.0 + 2.0 * edge) * learned * signal * band * tranche
 
             safe = max(pool, key=lambda c: (_fallback_score(c), c["proba_gain"]))
             safe["_roi_w"] = roi_w(safe)
@@ -1121,20 +1731,31 @@ def _select_conviction(
             _type_counts: dict[str, int] = {}
             for s in selected:
                 _type_counts[_fam(s["type_pari"])] = _type_counts.get(_fam(s["type_pari"]), 0) + 1
-            for c in sorted(cands, key=conviction, reverse=True):
+            # Le complément puise dans les candidats BRUTS : il doit donc repasser par
+            # l'ancrage, sinon il réintroduit exactement les combinaisons que la
+            # sélection vient d'écarter (mesuré −13,9 % sur le couplé gagnant non ancré,
+            # −75,5 % sur le trio non ancré).
+            _complement = _filtrer_ancrage_top2(
+                [c for c in sorted(cands, key=conviction, reverse=True) if _relaxed_ok(c)],
+                cfg)
+            for c in _complement:
                 if len(selected) >= need_bets:
                     break
-                if any(c is s for s in selected) or not _relaxed_ok(c):
+                if any(c is s for s in selected):
                     continue
                 if _type_counts.get(_fam(c["type_pari"]), 0) >= 3:
                     continue
                 hs = frozenset(int(h["numero"]) for h in c.get("chevaux", []))
+                _ancre_nums = frozenset(c.get("_ancre_nums") or ())
                 dup = False
                 for s, t in seen:
                     if hs == s:
                         dup = True
                         break
                     if t != c["type_pari"]:
+                        continue
+                    # Même appui, pied libre différent = structure voulue (cf. sélection).
+                    if c.get("_ancre_top2") and _ancre_nums and _ancre_nums <= s:
                         continue
                     inter = len(hs & s)
                     if len(hs) >= 3 and inter >= max(len(hs), len(s)) - 1:
@@ -1155,6 +1776,15 @@ def _select_conviction(
     for c in selected:
         c["_evb"] = round(evb(c), 4)
     return selected
+
+
+def _uncertainty_discount(ci_width) -> float:
+    """discount = 1/(1 + CI_WIDTH_PENALTY × largeur IC) ∈ (0, 1]. Largeur absente/None
+    → 1.0 (aucun effet, jamais d'incertitude inventée)."""
+    w = float(ci_width or 0.0)
+    if w <= 0:
+        return 1.0
+    return 1.0 / (1.0 + CI_WIDTH_PENALTY * w)
 
 
 def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
@@ -1187,8 +1817,13 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
         # à 2.0 → la demi-Kelly tiltée ne dépasse JAMAIS le Kelly PLEIN (0.5×2.0). Sans ce cap
         # le produit montait ~8× = bien au-dessus de Kelly plein = ruine sur série de pertes,
         # surtout edge surestimé (cf. audit edge : edge réel non prouvé).
+        # Incertitude du modèle (largeur de l'IC de proba_top1, Point 12 audit) : plus
+        # l'IC est large, moins l'edge mesuré est fiable → on réduit la conviction AVANT
+        # le cap anti sur-staking (donc le plafond « jamais > Kelly plein » reste garanti
+        # dans tous les cas). Absent (0.0) → discount=1.0, comportement inchangé.
+        unc_discount = _uncertainty_discount(c.get("_ci_width", 0.0))
         mult = min(certitude * rp.get(c["niveau"], 1.0) * c.get("_roi_w", 1.0)
-                   * float(c.get("_evb", 1.0) or 1.0), 2.0)
+                   * float(c.get("_evb", 1.0) or 1.0) * unc_discount, 2.0)
         return max(f * mult, 1e-3)
 
     weights = [weight(c) for c in selected]
@@ -1236,6 +1871,11 @@ def _allocate_kelly(selected: list[dict], montant: int, palier: dict, cfg: dict,
     # sûrs (ou d'autres gros-rapports décorrélés), sinon le laisse en réserve. Dernier
     # passage → ne peut pas être défait par la concentration du gain target.
     _apply_variance_cap(selected, montant, cfg, min_stake, respect_montant=respect_montant)
+    # GARDE-FOU CORRÉLATION : plusieurs paris qui misent sur le MÊME cheval ne sont pas
+    # diversifiés (cf. Point 12 audit) — même après le plafond de variance ci-dessus, qui
+    # ne regarde que le TYPE de pari (haute variance ou non), pas le chevauchement réel de
+    # chevaux entre paris différents.
+    _apply_correlation_cap(selected, montant, min_stake, respect_montant=respect_montant)
 
 
 def _enforce_gain_target(selected: list[dict], montant: int, cfg: dict,
@@ -1448,6 +2088,73 @@ def _apply_variance_cap(selected: list[dict], montant: int, cfg: dict,
             k += 1
 
 
+# Part max du montant total dont le GAIN dépend d'UN SEUL cheval, tous paris
+# confondus. Deux paris qui misent chacun sur le même cheval (ex. Simple Gagnant
+# + Couplé Placé l'incluant) ne sont PAS diversifiés : si ce cheval déçoit ou est
+# disqualifié, les deux perdent ENSEMBLE. Le nombre de paris affiché peut donc
+# être un trompe-l'œil — ce plafond mesure le risque réel (par cheval), pas le
+# nombre de tickets.
+MAX_HORSE_EXPOSURE_FRAC = 0.70
+
+
+def _apply_correlation_cap(selected: list[dict], montant: int, min_stake: int,
+                           respect_montant: bool = False) -> None:
+    """Plafonne l'exposition cumulée à un seul cheval à `MAX_HORSE_EXPOSURE_FRAC`
+    × montant. Dernier passage (après variance cap) : transfère l'excédent des
+    paris impliquant le cheval sur-exposé vers des paris qui NE LE PARTAGENT PAS
+    (jamais vers un autre pari corrélé, ce qui ne ferait que déplacer le
+    problème). Ne peut réduire une mise sous `min_stake`."""
+    if len(selected) < 2:
+        return
+    ceil_amt = max(int(min_stake), int(montant * MAX_HORSE_EXPOSURE_FRAC))
+    guard = 0
+    while guard < 20:
+        guard += 1
+        exposure: dict[int, float] = {}
+        for c in selected:
+            for n in {int(h["numero"]) for h in c.get("chevaux", []) if h.get("numero") is not None}:
+                exposure[n] = exposure.get(n, 0.0) + c.get("mise", 0)
+        over = {n: e for n, e in exposure.items() if e > ceil_amt}
+        if not over:
+            return
+        worst = max(over, key=over.get)
+        involved = [c for c in selected
+                   if worst in {int(h["numero"]) for h in c.get("chevaux", [])
+                                if h.get("numero") is not None}]
+        if len(involved) < 2:
+            return  # un seul pari sur ce cheval : c'est sa taille propre, pas une corrélation
+        # Réduit en priorité le pari le MOINS convaincant (proba×rapport le plus faible),
+        # jamais sous le plancher (ni min_stake, ni le "_besoin" du contrat de gain — même
+        # garde que _apply_variance_cap : on ne défait pas la promesse ≥ gain_cible_mult).
+        involved.sort(key=lambda c: c.get("proba_gain", 0.0) * c.get("rapport_estime", 0.0))
+        weakest = involved[0]
+        floor_w = max(int(min_stake), int(weakest.get("_besoin", 0) or 0))
+        reduce_by = min(int(weakest["mise"]) - floor_w, int(exposure[worst] - ceil_amt) + 1)
+        if reduce_by <= 0:
+            return
+        weakest["mise"] -= reduce_by
+        # Redistribue vers les paris NE PARTAGEANT AUCUN cheval avec `worst`.
+        weakest_horses = {int(h["numero"]) for h in weakest.get("chevaux", [])
+                          if h.get("numero") is not None}
+        free = [c for c in selected if c is not weakest
+               and not ({int(h["numero"]) for h in c.get("chevaux", [])
+                        if h.get("numero") is not None} & weakest_horses)
+               and worst not in {int(h["numero"]) for h in c.get("chevaux", [])
+                                 if h.get("numero") is not None}]
+        moved = reduce_by
+        k = 0
+        while moved > 0 and free:
+            free[k % len(free)]["mise"] += 1
+            moved -= 1
+            k += 1
+        if moved > 0 and respect_montant:
+            # Aucun pari décorrélé pour absorber : le montant saisi doit rester
+            # ENTIÈREMENT joué (contrat manuel) → on rend l'excédent à `weakest`
+            # plutôt que de sous-jouer le montant demandé. Le plafond n'est donc
+            # pas garanti dans ce cas (peu de candidats), mais jamais le contrat.
+            weakest["mise"] += moved
+
+
 # Pourquoi ce TYPE de pari sert ce PROFIL — pédagogie de la méthode de jeu.
 _TYPE_RAISON_PROFIL = {
     # PRUDENT — placé / duo placé / 2sur4.
@@ -1550,6 +2257,24 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict],
         raisons.append(f"Cette bande d'EV est historiquement RENTABLE (mise renforcée ×{evb:.2f}).")
     elif evb <= 0.95:
         raisons.append(f"Cette bande d'EV a un ROI réel faible/négatif — mise allégée ×{evb:.2f} (anti zone toxique).")
+    # 5 bis. Tranche de RAPPORT : le facteur le mieux étayé de tout le système
+    # (le ROI réel y décroît continûment). On le dit, sinon la mise réduite paraît
+    # arbitraire à l'utilisateur.
+    pbm = float(c.get("_pb_mult", 1.0) or 1.0)
+    if pbm >= 1.005:
+        raisons.append(
+            f"Cette tranche de rapport est celle qui a le mieux payé historiquement "
+            f"(conviction renforcée ×{pbm:.2f}).")
+    elif pbm <= 0.95:
+        raisons.append(
+            f"Tranche de rapport historiquement peu rentable — conviction réduite "
+            f"×{pbm:.2f} (le ROI réel baisse à mesure que le rapport visé monte).")
+    ratio_disc = c.get("_discipline_ratio")
+    if ratio_disc and float(ratio_disc) < 1.0:
+        raisons.append(
+            f"Discipline de mise : sur ce type de course l'argent est historiquement "
+            f"mal rendu — somme engagée ramenée à {int(float(ratio_disc)*100)} % du plan, "
+            "le reste reste en réserve.")
     # 6. Contrat de gain vs mise TOTALE (allocation spread) : la mise du ticket a été
     # dimensionnée pour que, gagnant, il rende ≥ la cible du profil sur le PLAN entier.
     mise = float(c.get("mise", 0) or 0)
@@ -1769,12 +2494,23 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
 
     Un pari de la sélection figée introuvable parmi les candidats live (combo d'outsider
     rare régénéré différemment) GARDE son gain figé — jamais d'invention, jamais de crash.
-    Mute et retourne `plan`."""
+
+    Non-partant déclaré APRÈS le gel : un cheval de la sélection peut être scratché entre
+    le gel (T-10) et le départ. Ces chevaux sont exclus des candidats live (comme dans
+    `generer_plan`) ; un pari de la sélection figée qui l'inclut est marqué
+    `non_partant_detecte=True` plutôt que ré-estimé sur un cheval qui ne courra plus — le
+    remboursement réel se fait au règlement (`settle_pari`), ceci n'est qu'un signal
+    d'affichage pour ne pas montrer un gain live trompeur. Mute et retourne `plan`."""
     if not plan or not predictions:
         return plan
+    non_partants = {int(p["numero"]) for p in predictions
+                    if p.get("non_partant") and p.get("numero") is not None}
     try:
         from ml.combo_bets import enumerate_bet_candidates
-        cands = enumerate_bet_candidates(predictions, course_info)
+        # Mêmes chevaux exclus qu'à la génération : un non-partant ne doit jamais
+        # réapparaître dans un candidat live (combo_bets ne le filtre pas lui-même).
+        live_preds = [p for p in predictions if not p.get("non_partant")]
+        cands = enumerate_bet_candidates(live_preds, course_info)
     except Exception:
         return plan
     if not cands:
@@ -1789,7 +2525,17 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
         for p in niv.get("paris", []):
             mise = float(p.get("mise") or 0)
             m_niv += mise
-            key = (p.get("type"), frozenset(int(h["numero"]) for h in p.get("chevaux", [])))
+            pari_horses = {int(h["numero"]) for h in p.get("chevaux", [])
+                           if h.get("numero") is not None}
+            if pari_horses & non_partants:
+                # Cheval scratché après le gel : le gain live n'a pas de sens (le pari
+                # sera remboursé au règlement). On garde le gain/EV figés pour l'affichage
+                # historique du plan, mais on signale l'impact plutôt que de le masquer.
+                p["non_partant_detecte"] = True
+                ev_pondere += mise * float(p.get("ev_estime") or 0.0)
+                niv["montant"] = round(m_niv, 2)
+                continue
+            key = (p.get("type"), frozenset(pari_horses))
             c = look.get(key)
             if c:
                 rap = float(c["rapport_estime"])

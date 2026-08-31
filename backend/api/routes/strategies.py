@@ -15,7 +15,7 @@ from sqlalchemy import select, and_, desc
 
 from api.routes.auth import get_current_user
 from db.database import get_db
-from db.models import User, Strategie, Course, Prediction, Participation, Cheval, Resultat
+from db.models import User, Strategie, Course, PredictionEvaluation, Participation, Cheval, Resultat
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -198,14 +198,18 @@ async def backtest_strategy(
 
     # Requête des prédictions sur les courses terminées matchant les filtres
     q = (
-        select(Prediction, Participation, Cheval, Course, Resultat)
-        .join(Participation, Participation.participation_id == Prediction.participation_id)
+        select(PredictionEvaluation, Participation, Cheval, Course, Resultat)
+        .join(Participation, Participation.participation_id == PredictionEvaluation.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .join(Course, Course.course_id == Prediction.course_id)
+        .join(Course, Course.course_id == PredictionEvaluation.course_id)
         .outerjoin(Resultat, Resultat.course_id == Course.course_id)
         .where(
             Course.statut == "termine",
             Course.date_heure >= since,
+            PredictionEvaluation.created_at.is_not(None),
+            Course.date_heure.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+            PredictionEvaluation.is_replayable.is_(True),
         )
     )
 

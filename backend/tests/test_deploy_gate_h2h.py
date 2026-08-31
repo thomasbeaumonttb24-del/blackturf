@@ -188,14 +188,23 @@ def test_holdout_identique_a_celui_de_train(monkeypatch):
 # ── La mesure head-to-head elle-même ─────────────────────────────────────────
 
 class _FakeModel:
-    """Prédit une proba d'autant plus juste que `skill` est grand."""
+    """Prédit une proba d'autant plus juste que `skill` est grand.
+
+    Le bruit est DISPERSÉ à l'intérieur de chaque course, et non croissant sur
+    tout le tableau. Avec un bruit monotone, le gagnant — toujours en tête de son
+    groupe — restait premier de sa course même à skill=0.30 : les deux modèles
+    obtenaient un classement intra-course parfait et ne se départageaient que sur
+    l'AUC poolée. C'est précisément le faux ami que le head-to-head a cessé de
+    mesurer le 20/08/2026 ; la fixture doit donc discriminer sur l'ORDRE.
+    """
 
     def __init__(self, skill: float):
         self.skill = skill
 
     def predict_proba(self, X):
         y = X["truth"].to_numpy().astype(float)
-        bruit = np.linspace(0, 1, len(X))
+        # Bruit déterministe pseudo-dispersé : reproductible sans RNG partagé.
+        bruit = ((np.arange(len(X)) * 7919) % 1000) / 1000.0
         return self.skill * y + (1 - self.skill) * bruit
 
 
@@ -352,3 +361,96 @@ async def test_h2h_indecidable_si_une_seule_classe(monkeypatch):
 
     assert await pl._head_to_head_auc(session, _FakeModel(0.9), X, y,
                                       _FakeMV(pd.Timestamp("2026-06-29"))) is None
+
+
+# ── Référence marché dans le head-to-head (diagnostic 2026-08-20) ────────
+# Le head-to-head confrontait le challenger au champion et à rien d'autre. Deux
+# modèles sous le niveau d'un `ORDER BY cote_pmu` pouvaient donc se succéder
+# indéfiniment sans qu'aucun chiffre ne le révèle.
+
+def _holdout_avec_cotes(n_courses=400, marche_juste=True):
+    """Comme `_holdout`, plus une colonne de cotes.
+
+    `marche_juste` : la cote la plus courte est celle du gagnant.
+    Sinon le marché est inversé et son classement vaut 0.
+    """
+    cid, truth, cotes = [], [], []
+    for i in range(n_courses):
+        for j in range(6):
+            cid.append(f"C{i}")
+            gagnant = (j == 0)
+            truth.append(1 if gagnant else 0)
+            cotes.append((2.0 + j) if marche_juste else (20.0 - j * 3))
+    X = pd.DataFrame({"course_id": cid, "truth": truth, "cote_pmu": cotes})
+    return X, pd.Series(truth)
+
+
+@pytest.mark.asyncio
+async def test_h2h_expose_le_classement_du_marche(monkeypatch):
+    from ml import pipeline as pl
+    X, y = _holdout_avec_cotes(400, marche_juste=True)
+    session = _FakeSession(X["course_id"].unique())
+    monkeypatch.setattr(pl.BlackTurfEnsemble, "load_current",
+                        classmethod(lambda cls: _FakeModel(0.30)))
+
+    res = await pl._head_to_head_auc(session, _FakeModel(0.30), X, y,
+                                     _FakeMV(pd.Timestamp("2026-06-29")))
+
+    # Marché parfait : le favori gagne toujours.
+    assert res["rank_marche"] == 1.0
+    # Un modèle médiocre doit ressortir SOUS le marché, et c'est le chiffre
+    # qui manquait depuis 513 versions.
+    assert res["delta_marche"] < 0
+    assert res["delta_marche"] == pytest.approx(res["rank_challenger"] - 1.0)
+
+
+@pytest.mark.asyncio
+async def test_h2h_delta_marche_positif_quand_le_marche_se_trompe(monkeypatch):
+    from ml import pipeline as pl
+    X, y = _holdout_avec_cotes(400, marche_juste=False)
+    session = _FakeSession(X["course_id"].unique())
+    monkeypatch.setattr(pl.BlackTurfEnsemble, "load_current",
+                        classmethod(lambda cls: _FakeModel(0.30)))
+
+    res = await pl._head_to_head_auc(session, _FakeModel(0.99), X, y,
+                                     _FakeMV(pd.Timestamp("2026-06-29")))
+
+    assert res["rank_marche"] == 0.0
+    assert res["delta_marche"] > 0
+
+
+@pytest.mark.asyncio
+async def test_h2h_sans_cotes_le_delta_marche_est_None(monkeypatch):
+    """Pas de cote sur le hold-out → pas de verdict marché. Surtout pas 0.0,
+    qui se lirait « à égalité avec le marché »."""
+    from ml import pipeline as pl
+    X, y = _holdout(400)
+    session = _FakeSession(X["course_id"].unique())
+    monkeypatch.setattr(pl.BlackTurfEnsemble, "load_current",
+                        classmethod(lambda cls: _FakeModel(0.30)))
+
+    res = await pl._head_to_head_auc(session, _FakeModel(0.95), X, y,
+                                     _FakeMV(pd.Timestamp("2026-06-29")))
+
+    assert res["rank_marche"] is None
+    assert res["delta_marche"] is None
+
+
+@pytest.mark.asyncio
+async def test_h2h_delta_porte_sur_le_classement_pas_sur_l_AUC_poolee(monkeypatch):
+    """`delta` arbitre champion/challenger : il doit refléter le CLASSEMENT.
+
+    Les deux AUC poolées restent exposées pour le diagnostic, mais ne décident
+    plus rien.
+    """
+    from ml import pipeline as pl
+    X, y = _holdout_avec_cotes(400)
+    session = _FakeSession(X["course_id"].unique())
+    monkeypatch.setattr(pl.BlackTurfEnsemble, "load_current",
+                        classmethod(lambda cls: _FakeModel(0.30)))
+
+    res = await pl._head_to_head_auc(session, _FakeModel(0.95), X, y,
+                                     _FakeMV(pd.Timestamp("2026-06-29")))
+
+    assert res["delta"] == pytest.approx(res["rank_challenger"] - res["rank_champion"])
+    assert "auc_challenger" in res and "auc_champion" in res

@@ -3,8 +3,10 @@ Service d'alertes — BlackTurf.
 Email (Resend) + Web Push (VAPID) + In-app (WebSocket via Redis).
 """
 import json
+import os
 import uuid
 import structlog
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -15,24 +17,125 @@ import httpx
 
 from api.config import get_settings
 from db.models import User, AlerteLog
+from services.email_verification import clause_email_utilisable
 
 settings = get_settings()
 log = structlog.get_logger()
 
 
 # ─────────────────────────────────────────────
+# Préférences de notification
+# ─────────────────────────────────────────────
+# Stockées dans `users.push_subscription["prefs"]` (colonne JSON déjà existante,
+# pas de migration). Elles étaient PUREMENT DÉCORATIVES jusqu'au 2026-08-17 :
+# l'écran /notifications les écrivait, et AUCUN envoi ne les lisait — un
+# utilisateur qui montait son seuil à ★★★★ continuait de recevoir tous les ★★.
+PREFS_DEFAUT: dict = {
+    "vb_niveau_min": 2,       # ne notifier que les value bets de ce niveau ou plus
+    "resultats_suivis": True,  # résultats des courses où l'utilisateur a un pari/une alerte
+    "alertes_systeme": True,   # annonces produit, maintenance
+}
+
+
+def prefs_utilisateur(user: User) -> dict:
+    """Préférences effectives d'un utilisateur (défauts pour les clés absentes)."""
+    brut = (user.push_subscription or {}).get("prefs") or {}
+    prefs = dict(PREFS_DEFAUT)
+    for k in PREFS_DEFAUT:
+        if k in brut and brut[k] is not None:
+            prefs[k] = brut[k]
+    try:
+        prefs["vb_niveau_min"] = max(1, min(4, int(prefs["vb_niveau_min"])))
+    except (TypeError, ValueError):
+        prefs["vb_niveau_min"] = PREFS_DEFAUT["vb_niveau_min"]
+    prefs["resultats_suivis"] = bool(prefs["resultats_suivis"])
+    prefs["alertes_systeme"] = bool(prefs["alertes_systeme"])
+    return prefs
+
+
+def _passe_le_seuil(vb: dict, seuil: int) -> bool:
+    """Ce value bet doit-il être notifié à un utilisateur dont le seuil est `seuil` ?
+
+    Niveau ABSENT ou illisible → on notifie. Entre taire une alerte et en envoyer
+    une de trop, le silence est la faute la plus coûteuse : l'utilisateur ne peut pas
+    savoir qu'il n'a pas été prévenu. Seul un niveau EXPLICITE et strictement
+    inférieur au seuil filtre.
+    """
+    brut = vb.get("niveau")
+    if brut is None:
+        return True
+    try:
+        return int(brut) >= seuil
+    except (TypeError, ValueError):
+        return True
+
+
+def _abonnement_push(user: User) -> Optional[dict]:
+    """Objet d'abonnement Web Push SEUL, sans la clé `prefs`.
+
+    `push_subscription` sert de fourre-tout (endpoint + keys + prefs) ; passer le
+    dict entier à pywebpush l'expose à une clé qu'il n'attend pas. On isole les
+    champs de la spec Push API, et on renvoie None s'il n'y a pas de vrai
+    abonnement (un utilisateur peut n'avoir QUE des préférences).
+    """
+    sub = user.push_subscription or {}
+    if not sub.get("endpoint"):
+        return None
+    return {k: v for k, v in sub.items() if k in ("endpoint", "keys", "expirationTime")}
+
+
+# ─────────────────────────────────────────────
 # Email (Resend)
 # ─────────────────────────────────────────────
+@dataclass(frozen=True)
+class ResultatEnvoi:
+    """Issue d'un envoi, avec sa RAISON d'échec.
+
+    Les expéditeurs ne renvoyaient qu'un booléen : la colonne `alertes_log.erreur`
+    est donc restée vide sur 115 860 échecs (juin-août 2026), et diagnostiquer la
+    panne demandait de relire les logs conteneur — effacés à chaque redémarrage.
+    Cet objet reste utilisable comme un booléen (`if ok:`) pour ne rien casser
+    chez les appelants, mais transporte de quoi comprendre.
+    """
+    ok: bool
+    erreur: Optional[str] = None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def _raison(resultat) -> Optional[str]:
+    """Raison d'échec d'un envoi, quel que soit le type renvoyé."""
+    return getattr(resultat, "erreur", None)
+
+
 async def send_email(
     to: str,
     subject: str,
     html: str,
     text: Optional[str] = None,
-) -> bool:
+) -> ResultatEnvoi:
     """Envoie un email via Resend API."""
+    # Un test ne doit JAMAIS envoyer de vrai e-mail. `backend/.env` porte une
+    # `RESEND_API_KEY` valide, que pydantic charge aussi sous pytest : la suite
+    # d'abonnements a expédié des dizaines de messages réels à l'exploitant, au
+    # nom de comptes fictifs (`6d121afe@blackturf.fr`, `sub_courant`…) — constaté
+    # le 2026-08-20.
+    #
+    # Le garde-fou s'appuie sur `PYTEST_CURRENT_TEST`, posé par pytest pour chaque
+    # test, et NON sur `ENVIRONMENT` : la suite tourne aussi dans l'image de prod
+    # avec le `.env` de prod, où `ENVIRONMENT` vaut "production" (cf. le
+    # neutraliseur d'ambiant dans conftest).
+    # L'absence de clé se diagnostique AVANT le blocage de test : sinon un envoi
+    # mal configuré rendrait « bloqué sous pytest » au lieu de sa vraie cause, et
+    # l'invariant qui exige qu'un échec porte sa raison tomberait.
     if not settings.resend_api_key:
         log.warning("alerts.email.no_api_key")
-        return False
+        return ResultatEnvoi(False, "RESEND_API_KEY absente")
+
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        log.info("alerts.email.bloque_en_test", to=to, subject=subject[:80])
+        return ResultatEnvoi(False, "envoi bloqué sous pytest")
 
     payload = {
         "from": f"{settings.email_from_name} <{settings.email_from}>",
@@ -51,10 +154,10 @@ async def send_email(
                 headers={"Authorization": f"Bearer {settings.resend_api_key}"},
             )
             resp.raise_for_status()
-            return True
+            return ResultatEnvoi(True)
     except Exception as e:
         log.error("alerts.email.failed", to=to, error=str(e))
-        return False
+        return ResultatEnvoi(False, f"{type(e).__name__}: {e}"[:400])
 
 
 def _digest_email_html(courses: list[dict], unsubscribe_url: str) -> str:
@@ -110,10 +213,14 @@ def _digest_email_html(courses: list[dict], unsubscribe_url: str) -> str:
 # ─────────────────────────────────────────────
 # Web Push (VAPID)
 # ─────────────────────────────────────────────
-async def send_web_push(subscription: dict, title: str, body: str, data: Optional[dict] = None) -> bool:
+async def send_web_push(subscription: dict, title: str, body: str,
+                        data: Optional[dict] = None) -> ResultatEnvoi:
     """Envoie une notification Web Push via pywebpush."""
     if not settings.vapid_private_key:
-        return False
+        # Cas réel : 22 345 tentatives, 22 345 échecs, aucune trace — les clés
+        # VAPID n'ont jamais été posées en production.
+        log.warning("alerts.push.no_vapid_key")
+        return ResultatEnvoi(False, "VAPID_PRIVATE_KEY absente")
 
     try:
         from pywebpush import webpush, WebPushException
@@ -124,10 +231,10 @@ async def send_web_push(subscription: dict, title: str, body: str, data: Optiona
             vapid_private_key=settings.vapid_private_key,
             vapid_claims={"sub": settings.vapid_subject},
         )
-        return True
+        return ResultatEnvoi(True)
     except Exception as e:
         log.error("alerts.push.failed", error=str(e))
-        return False
+        return ResultatEnvoi(False, f"{type(e).__name__}: {e}"[:400])
 
 
 # ─────────────────────────────────────────────
@@ -185,7 +292,10 @@ async def notify_value_bets(
     - un seul message in-app par lot ;
     - un seul push récapitulatif, avec cooldown persistant de 4 heures ;
     - aucun e-mail ici : le digest quotidien `send_morning_digest` est l'unique
-      e-mail value bet afin d'éviter tout risque de spam.
+      e-mail value bet afin d'éviter tout risque de spam ;
+    - le lot est FILTRÉ PAR UTILISATEUR selon `prefs.vb_niveau_min` : chacun reçoit
+      exactement les niveaux qu'il a demandés sur /notifications (avant le
+      2026-08-17 tout le monde recevait le même lot brut, réglage ignoré).
     """
     # Même signal présent plusieurs fois dans le lot : une seule ligne. La clé ne
     # dépend pas de vb_id (historiquement recréé à chaque recalcul), mais de la
@@ -203,21 +313,34 @@ async def notify_value_bets(
     )
     users = users_res.scalars().all()
 
-    payload = {
-        "nb_value_bets": len(batch),
-        "value_bets": batch,
-        "signal_keys": list(uniques),
-    }
-
+    nb_notifies = 0
     for user in users:
         if not user.is_active:
             continue
 
+        prefs = prefs_utilisateur(user)
+        seuil = prefs["vb_niveau_min"]
+        perso = [vb for vb in batch if _passe_le_seuil(vb, seuil)]
+        if not perso:
+            continue  # rien à ce niveau pour cet utilisateur : pas de ligne vide en base
+
+        payload = {
+            "nb_value_bets": len(perso),
+            "value_bets": perso,
+            "signal_keys": [
+                f"{vb.get('course_id', '')}:{vb.get('participation_id') or vb.get('nom_cheval', '')}"
+                for vb in perso
+            ],
+            "niveau_min": seuil,
+        }
+
         ok_inapp = await send_inapp(user.user_id, "value_bet_digest", payload)
         await _log_alerte(session, user.user_id, "value_bet_digest", "in-app", payload, ok_inapp)
+        nb_notifies += 1
 
         # Au plus un push toutes les 4 heures par utilisateur, même après restart.
-        if user.push_subscription:
+        abo = _abonnement_push(user)
+        if abo:
             recent_push = await session.scalar(
                 select(AlerteLog.alerte_id).where(
                     AlerteLog.user_id == user.user_id,
@@ -228,18 +351,20 @@ async def notify_value_bets(
                 ).limit(1)
             )
             if not recent_push:
-                noms = ", ".join(str(v.get("nom_cheval", "")) for v in batch[:3])
-                suffixe = "…" if len(batch) > 3 else ""
+                noms = ", ".join(str(v.get("nom_cheval", "")) for v in perso[:3])
+                suffixe = "…" if len(perso) > 3 else ""
                 ok_push = await send_web_push(
-                    user.push_subscription,
-                    title=f"{len(batch)} value bet{'s' if len(batch) > 1 else ''} détecté{'s' if len(batch) > 1 else ''}",
+                    abo,
+                    title=f"{len(perso)} value bet{'s' if len(perso) > 1 else ''} détecté{'s' if len(perso) > 1 else ''}",
                     body=f"{noms}{suffixe}",
                     data=payload,
                 )
-                await _log_alerte(session, user.user_id, "value_bet_digest", "push", payload, ok_push)
+                await _log_alerte(session, user.user_id, "value_bet_digest", "push", payload,
+                                  ok_push, _raison(ok_push))
 
     await session.commit()
-    log.info("alerts.notify_value_bets", nb_users=len(users), nb_value_bets=len(batch))
+    log.info("alerts.notify_value_bets", nb_users=len(users),
+             nb_notifies=nb_notifies, nb_value_bets=len(batch))
 
 
 async def notify_value_bet(
@@ -249,6 +374,213 @@ async def notify_value_bet(
 ):
     """Compatibilité des anciens appelants : passe toujours par le lot anti-spam."""
     await notify_value_bets(session, user_ids, [vb_data])
+
+
+# ─────────────────────────────────────────────
+# Suivi post-course (onglet « Résultats »)
+# ─────────────────────────────────────────────
+def _position_de(classement, numero: Optional[int]) -> Optional[int]:
+    """Place à l'arrivée d'un partant, None s'il n'est pas classé."""
+    if not classement or not isinstance(classement, list) or numero is None:
+        return None
+    for e in classement:
+        if isinstance(e, dict) and e.get("numero") == numero:
+            p = e.get("position")
+            return int(p) if isinstance(p, (int, float)) and p > 0 else None
+    return None
+
+
+def _rapport_gagnant(rapports) -> Optional[float]:
+    """Rapport Simple Gagnant RÉELLEMENT publié par le PMU, sinon None (jamais
+    d'estimation : un gain affiché doit être un gain payé)."""
+    if not isinstance(rapports, dict):
+        return None
+    for key in ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international"):
+        v = rapports.get(key)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict:
+    """Notifie le RÉSULTAT d'une course à ceux qu'elle concerne.
+
+    L'onglet « Résultats » du centre de notifications était structurellement vide :
+    aucun code ne produisait d'alerte de type résultat, seuls les value bets en
+    créaient. Un utilisateur alerté d'un pari de valeur n'apprenait donc JAMAIS ce
+    qu'il était devenu — le suivi s'arrêtait au signal.
+
+    Deux cas, un seul message par utilisateur et par course (le plus pertinent
+    d'abord) :
+      1. `resultat_pari`        — l'utilisateur a enregistré des paris sur la course
+                                  (bankroll_entries réglées) → gagné/perdu + net réel ;
+      2. `resultat_value_bet`   — sinon, il avait été alerté d'un value bet sur cette
+                                  course → ce que le cheval a fait à l'arrivée.
+
+    Idempotent : rappelée deux fois sur la même course (re-poll des rapports PMU,
+    catchup de règlement), elle ne renvoie rien. Respecte `prefs.resultats_suivis`.
+    """
+    from sqlalchemy import select as _select
+    from db.models import (BankrollEntry, Cheval, Course, Participation,
+                           Resultat, ValueBet)
+
+    cr = {"paris": 0, "value_bets": 0, "ignores_prefs": 0}
+
+    course = await session.scalar(_select(Course).where(Course.course_id == course_id))
+    resultat = await session.scalar(_select(Resultat).where(Resultat.course_id == course_id))
+    if not course or not resultat or not resultat.classement:
+        return cr  # pas d'arrivée exploitable → rien à annoncer
+
+    classement = resultat.classement
+    rapport_gagnant = _rapport_gagnant(resultat.rapports)
+    arrivee = " - ".join(
+        str(e.get("numero")) for e in sorted(
+            (e for e in classement if isinstance(e, dict) and e.get("position")),
+            key=lambda e: e["position"],
+        )[:5]
+    )
+    contexte = {
+        "course_id": course_id,
+        "hippodrome": course.hippodrome_nom,
+        "course_nom": course.nom,
+        "arrivee": arrivee,
+    }
+
+    # Utilisateurs déjà notifiés pour cette course (idempotence) — une seule requête.
+    # Bornée à partir de l'heure de départ : un résultat ne peut pas avoir été
+    # annoncé avant la course, et sans cette borne on scanne toute la table
+    # (200 000+ lignes) à chaque fin de course.
+    q_deja = _select(AlerteLog.user_id).where(
+        AlerteLog.type_alerte.in_(("resultat_pari", "resultat_value_bet")),
+        AlerteLog.canal == "in-app",
+        AlerteLog.payload["course_id"].as_string() == course_id,
+    )
+    if course.date_heure:
+        q_deja = q_deja.where(AlerteLog.created_at >= course.date_heure)
+    deja = set((await session.execute(q_deja)).scalars().all())
+
+    async def _envoyer(user: User, type_alerte: str, payload: dict, titre: str, corps: str):
+        ok = await send_inapp(user.user_id, type_alerte, payload)
+        await _log_alerte(session, user.user_id, type_alerte, "in-app", payload, ok)
+        abo = _abonnement_push(user)
+        if abo:
+            ok_push = await send_web_push(abo, title=titre, body=corps, data=payload)
+            await _log_alerte(session, user.user_id, type_alerte, "push", payload,
+                                  ok_push, _raison(ok_push))
+
+    # ── 1. Paris personnels réglés ────────────────────────────
+    entries = (await session.execute(
+        _select(BankrollEntry).where(
+            BankrollEntry.course_id == course_id,
+            BankrollEntry.resultat.is_not(None),
+        )
+    )).scalars().all()
+
+    par_user: dict[str, list] = {}
+    for e in entries:
+        par_user.setdefault(e.user_id, []).append(e)
+
+    traites: set[str] = set(deja)
+    for user_id, lot in par_user.items():
+        if user_id in traites:
+            continue
+        user = await session.scalar(_select(User).where(User.user_id == user_id))
+        if not user or not user.is_active:
+            continue
+        if not prefs_utilisateur(user)["resultats_suivis"]:
+            cr["ignores_prefs"] += 1
+            traites.add(user_id)
+            continue
+
+        nb_gagnes = sum(1 for e in lot if e.resultat == "gagne")
+        nb_perdus = sum(1 for e in lot if e.resultat == "perd")
+        gain_net = round(sum((e.gain_perte or 0.0) for e in lot), 2)
+        payload = {
+            **contexte,
+            "nb_gagnes": nb_gagnes,
+            "nb_perdus": nb_perdus,
+            "gain_net": gain_net,
+            "mise_totale": round(sum(e.mise for e in lot), 2),
+        }
+        titre = "Pari gagné" if (nb_gagnes and not nb_perdus) else (
+            "Pari perdu" if (nb_perdus and not nb_gagnes) else "Paris réglés")
+        await _envoyer(user, "resultat_pari", payload, f"🏁 {titre}",
+                       f"{course.hippodrome_nom} — {gain_net:+.2f} €")
+        traites.add(user_id)
+        cr["paris"] += 1
+
+    # Commit AVANT la seconde partie : sans ça, un retour anticipé faute de value
+    # bet signalé (`return cr` ci-dessous) perdait les alertes de paris personnels.
+    if cr["paris"]:
+        await session.commit()
+
+    # ── 2. Sort des value bets signalés ───────────────────────
+    vb_rows = (await session.execute(
+        _select(ValueBet, Participation, Cheval)
+        .join(Participation, Participation.participation_id == ValueBet.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .where(ValueBet.course_id == course_id, ValueBet.notifie == True)  # noqa: E712
+        .order_by(ValueBet.niveau.desc(), ValueBet.ev_max.desc())
+    )).all()
+    if not vb_rows:
+        return cr
+
+    # Value bet le plus PERTINENT à raconter : celui qui a fait la meilleure place
+    # (un signal gagnant primant un ★★★★ non placé), sinon le mieux noté.
+    candidats = []
+    for vb, part, cheval in vb_rows:
+        pos = _position_de(classement, part.numero)
+        candidats.append({
+            "nom_cheval": cheval.nom,
+            "numero": part.numero,
+            "niveau": vb.niveau,
+            "cote": round(part.cote_pmu, 2) if part.cote_pmu else None,
+            "ev": round(vb.ev_max, 4) if vb.ev_max is not None else None,
+            "position": pos,
+        })
+    meilleur = sorted(candidats, key=lambda c: (c["position"] or 99, -(c["niveau"] or 0)))[0]
+
+    # Destinataires : les abonnés payants actifs dont le seuil couvre ce niveau —
+    # exactement ceux qui ont pu recevoir l'alerte value bet initiale.
+    abonnes = (await session.execute(
+        _select(User).where(
+            User.plan.in_(["starter", "standard", "expert"]),
+            User.is_active == True,  # noqa: E712
+            # Jamais vers une adresse que personne n'a confirmée : chaque rebond
+            # abîme la délivrabilité de TOUS les envois, y compris ceux des vrais
+            # abonnés.
+            clause_email_utilisable(),
+        )
+    )).scalars().all()
+
+    for user in abonnes:
+        if user.user_id in traites:
+            continue
+        prefs = prefs_utilisateur(user)
+        if not prefs["resultats_suivis"]:
+            cr["ignores_prefs"] += 1
+            continue
+        if int(meilleur["niveau"] or 0) < prefs["vb_niveau_min"]:
+            continue  # ne raconter la suite que des signaux qu'il a demandés
+
+        payload = {
+            **contexte, **meilleur,
+            "rapport_simple_gagnant": rapport_gagnant if meilleur["position"] == 1 else None,
+            "nb_value_bets": len(candidats),
+        }
+        place = ("gagnant" if meilleur["position"] == 1
+                 else f"{meilleur['position']}ᵉ" if meilleur["position"] else "non placé")
+        await _envoyer(user, "resultat_value_bet", payload,
+                       f"🏁 {meilleur['nom_cheval']} : {place}",
+                       f"{course.hippodrome_nom} — arrivée {arrivee}")
+        cr["value_bets"] += 1
+
+    await session.commit()
+    log.info("alerts.notify_resultats_course", course_id=course_id, **cr)
+    return cr
 
 
 # ─────────────────────────────────────────────
@@ -451,6 +783,7 @@ async def send_weekly_best_value_bet(session: AsyncSession):
             User.plan.in_(["free", "decouverte"]),
             User.is_active == True,
             User.marketing_opt_out_at.is_(None),
+            clause_email_utilisable(),
         )
     )
     users = users_res.scalars().all()
@@ -464,7 +797,8 @@ async def send_weekly_best_value_bet(session: AsyncSession):
         # est rendu par utilisateur, pas mutualisé.
         html = _weekly_best_vb_email_html(best, _unsubscribe_url(user.user_id))
         ok_email = await send_email(to=user.email, subject=subject, html=html)
-        await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best, ok_email)
+        await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best,
+                          ok_email, _raison(ok_email))
 
         if user.push_subscription:
             ok_push = await send_web_push(
@@ -473,7 +807,8 @@ async def send_weekly_best_value_bet(session: AsyncSession):
                 body=f"{best['nom_cheval']} gagnant à {best.get('cote', '?')} — rapport officiel pour 10€ : {best.get('gain_reference_10e', '?')}€ (mise incluse)",
                 data=best,
             )
-            await _log_alerte(session, user.user_id, "weekly_best_vb", "push", best, ok_push)
+            await _log_alerte(session, user.user_id, "weekly_best_vb", "push", best,
+                              ok_push, _raison(ok_push))
 
     await session.commit()
     log.info("alerts.weekly_best_vb", nb_users=len(users), course_id=best["course_id"], cheval=best["nom_cheval"])
@@ -527,6 +862,7 @@ async def send_morning_digest(session: AsyncSession):
             User.plan.in_(["starter", "standard", "expert"]),
             User.is_active == True,
             User.marketing_opt_out_at.is_(None),
+            clause_email_utilisable(),
         )
     )
     users = users_res.scalars().all()
@@ -552,7 +888,8 @@ async def send_morning_digest(session: AsyncSession):
             subject=f"🏇 BlackTurf — {len(courses_list)} value bets aujourd'hui",
             html=html,
         )
-        await _log_alerte(session, user.user_id, "digest_matin", "email", {"nb_vb": len(courses_list)}, ok)
+        await _log_alerte(session, user.user_id, "digest_matin", "email",
+                          {"nb_vb": len(courses_list)}, ok, _raison(ok))
 
     await session.commit()
     log.info("alerts.morning_digest", nb_users=len(users), nb_vb=len(courses_list))

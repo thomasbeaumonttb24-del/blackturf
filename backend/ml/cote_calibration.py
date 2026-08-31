@@ -9,7 +9,7 @@ Principe (intégrité) :
 - Facteur de calibration par bucket = ratio (gains réels / gains attendus modèle),
   SHRINKÉ vers 1.0 par un pseudo-compte K (Bayesien) → un petit échantillon ne
   fait pas surréagir. Aucune valeur inventée : si pas de données → facteur 1.0.
-- Recalculé chaque nuit depuis predictions ⋈ resultats (s'affine avec le volume).
+- Recalculé chaque nuit depuis le dernier snapshot pré-course ⋈ résultats.
 - Stocké en table `cote_calibration` (créée inline, comme longshot_calibration).
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ import json
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from ml.prediction_evaluation import MIN_COTE_BUCKET_OBS, MIN_COTE_REPLAYABLE_OBS
 
 log = structlog.get_logger()
 
@@ -46,22 +47,14 @@ def _shrunk_factor(real_sum: float, model_sum: float) -> float:
 async def compute_cote_calibration(session: AsyncSession) -> dict:
     """Calcule les facteurs win/top3 par tranche de cote depuis les résultats réels.
     Retourne {buckets: [{lo,hi,n,win_factor,top3_factor}], updated_at}."""
-    # FLAG calib_guard : n'apprend que sur prédictions FIGÉES AVANT le départ
-    # (pr.created_at < c.date_heure). apply_factor multiplie directement la
-    # P(victoire) servant à sélectionner les value bets → si le facteur est appris
-    # sur des prédictions backfillées (régénérées après résultat connu), il encode
-    # du hindsight et mis-shrink en prod. Mêmes guards que signal_performance /
-    # edge_monitor. Flag off → comportement historique.
+    # La garde pré-départ est INCONDITIONNELLE. Un feature flag ne doit jamais
+    # pouvoir réintroduire du hindsight dans les facteurs utilisés en production.
     from ml.algo_flags import FLAGS as _AF
-    _guard = (
-        "AND pr.created_at IS NOT NULL AND c.date_heure IS NOT NULL AND pr.created_at < c.date_heure"
-        if _AF.calib_guard else ""
-    )
     # FLAG calib_on_raw : facteurs appris sur la proba BRUTE (COALESCE raw → calibrée).
     _p1c = "COALESCE(pr.proba_top1_raw, pr.proba_top1)" if _AF.calib_on_raw else "pr.proba_top1"
     _p3c = "COALESCE(pr.proba_top3_raw, pr.proba_top3)" if _AF.calib_on_raw else "pr.proba_top3"
     rows = (await session.execute(text(f"""
-        SELECT pa.cote_pmu AS cote,
+        SELECT COALESCE(pr.cote_figee, pa.cote_pmu) AS cote,
                {_p1c} AS p1, {_p3c} AS p3,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
                CASE WHEN pa.numero IN (
@@ -69,12 +62,16 @@ async def compute_cote_calibration(session: AsyncSession) -> dict:
                     FROM jsonb_array_elements(r.classement) WITH ORDINALITY a(e,o)
                     WHERE o <= 3
                ) THEN 1 ELSE 0 END AS top3
-        FROM predictions pr
+        FROM prediction_evaluation pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN courses c ON c.course_id = pr.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pr.course_id
-        WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
-          {_guard}
+        WHERE COALESCE(pr.cote_figee, pa.cote_pmu) > 1
+          AND jsonb_typeof(r.classement) = 'array'
+          AND pr.created_at IS NOT NULL
+          AND c.date_heure IS NOT NULL
+          AND pr.created_at < c.date_heure
+          AND pr.is_replayable = true
     """))).fetchall()
 
     nb = len(COTE_EDGES) - 1
@@ -93,14 +90,22 @@ async def compute_cote_calibration(session: AsyncSession) -> dict:
             "lo": COTE_EDGES[i],
             "hi": COTE_EDGES[i + 1] if COTE_EDGES[i + 1] < 1e8 else None,
             "n": a["n"],
-            "win_factor": round(_shrunk_factor(a["win_real"], a["win_exp"]), 4),
-            "top3_factor": round(_shrunk_factor(a["top3_real"], a["top3_exp"]), 4),
+            "win_factor": round(_shrunk_factor(a["win_real"], a["win_exp"]), 4)
+                          if a["n"] >= MIN_COTE_BUCKET_OBS else 1.0,
+            "top3_factor": round(_shrunk_factor(a["top3_real"], a["top3_exp"]), 4)
+                           if a["n"] >= MIN_COTE_BUCKET_OBS else 1.0,
         })
     return {"buckets": buckets, "n_total": len(rows)}
 
 
-async def persist_cote_calibration(session: AsyncSession, calib: dict) -> None:
+async def persist_cote_calibration(session: AsyncSession, calib: dict) -> bool:
     """Stocke la calibration (table inline, 1 ligne JSON)."""
+    if int(calib.get("n_total") or 0) < MIN_COTE_REPLAYABLE_OBS:
+        log.warning(
+            "cote_calibration.skipped_insufficient_replayable_data",
+            n_obs=int(calib.get("n_total") or 0), min_obs=MIN_COTE_REPLAYABLE_OBS,
+        )
+        return False
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS cote_calibration (
             id INT PRIMARY KEY DEFAULT 1,
@@ -115,6 +120,7 @@ async def persist_cote_calibration(session: AsyncSession, calib: dict) -> None:
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
     """), {"d": json.dumps(calib)})
     await session.commit()
+    return True
 
 
 async def load_cote_calibration(session: AsyncSession) -> dict | None:

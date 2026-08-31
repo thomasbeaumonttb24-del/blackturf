@@ -46,6 +46,21 @@ ENUM_INTERVAL = 300     # s — ré-énumération index + sweep des courses en f
 WINDOW_H = 3            # h — ne visite que les courses partant dans < WINDOW_H
 MATCH_MIN = 7           # ± minutes heure oddschecker (UK) ↔ BlackTurf (UTC)
 PAGE_WAIT_MS = 5000
+# `enum oddschecker=0` ne veut pas dire « pas de course » : c'est un CHALLENGE
+# CLOUDFLARE, servi en HTTP 200 sous le titre « Just a moment… ». Mesuré le
+# 20/08/2026 sur la production :
+#   - premier contexte d'un navigateur neuf : passe, 156 courses énumérées ;
+#   - tout contexte SUIVANT (donc tout `browser.new_page()`, qui en crée un) :
+#     challengé, et l'attente n'y change rien — 60 s de patience ne le résolvent
+#     jamais ;
+#   - le MÊME contexte, lui, enchaîne index → course → index → autre page sans
+#     broncher : il porte le cookie `cf_clearance` obtenu au premier passage.
+# Conclusion : on garde UN contexte pour toute la vie du process, et quand la
+# clearance finit par expirer, aucune réparation interne n'est possible — seul un
+# navigateur NEUF en obtient une autre. On sort donc du process et systemd
+# relance (même remède que pour un driver mort, cf. `_exit_si_driver_mort`).
+# 2 cycles = 10 min de silence avant de payer un redémarrage.
+CHALLENGES_AVANT_REDEMARRAGE = 2
 LONDON = ZoneInfo("Europe/London")
 
 _run = True
@@ -86,6 +101,38 @@ def _start_watchdog() -> None:
 def log(msg: str, **kv):
     extra = " ".join(f"{k}={v}" for k, v in kv.items())
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg} {extra}".rstrip(), flush=True)
+
+
+# Signatures d'un driver Playwright MORT : le process Node qui pilote le
+# navigateur a crashé, et plus aucun appel ne pourra aboutir.
+_DRIVER_MORT = (
+    "connection closed",
+    "target closed",
+    "browser has been closed",
+    "browser closed",
+)
+
+
+def _exit_si_driver_mort(exc: BaseException) -> None:
+    """Sort du process quand le driver est mort, pour que systemd relance.
+
+    Constaté le 18/08/2026 : le driver Node de Playwright a crashé sur un bug
+    interne (`Cannot read properties of undefined (reading 'url')` dans son
+    propre bundle, déclenché par une erreur JS de la page). Ensuite CHAQUE appel
+    échoue avec « Connection closed while reading from the driver », mais le
+    process Python reste bien vivant : le cycle attrape l'exception, la
+    journalise, dort, recommence — indéfiniment. Le watchdog ne se déclenche
+    jamais puisque les cycles échouent VITE, loin de dépasser leur timeout, et
+    `Restart=always` ne sert à rien tant que le process ne meurt pas
+    (`NRestarts=0` après des heures de panne).
+
+    Recréer la page ne suffit pas : `browser.new_page()` échoue aussi. Seule la
+    sortie du process permet de repartir avec un driver neuf.
+    """
+    message = str(exc).lower()
+    if any(signature in message for signature in _DRIVER_MORT):
+        log("driver.dead_exit", err=str(exc)[:120])
+        os._exit(1)   # systemd Restart=always relance avec un driver neuf
 
 # ─── DB via docker exec psql (même pattern que zeturf/genybet daemons) ──────
 def db_query(sql: str) -> list[list[str]]:
@@ -228,6 +275,15 @@ def match_course(bt: dict, slug: str, dt_utc: datetime):
     return None
 
 # ─── Boucle principale ──────────────────────────────────────────────────────
+def _dormir(t0: float) -> None:
+    """Attend le prochain cycle, en restant interruptible par SIGTERM."""
+    elapsed = time.time() - t0
+    for _ in range(int(max(5.0, ENUM_INTERVAL - elapsed))):
+        if not _run:
+            break
+        time.sleep(1)
+
+
 def main():
     global _cycle_started_at
     log("oddschecker_daemon.start", enum=ENUM_INTERVAL, window_h=WINDOW_H,
@@ -238,14 +294,42 @@ def main():
     # couvert, pas seulement les hangs à l'intérieur de la boucle `while _run`.
     _cycle_started_at = time.time()
     with Camoufox(headless=True, geoip=True) as browser:
+        # UN SEUL contexte pour tout le process : c'est lui qui porte la
+        # clearance Cloudflare (cf. note en tête de fichier).
         page = browser.new_page()
+        challenges = 0
         while _run:
             _cycle_started_at = time.time()
             t0 = time.time()
+            cotes_du_cycle = 0
             try:
                 bt = load_blackturf()
-                races = enum_races(page)
                 now = datetime.now(timezone.utc)
+                # Fenêtre calculée sur NOTRE base avant toute requête sortante :
+                # sans course à coter, on ne réveille pas Cloudflare pour rien
+                # (et on ne consomme pas de redémarrage la nuit).
+                attendues = [c for c in bt.values() if c["dt_obj"] and
+                             timedelta(minutes=-10) <= (c["dt_obj"] - now) <= timedelta(hours=WINDOW_H)]
+                if not attendues:
+                    log("cycle", courses=0, cotes=0, veille=True,
+                        sec=int(time.time() - t0))
+                    _dormir(t0)
+                    continue
+
+                races = enum_races(page)
+                if not races:
+                    # Index vide alors que NOUS attendons des courses : c'est le
+                    # challenge, pas un creux de programme.
+                    challenges += 1
+                    log("cloudflare.challenge", n=challenges,
+                        attendues=len(attendues), titre=str(page.title())[:40])
+                    if challenges >= CHALLENGES_AVANT_REDEMARRAGE:
+                        log("cloudflare.exit", n=challenges)
+                        os._exit(1)   # systemd relance : navigateur neuf = clearance neuve
+                    _dormir(t0)
+                    continue
+                challenges = 0
+
                 visit = []
                 for r in races:
                     if not (timedelta(minutes=-10) <= (r["dt_utc"] - now) <= timedelta(hours=WINDOW_H)):
@@ -273,17 +357,18 @@ def main():
                                 matches.append((pid, "cote_ladbrokes", "ladbrokes", ld))
                         if matches:
                             n = write_odds(cid, matches)
+                            cotes_du_cycle += n
                             log("wrote", race=f"{r['slug']}/{r['hhmm']}", course=cid, cotes=n)
                     except Exception as e:
                         log("race.error", url=r["url"][-40:], err=str(e)[:100])
+                # Bilan de PRODUCTIVITÉ, pas de simple survie : cette ligne
+                # distingue « rien à faire » de « tourne à vide ».
+                log("cycle", courses=len(visit), cotes=cotes_du_cycle,
+                    sec=int(time.time() - t0))
             except Exception as e:
                 log("cycle.error", err=str(e)[:140])
-            # attente jusqu'au prochain cycle (interruptible)
-            elapsed = time.time() - t0
-            for _ in range(int(max(5.0, ENUM_INTERVAL - elapsed))):
-                if not _run:
-                    break
-                time.sleep(1)
+                _exit_si_driver_mort(e)
+            _dormir(t0)
     log("oddschecker_daemon.stop")
 
 if __name__ == "__main__":

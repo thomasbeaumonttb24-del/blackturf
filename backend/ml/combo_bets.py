@@ -945,24 +945,29 @@ def build_coverage_bets(
             p_market = max(sim_m.p_coverage(sel, 4), 1e-4)
             rapport = float(min(max(TRJ["Multi"] / p_market, 1.1), 5000.0))
             niveau = "jackpot" if n == 4 else "couverture"
+            # PRIX RÉEL de la formule : on couvre toutes les combinaisons de 4 parmi n,
+            # donc 3 € × C(n,4) — 3 € en 4, 15 € en 5, 45 € en 6, 105 € en 7. Annoncer
+            # 3 € quel que soit n conseillait un ticket que le PMU ne vend pas.
+            n_combis = math.comb(n, 4)
+            cout = round(MULTI_UNIT * n_combis, 2)
             proposals.append({
                 "niveau": niveau,
                 "type_pari": f"{_label} en {n}",
                 "couverture": f"{n} chevaux",
                 "chevaux": [H(i) for i in sel],
                 "proba_gain": round(p_model, 4),
-                "nb_combinaisons": 1,            # mise PLATE : le PMU couvre toutes les combis
+                "nb_combinaisons": int(n_combis),
                 "flexi_pct": 100,
                 "mise_unitaire": MULTI_UNIT,
-                "cout_total": MULTI_UNIT,
+                "cout_total": cout,
                 "rapport_estime": round(rapport, 1),
-                "gain_potentiel": round(rapport * MULTI_UNIT, 2),
+                "gain_potentiel": round(rapport * cout, 2),
                 "ev": round(float(p_model * rapport - 1.0), 3),
                 "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
                 "texte_explication": (
                     f"{_label} en {n} — N°{','.join(str(numeros[i]) for i in sel)} : les 4 "
                     f"premiers (désordre) dans ces {n} chevaux · {p_model*100:.0f}% de toucher "
-                    f"· gain ~{rapport*MULTI_UNIT:.0f}€ pour {MULTI_UNIT:.0f}€."
+                    f"· gain ~{rapport*cout:.0f}€ pour {cout:.0f}€."
                 ),
             })
 

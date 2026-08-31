@@ -11,11 +11,24 @@ export interface AuthUser {
   email_verified: boolean;
   bankroll_initiale: number | null;
   is_admin?: boolean;
+  // Essai ouvert mais bloqué faute de carte enregistrée : le compte reste en
+  // `free` tant que le moyen de paiement n'est pas là. Sans ce signal, la perte
+  // d'accès serait inexplicable pour l'abonné.
+  essai_bloque_sans_carte?: boolean;
+  essai_fin?: string | null;
 }
+
+// Les JETONS ne sont plus stockés ici : ils vivent dans des cookies httpOnly posés
+// par l'API, donc hors de portée de JavaScript — une XSS ne peut plus les lire.
+// Seul le profil affiché reste en cache local : ce n'est pas un identifiant de
+// session, juste de quoi peindre la navbar sans attendre /auth/me.
+const USER_KEY = "user";
+const LEGACY_ACCESS = "access_token";
+const LEGACY_REFRESH = "refresh_token";
 
 export function getStoredUser(): AuthUser | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem("user");
+  const raw = localStorage.getItem(USER_KEY);
   try {
     return raw ? JSON.parse(raw) : null;
   } catch {
@@ -23,25 +36,41 @@ export function getStoredUser(): AuthUser | null {
   }
 }
 
-export function storeTokens(accessToken: string, refreshToken: string) {
-  localStorage.setItem("access_token", accessToken);
-  localStorage.setItem("refresh_token", refreshToken);
-}
-
 export function storeUser(user: AuthUser) {
-  localStorage.setItem("user", JSON.stringify(user));
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearAuth() {
-  localStorage.removeItem("access_token");
-  localStorage.removeItem("refresh_token");
-  localStorage.removeItem("user");
+  localStorage.removeItem(USER_KEY);
+  // Reliquats des sessions d'avant les cookies : on les efface pour de bon.
+  localStorage.removeItem(LEGACY_ACCESS);
+  localStorage.removeItem(LEGACY_REFRESH);
 }
 
-export function isAuthenticated(): boolean {
-  return !!localStorage.getItem("access_token");
+/**
+ * Jeton de rafraîchissement laissé par une session ouverte AVANT le passage aux
+ * cookies. Sert une seule fois, au chargement : on l'échange contre des cookies
+ * puis on le supprime (cf. AuthProvider). Sans cela, tous ces comptes seraient
+ * déconnectés d'un coup au déploiement.
+ */
+export function takeLegacyRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  const token = localStorage.getItem(LEGACY_REFRESH);
+  return token || null;
 }
 
-export function getAccessToken(): string | null {
-  return localStorage.getItem("access_token");
+export function clearLegacyTokens() {
+  localStorage.removeItem(LEGACY_ACCESS);
+  localStorage.removeItem(LEGACY_REFRESH);
+}
+
+/**
+ * Y a-t-il une session ouverte ? Les cookies de session sont httpOnly, donc
+ * invisibles ici ; l'API pose en plus un témoin LISIBLE (`bt_session=1`, aucune
+ * valeur secrète) sur le domaine parent. Sans lui, chaque visiteur anonyme
+ * déclencherait un /auth/me en 401 à chaque chargement de page.
+ */
+export function hasSessionHint(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.cookie.split("; ").some((c) => c.startsWith("bt_session="));
 }

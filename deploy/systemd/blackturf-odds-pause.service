@@ -1,0 +1,6 @@
+[Unit]
+Description=BlackTurf - arret des daemons de cotes pendant la fenetre de retrain
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl stop zeturf-odds.service genybet-odds.service oddschecker-odds.service

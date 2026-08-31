@@ -4,6 +4,14 @@ services:
   db:
     image: timescale/timescaledb:latest-pg16
     container_name: blackturf_db
+    # /dev/shm : Docker plafonne à 64 Mo par défaut, et PostgreSQL y alloue la
+    # mémoire partagée DYNAMIQUE de ses workers parallèles (~8 Mo par segment).
+    # Sous 64 Mo, tout plan parallèle sur une grosse table meurt en
+    # « could not resize shared memory segment : No space left on device » —
+    # panne constatée le 20/08/2026 : /admin/api/dashboard en 500 (transaction
+    # avortée) et 9 `post_course_sync` en échec par jour. 256 Mo = 4x l'usage
+    # observé, et reste très en dessous du plafond mémoire du conteneur.
+    shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-blackturf}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blackturf_secret}
@@ -48,11 +56,19 @@ services:
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
       - RESEND_API_KEY=${RESEND_API_KEY}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - FRONTEND_URL=${FRONTEND_URL:-https://blackturf.fr}
     ports:
-      - "8000:8000"
+      # Publié sur la LOOPBACK uniquement. nginx atteint l'API par le réseau
+      # Docker (`set $api_upstream http://api:8000` + resolver 127.0.0.11), pas
+      # par ce mapping : le publier sur 0.0.0.0 exposait l'API brute à Internet,
+      # en contournant nginx. Combiné à `--forwarded-allow-ips=*`, n'importe qui
+      # pouvait alors usurper X-Forwarded-For (rate-limiting et logs d'IP
+      # faussés). Seul un pare-feu Hetzner en amont l'empêchait — une garantie
+      # hors du dépôt, donc invisible et fragile.
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy

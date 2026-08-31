@@ -23,6 +23,8 @@ from db.models import (
     AssociationJockeyEntraineur, PenetrometreLog, PerformanceCarriere,
 )
 from db.models import User
+from services.course_resolution import STATUTS_NON_COURUES
+from services.temps_courses import jour_courses
 from ml.portfolio import BetPortfolioEngine
 from ml.adaptive_learning import get_adaptive_learning
 from ml.monte_carlo import MonteCarloSimulator
@@ -101,6 +103,11 @@ class PartantOut(BaseModel):
     numero_corde: Optional[int] = None         # position au départ (plat)
     # Carrière
     gains_carriere: Optional[int] = None
+    # Devise ISO 4217 de `gains_carriere`. Le PMU renvoie les gains dans la devise
+    # LOCALE de la réunion (pesos à San Isidro, HKD à Sha Tin…) : sans cette info le
+    # montant est ininterprétable. None = devise indéterminée → l'UI n'affiche rien
+    # plutôt qu'un montant dans une unité inventée (cf. services/devises.py).
+    gains_carriere_devise: Optional[str] = None
     nb_victoires: Optional[int] = None
     nb_courses: Optional[int] = None
     # Généalogie
@@ -273,6 +280,10 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     except Exception as e:
         log.warning("courses.asso_map_failed", error=str(e))
 
+    # Devise des gains de carrière (le PMU stocke en devise locale de la réunion)
+    from services.devises import devises_gains_carriere
+    devise_map = await devises_gains_carriere(db, [ch.cheval_id for _, ch, *_ in rows])
+
     partants = []
     for p, ch, j, en, eq, pc, fm in rows:
         # Cotes disponibles
@@ -290,6 +301,19 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             mouvement = round(
                 (p.cote_betclic_ouverture - p.cote_betclic) / p.cote_betclic_ouverture * 100, 1
             )  # positif = cote a baissé (argent dessus)
+        elif p.mouvement_cote_pct is not None:
+            # REPLI SUR LE MOUVEMENT NATIF PMU. Betclic n'est pas scrapé (aucune
+            # source gratuite), donc la branche ci-dessus ne s'active JAMAIS et la
+            # colonne « MVT » restait vide pour la totalité des partants — alors que
+            # le scraper enregistre depuis toujours l'écart entre la cote de
+            # référence (ouverture) et la cote directe, pour CHAQUE cheval.
+            #
+            # Deux conversions nécessaires : la valeur stockée est une FRACTION
+            # ((direct − référence) / référence) et non un pourcentage, et son signe
+            # est INVERSE de celui attendu ici — en base, positif = la cote monte
+            # (le cheval est délaissé) ; à l'affichage, positif = la cote baisse
+            # (l'argent arrive dessus).
+            mouvement = round(-float(p.mouvement_cote_pct) * 100, 1)
 
         # Association jockey × entraîneur
         asso = asso_map.get((p.jockey_id, p.entraineur_id)) if p.jockey_id and p.entraineur_id else None
@@ -348,6 +372,7 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             numero_corde=p.numero_corde,
             # Carrière (PerformanceCarriere, 1:1 cheval) — stocké en centimes
             gains_carriere=int(pc.gains_carriere_total / 100) if pc and pc.gains_carriere_total else None,
+            gains_carriere_devise=devise_map.get(ch.cheval_id),
             nb_victoires=pc.nb_victoires_total if pc else None,
             nb_courses=pc.nb_courses_total if pc else None,
             # Généalogie
@@ -470,9 +495,14 @@ async def get_programme(
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(rate_limit_public),
 ):
-    """Programme du jour (ou date fournie). Public. Cache Redis 120s."""
+    """Programme du jour (ou date fournie). Public. Cache Redis 120s.
+
+    Sans paramètre, « le jour » est le jour civil à PARIS : le conteneur tourne
+    en UTC, donc `date.today()` renvoyait la veille entre minuit et 2 h du matin
+    — soit un programme vide au moment précis où la journée vient de changer.
+    """
     import json
-    target = jour or date.today()
+    target = jour or jour_courses()
 
     try:
         redis = await get_redis()
@@ -488,7 +518,11 @@ async def get_programme(
         select(Course, Reunion)
         .join(Reunion, Reunion.reunion_id == Course.reunion_id)
         .where(func.date(Course.date_heure) == target)
-        .where(Course.statut != "annule")   # masque les courses annulées / obsolètes
+        # Masque les courses NON COURUES : annulées par le PMU ('annule') et celles
+        # dont aucun résultat n'est jamais arrivé ('sans_resultat', posé par
+        # services/course_resolution.py). Avant le 2026-08-17 ces dernières restaient
+        # 'a_venir' à vie et polluaient le programme des jours passés.
+        .where(Course.statut.notin_(STATUTS_NON_COURUES))
         .order_by(Course.date_heure)
     )
     rows = (await db.execute(q)).all()
@@ -533,10 +567,18 @@ async def get_programme(
         reunions=list(reunions_dict.values()),
     )
 
-    # Stocker en cache — TTL plus court si c'est aujourd'hui (données live)
+    # Stocker en cache — TTL plus court si c'est aujourd'hui (données live).
+    # Une journée VIDE n'est jamais mise en cache une heure : « vide » veut dire
+    # « pas encore importée » bien plus souvent que « pas de courses ce jour-là ».
+    # Vécu le 2026-08-20 : le programme du jour était déjà en base (37 courses)
+    # mais l'API a continué à répondre 0 pendant une heure, parce qu'une requête
+    # antérieure de quelques minutes avait figé le vide.
     try:
         redis = await get_redis()
-        ttl = 60 if target == date.today() else 3600   # 1 min live, 1h passé
+        if not rows or target == jour_courses():
+            ttl = 60          # jour courant, ou journée encore vide : on re-regarde vite
+        else:
+            ttl = 3600        # journée passée et servie : elle ne bougera plus
         await redis.setex(cache_key, ttl, json.dumps(result.model_dump(), default=str))
     except Exception as e:
         log.debug("courses.programme_cache_write_failed", error=str(e))
@@ -644,6 +686,7 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
             "en_cours": 15,    # 15s — pool + cotes live
             "termine":  3600,  # 1h  — données figées
             "annule":   86400, # 24h — figé définitivement
+            "sans_resultat": 86400,  # 24h — jamais résultée, figée (cf. course_resolution)
         }.get(course.statut, 30)
         await redis.setex(
             f"course_detail:{course_id}", ttl,
@@ -938,6 +981,12 @@ async def _profil_roi_observe(db: AsyncSession, profil: str, days: int = 30) -> 
 # consulte le classement IA et le plan de mise de la même course, pas de l'une sans
 # l'autre. Toute modification doit porter sur les DEUX tables.
 MISE_PLAN_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 5, "starter": 5}
+# Part max du bankroll RÉEL jouable en un jour, tous plans confondus (Point 12 audit :
+# « exposition maximale par jour »). Valeur POLICY documentée, pas apprise — au-delà,
+# même un joueur discipliné course après course peut cumuler une exposition qu'aucun
+# calcul par-course ne voit (chaque plan individuel semble raisonnable, le TOTAL ne
+# l'est plus). À valider empiriquement (cf. Point 11) plutôt qu'à considérer figée.
+DAILY_EXPOSURE_CAP_FRAC = 0.30
 
 
 async def _mise_plan_quota_check(user, course_id: str) -> tuple[bool, int, int]:
@@ -998,6 +1047,36 @@ async def get_mise_plan(
 
     profil = body.get("profil_risque") or (user.profil_risque or "equilibre")
     bankroll = body.get("bankroll") or user.bankroll_initiale
+
+    # EXPOSITION MAXIMALE PAR JOUR (Point 12) — uniquement quand un bankroll RÉEL est
+    # renseigné (même seuil ≥10€ que kelly_warn/staking_safe : le défaut 1.0 n'est pas
+    # un vrai bankroll, on ne bloque jamais dessus). Le cumul se lit sur les plans
+    # RÉELLEMENT émis (bet_plan_snapshots, Point 10) — pas une reconstruction. Un
+    # utilisateur qui a déjà beaucoup joué aujourd'hui est freiné AVANT de générer un
+    # nouveau plan, avec un message clair (pas un montant silencieusement raboté, qui
+    # trahirait le contrat « montant saisi = tout joué »).
+    if bankroll and bankroll >= 10:
+        try:
+            from services.bet_plan_snapshots import daily_exposure_total, subject_hash as _subj
+            from api.config import get_settings as _get_settings
+            _subj_hash = _subj(getattr(user, "user_id", None), _get_settings().secret_key)
+            _deja_joue = await daily_exposure_total(db, _subj_hash)
+            _cap = bankroll * DAILY_EXPOSURE_CAP_FRAC
+            if _deja_joue + montant > _cap:
+                from fastapi import HTTPException as _H
+                _reste = max(0.0, round(_cap - _deja_joue, 2))
+                raise _H(
+                    status_code=422,
+                    detail=(f"Exposition quotidienne atteinte : {_deja_joue:.0f}€ déjà "
+                            f"joués aujourd'hui sur {bankroll:.0f}€ de bankroll "
+                            f"(plafond {DAILY_EXPOSURE_CAP_FRAC:.0%}). "
+                            f"Il reste {_reste:.0f}€ jouables aujourd'hui."),
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.warning("mise_plan.daily_exposure_check_skip", user_id=getattr(user, "user_id", None),
+                       err=str(e)[:140])
 
     # Charger la course
     course_res = await db.execute(select(Course).where(Course.course_id == course_id))
@@ -1093,6 +1172,8 @@ async def get_mise_plan(
             "nom_cheval": cheval.nom,
             "proba_top3": pred.proba_top3,
             "proba_top1": pred.proba_top1,
+            "proba_top1_low": pred.proba_top1_low,
+            "proba_top1_high": pred.proba_top1_high,
             "cote_pmu": cote,
             "non_partant": part.non_partant,
             "value_bet": {"ev_max": vb.ev_max, "niveau": vb.niveau} if vb else None,
@@ -1190,7 +1271,85 @@ async def get_mise_plan(
     # grandeur des gains sur les cotes du marché EN DIRECT jusqu'au départ.
     if fige:
         out = await _reprice_gains_live(db, course, out)
+
+    # AUDIT — fige le conseil EXACTEMENT tel qu'il part chez l'utilisateur (après
+    # re-pricing éventuel). Le ROI du produit se mesure sur ces plans réellement
+    # émis, jamais sur une reconstruction faite une fois le résultat connu. Ne
+    # peut pas casser la réponse : record_plan_snapshot avale ses erreurs.
+    await _record_plan_emission(
+        db, course=course, out=out, profil=profil, montant=montant,
+        bankroll=bankroll, preds=preds, heat=heat, roi_weights=roi_weights,
+        signal_mults=signal_mults, rapport_calib=rapport_calib,
+        ev_band_perf=ev_band_perf, user=user, origin="mise_plan",
+    )
     return out
+
+
+async def _record_plan_emission(
+    db, *, course, out: dict, profil: str, montant: float, bankroll,
+    preds: list[dict], heat: float, roi_weights: dict, signal_mults: dict,
+    rapport_calib, ev_band_perf, user=None, origin: str = "mise_plan",
+) -> None:
+    """Journalise un plan émis dans ``bet_plan_snapshots`` (append-only).
+
+    ``algo_config`` décrit la configuration RÉELLEMENT appliquée : elle dérive la
+    version de l'algorithme, donc deux plans émis sous des réglages différents
+    ne sont jamais agrégés ensemble dans les mesures de rentabilité. Les entrées
+    apprises volumineuses sont résumées par leur empreinte, pas recopiées.
+    """
+    try:
+        from api.config import get_settings
+        from ml.algo_flags import FLAGS
+        from ml.prediction_snapshots import canonical_json
+        from services.bet_plan_snapshots import (
+            latest_prediction_run_id, record_plan_snapshot, subject_hash,
+        )
+        import hashlib as _hl
+
+        def _digest(value) -> str | None:
+            if not value:
+                return None
+            return _hl.sha256(canonical_json(value).encode("utf-8")).hexdigest()[:16]
+
+        from services.mise_calculator import _effective_config, _palier
+        algo_config = {
+            "profil": profil,
+            "heat": round(float(heat or 0.0), 4),
+            "cfg": _effective_config(profil, float(heat or 0.0)),
+            "palier": _palier(int(montant)),
+            "respect_montant": True,
+            "flags": {
+                "devig_gates": bool(getattr(FLAGS, "devig_gates", False)),
+                "calib_on_raw": bool(getattr(FLAGS, "calib_on_raw", False)),
+                "oos_weights": bool(getattr(FLAGS, "oos_weights", False)),
+            },
+            "inputs": {
+                "roi_weights": _digest(roi_weights),
+                "signal_mults": _digest(signal_mults),
+                "rapport_calib": _digest(rapport_calib),
+                "ev_band_perf": _digest(ev_band_perf),
+            },
+        }
+        cotes = {int(p["numero"]): float(p["cote_pmu"]) for p in preds
+                 if p.get("cote_pmu")}
+        await record_plan_snapshot(
+            db,
+            course_id=course.course_id,
+            plan=out,
+            profil=profil,
+            montant_demande=float(montant),
+            bankroll=float(bankroll) if bankroll is not None else None,
+            cotes_utilisees=cotes,
+            algo_config=algo_config,
+            emitted_at=datetime.now(timezone.utc),
+            course_start_at=course.date_heure,
+            subject=subject_hash(getattr(user, "user_id", None), get_settings().secret_key),
+            prediction_run_id=await latest_prediction_run_id(db, course.course_id),
+            origin=origin,
+        )
+    except Exception as e:
+        log.warning("mise_plan.snapshot_skip",
+                    course_id=getattr(course, "course_id", None), err=str(e)[:140])
 
 
 @router.post("/courses/{course_id}/enregistrer-paris")
@@ -1343,9 +1502,16 @@ async def get_bilan_pronostic(
     course_id: str,
     montant: float = 20.0,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _rl: None = Depends(rate_limit_public),
 ):
     """
+    PUBLIC (2026-08-19) : le bilan ne porte que sur une course TERMINÉE — il ne
+    révèle donc aucun pronostic exploitable, et c'est justement l'argument de
+    vente pour un visiteur non abonné (« voilà ce que le plan de mise aurait
+    donné »). Le verrou statut == 'termine' plus bas reste la garantie anti-fuite.
+    Rate-limité par IP comme les autres routes publiques (le front re-poll toutes
+    les 15 s tant qu'un rapport PMU manque).
+
     Bilan RÉTROSPECTIF d'une course TERMINÉE : applique le plan de mise (20€ par
     défaut) généré sur les pronostics réels, le règle contre le résultat officiel
     (rapports PMU réels) et indique si le pronostic était bon (net, ROI, comparaison
@@ -1960,6 +2126,10 @@ async def get_cheval(cheval_id: str, db: AsyncSession = Depends(get_db)):
     )
     perf = perf_res.scalar_one_or_none()
 
+    # Devise des gains stockés (PMU = devise locale de la dernière réunion courue)
+    from services.devises import devise_gains_carriere
+    gains_devise = await devise_gains_carriere(db, cheval_id)
+
     # Last 30 races
     hist_res = await db.execute(
         select(HistoriqueCourse)
@@ -2098,6 +2268,9 @@ async def get_cheval(cheval_id: str, db: AsyncSession = Depends(get_db)):
             "nb_places": perf.nb_places_total if perf else 0,
             "gains_total": int(perf.gains_carriere_total / 100) if perf and perf.gains_carriere_total else 0,
             "gains_annee_n": int(perf.gains_annee_n / 100) if perf and perf.gains_annee_n else 0,
+            # Devise ISO 4217 des deux montants ci-dessus (PMU = devise locale de la
+            # réunion). None → l'UI masque le montant (cf. services/devises.py).
+            "gains_devise": gains_devise,
             "nb_courses_annee": perf.nb_courses_annee if perf else 0,
             "nb_victoires_annee": perf.nb_victoires_annee if perf else 0,
             "meilleur_temps_all": perf.meilleur_temps_all if perf else None,

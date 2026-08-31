@@ -19,6 +19,7 @@ from db.models import (
     PenetrometreLog, TempsPassage, PronosticPresse,
     AssociationJockeyEntraineur, StatsJockey, StatsEntraineur,
 )
+from services.temps_courses import jour_courses
 from scraper.base import (
     CourseScrape, PartantScrape, ResultatScrape,
     CoteBookmakerScrape, PoolPMUScrape, SuspensionScrape,
@@ -133,9 +134,23 @@ async def upsert_hippodrome(session: AsyncSession, nom: str, pays: str | None = 
     return result.scalar_one()
 
 
+def _jour_de_la_course(course: CourseScrape) -> date:
+    """Jour de la réunion, lu sur le course_id (`ddmmyyyyRxCy`) plutôt que sur
+    l'horloge : le backfill écrit des journées passées, et `date.today()` en UTC
+    se trompe de jour entre minuit et 2 h à Paris. Repli sur la journée de courses
+    parisienne si le préfixe est absent (identifiant legacy sans date)."""
+    prefixe = str(course.course_id)[:8]
+    if prefixe.isdigit():
+        try:
+            return datetime.strptime(prefixe, "%d%m%Y").date()
+        except ValueError:
+            pass
+    return jour_courses()
+
+
 async def upsert_reunion(session: AsyncSession, course: CourseScrape, hippodrome_id: str) -> None:
     """Upsert réunion."""
-    date_obj = date.today()
+    date_obj = _jour_de_la_course(course)
     stmt = pg_insert(Reunion).values(
         reunion_id=course.reunion_id,
         date=date_obj,
@@ -263,6 +278,14 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
     # Heure de départ
     date_heure = _parse_datetime(course.date_heure)
 
+    # Statut dérivé du PMU : seule l'ANNULATION est déduite ici. Une course annulée
+    # ne recevra JAMAIS d'ordreArrivee du PMU, donc sans ça elle reste 'a_venir' à
+    # vie une fois sortie de la fenêtre 36h de poll_resultats (159 courses en prod
+    # au 2026-08-17, 100 % COURSE_ANNULEE). Le passage à 'termine' reste piloté par
+    # save_resultat_to_db (arrivée réelle en base). Cf. services/course_resolution.
+    from services.course_resolution import statut_interne_depuis_pmu
+    statut_annule = statut_interne_depuis_pmu(getattr(course, "statut_pmu", None))
+
     # Course (upsert)
     stmt = pg_insert(Course).values(
         course_id=course.course_id,
@@ -292,7 +315,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
         categorie_particularite=_t(course.categorie_particularite, 30),
         montant_offert_1er=course.montant_offert_1er,
         nombre_declares_partants=course.nombre_declares_partants,
-        statut="a_venir",
+        statut=statut_annule or "a_venir",
     ).on_conflict_do_update(
         index_elements=["course_id"],
         set_={
@@ -314,6 +337,11 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             "est_2sur4": course.est_2sur4,
             "paris_disponibles": course.paris_disponibles,
             "updated_at": datetime.now(),
+            # Annulation en cours de journée (cas le plus fréquent : le PMU annule une
+            # réunion entière après la publication du programme). Écriture CONDITIONNELLE :
+            # on ne remet jamais un statut existant à 'a_venir' — un re-scrape ne doit
+            # pas ressusciter une course déjà 'termine'.
+            **({"statut": statut_annule} if statut_annule else {}),
         },
     )
     await session.execute(stmt)
@@ -364,6 +392,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             musique=_t(partant.musique, 50),
             # ── Enrichissements PMU ──
             cote_reference=cote_ref_v,
+            cote_pmu_datetime=partant.cote_pmu_datetime,
             mouvement_cote_pct=partant.mouvement_cote_pct,
             tendance_cote=_t(partant.tendance_cote, 2),
             tendance_force=partant.tendance_force,
@@ -384,6 +413,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
                 "rang_pronostic_pmu": partant.rang_pronostic_pmu,
                 # le mouvement de cote évolue → réactualisé à chaque cycle
                 "cote_reference": cote_ref_v,
+                "cote_pmu_datetime": partant.cote_pmu_datetime,
                 "mouvement_cote_pct": partant.mouvement_cote_pct,
                 "tendance_cote": _t(partant.tendance_cote, 2),
                 "tendance_force": partant.tendance_force,
@@ -425,14 +455,22 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
 
     # ── NON-PARTANTS : nettoyage des pronos périmés ──
     # Un cheval qui vient d'être déclaré non-partant ne doit plus apparaître dans le
-    # pronostic : on supprime sa prédiction et on désactive son value bet. Le prono
-    # du champ restant sera RÉGÉNÉRÉ par l'appelant (predict_course), même dans les
-    # 10 dernières minutes (exception au gel T-10 — uniquement sur forfait).
+    # pronostic : on désactive son value bet, et c'est `participations.non_partant`
+    # — posé juste au-dessus, dans CETTE transaction — qui fait autorité pour les
+    # lecteurs. Le prono du champ restant est RÉGÉNÉRÉ par l'appelant
+    # (predict_course), même dans les 10 dernières minutes (exception au gel T-10 —
+    # uniquement sur forfait).
+    #
+    # On ne SUPPRIME plus la ligne `predictions` correspondante. Elle est référencée
+    # par `prediction_snapshots` (journal append-only, migration 0029) et par
+    # `value_bets`, dont les clés étrangères sont en NO ACTION : le DELETE était
+    # refusé et faisait échouer la sauvegarde de la course ENTIÈRE — cotes, statut
+    # non-partant et résultats compris (constaté en production le 2026-08-19, toutes
+    # les courses déjà snapshotées étaient figées). Supprimer le journal n'est pas
+    # une option : un trigger BEFORE DELETE OR UPDATE l'interdit, et c'est lui qui
+    # garantit la rejouabilité des cohortes d'apprentissage.
     scratch_course: Optional[str] = None
     if newly_scratched_pids:
-        await session.execute(text(
-            "DELETE FROM predictions WHERE participation_id = ANY(:pids)"),
-            {"pids": newly_scratched_pids})
         await session.execute(text(
             "UPDATE value_bets SET actif = false WHERE participation_id = ANY(:pids)"),
             {"pids": newly_scratched_pids})
@@ -1066,6 +1104,29 @@ async def resolve_presse_course_id(
     return row[0] if row else None
 
 
+# Volume minimal pour publier un taux de victoire/place. En dessous, le taux est
+# trop bruité pour valoir mieux que le défaut.
+MIN_COURSES_ACTEUR = 10
+# Le ROI demande BEAUCOUP plus de volume que le taux de victoire : une seule
+# victoire à 30/1 déplace le ROI de +300 points sur 10 montes. En dessous de ce
+# seuil, on n'écrit PAS de ROI (NULL → la feature retombe sur 0, neutre) plutôt
+# que de nourrir le modèle avec du bruit présenté comme un signal.
+MIN_COURSES_ROI = 40
+
+
+def roi_acteur(gains, rides) -> float | None:
+    """ROI d'un euro joué « Gagnant » sur CHAQUE monte de cet acteur.
+
+    Convention identique au track record : rapports PMU base 1 €, mise de 1 € par
+    partant. Renvoie None sous le seuil de fiabilité — un ROI sur dix montes ne
+    mesure que la chance.
+    """
+    rides = int(rides or 0)
+    if rides < MIN_COURSES_ROI:
+        return None
+    return round((float(gains or 0.0) - rides) / rides, 4)
+
+
 async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -> tuple[int, int]:
     """Calcule taux victoire/place GLOBAUX jockey & entraîneur depuis NOS résultats
     (participations ⋈ resultats.classement) et upsert dans stats_jockeys /
@@ -1077,14 +1138,26 @@ async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -
     jockey/entraîneur absente de l'évaluation. On la calcule sur l'arrivée
     officielle (aucune donnée inventée). Tourne dans le cycle associations (hebdo).
     """
-    MIN_COURSES = 10
     saison = datetime.now().year
+    # `montes_30j` compte les montes des 30 derniers jours DANS la fenêtre agrégée :
+    # une activité récente nulle distingue un jockey en pause d'un jockey en pleine
+    # saison, à taux de victoire égal.
     agg = """
         SELECT p.{a} AS aid, count(*) AS rides,
                count(*) FILTER (WHERE (e->>'position') ~ '^[0-9]+$'
                                       AND (e->>'position')::int = 1) AS wins,
                count(*) FILTER (WHERE (e->>'position') ~ '^[0-9]+$'
-                                      AND (e->>'position')::int <= 3) AS places
+                                      AND (e->>'position')::int <= 3) AS places,
+               SUM(CASE WHEN (e->>'position') ~ '^[0-9]+$'
+                         AND (e->>'position')::int = 1
+                        THEN COALESCE(
+                            CASE WHEN r.rapports->>'simple_gagnant' ~ '^[0-9]+(\\.[0-9]+)?$'
+                                 THEN (r.rapports->>'simple_gagnant')::float END,
+                            CASE WHEN r.rapports->>'e_simple_gagnant' ~ '^[0-9]+(\\.[0-9]+)?$'
+                                 THEN (r.rapports->>'e_simple_gagnant')::float END,
+                            0)
+                        ELSE 0 END) AS gains,
+               count(*) FILTER (WHERE c.date_heure > now() - interval '30 days') AS montes_30j
         FROM participations p
         JOIN courses c   ON c.course_id = p.course_id
         JOIN resultats r ON r.course_id = p.course_id
@@ -1094,28 +1167,44 @@ async def compute_and_save_acteur_stats(session: AsyncSession, mois: int = 18) -
           AND c.date_heure > now() - (:mois || ' months')::interval
         GROUP BY p.{a} HAVING count(*) >= :minc
     """
+    # `montes_30j` n'existe que côté jockeys : un entraîneur n'a pas de montes, et
+    # sa table ne porte pas la colonne. On construit donc l'upsert par table plutôt
+    # que d'écrire une requête qui échoue sur l'une des deux.
     upsert = """
         INSERT INTO {t} (stat_id, {a}, saison, victoires_saison,
-                         taux_victoire_global, taux_place_global)
-        VALUES (gen_random_uuid(), :aid, :saison, :wins, :tv, :tp)
+                         taux_victoire_global, taux_place_global,
+                         roi_global{col_m30})
+        VALUES (gen_random_uuid(), :aid, :saison, :wins, :tv, :tp, :roi{val_m30})
         ON CONFLICT ({a}, saison) DO UPDATE SET
             victoires_saison = EXCLUDED.victoires_saison,
             taux_victoire_global = EXCLUDED.taux_victoire_global,
             taux_place_global = EXCLUDED.taux_place_global,
+            roi_global = EXCLUDED.roi_global,{set_m30}
             updated_at = now()
     """
     counts = []
-    for table, acteur in (("stats_jockeys", "jockey_id"), ("stats_entraineurs", "entraineur_id")):
+    for table, acteur, avec_montes in (("stats_jockeys", "jockey_id", True),
+                                       ("stats_entraineurs", "entraineur_id", False)):
         rows = (await session.execute(text(agg.format(a=acteur)),
-                                      {"mois": str(mois), "minc": MIN_COURSES})).fetchall()
+                                      {"mois": str(mois), "minc": MIN_COURSES_ACTEUR})).fetchall()
+        sql_upsert = upsert.format(
+            t=table, a=acteur,
+            col_m30=", montes_30j" if avec_montes else "",
+            val_m30=", :m30" if avec_montes else "",
+            set_m30="\n            montes_30j = EXCLUDED.montes_30j," if avec_montes else "",
+        )
         n = 0
-        for aid, rides, wins, places in rows:
+        for aid, rides, wins, places, gains, montes_30j in rows:
             if not rides:
                 continue
-            await session.execute(text(upsert.format(t=table, a=acteur)), {
+            params = {
                 "aid": aid, "saison": saison, "wins": int(wins),
                 "tv": round(wins / rides, 4), "tp": round(places / rides, 4),
-            })
+                "roi": roi_acteur(gains, rides),
+            }
+            if avec_montes:
+                params["m30"] = int(montes_30j or 0)
+            await session.execute(text(sql_upsert), params)
             n += 1
         counts.append(n)
     log.info("db_writer.acteur_stats_computed", jockeys=counts[0], entraineurs=counts[1])

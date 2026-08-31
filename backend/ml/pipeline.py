@@ -21,7 +21,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.database import AsyncSessionLocal
 from db.models import (
-    Course, Resultat, Participation, Prediction as PredictionModel,
+    Course, Resultat, Participation, Prediction as PredictionModel, PredictionEvaluation,
     ValueBet as ValueBetModel, Recommandation, ModelVersion, FeatureML,
     Cheval, Jockey, Entraineur
 )
@@ -36,6 +36,7 @@ from ml.drift_detector import get_drift_detector, initialize_drift_detector
 from ml.meta_learner import get_meta_learner, get_contextual_corrector
 from ml.narrative import generate_full_course_analysis, explain_prediction
 from ml.portfolio import get_markowitz_optimizer, kelly_fraction_adaptatif, dutching_calculator
+from ml.prediction_snapshots import build_snapshot_values, persist_snapshot_compat
 from api.config import get_settings
 
 log = structlog.get_logger()
@@ -45,6 +46,83 @@ settings = get_settings()
 # AUC sous ce seuil = modèle au mieux aléatoire (0.5) / au pire inversé → JAMAIS déployé.
 # 0.52 laisse une petite marge au-dessus du hasard pur tout en bloquant les runs cassés.
 MIN_DEPLOYABLE_AUC = 0.52
+
+
+# ─────────────────────────────
+# Empreinte mémoire du retrain
+# ─────────────────────────────
+# Le VPS a 7,6 Gio de RAM partagés entre Postgres, l'API, le scraper et trois
+# daemons de cotes hors Docker. Le retrain nocturne est de loin le plus gros
+# consommateur : tant qu'on ne le mesure pas, un OOM-kill ne dit pas OÙ ça a
+# débordé (nuit du 19→20/08/2026 : signal 9 nu, aucune trace de pic).
+def _rss_mb() -> float:
+    """RSS du process courant en Mio. 0.0 si /proc est indisponible."""
+    try:
+        import resource
+        with open("/proc/self/statm") as fh:
+            pages = int(fh.read().split()[1])
+        return round(pages * resource.getpagesize() / (1024 * 1024), 1)
+    except Exception:
+        return 0.0
+
+
+def _log_rss(stage: str, **extra) -> None:
+    log.info("pipeline.rss", stage=stage, rss_mb=_rss_mb(), **extra)
+
+
+def _release_memory(stage: str) -> None:
+    """Collecte Python PUIS rend les arènes libérées au noyau.
+
+    ``gc.collect()`` ne fait que rendre la mémoire à l'allocateur de la libc :
+    le RSS du process ne bouge pas. Mesuré en production, le worker restait à
+    4,9 Gio de RSS anonyme quatre-vingt-dix secondes APRÈS la fin de
+    l'entraînement, pendant `compute_signal_performance` — c'est cette empreinte
+    fantôme qui a fait de lui la plus grosse victime désignée de l'OOM global.
+    ``malloc_trim(0)`` rend effectivement les pages libres au système.
+
+    Best-effort : absence de glibc (musl/Alpine) ou symbole manquant = no-op.
+    """
+    import gc
+    gc.collect()
+    before = _rss_mb()
+    trimmed = False
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+        trimmed = True
+    except Exception:
+        pass
+    log.info("pipeline.rss.released", stage=stage, rss_before_mb=before,
+             rss_after_mb=_rss_mb(), malloc_trim=trimmed)
+
+
+def _extract_brier_course(analysis_result: dict) -> float:
+    """Retourne le Brier post-course réel destiné au détecteur de dérive.
+
+    ``PostRaceAnalyzer.analyze_race`` expose cette métrique sous la clé
+    ``brier_course``. Une donnée absente ou hors de [0, 1] doit faire échouer le
+    seul bloc de drift, plutôt que d'injecter silencieusement une valeur fictive.
+    """
+    raw_value = analysis_result.get("brier_course")
+    if raw_value is None:
+        raise ValueError("post-race analysis missing brier_course")
+
+    value = float(raw_value)
+    if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"invalid brier_course: {raw_value!r}")
+    return value
+
+
+def _extract_prediction_confidence(analysis_result: dict) -> float:
+    """Retourne la probabilité brute du gagnant, toujours bornée dans [0, 1]."""
+    raw_value = analysis_result.get("gagnant_proba_ia")
+    if raw_value is None:
+        raise ValueError("post-race analysis missing gagnant_proba_ia")
+
+    value = float(raw_value)
+    if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"invalid gagnant_proba_ia: {raw_value!r}")
+    return value
 
 
 def _should_deploy(
@@ -61,6 +139,9 @@ def _should_deploy(
     betting_edge_ok: bool = True,
     h2h_delta: Optional[float] = None,
     h2h_tolerance: float = 0.002,
+    market_gate_enabled: bool = False,
+    rank_delta_market: Optional[float] = None,
+    market_gate_margin: float = 0.0,
 ) -> bool:
     """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
 
@@ -88,11 +169,38 @@ def _should_deploy(
     edge durablement négatif (audit -52%) figerait le modèle À VIE — exactement le blocage
     du 2026-06-19 (wf 0.8165>0.8141 rejeté à tort en `worse_wf`).
 
+    FLAG market_gate : `rank_delta_market` = AUC de classement intra-course du
+    challenger MOINS celle d'un simple `ORDER BY cote_pmu`, sur le même hold-out.
+    Négatif, le produit ferait mieux sans modèle. Ce gate court-circuite TOUT, y
+    compris un remplacement structurel : promouvoir un modèle sous la cote au motif
+    que l'actif est synthétique reviendrait à remplacer un mauvais classeur par un
+    autre. Défaut OFF, le temps que l'entraînement sur le résidu du marché rende le
+    delta positif (cf. ml/algo_flags.market_gate).
+
     Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
     saut de données massif, OU mérite de ranking (tolérance régression).
+
+    NOTE sur `h2h_delta` : depuis le diagnostic du 2026-08-20 il porte sur l'AUC de
+    CLASSEMENT intra-course, plus sur l'AUC poolée. La poolée mélangeait variance
+    inter-course et classement, et flattait un simple lecteur de cote.
     """
     if new_wf < min_auc:
         return False
+
+    # GATE MARCHÉ (FLAG market_gate, défaut OFF) — le classement du challenger
+    # bat-il un simple `ORDER BY cote_pmu` sur le même hold-out ?
+    #
+    # C'est la question que rien ne posait : le gate ne confrontait le challenger
+    # qu'au champion précédent, si bien que 513 versions ont pu se succéder sous
+    # le niveau de la cote sans qu'aucune alerte ne se déclenche.
+    #
+    # `rank_delta_market is None` = mesure impossible (pas de cote sur le hold-out).
+    # On NE bloque PAS : une absence de mesure n'est pas une preuve d'échec, et
+    # bloquer dessus figerait le modèle sur une panne de données.
+    if market_gate_enabled and rank_delta_market is not None:
+        if rank_delta_market < market_gate_margin:
+            return False
+
     # Remplacement STRUCTUREL de l'actif : actif synthetique / absent / non fiable
     # (trop peu de courses) / saut de donnees massif (nouveau modele entraine sur
     # >=1.5x plus de donnees). Ces cas justifient la promotion independamment du
@@ -198,13 +306,25 @@ async def _head_to_head_auc(
     import gc
     from sklearn.metrics import roc_auc_score
 
+    from ml.ranking_metrics import extract_cotes, within_race_auc
+
+    _groupes = X_oos["course_id"]
+    _cotes = extract_cotes(X_oos)
+
+    def _mesures(probas) -> tuple[float, float]:
+        """(AUC poolée, AUC de classement intra-course) sur le hold-out commun."""
+        return (
+            float(roc_auc_score(y_oos, probas)),
+            float(within_race_auc(y_oos, probas, _groupes)),
+        )
+
     try:
         champion = BlackTurfEnsemble.load_current()
         if champion is None:
             return None
         # predict_proba reindexe sur ses propres feature_names → tolère une dérive
         # du schéma de features entre les deux générations.
-        auc_champion = float(roc_auc_score(y_oos, champion.predict_proba(X_oos)))
+        auc_champion, rank_champion = _mesures(champion.predict_proba(X_oos))
     except Exception as e:
         log.warning("pipeline.h2h.champion_scoring_failed", err=str(e)[:160])
         return None
@@ -213,20 +333,48 @@ async def _head_to_head_auc(
         gc.collect()
 
     try:
-        auc_challenger = float(roc_auc_score(y_oos, challenger.predict_proba(X_oos)))
+        auc_challenger, rank_challenger = _mesures(challenger.predict_proba(X_oos))
     except Exception as e:
         log.warning("pipeline.h2h.challenger_scoring_failed", err=str(e)[:160])
         return None
 
-    delta = auc_challenger - auc_champion
-    n_courses = int(X_oos["course_id"].nunique())
+    # Le MARCHÉ passe le même examen, sur le même échantillon. C'est la référence
+    # qui manquait : sans elle, champion et challenger peuvent se succéder
+    # indéfiniment sous le niveau d'un simple `ORDER BY cote_pmu` — ce qui s'est
+    # produit sur 513 versions (diagnostic 2026-08-20).
+    rank_marche = None
+    if _cotes is not None:
+        try:
+            from ml.ranking_metrics import market_scores_from_cotes
+            _ms = market_scores_from_cotes(_cotes)
+            if _ms is not None:
+                rank_marche = float(within_race_auc(y_oos, _ms, _groupes))
+        except Exception as e:
+            log.warning("pipeline.h2h.market_scoring_failed", err=str(e)[:160])
+
+    # `delta` reste l'arbitre champion/challenger, mais il porte désormais sur le
+    # CLASSEMENT et non sur l'AUC poolée : c'est le classement que le produit
+    # affiche. L'AUC poolée est conservée pour la continuité du diagnostic.
+    delta = rank_challenger - rank_champion
+    delta_marche = (rank_challenger - rank_marche) if rank_marche is not None else None
+    n_courses = int(_groupes.nunique())
     log.info("pipeline.h2h.measured",
-             auc_challenger=round(auc_challenger, 4), auc_champion=round(auc_champion, 4),
-             delta=round(delta, 4), n_rows=n_rows, n_courses=n_courses)
+             rank_challenger=round(rank_challenger, 4), rank_champion=round(rank_champion, 4),
+             rank_marche=round(rank_marche, 4) if rank_marche is not None else None,
+             delta=round(delta, 4),
+             delta_marche=round(delta_marche, 4) if delta_marche is not None else None,
+             bat_le_marche=(delta_marche > 0) if delta_marche is not None else None,
+             auc_challenger_poolee=round(auc_challenger, 4),
+             auc_champion_poolee=round(auc_champion, 4),
+             n_rows=n_rows, n_courses=n_courses)
     return {
         "auc_challenger": auc_challenger,
         "auc_champion": auc_champion,
+        "rank_challenger": rank_challenger,
+        "rank_champion": rank_champion,
+        "rank_marche": rank_marche,
         "delta": delta,
+        "delta_marche": delta_marche,
         "n_rows": n_rows,
         "n_courses": n_courses,
     }
@@ -401,20 +549,22 @@ async def run_post_course(course_id: str) -> None:
                 gagnant_pid = gagnant_pid_r.scalar_one_or_none()
 
                 if gagnant_pid:
-                    gagnant_feat_r = await session.execute(_sel(FeatureML.features).where(
-                        FeatureML.participation_id == gagnant_pid
-                    ))
+                    gagnant_feat_r = await session.execute(text("""
+                        SELECT pe.features
+                        FROM prediction_evaluation pe
+                        WHERE pe.participation_id = :pid
+                          AND pe.is_replayable = true
+                    """), {"pid": gagnant_pid})
                     gagnant_features = gagnant_feat_r.scalar_one_or_none() or {}
 
                     # Moyenne des features des perdants
-                    all_feat_r = await session.execute(
-                        _sel(FeatureML.features).join(
-                            Participation, Participation.participation_id == FeatureML.participation_id
-                        ).where(
-                            Participation.course_id == course_id,
-                            Participation.participation_id != gagnant_pid,
-                        )
-                    )
+                    all_feat_r = await session.execute(text("""
+                        SELECT pe.features
+                        FROM prediction_evaluation pe
+                        WHERE pe.course_id = :cid
+                          AND pe.participation_id != :winner
+                          AND pe.is_replayable = true
+                    """), {"cid": course_id, "winner": gagnant_pid})
                     all_feats = [r[0] or {} for r in all_feat_r.fetchall()]
 
                     if all_feats and gagnant_features:
@@ -424,8 +574,9 @@ async def run_post_course(course_id: str) -> None:
 
                         # Vérifier si modèle avait prédit le gagnant
                         was_correct = False
-                        pred_r = await session.execute(_sel(PredictionModel).where(
-                            PredictionModel.participation_id == gagnant_pid
+                        pred_r = await session.execute(_sel(PredictionEvaluation).where(
+                            PredictionEvaluation.participation_id == gagnant_pid,
+                            PredictionEvaluation.is_replayable.is_(True),
                         ))
                         pred_obj = pred_r.scalar_one_or_none()
                         if pred_obj:
@@ -480,9 +631,10 @@ async def run_post_course(course_id: str) -> None:
                 pred_result = await al_session.execute(text("""
                     SELECT p.participation_id, p.proba_top3, p.proba_top1,
                            p.confidence_score, pa.numero, p.rang_predit
-                    FROM predictions p
+                    FROM prediction_evaluation p
                     JOIN participations pa ON p.participation_id = pa.participation_id
                     WHERE p.course_id = :cid
+                      AND p.is_replayable = true
                 """), {"cid": course_id})
                 pred_rows = pred_result.fetchall()
 
@@ -522,7 +674,6 @@ async def run_post_course(course_id: str) -> None:
                 await al_session.commit()
 
                 # ── État adaptatif (commit séparé, isolé) ──────────────────
-                brier_val = float(adaptive_learning_result.get("brier_score") or 0.20)
                 was_surp = bool(adaptive_learning_result.get("was_surprise", False))
                 try:
                     al = get_adaptive_learning()
@@ -535,11 +686,15 @@ async def run_post_course(course_id: str) -> None:
                 # ── Drift detection (commit séparé, isolé) ─────────────────
                 drift_result = {}
                 try:
+                    brier_val = _extract_brier_course(adaptive_learning_result)
+                    prediction_confidence = _extract_prediction_confidence(
+                        adaptive_learning_result
+                    )
                     drift_det = get_drift_detector()
                     drift_result = drift_det.update(
                         brier_score=brier_val,
                         was_surprise=was_surp,
-                        prediction_confidence=float(adaptive_learning_result.get("gagnant_proba_ia") or 0.3),
+                        prediction_confidence=prediction_confidence,
                     )
                     await drift_det.save_state(al_session)
                     await al_session.commit()
@@ -547,16 +702,18 @@ async def run_post_course(course_id: str) -> None:
                     await al_session.rollback()
                     log.warning("pipeline.drift_save_skip", course_id=course_id, err=str(e)[:140])
 
-                # Si drift critique → déclencher retraining immédiat
+                # Si drift critique, persister/alerter uniquement. Le scheduler
+                # relit cet état chaque heure et enqueue le retrain dans RQ avec
+                # déduplication. Ne jamais lancer ce job lourd via create_task dans
+                # le process post-course : c'était une source de concurrence/OOM.
                 if drift_result.get("severity") == "critical":
                     active_signals = [k for k, v in drift_result.get("signals", {}).items() if v]
                     log.warning(
                         "pipeline.drift.critical_detected",
                         course_id=course_id,
                         active_signals=active_signals,
-                        triggering_retrain=True,
+                        retrain_deferred_to_scheduler=True,
                     )
-                    asyncio.create_task(_async_retrain_wrapper())
 
                 log.info(
                     "pipeline.adaptive_learning.updated",
@@ -585,6 +742,19 @@ async def run_post_course(course_id: str) -> None:
     except Exception as e:
         log.warning("pipeline.settle_all_skip", course_id=course_id, err=str(e)[:140])
 
+    # ── 6c-bis. Notifier le RÉSULTAT à ceux que la course concerne (paris
+    # enregistrés réglés, ou value bet dont on les avait alertés). APRÈS le
+    # règlement : c'est lui qui remplit bankroll_entries.resultat / gain_perte, donc
+    # l'inverse annoncerait « 0 pari réglé ». Sans cet appel l'onglet « Résultats »
+    # du centre de notifications restait structurellement vide et le suivi
+    # s'arrêtait au signal (cf. services/alerts.notify_resultats_course).
+    try:
+        from services.alerts import notify_resultats_course
+        async with AsyncSessionLocal() as notif_session:
+            await notify_resultats_course(notif_session, course_id)
+    except Exception as e:
+        log.warning("pipeline.notify_resultats_skip", course_id=course_id, err=str(e)[:140])
+
     # ── 6d. Régler les PRONOS ÉMIS PAR PROFIL (profil_run_log) sur cette course :
     # l'apprentissage se fait sur les recommandations réellement émises (figées
     # avant course), réglées aux vrais rapports PMU — pas sur le top-3 du modèle.
@@ -606,6 +776,19 @@ async def run_post_course(course_id: str) -> None:
                     log.warning("pipeline.rapport_calib_skip", course_id=course_id, err=str(e)[:140])
     except Exception as e:
         log.warning("pipeline.profil_learning_settle_skip", course_id=course_id, err=str(e)[:140])
+
+    # ── 6e. Régler les PLANS RÉELLEMENT ÉMIS (bet_plan_snapshots), y compris ceux
+    # rendus aux utilisateurs, sur les vrais rapports PMU. Événement AJOUTÉ : le
+    # conseil figé n'est jamais réécrit, et un rapport publié plus tard produira
+    # un nouveau règlement (le rattrapage nightly re-tente les 'partial').
+    try:
+        from services.bet_plan_snapshots import settle_course_plans
+        async with AsyncSessionLocal() as bp_session:
+            _bp = await settle_course_plans(bp_session, course_id)
+            if _bp.get("n_settled") or _bp.get("n_partial"):
+                log.info("pipeline.bet_plans_settled", course_id=course_id, **_bp)
+    except Exception as e:
+        log.warning("pipeline.bet_plan_settle_skip", course_id=course_id, err=str(e)[:140])
 
     # 7. Mini-retraining si nb_resultats_depuis_dernier_retrain % 20 == 0
     # COOLDOWN (anti-flood) : _count_recent_results() reste à un multiple du seuil sur une
@@ -637,6 +820,9 @@ async def _invalidate_stats_caches(course_id: str) -> None:
         keys = [
             "stats:public", "stats:equity-curve", "stats:ml-status",
             "stats:dashboard-summary",
+            # Palmarès public (page d'accueil) : « mis à jour à chaque fin de course »
+            # doit être vrai, sinon le bandeau live affiche jusqu'à 5 min de retard.
+            "stats:palmares-public",
             # NB: stats:track-record + stats:profils retires de la purge immediate
             # (recalcul froid ~2s). Geres par TTL 1h + job warm_caches /30min.
             f"course_detail:{course_id}", f"analyse:{course_id}",
@@ -652,6 +838,8 @@ async def _invalidate_stats_caches(course_id: str) -> None:
 # créneau), mais on supprime le pic mémoire/CPU permanent qui saturait le VPS 8 Go.
 RETRAIN_COOLDOWN_S = 6 * 3600
 _INCR_RETRAIN_COOLDOWN_KEY = "ml:incr_retrain_cooldown"
+RETRAIN_LEASE_S = 2 * 3600
+_RETRAIN_LEASE_KEY = "ml:retrain:active"
 
 
 async def _incr_retrain_cooldown_active() -> bool:
@@ -673,7 +861,48 @@ async def _set_incr_retrain_cooldown(seconds: int) -> None:
         pass
 
 
-async def run_incremental_retraining() -> None:
+async def _run_retraining_with_lease(label: str, runner) -> bool:
+    """Exécute un entraînement seulement si aucun autre n'est actif.
+
+    Le token propriétaire empêche un job expiré de supprimer le bail acquis par
+    un successeur. Redis indisponible => fail-closed : mieux vaut reporter un
+    entraînement que provoquer un nouvel OOM sur le serveur de production.
+    """
+    token = str(uuid.uuid4())
+    try:
+        from db.redis_client import get_redis
+        redis = await get_redis()
+        acquired = await redis.set(
+            _RETRAIN_LEASE_KEY,
+            token,
+            ex=RETRAIN_LEASE_S,
+            nx=True,
+        )
+    except Exception as exc:
+        log.error("pipeline.retrain.lease_unavailable", label=label, err=str(exc)[:140])
+        return False
+
+    if not acquired:
+        log.warning("pipeline.retrain.concurrent_skip", label=label)
+        return False
+
+    try:
+        await runner()
+        return True
+    finally:
+        try:
+            await redis.eval(
+                "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                "return redis.call('del', KEYS[1]) else return 0 end",
+                1,
+                _RETRAIN_LEASE_KEY,
+                token,
+            )
+        except Exception as exc:
+            log.warning("pipeline.retrain.lease_release_failed", label=label, err=str(exc)[:140])
+
+
+async def _run_incremental_retraining_unlocked() -> None:
     """
     Retraining léger sur les 500 dernières courses.
     Plus rapide que le nightly complet.
@@ -682,7 +911,18 @@ async def run_incremental_retraining() -> None:
     await _do_retraining(mois=3, label="incremental")
 
 
+async def run_incremental_retraining() -> None:
+    await _run_retraining_with_lease(
+        "incremental",
+        _run_incremental_retraining_unlocked,
+    )
+
+
 async def run_nightly_retraining() -> None:
+    await _run_retraining_with_lease("nightly", _run_nightly_retraining_unlocked)
+
+
+async def _run_nightly_retraining_unlocked() -> None:
     """
     Retraining complet nightly à 2h UTC.
     Fenêtre récente configurable, validation et déploiement conditionnel.
@@ -694,6 +934,13 @@ async def run_nightly_retraining() -> None:
     """
     log.info("pipeline.nightly_retrain.start")
     await _do_retraining(mois=settings.retrain_history_months, label="nightly")
+    # L'ensemble entraîné et le dataset meurent en sortant de `_do_retraining`,
+    # mais la libc garde leurs arènes : le worker restait à 4,9 Gio de RSS
+    # pendant TOUTE la série d'analyses ci-dessous, alors qu'elles ne pèsent que
+    # quelques centaines de Mio. C'est cette empreinte fantôme qui l'a fait
+    # désigner comme victime de l'OOM global du 20/08/2026 (tué à 02:04, soit
+    # 93 s après avoir déployé v511 avec succès).
+    _release_memory("nightly.after_training")
     # Recalcule la calibration longshots sur toutes les données réelles à jour
     try:
         from ml.longshot_calibration import compute_and_store
@@ -721,8 +968,12 @@ async def run_nightly_retraining() -> None:
         from ml.cote_calibration import compute_cote_calibration, persist_cote_calibration
         async with AsyncSessionLocal() as cc_session:
             _cc = await compute_cote_calibration(cc_session)
-            await persist_cote_calibration(cc_session, _cc)
-            log.info("pipeline.cote_calibration_done", n=_cc.get("n_total"))
+            _cc_persisted = await persist_cote_calibration(cc_session, _cc)
+            log.info(
+                "pipeline.cote_calibration_done" if _cc_persisted
+                else "pipeline.cote_calibration_cold_start_preserved",
+                n=_cc.get("n_total"),
+            )
     except Exception as e:
         log.warning("pipeline.nightly_cote_calib_skip", err=str(e)[:140])
     # RATTRAPAGE du règlement des runs profils (audit ROI 2026-07-02 : 287 runs
@@ -735,6 +986,37 @@ async def run_nightly_retraining() -> None:
             log.info("pipeline.settle_catchup_done", **_sc)
     except Exception as e:
         log.warning("pipeline.nightly_settle_catchup_skip", err=str(e)[:140])
+    # Même rattrapage pour les PLANS ÉMIS : un rapport PMU publié tardivement doit
+    # entrer dans la mesure de rentabilité, sinon le ROI ne porte que sur les
+    # courses faciles à régler (biais vers le haut).
+    try:
+        from services.bet_plan_snapshots import settle_catchup_plans
+        async with AsyncSessionLocal() as bpc_session:
+            _bpc = await settle_catchup_plans(bpc_session)
+            log.info("pipeline.bet_plan_catchup_done", **_bpc)
+    except Exception as e:
+        log.warning("pipeline.nightly_bet_plan_catchup_skip", err=str(e)[:140])
+    # Point 11 — gates automatiques sur les plans RÉELLEMENT émis (bet_plan_evaluation).
+    # Un type de pari (ou profil) durablement négatif ou en drawdown excessif voit ses
+    # poids appris plafonnés (jamais relevés) via bet_performance.get_learned_type_weights.
+    # Fenêtre glissante 90j : un segment qui a mal tourné il y a un an ne doit pas rester
+    # suspendu indéfiniment une fois le comportement corrigé en amont.
+    try:
+        from datetime import timedelta as _td
+        from ml.bet_plan_performance import (
+            compute_forward_performance, evaluate_segment_gates, persist_segment_gates,
+        )
+        since_90d = datetime.now(timezone.utc) - _td(days=90)
+        async with AsyncSessionLocal() as gate_session:
+            for _dim in ("type_pari", "profil"):
+                _perf = await compute_forward_performance(gate_session, _dim, since=since_90d)
+                _gates = evaluate_segment_gates(_perf)
+                _n = await persist_segment_gates(gate_session, _dim, _gates)
+                _susp = [k for k, g in _gates.items() if g["status"] != "active"]
+                log.info("pipeline.bet_plan_gates_done", dimension=_dim, n_segments=_n,
+                         n_flagged=len(_susp), flagged=_susp[:10])
+    except Exception as e:
+        log.warning("pipeline.nightly_bet_plan_gates_skip", err=str(e)[:140])
     # Ré-apprend le ROI réel PAR SIGNAL (duo J/E, ELO, pedigree, forme-piège…) →
     # module la sélection des value bets vers ce qui rapporte. Auto-amélioration.
     try:
@@ -746,8 +1028,12 @@ async def run_nightly_retraining() -> None:
             _sp = await compute_signal_performance(sp_session)            # global
             _spp = await compute_signal_performance_by_profile(sp_session)  # par profil
             _sp["profils"] = _spp.get("profils", {})                      # fusion
-            await persist_signal_performance(sp_session, _sp)
-            log.info("pipeline.signal_performance_done", n=_sp.get("n_total"))
+            _sp_persisted = await persist_signal_performance(sp_session, _sp)
+            log.info(
+                "pipeline.signal_performance_done" if _sp_persisted
+                else "pipeline.signal_performance_cold_start_preserved",
+                n=_sp.get("n_total"),
+            )
     except Exception as e:
         log.warning("pipeline.nightly_signal_perf_skip", err=str(e)[:140])
     # Ré-apprend le ROI réel PAR BANDE D'EV → rétrograde les bandes perdantes (zone
@@ -758,8 +1044,12 @@ async def run_nightly_retraining() -> None:
         )
         async with AsyncSessionLocal() as evb_session:
             _evb = await compute_ev_band_performance(evb_session)
-            await persist_ev_band_performance(evb_session, _evb)
-            log.info("pipeline.ev_band_performance_done", n=_evb.get("n_total"))
+            _evb_persisted = await persist_ev_band_performance(evb_session, _evb)
+            log.info(
+                "pipeline.ev_band_performance_done" if _evb_persisted
+                else "pipeline.ev_band_performance_cold_start_preserved",
+                n=_evb.get("n_total"),
+            )
     except Exception as e:
         log.warning("pipeline.nightly_ev_band_perf_skip", err=str(e)[:140])
     # Ré-apprend les poids PAR PROFIL depuis les PRONOS ÉMIS réglés (profil_run_log) :
@@ -768,7 +1058,12 @@ async def run_nightly_retraining() -> None:
         from ml.profil_learning import compute_profil_weights
         async with AsyncSessionLocal() as plw_session:
             _plw = await compute_profil_weights(plw_session)
-            log.info("pipeline.profil_weights_done", n_runs=_plw.get("n_total_runs"))
+            _plw_skipped = _plw.get("status") == "skipped_insufficient_replayable_data"
+            log.info(
+                "pipeline.profil_weights_cold_start_preserved" if _plw_skipped
+                else "pipeline.profil_weights_done",
+                n_runs=_plw.get("n_observed_runs", _plw.get("n_total_runs")),
+            )
     except Exception as e:
         log.warning("pipeline.nightly_profil_weights_skip", err=str(e)[:140])
     # Ré-apprend la calibration estimé→réel du RAPPORT par (profil × type) depuis les
@@ -777,11 +1072,27 @@ async def run_nightly_retraining() -> None:
     # est écarté. C'est l'apprentissage qui fait respecter les tranches sur le réel.
     try:
         from ml.signal_performance import (
-            compute_rapport_calibration, persist_rapport_calibration)
+            compute_payout_bucket_performance, compute_rapport_calibration,
+            persist_rapport_calibration)
         async with AsyncSessionLocal() as rc_session:
             _rc = await compute_rapport_calibration(rc_session)
-            await persist_rapport_calibration(rc_session, _rc)
-            log.info("pipeline.rapport_calibration_done", n_runs=_rc.get("n_runs"))
+            # ROI reel par tranche de rapport, FUSIONNE dans la meme table : elle est
+            # deja chargee et transmise partout ou un plan se construit. Un parametre
+            # separe aurait demande de toucher cinq appelants, dont un oubli aurait
+            # desactive le tilt en silence.
+            try:
+                _pb = await compute_payout_bucket_performance(rc_session)
+                _rc["payout_buckets"] = _pb.get("types") or {}
+                log.info("pipeline.payout_buckets_done",
+                         n_types=len(_rc["payout_buckets"]), n_runs=_pb.get("n_runs"))
+            except Exception as e:
+                log.warning("pipeline.payout_buckets_skip", err=str(e)[:140])
+            _rc_persisted = await persist_rapport_calibration(rc_session, _rc)
+            log.info(
+                "pipeline.rapport_calibration_done" if _rc_persisted
+                else "pipeline.rapport_calibration_cold_start_preserved",
+                n_runs=_rc.get("n_runs"),
+            )
     except Exception as e:
         log.warning("pipeline.nightly_rapport_calib_skip", err=str(e)[:140])
     # Surveillance HONNÊTE de l'edge : test hors-échantillon (le filtre conviction≥1.1
@@ -849,7 +1160,9 @@ async def _do_retraining(mois: int, label: str) -> None:
     t0 = datetime.now()
     async with AsyncSessionLocal() as session:
         # Construire le dataset
+        _log_rss(f"{label}.start")
         features_rows, resultats_dict = await _build_training_dataset_from_db(session, mois)
+        _log_rss(f"{label}.dataset_fetched", n_rows=len(features_rows))
         # Seuil abaissé à 300 : amorçage sur vraies courses (le synthétique sert de
         # prior tant qu'on a peu de données réelles ; il sera remplacé dès qu'on a
         # un vrai modèle, cf. override est_synthetique ci-dessous).
@@ -867,13 +1180,16 @@ async def _do_retraining(mois: int, label: str) -> None:
 
         # Libérer la liste brute (144k dicts × 173 clés ≈ 2-3 Go) : inutile une fois X
         # construit. Réduit le pic RAM (serveur 8 Go → OOM à la phase promotion sinon).
-        import gc
         del features_rows, resultats_dict
-        gc.collect()
+        # Rendu au NOYAU, pas seulement à la libc : sans malloc_trim ces gigas
+        # restent comptés dans le RSS et désignent le worker comme victime de
+        # l'OOM global bien après la fin du calcul.
+        _release_memory(f"{label}.dataset_freed")
 
         # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
         model = BlackTurfEnsemble()
         metrics = model.train(X, y, y_win)
+        _log_rss(f"{label}.trained")
         # Hold-out temporel (MÊME découpage que train()) conservé pour l'arbitrage
         # champion/challenger. ~20% des lignes en float32 = quelques dizaines de Mo :
         # négligeable face aux Go du dataset complet qu'on libère juste après.
@@ -884,7 +1200,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         # → on libère avant la phase métriques/edge_monitor pour ne pas cumuler le pic RAM.
         n_train_rows = len(X)
         del X, y, y_win, _hm
-        gc.collect()
+        _release_memory(f"{label}.matrices_freed")
 
         # Récupérer le modèle actif EN BASE pour une comparaison HONNÊTE.
         current_mv = (await session.execute(
@@ -944,8 +1260,28 @@ async def _do_retraining(mois: int, label: str) -> None:
         # Arbitrage champion/challenger sur un hold-out commun (cf. _head_to_head_auc).
         _h2h = await _head_to_head_auc(session, model, X_hold, y_hold, current_mv)
         del X_hold, y_hold
-        gc.collect()
+        _release_memory(f"{label}.holdout_freed")
         _h2h_delta = _h2h["delta"] if _h2h else None
+
+        # ── Écart au MARCHÉ (diagnostic 2026-08-20) ───────────────────────────
+        # Source préférée : le head-to-head, qui l'a mesuré sur l'échantillon
+        # hors-échantillon commun aux deux modèles. Repli : les folds walk-forward,
+        # disponibles même quand le h2h renonce faute de courses postérieures au
+        # champion (`h2h.sample_too_small`, le cas courant en régime normal).
+        _rank_delta_market = (_h2h or {}).get("delta_marche")
+        _rank_source = "h2h"
+        if _rank_delta_market is None:
+            _rank_delta_market = metrics.get("wf_rank_delta_market")
+            _rank_source = "walk_forward"
+        log.info(
+            "pipeline.retrain.rank_vs_marche",
+            delta_marche=round(_rank_delta_market, 4) if _rank_delta_market is not None else None,
+            source=_rank_source,
+            rank_auc=round(metrics["wf_rank_auc"], 4) if metrics.get("wf_rank_auc") is not None else None,
+            market_rank_auc=round(metrics["wf_market_rank_auc"], 4) if metrics.get("wf_market_rank_auc") is not None else None,
+            gate_actif=_AF.market_gate,
+            bat_le_marche=(_rank_delta_market > 0) if _rank_delta_market is not None else None,
+        )
 
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
         if _should_deploy(
@@ -957,6 +1293,9 @@ async def _do_retraining(mois: int, label: str) -> None:
             roi_gate_enabled=_AF.roi_deploy_gate,
             betting_edge_ok=_betting_edge_ok,
             h2h_delta=_h2h_delta,
+            market_gate_enabled=_AF.market_gate,
+            rank_delta_market=_rank_delta_market,
+            market_gate_margin=_AF.market_gate_margin,
         ):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
@@ -972,6 +1311,11 @@ async def _do_retraining(mois: int, label: str) -> None:
                 roi_simule=metrics["roi_simule"],
                 walk_forward_auc=metrics.get("walk_forward_auc"),
                 walk_forward_variance=metrics.get("walk_forward_variance"),
+                # Le couple qui dit si ce modèle mérite d'exister : son classement
+                # intra-course, celui de la cote sur les mêmes folds, et l'écart.
+                rank_auc=metrics.get("wf_rank_auc"),
+                market_rank_auc=metrics.get("wf_market_rank_auc"),
+                rank_delta_market=_rank_delta_market,
                 nb_courses_train=n_train_rows,
                 est_actif=True,
                 est_synthetique=False,  # entraîné sur de vraies courses
@@ -1065,6 +1409,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         if not features_list:
             log.warning("pipeline.predict.no_features", course_id=course_id)
             return None
+
+        # Identité et horodatage uniques du cycle complet. Tous les partants de la
+        # course partagent ces valeurs : une relance du même INSERT est idempotente,
+        # tandis qu'un nouveau calcul produit bien un nouvel état immuable.
+        _prediction_run_id = str(uuid.uuid4())
+        _prediction_observed_at = datetime.now(timezone.utc)
 
         # Sauvegarder les features en DB
         for feat in features_list:
@@ -1390,6 +1740,23 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception:
             _field_overround = None
 
+        # Heure de publication de la cote PAR LE PMU, par participation (migration
+        # 0033). Lue à part plutôt qu'ajoutée aux features : c'est une métadonnée de
+        # provenance, pas un signal d'entraînement — elle n'a rien à faire dans le
+        # vecteur du modèle. Absente (lignes antérieures à 0033, ou colonne pas
+        # encore migrée) → le snapshot retombe sur l'heure du calcul.
+        _odds_dt_by_pid: dict[str, datetime] = {}
+        try:
+            _odds_rows = (await session.execute(text("""
+                SELECT participation_id, cote_pmu_datetime
+                FROM participations
+                WHERE course_id = :cid AND cote_pmu_datetime IS NOT NULL
+            """), {"cid": course_id})).all()
+            _odds_dt_by_pid = {r[0]: r[1] for r in _odds_rows}
+        except Exception as e:
+            await session.rollback()
+            log.debug("pipeline.odds_datetime_unavailable", err=str(e)[:120])
+
         predictions = []
         for i, feat in enumerate(features_list):
             pid = feat.get("participation_id")
@@ -1454,6 +1821,32 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             ).returning(PredictionModel.prediction_id)
             result = await session.execute(stmt)
             pred_id = result.scalar_one_or_none() or pred_id
+
+            # Journal append-only exact de ce qui a réellement alimenté le prono.
+            # L'upsert historique ci-dessus reste la projection courante pour les
+            # lecteurs existants ; il ne constitue plus notre preuve temporelle.
+            snapshot_values = build_snapshot_values(
+                prediction_run_id=_prediction_run_id,
+                snapshot_id=str(uuid.uuid4()),
+                prediction_id=pred_id,
+                participation_id=pid,
+                course_id=course_id,
+                model_version_id=mv_id,
+                features=feat,
+                observed_at=_prediction_observed_at,
+                course_start_at=course.date_heure,
+                proba_top1=proba_t1,
+                proba_top3=proba_t3,
+                proba_top1_raw=_raw_vals.get("proba_top1_raw"),
+                proba_top3_raw=_raw_vals.get("proba_top3_raw"),
+                proba_top1_low=ci_low,
+                proba_top1_high=ci_high,
+                rang_predit=rang,
+                confidence_score=round(confidence * 100, 2),
+                cote_figee=feat.get("cote_pmu"),
+                odds_observed_at=_odds_dt_by_pid.get(pid),
+            )
+            await persist_snapshot_compat(session, snapshot_values)
 
             # Value bet — tous les bookmakers + suspension check
             cote_pmu     = feat.get("cote_pmu")
@@ -1795,15 +2188,6 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         return fiche
 
 
-async def _async_retrain_wrapper() -> None:
-    """Lance un retraining incrémental en tâche de fond (déclenché par drift critique)."""
-    try:
-        log.warning("pipeline.drift.retrain_triggered")
-        await run_incremental_retraining()
-    except Exception as e:
-        log.error("pipeline.drift.retrain_failed", err=str(e))
-
-
 # ─────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────
@@ -1867,8 +2251,14 @@ async def _build_training_dataset_from_db(
         if _AF.train_prerace_only else ""
     )
 
-    # Récupérer les features sauvegardées avec leurs labels
-    result = await session.execute(text(f"""
+    # Récupérer les features sauvegardées avec leurs labels.
+    #
+    # `session.stream()` et NON `session.execute()` : ce dernier fait remonter
+    # TOUT le résultat dans un buffer asyncpg avant la première ligne Python
+    # (~42 000 lignes portant chacune un JSONB de 173 clés). Le curseur serveur
+    # laisse Postgres garder le gros du résultat de son côté et ne matérialise
+    # qu'une partition à la fois.
+    result = await session.stream(text(f"""
         SELECT
             fm.features,
             h.position_arrivee,
@@ -1886,18 +2276,37 @@ async def _build_training_dataset_from_db(
         ORDER BY c.date_heure
     """), {"date_limite": date_limite})
 
-    rows = result.fetchall()
-    features_list = []
+    # `fetchall()` matérialisait TOUT le résultat (~42 000 lignes × un JSONB de
+    # 173 clés) puis la boucle en construisait une SECONDE copie via `dict()` :
+    # les deux vivaient simultanément, doublant le pic pour rien. On consomme
+    # désormais le curseur par blocs et on relâche chaque bloc au fur et à mesure,
+    # ce qui plafonne le surcoût à un bloc au lieu du dataset entier.
+    features_list: list[dict] = []
     resultats_dict: dict[str, dict] = {}
 
-    for feat_json, position, cheval_id, course_id in rows:
-        feat = dict(feat_json)
-        feat["cheval_id"] = cheval_id
-        features_list.append(feat)
+    async for partition in result.partitions(2000):
+        for feat_json, position, cheval_id, course_id in partition:
+            # asyncpg décode déjà le JSONB en dict neuf, propre à cette ligne :
+            # le `dict(feat_json)` d'origine en faisait une SECONDE copie qui
+            # cohabitait avec la première jusqu'à la fin de la boucle. On garde
+            # la conversion en secours pour le codec SQLite des tests, qui rend
+            # une chaîne.
+            if isinstance(feat_json, dict):
+                feat = feat_json
+            elif isinstance(feat_json, str):
+                import json as _json
+                feat = _json.loads(feat_json)
+            else:
+                feat = dict(feat_json)
+            feat["cheval_id"] = cheval_id
+            features_list.append(feat)
 
-        if course_id not in resultats_dict:
-            resultats_dict[course_id] = {}
-        resultats_dict[course_id][cheval_id] = int(position)
+            if course_id not in resultats_dict:
+                resultats_dict[course_id] = {}
+            resultats_dict[course_id][cheval_id] = int(position)
+        # La partition consommée doit mourir ici, sinon le curseur serveur ne
+        # sert à rien : on aurait juste déplacé le buffer du driver vers Python.
+        del partition
 
     return features_list, resultats_dict
 
@@ -2072,9 +2481,10 @@ async def _log_prediction_accuracy(session: AsyncSession, course_id: str, classe
     result = await session.execute(text("""
         SELECT pr.prediction_id, pr.rang_predit, pr.proba_top3,
                p.cheval_id
-        FROM predictions pr
+        FROM prediction_evaluation pr
         JOIN participations p ON pr.participation_id = p.participation_id
         WHERE pr.course_id = :cid
+          AND pr.is_replayable = true
     """), {"cid": course_id})
     predictions = result.fetchall()
 

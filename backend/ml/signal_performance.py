@@ -17,9 +17,18 @@ Aucune valeur inventée : tout vient des résultats réels ; signal absent → n
 from __future__ import annotations
 
 import json
+import math
+
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from ml.prediction_evaluation import (
+    MIN_EV_BAND_OBS,
+    MIN_EV_BAND_REPLAYABLE_OBS,
+    MIN_RAPPORT_CALIB_RUNS,
+    MIN_SIGNAL_PERF_OBS,
+)
 
 log = structlog.get_logger()
 
@@ -63,10 +72,59 @@ SIGNALS: dict = {
 }
 
 K_SHRINK = 40.0   # pseudo-paris (mise) shrinkant le ROI vers 0
+SIG_M_MIN, SIG_M_MAX = 0.6, 1.6   # bornes du multiplicateur d'un signal
+
+
+# ─────────────────────────────────────────────────────────────
+# Un signal se juge par rapport aux AUTRES CHEVAUX, pas par rapport à zéro
+# ─────────────────────────────────────────────────────────────
+# Le multiplicateur valait `1 + roi`, où `roi` est le rendement d'une mise plate sur
+# les chevaux qui portent le signal. Or le rendement d'une mise plate sur N'IMPORTE
+# QUEL cheval vaut environ −15 % (le prélèvement PMU du simple gagnant) : TOUS les
+# signaux sortent donc sous 1, et le produit de 4 à 6 d'entre eux s'écrase sur la
+# borne basse.
+#
+# Constat du 2026-08-23 sur 242 chevaux de 20 courses : **207 (86 %) recevaient
+# exactement 0,50**, la borne. Un multiplicateur constant ne trie plus rien — et
+# l'explication affichée à l'utilisateur annonçait « signaux mitigés, mise réduite »
+# sur presque chaque cheval, sans que la mise change puisque le facteur était commun.
+#
+# On mesure donc un signal RELATIVEMENT au rendement moyen de la population : un
+# signal à −15 % dans un monde à −15 % est neutre, pas mauvais.
+def _roi_reference(agg: dict) -> float:
+    """Rendement moyen de la population qui sert de zéro aux multiplicateurs.
+
+    Agrégé sur l'ensemble des observations de signaux : c'est exactement la même
+    mise plate, sur le même échantillon, donc le bon point de comparaison.
+    """
+    stake = sum(a["stake"] for a in agg.values())
+    payout = sum(a["payout"] for a in agg.values())
+    return ((payout - stake) / stake) if stake > 0 else 0.0
+
+
+def _multiplicateur_relatif(roi: float, roi_reference: float, n: int) -> float:
+    """Avantage du signal sur la population, ramené vers 1 quand l'échantillon est
+    mince, puis borné. Un signal exactement dans la moyenne rend 1.0."""
+    base = 1.0 + roi_reference
+    if base <= 0:
+        return 1.0
+    ratio = (1.0 + roi) / base
+    shrink = n / (n + K_SHRINK)          # peu d'observations → on reste près de 1
+    return float(max(SIG_M_MIN, min(SIG_M_MAX, 1.0 + (ratio - 1.0) * shrink)))
 
 
 async def compute_signal_performance(session: AsyncSession) -> dict:
-    rows = (await session.execute(text("""
+    # `stream()` + agrégation au fil de l'eau, et NON `fetchall()`.
+    # Cette requête ne porte aucune borne temporelle : elle ramène la table
+    # `features_ml` entière, soit 212 721 lignes portant chacune un JSONB de
+    # 173 clés. Matérialisée en dicts Python, elle pesait ~4 Gio — sur un hôte
+    # de 7,6 Gio partagés. C'est ici que le worker était en train de tourner
+    # quand l'OOM killer l'a choisi le 20/08/2026, et non dans l'entraînement
+    # (mesuré à 1,5 Gio de pic).
+    #
+    # La fonction n'est qu'un accumulateur de compteurs : elle n'a jamais eu
+    # besoin de voir deux lignes en même temps. Résultat strictement identique.
+    result = await session.stream(text("""
         SELECT fm.features, pa.cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
         FROM features_ml fm
@@ -79,42 +137,50 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
           -- → exclu. Sinon on apprend "ce qui rapporte" sur des features reconstruites
           -- a posteriori (fuite temporelle) qui pilotent ensuite les value bets en prod.
           AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
-    """))).fetchall()
+    """))
 
     agg = {name: {"n": 0, "wins": 0, "stake": 0.0, "payout": 0.0} for name in SIGNALS}
-    for feats, cote, win in rows:
-        f = feats if isinstance(feats, dict) else json.loads(feats)
-        cote = float(cote)
-        for name, pred in SIGNALS.items():
-            try:
-                if pred(f):
-                    a = agg[name]
-                    a["n"] += 1
-                    a["wins"] += int(win)
-                    a["stake"] += 1.0
-                    a["payout"] += cote if win else 0.0
-            except Exception:
-                continue
+    n_total = 0
+    async for partition in result.partitions(2000):
+        for feats, cote, win in partition:
+            n_total += 1
+            f = feats if isinstance(feats, dict) else json.loads(feats)
+            cote = float(cote)
+            for name, pred in SIGNALS.items():
+                try:
+                    if pred(f):
+                        a = agg[name]
+                        a["n"] += 1
+                        a["wins"] += int(win)
+                        a["stake"] += 1.0
+                        a["payout"] += cote if win else 0.0
+                except Exception:
+                    continue
+        # Sans ce `del`, le curseur serveur n'apporte rien : on aurait seulement
+        # déplacé l'accumulation du driver vers la liste de partitions.
+        del partition
 
+    roi_reference = _roi_reference(agg)
     signals = {}
     for name, a in agg.items():
         n = a["n"]
         if n == 0:
-            signals[name] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0, "multiplier": 1.0}
+            signals[name] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0,
+                             "multiplier": 1.0}
             continue
         roi = (a["payout"] - a["stake"]) / a["stake"]
         # ROI shrinké : (payout - stake) / (stake + K) → tend vers 0 si n petit
         roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + K_SHRINK)
-        # multiplicateur de conviction borné : 1 + roi_shrunk, clampé [0.6, 1.6]
-        mult = float(max(0.6, min(1.6, 1.0 + roi_shrunk)))
+        mult = _multiplicateur_relatif(roi, roi_reference, n)
         signals[name] = {
             "n": n,
             "win_rate": round(a["wins"] / n, 3),
             "roi": round(roi, 3),
             "roi_shrunk": round(roi_shrunk, 3),
+            "roi_reference": round(roi_reference, 3),
             "multiplier": round(mult, 3),
         }
-    return {"signals": signals, "n_total": len(rows)}
+    return {"signals": signals, "n_total": n_total, "roi_reference": round(roi_reference, 3)}
 
 
 def _profile_pnl(profil: str, win: int, top3: int, cote: float) -> tuple[float, float]:
@@ -139,7 +205,12 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
     """Comme compute_signal_performance mais PAR PROFIL (conservateur/équilibré/agressif),
     avec l'objectif propre à chaque profil → les multiplicateurs diffèrent par profil.
     → permet un pronostic adapté au profil sélectionné."""
-    rows = (await session.execute(text("""
+    # Même table entière que `compute_signal_performance`, ramenée une SECONDE
+    # fois dans la foulée : ces deux appels consécutifs du nightly faisaient à
+    # eux seuls l'essentiel du pic mémoire du worker. Ici la version d'origine
+    # était pire encore — elle construisait `parsed`, une TROISIÈME copie qui
+    # cohabitait avec `rows` le temps de la boucle.
+    result = await session.stream(text("""
         SELECT fm.features, pa.cote_pmu,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
                CASE WHEN pa.numero IN (
@@ -153,46 +224,54 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
         WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
           -- ANTI-LEAKAGE (cf. compute_signal_performance) : features pré-départ only.
           AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
-    """))).fetchall()
+    """))
 
     profils = ["conservateur", "equilibre", "agressif"]
     agg = {p: {name: {"n": 0, "stake": 0.0, "payout": 0.0, "hits": 0} for name in SIGNALS} for p in profils}
-    parsed = []
-    for feats, cote, win, top3 in rows:
-        f = feats if isinstance(feats, dict) else json.loads(feats)
-        parsed.append((f, float(cote), int(win), int(top3)))
-
-    for f, cote, win, top3 in parsed:
-        present = [name for name, pred in SIGNALS.items() if _safe(pred, f)]
-        for p in profils:
-            stake, payout = _profile_pnl(p, win, top3, cote)
-            if stake <= 0:
-                continue
-            success = top3 if p == "conservateur" else win
-            for name in present:
-                a = agg[p][name]
-                a["n"] += 1
-                a["stake"] += stake
-                a["payout"] += payout
-                a["hits"] += success
+    n_total = 0
+    async for partition in result.partitions(2000):
+        for feats, cote, win, top3 in partition:
+            n_total += 1
+            f = feats if isinstance(feats, dict) else json.loads(feats)
+            cote, win, top3 = float(cote), int(win), int(top3)
+            present = [name for name, pred in SIGNALS.items() if _safe(pred, f)]
+            for p in profils:
+                stake, payout = _profile_pnl(p, win, top3, cote)
+                if stake <= 0:
+                    continue
+                success = top3 if p == "conservateur" else win
+                for name in present:
+                    a = agg[p][name]
+                    a["n"] += 1
+                    a["stake"] += stake
+                    a["payout"] += payout
+                    a["hits"] += success
+        del partition
 
     out = {}
+    references = {}
     for p in profils:
         sig = {}
+        # Chaque profil a son propre zéro : le conservateur mise au placé, l'agressif
+        # ne joue que les cotes ≥ 6 — leurs rendements moyens n'ont rien à voir.
+        roi_reference = _roi_reference(agg[p])
+        references[p] = round(roi_reference, 3)
         for name, a in agg[p].items():
             if a["stake"] <= 0:
                 sig[name] = {"n": a["n"], "roi_shrunk": 0.0, "multiplier": 1.0, "hit_rate": None}
                 continue
+            roi = (a["payout"] - a["stake"]) / a["stake"]
             roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + K_SHRINK)
             sig[name] = {
                 "n": a["n"],
                 "hit_rate": round(a["hits"] / a["n"], 3) if a["n"] else None,
-                "roi": round((a["payout"] - a["stake"]) / a["stake"], 3),
+                "roi": round(roi, 3),
                 "roi_shrunk": round(roi_shrunk, 3),
-                "multiplier": round(float(max(0.6, min(1.6, 1.0 + roi_shrunk))), 3),
+                "roi_reference": round(roi_reference, 3),
+                "multiplier": round(_multiplicateur_relatif(roi, roi_reference, a["n"]), 3),
             }
         out[p] = sig
-    return {"profils": out, "n_total": len(rows)}
+    return {"profils": out, "n_total": n_total, "roi_reference": references}
 
 
 def _safe(pred, f) -> bool:
@@ -202,7 +281,20 @@ def _safe(pred, f) -> bool:
         return False
 
 
-async def persist_signal_performance(session: AsyncSession, perf: dict) -> None:
+async def persist_signal_performance(session: AsyncSession, perf: dict) -> bool:
+    """Persiste les multiplicateurs de signaux. False = état existant PRÉSERVÉ.
+
+    Cold start : la garde anti-leakage (features figées avant départ) peut ne
+    retenir aucune ligne. ``compute_signal_performance`` renvoie alors tous les
+    signaux à multiplier=1.0 — une structure complète, donc indiscernable d'un
+    apprentissage légitime une fois écrite. On refuse l'écriture sous le seuil.
+    """
+    if int(perf.get("n_total") or 0) < MIN_SIGNAL_PERF_OBS:
+        log.warning(
+            "signal_performance.skipped_insufficient_replayable_data",
+            n_obs=int(perf.get("n_total") or 0), min_obs=MIN_SIGNAL_PERF_OBS,
+        )
+        return False
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS signal_performance (
             id INT PRIMARY KEY DEFAULT 1,
@@ -216,6 +308,7 @@ async def persist_signal_performance(session: AsyncSession, perf: dict) -> None:
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
     """), {"d": json.dumps(perf)})
     await session.commit()
+    return True
 
 
 async def load_signal_performance(session: AsyncSession) -> dict | None:
@@ -255,7 +348,7 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
     rows = (await session.execute(text("""
         SELECT p.cote_figee, p.proba_top1,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
-        FROM predictions p
+        FROM prediction_evaluation p
         JOIN participations pa ON pa.participation_id = p.participation_id
         JOIN courses c ON c.course_id = p.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = p.course_id
@@ -263,6 +356,7 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
           AND p.proba_top1 IS NOT NULL AND jsonb_typeof(r.classement) = 'array'
           -- ANTI-LEAKAGE : prono FIGÉ avant le départ uniquement (cf. signal learner).
           AND c.date_heure IS NOT NULL AND p.created_at < c.date_heure
+          AND p.is_replayable = true
     """))).fetchall()
 
     agg = {f"{lo:.2f}_{hi:.2f}": {"n": 0, "wins": 0, "stake": 0.0, "payout": 0.0}
@@ -276,26 +370,46 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
         a["stake"] += 1.0
         a["payout"] += cote if win else 0.0
 
+    # Même correction que pour les signaux : une bande d'EV se juge par rapport aux
+    # AUTRES bandes, pas par rapport à zéro. Le ROI d'une mise plate sur n'importe
+    # quel partant vaut ~−20 % (prélèvement PMU), donc `1 + roi` mettait TOUTES les
+    # bandes sous 1 — mesuré le 2026-08-23 en prod : 0,667 à 0,808, aucune au-dessus.
+    # Or ce multiplicateur alimente un GATE DUR dans mise_calculator
+    # (`if evb(c) <= 0.80: return False`) : avec toutes les bandes sous 0,81, ce gate
+    # rejetait tout candidat spéculatif quelle que soit sa bande. Une interdiction
+    # generale deguisee en apprentissage.
+    roi_reference = _roi_reference(agg)
     bands = {}
     for key, a in agg.items():
         n = a["n"]
         if n == 0:
-            bands[key] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0, "multiplier": 1.0}
+            bands[key] = {"n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0,
+                          "multiplier": 1.0}
             continue
         roi = (a["payout"] - a["stake"]) / a["stake"]
         roi_shrunk = (a["payout"] - a["stake"]) / (a["stake"] + EV_K_SHRINK)
-        mult = float(max(0.5, min(1.6, 1.0 + roi_shrunk)))
+        reliable = n >= MIN_EV_BAND_OBS
+        mult = _multiplicateur_relatif(roi, roi_reference, n) if reliable else 1.0
         bands[key] = {
             "n": n,
             "win_rate": round(a["wins"] / n, 3),
             "roi": round(roi, 3),
             "roi_shrunk": round(roi_shrunk, 3),
+            "roi_reference": round(roi_reference, 3),
             "multiplier": round(mult, 3),
+            "reliable": reliable,
         }
-    return {"bands": bands, "n_total": len(rows)}
+    return {"bands": bands, "n_total": len(rows), "roi_reference": round(roi_reference, 3)}
 
 
-async def persist_ev_band_performance(session: AsyncSession, perf: dict) -> None:
+async def persist_ev_band_performance(session: AsyncSession, perf: dict) -> bool:
+    if int(perf.get("n_total") or 0) < MIN_EV_BAND_REPLAYABLE_OBS:
+        log.warning(
+            "ev_band_performance.skipped_insufficient_replayable_data",
+            n_obs=int(perf.get("n_total") or 0),
+            min_obs=MIN_EV_BAND_REPLAYABLE_OBS,
+        )
+        return False
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS ev_band_performance (
             id INT PRIMARY KEY DEFAULT 1,
@@ -309,6 +423,7 @@ async def persist_ev_band_performance(session: AsyncSession, perf: dict) -> None
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
     """), {"d": json.dumps(perf)})
     await session.commit()
+    return True
 
 
 async def load_ev_band_performance(session: AsyncSession) -> dict | None:
@@ -345,6 +460,21 @@ RC_K_SHRINK = 12.0          # pseudo-gagnants shrinkant le facteur vers 1.0 (ant
 RC_MIN_WINS = 8             # nb de gagnants min (avec estimé connu) avant d'appliquer un facteur
 RC_F_MIN, RC_F_MAX = 0.40, 1.30   # bornes du facteur (correction prudente)
 
+# ── Calibration des PROBABILITÉS de pari (mesurée le 2026-08-19) ────────────
+# Le modèle annonce systématiquement plus souvent qu'il ne réalise, et l'écart
+# grandit avec le nombre de chevaux à trouver : Simple Gagnant ×1,22 (10,9 %
+# annoncés, 8,9 % réels), Simple Placé ×1,23, Couplé Gagnant ×1,34, Couplé Placé
+# ×1,46, Trio ×2,26 — sur 19 968 paris réglés. L'EV en hérite : EV = p × rapport
+# − 1, donc une proba gonflée de 22 % transforme un vrai −10 % en un +10 % affiché.
+# C'est la cause première du ROI négatif, et la raison pour laquelle les bandes
+# d'EV ne classaient rien (toutes entre −8 % et −9 % de ROI réel).
+PC_MIN_PARIS = 200          # paris réglés minimum sur le type avant de corriger
+PC_K_SHRINK = 150.0         # pseudo-observations shrinkant le facteur vers 1.0
+# On ne corrige QUE vers le bas au-delà de 1.0 : gonfler une probabilité déjà
+# optimiste fabriquerait de faux value bets. Plancher à 0.5 (une proba divisée
+# par deux est déjà une correction massive).
+PC_F_MIN, PC_F_MAX = 0.50, 1.05
+
 
 def _bet_key(type_pari, chevaux) -> tuple:
     """Clé d'un pari = (type, numéros triés) pour matcher plan figé ⋈ bilan réglé."""
@@ -379,12 +509,16 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
         res = resultat if isinstance(resultat, dict) else json.loads(resultat)
         # rapport ESTIMÉ par pari, reconstruit depuis le plan figé (gain_potentiel/mise)
         est: dict = {}
+        proba_annoncee: dict = {}
         for niv in plan_d.get("niveaux", []):
             for p in niv.get("paris", []):
                 mise = float(p.get("mise") or 0)
+                cle = _bet_key(p.get("type"), p.get("chevaux"))
                 if mise > 0:
-                    est[_bet_key(p.get("type"), p.get("chevaux"))] = \
-                        float(p.get("gain_potentiel") or 0) / mise
+                    est[cle] = float(p.get("gain_potentiel") or 0) / mise
+                pr = p.get("probabilite")
+                if isinstance(pr, (int, float)) and 0.0 < float(pr) <= 1.0:
+                    proba_annoncee[cle] = float(pr)
         pa = agg.setdefault(profil, {})
         for p in res.get("paris", []):
             if p.get("statut") == "rembourse":
@@ -393,9 +527,16 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
             if not t:
                 continue
             ta = pa.setdefault(t, {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
-                                   "n": 0, "mise": 0.0, "gain": 0.0})
+                                   "n": 0, "mise": 0.0, "gain": 0.0,
+                                   "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0})
             ta["n"] += 1
             ta["mise"] += float(p.get("mise") or 0)
+            pr = proba_annoncee.get(_bet_key(t, p.get("chevaux")))
+            if pr is not None:
+                ta["n_proba"] += 1
+                ta["sum_proba"] += pr
+                if p.get("statut") == "gagne":
+                    ta["n_gagne_proba"] += 1
             if p.get("statut") == "gagne" and p.get("rapport_reel"):
                 re_ = est.get(_bet_key(t, p.get("chevaux")))
                 ta["gain"] += float(p.get("gain") or 0)
@@ -411,9 +552,29 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
             return float(max(RC_F_MIN, min(RC_F_MAX, 1.0 + (raw - 1.0) * w)))
         return 1.0                                            # échantillon insuffisant → neutre
 
+    def _proba_factor(a: dict) -> float:
+        """Fréquence RÉELLE / probabilité ANNONCÉE, shrinkée et bornée."""
+        n = a.get("n_proba", 0)
+        somme = a.get("sum_proba", 0.0)
+        if n < PC_MIN_PARIS or somme <= 0:
+            return 1.0                                        # jamais de correction à l'aveugle
+        annoncee = somme / n
+        reelle = a.get("n_gagne_proba", 0) / n
+        if annoncee <= 0:
+            return 1.0
+        brut = reelle / annoncee
+        w = n / (n + PC_K_SHRINK)                             # shrink vers 1.0 (anti petit n)
+        return float(max(PC_F_MIN, min(PC_F_MAX, 1.0 + (brut - 1.0) * w)))
+
     def _entry(a: dict) -> dict:
         return {
             "factor": round(_factor(a), 3),
+            "proba_factor": round(_proba_factor(a), 3),
+            "n_proba": a.get("n_proba", 0),
+            "proba_annoncee": (round(a["sum_proba"] / a["n_proba"], 4)
+                               if a.get("n_proba") else None),
+            "proba_reelle": (round(a["n_gagne_proba"] / a["n_proba"], 4)
+                             if a.get("n_proba") else None),
             "n_win": a["n_win"], "n": a["n"],
             "real_mean": round(a["sum_real"] / a["n_win"], 2) if a["n_win"] else None,
             "est_mean": round(a["sum_est"] / a["n_win"], 2) if a["n_win"] else None,
@@ -432,7 +593,8 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
         for t, a in types.items():
             po[t] = _entry(a)
             g = glob.setdefault(t, {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
-                                    "n": 0, "mise": 0.0, "gain": 0.0})
+                                    "n": 0, "mise": 0.0, "gain": 0.0,
+                                    "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0})
             for k in g:
                 g[k] += a[k]
         out["profils"][profil] = po
@@ -441,7 +603,49 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
     return out
 
 
-async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> None:
+# ── Ne JAMAIS effacer une table annexe qu'on ne recalcule pas ────────────────────
+# La ligne `rapport_calibration` porte plusieurs apprentissages FUSIONNÉS (choix
+# assumé de l'appelant nightly : la table est déjà chargée et transmise partout où
+# un plan se construit) — la calibration estimé→réel, ET le ROI par TRANCHE DE
+# RAPPORT (`payout_buckets`), que `mise_calculator.conviction()` décrit comme « de
+# loin le facteur le mieux étayé ».
+#
+# Deux chemins écrivent ici. Le nightly calcule les deux et écrit le tout. Le chemin
+# POST-COURSE (pipeline, après CHAQUE arrivée) ne recalcule que la calibration et
+# écrasait donc `payout_buckets` quelques minutes après le nightly. Constat du
+# 2026-08-23 : la clé était tout simplement ABSENTE de la table en prod, donc
+# `payout_bucket_multiplier` renvoyait 1.0 sur chaque candidat — le tilt n'a JAMAIS
+# agi, sans un seul signal d'erreur.
+CLES_ANNEXES_PRESERVEES = ("payout_buckets",)
+
+
+def fusionner_cles_preservees(perf: dict, ancien: dict | None) -> dict:
+    """Reporte les clés annexes que l'écrivain courant n'apporte pas.
+
+    Un appelant qui RECALCULE la clé la remplace normalement : le report ne fige
+    jamais une valeur périmée, il empêche seulement de l'effacer.
+    """
+    out = dict(perf or {})
+    for cle in CLES_ANNEXES_PRESERVEES:
+        if cle not in out and cle in (ancien or {}):
+            out[cle] = ancien[cle]
+    return out
+
+
+async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> bool:
+    """Persiste la calibration estimé→réel des rapports. False = état PRÉSERVÉ.
+
+    Source : ``profil_run_log`` réglé, filtré par les gardes anti-leakage. Si ce
+    filtre ne laisse plus rien (règlement en retard, backfills exclus), les
+    facteurs retombent tous à 1.0 et le gate de bande cesserait d'écarter les
+    types qui paient sous la tranche de leur profil.
+    """
+    if int(perf.get("n_runs") or 0) < MIN_RAPPORT_CALIB_RUNS:
+        log.warning(
+            "rapport_calibration.skipped_insufficient_replayable_data",
+            n_runs=int(perf.get("n_runs") or 0), min_runs=MIN_RAPPORT_CALIB_RUNS,
+        )
+        return False
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS rapport_calibration (
             id INT PRIMARY KEY DEFAULT 1,
@@ -450,11 +654,19 @@ async def persist_rapport_calibration(session: AsyncSession, perf: dict) -> None
             CONSTRAINT rapport_calib_singleton CHECK (id = 1)
         )
     """))
+    if any(k not in perf for k in CLES_ANNEXES_PRESERVEES):
+        ancien = (await session.execute(text(
+            "SELECT data FROM rapport_calibration WHERE id=1"))).first()
+        ancien_d = (ancien[0] if ancien else None) or {}
+        if isinstance(ancien_d, str):
+            ancien_d = json.loads(ancien_d)
+        perf = fusionner_cles_preservees(perf, ancien_d)
     await session.execute(text("""
         INSERT INTO rapport_calibration (id, data, updated_at) VALUES (1, :d, now())
         ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
     """), {"d": json.dumps(perf)})
     await session.commit()
+    return True
 
 
 async def load_rapport_calibration(session: AsyncSession) -> dict | None:
@@ -482,6 +694,211 @@ def rapport_realization_factor(profil: str | None, type_pari: str | None,
     return float((g or {}).get("factor", 1.0) or 1.0)
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROI RÉEL PAR TRANCHE DE RAPPORT (mesuré le 2026-08-19 sur 19 972 paris réglés)
+# ─────────────────────────────────────────────────────────────────────────────
+# Le biais favori/outsider, dans NOS propres chiffres :
+#
+#   Simple Gagnant  ×4-8   -1,7 %   (1 458 paris, 10 324 €)
+#   Simple Gagnant  ×8-15  -8,2 %   (2 336 paris)
+#   Simple Gagnant  ≥×15  -15,4 %   (2 436 paris)
+#   Simple Placé    <×2    -6,2 %
+#   Simple Placé    ×2-4   -7,5 %
+#   Simple Placé    ×4-8  -25,0 %
+#
+# Monotone dans les deux types, sur de gros échantillons, et sans dépendre d'un
+# gros gain isolé : c'est le signal le plus solide dont nous disposions. La bande
+# d'EV, elle, ne trie RIEN (toutes les bandes entre -8 % et -13 % de ROI réel),
+# parce que sélectionner sur l'edge estimé revient à sélectionner sur l'erreur
+# d'estimation.
+#
+# On en fait un TILT, pas une barrière : le contrat produit (tranche de rapport
+# par profil, un plan sur chaque course) reste intact, seule la préférence entre
+# candidats d'une même course bouge.
+# La grille est fine AU-DESSUS de ×15 parce que c'est là que vit le profil
+# risqué (bande ×10 → ∞) et que l'écart y est le plus violent : ×15-30 rend
+# -14,6 %, ×30-60 -21,5 %, ≥×60 -64,7 %. Une tranche ≥×15 unique donnait le même
+# multiplicateur à un ×20 et à un ×200 — le tilt ne pouvait pas trier là où le
+# profil risqué joue justement tous ses paris.
+PB_BUCKETS = ((0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 15.0),
+              (15.0, 30.0), (30.0, 60.0), (60.0, 1e9))
+PB_MIN_PARIS = 150          # sous ce volume, le ROI d'une tranche est du bruit
+# L'incertitude n'est PAS symétrique, et c'est le point clé.
+#
+# Affirmer qu'une tranche est BONNE repose sur des gains rares et gros : la preuve
+# tient donc au nombre de GAGNANTS. Couplé Gagnant ×15-30 affichait +10,9 % sur
+# 836 paris mais ~33 gagnants — retirer ses 20 meilleurs gains le ramène à -38,8 %.
+#
+# Affirmer qu'une tranche est MAUVAISE ne demande pas de gagnants : 1 849 paris
+# qui rendent -66 % établissent la perte, quel que soit le nombre de gains. Le
+# doute ne porte que sur la queue haute, jamais sur le fait que l'argent n'est
+# pas revenu.
+#
+# On shrinke donc le HAUT sur les gagnants et le BAS sur les paris. Une première
+# version, shrinkée uniformément sur les gagnants, ramenait Trio ≥×60 (-62,9 %) à
+# un tilt de 0,952 : la pire tranche mesurée devenait presque neutre.
+PB_K_SHRINK_GAGNANTS = 60.0   # pseudo-gagnants — pour FAVORISER une tranche
+PB_K_SHRINK_PARIS = 200.0     # pseudo-paris — pour PÉNALISER une tranche
+PB_M_MIN, PB_M_MAX = 0.60, 1.40
+# WINSORISATION — sans elle, un unique gain aberrant commande la tranche entière.
+# Vécu au premier calcul : le Trio ≥×15 affichait +106 % de ROI et décrochait le
+# tilt MAXIMAL (1,40) grâce à UN rapport à 4 526 € ; retirer ce seul pari fait
+# tomber la tranche à −21 %. Le système aurait donc été poussé vers le billet de
+# loterie par un coup de chance. On plafonne chaque gain à 50× la mise (même
+# convention que le ROI winsorisé des poids de profil).
+PB_GAIN_CAP = 50.0
+# Un multiplicateur SUPÉRIEUR à 1 pousse à jouer davantage cette tranche : on ne
+# l'accorde qu'avec assez de gagnants pour que le ROI ne soit pas l'histoire de
+# quelques coups. En dessous, la tranche peut être pénalisée (le manque de
+# gagnants est en soi une information) mais jamais favorisée.
+#
+# Seuil relevé à 150 après vérification : Couplé Gagnant ×15-30 affichait +10,9 %
+# sur 836 paris — mais retirer ses 20 meilleurs gains le ramène à -38,8 %. Une
+# cellule à faible taux de réussite ne prouve RIEN de positif à cette échelle ;
+# seules les cellules à forte fréquence (Simple Placé ~37 %, Simple Gagnant ~16 %)
+# accumulent assez de gagnants pour qu'un ROI proche de zéro soit crédible.
+PB_MIN_WINS_POUR_FAVORISER = 150
+
+
+def _pb_key(rapport: float) -> str:
+    for lo, hi in PB_BUCKETS:
+        if lo <= rapport < hi:
+            return f"{lo:g}_{hi:g}"
+    return f"{PB_BUCKETS[-1][0]:g}_{PB_BUCKETS[-1][1]:g}"
+
+
+async def compute_payout_bucket_performance(session: AsyncSession) -> dict:
+    """ROI réel par (type de pari × tranche de rapport), depuis `profil_run_log`.
+
+    Le rapport retenu est celui ESTIMÉ au moment du conseil (gain_potentiel/mise),
+    pas le rapport réel : c'est la seule valeur connue à l'instant de la décision,
+    donc la seule sur laquelle on puisse arbitrer sans tricher.
+    """
+    rows = (await session.execute(text("""
+        SELECT r.plan, r.resultat
+        FROM profil_run_log r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE r.statut = 'settled' AND r.resultat IS NOT NULL AND r.plan IS NOT NULL
+          AND c.date_heure IS NOT NULL AND r.created_at < c.date_heure
+    """))).all()
+
+    agg: dict = {}
+    for plan, resultat in rows:
+        plan_d = plan if isinstance(plan, dict) else json.loads(plan)
+        res = resultat if isinstance(resultat, dict) else json.loads(resultat)
+        rapport_par_pari: dict = {}
+        for niv in plan_d.get("niveaux", []):
+            for pb in niv.get("paris", []):
+                mise = float(pb.get("mise") or 0)
+                if mise > 0:
+                    rapport_par_pari[_bet_key(pb.get("type"), pb.get("chevaux"))] = \
+                        float(pb.get("gain_potentiel") or 0) / mise
+        for pari in res.get("paris", []):
+            if pari.get("statut") == "rembourse":
+                continue
+            t = pari.get("type")
+            rapport = rapport_par_pari.get(_bet_key(t, pari.get("chevaux")))
+            if not t or not rapport or rapport <= 0:
+                continue
+            cle = (t, _pb_key(rapport))
+            a = agg.setdefault(cle, {"n": 0, "mise": 0.0, "gain": 0.0, "n_wins": 0})
+            mise = float(pari.get("mise") or 0)
+            gain = float(pari.get("gain") or 0)
+            a["n"] += 1
+            a["mise"] += mise
+            # Gain plafonné : une tranche ne doit pas être jugée sur un coup isolé.
+            a["gain"] += min(gain, PB_GAIN_CAP * mise) if mise > 0 else gain
+            if gain > 0:
+                a["n_wins"] += 1
+
+    out: dict = {"types": {}, "n_runs": len(rows)}
+    for (t, bucket), a in agg.items():
+        roi = ((a["gain"] - a["mise"]) / a["mise"]) if a["mise"] > 0 else None
+        if a["n"] >= PB_MIN_PARIS and roi is not None:
+            # ROI de -30 % → 0.70, ROI de 0 % → 1.0, borné puis shrinké.
+            brut = 1.0 + roi
+            if brut >= 1.0:
+                w = a["n_wins"] / (a["n_wins"] + PB_K_SHRINK_GAGNANTS)
+            else:
+                w = a["n"] / (a["n"] + PB_K_SHRINK_PARIS)
+            mult = max(PB_M_MIN, min(PB_M_MAX, 1.0 + (brut - 1.0) * w))
+            if mult > 1.0 and a["n_wins"] < PB_MIN_WINS_POUR_FAVORISER:
+                mult = 1.0                   # trop peu de gagnants pour encourager
+        else:
+            mult = 1.0                       # échantillon insuffisant → neutre
+        out["types"].setdefault(t, {})[bucket] = {
+            "multiplier": round(mult, 3),
+            "n": a["n"],
+            "n_wins": a["n_wins"],
+            "roi_winsorise": round(roi * 100, 1) if roi is not None else None,
+        }
+    return out
+
+
+async def persist_payout_bucket_performance(session: AsyncSession, perf: dict) -> bool:
+    """Persiste la table. False = état PRÉSERVÉ (échantillon trop mince)."""
+    if int(perf.get("n_runs") or 0) < MIN_RAPPORT_CALIB_RUNS:
+        log.warning("payout_bucket.skipped_insufficient_data",
+                    n_runs=int(perf.get("n_runs") or 0))
+        return False
+    await session.execute(text("""
+        CREATE TABLE IF NOT EXISTS payout_bucket_performance (
+            id INT PRIMARY KEY DEFAULT 1,
+            data JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT payout_bucket_singleton CHECK (id = 1)
+        )
+    """))
+    await session.execute(text("""
+        INSERT INTO payout_bucket_performance (id, data, updated_at) VALUES (1, :d, now())
+        ON CONFLICT (id) DO UPDATE SET data = :d, updated_at = now()
+    """), {"d": json.dumps(perf)})
+    await session.commit()
+    return True
+
+
+async def load_payout_bucket_performance(session: AsyncSession) -> dict | None:
+    try:
+        r = (await session.execute(text(
+            "SELECT data FROM payout_bucket_performance WHERE id=1"))).first()
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
+def payout_bucket_multiplier(type_pari: str | None, rapport: float | None,
+                             perf: dict | None) -> float:
+    """Tilt de conviction selon le ROI historique de cette tranche de rapport.
+    1.0 (neutre) sans table, type inconnu ou échantillon insuffisant."""
+    if not perf or not type_pari or not rapport or rapport <= 0:
+        return 1.0
+    # La table voyage fusionnee dans `rapport_calibration` (deja charge et passe
+    # partout ou un plan se construit) : la router par un nouveau parametre aurait
+    # demande de modifier cinq appelants, dont un oubli aurait suffi a desactiver
+    # le tilt sans que rien ne le signale.
+    tables = perf.get("payout_buckets") or perf.get("types") or {}
+    t = tables.get(type_pari)
+    if not t:
+        return 1.0
+    e = t.get(_pb_key(float(rapport)))
+    return float((e or {}).get("multiplier", 1.0) or 1.0)
+
+
+def proba_realization_factor(type_pari: str | None, calib: dict | None) -> float:
+    """Facteur annoncé→réel de la PROBABILITÉ d'un type de pari.
+
+    Lu sur le POOL GLOBAL uniquement : la fréquence à laquelle un Couplé tombe ne
+    dépend pas du profil qui le joue, et découper par profil diviserait
+    l'échantillon sans rien apprendre de plus. 1.0 (neutre) si la table manque ou
+    si l'échantillon est trop mince — jamais de correction inventée.
+    """
+    if not calib or not type_pari:
+        return 1.0
+    g = (calib.get("global") or {}).get(type_pari)
+    return float((g or {}).get("proba_factor", 1.0) or 1.0)
+
+
 def signal_multiplier(features: dict, perf: dict | None, profil: str | None = None) -> float:
     """Multiplicateur de conviction d'un partant = produit (borné) des multiplicateurs
     des signaux qu'il porte, appris du ROI réel. PROFILE-AWARE : si `profil` fourni et
@@ -496,11 +913,23 @@ def signal_multiplier(features: dict, perf: dict | None, profil: str | None = No
         sigs = perf["signals"]
     if not sigs:
         return 1.0
-    m = 1.0
+    # MOYENNE GÉOMÉTRIQUE, pas produit. Le produit fait payer au cheval le NOMBRE de
+    # signaux qu'il porte : six facteurs à 0,9 donnent 0,53 alors que chaque signal pris
+    # séparément ne dit « −10 % » qu'une fois. Combiné à des multiplicateurs tous < 1
+    # (cf. _multiplicateur_relatif), 86 % des chevaux tombaient sur la borne basse le
+    # 2026-08-23 — le tilt ne triait plus rien. La moyenne géométrique garde le sens
+    # (un signal neutre ne change rien, deux mauvais pèsent plus qu'un) sans que porter
+    # beaucoup de signaux soit en soi une faute.
+    mults = []
     for name, pred in SIGNALS.items():
         try:
             if pred(features) and name in sigs:
-                m *= sigs[name].get("multiplier", 1.0)
+                m = float(sigs[name].get("multiplier", 1.0) or 1.0)
+                if m > 0:
+                    mults.append(m)
         except Exception:
             continue
-    return float(max(0.5, min(2.0, m)))
+    if not mults:
+        return 1.0
+    moyenne = math.exp(sum(math.log(m) for m in mults) / len(mults))
+    return float(max(0.5, min(2.0, moyenne)))

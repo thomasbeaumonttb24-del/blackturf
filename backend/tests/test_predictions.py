@@ -32,7 +32,7 @@ async def _seed_course_with_predictions(db: AsyncSession) -> tuple[str, str]:
         reunion_id="R99",
         numero=1,
         nom="Prix Prédiction",
-        date_heure=datetime.now(timezone.utc).replace(hour=15),
+        date_heure=datetime.now(timezone.utc),
         hippodrome_nom="Vincennes Test",
         discipline="Plat",
         distance=2000,

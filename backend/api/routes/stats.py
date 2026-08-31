@@ -4,6 +4,7 @@ Métriques du modèle + courbe équité simulée + ML monitoring.
 Cache Redis pour éviter requêtes lourdes répétées.
 """
 import json
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -22,8 +23,9 @@ from db.redis_client import get_redis
 from db.models import (
     ModelVersion, Course, User, ValueBet, Participation,
     Resultat, Cheval, AdaptiveLearningState, DriftDetectorState,
-    BankrollEntry, Recommandation, Prediction, RaceLearningLog,
+    BankrollEntry, Recommandation, PredictionEvaluation, RaceLearningLog,
 )
+from services.course_resolution import STATUTS_NON_COURUES
 import redis.asyncio as aioredis
 
 log = structlog.get_logger()
@@ -41,6 +43,44 @@ async def _cache_get(redis: aioredis.Redis, key: str) -> Any | None:
 async def _cache_set(redis: aioredis.Redis, key: str, data: Any, ttl: int) -> None:
     try:
         await redis.setex(key, ttl, json.dumps(data, default=str))
+    except Exception:
+        pass
+
+
+# ── Cache « stale-while-revalidate » ─────────────────────────────────────────
+# Pourquoi (panne Palmarès du 2026-08-18) : /stats/track-record coûte ~29 s à froid
+# alors que le client axios coupe à 15 s. Avec un TTL unique, l'expiration rendait la
+# page DÉFINITIVEMENT inutilisable pendant toute la fenêtre froide — chaque tentative
+# dépassait le timeout et `refreshInterval: 60_000` relançait à l'infini, donc
+# skeleton perpétuel. `job_warm_caches` ne rattrapait rien : cache encore chaud →
+# l'endpoint renvoyait tôt SANS réécrire la clé, le TTL n'était jamais prolongé et
+# l'expiration tombait à une heure décorrélée du cron /30 min.
+#
+# On découple donc conservation et fraîcheur : la charge utile survit `stale_ttl`, un
+# drapeau séparé porte la fraîcheur. Périmé mais présent → on sert immédiatement la
+# version précédente et on recalcule en fond. L'utilisateur n'attend jamais le calcul
+# froid ; seul un Redis totalement vide bloque, une seule fois.
+_SWR_STALE_TTL = 86400  # 24 h de conservation de secours
+
+
+async def _cache_get_swr(redis: aioredis.Redis, key: str) -> tuple[Any | None, bool]:
+    """Renvoie (charge_utile ou None, est_frais)."""
+    try:
+        raw = await redis.get(key)
+        if not raw:
+            return None, False
+        frais = await redis.exists(f"{key}:fresh")
+        return json.loads(raw), bool(frais)
+    except Exception:
+        return None, False
+
+
+async def _cache_set_swr(redis: aioredis.Redis, key: str, data: Any,
+                         fresh_ttl: int, stale_ttl: int = _SWR_STALE_TTL) -> None:
+    try:
+        payload = json.dumps(data, default=str)
+        await redis.setex(key, stale_ttl, payload)
+        await redis.setex(f"{key}:fresh", fresh_ttl, "1")
     except Exception:
         pass
 
@@ -73,10 +113,10 @@ async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float
     courbe d'équité ET le ROI simulé 6 mois. is_real=False si < 10 paris."""
     since = datetime.now(timezone.utc) - timedelta(days=since_days)
     rows = (await db.execute(
-        select(ValueBet, Participation, Course, Resultat, Prediction)
+        select(ValueBet, Participation, Course, Resultat, PredictionEvaluation)
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
         .join(Course, Course.course_id == ValueBet.course_id)
-        .outerjoin(Prediction, Prediction.prediction_id == ValueBet.prediction_id)
+        .outerjoin(PredictionEvaluation, PredictionEvaluation.prediction_id == ValueBet.prediction_id)
         .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
         .where(
             ValueBet.niveau >= 3,
@@ -86,6 +126,9 @@ async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float
             # départ. Sinon = pari reconstruit a posteriori sur une course connue
             # (in-sample) → ROI gonflé.
             ValueBet.detecte_a < Course.date_heure,
+            PredictionEvaluation.created_at.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+            PredictionEvaluation.is_replayable.is_(True),
         )
         .order_by(Course.date_heure)
         .limit(500)
@@ -334,7 +377,7 @@ async def dashboard_summary(
         select(func.count(Course.course_id)).where(
             Course.date_heure >= today_start,
             Course.date_heure < today_end,
-            Course.statut != "annule",
+            Course.statut.notin_(STATUTS_NON_COURUES),  # annulées / jamais résultées
         )
     )).scalar() or 0
 
@@ -609,6 +652,17 @@ async def perf_personnelle(
 # Track-record IA (public, cache 1h)
 # ─────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────
+# Track record (page publique Palmarès) — calcul lourd, cache SWR
+# ─────────────────────────────────────────────────────────────
+TRACK_RECORD_CACHE_KEY = "stats:track-record"
+TRACK_RECORD_FRESH_TTL = 3600   # 1 h de fraîcheur
+
+# Références fortes sur les tâches de fond : sans ça, asyncio peut collecter une
+# tâche non référencée avant sa fin (le recalcul serait tué en cours de route).
+_bg_tasks: set = set()
+
+
 @router.get("/stats/track-record")
 async def track_record(
     db: AsyncSession = Depends(get_db),
@@ -616,13 +670,91 @@ async def track_record(
 ):
     """
     Performance historique de l'IA — page publique marketing.
-    Cache Redis 1h.
+
+    Cache « stale-while-revalidate » : le calcul complet coûte ~29 s (mesuré en prod
+    le 2026-08-18) pour un client qui abandonne à 15 s. On ne le fait donc JAMAIS
+    dans le chemin d'une requête utilisateur tant qu'une version antérieure existe.
     """
-    CACHE_KEY = "stats:track-record"
-    cached = await _cache_get(redis, CACHE_KEY)
-    if cached:
+    cached, frais = await _cache_get_swr(redis, TRACK_RECORD_CACHE_KEY)
+    if cached is not None and frais:
+        return cached
+    if cached is not None:
+        # Périmé mais exploitable : réponse immédiate, recalcul en arrière-plan.
+        task = asyncio.create_task(refresh_track_record_cache())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
         return cached
 
+    # Aucune version en cache (Redis vide / premier démarrage) : on paie le calcul.
+    result = await _compute_track_record(db)
+    await _cache_set_swr(redis, TRACK_RECORD_CACHE_KEY, result,
+                         fresh_ttl=TRACK_RECORD_FRESH_TTL)
+    return result
+
+
+async def refresh_track_record_cache() -> bool:
+    """Recalcule le track record et réécrit son cache. True si réécrit.
+
+    Appelé (a) en tâche de fond quand un utilisateur a reçu une version périmée,
+    (b) par `job_warm_caches`, pour renouveler la fraîcheur AVANT expiration :
+    l'ancien job tapait l'endpoint en HTTP, qui lui renvoyait le cache chaud sans
+    rien réécrire — il ne prolongeait donc jamais le TTL.
+
+    Verrou Redis : le calcul martèle la base ~29 s ; sans verrou, N requêtes périmées
+    simultanées déclencheraient N recalculs concurrents.
+    """
+    from db.database import AsyncSessionLocal
+    from db.redis_client import get_redis as _get_redis
+
+    lock_key = f"{TRACK_RECORD_CACHE_KEY}:lock"
+    try:
+        redis = await _get_redis()
+        verrou = await redis.set(lock_key, "1", ex=300, nx=True)
+    except Exception as e:
+        log.warning("stats.track_record.refresh_lock_failed", error=str(e)[:200])
+        return False
+    if not verrou:
+        return False            # un recalcul est déjà en cours ailleurs
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await _compute_track_record(session)
+        await _cache_set_swr(redis, TRACK_RECORD_CACHE_KEY, result,
+                             fresh_ttl=TRACK_RECORD_FRESH_TTL)
+        log.info("stats.track_record.refreshed")
+        return True
+    except Exception as e:
+        log.warning("stats.track_record.refresh_failed", error=str(e)[:200])
+        return False
+    finally:
+        try:
+            await redis.delete(lock_key)
+        except Exception:
+            pass
+
+
+async def _compute_track_record(db: AsyncSession) -> dict:
+    """Calcul complet du track record (~29 s en prod). Ne jamais appeler depuis une
+    requête utilisateur tant qu'une version en cache existe (cf. `track_record`).
+
+    COHORTE MESURÉE — une course compte dans les taux publiés si, et seulement si,
+    sa prédiction existait AVANT le départ (`p.created_at < c.date_heure`) : c'est
+    la garde anti-backfill, la même que celle du palmarès des gains.
+
+    `is_replayable` n'est VOLONTAIREMENT pas exigé (retiré le 19/08). Ce drapeau
+    (migration 0030) distingue le snapshot immuable — rejouable en backtest — de la
+    ligne `predictions` héritée, mutable : c'est une propriété de REJOUABILITÉ, pas
+    d'intégrité temporelle. L'exiger réduisait le palmarès PUBLIC aux courses
+    postérieures au 18/08 — 44 courses, dont 4 en monté — alors que 3 627 courses
+    pré-course sont mesurées depuis le 06/06 : la page annonçait « 19 courses
+    analysées » en attelé pour 1 598 réelles.
+
+    Pourquoi la cohorte longue n'est pas contaminée : `race_learning_log` est écrit
+    JUSTE APRÈS l'arrivée à partir des prédictions du moment (le cycle de prédiction
+    s'arrête à T-10 min), donc une mutation ultérieure d'une ligne `predictions` ne
+    peut pas réécrire un rang déjà journalisé. Contrôle en base le 19/08 : la cohorte
+    héritée mesure 55-66 % de Top-3 et 31,9 % de favoris gagnants, contre 62-75 % et
+    34,8 % pour la cohorte rejouable — l'historique long est PLUS SÉVÈRE, pas gonflé.
+    Le compte strict reste publié à part (`global.nb_courses_rejouables`)."""
     # ── 1. Précision globale depuis race_learning_log ─────────
     # Agrégats en SQL (PAS de chargement de toute la table en mémoire : elle grossit
     # d'une ligne par course analysée → des dizaines de milliers de lignes = page lente).
@@ -632,14 +764,63 @@ async def track_record(
                COUNT(*) FILTER (WHERE gagnant_rang_predit = 1)                AS top1,
                COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
                                   AND gagnant_rang_predit <= 3)               AS top3,
-               COUNT(*) FILTER (WHERE was_surprise)                           AS surprises
+               COUNT(*) FILTER (WHERE was_surprise)                           AS surprises,
+               -- Repère « hasard » CALCULÉ, jamais posé à la main : espérance d'un
+               -- tirage au sort sur le champ réel de chaque course (3 chevaux sur
+               -- nb_partants pour le Top-3, 1 sur nb_partants pour le Top-1). Sans
+               -- lui, « 59,8 % » ne dit pas au lecteur ce qu'il bat.
+               AVG(CASE WHEN nb_partants > 0
+                        THEN LEAST(3.0, nb_partants::numeric) / nb_partants END)  AS hasard3,
+               AVG(CASE WHEN nb_partants > 0
+                        THEN 1.0 / nb_partants END)                              AS hasard1,
+               AVG(nb_partants)                                                  AS partants
         FROM race_learning_log
+        WHERE EXISTS (
+            SELECT 1 FROM prediction_evaluation p
+            JOIN courses c ON c.course_id = p.course_id
+            WHERE p.course_id = race_learning_log.course_id
+              AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+              AND p.created_at < c.date_heure
+        )
     """))).first()
     nb_total = int(_glob.nb or 0)
+    # Depuis QUAND ces taux sont-ils mesurés ? Le read-model ne retient que la cohorte
+    # rejouable (snapshots pré-course), qui a commencé le 2026-08-18 : sans cette date,
+    # la page publique affiche un pourcentage sans dire qu'il porte sur quelques jours.
+    _depuis = (await db.execute(text("""
+        SELECT MIN(c.date_heure)
+        FROM race_learning_log r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE c.date_heure IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              WHERE p.course_id = r.course_id
+                AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+          )
+    """))).scalar()
+    mesure_depuis = _depuis.date().isoformat() if _depuis else None
+    # Sous-ensemble STRICT : courses dont le pronostic est figé dans un snapshot
+    # immuable (rejouable à l'identique en backtest). Publié à côté du compte
+    # mesuré pour que « vérifiable » garde un chiffre, sans amputer l'historique.
+    nb_rejouables = int((await db.execute(text("""
+        SELECT COUNT(*) FROM race_learning_log r
+        WHERE EXISTS (
+            SELECT 1 FROM prediction_evaluation p
+            JOIN courses c ON c.course_id = p.course_id
+            WHERE p.course_id = r.course_id
+              AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+              AND p.created_at < c.date_heure
+              AND p.is_replayable = true
+        )
+    """))).scalar() or 0)
     brier_moyen = round(float(_glob.brier), 4) if _glob.brier is not None else 0.0
     accuracy_top1 = round(int(_glob.top1 or 0) / nb_total * 100, 1) if nb_total else 0.0
     accuracy_top3 = round(int(_glob.top3 or 0) / nb_total * 100, 1) if nb_total else 0.0
     nb_surprises = int(_glob.surprises or 0)
+    hasard_top3 = round(float(_glob.hasard3) * 100, 1) if _glob.hasard3 is not None else None
+    hasard_top1 = round(float(_glob.hasard1) * 100, 1) if _glob.hasard1 is not None else None
+    partants_moyen = round(float(_glob.partants), 1) if _glob.partants is not None else None
 
     # ── 2. Par jour (7 derniers jours, fuseau Europe/Paris) ──
     # Coupure de journée à minuit heure française (pas UTC) → group by date FR en SQL.
@@ -666,6 +847,13 @@ async def track_record(
                COUNT(*) FILTER (WHERE was_surprise)                           AS surprises
         FROM race_learning_log
         WHERE analyzed_at IS NOT NULL AND analyzed_at >= :since
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              JOIN courses c ON c.course_id = p.course_id
+              WHERE p.course_id = race_learning_log.course_id
+                AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+          )
         GROUP BY 1
     """), {"since": _since.replace(tzinfo=None)})).all()
     for r in _drows:
@@ -686,8 +874,17 @@ async def track_record(
         SELECT COALESCE(NULLIF(discipline, ''), 'Autre')                      AS d,
                COUNT(*)                                                       AS nb,
                COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
-                                  AND gagnant_rang_predit <= 3)               AS top3
+                                  AND gagnant_rang_predit <= 3)               AS top3,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit = 1)                AS top1,
+               AVG(brier_score)                                               AS brier
         FROM race_learning_log
+        WHERE EXISTS (
+            SELECT 1 FROM prediction_evaluation p
+            JOIN courses c ON c.course_id = p.course_id
+            WHERE p.course_id = race_learning_log.course_id
+              AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+              AND p.created_at < c.date_heure
+        )
         GROUP BY 1
     """))).all()
     by_discipline = [
@@ -695,23 +892,64 @@ async def track_record(
             "discipline": r.d,
             "nb_courses": int(r.nb or 0),
             "accuracy_top3": round(int(r.top3 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+            "accuracy_top1": round(int(r.top1 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+            "brier_moyen": round(float(r.brier), 4) if r.brier is not None else None,
         }
         for r in _disc
+    ]
+    by_discipline.sort(key=lambda d: d["nb_courses"], reverse=True)
+
+    # ── 3b. Tendance 30 jours ─────────────────────────────────
+    # `by_day` reste sur 7 jours (l'accueil l'affiche en 7 barres) ; la page palmarès
+    # a besoin d'une série assez longue pour qu'une tendance soit lisible. Les jours
+    # SANS course mesurée sont absents du tableau — le front les affiche en trou
+    # plutôt qu'en 0 %, qui se lirait comme un échec du modèle.
+    _since30 = datetime.now(timezone.utc) - timedelta(days=31)
+    _t30 = (await db.execute(text("""
+        SELECT (analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Paris')::date AS jour,
+               COUNT(*)                                                       AS nb,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit IS NOT NULL
+                                  AND gagnant_rang_predit <= 3)               AS top3,
+               COUNT(*) FILTER (WHERE gagnant_rang_predit = 1)                AS top1
+        FROM race_learning_log
+        WHERE analyzed_at IS NOT NULL AND analyzed_at >= :since
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              JOIN courses c ON c.course_id = p.course_id
+              WHERE p.course_id = race_learning_log.course_id
+                AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+          )
+        GROUP BY 1
+        ORDER BY 1
+    """), {"since": _since30.replace(tzinfo=None)})).all()
+    tendance_30j = [
+        {
+            "date": r.jour.isoformat(),
+            "jour": r.jour.strftime("%d/%m"),
+            "nb_predictions": int(r.nb or 0),
+            "accuracy_top3": round(int(r.top3 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+            "accuracy_top1": round(int(r.top1 or 0) / int(r.nb) * 100, 1) if r.nb else 0.0,
+        }
+        for r in _t30
     ]
 
     # ── 4. Meilleurs pronostics (gagnant prédit rang 1, cote > 5) ─
     q_best = (
-        select(Prediction, Participation, Cheval, Course, Resultat)
-        .join(Participation, Participation.participation_id == Prediction.participation_id)
+        select(PredictionEvaluation, Participation, Cheval, Course, Resultat)
+        .join(Participation, Participation.participation_id == PredictionEvaluation.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .join(Course, Course.course_id == Prediction.course_id)
-        .outerjoin(Resultat, Resultat.course_id == Prediction.course_id)
+        .join(Course, Course.course_id == PredictionEvaluation.course_id)
+        .outerjoin(Resultat, Resultat.course_id == PredictionEvaluation.course_id)
         .where(
-            Prediction.rang_predit == 1,
+            PredictionEvaluation.rang_predit == 1,
             Participation.cote_pmu >= 5.0,
             Course.statut == "termine",
+            PredictionEvaluation.created_at.is_not(None),
+            Course.date_heure.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
         )
-        .order_by(Prediction.created_at.desc())
+        .order_by(PredictionEvaluation.created_at.desc())
         .limit(10)
     )
     best_rows = (await db.execute(q_best)).all()
@@ -735,30 +973,40 @@ async def track_record(
 
     # ── 5. VB performance par niveau ─────────────────────────
     vb_stats: dict[int, dict] = {n: {"nb": 0, "wins": 0, "mise": 0.0, "gains": 0.0} for n in range(1, 5)}
+    # PERF : projection des seules colonnes lues ci-dessous. Charger les entites
+    # ORM completes materialisait 3 objets par ligne, dont Resultat et son JSON.
     q_vbs = (
-        select(ValueBet, Participation, Resultat)
+        select(ValueBet.niveau, Participation.numero, Participation.cote_pmu,
+               Resultat.classement)
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
+        .join(Course, Course.course_id == ValueBet.course_id)
+        .join(PredictionEvaluation, PredictionEvaluation.prediction_id == ValueBet.prediction_id)
         .outerjoin(Resultat, Resultat.course_id == ValueBet.course_id)
-        .where(ValueBet.actif == False)  # resolved bets only
+        .where(
+            ValueBet.actif == False,  # resolved bets only
+            Course.date_heure.is_not(None),
+            ValueBet.detecte_a < Course.date_heure,
+            PredictionEvaluation.created_at.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+        )
         .limit(2000)
     )
     vb_rows = (await db.execute(q_vbs)).all()
-    for vb, part, resultat in vb_rows:
-        n = vb.niveau
+    for n, vb_numero, vb_cote, vb_classement in vb_rows:
         if n not in vb_stats:
             continue
-        # Pas d'arrivée publiée (outerjoin → resultat None) : on NE règle PAS le pari.
+        # Pas d'arrivée publiée (outerjoin → classement None) : on NE règle PAS le pari.
         # Avant, il tombait dans le `else` et était compté perdant → ROI faussé à la baisse.
-        if not (resultat and isinstance(resultat.classement, list) and resultat.classement):
+        if not (isinstance(vb_classement, list) and vb_classement):
             continue
         mise = 10.0
         vb_stats[n]["nb"] += 1
         vb_stats[n]["mise"] += mise
-        _w = _winner_entry(resultat.classement)
-        gagne = bool(_w and _w.get("numero") == part.numero)
-        if gagne and part.cote_pmu and part.cote_pmu > 1:
+        _w = _winner_entry(vb_classement)
+        gagne = bool(_w and _w.get("numero") == vb_numero)
+        if gagne and vb_cote and vb_cote > 1:
             vb_stats[n]["wins"] += 1
-            vb_stats[n]["gains"] += (part.cote_pmu - 1) * mise
+            vb_stats[n]["gains"] += (vb_cote - 1) * mise
         else:
             vb_stats[n]["gains"] -= mise
 
@@ -776,20 +1024,33 @@ async def track_record(
     # Le favori IA = prédiction rang_predit==1 de chaque course. On le confronte à
     # l'arrivée réelle (sa position dans le classement officiel). Données réelles
     # uniquement (Prediction figée + Resultat), borné aux 2000 derniers résolus.
+    # PERF : projection des seules colonnes lues (2 000 lignes x 5 entites ORM
+    # completes = ~10 000 objets, dont le JSON `classement` integral a chaque fois).
+    # ORDER BY created_at DESC LIMIT 2000 reste deterministe : aucun ex aequo sur
+    # predictions.created_at (verifie : 2 100 horodatages distincts sur 2 100).
     q_fav = (
-        select(Prediction, Participation, Cheval, Course, Resultat)
-        .join(Participation, Participation.participation_id == Prediction.participation_id)
+        select(PredictionEvaluation.proba_top1, Participation.numero, Participation.cote_pmu,
+               Cheval.nom.label("cheval_nom"), Course.course_id,
+               Course.hippodrome_nom, Course.discipline, Course.date_heure,
+               Resultat.classement)
+        .join(Participation, Participation.participation_id == PredictionEvaluation.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .join(Course, Course.course_id == Prediction.course_id)
-        .join(Resultat, Resultat.course_id == Prediction.course_id)
-        .where(Prediction.rang_predit == 1, Course.statut == "termine")
-        .order_by(Prediction.created_at.desc())
+        .join(Course, Course.course_id == PredictionEvaluation.course_id)
+        .join(Resultat, Resultat.course_id == PredictionEvaluation.course_id)
+        .where(
+            PredictionEvaluation.rang_predit == 1,
+            Course.statut == "termine",
+            PredictionEvaluation.created_at.is_not(None),
+            Course.date_heure.is_not(None),
+            PredictionEvaluation.created_at < Course.date_heure,
+        )
+        .order_by(PredictionEvaluation.created_at.desc())
         .limit(2000)
     )
     fav_rows = (await db.execute(q_fav)).all()
 
     # Rang IA du vainqueur réel par course (depuis race_learning_log)
-    course_ids = [c.course_id for _, _, _, c, _ in fav_rows]
+    course_ids = [r.course_id for r in fav_rows]
     rll_by_course: dict[str, int] = {}
     if course_ids:
         rll_rows = (await db.execute(
@@ -812,9 +1073,9 @@ async def track_record(
     # réglé sur l'arrivée officielle (cote_pmu réelle). Aucune valeur inventée.
     mise_fav = gain_fav = 0.0
     derniers_pronostics: list[dict] = []
-    for pred, part, cheval, course, resultat in fav_rows:
-        classement = resultat.classement if resultat else None
-        pos = _pos_in_classement(classement, part.numero)
+    for (proba_top1, numero, cote_pmu, cheval_nom, course_id,
+         hippodrome_nom, discipline, date_heure, classement) in fav_rows:
+        pos = _pos_in_classement(classement, numero)
         if pos is None:
             continue  # non-partant / arrivée incomplète → hors taux
         fav_total += 1
@@ -824,10 +1085,10 @@ async def track_record(
         fav_places += int(is_place)
 
         # ROI : on ne compte que les courses où la cote PMU réelle est connue
-        if part.cote_pmu and part.cote_pmu > 1.0:
+        if cote_pmu and cote_pmu > 1.0:
             mise_fav += 1.0
             if is_win:
-                gain_fav += float(part.cote_pmu)
+                gain_fav += float(cote_pmu)
 
         if len(derniers_pronostics) < 20:
             gagnant_nom = None
@@ -839,7 +1100,7 @@ async def track_record(
                 )
                 if premier:
                     gagnant_nom = premier.get("cheval") or premier.get("nom")
-            rang_gagnant_ia = rll_by_course.get(course.course_id)
+            rang_gagnant_ia = rll_by_course.get(course_id)
             verdict = (
                 "gagnant" if is_win
                 else "place" if is_place
@@ -847,14 +1108,14 @@ async def track_record(
                 else "manque"
             )
             derniers_pronostics.append({
-                "course_id": course.course_id,
-                "hippodrome": course.hippodrome_nom,
-                "discipline": course.discipline,
-                "date": course.date_heure.strftime("%d/%m/%Y") if course.date_heure else None,
-                "favori_nom": cheval.nom,
-                "favori_numero": part.numero,
-                "proba_top1": round(pred.proba_top1 * 100, 1),
-                "cote": round(part.cote_pmu, 1) if part.cote_pmu else None,
+                "course_id": course_id,
+                "hippodrome": hippodrome_nom,
+                "discipline": discipline,
+                "date": date_heure.strftime("%d/%m/%Y") if date_heure else None,
+                "favori_nom": cheval_nom,
+                "favori_numero": numero,
+                "proba_top1": round(proba_top1 * 100, 1),
+                "cote": round(cote_pmu, 1) if cote_pmu else None,
                 "favori_position": pos,
                 "gagnant_nom": gagnant_nom,
                 "rang_ia_gagnant": rang_gagnant_ia,
@@ -886,23 +1147,37 @@ async def track_record(
     # gain de proba implicite moyen (insensible aux outliers de cote).
     clv = None
     try:
+        # PERF : ne JAMAIS agreger cotes_historique en entier. L'ecriture naive
+        # (GROUP BY participation_id sur toute la table, puis JOIN fav) agregeait
+        # 5,8 M lignes / 11 chunks TimescaleDB -- 20 s, 6 M buffers -- pour n'en
+        # garder que ~3 700 : le filtre `fav` ne peut pas descendre sous le GROUP BY.
+        # On inverse : on part des ~3 700 favoris et on va chercher pour chacun sa
+        # premiere et sa derniere cote via l'index (participation_id, time).
+        # Valeur identique : memes filtres, et la PK UNIQUE (time, participation_id)
+        # interdit les ex aequo, donc ORDER BY time LIMIT 1 == (array_agg(...))[1].
         clv_row = (await db.execute(text("""
-            WITH fav AS (
-                SELECT p.participation_id FROM predictions p
+            WITH fav AS MATERIALIZED (
+                SELECT p.participation_id FROM prediction_evaluation p
                 JOIN courses c ON c.course_id = p.course_id
                 WHERE p.rang_predit = 1 AND c.statut = 'termine'
+                  AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                  AND p.created_at < c.date_heure
             ),
-            ch AS (
-                SELECT participation_id,
-                       (array_agg(cote ORDER BY time ASC))[1]  AS o,
-                       (array_agg(cote ORDER BY time DESC))[1] AS c
-                FROM cotes_historique WHERE cote > 1 GROUP BY participation_id
+            ch AS MATERIALIZED (
+                SELECT f.participation_id,
+                       (SELECT h.cote FROM cotes_historique h
+                         WHERE h.participation_id = f.participation_id AND h.cote > 1
+                         ORDER BY h.time ASC  LIMIT 1) AS o,
+                       (SELECT h.cote FROM cotes_historique h
+                         WHERE h.participation_id = f.participation_id AND h.cote > 1
+                         ORDER BY h.time DESC LIMIT 1) AS c
+                FROM fav f
             )
             SELECT count(*) AS n,
                    round((count(*) FILTER (WHERE o > c)::numeric / nullif(count(*),0) * 100), 1) AS pct_beat,
                    round(avg(1.0/c - 1.0/o)::numeric * 100, 2) AS clv_implied,
                    round((percentile_cont(0.5) WITHIN GROUP (ORDER BY o/c - 1))::numeric * 100, 1) AS clv_median
-            FROM fav JOIN ch ON ch.participation_id = fav.participation_id
+            FROM ch
             WHERE o IS NOT NULL AND c IS NOT NULL AND o <> c
         """))).first()
         if clv_row and clv_row[0] and clv_row[0] >= 10:
@@ -921,7 +1196,17 @@ async def track_record(
             "accuracy_top3": accuracy_top3,
             "brier_moyen": brier_moyen,
             "nb_courses_analysees": nb_total,
+            # Sous-ensemble rejouable à l'identique (snapshots immuables) : sert la
+            # mention « vérifiable » sans réduire l'historique mesuré à ce sous-ensemble.
+            "nb_courses_rejouables": nb_rejouables,
+            # Date de la plus ancienne course de la cohorte mesurée (ISO) — sert à
+            # dire honnêtement sur quelle période portent les taux affichés.
+            "mesure_depuis": mesure_depuis,
             "nb_surprises": nb_surprises,
+            # Référence : ce que rapporterait un tirage au sort sur les mêmes courses.
+            "hasard_top3": hasard_top3,
+            "hasard_top1": hasard_top1,
+            "nb_partants_moyen": partants_moyen,
             "favori_win_rate": favori_win_rate,
             "favori_place_rate": favori_place_rate,
             "nb_favoris_evalues": fav_total,
@@ -932,6 +1217,7 @@ async def track_record(
             "favori_net": net_fav,
         },
         "by_day": daily_list,
+        "tendance_30j": tendance_30j,
         "by_discipline": by_discipline,
         "best_pronostics": best_pronostics,
         "derniers_pronostics": derniers_pronostics,
@@ -940,7 +1226,6 @@ async def track_record(
         "clv": clv,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await _cache_set(redis, CACHE_KEY, result, ttl=3600)  # 1h — pre-chauffe par job warm_caches /30min (CLV froid ~2s)
     return result
 
 
@@ -968,22 +1253,14 @@ async def stats_profils(
     return data
 
 
-@router.get("/stats/palmares-gagnants")
-async def stats_palmares_gagnants(
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),   # ROI/gains par profil = admin uniquement
-):
-    """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — UNIQUEMENT
-    les pronostics RÉELLEMENT FIGÉS AVANT LE DÉPART de la course (profil_run_log),
-    puis réglés aux VRAIS rapports PMU à l'arrivée.
+async def _palmares_rows(db: AsyncSession) -> dict:
+    """Cœur du palmarès, partagé par la version admin et la version publique.
 
-    INTÉGRITÉ STRICTE (exigence produit) — un pari ne compte au palmarès QUE si :
-      1. il a été journalisé AVANT le départ : `r.created_at < c.date_heure`
-         (preuve temporelle : le prono existait avant que la course parte) ;
-      2. ce n'est PAS une reconstruction a posteriori (`meta.backfill` exclu) :
-         un plan régénéré après la course n'a jamais été « proposé » → mensonge ;
-      3. le pari est réglé gagnant avec rapport PMU publié.
-    Sans ces gardes, le palmarès afficherait des paris jamais réellement émis."""
+    Factorisé pour qu'il n'existe qu'UNE définition des règles d'intégrité : un pari
+    ne compte QUE s'il a été figé avant le départ et n'est pas un backfill. Deux
+    copies de cette requête divergeraient tôt ou tard, et le palmarès public
+    afficherait alors des paris que la version admin refuse (ou l'inverse).
+    """
     from sqlalchemy import text as _text
     try:
         rows = (await db.execute(_text("""
@@ -1000,17 +1277,18 @@ async def stats_palmares_gagnants(
             ORDER BY r.settled_at DESC NULLS LAST
         """))).all()
     except Exception:
-        return {"gagnants": [], "n": 0, "n_courses": 0, "profils": [],
-                "updated_at": datetime.now(timezone.utc).isoformat()}
+        return {"gagnants": [], "top_gains": [], "n": 0, "n_courses": 0,
+                "n_courses_reglees": 0, "by_profil": {}, "total_gain": 0.0,
+                "total_mise": 0.0, "integrite": _PALMARES_INTEGRITE}
 
     PROFIL_LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
     gagnants = []
-    # Résumé par profil : compte TOUTES les courses réglées (gagnées + perdues)
-    # pour un ROI honnête, et les courses bénéficiaires.
+    courses_reglees: set = set()
     by_profil: dict = {p: {"courses": set(), "mise": 0.0, "gain": 0.0,
                            "courses_benef": 0, "paris_gagnes": 0} for p in PROFIL_LBL}
     for profil, resultat, settled_at, created_at, hippo, dh, cid, n_reunion, n_course in rows:
         res = resultat if isinstance(resultat, dict) else json.loads(resultat or "{}")
+        courses_reglees.add(cid)
         agg = by_profil.get(profil)
         if agg is not None:
             agg["courses"].add(cid)
@@ -1050,11 +1328,103 @@ async def stats_palmares_gagnants(
                 "regle_le": settled_at.isoformat() if settled_at else None,
             })
     gagnants.sort(key=lambda g: g.get("date") or "", reverse=True)
-    total_gain = round(sum(x["gain"] for x in gagnants), 2)
-    total_mise = round(sum(x["mise"] for x in gagnants), 2)
+    return {
+        "gagnants": gagnants,
+        "top_gains": sorted(gagnants, key=lambda x: x["benefice"], reverse=True)[:30],
+        "n": len(gagnants),
+        "n_courses": len({x["course_id"] for x in gagnants}),
+        "n_courses_reglees": len(courses_reglees),
+        "by_profil": by_profil,
+        "profil_labels": PROFIL_LBL,
+        "total_gain": round(sum(x["gain"] for x in gagnants), 2),
+        "total_mise": round(sum(x["mise"] for x in gagnants), 2),
+        "integrite": _PALMARES_INTEGRITE,
+    }
+
+
+_PALMARES_INTEGRITE = (
+    "Tous les paris affichés ont été figés AVANT le départ de la course "
+    "puis réglés aux vrais rapports PMU à l'arrivée. Aucune reconstruction "
+    "a posteriori (backfill) n'est comptée."
+)
+
+
+@router.get("/stats/palmares-public")
+async def stats_palmares_public(
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    """Palmarès PUBLIC (page d'accueil / track-record) — version non authentifiée de
+    `/stats/palmares-gagnants`.
+
+    Pourquoi cet endpoint existe (bug constaté 2026-08-17) : la section « Palmarès en
+    direct » de la page d'accueil appelait `/stats/palmares-gagnants`, gardé par
+    `require_admin` → **401 pour tout visiteur**. La principale preuve sociale du site
+    n'était donc visible QUE par le compte admin ; chaque prospect voyait l'état vide
+    « Les premiers paris gagnants s'afficheront ici ».
+
+    Ce qui est exposé ici, et pourquoi c'est sans risque :
+      - uniquement des courses PASSÉES et réglées, aux rapports PMU déjà publics —
+        la valeur payante du produit porte sur les prédictions À VENIR, pas sur
+        l'historique ;
+      - mêmes garde-fous d'intégrité que la version admin (prono figé AVANT le
+        départ, backfill exclu) ;
+      - `nb_courses_reglees` est renvoyé VOLONTAIREMENT à côté de la liste des
+        gagnants : sans ce dénominateur, n'afficher que les paris gagnants serait un
+        biais du survivant. Le front doit présenter les deux ensemble.
+
+    Ce qui N'EST PAS exposé : le ROI et les agrégats de gains par profil restent
+    réservés à l'admin (exigence produit déjà appliquée à `/stats/public`).
+    """
+    CACHE_KEY = "stats:palmares-public"
+    cached = await _cache_get(redis, CACHE_KEY)
+    if cached:
+        return cached
+
+    data = await _palmares_rows(db)
+    result = {
+        # Volumes alignés sur ce que la page track-record sait dérouler via ses
+        # boutons « voir plus » (50 récents / 30 records). Avec l'ancien cap à 10,
+        # un visiteur anonyme recevait exactement 10 lignes : le bouton, conditionné
+        # à `limite < longueur`, ne s'affichait jamais et la liste semblait close.
+        "top_gains": data["top_gains"][:30],
+        "gagnants": data["gagnants"][:50],
+        "nb_paris_gagnes": data["n"],
+        "nb_courses_gagnantes": data["n_courses"],
+        "nb_courses_reglees": data["n_courses_reglees"],
+        "integrite": data["integrite"],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await _cache_set(redis, CACHE_KEY, result, ttl=300)  # 5 min
+    return result
+
+
+@router.get("/stats/palmares-gagnants")
+async def stats_palmares_gagnants(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),   # ROI/gains par profil = admin uniquement
+):
+    """Liste des PARIS RÉELLEMENT GAGNÉS par l'algorithme, par profil — UNIQUEMENT
+    les pronostics RÉELLEMENT FIGÉS AVANT LE DÉPART de la course (profil_run_log),
+    puis réglés aux VRAIS rapports PMU à l'arrivée.
+
+    INTÉGRITÉ STRICTE (exigence produit) — un pari ne compte au palmarès QUE si :
+      1. il a été journalisé AVANT le départ : `r.created_at < c.date_heure`
+         (preuve temporelle : le prono existait avant que la course parte) ;
+      2. ce n'est PAS une reconstruction a posteriori (`meta.backfill` exclu) :
+         un plan régénéré après la course n'a jamais été « proposé » → mensonge ;
+      3. le pari est réglé gagnant avec rapport PMU publié.
+    Sans ces gardes, le palmarès afficherait des paris jamais réellement émis.
+
+    La requête et les garde-fous vivent dans `_palmares_rows()` (partagé avec
+    `/stats/palmares-public`) ; seuls les agrégats ROI/gains par profil, réservés à
+    l'admin, sont calculés ici."""
+    data = await _palmares_rows(db)
+    gagnants = data["gagnants"]
+    by_profil = data["by_profil"]
 
     profils = []
-    for pk, lbl in PROFIL_LBL.items():
+    for pk, lbl in data.get("profil_labels", {}).items():
         a = by_profil[pk]
         nc = len(a["courses"])
         profils.append({
@@ -1068,23 +1438,55 @@ async def stats_palmares_gagnants(
             "taux_courses_beneficiaires": round(a["courses_benef"] / nc * 100, 1) if nc else None,
         })
 
-    # Top 30 des plus gros gains (par bénéfice net du pari), toutes courses.
-    top_gains = sorted(gagnants, key=lambda x: x["benefice"], reverse=True)[:30]
-
     return {
         # Liste = 100 paris gagnants les plus récents (le résumé par profil + les
         # totaux ci-dessous portent eux sur TOUTES les courses analysées).
         "gagnants": gagnants[:100],
-        "top_gains": top_gains,
-        "n": len(gagnants),
-        "n_courses": len({x["course_id"] for x in gagnants}),
-        "total_gain": total_gain,
-        "total_benefice": round(total_gain - total_mise, 2),
+        "top_gains": data["top_gains"],
+        "n": data["n"],
+        "n_courses": data["n_courses"],
+        "nb_courses_reglees": data["n_courses_reglees"],
+        "total_gain": data["total_gain"],
+        "total_benefice": round(data["total_gain"] - data["total_mise"], 2),
         "profils": profils,
-        "integrite": (
-            "Tous les paris affichés ont été figés AVANT le départ de la course "
-            "puis réglés aux vrais rapports PMU à l'arrivée. Aucune reconstruction "
-            "a posteriori (backfill) n'est comptée."
-        ),
+        "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# Point 11 — Rentabilité FORWARD des plans réellement émis (admin)
+# ─────────────────────────────────────────────────────────────
+BET_PLAN_PERF_DIMENSIONS = (
+    "profil", "type_pari", "cote_band", "ev_band", "discipline", "hippodrome",
+    "peloton", "model_version", "snapshot_age", "bankroll", "combo",
+)
+
+
+@router.get("/stats/bet-plan-performance")
+async def stats_bet_plan_performance(
+    dimension: str = "type_pari",
+    days: Optional[int] = 90,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),   # ROI segmenté par plan = admin uniquement
+):
+    """Rentabilité FORWARD des plans de mise RÉELLEMENT émis (bet_plan_snapshots
+    réglés sur les vrais rapports PMU), jamais une reconstruction a posteriori.
+
+    `dimension` : une des colonnes de segmentation (profil, type_pari, cote_band,
+    ev_band, discipline, hippodrome, peloton, model_version, snapshot_age,
+    bankroll, combo). `days` : fenêtre glissante en jours (None = tout l'historique).
+    Un segment sous le seuil de fiabilité reste `status="observed"` — jamais
+    déclaré rentable ou perdant sur un petit échantillon.
+    """
+    from fastapi import HTTPException as _H
+    from ml.bet_plan_performance import (
+        DIMENSIONS, compute_forward_performance, evaluate_segment_gates,
+    )
+    if dimension not in DIMENSIONS:
+        raise _H(status_code=422,
+                 detail=f"dimension invalide (attendu: {', '.join(DIMENSIONS)})")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
+    perf = await compute_forward_performance(db, dimension, since=since)
+    perf["gates"] = evaluate_segment_gates(perf)
+    return perf

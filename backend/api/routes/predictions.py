@@ -141,11 +141,17 @@ async def get_predictions(
         autorise, quota_restant = True, -1
 
     # Charger prédictions + partants
+    # Les non-partants sont EXCLUS du pronostic. La ligne `predictions` d'un cheval
+    # déclaré non-partant n'est plus supprimée (sa suppression faisait échouer toute
+    # la sauvegarde de la course, cf. db_writer) : c'est donc ici, à la lecture,
+    # qu'on l'écarte — sinon la page afficherait une probabilité et un rang périmés
+    # sur un cheval qui ne court pas.
     q = (
         select(Prediction, Participation, Cheval)
         .join(Participation, Participation.participation_id == Prediction.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .where(Prediction.course_id == course_id)
+        .where(and_(Prediction.course_id == course_id,
+                    Participation.non_partant == False))  # noqa: E712
         .order_by(Prediction.rang_predit)
     )
     rows = (await db.execute(q)).all()
@@ -363,6 +369,13 @@ async def get_value_bets_live(
         ValueBet.actif == True,
         ValueBet.niveau >= niveau_min,
         Course.statut.in_(["a_venir", "en_cours"]),
+        # Garde-fou en plus de `actif` (cf. job_expire_stale_value_bets) : une course
+        # jamais passée à statut='termine' faute de résultat (piste étrangère non
+        # couverte PMU, panne scraper) restait "a_venir" indéfiniment et ses value
+        # bets s'affichaient toujours, parfois vieux de plusieurs mois (constaté
+        # 2026-08-17). Le job de nettoyage tourne toutes les 15 min ; ce filtre rend
+        # l'endpoint correct même entre deux exécutions.
+        Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
     ]
     # Standard plan: 15min delay on value bets (briefing §4.2)
     if user.plan == "standard":
@@ -427,6 +440,7 @@ async def get_value_bets_compteur(
             ValueBet.actif == True,
             ValueBet.niveau >= niveau_min,
             Course.statut.in_(["a_venir", "en_cours"]),
+            Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
         )
     )
     count = (await db.execute(q)).scalar_one()

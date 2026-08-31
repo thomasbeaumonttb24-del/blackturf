@@ -114,7 +114,17 @@ async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None
       des proxies = fuite de credential).
     - Voie LEGACY (dépréciée) : token en query string — conservée le temps qu'un
       ancien front en cache se reconnecte. À retirer une fois le front à jour partout.
+
+    Depuis le passage aux cookies httpOnly, le jeton n'est plus lisible en
+    JavaScript : le navigateur l'envoie de lui-même dans la poignée de main WS
+    (même site), c'est donc la voie NORMALE désormais — les deux autres ne servent
+    plus qu'aux clients non navigateur et aux onglets pas encore rechargés.
     """
+    cookie_token = websocket.cookies.get("access_token")
+    if cookie_token:
+        user_id = await _get_user_from_token(cookie_token)
+        if user_id:
+            return user_id
     if token_query:
         return await _get_user_from_token(token_query)
     try:
@@ -246,6 +256,11 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
             filters = [
                 ValueBet.actif == True,
                 Course.statut.in_(["a_venir", "en_cours"]),
+                # cf. job_expire_stale_value_bets (jobs.py) : garde-fou contre les
+                # courses jamais passées à 'termine' faute de résultat (piste
+                # étrangère non couverte PMU, panne scraper) — sans lui, un value
+                # bet pouvait rester "actif" indéfiniment et sortir sur ce flux.
+                Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
             ]
             # Même délai 15 min que GET /value-bets (briefing §4.2) : Standard voit
             # les value bets décalés, Pro/Expert en direct. Sans ce flux WS aligné,

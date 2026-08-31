@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import useSWR from "swr";
+import { useState, useCallback, useEffect } from "react";
+import useSWR, { useSWRConfig } from "swr";
 import Link from "next/link";
 import { toast } from "sonner";
 import { formatDistanceToNow, parseISO } from "date-fns";
@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useRequireAuth } from "@/hooks/useAuth";
+import { useAlertesStream } from "@/hooks/useWebSocket";
 import { notificationsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,8 @@ import { cn } from "@/lib/utils";
 interface NotifItem {
   alerte_id: string;
   type_alerte: string;
+  /** Onglet calculé par le SERVEUR (value_bet / resultat / systeme). */
+  categorie: FilterTab;
   canal: string;
   lue: boolean;
   envoye: boolean;
@@ -30,6 +33,7 @@ interface NotifItem {
   course_id: string | null;
   cheval: string | null;
   niveau: number | null;
+  nb: number | null;
 }
 
 interface NotifsResponse {
@@ -37,6 +41,7 @@ interface NotifsResponse {
   total_unread: number;
   page: number;
   limit: number;
+  has_more: boolean;
 }
 
 interface Prefs {
@@ -55,14 +60,17 @@ const TAB_LABELS: Record<FilterTab, string> = {
   systeme: "Système",
 };
 
-function typeCategory(type: string): FilterTab {
-  if (type.includes("value_bet") || type.includes("vb")) return "value_bet";
-  if (type.includes("resultat") || type.includes("course")) return "resultat";
+/** Catégorie d'une notification. La classification vient du SERVEUR (`categorie`) ;
+ *  le repli par sous-chaîne ne sert qu'aux réponses d'une API plus ancienne. */
+function category(n: Pick<NotifItem, "categorie" | "type_alerte">): FilterTab {
+  if (n.categorie) return n.categorie;
+  const t = n.type_alerte || "";
+  if (t.includes("resultat")) return "resultat";
+  if (t.includes("value_bet") || t.includes("vb") || t.includes("digest")) return "value_bet";
   return "systeme";
 }
 
-function NotifIcon({ type }: { type: string }) {
-  const cat = typeCategory(type);
+function NotifIcon({ cat }: { cat: FilterTab }) {
   if (cat === "value_bet") return <Zap className="w-4 h-4 text-amber-600" />;
   if (cat === "resultat") return <Trophy className="w-4 h-4 text-emerald-600" />;
   return <Info className="w-4 h-4 text-blue-600" />;
@@ -111,17 +119,30 @@ export default function NotificationsPage() {
   const [tab, setTab] = useState<FilterTab>("tous");
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
+  const [limit, setLimit] = useState(50);
 
-  // Notifications list
+  // Liste. Le filtre d'onglet est envoyé au SERVEUR : filtrer une page de 50 côté
+  // client rendait un onglet vide alors que la catégorie avait des entrées plus loin.
   const {
     data: notifs,
     mutate: mutateNotifs,
     isLoading,
+    error,
   } = useSWR<NotifsResponse>(
-    "notifications",
-    () => notificationsApi.list().then((r) => r.data),
-    { refreshInterval: 30_000 }
+    ["notifications", tab, limit],
+    () => notificationsApi
+      .list(1, limit, tab === "tous" ? undefined : tab)
+      .then((r) => r.data),
+    { refreshInterval: 30_000, keepPreviousData: true }
   );
+
+  // Temps réel : une alerte poussée sur /ws/user/alertes rafraîchit la liste tout de
+  // suite, sans attendre le sondage de 30 s.
+  const { alertes } = useAlertesStream(true);
+  const nbAlertesWs = alertes.length;
+  useEffect(() => {
+    if (nbAlertesWs > 0) mutateNotifs();
+  }, [nbAlertesWs, mutateNotifs]);
 
   // Prefs
   const {
@@ -134,27 +155,35 @@ export default function NotificationsPage() {
 
   // ── Actions ─────────────────────────────────────────────────
 
+  // Le badge de la navbar vit dans un autre composant, sur sa propre clé SWR :
+  // sans cette revalidation il continuait d'afficher « 9+ » après un « tout marquer lu ».
+  const { mutate: mutateGlobal } = useSWRConfig();
+  const refreshBadge = useCallback(
+    () => mutateGlobal("notif-count-unread"),
+    [mutateGlobal],
+  );
+
   const markRead = useCallback(async (id: string) => {
     try {
       await notificationsApi.markRead(id);
-      await mutateNotifs();
+      await Promise.all([mutateNotifs(), refreshBadge()]);
     } catch {
       // silent — optimistic UI
     }
-  }, [mutateNotifs]);
+  }, [mutateNotifs, refreshBadge]);
 
   const markAllRead = useCallback(async () => {
     setMarkingAll(true);
     try {
       await notificationsApi.markAllRead();
-      await mutateNotifs();
+      await Promise.all([mutateNotifs(), refreshBadge()]);
       toast.success("Toutes les notifications marquées comme lues");
     } catch {
       toast.error("Erreur lors du marquage");
     } finally {
       setMarkingAll(false);
     }
-  }, [mutateNotifs]);
+  }, [mutateNotifs, refreshBadge]);
 
   const updatePref = useCallback(async (patch: Partial<Prefs>) => {
     if (!prefs) return;
@@ -171,12 +200,9 @@ export default function NotificationsPage() {
     }
   }, [prefs, mutatePrefs]);
 
-  // ── Filter ──────────────────────────────────────────────────
-  const items = notifs?.items ?? [];
-  const filtered = tab === "tous"
-    ? items
-    : items.filter((n) => typeCategory(n.type_alerte) === tab);
-
+  // ── Données ─────────────────────────────────────────────────
+  // Le filtrage est fait par le serveur : la liste reçue est déjà celle de l'onglet.
+  const filtered = notifs?.items ?? [];
   const unread = notifs?.total_unread ?? 0;
 
   return (
@@ -218,7 +244,7 @@ export default function NotificationsPage() {
           {(Object.keys(TAB_LABELS) as FilterTab[]).map((t) => (
             <button
               key={t}
-              onClick={() => setTab(t)}
+              onClick={() => { setTab(t); setLimit(50); }}
               className={cn(
                 "px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
                 tab === t
@@ -233,13 +259,37 @@ export default function NotificationsPage() {
 
         {/* ── Notifications list ────────────────── */}
         <div className="space-y-2">
-          {isLoading && (
+          {isLoading && !notifs && (
             <div className="py-12 text-center text-sm text-muted-foreground animate-pulse">
               Chargement…
             </div>
           )}
 
-          {!isLoading && filtered.length === 0 && (
+          {/* ERREUR ≠ VIDE. C'est exactement ce qui a caché le bug du 2026-08-17 :
+              la requête échouait (redirection 307 vers http, bloquée par le
+              navigateur), SWR n'avait pas de données, et la page affichait
+              « Aucune notification · Tout est lu » — un mensonge rassurant alors
+              que 22 400 alertes attendaient en base. */}
+          {!isLoading && error && (
+            <div className="py-12 flex flex-col items-center gap-3 text-center">
+              <div className="p-4 rounded-full bg-destructive/10">
+                <Bell className="w-8 h-8 text-destructive" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Impossible de charger vos notifications
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Vos alertes sont bien enregistrées — c&apos;est l&apos;affichage qui a échoué.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => mutateNotifs()}>
+                Réessayer
+              </Button>
+            </div>
+          )}
+
+          {!isLoading && !error && filtered.length === 0 && (
             <div className="py-16 flex flex-col items-center gap-3 text-center">
               <div className="p-4 rounded-full bg-muted/50">
                 <BellOff className="w-8 h-8 text-muted-foreground" />
@@ -274,11 +324,11 @@ export default function NotificationsPage() {
               {/* Icon */}
               <div className={cn(
                 "mt-0.5 p-2 rounded-lg shrink-0",
-                typeCategory(n.type_alerte) === "value_bet" ? "bg-amber-50" :
-                typeCategory(n.type_alerte) === "resultat" ? "bg-emerald-50" :
+                category(n) === "value_bet" ? "bg-amber-50" :
+                category(n) === "resultat" ? "bg-emerald-50" :
                 "bg-blue-50"
               )}>
-                <NotifIcon type={n.type_alerte} />
+                <NotifIcon cat={category(n)} />
               </div>
 
               {/* Body */}
@@ -311,6 +361,20 @@ export default function NotificationsPage() {
               </div>
             </div>
           ))}
+
+          {notifs?.has_more && (
+            <div className="pt-2 text-center">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                onClick={() => setLimit((l) => Math.min(l + 50, 100))}
+                disabled={limit >= 100}
+              >
+                {limit >= 100 ? "Historique limité aux 100 dernières" : "Voir plus"}
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* ── Push preferences ──────────────────── */}

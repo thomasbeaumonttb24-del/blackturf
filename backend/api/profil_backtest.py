@@ -25,7 +25,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Course, Participation, Prediction, Resultat
+from db.models import Course, Participation, PredictionEvaluation, Resultat
 from ml.combo_bets import enumerate_bet_candidates
 from services.bet_settlement import settle_pari
 from services.mise_calculator import (
@@ -213,13 +213,14 @@ async def backtest_profils(db: AsyncSession, limit: int = 200, n_sims: int = 300
     # → exclue. Sans ce filtre, le backtest utilise des pronos qui « connaissent » le
     # résultat → ROI illusoire (+150% in-sample vs -52% live). Cf. profil_learning.
     pred_rows = (await db.execute(
-        select(Prediction, Participation)
-        .join(Participation, Participation.participation_id == Prediction.participation_id)
-        .join(Course, Course.course_id == Prediction.course_id)
+        select(PredictionEvaluation, Participation)
+        .join(Participation, Participation.participation_id == PredictionEvaluation.participation_id)
+        .join(Course, Course.course_id == PredictionEvaluation.course_id)
         .where(
-            Prediction.course_id.in_(course_ids),
+            PredictionEvaluation.course_id.in_(course_ids),
             Course.date_heure.isnot(None),
-            Prediction.created_at < Course.date_heure,
+            PredictionEvaluation.created_at < Course.date_heure,
+            PredictionEvaluation.is_replayable.is_(True),
         )
     )).all()
     preds_by_course: dict[str, list[dict]] = {}

@@ -30,10 +30,15 @@ async def _fetch_proba_outcomes(session: AsyncSession) -> list[tuple[float, int]
     """[(proba_top1, gagné 0/1)] sur toutes les courses avec résultat."""
     rows = await session.execute(text("""
         SELECT pr.proba_top1, pa.numero, pr.course_id
-        FROM predictions pr
+        FROM prediction_evaluation pr
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN resultats r       ON r.course_id        = pr.course_id
+        JOIN courses c         ON c.course_id        = pr.course_id
         WHERE pr.proba_top1 IS NOT NULL
+          AND c.date_heure IS NOT NULL
+          AND pr.created_at IS NOT NULL
+          AND pr.created_at < c.date_heure
+          AND pr.is_replayable = true
     """))
     winners = await fetch_winners(session)
     out: list[tuple[float, int]] = []
