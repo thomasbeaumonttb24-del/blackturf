@@ -22,8 +22,18 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       # Memory tuning for small VPS
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=fr_FR.UTF-8"
+    # `shared_preload_libraries` posé ici ÉCRASE la valeur de postgresql.conf (qui
+    # ne portait que timescaledb) : garder timescaledb EN TÊTE, sinon l'extension ne
+    # se charge pas et la base refuse de démarrer. pg_stat_statements était absent —
+    # sans lui le top des requêtes par temps cumulé n'existe pas et toute
+    # optimisation SQL se fait à l'aveugle sur une base de 10 Go.
+    # Les commentaires restent HORS du scalaire replié `>` : à l'intérieur, `#`
+    # n'est pas un commentaire YAML, il partirait dans la ligne de commande postgres.
     command: >
       postgres
+      -c shared_preload_libraries=timescaledb,pg_stat_statements
+      -c pg_stat_statements.max=5000
+      -c pg_stat_statements.track=top
       -c shared_buffers=256MB
       -c work_mem=16MB
       -c maintenance_work_mem=64MB

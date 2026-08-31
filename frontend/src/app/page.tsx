@@ -119,10 +119,27 @@ interface TrackRecord {
   accuracy_top3: number | null;
   favori_place_rate: number | null;
   favori_win_rate: number | null;
+  // Rendement RÉEL de 1 € Gagnant sur notre favori : négatif, et publié tel quel.
+  favori_roi: number | null;
   nb_courses: number | null;
   mesure_depuis: string | null;
   hasard_top3: number | null;
   hasard_top1: number | null;
+  /**
+   * Le classement par la COTE, sur exactement les mêmes courses.
+   *
+   * Se comparer au hasard flatte et ne prouve rien : battre un tirage au sort
+   * est la moindre des choses. Mesuré le 2026-08-31 sur 4 023 courses, le marché
+   * place le gagnant dans son trio de tête 62,3 % du temps contre 61,4 % pour
+   * nous — il est donc LÉGÈREMENT MEILLEUR en précision. Notre avantage est
+   * ailleurs, et c'est lui qu'il faut dire : à précision égale nous désignons
+   * des chevaux plus chers (ROI du favori −11,9 % contre −17,6 %).
+   *
+   * `null` si l'API ne l'a pas mesuré : on tait alors la comparaison.
+   */
+  marche: { nb_courses: number; marche_top1: number; marche_top3: number;
+            ia_top1: number; ia_top3: number; marche_favori_roi: number;
+            ia_favori_roi: number } | null;
   by_discipline: Array<{ discipline: string; nb_courses: number; accuracy_top3: number }>;
   by_day: Array<{ jour: string; accuracy_top3: number; nb_predictions: number }>;
 }
@@ -133,7 +150,9 @@ interface TrackRecord {
 function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
   const pc = (x: number | null, d = 1) => (x == null ? null : `${x.toFixed(d).replace(".", ",")} %`);
   const top3 = pc(tr?.accuracy_top3 ?? null);
-  const hasard = pc(tr?.hasard_top3 ?? null, 0);
+  // Le hasard n'est plus le point de comparaison publié : il flattait. Voir le
+  // champ `marche` du type TrackRecord pour la mesure et le raisonnement.
+  const m = tr?.marche ?? null;
   const nb = tr?.nb_courses ? tr.nb_courses.toLocaleString("fr-FR") : null;
   return [
     {
@@ -142,7 +161,7 @@ function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
     },
     {
       q: "Est-ce que je vais gagner de l'argent ?",
-      r: `Personne ne peut vous le garantir, et nous ne le ferons pas : le pari hippique reste soumis au prélèvement de l'opérateur et au hasard. Ce que nous publions, c'est la qualité de l'analyse${top3 && hasard ? ` — le gagnant figure dans notre Top-3 sur ${top3} des courses, contre ${hasard} pour un tirage au sort` : ""}, et le détail de chaque pari réglé, gagnant comme perdant.`,
+      r: `Personne ne peut vous le garantir, et nous ne le ferons pas : le pari hippique reste soumis au prélèvement de l'opérateur et au hasard. Ce que nous publions, c'est la qualité de l'analyse${top3 ? ` — le gagnant figure dans notre Top-3 sur ${top3} des courses` : ""}${m ? `, contre ${pc(m.marche_top3)} pour le classement par la cote : nous ne sommes pas plus précis que le marché, nous désignons des chevaux plus chers à précision égale` : ""}, et le détail de chaque pari réglé, gagnant comme perdant.`,
     },
     {
       q: "Combien de temps ça me prend ?",
@@ -181,10 +200,20 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
       accuracy_top3: numOf(g.accuracy_top3),
       favori_place_rate: numOf(g.favori_place_rate),
       favori_win_rate: numOf(g.favori_win_rate),
+      favori_roi: numOf(g.favori_roi),
       nb_courses: numOf(g.nb_courses_analysees),
       mesure_depuis: typeof g.mesure_depuis === "string" ? g.mesure_depuis : null,
       hasard_top3: numOf(g.hasard_top3),
       hasard_top1: numOf(g.hasard_top1),
+      marche: (d?.marche && numOf(d.marche.marche_top3) !== null) ? {
+        nb_courses: d.marche.nb_courses,
+        marche_top1: d.marche.marche_top1,
+        marche_top3: d.marche.marche_top3,
+        ia_top1: d.marche.ia_top1,
+        ia_top3: d.marche.ia_top3,
+        marche_favori_roi: d.marche.marche_favori_roi,
+        ia_favori_roi: d.marche.ia_favori_roi,
+      } : null,
       by_discipline: byDisc
         .filter((x: Record<string, unknown>) => numOf(x?.nb_courses) && (x.nb_courses as number) >= 10 && numOf(x?.accuracy_top3))
         .map((x: Record<string, unknown>) => ({ discipline: String(x.discipline ?? "autre"), nb_courses: x.nb_courses as number, accuracy_top3: x.accuracy_top3 as number }))
@@ -325,7 +354,7 @@ export default async function HomePage() {
               </h2>
               <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
                 Aucun pronostic n'est réécrit après la course. Voici la précision réelle de BlackTurf sur les
-                courses déjà réglées, et ce que ferait un tirage au sort sur les mêmes courses.
+                courses déjà réglées, mise en regard du seul comparateur qui compte : le classement par la cote.
               </p>
             </div>
           </ScrollReveal>
@@ -353,7 +382,51 @@ export default async function HomePage() {
               lire un pourcentage comme un acquis. */}
           <EchantillonNotice nbCourses={tr?.nb_courses} mesureDepuis={tr?.mesure_depuis} />
 
-          <div className="grid lg:grid-cols-2 gap-4">
+          {/* ── Le comparateur qui compte, y compris quand il nous est défavorable ──
+              Se mesurer au hasard était l'unique argument fallacieux du site : battre
+              un tirage au sort est la moindre des choses pour un modèle. Le vrai
+              adversaire est le classement par la cote, et sur les mêmes courses il
+              est LÉGÈREMENT MEILLEUR que nous en précision. Le publier n'affaiblit
+              pas l'offre, il la déplace là où elle tient : à précision égale, nous
+              désignons des chevaux plus chers — c'est ça, l'avantage, et c'est
+              vérifiable. Rien n'est affiché si la mesure manque. */}
+          {tr?.marche && (
+            <ScrollReveal>
+              <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6">
+                <h3 className="font-semibold text-gray-900 text-sm">
+                  Et face au marché ? <span className="font-normal text-gray-600">Sur les {tr.marche.nb_courses.toLocaleString("fr-FR")} mêmes courses.</span>
+                </h3>
+                <dl className="mt-4 grid gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200 sm:grid-cols-3">
+                  {[
+                    { k: "Gagnant trouvé", nous: tr.marche.ia_top1, eux: tr.marche.marche_top1, unite: "%" },
+                    { k: "Gagnant dans le trio de tête", nous: tr.marche.ia_top3, eux: tr.marche.marche_top3, unite: "%" },
+                    { k: "Rendement de 1 € sur le favori", nous: tr.marche.ia_favori_roi, eux: tr.marche.marche_favori_roi, unite: "%" },
+                  ].map((r) => (
+                    <div key={r.k} className="bg-white px-4 py-3">
+                      <dt className="text-[11px] leading-snug text-gray-600">{r.k}</dt>
+                      <dd className="mt-1 flex items-baseline gap-2">
+                        <span className="num-display text-[19px] font-bold text-gray-900">
+                          {r.nous == null ? "—" : `${r.nous.toFixed(1).replace(".", ",")} ${r.unite}`}
+                        </span>
+                        <span className="text-[11px] text-gray-600">
+                          marché : {r.eux == null ? "—" : `${r.eux.toFixed(1).replace(".", ",")} ${r.unite}`}
+                        </span>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-3 text-xs leading-relaxed text-gray-600">
+                  Le marché — les chevaux classés par leur cote — est aussi précis que nous, voire
+                  un peu plus. Notre avantage n&apos;est donc pas de mieux deviner l&apos;arrivée :
+                  à précision égale, nous désignons des chevaux plus chers, et c&apos;est ce qui
+                  fait l&apos;écart de rendement. Les deux colonnes restent négatives : le PMU
+                  prélève environ 20 % des enjeux avant toute redistribution.
+                </p>
+              </div>
+            </ScrollReveal>
+          )}
+
+          <div className="mt-4 grid lg:grid-cols-2 gap-4">
             {tr && tr.by_discipline.length > 0 && (
               <ScrollReveal>
                 <div className="glass-card rounded-2xl p-6 h-full">
@@ -383,8 +456,8 @@ export default async function HomePage() {
                   <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-600">
                     <span className="inline-block w-px h-3 bg-gray-400/60" />
                     {tr.hasard_top3 != null
-                      ? `Repère « hasard » à ${tr.hasard_top3.toFixed(0)} % — l'espérance d'un tirage au sort sur ces mêmes courses. Au-delà, l'analyse fait mieux.`
-                      : "Au-delà du repère du hasard, l'analyse fait mieux."}
+                      ? `Repère « hasard » à ${tr.hasard_top3.toFixed(0)} % — l'espérance d'un tirage au sort sur ces mêmes courses. C'est le plancher, pas la référence : celle-ci est le marché${tr.marche ? `, à ${tr.marche.marche_top3.toFixed(1).replace(".", ",")} %` : ""}.`
+                      : "Le repère du hasard est un plancher ; la vraie référence est le marché."}
                   </div>
                 </div>
               </ScrollReveal>

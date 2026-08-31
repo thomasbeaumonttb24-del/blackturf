@@ -1190,6 +1190,100 @@ async def _compute_track_record(db: AsyncSession) -> dict:
     except Exception as e:
         log.warning("track_record.clv_failed", error=str(e))
 
+    # ── LE SEUL COMPARATEUR QUI COMPTE : le marché ─────────────────────────
+    # Le site se comparait au HASARD (« 60,2 % contre 29 % pour un tirage au
+    # sort »). Le chiffre est vrai, la comparaison est celle qui flatte : sur un
+    # site dont l'argument central est l'honnêteté de la mesure, c'est la faille
+    # la plus coûteuse en crédibilité. Le vrai adversaire est le classement par
+    # la cote, et il faut publier qu'il fait JEU ÉGAL, voire un peu mieux.
+    #
+    # Mesuré en production le 2026-08-31 sur les 4 023 courses de la cohorte :
+    #     gagnant trouvé      IA 28,54 %   marché 28,83 %
+    #     gagnant dans le top-3  IA 61,35 %   marché 62,32 %
+    #     ROI 1 € Gagnant sur le favori   IA −11,9 %   marché −17,6 %
+    # L'IA n'est donc PAS plus précise. Son avantage est un effet de PRIX : à
+    # précision égale elle désigne des chevaux plus chers, ce qui vaut ~+5,5
+    # points de ROI. C'est ce qu'il faut vendre, et rien d'autre.
+    #
+    # `cote_figee` et non la cote courante : c'est la cote enregistrée AVEC le
+    # pronostic, donc un classement de marché contemporain de la prédiction. Le
+    # rang IA est recalculé sur les MÊMES partants (non-partants exclus) pour que
+    # les deux colonnes portent sur exactement la même population.
+    marche = None
+    try:
+        m = (await db.execute(text("""
+            WITH cohorte AS (
+                SELECT p.course_id, p.participation_id, p.rang_predit, p.cote_figee
+                FROM prediction_evaluation p
+                JOIN courses c ON c.course_id = p.course_id
+                WHERE c.statut = 'termine'
+                  AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                  AND p.created_at < c.date_heure
+                  AND p.cote_figee IS NOT NULL AND p.cote_figee > 1
+            ),
+            partants AS (
+                SELECT co.*, pa.numero
+                FROM cohorte co
+                JOIN participations pa ON pa.participation_id = co.participation_id
+                WHERE pa.non_partant = false
+            ),
+            classe AS (
+                SELECT a.*,
+                       ROW_NUMBER() OVER (PARTITION BY a.course_id
+                                          ORDER BY a.cote_figee ASC, a.numero ASC) AS rang_marche,
+                       ROW_NUMBER() OVER (PARTITION BY a.course_id
+                                          ORDER BY a.rang_predit ASC, a.numero ASC) AS rang_ia
+                FROM partants a
+            ),
+            gagnants AS (
+                SELECT r.course_id, (e->>'numero')::int AS numero
+                FROM resultats r, LATERAL jsonb_array_elements(r.classement) e
+                WHERE jsonb_typeof(r.classement) = 'array' AND (e->>'position')::int = 1
+            ),
+            par_course AS (
+                SELECT c.course_id,
+                       MAX(CASE WHEN c.rang_marche = 1 THEN c.cote_figee END) AS cote_fav,
+                       -- Cote FIGÉE du favori IA : les deux rendements sont ainsi
+                       -- calculés sur la même base de prix et la même cohorte. Les
+                       -- comparer au `favori_roi` global (cohorte plus large, sans
+                       -- exigence de cote figée) donnerait −6,8 % contre −17,6 % et
+                       -- surestimerait l'avantage de dix points.
+                       MAX(CASE WHEN c.rang_ia = 1 THEN c.cote_figee END) AS cote_fav_ia,
+                       BOOL_OR(c.rang_marche = 1 AND c.numero = g.numero) AS m1,
+                       BOOL_OR(c.rang_marche <= 3 AND c.numero = g.numero) AS m3,
+                       BOOL_OR(c.rang_ia = 1 AND c.numero = g.numero)     AS i1,
+                       BOOL_OR(c.rang_ia <= 3 AND c.numero = g.numero)    AS i3
+                FROM classe c JOIN gagnants g ON g.course_id = c.course_id
+                GROUP BY c.course_id
+            )
+            SELECT count(*)                                                          AS n,
+                   avg(m1::int) * 100                                                AS marche_top1,
+                   avg(m3::int) * 100                                                AS marche_top3,
+                   avg(i1::int) * 100                                                AS ia_top1,
+                   avg(i3::int) * 100                                                AS ia_top3,
+                   (sum(CASE WHEN m1 THEN cote_fav ELSE 0 END) - count(*))::numeric
+                       / nullif(count(*), 0) * 100                                   AS marche_roi,
+                   (sum(CASE WHEN i1 THEN cote_fav_ia ELSE 0 END) - count(*))::numeric
+                       / nullif(count(*), 0) * 100                                   AS ia_roi
+            FROM par_course
+        """))).first()
+        if m and (m.n or 0) >= 200:
+            marche = {
+                "nb_courses": int(m.n),
+                "marche_top1": round(float(m.marche_top1), 2),
+                "marche_top3": round(float(m.marche_top3), 2),
+                # Taux de l'IA RECALCULÉS sur cette cohorte-là : les comparer aux
+                # taux globaux (cohortes différentes) donnerait un écart faux.
+                "ia_top1": round(float(m.ia_top1), 2),
+                "ia_top3": round(float(m.ia_top3), 2),
+                "marche_favori_roi": round(float(m.marche_roi), 2),
+                # ROI de NOTRE favori sur CETTE cohorte : le seul chiffre qui se
+                # compare légitimement à `marche_favori_roi`.
+                "ia_favori_roi": round(float(m.ia_roi), 2),
+            }
+    except Exception as e:
+        log.warning("track_record.marche_failed", error=str(e)[:200])
+
     result = {
         "global": {
             "accuracy_top1": accuracy_top1,
@@ -1224,6 +1318,9 @@ async def _compute_track_record(db: AsyncSession) -> dict:
         "vb_performance": vb_performance,
         "adaptive_learning": al_data,
         "clv": clv,
+        # None si la mesure a échoué ou si la cohorte est trop courte : l'affichage
+        # doit alors TAIRE la comparaison, jamais la remplacer par le hasard.
+        "marche": marche,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     return result

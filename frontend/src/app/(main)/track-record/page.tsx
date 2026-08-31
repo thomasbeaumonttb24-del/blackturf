@@ -603,6 +603,74 @@ function StatCell({ value, label, note }: { value: React.ReactNode; label: strin
 }
 
 // ─── Main page ────────────────────────────────────────────────
+/**
+ * En-tête du palmarès — rendu dans les TROIS états de la page (chargement,
+ * erreur, données).
+ *
+ * `/track-record` est un composant client intégral : pendant le chargement, le
+ * HTML servi ne contenait qu'un squelette, SANS le moindre `<h1>`. La page qui
+ * porte la preuve du produit était ainsi la moins bien référencée du site —
+ * `grep '<h1' track-record.html` renvoyait 0. Sortir l'en-tête du garde de
+ * chargement suffit : son texte ne dépend d'aucune donnée, seul le compteur en
+ * dépend, et il s'efface proprement quand le nombre n'est pas encore connu.
+ */
+function HeroPalmares({ courses }: { courses: number | null }) {
+  return (
+        <header className="relative isolate overflow-hidden bg-slate-950">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/img/palmares-hero-1600.webp"
+            srcSet="/img/palmares-hero-640.webp 640w, /img/palmares-hero-1024.webp 1024w, /img/palmares-hero-1600.webp 1600w"
+            sizes="100vw"
+            alt=""
+            aria-hidden="true"
+            fetchPriority="high"
+            className="absolute inset-0 h-full w-full object-cover object-[center_42%]"
+          />
+          {/* Voile en deux passes : dégradé horizontal pour tenir le contraste du
+              texte à gauche (AA sur fond photo), voile vertical léger pour que la
+              photo reste LISIBLE à droite — un aplat uniforme la transformait en
+              texture grise et annulait l'intérêt de l'image. */}
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/85 to-slate-950/25" aria-hidden="true" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/5 to-slate-950/55" aria-hidden="true" />
+
+          <div className="relative mx-auto max-w-7xl px-4 pb-36 pt-14 sm:px-6 sm:pb-44 sm:pt-20 lg:pb-52 lg:pt-24">
+            <p className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-300">
+              <span className="h-px w-8 bg-amber-400/80" aria-hidden="true" />
+              Palmarès public
+            </p>
+
+            <h1 className="mt-7 max-w-4xl font-display text-[2.5rem] font-bold leading-[1.03] tracking-[-0.04em] text-white sm:text-6xl lg:text-[4.25rem]">
+              {courses !== null ? <><CountUp value={courses} /> courses analysées.</> : "Chaque course analysée, notée à l'arrivée."}
+              <span className="mt-2 block text-amber-300">Tous les résultats sont publics.</span>
+            </h1>
+
+            <p className="mt-7 max-w-xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
+              On note chaque pronostic à l&apos;arrivée, aux rapports PMU officiels.
+              Les bons comme les mauvais.
+            </p>
+
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-6 shadow-none">
+                <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-4 w-4" /></Link>
+              </Button>
+              <Button asChild variant="ghost" size="lg" className="min-h-12 rounded-xl border border-white/25 bg-white/5 px-6 text-white hover:bg-white/10 hover:text-white">
+                <a href="#preuves">Voir la méthode</a>
+              </Button>
+            </div>
+
+            <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-600">
+              <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Horodaté avant le départ</span>
+              <span className="text-slate-600" aria-hidden="true">·</span>
+              <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Rapports PMU officiels</span>
+              <span className="text-slate-600" aria-hidden="true">·</span>
+              <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Aucun prélèvement pendant l&apos;essai</span>
+            </p>
+          </div>
+        </header>
+  );
+}
+
 export default function TrackRecordPage() {
   const [recentLimit, setRecentLimit] = useState(10);
   const [recordsLimit, setRecordsLimit] = useState(10);
@@ -654,13 +722,15 @@ export default function TrackRecordPage() {
     return { points, moyenne, totalCourses: total, jours: brute.length };
   }, [data?.tendance_30j]);
 
+  // C'EST CET ÉTAT QUI EST SERVI EN HTML. Il ne portait qu'un squelette gris,
+  // donc aucun `<h1>` : la page de preuve du site était sa page la moins bien
+  // référencée. L'en-tête, dont le texte ne dépend d'aucune donnée, y figure
+  // désormais tel quel ; seuls les chiffres restent en attente.
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#FCFBF8] px-4 py-16" aria-busy="true" aria-label="Chargement du palmarès">
-        <div className="mx-auto max-w-6xl animate-pulse space-y-8">
-          <div className="h-5 w-36 rounded-full bg-stone-200" />
-          <div className="h-12 max-w-2xl rounded-2xl bg-stone-200" />
-          <div className="h-5 max-w-xl rounded-full bg-stone-100" />
+      <div className="min-h-screen bg-[#FCFBF8]">
+        <HeroPalmares courses={null} />
+        <div className="mx-auto max-w-6xl animate-pulse space-y-8 px-4 py-16 sm:px-6" aria-busy="true" aria-label="Chargement des chiffres du palmarès">
           <div className="grid gap-4 sm:grid-cols-4"><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /></div>
           <div className="h-80 rounded-3xl bg-white" />
         </div>
@@ -706,58 +776,7 @@ export default function TrackRecordPage() {
           L'image n'est pas décorative : ce sont les stalles AVANT l'ouverture,
           c'est-à-dire exactement l'instant que la page prouve — le pronostic est
           figé avant que les portes s'ouvrent. */}
-      <header className="relative isolate overflow-hidden bg-slate-950">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/img/palmares-hero-1600.webp"
-          srcSet="/img/palmares-hero-640.webp 640w, /img/palmares-hero-1024.webp 1024w, /img/palmares-hero-1600.webp 1600w"
-          sizes="100vw"
-          alt=""
-          aria-hidden="true"
-          fetchPriority="high"
-          className="absolute inset-0 h-full w-full object-cover object-[center_42%]"
-        />
-        {/* Voile en deux passes : dégradé horizontal pour tenir le contraste du
-            texte à gauche (AA sur fond photo), voile vertical léger pour que la
-            photo reste LISIBLE à droite — un aplat uniforme la transformait en
-            texture grise et annulait l'intérêt de l'image. */}
-        <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/85 to-slate-950/25" aria-hidden="true" />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/5 to-slate-950/55" aria-hidden="true" />
-
-        <div className="relative mx-auto max-w-7xl px-4 pb-36 pt-14 sm:px-6 sm:pb-44 sm:pt-20 lg:pb-52 lg:pt-24">
-          <p className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-300">
-            <span className="h-px w-8 bg-amber-400/80" aria-hidden="true" />
-            Palmarès public
-          </p>
-
-          <h1 className="mt-7 max-w-4xl font-display text-[2.5rem] font-bold leading-[1.03] tracking-[-0.04em] text-white sm:text-6xl lg:text-[4.25rem]">
-            <CountUp value={g.nb_courses_analysees} /> courses analysées.
-            <span className="mt-2 block text-amber-300">Tous les résultats sont publics.</span>
-          </h1>
-
-          <p className="mt-7 max-w-xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
-            On note chaque pronostic à l&apos;arrivée, aux rapports PMU officiels.
-            Les bons comme les mauvais.
-          </p>
-
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-6 shadow-none">
-              <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-4 w-4" /></Link>
-            </Button>
-            <Button asChild variant="ghost" size="lg" className="min-h-12 rounded-xl border border-white/25 bg-white/5 px-6 text-white hover:bg-white/10 hover:text-white">
-              <a href="#preuves">Voir la méthode</a>
-            </Button>
-          </div>
-
-          <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-600">
-            <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Horodaté avant le départ</span>
-            <span className="text-slate-600" aria-hidden="true">·</span>
-            <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Rapports PMU officiels</span>
-            <span className="text-slate-600" aria-hidden="true">·</span>
-            <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Aucun prélèvement pendant l&apos;essai</span>
-          </p>
-        </div>
-      </header>
+      <HeroPalmares courses={g.nb_courses_analysees} />
 
       {/* Bandeau de chiffres à cheval sur la photo : la preuve est lisible avant
           tout scroll, sans réempiler une carte sombre par-dessus une photo sombre. */}

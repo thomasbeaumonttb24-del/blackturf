@@ -611,6 +611,29 @@ export interface SeoTrackRecord {
     clv_implied: number;
     clv_median: number;
   } | null;
+  /**
+   * LE comparateur : le classement par la cote, sur la même cohorte.
+   *
+   * Se comparer au hasard flatte et ne prouve rien — battre un tirage au sort est
+   * la moindre des choses pour un modèle. Le vrai adversaire est le marché, et la
+   * mesure dit qu'il fait jeu égal : gagnant trouvé 28,8 % contre 28,5 %, gagnant
+   * dans le top-3 62,3 % contre 61,4 % (4 023 courses, 2026-08-31). L'avantage de
+   * BlackTurf n'est PAS une meilleure précision, c'est un effet de prix — à
+   * précision égale, des chevaux plus chers, soit ~+5,5 points de ROI.
+   *
+   * `null` quand la mesure a échoué ou que la cohorte est trop courte : on TAIT
+   * alors la comparaison, on ne la remplace pas par celle qui arrange.
+   */
+  marche?: {
+    nb_courses: number;
+    marche_top1: number;
+    marche_top3: number;
+    ia_top1: number;
+    ia_top3: number;
+    marche_favori_roi: number;
+    /** ROI de NOTRE favori sur CETTE cohorte : le seul comparable à `marche_favori_roi`. */
+    ia_favori_roi: number;
+  } | null;
   updated_at?: string;
 }
 
