@@ -224,6 +224,47 @@ def _should_deploy(
     return structural_replace or ranking_acceptable
 
 
+def _motif_promotion(
+    *,
+    new_wf: float,
+    current_wf: float,
+    current_is_synth: bool,
+    current_unreliable: bool,
+    data_jump: bool,
+    h2h_delta: Optional[float],
+) -> str:
+    """Motif RÉEL d'une promotion déjà décidée par `_should_deploy`.
+
+    Ne décide rien : `_should_deploy` a déjà tranché, cette fonction nomme ce qui a
+    emporté la décision. Elle existe parce que le libellé était écrit sans jamais
+    comparer quoi que ce soit — hors remplacement structurel, la branche retombait
+    sur « better_wf », y compris quand le nouveau walk-forward était INFÉRIEUR à
+    celui du champion.
+
+    Constat du 2026-08-31, trois nuits sur quatre promues en baisse et rapportées
+    comme des améliorations : 0.7884→0.7883, 0.7883→0.7873, 0.7878→0.7869. Le
+    rapport matinal reposant sur ce champ, il annonçait une progression continue
+    pendant que le modèle dérivait vers le bas.
+
+    `regression_toleree_*` n'est PAS une anomalie : `_should_deploy` accepte
+    délibérément une régression jusqu'à `seuil_regression` (wf) ou `h2h_tolerance`
+    (head-to-head). Ce motif dit simplement que la promotion vient de cette
+    tolérance et non d'un progrès — c'est la distinction qui manquait.
+
+    L'ordre reproduit celui de `_should_deploy` : le remplacement structurel
+    court-circuite le mérite de ranking, donc il se nomme en premier.
+    """
+    if current_is_synth:
+        return "synth"
+    if current_unreliable:
+        return "unreliable_active"
+    if data_jump:
+        return "data_jump"
+    if h2h_delta is not None:
+        return "better_h2h" if h2h_delta >= 0 else "regression_toleree_h2h"
+    return "better_wf" if new_wf >= current_wf else "regression_toleree_wf"
+
+
 def _edge_undecidable(em: dict) -> bool:
     """L'edge_monitor a-t-il assez de matière pour CONCLURE quoi que ce soit ?
 
@@ -1350,15 +1391,22 @@ async def _do_retraining(mois: int, label: str) -> None:
                 .values(est_actif=False)
             )
 
+            _raison = _motif_promotion(
+                new_wf=new_wf,
+                current_wf=current_wf,
+                current_is_synth=current_is_synth,
+                current_unreliable=current_unreliable,
+                data_jump=data_jump,
+                h2h_delta=_h2h_delta,
+            )
             log.info(
                 "pipeline.retrain.deployed",
                 version=version_num,
                 auc=round(metrics["auc_roc"], 4),
                 wf_auc=round(new_wf, 4),
                 prev_wf_auc=round(current_wf, 4),
-                reason=("synth" if current_is_synth else "unreliable_active" if current_unreliable
-                        else "data_jump" if data_jump
-                        else "better_h2h" if _h2h_delta is not None else "better_wf"),
+                wf_delta=round(new_wf - current_wf, 4),
+                reason=_raison,
                 h2h_delta=round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 h2h_n_courses=_h2h["n_courses"] if _h2h else None,
                 train_n=new_train_n,

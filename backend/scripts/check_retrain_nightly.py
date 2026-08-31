@@ -177,6 +177,47 @@ async def _etat_modele() -> dict:
             SELECT count(*) FROM courses
             WHERE statut = 'termine' AND date_heure > now() - interval '24 hours'
         """))).scalar() or 0
+        # ── Tendance ────────────────────────────────────────────────────────
+        # Le rapport ne montrait que les chiffres du jour. Or le gate de promotion
+        # tolère une régression par rapport au champion de la VEILLE, sans jamais
+        # se comparer au meilleur modèle jamais atteint : une dérive de quelques
+        # dix-millièmes par nuit passe donc indéfiniment, et un chiffre isolé la
+        # rend invisible. Constaté le 2026-08-31 : walk-forward 0,7888 → 0,7869 et
+        # avantage sur la cote 0,0201 → 0,0188 en cinq nuits, chaque nuit annoncée
+        # comme une amélioration. Ces deux écarts sont le seul moyen de le voir.
+        #
+        # Le prédécesseur est la version de numéro immédiatement inférieur, pas
+        # « celle d'hier » : plusieurs promotions peuvent tomber le même jour
+        # (v511/512/513 le 20/08), et une date ne les départage pas.
+        prec = (await s.execute(
+            select(ModelVersion)
+            .where(ModelVersion.version_num < mv.version_num)
+            .order_by(ModelVersion.version_num.desc())
+        )).scalars().first()
+
+        def _record(colonne):
+            """Meilleure valeur jamais atteinte sur cette colonne, et sa version.
+
+            Restreint aux versions NON synthétiques : un modèle de secours n'est pas
+            une référence de qualité. `NULLS LAST` n'est pas nécessaire ici, l'ordre
+            décroissant place déjà les NULL en tête sous PostgreSQL — d'où le
+            `IS NOT NULL` explicite.
+            """
+            return (
+                select(ModelVersion.version_num, colonne)
+                .where(colonne.is_not(None), ModelVersion.est_synthetique.is_(False))
+                .order_by(colonne.desc())
+                .limit(1)
+            )
+
+        rec_wf = (await s.execute(_record(ModelVersion.walk_forward_auc))).first()
+        rec_delta = (await s.execute(_record(ModelVersion.rank_delta_market))).first()
+
+        def _ecart(actuel, reference):
+            if actuel is None or reference is None:
+                return None
+            return round(actuel - reference, 4)
+
         return {
             "version": mv.version_num,
             "cree_le": mv.created_at.strftime("%d/%m/%Y"),
@@ -190,7 +231,95 @@ async def _etat_modele() -> dict:
                                 if mv.market_rank_auc is not None else None),
             "rank_delta_market": (round(mv.rank_delta_market, 4)
                                   if mv.rank_delta_market is not None else None),
+            # Tendance : écart au prédécesseur immédiat et au record historique.
+            "prec_version": prec.version_num if prec else None,
+            "wf_vs_prec": _ecart(mv.walk_forward_auc,
+                                 prec.walk_forward_auc if prec else None),
+            "delta_vs_prec": _ecart(mv.rank_delta_market,
+                                    prec.rank_delta_market if prec else None),
+            "wf_record": round(rec_wf[1], 4) if rec_wf else None,
+            "wf_record_version": rec_wf[0] if rec_wf else None,
+            "wf_vs_record": _ecart(mv.walk_forward_auc, rec_wf[1] if rec_wf else None),
+            "delta_record": round(rec_delta[1], 4) if rec_delta else None,
+            "delta_record_version": rec_delta[0] if rec_delta else None,
+            "delta_vs_record": _ecart(mv.rank_delta_market,
+                                      rec_delta[1] if rec_delta else None),
         }
+
+
+def _ligne_tendance(libelle: str, valeur, ecart, reference: str) -> str:
+    """Une ligne « métrique — écart — référence ».
+
+    Le signe porte la couleur, pas la valeur absolue : un walk-forward de 0,7869
+    n'est ni bon ni mauvais dans l'absolu, ce qui compte est qu'il ait baissé.
+    Un écart nul est neutre (gris) et non vert : ne pas avoir régressé n'est pas
+    une amélioration.
+    """
+    if valeur is None:
+        return ""
+    if ecart is None:
+        etxt, coul = "—", "#666"
+    elif ecart > 0:
+        etxt, coul = f"{ecart:+.4f}", "#16a34a"
+    elif ecart < 0:
+        etxt, coul = f"{ecart:+.4f}", "#dc2626"
+    else:
+        etxt, coul = "=", "#666"
+    return (
+        f'<tr><td style="padding:4px 12px 4px 0;color:#666;">{libelle}</td>'
+        f'<td><b>{valeur:.4f}</b></td>'
+        f'<td style="padding-left:12px;color:{coul};font-weight:bold;">{etxt}</td>'
+        f'<td style="padding-left:8px;color:#666;font-size:12px;">{reference}</td></tr>'
+    )
+
+
+def _bloc_tendance(modele: dict) -> str:
+    """Écart au modèle précédent ET au meilleur jamais atteint.
+
+    Pourquoi le record et pas seulement la veille : le gate de promotion tolère une
+    régression par rapport au champion de la veille, sans plancher absolu. Une baisse
+    de quelques dix-millièmes par nuit est donc acceptée indéfiniment, et chaque nuit
+    prise isolément paraît normale. L'écart au record est la seule ligne qui rende
+    cette dérive cumulée visible.
+    """
+    if modele.get("wf_auc") is None and modele.get("rank_delta_market") is None:
+        return ""
+    prec = modele.get("prec_version")
+    ref_prec = f"vs v{prec}" if prec else "pas de prédécesseur"
+    lignes = [
+        _ligne_tendance("Walk-forward AUC", modele.get("wf_auc"),
+                        modele.get("wf_vs_prec"), ref_prec),
+        _ligne_tendance("Walk-forward AUC", modele.get("wf_auc"),
+                        modele.get("wf_vs_record"),
+                        f"vs record v{modele.get('wf_record_version')}"
+                        f" ({modele['wf_record']:.4f})" if modele.get("wf_record") else "—"),
+        _ligne_tendance("Avantage sur la cote", modele.get("rank_delta_market"),
+                        modele.get("delta_vs_prec"), ref_prec),
+        _ligne_tendance("Avantage sur la cote", modele.get("rank_delta_market"),
+                        modele.get("delta_vs_record"),
+                        f"vs record v{modele.get('delta_record_version')}"
+                        f" ({modele['delta_record']:+.4f})" if modele.get("delta_record") else "—"),
+    ]
+    corps = "".join(l for l in lignes if l)
+    if not corps:
+        return ""
+    # Une dérive ne se lit qu'au cumul : on la nomme quand l'écart au record est
+    # négatif, sinon le lecteur voit deux nombres sans savoir lequel doit l'inquiéter.
+    _wr, _dr = modele.get("wf_vs_record"), modele.get("delta_vs_record")
+    sous_record = [
+        nom for nom, ec in (("le walk-forward", _wr), ("l'avantage sur la cote", _dr))
+        if ec is not None and ec < 0
+    ]
+    avertissement = (
+        f'<p style="color:#d97706;font-size:13px;margin-top:6px;">'
+        f'Le modèle actif est sous son record historique sur {" et ".join(sous_record)}. '
+        f'La promotion nocturne se compare au modèle de la veille, jamais au meilleur '
+        f'jamais atteint : une baisse répétée sous le seuil de tolérance est acceptée '
+        f'nuit après nuit.</p>'
+    ) if sous_record else ""
+    return f"""
+    <h3 style="font-size:14px;margin-top:24px;">Tendance</h3>
+    <table style="border-collapse:collapse;font-size:14px;">{corps}</table>{avertissement}"""
 
 
 def _html(verdict: tuple, modele: dict, lignes: list[str],
@@ -241,6 +370,12 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
       Ne se compare pas à l'AUC poolée ci-dessus.
     </p>"""
 
+    # ── Tendance ─────────────────────────────────────────────────────────────
+    # Une valeur isolée ne dit pas si le modèle monte ou descend, et le gate de
+    # promotion ne se compare jamais au meilleur modèle jamais atteint : sans ces
+    # deux écarts, une dérive lente reste invisible nuit après nuit.
+    bloc_tendance = _bloc_tendance(modele)
+
     if modele.get("version") is None:
         bloc_modele = "<p>Aucun modèle actif en base.</p>"
     else:
@@ -273,6 +408,7 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
   </div>
   {bloc_modele}
   {bloc_classement}
+  {bloc_tendance}
   <h3 style="font-size:14px;margin-top:24px;">Extrait des logs</h3>
   {logs}
   <p style="color:#999;font-size:11px;margin-top:24px;">
