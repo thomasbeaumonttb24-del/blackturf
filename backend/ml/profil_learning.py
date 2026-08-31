@@ -78,6 +78,49 @@ W_MIN, W_MAX = 0.5, 1.6
 # (une preuve de perte n'expire pas à la légère). Decay appliqué aux POIDS uniquement.
 DECAY_HALF_LIFE_DAYS = 45.0
 
+# ── WINSORISATION DES GAINS QUI PILOTENT LES POIDS (audit 2026-08-31) ────────
+# Mesure qui impose cette correction, sur 81 jours et 4 039 courses rejouables :
+#     Trio, 1 653 paris — ROI BRUT +51,0 %, ROI WINSORISÉ p99 −75,7 %
+# Un UNIQUE ticket (19072026R3C7, 10 € misés, 4 526 € rendus) portait 49,8 % de
+# tous les gains Trio de la période ; les trois plus gros en portaient 74,7 %.
+# Sans ce ticket, le Trio retombait à −24,1 %. `shrunk_weight` travaillant sur
+# `net / mise` en sommes BRUTES, l'état appris affichait `Trio roi: 62,8 %` et lui
+# donnait le poids MAXIMUM (1,6 = W_MAX) — l'apprentissage poussait donc
+# activement le pari qui détruisait le plus d'argent. Seul un gate appliqué EN AVAL
+# (`apply_type_gates`) l'empêchait de sortir dans les plans : le produit ne tenait
+# que par un correctif posé après coup sur un apprentissage inversé.
+#
+# Ce qui est winsorisé et ce qui ne l'est PAS — la distinction est délibérée :
+#   - les POIDS appris (`shrunk_weight`) partent des gains PLAFONNÉS : un poids
+#     doit refléter ce qui se reproduit, pas ce qui est arrivé une fois ;
+#   - `mise`, `gain`, `win`, `roi` restent BRUTS : ce sont des diagnostics et
+#     l'argent réellement rendu. Un montant en euros affiché quelque part ne doit
+#     jamais être une valeur winsorisée.
+# Les gates de suppression dure (`zero_win_suppression`, seuil `ROI_SUPPRESS`)
+# continuent de lire les champs bruts : ils comptent des VICTOIRES, pas des
+# montants, et un plafond ne peut pas transformer un perdant en gagnant.
+#
+# Plafond calculé PAR TYPE sur l'ensemble des profils (n plus grand, donc plafond
+# plus stable) et sur TOUS les tickets, gagnants et perdants — même définition que
+# `percentile_cont(0.99)` de PostgreSQL, pour que la mesure d'audit reste
+# reproductible telle quelle en SQL.
+WINSOR_QUANTILE = 0.99
+
+
+def plafond_gain(gains: list[float]) -> Optional[float]:
+    """Quantile `WINSOR_QUANTILE` d'une liste de gains — fonction PURE (testable
+    sans DB). Interpolation linéaire, identique à `percentile_cont` de PostgreSQL.
+    Liste vide → None (aucun plafond : on n'invente pas de borne sans données)."""
+    if not gains:
+        return None
+    s = sorted(float(g) for g in gains)
+    if len(s) == 1:
+        return s[0]
+    pos = WINSOR_QUANTILE * (len(s) - 1)
+    bas = int(pos)
+    haut = min(bas + 1, len(s) - 1)
+    return s[bas] + (s[haut] - s[bas]) * (pos - bas)
+
 
 def ctx_key(discipline, nb_partants) -> str:
     """Clé de contexte d'une course : discipline + bande de taille de peloton.
@@ -518,6 +561,38 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                 "status": "skipped_insufficient_replayable_data",
                 "min_runs": MIN_PROFIL_WEIGHTS_RUNS}
 
+    # ── PRÉ-PASSE : plafond de winsorisation par TYPE ────────────────────────
+    # Deux passes sont nécessaires : un quantile ne se calcule pas en flux. La
+    # première ne fait que collecter les gains (0 inclus pour les perdants, comme
+    # la requête SQL de référence), la seconde accumule en plafonnant.
+    _gains_par_type: dict[str, list[float]] = {}
+    _gains_par_plan: dict[str, list[float]] = {}
+    for _profil, _resultat, _r, _d, _np, _ca in rows:
+        if _profil not in PROFILS:
+            continue
+        _res = _resultat if isinstance(_resultat, dict) else json.loads(_resultat)
+        _gains_par_plan.setdefault(_profil, []).append(float(_res.get("total_gain") or 0))
+        for _pari in _res.get("paris", []):
+            _t = _pari.get("type")
+            if not _t:
+                continue
+            _gains_par_type.setdefault(_t, []).append(
+                float(_pari.get("gain") or 0) if _pari.get("statut") == "gagne" else 0.0)
+    plafonds: dict[str, float] = {t: p for t, p in
+                                  ((t, plafond_gain(g)) for t, g in _gains_par_type.items())
+                                  if p is not None}
+    # Plafond au niveau du PLAN, par profil : sert au seul `roi_global_winsorise`,
+    # publié à côté du ROI brut. C'est le chiffre qui a révélé l'ampleur du défaut
+    # (profil agressif : −5,08 % brut contre −30,64 % winsorisé sur 4 033 courses) ;
+    # le laisser invisible, c'est laisser croire que le profil perd 5 % quand il en
+    # perd 30. Ce champ ne pilote AUCUNE décision — il est là pour être lu.
+    plafonds_plan: dict[str, float] = {p: c for p, c in
+                                       ((p, plafond_gain(g)) for p, g in _gains_par_plan.items())
+                                       if c is not None}
+    gain_plan_winsor: dict[str, float] = {
+        p: sum(min(g, plafonds_plan[p]) for g in gs)
+        for p, gs in _gains_par_plan.items() if p in plafonds_plan}
+
     def _new_agg():
         return {"types": {}, "n_runs": 0, "mise": 0.0, "gain": 0.0, "runs_benef": 0}
 
@@ -525,7 +600,12 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         """Accumule un run réglé. Champs BRUTS (n/mise/gain/win : diagnostics + gate de
         suppression, une preuve de perte n'expire pas) ET champs EFFECTIFS pondérés par
         `decay` (récence) — les POIDS appris se calculent sur l'effectif → ils suivent
-        le régime récent du modèle/marché au lieu de moyenner tout l'historique à plat."""
+        le régime récent du modèle/marché au lieu de moyenner tout l'historique à plat.
+
+        `gain_ew` = le même effectif mais sur les gains PLAFONNÉS au p99 du type
+        (cf. `plafond_gain`). C'est LUI qui pilote `shrunk_weight` : un poids doit
+        refléter ce qui se reproduit, pas un jackpot unique. `gain`/`gain_e`
+        restent bruts pour les diagnostics et l'argent réellement rendu."""
         agg["n_runs"] += 1
         agg["mise"] += float(res.get("total_mise") or 0)
         agg["gain"] += float(res.get("total_gain") or 0)
@@ -536,7 +616,8 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
             if not t:
                 continue
             ts = agg["types"].setdefault(t, {"n": 0, "mise": 0.0, "gain": 0.0, "win": 0,
-                                             "n_e": 0.0, "mise_e": 0.0, "gain_e": 0.0})
+                                             "n_e": 0.0, "mise_e": 0.0, "gain_e": 0.0,
+                                             "gain_w": 0.0, "gain_ew": 0.0})
             mise = float(pari.get("mise") or 0)
             ts["n"] += 1
             ts["mise"] += mise
@@ -544,9 +625,13 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
             ts["mise_e"] += mise * decay
             if pari.get("statut") == "gagne":
                 gain = float(pari.get("gain") or 0)
+                cap = plafonds.get(t)
+                gain_w = min(gain, cap) if cap is not None else gain
                 ts["win"] += 1
                 ts["gain"] += gain
                 ts["gain_e"] += gain * decay
+                ts["gain_w"] += gain_w
+                ts["gain_ew"] += gain_w * decay
 
     _now = datetime.now(timezone.utc)
 
@@ -579,17 +664,24 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         detail = {}
         for t, ts in agg["types"].items():
             if ts["n"] >= MIN_RUNS_FOR_WEIGHTS:
-                # Poids sur les agrégats EFFECTIFS (récence) : le ROI récent pilote,
-                # l'ancien s'estompe (demi-vie DECAY_HALF_LIFE_DAYS). Seuil d'activation
-                # sur le n BRUT (préserve « pas d'invention sous 10 runs »).
-                w = shrunk_weight(ts["gain_e"] - ts["mise_e"], ts["mise_e"], ts["n_e"],
+                # Poids sur les agrégats EFFECTIFS (récence) ET WINSORISÉS : le ROI
+                # récent pilote, l'ancien s'estompe (demi-vie DECAY_HALF_LIFE_DAYS),
+                # et un jackpot unique ne fixe plus le poids d'un type (cf. plafond_gain).
+                # Seuil d'activation sur le n BRUT (préserve « pas d'invention sous 10 runs »).
+                w = shrunk_weight(ts["gain_ew"] - ts["mise_e"], ts["mise_e"], ts["n_e"],
                                   roi_reference=-prelevement(t))
             else:
                 w = 1.0          # échantillon insuffisant → neutre, pas d'invention
             weights[t] = round(w, 3)
             detail[t] = {
                 "n": ts["n"], "win_rate": round(ts["win"] / ts["n"] * 100, 1) if ts["n"] else None,
+                # `roi` reste BRUT : c'est l'argent réellement rendu. `roi_winsorise`
+                # est celui qui a décidé du poids. Publier les DEUX est le seul moyen
+                # de voir d'un coup d'œil qu'un type ne tient que par un gros lot —
+                # c'est cet écart (Trio : +51,0 % contre −75,7 %) qui a fait découvrir
+                # le défaut, et il ne doit plus jamais être invisible.
                 "roi": round((ts["gain"] - ts["mise"]) / ts["mise"] * 100, 1) if ts["mise"] > 0 else None,
+                "roi_winsorise": round((ts["gain_w"] - ts["mise"]) / ts["mise"] * 100, 1) if ts["mise"] > 0 else None,
                 "poids": round(w, 3),
             }
         # SUPPRESSION GLOBALE « 0 GAIN » (cf. zero_win_suppression) : coupe les types
@@ -619,17 +711,21 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
                     # RÉHABILITATION par la récence : si le ROI EFFECTIF (récent) est
                     # redevenu ≥ -15%, on ne coupe plus (le régime a changé) — on
                     # sous-pondère seulement. Une suppression ne doit pas être éternelle.
-                    roi_e = ((ts["gain_e"] - ts["mise_e"]) / ts["mise_e"]
+                    # Ce ROI de réhabilitation est WINSORISÉ : sinon un seul gros lot
+                    # tombé dans ce bucket suffisait à ressusciter un type prouvé
+                    # perdant sur des dizaines de courses. C'est exactement ce qui
+                    # avait porté `ctx_weights["plat|g"]["Trio"]` à 1,6.
+                    roi_e = ((ts["gain_ew"] - ts["mise_e"]) / ts["mise_e"]
                              if ts.get("mise_e", 0) > 0 else roi)
                     if roi_e <= -0.15:
                         cw[t] = 0.0
                         suppressed.append(f"{ck}:{t} (roi={round(roi*100)}% n={n})")
                     else:
-                        cw[t] = round(shrunk_weight(ts["gain_e"] - ts["mise_e"],
+                        cw[t] = round(shrunk_weight(ts["gain_ew"] - ts["mise_e"],
                                                     ts["mise_e"], ts["n_e"],
                                                     roi_reference=-prelevement(t)), 3)
                 elif n >= MIN_RUNS_FOR_WEIGHTS_CTX:
-                    cw[t] = round(shrunk_weight(ts["gain_e"] - ts["mise_e"],
+                    cw[t] = round(shrunk_weight(ts["gain_ew"] - ts["mise_e"],
                                                 ts["mise_e"], ts["n_e"],
                                                 roi_reference=-prelevement(t)), 3)
             if cw:
@@ -641,6 +737,11 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         out["profils"][profil] = {
             "n_runs": agg["n_runs"],
             "roi_global": round((gain - mise) / mise * 100, 1) if mise > 0 else None,
+            # Diagnostic pur, ne pilote rien : l'écart entre les deux dit si le profil
+            # tient par sa méthode ou par un gros lot (cf. `plafonds_plan`).
+            "roi_global_winsorise": (
+                round((gain_plan_winsor[profil] - mise) / mise * 100, 1)
+                if mise > 0 and profil in gain_plan_winsor else None),
             "taux_runs_beneficiaires": round(agg["runs_benef"] / agg["n_runs"] * 100, 1) if agg["n_runs"] else None,
             "type_weights": weights,
             "type_detail": detail,

@@ -122,14 +122,28 @@ class TestVarianceCap:
 
     def test_risque_spread_plusieurs_mises(self):
         # DEMANDE USER : « plus de mises différentes en risqué » — fini le 10€ sur un
-        # seul Simple Gagnant. Avec 10€ et un champ complet de candidats, le plan
-        # risqué doit répartir sur ≥2 tickets, chacun ≥ 2€ (plancher produit) et
-        # chaque ticket GAGNANT rend ≥ ×10 de la MISE TOTALE du plan (contrat
-        # 2026-07-02 : 10€ joués → tout gagnant rend ≥ 100€, peu importe le type).
+        # seul Simple Gagnant. Chaque ticket ≥ 2€ (plancher produit) et chaque ticket
+        # GAGNANT rend ≥ ×10 de la MISE TOTALE du plan (contrat 2026-07-02 : 10€ joués
+        # → tout gagnant rend ≥ 100€, peu importe le type). Le contrat ×10 est
+        # confirmé par l'exploitant le 2026-08-31 : « viser gros, quitte à gagner
+        # moins souvent ».
+        #
+        # L'ÉTALEMENT N'EST PLUS EXIGÉ INCONDITIONNELLEMENT (2026-08-31). Sur cette
+        # fixture, le 2ᵉ ticket était un Simple Gagnant sur le cheval de RANG 8,
+        # c'est-à-dire le dernier du champ : l'étalement n'était obtenu qu'en pariant
+        # contre notre propre classement. Le plafond de rang du profil (6) l'interdit,
+        # et il l'interdisait déjà — c'est le chemin de complément manuel
+        # (`_relaxed_ok`) qui ne le vérifiait pas, oubli corrigé le 2026-08-31.
+        # ROI winsorisé mesuré par pire rang du ticket, profil agressif, 4 033 courses :
+        # rang ≤3 → −22,0 %, rang 6 → −40,6 %, rangs 7-8 → −54,5 %. Un 2ᵉ ticket au
+        # rang 8 ne diversifie pas le risque, il achète une perte.
+        #
+        # Ce qui reste exigé : que le montant soit ENTIÈREMENT joué, que chaque ticket
+        # respecte le plancher de mise, et que chacun tienne la tranche ×10.
         plan = generer_plan(10, "agressif", _field(8), self.COURSE, respect_montant=True)
         d = plan_to_dict(plan)
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
-        assert len(paris) >= 2, f"1 seul ticket risqué : {paris}"
+        assert paris, "plan risqué vide"
         assert sum(p["mise"] for p in paris) == 10          # tout le montant joué
         # Le contrat ×10 vs mise TOTALE porte sur TOUS les tickets, sans exception
         # (décision produit 2026-08-20), y compris les tickets d'appoint à 2€.
@@ -264,11 +278,23 @@ class TestTicketsAppoint:
         Sur un champ à favori marqué, les combinaisons paient ×24-42 : sous le seuil de
         finançabilité du risqué, le plan se concentre légitimement sur son meilleur
         ticket. C'est sur un champ OUVERT que l'étalement a un sens, et c'est là qu'on
-        l'exige. Sur la population réelle, le risqué tient 2,1 à 2,9 tickets par plan.
+        l'exige.
+
+        LE SEUIL D'EXIGENCE DÉPEND DE LA MISE (2026-08-31). La cible ×10 impose
+        `mise ≥ cible / rapport` : plus le plan est gros, plus chaque ticket coûte cher,
+        donc moins il en tient. Mesuré sur ce champ ouvert de 14 partants, plafond de
+        rang 6 : 2 tickets à 10 € et à 20 €, 1 seul à 30 € et 50 €. Exiger 2 tickets à
+        30 € reviendrait à exiger que le moteur casse le contrat ×10 — c'est-à-dire à
+        tester l'inverse de ce que l'exploitant a arbitré le 2026-08-31.
+
+        À 30 €, on exige donc seulement que le plan reste dans sa tranche. Ce que la
+        version précédente obtenait à 30 € : 3 tickets, dont un Simple Gagnant sur le
+        cheval de RANG 8 et un Trio avec un pied au rang 7 — les bandes mesurées à
+        −54,5 % de ROI winsorisé, contre −40,6 % au rang 6 et −22,0 % au rang ≤3.
         """
         champ = self._champ(self.CHAMP_OUVERT)
         course = dict(self.COURSE, nb_partants=len(self.CHAMP_OUVERT))
-        for montant, mini in ((10, 2), (30, 2)):
+        for montant, mini in ((10, 2), (20, 2), (30, 1)):
             d = plan_to_dict(generer_plan(montant, "agressif", champ, course,
                                           respect_montant=True))
             paris = [p for niv in d["niveaux"] for p in niv["paris"]]
@@ -328,12 +354,23 @@ class TestTicketsAppoint:
 
         Mesure sur 459 courses reglees : le vrai gagnant est dans le top-3 predit 61,7 %
         du temps, dans le top-8 95,9 %. Jouer un cheval au-dela, c'est parier contre le
-        modele qui produit le pronostic."""
+        modele qui produit le pronostic.
+
+        Le plafond du profil AGRESSIF est passe de 8 a 5 le 2026-08-31 : contenir le
+        gagnant n'est pas le critere, ce que rapporte l'argent mise l'est. ROI winsorise
+        au p99 par pire rang predit du ticket, deux fenetres independantes :
+            plafond 8 -> -42,0 % (81 j) et -39,0 % (regime actuel)
+            plafond 5 -> -31,4 % (81 j) et -27,3 % (regime actuel)
+        soit +10,6 et +11,7 points. Le contrat de gain x10 du profil est CONSERVE :
+        ce plafond porte sur le rang des chevaux, pas sur la tranche de gain visee.
+        Mesure et NON retenu : le meme plafond sur les deux autres profils
+        (conservateur -17,6 % a 8 contre -16,8 % a 5 = rien ; equilibre -7,3 % contre
+        -8,4 % = pire)."""
         from services.mise_calculator import _rang_max_effectif, PROFIL_CONFIG
         # bornes par profil, du plus strict au plus large
         assert PROFIL_CONFIG["conservateur"]["rang_max"] == 5
         assert PROFIL_CONFIG["equilibre"]["rang_max"] == 6
-        assert PROFIL_CONFIG["agressif"]["rang_max"] == 8
+        assert PROFIL_CONFIG["agressif"]["rang_max"] == 6
         # champ large : c'est le plafond du profil qui borne
         assert _rang_max_effectif(8, 20) == 8
         # champ reduit : le rang 8 serait le dernier cheval -> le champ borne
@@ -615,12 +652,28 @@ class TestAncrageTop2:
                             f"{profil} : {p['type']} {sorted(nums)} sans appui "
                             f"sur les 2 premiers {sorted(top2)}")
 
-    def test_le_pied_libre_rentable_prime_sur_le_troisieme_favori(self):
-        """Mesure du 2026-08-23 (winsorisée) sur les trios ancrés, par rang du 3ᵉ pied :
-        rang 3 → −80 % de ROI, rangs 4-5 → −21 %, rangs 6-8 → +92 %, rang 9+ → −100 %.
-        À rapport et probabilité IDENTIQUES, le classement doit donc préférer le pied
-        libre au rang 6-8 au 3ᵉ favori."""
-        from services.mise_calculator import _select_conviction, _effective_config
+    def test_le_rang_du_pied_libre_ne_departage_plus_rien(self):
+        """Le bonus porte par le rang du 3e pied est NEUTRALISE (_ANC_NEUTRE, 2026-08-31).
+
+        Il classait a l'envers. Re-mesure sur TOUS les trios ancres sur les 2 premiers
+        predits (622 paris, 81 jours, anti-fuite, hors backfill), ROI par rang du
+        3e pied, brut puis winsorise au p99 :
+
+            rang 3     194 courses   -38,7 %   -60,5 %   <- etait penalise x0,70
+            rangs 4-5  234 courses   -29,3 %   -63,5 %
+            rangs 6-8  194 courses   -60,2 %   -67,4 %   <- etait bonifie x1,25
+            rang 9+     68 courses  -100,0 %  -100,0 %
+
+        Le code bonifiait donc de 25 % la PIRE des trois bandes viables, sur la foi
+        d'un « rangs 6-8 -> +92 % » qui reposait sur 17 gagnants non winsorises.
+        Aucune bande ne se detache reellement (-60,5 / -63,5 / -67,4 sur ~200 courses
+        chacune) : la reponse n'est pas de retourner les multiplicateurs, c'est de ne
+        plus pretendre savoir. A rapport et probabilite identiques, l'ordre ne doit
+        donc plus dependre du rang du pied libre."""
+        from services.mise_calculator import (
+            _select_conviction, _effective_config, _ANC_NEUTRE)
+
+        assert _ANC_NEUTRE is True, "le bonus de rang du pied libre doit rester neutralise"
 
         def _cand(numero_libre, rang_libre):
             return {"type_pari": "Trio",
@@ -631,10 +684,15 @@ class TestAncrageTop2:
 
         palier = {"nom": "petit", "max_bets": 3, "min_stake": 3,
                   "favor_value": True, "cap_spec": 0.6}
-        ordre = _select_conviction([_cand(3, 3), _cand(7, 7)], 30, palier,
-                                   _effective_config("agressif", 0.0), {})
-        assert ordre and ordre[0]["_rang_hors_ancre"] == 7, (
-            "le 3ᵉ pied au rang 6-8 doit primer sur le 3ᵉ favori")
+        cfg = _effective_config("agressif", 0.0)
+        ordre = _select_conviction([_cand(3, 3), _cand(5, 5)], 30, palier, cfg, {})
+        # Les deux candidats sont identiques hors rang du pied libre : aucun des deux
+        # ne doit etre avantage. On verifie que le rang ne cree plus d'ecart d'ordre
+        # en inversant l'ordre d'entree — le resultat doit suivre l'entree, pas le rang.
+        ordre_inverse = _select_conviction([_cand(5, 5), _cand(3, 3)], 30, palier, cfg, {})
+        assert ordre and ordre_inverse
+        assert ordre[0]["_rang_hors_ancre"] == 3
+        assert ordre_inverse[0]["_rang_hors_ancre"] == 5
 
 
 # ── Prix réel des formules Multi ─────────────────────────────────────────────
