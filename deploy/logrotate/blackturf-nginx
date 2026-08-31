@@ -1,0 +1,21 @@
+# Journal d acces nginx persistant (monte depuis l hote, cf docker-compose.prod.yml).
+# Sans rotation il grossit sans limite : c est la contrepartie de la persistance.
+# 30 jours conserves : assez pour dater un effondrement du budget d exploration
+# Googlebot et pour prouver qu une correction a eu un effet, ce que dix heures de
+# journal Docker ne permettaient pas.
+/opt/blackturf/nginx/logs/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+    sharedscripts
+    postrotate
+        # nginx garde le descripteur de l ancien fichier apres rotation : sans ce
+        # signal il continue d ecrire dans le fichier renomme, et le nouveau reste
+        # vide. USR1 lui fait rouvrir ses journaux.
+        docker exec blackturf_nginx nginx -s reopen 2>/dev/null || true
+    endscript
+}
