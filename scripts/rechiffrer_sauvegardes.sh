@@ -22,7 +22,14 @@ for CLAIR in $(ls -1t "$DIR"/blackturf_*.sql.gz 2>/dev/null); do
   if ! gzip -t "$CLAIR" 2>/dev/null; then echo "SOURCE CORROMPUE, ignoree (clair conserve)"; continue; fi
 
   DK=$(mktemp); KENC=$(mktemp); TMP="$OUT.partiel"
-  openssl rand -out "$DK" 32
+  # Cle en HEXADECIMAL : `openssl enc -pass file:` ne lit que la premiere ligne du
+  # fichier, donc 32 octets bruts commencant par 0x0a donnent une passphrase VIDE
+  # (1/256 des tirages) et le fichier devient dechiffrable sans aucune cle. Meme
+  # correction que db_backup.sh, meme raison. Voir le commentaire detaille la-bas.
+  openssl rand -hex 32 > "$DK"
+  if [ "$(head -n 1 "$DK" | tr -d '\n' | wc -c)" != "64" ]; then
+    echo "CLE AES MAL FORMEE (clair conserve)"; shred -u "$DK" 2>/dev/null; rm -f "$KENC"; continue
+  fi
   if ! openssl pkeyutl -encrypt -pubin -inkey <(openssl x509 -in "$CERT" -pubkey -noout) \
         -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$DK" -out "$KENC" 2>/dev/null \
      || [ "$(stat -c %s "$KENC")" != "512" ]; then
