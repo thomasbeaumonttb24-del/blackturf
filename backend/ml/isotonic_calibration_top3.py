@@ -84,22 +84,37 @@ async def compute_and_store(session: AsyncSession) -> dict:
         return curve
 
     if len(data) >= MIN_OBS:
+        x = np.array([d[0] for d in data], dtype=float)
+        y = np.array([d[1] for d in data], dtype=float)
+        # FLAG cir_calibration : isotone CENTRÉE (pas d'escalier) — cf. ml/isotonic_utils.
+        _cir_done = False
         try:
-            from sklearn.isotonic import IsotonicRegression
-            x = np.array([d[0] for d in data], dtype=float)
-            y = np.array([d[1] for d in data], dtype=float)
-            iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True,
-                                     out_of_bounds="clip")
-            iso.fit(x, y)
-            xs = np.asarray(iso.X_thresholds_, dtype=float)
-            ys = np.asarray(iso.y_thresholds_, dtype=float)
-            xs_u, idx = np.unique(xs, return_index=True)
-            curve = {"x": [round(v, 6) for v in xs_u.tolist()],
-                     "y": [round(float(ys[i]), 6) for i in idx],
-                     "n_obs": len(data)}
+            from ml.algo_flags import FLAGS as _AFc
+            if _AFc.cir_calibration:
+                from ml.isotonic_utils import centered_isotonic_curve
+                cir = centered_isotonic_curve(x, y)
+                if cir.get("x"):
+                    curve = {"x": cir["x"], "y": cir["y"], "n_obs": len(data)}
+                    _cir_done = True
+                else:
+                    log.warning("isotonic_top3.cir_empty_fallback_step", n_obs=len(data))
         except Exception as e:
-            log.warning("isotonic_top3.fit_failed", err=str(e)[:160])
-            curve = {"x": [], "y": [], "n_obs": len(data)}
+            log.warning("isotonic_top3.cir_failed", err=str(e)[:160])
+        if not _cir_done:
+            try:
+                from sklearn.isotonic import IsotonicRegression
+                iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True,
+                                         out_of_bounds="clip")
+                iso.fit(x, y)
+                xs = np.asarray(iso.X_thresholds_, dtype=float)
+                ys = np.asarray(iso.y_thresholds_, dtype=float)
+                xs_u, idx = np.unique(xs, return_index=True)
+                curve = {"x": [round(v, 6) for v in xs_u.tolist()],
+                         "y": [round(float(ys[i]), 6) for i in idx],
+                         "n_obs": len(data)}
+            except Exception as e:
+                log.warning("isotonic_top3.fit_failed", err=str(e)[:160])
+                curve = {"x": [], "y": [], "n_obs": len(data)}
 
     await session.execute(text("""
         CREATE TABLE IF NOT EXISTS isotonic_calibration_top3 (
@@ -148,6 +163,12 @@ def apply_calibration(probas_top3: np.ndarray, curve: dict, nb_partants: int) ->
     p = np.asarray(probas_top3, dtype=float)
     mapped = np.interp(p, np.asarray(xs, dtype=float), np.asarray(ys, dtype=float))
     mapped = np.clip(mapped, 1e-6, 0.999)
+    # Filet anti-palier (cf. ml/isotonic_utils.restore_within_race_order).
+    try:
+        from ml.isotonic_utils import restore_within_race_order
+        mapped = restore_within_race_order(mapped, p)
+    except Exception as e:
+        log.warning("isotonic_top3.tie_restore_skip", err=str(e)[:120])
     target = float(min(3.0, max(nb_partants, 1)))
     s = float(mapped.sum())
     if s > 0:

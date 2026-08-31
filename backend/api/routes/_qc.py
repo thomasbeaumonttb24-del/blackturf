@@ -18,6 +18,7 @@ from db.models import (
     Prediction, ValueBet, Recommandation, Participation,
     Cheval, Course, User
 )
+from services.cote_juste import cote_juste as _cote_juste
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -236,10 +237,9 @@ async def get_predictions(
             proba_top3=round(pred.proba_top3, 4),
             proba_top1_low=round(pred.proba_top1_low, 4) if pred.proba_top1_low is not None else None,
             proba_top1_high=round(pred.proba_top1_high, 4) if pred.proba_top1_high is not None else None,
-            # Cote juste IA = 1/proba de victoire (cote "équitable" sans marge bookmaker),
-            # bornée [1.01, 100] : éviter une cote absurde (1000) ou < seuil de rentabilité.
-            cote_juste=(round(min(100.0, max(1.01, 1.0 / pred.proba_top1)), 1)
-                        if pred.proba_top1 and pred.proba_top1 > 0.001 else None),
+            # Cote juste IA = 1/proba de victoire (cote "équitable" sans marge bookmaker).
+            # Précision adaptée à l'ordre de grandeur (cf. services/cote_juste.py).
+            cote_juste=_cote_juste(pred.proba_top1),
             rang_predit=pred.rang_predit,
             confidence_score=pred.confidence_score,
             cote_pmu=cote_aff,

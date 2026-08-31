@@ -24,7 +24,7 @@ import {
 import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, type ClassementSignal,
 } from "@/components/courses/classement";
-import { formatCote, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
+import { formatCote, formatCoteJuste, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   ConfidenceMeter, EVBadge, ELOBadge, RunningStyleBadge, MusiqueDisplay,
@@ -3821,12 +3821,12 @@ export default function CoursePage({
                               style={{ textAlign: "right", fontFamily: CX.sg, fontSize: 12.5, fontWeight: favorable ? 700 : 400, color: favorable ? CX.emDeep : cher ? CX.gray400 : CX.gray600 }}
                               title={
                                 cj == null ? undefined
-                                : favorable ? `Cote juste ${formatCote(cj)} — le marché paie ${formatCote(cote!)}, soit ${Math.round(ecart! * 100)} % de plus`
-                                : cher ? `Cote juste ${formatCote(cj)} — le marché paie moins (${formatCote(cote!)}) : le prix ne couvre pas le risque`
-                                : `Cote juste ${formatCote(cj)} — le marché est au prix`
+                                : favorable ? `Cote juste ${formatCoteJuste(cj)} — le marché paie ${formatCote(cote!)}, soit ${Math.round(ecart! * 100)} % de plus`
+                                : cher ? `Cote juste ${formatCoteJuste(cj)} — le marché paie moins (${formatCote(cote!)}) : le prix ne couvre pas le risque`
+                                : `Cote juste ${formatCoteJuste(cj)} — le marché est au prix`
                               }
                             >
-                              {cj ? formatCote(cj) : "—"}
+                              {cj ? formatCoteJuste(cj) : "—"}
                             </div>
                           );
                         })()}

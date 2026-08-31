@@ -58,6 +58,16 @@ const pct = (x: number | null | undefined) =>
 
 const cote = (x: number) => x.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
+/** La cote JUSTE n'est pas une cote de bookmaker : c'est 1/proba, et sa précision
+ *  utile dépend de l'ordre de grandeur. À 1 décimale fixe, deux chevaux séparés de
+ *  2 % de probabilité s'affichaient au même prix. Même règle que l'API
+ *  (backend/services/cote_juste.py) — les deux doivent rester synchronisées. */
+const coteJuste = (x: number) =>
+  x.toLocaleString("fr-FR", {
+    minimumFractionDigits: x < 10 ? 2 : x < 100 ? 1 : 0,
+    maximumFractionDigits: x < 10 ? 2 : x < 100 ? 1 : 0,
+  });
+
 const ordinal = (n: number) => `${n}${n === 1 ? "er" : "e"}`;
 
 /** Retire les puces / emojis en tête de libellé renvoyés par l'analyse. */
@@ -69,13 +79,20 @@ const SENS = {
   neutre: { fg: "text-amber-800", bg: "bg-amber-50", ring: "ring-amber-200/70", fleche: "●" },
 } as const;
 
-/** Borne haute de la cote juste appliquée côté API (predictions.py). Atteinte,
- *  elle signifie « le modèle ne chiffre plus », pas « cote de 100 ». */
-const COTE_JUSTE_MAX = 100;
+/** Borne haute de la cote juste appliquée côté API (services/cote_juste.py). Atteinte,
+ *  elle signifie « le modèle ne chiffre plus », pas « cote de 999 ». Le plafond est
+ *  passé de 100 à 999 : écraser tous les gros outsiders sur 100 créait des ex æquo
+ *  cosmétiques entre des chevaux que le modèle sépare d'un facteur 3. */
+const COTE_JUSTE_MAX = 999;
 
 /** Écart minimal entre la cote affichée et la cote du pronostic pour rappeler
  *  cette dernière. En dessous, le rappel n'apprend rien et alourdit la ligne. */
 const ECART_RAPPEL_COTE = 0.2;
+
+/** Écart marché/cote juste en deçà duquel LecturePrix écrit « au prix ». Même seuil
+ *  pour le repère « meilleur écart » : désigner un meilleur cheval là où le modèle
+ *  dit que tout est au prix inventerait une hiérarchie qu'il n'écrit pas. */
+const ECART_MEILLEUR_PRIX = 0.08;
 
 /** Préférence d'affichage des signaux, conservée d'une course à l'autre. */
 const CLE_SIGNAUX = "bt.classement.signaux";
@@ -195,14 +212,14 @@ function LecturePrix({ marche, juste }: { marche: number | null; juste: number |
   if (marche == null || juste == null || juste <= 0) {
     return <span className="text-[13px] text-stone-300">—</span>;
   }
-  // La cote juste est bornée à 100 côté API. Sur un cheval que le modèle chiffre
-  // sous 1 %, la borne est ATTEINTE : comparer une cote de 242 à ce plafond
-  // produisait un « +142 % » qui annonce une aubaine là où le modèle dit seulement
+  // La cote juste est bornée côté API. Sur un cheval que le modèle chiffre sous
+  // 0,1 %, la borne est ATTEINTE : comparer une cote de marché à ce plafond
+  // produisait un écart qui annonce une aubaine là où le modèle dit seulement
   // qu'il ne sait plus fixer de prix. On ne chiffre pas un écart contre une borne.
   if (juste >= COTE_JUSTE_MAX) {
     return (
       <span
-        title="Le modèle chiffre ce cheval en dessous du seuil où sa cote juste reste mesurable (plafonnée à 100) : l'écart au marché n'a pas de sens ici."
+        title="Le modèle chiffre ce cheval en dessous du seuil où sa cote juste reste mesurable (plafonnée à 999) : l'écart au marché n'a pas de sens ici."
         className="text-[11px] text-stone-600"
       >
         non chiffrable
@@ -211,10 +228,10 @@ function LecturePrix({ marche, juste }: { marche: number | null; juste: number |
   }
   const ecart = marche / juste - 1;
   const abs = Math.abs(Math.round(ecart * 100));
-  if (abs < 8) {
+  if (abs < ECART_MEILLEUR_PRIX * 100) {
     return (
       <span
-        title={`Le marché paie ${cote(marche)}, le modèle estime la cote juste à ${cote(juste)} : prix conforme.`}
+        title={`Le marché paie ${cote(marche)}, le modèle estime la cote juste à ${coteJuste(juste)} : prix conforme.`}
         className="inline-flex items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-600"
       >
         au prix
@@ -226,8 +243,8 @@ function LecturePrix({ marche, juste }: { marche: number | null; juste: number |
     <span
       title={
         genereux
-          ? `Le marché paie ${cote(marche)} pour une cote juste estimée à ${cote(juste)} : ${abs} % au-dessus.`
-          : `Le marché ne paie que ${cote(marche)} pour une cote juste estimée à ${cote(juste)} : ${abs} % en dessous du prix qui couvrirait le risque.`
+          ? `Le marché paie ${cote(marche)} pour une cote juste estimée à ${coteJuste(juste)} : ${abs} % au-dessus.`
+          : `Le marché ne paie que ${cote(marche)} pour une cote juste estimée à ${coteJuste(juste)} : ${abs} % en dessous du prix qui couvrirait le risque.`
       }
       className={cn(
         "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums ring-1",
@@ -432,6 +449,21 @@ export function ClassementAlgo({
 }) {
   const lignes = [...predictions].sort((a, b) => a.rang_predit - b.rang_predit);
   const aCoteJuste = lignes.some((p) => p.cote_juste != null);
+
+  // Le cheval le MIEUX ÉVALUÉ par la cote juste : celui dont le marché paie le plus
+  // au-dessus du prix du modèle. C'est la lecture que la colonne « Lecture du prix »
+  // rend ligne à ligne mais qu'il fallait reconstituer de tête sur douze partants.
+  // Restitution d'un écart entre deux valeurs DÉJÀ affichées — aucune appréciation
+  // ajoutée, et le repère disparaît si aucun écart n'atteint le seuil de lisibilité
+  // (le même que celui du « au prix » de LecturePrix).
+  const meilleurPrix = lignes.reduce<{ numero: number; ecart: number } | null>((best, p) => {
+    const m = coteLive?.[p.numero] ?? p.cote_pmu;
+    if (nonPartants?.has(p.numero) || m == null || p.cote_juste == null) return best;
+    if (p.cote_juste >= COTE_JUSTE_MAX) return best;   // borne atteinte : non chiffrable
+    const ecart = m / p.cote_juste - 1;
+    if (ecart < ECART_MEILLEUR_PRIX) return best;
+    return best && best.ecart >= ecart ? best : { numero: p.numero, ecart };
+  }, null);
   const grille = aCoteJuste ? COLS.avecJuste : COLS.sansJuste;
   const nbSignaux = lignes.reduce((n, p) => n + (signauxParNumero[p.numero]?.length ?? 0), 0);
 
@@ -608,11 +640,19 @@ export function ClassementAlgo({
                       )}
                       title={
                         p.cote_juste != null
-                          ? `Cote juste du modèle : ${cote(p.cote_juste)} — le prix à partir duquel le pari devient rentable si la probabilité est exacte.`
+                          ? `Cote juste du modèle : ${coteJuste(p.cote_juste)} — le prix à partir duquel le pari devient rentable si la probabilité est exacte.`
                           : undefined
                       }
                     >
-                      {p.cote_juste != null ? cote(p.cote_juste) : "—"}
+                      {p.cote_juste != null ? coteJuste(p.cote_juste) : "—"}
+                      {meilleurPrix?.numero === p.numero && (
+                        <span
+                          className="mt-0.5 block text-[9.5px] font-semibold uppercase tracking-wider text-emerald-700"
+                          title={`Sur cette course, c'est l'écart le plus large entre le prix payé par le marché et la cote juste du modèle : +${Math.round(meilleurPrix.ecart * 100)} %.`}
+                        >
+                          meilleur écart
+                        </span>
+                      )}
                     </span>
                   )}
 
@@ -657,7 +697,14 @@ export function ClassementAlgo({
                     </div>
                     <div>
                       <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Cote juste</dt>
-                      <dd className="font-semibold text-slate-700">{p.cote_juste != null ? cote(p.cote_juste) : "—"}</dd>
+                      <dd className="font-semibold text-slate-700">
+                        {p.cote_juste != null ? coteJuste(p.cote_juste) : "—"}
+                        {meilleurPrix?.numero === p.numero && (
+                          <span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-wider text-emerald-700">
+                            meilleur écart
+                          </span>
+                        )}
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Prix</dt>
@@ -813,7 +860,7 @@ export function ClassementApercu({
 
               <span className="hidden text-right text-[13px] text-stone-300 sm:block" aria-hidden="true">•••</span>
               <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-600 sm:block">
-                {l.cote_juste != null ? cote(l.cote_juste) : "—"}
+                {l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}
               </span>
 
               <div className="flex items-center gap-2.5">
@@ -863,7 +910,7 @@ export function ClassementApercu({
                 </div>
                 <div className="mt-1.5 flex items-center gap-3 text-[11px] tabular-nums text-stone-600 sm:hidden">
                   {l.cote != null && <span>Cote {cote(l.cote)}</span>}
-                  {l.cote_juste != null && <span>Juste {cote(l.cote_juste)}</span>}
+                  {l.cote_juste != null && <span>Juste {coteJuste(l.cote_juste)}</span>}
                   {l.proba_top3 != null && <span>Top-3 {pct(l.proba_top3)}</span>}
                 </div>
               </div>
@@ -872,7 +919,7 @@ export function ClassementApercu({
                 {l.cote != null ? cote(l.cote) : "—"}
               </span>
               <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-600 sm:block">
-                {l.cote_juste != null ? cote(l.cote_juste) : "—"}
+                {l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}
               </span>
 
               <div className="flex items-center gap-2.5">

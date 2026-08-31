@@ -18,6 +18,7 @@ from db.models import (
     Prediction, ValueBet, Recommandation, Participation,
     Cheval, Course, Resultat, User
 )
+from services.cote_juste import cote_juste as _cote_juste
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -267,10 +268,11 @@ async def get_predictions(
             proba_top3=round(pred.proba_top3, 4),
             proba_top1_low=round(pred.proba_top1_low, 4) if pred.proba_top1_low is not None else None,
             proba_top1_high=round(pred.proba_top1_high, 4) if pred.proba_top1_high is not None else None,
-            # Cote juste IA = 1/proba de victoire (cote "équitable" sans marge bookmaker),
-            # bornée [1.01, 100] : éviter une cote absurde (1000) ou < seuil de rentabilité.
-            cote_juste=(round(min(100.0, max(1.01, 1.0 / pred.proba_top1)), 1)
-                        if pred.proba_top1 and pred.proba_top1 > 0.001 else None),
+            # Cote juste IA = 1/proba de victoire (cote "équitable" sans marge bookmaker).
+            # Précision adaptée à l'ordre de grandeur (cf. services/cote_juste.py) : à
+            # 1 décimale fixe, deux chevaux séparés de 2 % de proba tombaient sur le
+            # même prix affiché.
+            cote_juste=_cote_juste(pred.proba_top1),
             rang_predit=pred.rang_predit,
             confidence_score=pred.confidence_score,
             cote_pmu=cote_aff,
@@ -482,8 +484,7 @@ async def get_apercu_analyse(
             # se déduit d'une probabilité déjà envoyée, donc l'afficher même sur
             # une ligne masquée ne révèle RIEN de plus — et remplit la colonne
             # avec du vrai plutôt qu'avec des pointillés.
-            "cote_juste": (round(min(100.0, max(1.01, 1.0 / pred.proba_top1)), 1)
-                           if pred.proba_top1 and pred.proba_top1 > 0.001 else None),
+            "cote_juste": _cote_juste(pred.proba_top1),
             "revele": ligne_revelee,
         }
         if ligne_revelee:

@@ -110,6 +110,20 @@ class AlgoFlags:
     ev_band_gate: bool = field(default_factory=lambda: _env_bool("BT_EV_BAND_GATE", True))
     # Temperature ajustée par fit 1-D sur NLL held-out au lieu du ratchet asymétrique.
     temp_fit: bool = field(default_factory=lambda: _env_bool("BT_TEMP_FIT"))
+    # ── Calibration isotone CENTRÉE (CIR) — ACTIF PAR DÉFAUT (2026-08-31) ────
+    # L'isotone classique est une fonction EN ESCALIER : la courbe prod avait 62
+    # points pour 31 `y` distincts, tout x ∈ [0.0363, 0.0470] tombant sur 0.042435.
+    # Deux chevaux d'une même course à 25 % d'écart de proba modèle ressortaient
+    # donc avec la MÊME proba calibrée, donc la même « cote juste ». Mesuré sur
+    # 7 jours : 10.99 probas distinctes en brut pour 11.06 partants → 6.70 après
+    # calibration, 96 % des courses avec au moins un doublon.
+    # CIR (Oron & Flournoy 2017) réduit chaque palier à son centroïde et interpole
+    # entre centres → courbe strictement croissante. Mesuré sur held-out groupé par
+    # course (612 courses) : logloss 0.29825 → 0.28823, Brier 0.08181 → 0.08102,
+    # ECE 0.03449 → 0.02572, discrimination 68.9 % → 99.6 % des partants.
+    # À noter : l'isotone classique faisait PIRE que pas de calibration du tout
+    # (logloss brut 0.28856). Rollback ciblé : BT_CIR_CALIBRATION=0.
+    cir_calibration: bool = field(default_factory=lambda: _env_bool("BT_CIR_CALIBRATION", True))
     # ── Ranking (précision du classement affiché) ────────────────────────────
     # Mélange un score LGBMRanker (lambdarank, groupé par course) dans l'ORDRE
     # d'arrivée prédit (rang_predit) UNIQUEMENT — n'affecte PAS les probas/EV
@@ -150,6 +164,7 @@ class AlgoFlags:
             "ev_band_gate": self.ev_band_gate,
             "combo_market_cap": self.combo_market_cap,
             "temp_fit": self.temp_fit,
+            "cir_calibration": self.cir_calibration,
             "ranker_blend": self.ranker_blend,
             "ranker_blend_weight": self.ranker_blend_weight,
             "market_gate": self.market_gate,

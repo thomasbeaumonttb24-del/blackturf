@@ -98,14 +98,30 @@ async def _fetch_proba_outcomes(session: AsyncSession) -> list[tuple[float, int,
 
 
 def _fit_curve(data: list[tuple[float, int]]) -> dict:
-    """Fit isotone sur [(proba, gagné)] → {x, y, n_obs}. Courbe vide si insuffisant."""
+    """Fit isotone sur [(proba, gagné)] → {x, y, n_obs}. Courbe vide si insuffisant.
+
+    FLAG cir_calibration (défaut ON) : régression isotone CENTRÉE — chaque palier
+    plat est réduit à son centroïde, la courbe devient strictement croissante. Sans
+    ça la courbe est un escalier qui écrase des probas distinctes sur une seule
+    valeur (mesuré : 31 `y` distincts pour 62 points de rupture, 39 % de la
+    discrimination intra-course détruite). Flag off → escalier d'avant.
+    """
     curve = {"x": [], "y": [], "n_obs": len(data)}
     if len(data) < MIN_OBS:
         return curve
+    x = np.array([d[0] for d in data], dtype=float)
+    y = np.array([d[1] for d in data], dtype=float)
+
+    from ml.algo_flags import FLAGS as _AFc
+    if _AFc.cir_calibration:
+        from ml.isotonic_utils import centered_isotonic_curve
+        cir = centered_isotonic_curve(x, y)
+        if cir.get("x"):
+            return {"x": cir["x"], "y": cir["y"], "n_obs": len(data)}
+        log.warning("isotonic.cir_empty_fallback_step", n_obs=len(data))
+
     try:
         from sklearn.isotonic import IsotonicRegression
-        x = np.array([d[0] for d in data], dtype=float)
-        y = np.array([d[1] for d in data], dtype=float)
         iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True, out_of_bounds="clip")
         iso.fit(x, y)
         xs = np.asarray(iso.X_thresholds_, dtype=float)
@@ -208,6 +224,14 @@ def apply_calibration(probas_top1: np.ndarray, curve: dict, seg: str | None = No
     p = np.asarray(probas_top1, dtype=float)
     mapped = np.interp(p, np.asarray(xs, dtype=float), np.asarray(ys, dtype=float))
     mapped = np.clip(mapped, 1e-6, 0.999)
+    # Filet : une courbe EN ESCALIER (ancien fit encore en base tant que le recalcul
+    # nocturne n'a pas tourné) colle la même proba à des chevaux que le modèle
+    # séparait. On leur rend leur ordre — jamais aux chevaux réellement à égalité.
+    try:
+        from ml.isotonic_utils import restore_within_race_order
+        mapped = restore_within_race_order(mapped, p)
+    except Exception as e:
+        log.warning("isotonic.tie_restore_skip", err=str(e)[:120])
     s = float(mapped.sum())
     if s > 0:
         mapped = mapped / s

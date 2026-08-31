@@ -10,6 +10,17 @@ export function formatCote(cote: number | null | undefined): string {
   return cote.toFixed(1);
 }
 
+/**
+ * Cote JUSTE (1/proba du modèle) — précision adaptée à l'ordre de grandeur.
+ * À 1 décimale fixe, deux chevaux séparés de 2 % de probabilité s'affichaient au
+ * même prix. Même règle que l'API (backend/services/cote_juste.py) : les deux
+ * doivent rester synchronisées.
+ */
+export function formatCoteJuste(cote: number | null | undefined): string {
+  if (!cote) return "—";
+  return cote.toFixed(cote < 10 ? 2 : cote < 100 ? 1 : 0);
+}
+
 export function formatEV(ev: number | null | undefined): string {
   if (ev === null || ev === undefined) return "—";
   const pct = (ev * 100).toFixed(1);
