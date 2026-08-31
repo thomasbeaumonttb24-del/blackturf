@@ -41,7 +41,7 @@ type Cellule = boolean | string;
 
 const FEATURES_COMPARISON: { label: string; free: Cellule; standard: Cellule; expert: Cellule }[] = [
   { label: "Programme PMU du jour", free: true, standard: true, expert: true },
-  { label: "Cotes publiques", free: true, standard: true, expert: true },
+  { label: "Cotes publiques + marché en direct", free: true, standard: true, expert: true },
   { label: "Prédictions IA", free: "1 course/jour", standard: "5 courses/jour", expert: "Illimité" },
   { label: "Paris de valeur", free: false, standard: "Délai 15 min", expert: "Temps réel" },
   { label: "Calculateur de mise personnalisé", free: false, standard: true, expert: true },
