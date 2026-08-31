@@ -823,9 +823,16 @@ async def send_weekly_best_value_bet(session: AsyncSession):
         await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best,
                           ok_email, _raison(ok_email))
 
-        if user.push_subscription:
+        # `_abonnement_push` et non `user.push_subscription` : la colonne est un
+        # fourre-tout qui porte aussi les PRÉFÉRENCES. Un compte n'ayant que des
+        # préférences la rendait vraie, on tentait un envoi vers un abonnement
+        # sans `endpoint`, et l'échec était journalisé comme une panne de canal.
+        # C'est ce qui a produit l'essentiel des 22 349 « échecs push » et masqué
+        # la vraie cause : personne n'a jamais pu s'abonner (cf. Dockerfile).
+        abo_push = _abonnement_push(user)
+        if abo_push:
             ok_push = await send_web_push(
-                user.push_subscription,
+                abo_push,
                 title="🏇 Meilleur pari de la semaine",
                 body=f"{best['nom_cheval']} gagnant à {best.get('cote', '?')} — rapport officiel pour 10€ : {best.get('gain_reference_10e', '?')}€ (mise incluse)",
                 data=best,

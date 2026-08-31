@@ -444,7 +444,7 @@ def test_taille_baseline_par_type():
 
 
 async def _seed_course_classement(db, course_id, *, arrivee, rangs, rapports,
-                                  non_partants=(), nb_partants=10):
+                                  non_partants=(), nb_partants=10, created_at=None):
     """Une course terminée + le classement prédit, pour la référence classement.
 
     `rangs` : {rang_predit: numero}. `arrivee` : numéros dans l'ordre d'arrivée.
@@ -459,7 +459,11 @@ async def _seed_course_classement(db, course_id, *, arrivee, rangs, rapports,
                              cote_pmu=3.0, non_partant=(numero in non_partants)))
         db.add(Prediction(prediction_id=f"pr-{course_id}-{numero}",
                           participation_id=pid, course_id=course_id,
-                          proba_top1=0.5, proba_top3=0.7, rang_predit=rang))
+                          proba_top1=0.5, proba_top3=0.7, rang_predit=rang,
+                          # created_at EXPLICITE : la référence classement ne lit que
+                          # les pronostics antérieurs au départ. Sans cette date, le
+                          # défaut `now()` tombe après DEPART et la référence est vide.
+                          created_at=created_at or (DEPART - timedelta(minutes=10))))
     db.add(Resultat(course_id=course_id, rapports=rapports, classement=[
         {"numero": n, "position": i + 1} for i, n in enumerate(arrivee)]))
 
@@ -553,3 +557,23 @@ def test_gate_ne_ressuscite_pas_un_type_dont_la_reference_perd_aussi():
     gates = bpp.evaluate_segment_gates(perf)
     assert gates["Trio"]["status"] == "suspended"
     assert gates["Trio"]["factor"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_la_reference_classement_ignore_un_pronostic_ecrit_apres_le_depart(db):
+    """Un pronostic postérieur au départ n'a pas sa place dans un comparateur.
+
+    La référence « classement » décide d'une suspension via `delta_vs_classement` :
+    la nourrir d'un pronostic écrit après l'arrivée y ferait entrer de la
+    connaissance du résultat. En production 1 000 prédictions (90 courses) sont
+    dans ce cas — aucune n'appartenait encore à la cohorte des plans le
+    2026-08-31 (0 sur 628), le garde-fou est donc préventif.
+    """
+    await _seed_course_classement(db, "BF", arrivee=[7, 8, 9],
+                                  rangs={1: 7, 2: 8, 3: 9},
+                                  rapports={"e_simple_gagnant": 4.0},
+                                  created_at=DEPART + timedelta(minutes=30))
+    await db.commit()
+    out = await bpp._baseline_classement_par_type(db, ["BF"], ["Simple Gagnant"])
+    assert "Simple Gagnant" not in out or out["Simple Gagnant"]["n_courses"] == 0, (
+        "la référence a compté une course dont le pronostic est postérieur au départ")

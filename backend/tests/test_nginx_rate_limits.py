@@ -19,22 +19,21 @@ import re
 
 import pytest
 
-RACINE = pathlib.Path(os.environ.get("BLACKTURF_BACKEND_DIR")
-                      or pathlib.Path(__file__).resolve().parents[1]).parent
-COMPOSE_PROD_NGINX = RACINE / "nginx" / "nginx.prod.conf"
+from ._descripteurs_deploiement import NGINX_PROD as COMPOSE_PROD_NGINX, exiger  # noqa: E402
 
 
 def _conf() -> str:
-    if not COMPOSE_PROD_NGINX.exists():
-        pytest.skip("nginx.prod.conf absent de ce contexte (image sans le dépôt)")
-    return COMPOSE_PROD_NGINX.read_text(encoding="utf-8")
+    # `nginx.prod.conf` est suivi par git : son absence signifie que le dépôt
+    # n'est pas monté, pas que le contexte est particulier. Échec bruyant plutôt
+    # que trois quotas d'admin vérifiés par personne. Cf. _descripteurs_deploiement.
+    return exiger(COMPOSE_PROD_NGINX)
 
 
 def _zone_du_bloc(texte: str, chemin: str) -> str | None:
     """Zone `limit_req` appliquée à `location <chemin>`, ou None s'il n'y en a pas."""
     bloc = re.search(rf"location {re.escape(chemin)} {{(.*?)^        }}", texte, re.S | re.M)
-    if not bloc:
-        pytest.skip(f"location {chemin} introuvable")
+    assert bloc, (f"location {chemin} introuvable dans nginx.prod.conf : le bloc a "
+                  "été renommé ou déplacé, et son quota n'est plus verrouillé.")
     m = re.search(r"limit_req\s+zone=(\w+)", bloc.group(1))
     return m.group(1) if m else None
 

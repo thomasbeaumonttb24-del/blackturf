@@ -18,17 +18,9 @@ import re
 import pytest
 
 
-RACINE = pathlib.Path(os.environ.get("BLACKTURF_BACKEND_DIR")
-                      or pathlib.Path(__file__).resolve().parents[1]).parent
-COMPOSE_BASE = RACINE / "docker-compose.yml"
-COMPOSE_PROD = RACINE / "docker-compose.prod.yml"
-DOCKERFILE = RACINE / "backend" / "Dockerfile"
-
-
-def _lire(chemin: pathlib.Path) -> str:
-    if not chemin.exists():
-        pytest.skip(f"{chemin.name} absent de ce contexte de test")
-    return chemin.read_text(encoding="utf-8")
+from ._descripteurs_deploiement import (  # noqa: E402
+    COMPOSE_BASE, COMPOSE_PROD, DOCKERFILE, RACINE, exiger as _lire,
+)
 
 
 def _publications_du_port_api(texte: str) -> list[str]:
@@ -38,28 +30,20 @@ def _publications_du_port_api(texte: str) -> list[str]:
     par son indentation) pour ne pas capter le mapping d'un autre service.
     """
     bloc = re.search(r"^  api:\n(.*?)(?=^  \S)", texte, re.S | re.M)
-    if not bloc:
-        pytest.skip("service `api` introuvable dans le compose")
+    assert bloc, ("service `api` introuvable dans le compose : le motif de lecture "
+                  "ne reconnaît plus le fichier, donc l'invariant du binding loopback "
+                  "ne vérifie plus rien (un skip le rendrait indolore).")
     return [m.group(1).strip().strip('"\'')
             for m in re.finditer(r"^\s*-\s*(\S*8000\S*)\s*$", bloc.group(1), re.M)]
 
 
-def _descripteurs_presents() -> list[pathlib.Path]:
-    """Fichiers de déploiement lisibles depuis ce contexte d'exécution.
-
-    L'image de prod ne contient QUE `/app` : ni les compose, ni le Dockerfile
-    (le gate ne monte que `tests/`). `_commandes_uvicorn()` renvoyait alors une
-    liste vide et le test échouait sur « aucune commande uvicorn trouvée » —
-    un rouge permanent qui ne signalait aucun défaut de configuration et qui
-    finissait par masquer les vrais (constaté le 2026-08-19).
-
-    Pour exercer VRAIMENT l'invariant depuis l'image, monter les descripteurs :
-        -e BLACKTURF_BACKEND_DIR=/app \\
-        -v /opt/blackturf/docker-compose.yml:/docker-compose.yml:ro \\
-        -v /opt/blackturf/docker-compose.prod.yml:/docker-compose.prod.yml:ro \\
-        -v /opt/blackturf/backend/Dockerfile:/backend/Dockerfile:ro
+def _exiger_les_descripteurs() -> None:
+    """Les trois descripteurs sont suivis par git : leur absence est une erreur
+    d'invocation, jamais une particularité du contexte. Cf.
+    `_descripteurs_deploiement` pour le raisonnement complet et l'échappatoire.
     """
-    return [p for p in (COMPOSE_BASE, COMPOSE_PROD, DOCKERFILE) if p.exists()]
+    for chemin in (COMPOSE_BASE, COMPOSE_PROD, DOCKERFILE):
+        _lire(chemin)
 
 
 def _commandes_uvicorn() -> list[str]:
@@ -96,8 +80,7 @@ def test_uvicorn_honore_les_entetes_du_reverse_proxy():
     redirections 307 en http://. Depuis une page https le navigateur refuse de
     les suivre (contenu mixte) : la requête meurt sans erreur visible — c'est ce
     qui vidait le centre de notifications."""
-    if not _descripteurs_presents():
-        pytest.skip("compose et Dockerfile absents de ce contexte (image sans le dépôt)")
+    _exiger_les_descripteurs()
     commandes = _commandes_uvicorn()
     assert commandes, "aucune commande uvicorn trouvée"
     for cmd in commandes:
@@ -105,7 +88,14 @@ def test_uvicorn_honore_les_entetes_du_reverse_proxy():
 
 
 def test_toute_confiance_aux_entetes_transferes_est_justifiee():
-    """Si --forwarded-allow-ips=* est présent, le binding loopback DOIT l'être aussi."""
+    """Si --forwarded-allow-ips=* est présent, le binding loopback DOIT l'être aussi.
+
+    L'exigence des descripteurs vient AVANT le test de présence du drapeau : sans
+    elle, une commande uvicorn introuvable donnait « aucune confiance globale
+    accordée aux en-têtes transférés » — un skip qui se lit comme un satisfecit
+    alors qu'il signalait qu'on n'avait rien lu du tout.
+    """
+    _exiger_les_descripteurs()
     if not any("--forwarded-allow-ips=*" in c for c in _commandes_uvicorn()):
         pytest.skip("aucune confiance globale accordée aux en-têtes transférés")
     exposees = [m for m in _publications_du_port_api(_lire(COMPOSE_BASE))
@@ -147,8 +137,8 @@ def test_la_fenetre_de_retraining_atteint_le_worker():
     texte = _lire(COMPOSE_PROD)
     motif = "^  worker:" + chr(10) + "(.*?)(?=^  [^ ])"
     bloc = re.search(motif, texte, re.S | re.M)
-    if not bloc:
-        pytest.skip("service `worker` introuvable dans le compose")
+    assert bloc, ("service `worker` introuvable dans docker-compose.prod.yml : la "
+                  "fenêtre de retraining n'est plus vérifiée par personne.")
     for variable in ("RETRAIN_HISTORY_MONTHS", "RETRAIN_MAX_ROWS"):
         assert re.search(rf"^\s*-\s*{variable}=", bloc.group(1), re.M), (
             f"{variable} n'est pas transmis au worker : le retrain nocturne "
@@ -167,10 +157,7 @@ def test_le_service_db_declare_un_dev_shm_suffisant():
     exécutée ensuite. Panne du 20/08/2026 : /admin/api/dashboard en 500 et
     9 `post_course_sync` perdus par jour, pour un réglage absent d'un fichier.
     """
-    fichiers = [p for p in (COMPOSE_BASE, COMPOSE_PROD) if p.exists()]
-    if not fichiers:
-        pytest.skip("aucun compose lisible dans ce contexte de test")
-    for chemin in fichiers:
+    for chemin in (COMPOSE_BASE, COMPOSE_PROD):
         bloc = re.search(r"^  db:\n(.*?)(?=^  \S)", _lire(chemin), re.S | re.M)
         assert bloc, f"service `db` introuvable dans {chemin.name}"
         m = re.search(r"^\s*shm_size:\s*(\d+)\s*(m|mb|g|gb)\s*$",
@@ -179,3 +166,50 @@ def test_le_service_db_declare_un_dev_shm_suffisant():
                    "PostgreSQL retombe sur les 64 Mo par défaut de Docker")
         mo = int(m.group(1)) * (1024 if m.group(2).lower() in ("g", "gb") else 1)
         assert mo >= 128, f"{chemin.name} : shm_size={mo} Mo, trop juste"
+
+
+def test_l_absence_de_descripteur_est_rouge_et_non_silencieuse():
+    """Le garde-fou lui-même : sans les fichiers, on ÉCHOUE, on ne saute pas.
+
+    C'est l'invariant du 2026-08-31 : `pytest` lancé dans l'image (son contexte
+    naturel, sans le dépôt) affichait « 1380 passed, 10 skipped » et rendait 0,
+    ayant sauté toute la vérification d'exposition réseau, des quotas nginx et
+    des variables transmises aux conteneurs. Un skip ne se voit pas dans une
+    suite de 1 400 lignes ; c'est exactement le mode de panne que ces tests
+    existent pour couvrir.
+    """
+    from . import _descripteurs_deploiement as d
+
+    # `pytest.fail` et `pytest.skip` lèvent tous deux des `BaseException` (Failed /
+    # Skipped) : on capture donc à ce niveau, et c'est le TYPE qui tranche.
+    with pytest.raises(BaseException) as capture:  # noqa: PT011
+        d.exiger(RACINE / "descripteur-qui-n-existe-pas.yml")
+    assert type(capture.value).__name__ == "Failed", (
+        "l'absence d'un descripteur suivi par git doit lever un ÉCHEC, pas un "
+        f"{type(capture.value).__name__}")
+
+
+def test_la_cle_vapid_publique_atteint_le_build_du_frontend():
+    """`NEXT_PUBLIC_*` est inliné AU BUILD : absent des `args`, il n'existe pas.
+
+    Le mode de panne est muet et total. Sans cette variable dans le bundle,
+    `pushManager.subscribe({applicationServerKey: undefined})` lève, le
+    `catch` affichait « Erreur lors de l'activation », et AUCUN abonnement push
+    n'a jamais pu être créé — 0 utilisateur sur 26 avec un `endpoint` au
+    2026-08-31, pendant que 22 349 envois étaient journalisés en échec. Le
+    déclarer seulement dans `environment:` ne suffit pas : au runtime, Next a
+    déjà figé la valeur.
+    """
+    texte = _lire(COMPOSE_PROD)
+    bloc = re.search(r"^  frontend:\n(.*?)(?=^  \S)", texte, re.S | re.M)
+    assert bloc, "service `frontend` introuvable dans docker-compose.prod.yml"
+    args = re.search(r"^\s+args:\n(.*?)(?=^\s{4}\w)", bloc.group(1), re.S | re.M)
+    assert args and "NEXT_PUBLIC_VAPID_PUBLIC_KEY=" in args.group(1), (
+        "NEXT_PUBLIC_VAPID_PUBLIC_KEY absent des `build.args` du frontend : la "
+        "clé publique ne sera pas dans le bundle et personne ne pourra activer "
+        "les notifications push.")
+
+    dockerfile = _lire(RACINE / "frontend" / "Dockerfile")
+    assert "ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY" in dockerfile, (
+        "le Dockerfile du frontend ne déclare pas l'ARG : compose la passe, "
+        "Docker l'ignore, et la panne redevient silencieuse.")

@@ -19,15 +19,14 @@ import re
 
 import pytest
 
-RACINE = pathlib.Path(os.environ.get("BLACKTURF_BACKEND_DIR")
-                      or pathlib.Path(__file__).resolve().parents[1]).parent
-COMPOSE_PROD = RACINE / "docker-compose.prod.yml"
-CONF_INSPECTEE = RACINE / "nginx" / "nginx.prod.conf"
+from ._descripteurs_deploiement import (  # noqa: E402
+    COMPOSE_PROD, NGINX_PROD as CONF_INSPECTEE, RACINE, exiger,
+)
 
 
 def _conf_montee_sur_nginx() -> str | None:
     """Chemin (relatif au dépôt) monté sur /etc/nginx/nginx.conf, s'il existe."""
-    texte = COMPOSE_PROD.read_text(encoding="utf-8")
+    texte = exiger(COMPOSE_PROD)
     m = re.search(r"^\s*-\s*\./(\S+):/etc/nginx/nginx\.conf(?::\w+)?\s*$", texte, re.M)
     return m.group(1) if m else None
 
@@ -39,9 +38,8 @@ def test_la_conf_nginx_testee_est_bien_celle_qui_est_servie():
     # fichiers réellement déployés sont montés (gate de prod, BLACKTURF_BACKEND_DIR).
     if not os.environ.get("BLACKTURF_BACKEND_DIR"):
         pytest.skip("hors gate de déploiement : la conf servie n'est pas dans le dépôt")
-    if not COMPOSE_PROD.exists() or not CONF_INSPECTEE.exists():
-        pytest.skip("compose ou nginx.prod.conf absents de ce contexte "
-                    "(monter les descripteurs pour exercer ce test)")
+    exiger(COMPOSE_PROD)
+    exiger(CONF_INSPECTEE)
 
     chemin_monte = _conf_montee_sur_nginx()
     assert chemin_monte, (

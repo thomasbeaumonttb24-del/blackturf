@@ -210,19 +210,30 @@ export default function ProfilPage() {
       toast.error("Notifications non supportées");
       return;
     }
+    // La clé publique est INLINÉE AU BUILD. Absente, `subscribe()` lève et le
+    // `catch` affichait « Erreur lors de l'activation » — un message qui accuse
+    // le navigateur de l'utilisateur pour un défaut de déploiement. C'est ce qui
+    // a laissé le canal push mort de juin à août 2026 sans que personne cherche.
+    const cleVapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!cleVapid) {
+      toast.error("Les notifications push ne sont pas configurées sur ce serveur.");
+      console.error("NEXT_PUBLIC_VAPID_PUBLIC_KEY absente du bundle : voir docker-compose.prod.yml (build args du frontend).");
+      return;
+    }
     const permission = await Notification.requestPermission();
     if (permission !== "granted") { toast.error("Permission refusée"); return; }
     try {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+        applicationServerKey: cleVapid,
       });
       await authApi.savePushSub(sub.toJSON());
       setPushEnabled(true);
       toast.success("Notifications activées !");
-    } catch {
+    } catch (e) {
       toast.error("Erreur lors de l'activation");
+      console.error("pushManager.subscribe a échoué", e);
     }
   }
 

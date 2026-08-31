@@ -2402,6 +2402,10 @@ async def _build_training_dataset_from_db(
           {_prerace_clause}
     """
     _from = """
+        -- affichage : ce fragment ne porte que les jointures. La borne pré-départ
+        -- vit dans `_where` ci-dessus (`_prerace_clause`, drapeau
+        -- BT_TRAIN_PRERACE_ONLY, vrai par défaut et vrai en production) — voir
+        -- tests/test_anti_fuite_temporelle, qui verrouille aussi ce défaut.
         FROM features_ml fm
         JOIN participations p ON fm.participation_id = p.participation_id
         JOIN historique_courses h ON h.cheval_id = p.cheval_id AND h.course_id = p.course_id

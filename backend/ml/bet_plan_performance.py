@@ -468,6 +468,15 @@ async def _baseline_classement_par_type(
         JOIN courses c ON c.course_id = pr.course_id
         JOIN resultats r ON r.course_id = pr.course_id
         WHERE pr.course_id IN :cids
+          -- anti-fuite : la référence « classement » sert à JUGER un segment (elle
+          -- décide d'une suspension via `delta_vs_classement`). Un pronostic écrit
+          -- APRÈS le départ y ferait entrer de la connaissance du résultat et
+          -- fausserait la comparaison dans un sens qu'on ne contrôle pas. En prod
+          -- 1 000 prédictions (90 courses) sont dans ce cas ; aucune n'appartenait
+          -- encore à la cohorte des plans le 2026-08-31 (0 sur 628), le garde-fou
+          -- est donc préventif — et c'est justement quand il ne coûte rien qu'il
+          -- faut le poser.
+          AND c.date_heure IS NOT NULL AND pr.created_at < c.date_heure
     """).bindparams(bindparam("cids", expanding=True))
     rows = (await session.execute(stmt, {"cids": list(set(course_ids))})).all()
     if not rows:
@@ -556,7 +565,13 @@ async def compute_forward_performance(
     # ROW_NUMBER() plutôt que DISTINCT ON : compatible SQLite (tests) ET PostgreSQL
     # (même convention que admin.py / clv_monitor.py). Dernier règlement 'settled'
     # de chaque plan émis avant le départ.
-    rows = (await session.execute(text(f"""
+    # STREAM et non `.execute(...).all()` : la ligne porte deux blobs JSON (`plan`
+    # et `bilan`, un par pari) et il y a ~33 plans pré-course par course. Sur
+    # l'historique complet (`since=None`, 60 802 plans) tout matérialiser d'un coup
+    # faisait tuer le conteneur API — `exit 137`, limite 1,5 Go — pour TOUS les
+    # utilisateurs, depuis un simple `/stats/bet-plan-performance?days=`.
+    # En flux, chaque blob est libéré dès qu'il est agrégé : seul l'agrégat reste.
+    resultat = await session.stream(text(f"""
         SELECT plan_snapshot_id, course_id, profil, bankroll, model_version_id,
                emitted_at, course_start_at, plan, discipline, hippodrome_nom,
                nb_partants, bilan, net, roi, settled_at
@@ -577,16 +592,16 @@ async def compute_forward_performance(
               {since_clause}
         ) ranked
         WHERE rn = 1
-    """), params)).all()
+    """), params)
 
     plan_rows: list[dict] = []
     all_bet_rows: list[dict] = []
     by_segment: dict[str, list[dict]] = {}
     by_segment_plans: dict[str, dict[str, dict]] = {}  # segment -> {plan_snapshot_id: plan_row}
 
-    for (plan_snapshot_id, course_id, profil, bankroll, model_version_id, emitted_at,
-         course_start_at, plan, discipline, hippodrome, nb_partants, bilan, net, roi,
-         settled_at) in rows:
+    async for (plan_snapshot_id, course_id, profil, bankroll, model_version_id, emitted_at,
+               course_start_at, plan, discipline, hippodrome, nb_partants, bilan, net, roi,
+               settled_at) in resultat:
         emitted_at = _as_dt(emitted_at)
         course_start_at = _as_dt(course_start_at)
         # asyncpg/aiosqlite renvoient parfois du JSON en chaîne pour une requête

@@ -855,6 +855,10 @@ async def get_programme_apercu(
           JOIN courses c         ON c.course_id = pr.course_id
          WHERE c.date_heure >= :debut AND c.date_heure < :fin
            AND pa.non_partant = false
+           -- affichage : pastilles d'analyse du programme du jour, aucune mesure
+           -- n'en sort. Borner au pré-départ ferait DISPARAÎTRE la pastille des
+           -- courses dont le pronostic est arrivé en retard, ce qui appauvrirait
+           -- la page sans rendre le moindre chiffre plus honnête.
     """), {
         # Fenêtre en UTC autour du jour de courses demandé : `date_heure` est stocké
         # en UTC, et un `date()` local ferait glisser la journée d'une heure l'été.
