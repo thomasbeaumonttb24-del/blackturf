@@ -378,6 +378,14 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.runtime.conf:/etc/nginx/nginx.conf:ro
+      # Journal d'acces PERSISTANT. Sans ce montage, /var/log/nginx/access.log
+      # est un symlink vers /dev/stdout dans l'image : tout le trafic part dans
+      # le journal Docker, qui disparait avec le conteneur. Une recreation de
+      # nginx — c'est-a-dire un deploiement — efface l'historique d'exploration.
+      # Le montage masque les symlinks, nginx ecrit de vrais fichiers, et la
+      # seconde directive access_log continue d'alimenter stdout pour fail2ban.
+      # Rotation : /etc/logrotate.d/blackturf-nginx sur l'hote.
+      - ./nginx/logs:/var/log/nginx
       # Monter le RÉPERTOIRE /etc/letsencrypt, jamais les .pem un par un.
       # `live/*.pem` sont des SYMLINKS vers `archive/*N.pem` : un bind-mount de
       # fichier est résolu à la CRÉATION du conteneur et épingle l'inode courant
