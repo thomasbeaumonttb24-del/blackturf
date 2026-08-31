@@ -209,11 +209,21 @@ async def _etat_modele() -> dict:
         def _record(colonne):
             """Meilleure valeur atteinte par un modèle COMPARABLE, et sa version.
 
-            Comparable = non synthétique (un modèle de secours n'est pas une
-            référence de qualité) ET entraîné sur un volume du même ordre. Le
-            plancher de volume est indispensable au walk-forward ; il est appliqué
-            aussi à l'avantage sur la cote, dont la variance sur un petit jeu ne se
-            compare pas davantage.
+            Comparable = trois conditions, chacune pour une raison distincte.
+
+            - Non synthétique : un modèle de secours n'est pas une référence de
+              qualité.
+            - Volume du même ordre : le walk-forward est d'autant plus optimiste
+              que le jeu est petit.
+            - Classement intra-course mesuré (`rank_auc`, depuis le 20/08/2026) :
+              c'est ce qui borne le record à la génération de mesure courante. Le
+              volume seul ne suffit pas — les modèles de juin, à 145 000 lignes,
+              passent le plancher mais affichent un walk-forward de 0,816 sur une
+              autre fenêtre et un autre jeu de features. C'est exactement cette
+              référence-là (0,8104, juin) qui, prise pour comparable, avait rejeté
+              quatorze challengers d'affilée et gelé le modèle 48 jours. Un
+              walk-forward sans mesure de classement ne dit d'ailleurs pas si ce
+              modèle battait la cote : il ne peut pas servir de record.
 
             `is_not(None)` est explicite : sous PostgreSQL un `ORDER BY … DESC`
             placerait les NULL en tête.
@@ -224,6 +234,7 @@ async def _etat_modele() -> dict:
                     colonne.is_not(None),
                     ModelVersion.est_synthetique.is_(False),
                     ModelVersion.nb_courses_train >= volume_min,
+                    ModelVersion.rank_auc.is_not(None),
                 )
                 .order_by(colonne.desc())
                 .limit(1)
