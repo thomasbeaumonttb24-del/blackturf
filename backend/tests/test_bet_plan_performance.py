@@ -158,19 +158,43 @@ def test_gate_reduit_sur_serie_perdante_bien_au_dela_de_l_attendu():
     assert gates["Placé"]["factor"] == bpp.REDUCE_FACTOR
 
 
+def _mini_multi_en_4(**override) -> dict:
+    """« Mini Multi en 4 » tel que mesuré en prod, paramétrable."""
+    seg = {
+        "reliable": True, "roi_pct": 332.3, "roi_pct_winsor": 332.3,
+        "edge_pct": 362.3, "edge_pct_winsor": 362.3, "prelevement_pct": 30.0,
+        "n_paris": 215, "n_courses": 215, "n_plans": 300,
+        "drawdown_max": 900.0, "montant_mise": 1000.0,
+        "losing_streak_attendue": 60.5, "losing_streak_max": 200,
+    }
+    seg.update(override)
+    return {"segments": {"Mini Multi en 4": seg}}
+
+
 def test_gate_ne_penalise_pas_un_pari_rare_mais_rentable():
     """Un pari qui tombe une fois sur onze enchaîne NORMALEMENT de longues séries
     perdantes. Tant que son avantage est positif, ce n'est pas un signal de risque —
     l'ancienne règle (drawdown ≥ 50 % de la mise) rétrogradait « Mini Multi en 4 »
-    mesuré à +332 % de ROI."""
-    perf = {"segments": {"Mini Multi en 4": {
-        "reliable": True, "roi_pct": 332.3, "edge_pct": 362.3, "prelevement_pct": 30.0,
-        "n_paris": 215, "n_plans": 300, "drawdown_max": 900.0, "montant_mise": 1000.0,
-        "losing_streak_attendue": 60.5, "losing_streak_max": 200,
-    }}}
-    gates = bpp.evaluate_segment_gates(perf)
+    mesuré à +332 % de ROI.
+
+    La série perdante ne doit toujours pas suffire à le rétrograder, à condition
+    qu'il ait été observé sur assez de COURSES distinctes (cf. le test suivant)."""
+    gates = bpp.evaluate_segment_gates(_mini_multi_en_4(n_courses=215))
     assert gates["Mini Multi en 4"]["status"] == "active"
     assert gates["Mini Multi en 4"]["factor"] == 1.0
+
+
+def test_le_meme_pari_est_reduit_quand_les_215_paris_ne_font_que_17_courses():
+    """Le chiffre réel de la production au 2026-08-31 : ces 215 paris ne couvrent
+    que **17 courses**, parce qu'un plan est ré-émis à chaque mouvement de cote
+    (~33 snapshots par course). Le +332 % de ROI ne repose donc pas sur 215
+    observations indépendantes, et un ROI non winsorisé sur 17 courses n'est pas
+    une preuve de rentabilité. On ne coupe pas — rien ne prouve que ce type soit
+    mauvais — mais on refuse de miser à plein régime dessus."""
+    gates = bpp.evaluate_segment_gates(_mini_multi_en_4(n_courses=17))
+    assert gates["Mini Multi en 4"]["status"] == "reduced"
+    assert gates["Mini Multi en 4"]["factor"] == bpp.REDUCE_FACTOR
+    assert "17 courses" in gates["Mini Multi en 4"]["reason"]
 
 
 def test_gate_juge_l_avantage_sur_le_pool_pas_le_roi_absolu():

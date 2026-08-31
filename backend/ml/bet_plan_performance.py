@@ -43,10 +43,30 @@ log = structlog.get_logger(module="bet_plan_performance")
 # variance (cf. Point 9 : mêmes ordres de grandeur que les autres seuils
 # cold-start). Documenté ici plutôt que dupliqué à chaque appelant.
 MIN_SEGMENT_OBS = 30
+# ── COURSES DISTINCTES, PAS PARIS (audit 2026-08-31) ────────────────────────
+# `MIN_SEGMENT_OBS` compte des PARIS, or un même plan est ré-émis à chaque
+# mouvement de cote : ~33 snapshots par course en production. Un segment atteint
+# donc 30 « observations » avec une seule course. Constat au 2026-08-31 :
+#   Mini Multi en 4 : 228 paris mais 17 COURSES, ROI brut +332 % → gate « active »
+#   Pick5 : 86 paris / 3 courses · Tiercé Désordre : 35 paris / 1 course
+# Le seuil ne peut pas simplement passer en courses : mesuré, cela FAIT REMONTER
+# 8 types ruineux (Multi en 4 à −100 % sur 7 courses, Pick5 −100 % sur 3) parce
+# qu'un segment redevenu "observed" retombe en "active" par défaut.
+#
+# La règle est donc ASYMÉTRIQUE, parce que les deux erreurs ne coûtent pas pareil :
+#   - SUSPENDRE garde le seuil permissif en paris. Suspendre à tort coûte un type
+#     écarté ; ne pas suspendre coûte de l'argent réel, à chaque course.
+#   - RESTER ACTIF à plein régime sur un avantage POSITIF exige des courses
+#     distinctes. En dessous, le segment est "reduced", jamais "active".
+MIN_COURSES_POUR_ACTIF = 30
 # Nombre minimal de PLANS (pas de paris) avant de mesurer un drawdown ou une
 # série de pertes : sous ce seuil la série temporelle est trop courte pour que
 # ces statistiques signifient autre chose que du bruit.
 MIN_PLANS_FOR_SERIES = 10
+# Quantile de winsorisation des gains. 0.99 et pas moins : on coupe la queue
+# extrême, pas la performance. Même définition que `percentile_cont(0.99)` de
+# PostgreSQL, pour qu'une mesure faite en SQL et une mesure faite ici coïncident.
+WINSOR_QUANTILE = 0.99
 BOOTSTRAP_ITER = 2000
 BOOTSTRAP_SEED = 20260818  # figé : deux appels sur les mêmes données → même IC
 
@@ -80,6 +100,25 @@ def _as_dt(value) -> Optional[datetime]:
     if isinstance(value, str):
         return datetime.fromisoformat(value)
     return value
+
+
+def _plafond_winsorisation(gains: list[float]) -> Optional[float]:
+    """Quantile ``WINSOR_QUANTILE`` d'une liste de gains — fonction PURE.
+
+    Prend TOUS les tickets, gagnants et perdants (les 0 comptent), exactement comme
+    ``percentile_cont(0.99) WITHIN GROUP (ORDER BY gain)`` en SQL : c'est ce qui
+    permet de rejouer la mesure d'audit à l'identique depuis psql. Liste vide →
+    None, c'est-à-dire aucun plafond : on n'invente pas de borne sans données.
+    """
+    if not gains:
+        return None
+    s = sorted(float(g or 0.0) for g in gains)
+    if len(s) == 1:
+        return s[0]
+    pos = WINSOR_QUANTILE * (len(s) - 1)
+    bas = int(pos)
+    haut = min(bas + 1, len(s) - 1)
+    return s[bas] + (s[haut] - s[bas]) * (pos - bas)
 
 
 def _bucket(value: float, edges: list[tuple[float, float, str]]) -> str:
@@ -226,6 +265,18 @@ def _metrics_for_group(bet_rows: list[dict], plan_rows: list[dict]) -> dict:
     hit_rate = round(hit / n_paris, 4) if n_paris else None
     roi = round(net / mise * 100, 2) if mise > 0 else None
 
+    # ── ROI WINSORISÉ (audit 2026-08-31) ────────────────────────────────────
+    # `retour` est l'argent réellement rendu : il reste brut, on n'affiche jamais
+    # un euro winsorisé. Mais un ROI sert à JUGER, et un jugement ne doit pas
+    # tenir à un seul ticket. Mesure qui l'impose, sur 4 039 courses rejouables :
+    # le Trio ressortait à +51,0 % de ROI alors qu'un unique gain de 4 526 € (sur
+    # 6 023 € misés au total) portait 49,8 % de tous ses gains ; winsorisé, il vaut
+    # −75,7 %. C'est ce chiffre-là, pas le brut, qui doit décider d'une suspension.
+    plafond = _plafond_winsorisation([b["gain"] or 0.0 for b in bet_rows])
+    retour_w = (round(sum(min(b["gain"] or 0.0, plafond) for b in bet_rows), 2)
+                if plafond is not None else retour)
+    roi_winsor = round((retour_w - mise) / mise * 100, 2) if mise > 0 else None
+
     n_plans = len(plan_rows)
     plan_nets = [p["net"] for p in plan_rows]
     courses_benef = len({p["course_id"] for p in plan_rows if p["net"] > 0})
@@ -249,19 +300,30 @@ def _metrics_for_group(bet_rows: list[dict], plan_rows: list[dict]) -> dict:
     # Simple Gagnant (15,5 %) et un Multi (30 %).
     prelev = _prelevement_moyen_pct(bet_rows)
     edge = round(roi + prelev, 2) if (roi is not None and prelev is not None) else None
+    edge_w = (round(roi_winsor + prelev, 2)
+              if (roi_winsor is not None and prelev is not None) else None)
     streak_attendue = _streak_attendue(hit_rate, n_plans)
     return {
         "n_plans": n_plans,
         "n_paris": n_paris,
         "n_courses": courses_total,
         "montant_mise": mise,
+        # `montant_retour` est de l'argent RÉELLEMENT rendu : jamais winsorisé.
         "montant_retour": retour,
         "net_profit": net,
         "roi_pct": roi if reliable else None,
         "roi_pct_raw": roi,
+        # ROI/avantage WINSORISÉS : ce sont eux qui décident (cf. evaluate_segment_gates).
+        # Les bruts restent publiés à côté — l'écart entre les deux est le signal
+        # « ce segment ne tient que par un gros lot », et il doit rester lisible.
+        "roi_pct_winsor": roi_winsor if reliable else None,
+        "roi_pct_winsor_raw": roi_winsor,
+        "plafond_winsorisation": (round(plafond, 2) if plafond is not None else None),
         "prelevement_pct": prelev,
         "edge_pct": edge if reliable else None,
         "edge_pct_raw": edge,
+        "edge_pct_winsor": edge_w if reliable else None,
+        "edge_pct_winsor_raw": edge_w,
         "hit_rate": hit_rate,
         "taux_courses_beneficiaires": taux_courses_benef,
         "drawdown_max": drawdown_max,
@@ -290,11 +352,24 @@ async def _naive_favorite_roi(session: AsyncSession, course_ids: list[str]) -> O
     # IN (expanding bindparam), pas ANY(:cids) : portable SQLite (tests) + PostgreSQL.
     # Le filtre "classement bien formé" se fait côté Python (isinstance ci-dessous) :
     # jsonb_typeof est PostgreSQL-only, et le classement mal formé reste rare/marginal.
+    # ORDER BY s.emitted_at DESC : INDISPENSABLE, et son absence a coûté cher.
+    # Il y a ~33 snapshots pré-course par course. Sans tri, la boucle
+    # `if course_id in seen: continue` gardait un snapshot ARBITRAIRE — donc le plus
+    # souvent un snapshot ancien, dont les cotes ne désignent pas encore le vrai
+    # favori. Mesuré le 2026-08-31 sur les mêmes 611 courses :
+    #     snapshot le plus ancien   → le favori gagne 11,4 %, ROI −43,00 %
+    #     ordre physique (avant fix)→ 12,7 %, ROI −40,93 %   [valeur servie : −44,22 %]
+    #     dernier snapshot (ci-dessous) → 26,5 %, ROI −25,85 %
+    #     contrôle indépendant sur `predictions.cote_figee` → 26,7 %, ROI −25,68 %
+    # Le comparateur annonçait donc un marché à −44 % là où il est à −26 %, et
+    # surestimait l'avantage revendiqué par BlackTurf de 17 à 18 points. Un
+    # comparateur sans garde de cote figée n'est pas un comparateur.
     stmt = text("""
         SELECT s.course_id, s.cotes_utilisees, r.classement
         FROM bet_plan_snapshots s
         JOIN resultats r ON r.course_id = s.course_id
         WHERE s.course_id IN :cids AND s.is_pre_course = true
+        ORDER BY s.course_id, s.emitted_at DESC
     """).bindparams(bindparam("cids", expanding=True))
     rows = (await session.execute(stmt, {"cids": list(set(course_ids))})).all()
     seen: set[str] = set()
@@ -664,11 +739,36 @@ def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
     Ne tranche JAMAIS sous les seuils de fiabilité déjà appliqués par
     ``_metrics_for_group`` (``status == "observed"``) : un segment encore
     "observed" reste "active" ici, quel que soit son ROI apparent.
+
+    Deux garde-fous ajoutés le 2026-08-31, après mesure sur 611 courses :
+
+    1. La décision porte sur l'avantage **winsorisé** (``edge_pct_winsor``). Simulé
+       sur la production : aucune suspension supplémentaire, aucun catalogue de
+       profil éteint — mais Couplé Gagnant passe de +22,2 à −5,7 pts d'avantage et
+       Couplé Ordre de +10,9 à −5,2. Ces deux types étaient crédités d'une
+       compétence qu'ils n'ont pas ; ils sont désormais à 2 points de la suspension,
+       ce qui est la vérité de la mesure.
+    2. Un avantage positif sur moins de ``MIN_COURSES_POUR_ACTIF`` courses
+       distinctes vaut ``reduced``, pas ``active``. Simulé : une seule décision
+       change dans toute la production — « Mini Multi en 4 » (17 courses, +332 %).
+
+    Ce qui a été essayé et REJETÉ : remplacer ``reliable = n_paris >= 30`` par
+    ``n_courses >= 30``. Mesuré, cela réhabilitait 8 types ruineux (Multi en 4 à
+    −100 % sur 7 courses, Pick5 −100 % sur 3, Tiercé et Quinté+ Désordre −100 % sur
+    1 course chacun), parce qu'un segment redevenu "observed" retombe en "active"
+    par défaut. Le seuil de SUSPENSION reste donc volontairement permissif.
     """
     out: dict[str, dict] = {}
     for key, m in (perf.get("segments") or {}).items():
         status, factor, reason = "active", 1.0, None
-        edge = m.get("edge_pct")
+        # DÉCISION SUR L'AVANTAGE WINSORISÉ (audit 2026-08-31), pas sur le brut :
+        # un segment ne doit ni survivre ni être condamné à cause d'un seul ticket.
+        # Repli sur le brut si la winsorisation n'a pas pu se calculer (segment vide).
+        edge = m.get("edge_pct_winsor")
+        if edge is None:
+            edge = m.get("edge_pct")
+        edge_brut = m.get("edge_pct")
+        n_courses = m.get("n_courses") or 0
         streak_att = m.get("losing_streak_attendue")
         streak_max = m.get("losing_streak_max")
         baseline = m.get("baseline_classement") or {}
@@ -690,15 +790,29 @@ def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
                       f"le choix des chevaux l'est")
         elif m.get("reliable") and edge is not None and edge <= EDGE_SUSPEND_THRESHOLD_PCT:
             status, factor = "suspended", 0.0
-            reason = (f"avantage={edge} pts <= {EDGE_SUSPEND_THRESHOLD_PCT} "
-                      f"(roi_pct={m.get('roi_pct')}, prélèvement={m.get('prelevement_pct')}%, "
-                      f"n={m['n_paris']})")
+            reason = (f"avantage winsorisé={edge} pts <= {EDGE_SUSPEND_THRESHOLD_PCT} "
+                      f"(roi winsorisé={m.get('roi_pct_winsor')}, roi brut={m.get('roi_pct')}, "
+                      f"prélèvement={m.get('prelevement_pct')}%, "
+                      f"n={m['n_paris']} paris sur {n_courses} courses)")
         elif (m.get("reliable") and edge is None and m.get("roi_pct") is not None
               and m["roi_pct"] <= ROI_SUSPEND_THRESHOLD_PCT):
             # Prélèvement inconnu → repli sur l'ancien critère absolu.
             status, factor = "suspended", 0.0
             reason = (f"prélèvement inconnu, repli roi_pct={m['roi_pct']} "
                       f"<= {ROI_SUSPEND_THRESHOLD_PCT} (n={m['n_paris']})")
+        elif (m.get("reliable") and edge is not None and edge > 0
+              and n_courses < MIN_COURSES_POUR_ACTIF):
+            # AVANTAGE POSITIF MAIS TROP PEU DE COURSES DISTINCTES.
+            # `reliable` compte des PARIS, or le même plan est ré-émis ~33 fois par
+            # course : un segment peut donc paraître fiable sur une poignée de
+            # courses. Constat au 2026-08-31 : « Mini Multi en 4 » était `active`
+            # avec 228 paris… répartis sur 17 courses, ROI +332 %. On ne coupe pas
+            # (rien ne prouve qu'il soit mauvais) mais on refuse de miser à plein
+            # sur une performance qui n'a pas encore rencontré 30 courses.
+            status, factor = "reduced", REDUCE_FACTOR
+            reason = (f"avantage={edge} pts mais seulement {n_courses} courses "
+                      f"distinctes < {MIN_COURSES_POUR_ACTIF} ({m.get('n_paris')} paris, "
+                      f"le même plan étant ré-émis à chaque mouvement de cote)")
         elif (streak_att and streak_max is not None
               and streak_max > DRAWDOWN_TOLERANCE_FACTOR * streak_att
               and not (edge is not None and edge > 0)):
@@ -709,10 +823,17 @@ def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
                       f"l'attendu {streak_att} (drawdown_max={m.get('drawdown_max')})")
         out[key] = {
             "status": status, "factor": factor, "reason": reason,
-            "roi_pct": m.get("roi_pct"), "edge_pct": edge,
+            # `roi_pct` reste le BRUT : c'est lui que lit `_garantir_catalogue_profil`
+            # pour classer les types à réanimer, et le changer ici changerait ce
+            # classement sans que rien ne le dise.
+            "roi_pct": m.get("roi_pct"),
+            "roi_pct_winsor": m.get("roi_pct_winsor"),
+            # `edge_pct` porte désormais l'avantage QUI A DÉCIDÉ (winsorisé) ;
+            # `edge_pct_brut` garde le non-winsorisé pour pouvoir comparer.
+            "edge_pct": edge, "edge_pct_brut": edge_brut,
             "prelevement_pct": m.get("prelevement_pct"),
             "delta_vs_classement_pct": delta,
-            "n_paris": m.get("n_paris"),
+            "n_paris": m.get("n_paris"), "n_courses": m.get("n_courses"),
             "n_plans": m.get("n_plans"), "drawdown_max": m.get("drawdown_max"),
         }
     return out

@@ -192,7 +192,27 @@ def _palier(montant: int) -> dict:
 # d'une combinaison ancrée. Résultat du rejeu sur 400 courses (2026-08-23) : effet
 # NUL (−33,3 % avec, −33,3 % sans ; Trio −62,9 % contre −62,0 %). Le facteur ne nuit
 # pas mais n'apporte rien de mesurable — il reposait sur 17 gagnants.
-_ANC_NEUTRE = False
+#
+# ACTIVÉ le 2026-08-31. Le bonus ne se contentait pas d'être inutile : il classait
+# À L'ENVERS. Re-mesure sur TOUS les Trios ancrés sur les 2 premiers prédits
+# (622 paris, 81 jours, anti-fuite `created_at < date_heure`, hors backfill), ROI
+# par rang du 3ᵉ pied — brut, puis winsorisé au p99 :
+#
+#     rang du 3ᵉ pied   n courses   ROI brut    ROI winsorisé   multiplicateur appliqué
+#        rang 3            194       −38,7 %       −60,5 %            ×0,70
+#        rangs 4-5         234       −29,3 %       −63,5 %            ×1,00
+#        rangs 6-8         194       −60,2 %       −67,4 %            ×1,25  ←
+#        rang 9+            68      −100,0 %      −100,0 %            ×0,70
+#
+# Le code bonifiait donc de 25 % la bande la PIRE des trois, et pénalisait de 30 %
+# l'une des deux meilleures. Les chiffres qui justifiaient l'inverse (« rangs 6-8
+# → +92 % ») venaient d'un échantillon de 17 gagnants, non winsorisé.
+#
+# Aucune des trois bandes viables ne se distingue vraiment (−60,5 / −63,5 / −67,4
+# sur ~200 courses chacune) : la bonne réponse n'est pas de retourner les
+# multiplicateurs, c'est de ne plus prétendre savoir. Le seul signal net est
+# « rang 9+ = −100 % », et le plafond de rang du profil l'exclut déjà.
+_ANC_NEUTRE = True
 # `_ANCRE_HORS_BANDE` exempte les combinaisons ANCRÉES sur les 2 premiers du plancher
 # de rapport du profil. Ce plancher est un CONTRAT PRODUIT (tranché le 2026-08-20).
 #
@@ -363,10 +383,54 @@ PROFIL_CONFIG = {
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre",
                   "Multi en 4", "Multi en 5", "Pick5"},
         "objectif": "gain",
-        # top-8 prédit = 95,9 % des vrais gagnants (mesure du 2026-08-20). Au-delà, le
-        # « gros rapport » n'est plus un outsider à valeur : c'est un pari contre le
-        # classement, et c'est ce qui remplissait 17,8 % des tickets risqués.
-        "rang_max": 8,
+        # 8 → 5 (audit 2026-08-31). Le raisonnement « top-8 = 95,9 % des vrais
+        # gagnants » (2026-08-20) répondait à la mauvaise question : ce qui compte
+        # n'est pas de CONTENIR le gagnant, c'est ce que rapporte l'argent misé.
+        #
+        # Le contrat ×10 du profil est CONSERVÉ (arbitrage de l'exploitant du
+        # 2026-08-31 : « viser gros, quitte à gagner moins souvent »). Ce plafond
+        # ne touche pas la tranche de gain, il écarte les tickets dont le pire
+        # cheval est trop bas au classement — ceux-là ne sont pas des « outsiders
+        # à valeur », ce sont des paris contre notre propre modèle.
+        #
+        # ROI WINSORISÉ au p99 par pire rang prédit du ticket, profil agressif,
+        # décroissance monotone mesurée sur DEUX fenêtres indépendantes :
+        #
+        #   plafond   81 jours / 4 033 courses      depuis le 2026-08-20 / 559 courses
+        #             ROI      % courses servies    ROI      % courses servies
+        #     3      −22,0 %        25,0 %          +10,3 %        26,8 %
+        #     4      −29,7 %        43,3 %          −11,8 %        43,5 %
+        #     5      −31,4 %        60,8 %          −27,3 %        66,5 %
+        #     6      −36,5 %        77,1 %          −32,2 %        83,9 %   ← retenu
+        #     8      −42,0 %        95,1 %          −39,0 %        98,6 %   ← avant
+        #    aucun   −45,3 %        99,9 %          −41,5 %       100,0 %
+        #
+        # Soit +5,5 points sur la fenêtre longue et +6,8 sur le régime actuel, les
+        # deux mesures concordant.
+        #
+        # POURQUOI 6 ET PAS 5, alors que 5 rapporte ~5 points de plus. Parce que 5
+        # transforme le risqué en profil MONO-TICKET, ce qui n'est pas la même
+        # décision que « viser gros ». Sur un champ ouvert de 14 partants :
+        #     rang_max 5 → 1 pari à 10 €, 1 à 20 €, 1 à 30 €, 1 à 50 €
+        #     rang_max 6 → 2 paris à 10 €, 2 à 20 €
+        #     rang_max 8 → 2 à 10 € mais construits sur les rangs 7 et 8
+        # `var_cap = 0.20` a justement été posé pour en finir avec « 10 € sur un
+        # seul Simple Gagnant » ; descendre à 5 le rétablirait par un autre chemin.
+        # La tranche de gain ×10 est CONSERVÉE dans les deux cas : ce plafond porte
+        # sur le rang des chevaux, jamais sur le multiple visé.
+        #
+        # ⚠ Le « % courses servies » est une BORNE BASSE. Le rejeu ne sait que
+        # RETIRER des tickets, jamais en reconstruire : en vrai, `mise_calculator`
+        # réalloue le budget sur les chevaux restants, donc la couverture réelle
+        # sera supérieure. C'est aussi pourquoi le ROI ci-dessus est mesuré sur les
+        # seuls tickets survivants et non sur un plan reconstruit.
+        #
+        # Mesuré et NON RETENU : le même plafond sur les deux autres profils.
+        # Conservateur : −17,6 % à 8 contre −16,8 % à 5, soit rien. Équilibré :
+        # −7,3 % à 8 contre −8,4 % à 5, c'est-à-dire PIRE. Le plafond de rang est
+        # un levier du seul profil risqué ; l'appliquer partout aurait dégradé
+        # l'équilibré au nom d'une moyenne portée par le risqué.
+        "rang_max": 6,
         # var_cap 0.20 (0.45 → 0.35 → 0.20) : le risqué reste 100% gros rapport, MAIS
         # jamais plus de 20% du budget sur un seul ticket TOUT-OU-RIEN → la mise s'étale
         # sur plusieurs gros-rapports DÉCORRÉLÉS (demande user : « plus de mises
@@ -1730,6 +1794,23 @@ def _select_conviction(
                     return False
                 if c["proba_gain"] < min_proba:
                     return False
+                # PLAFOND DE RANG — oubli corrigé le 2026-08-31.
+                # Ce chemin de complément relâche volontairement les gates de
+                # RENTABILITÉ (ROI passé, seuil d'EV) : déployer la mise choisie sur
+                # l'éventail du profil est le comportement attendu. Mais le plafond de
+                # rang n'est pas une gate de rentabilité, c'est la même contrainte
+                # d'identité produit que la bande de rapport ou l'ancrage top-2 juste
+                # en dessous — et il manquait ici, donc le complément réintroduisait
+                # précisément les paris que `passes_gates` venait d'écarter.
+                # Effet mesuré de l'oubli, profil agressif, plafond effectif 5 :
+                # le plan sortait deux Simple Gagnant aux rangs 7 et 8. En production,
+                # la part de paris au rang 9+ n'était tombée qu'à 5,6 % après la pose
+                # du plafond (contre ~18 % avant), au lieu de 0.
+                if rang_max_eff is not None and c.get("_rang_max") is not None:
+                    _pl = rang_max_eff + (RANG_MAX_BONUS_PLACE
+                                          if "Placé" in c["type_pari"] else 0)
+                    if int(c["_rang_max"]) > _pl:
+                        return False
                 return c["ev"] >= SPEC_EV_FLOOR        # exclut la loterie pure (EV planchée)
 
             seen = [(frozenset(int(h["numero"]) for h in c.get("chevaux", [])), c["type_pari"])
