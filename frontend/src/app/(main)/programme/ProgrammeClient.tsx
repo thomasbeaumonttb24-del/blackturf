@@ -140,6 +140,55 @@ function useCountdown(targetDate: string, statut: string) {
   return text;
 }
 
+/* ─── Horloge partagée ──────────────────────────────────────
+ * Ni le jour ni l'heure ne peuvent être figés au rendu. Cette page est servie depuis
+ * un cache (ISR côté serveur, et cache HTTP côté navigateur, qui a le droit de rendre
+ * un HTML de la veille) puis reste ouverte des heures. Sans horloge qui bat,
+ * `jourParis()` garde la valeur qu'il avait à la GÉNÉRATION du HTML : d'où un
+ * « Programme du jour » qui ouvre sur hier, et une « prochaine course » restée à 11h
+ * alors qu'il est 14h.
+ *
+ * Le premier rendu — SSR puis hydratation — renvoie `null` : il ne dépend d'aucune
+ * horloge, donc aucun mismatch d'hydratation possible. L'heure réelle arrive à
+ * l'effet, juste après, et tout ce qui en dépend se recalcule.
+ */
+function useHorloge(periodeMs = 30000): Date | null {
+  const [maintenant, setMaintenant] = useState<Date | null>(null);
+  useEffect(() => {
+    const tick = () => setMaintenant(new Date());
+    tick();
+    const id = setInterval(tick, periodeMs);
+    // Un onglet en arrière-plan voit ses timers étranglés par le navigateur, et un
+    // portable qui sort de veille a pu sauter la nuit entière : au retour au premier
+    // plan on resynchronise tout de suite, sans attendre le prochain battement.
+    const auRetour = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", auRetour);
+    window.addEventListener("focus", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", auRetour);
+      window.removeEventListener("focus", tick);
+    };
+  }, [periodeMs]);
+  return maintenant;
+}
+
+/* Seau horaire de la timeline, lu à Paris. `new Date(...).getHours()` lisait le fuseau
+ * de la MACHINE : le conteneur tourne en UTC, le HTML prérendu sortait donc avec un
+ * en-tête de groupe « 9h » posé au-dessus de courses affichées à 11:03 — faux pour le
+ * visiteur sans JavaScript comme pour un robot d'indexation, et mismatch d'hydratation
+ * pour les autres. `formatToParts` plutôt que `format` : selon la version d'ICU,
+ * `format` en fr-FR rend « 09 h » et non « 09 ». */
+const HEURE_PARIS_H = new Intl.DateTimeFormat("fr-FR", {
+  timeZone: "Europe/Paris",
+  hour: "2-digit",
+  hour12: false,
+});
+function heureBucket(iso: string): string {
+  const h = HEURE_PARIS_H.formatToParts(new Date(iso)).find((p) => p.type === "hour")?.value ?? "0";
+  return `${Number(h)}h`;
+}
+
 /* ─── StatutBadge ───────────────────────────────────────── */
 function StatutBadge({ statut }: { statut: string }) {
   if (statut === "en_cours")
@@ -158,9 +207,12 @@ function StatutBadge({ statut }: { statut: string }) {
 /* ─── Sélecteur de jour ─────────────────────────────────── */
 const HIDE_SCROLLBAR = "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden";
 
-function DayStrip({ selected, onSelect }: { selected: Date; onSelect: (d: Date) => void }) {
-  // Jour de Paris, identique au serveur et au navigateur → pas de mismatch d’hydratation
-  const today = new Date(`${jourParis()}T12:00:00`);
+function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCourant: string; onSelect: (d: Date) => void }) {
+  // Le jour vient du parent, il n'est plus relu ici. Un `jourParis()` appelé au rendu
+  // donnait le jour de GÉNÉRATION du HTML côté serveur et le vrai jour côté navigateur :
+  // sur un HTML servi depuis le cache après minuit, la pastille « Auj. » se posait sur
+  // hier — et le texte différait entre les deux rendus (mismatch d'hydratation).
+  const today = new Date(`${jourCourant}T12:00:00`);
   const days = Array.from({ length: 10 }, (_, i) => addDays(today, i - 9));
   const selKey = format(selected, "yyyy-MM-dd");
   const todayKey = format(today, "yyyy-MM-dd");
@@ -437,7 +489,31 @@ export default function ProgrammeClient({
   initialCompteurVB?: { count: number; niveau_min: number } | null;
 } ) {
   const { user } = useAuth();
+  const maintenant = useHorloge(30000);
+  /* Jour de Paris VIVANT. Il part de `initialJour` — la valeur exacte contenue dans le
+     HTML servi, donc zéro mismatch d'hydratation — puis se corrige au premier battement
+     d'horloge. C'est ce qui rattrape un HTML sorti du cache (ISR ou cache navigateur :
+     Next annonce `stale-while-revalidate` sur cette page) ainsi qu'un onglet resté
+     ouvert par-dessus minuit. */
+  const [jourCourant, setJourCourant] = useState(initialJour);
+  useEffect(() => {
+    if (!maintenant) return;
+    const j = jourParis(0, maintenant);
+    setJourCourant((prec) => (prec === j ? prec : j));
+  }, [maintenant]);
+
   const [selectedDate, setSelectedDate] = useState(() => new Date(`${initialJour}T12:00:00`));
+  /* Tant que le visiteur n'a pas choisi une journée lui-même, la page suit le jour
+     courant. Sans cela, `selectedDate` restait sur le jour figé dans le HTML : la page
+     ouvrait sur hier, `isToday` valait faux, et avec lui tombaient le rafraîchissement
+     toutes les minutes, les value bets et le bandeau « prochaine course ». */
+  const jourChoisiALaMain = useRef(false);
+  useEffect(() => {
+    if (jourChoisiALaMain.current) return;
+    setSelectedDate((prec) =>
+      format(prec, "yyyy-MM-dd") === jourCourant ? prec : new Date(`${jourCourant}T12:00:00`),
+    );
+  }, [jourCourant]);
   const [programme, setProgramme] = useState<{ reunions: Reunion[]; nb_courses: number } | null>(initialProgramme);
   // Jour auquel correspond `programme` (ref, pas état : lu dans l'effet de chargement,
   // une valeur figée dans la fermeture donnerait un mauvais verdict). Sert à ne pas
@@ -451,7 +527,7 @@ export default function ProgrammeClient({
   const [showSearch, setShowSearch] = useState(false);
   const [vbOnly, setVbOnly] = useState(false);
 
-  const isToday = format(selectedDate, "yyyy-MM-dd") === jourParis();
+  const isToday = format(selectedDate, "yyyy-MM-dd") === jourCourant;
   const isPaid = user && !["free", "decouverte"].includes(user.plan);
 
   /* Value bets */
@@ -507,7 +583,16 @@ export default function ProgrammeClient({
     if (programmeJour.current === dateStr) setLoading(false);
     else load(true);
     const iv = isToday ? setInterval(() => load(false), 60000) : null;
-    return () => { cancelled = true; if (iv) clearInterval(iv); };
+    // Le navigateur étrangle les timers d'un onglet en arrière-plan : après une heure
+    // masquée, l'intervalle d'une minute n'a pas tourné une minute sur deux et la page
+    // se rouvrait sur des statuts périmés. Un retour au premier plan force la relecture.
+    const auRetour = () => { if (isToday && document.visibilityState === "visible") load(false); };
+    document.addEventListener("visibilitychange", auRetour);
+    return () => {
+      cancelled = true;
+      if (iv) clearInterval(iv);
+      document.removeEventListener("visibilitychange", auRetour);
+    };
   }, [selectedDate, isToday]);
 
   const selectDate = useCallback((d: Date) => {
@@ -515,8 +600,12 @@ export default function ProgrammeClient({
     setReunionFilter("all");
     setHippoSearch("");
     setVbOnly(false);
+    // Revenir sur aujourd'hui rend la main au suivi automatique du jour ; choisir une
+    // autre journée le suspend, sinon le passage de minuit arracherait le visiteur de
+    // la journée qu'il consulte.
+    jourChoisiALaMain.current = format(d, "yyyy-MM-dd") !== jourCourant;
     setSelectedDate(d);
-  }, []);
+  }, [jourCourant]);
 
   /* Derived */
   const allCourses = useMemo(() => programme?.reunions.flatMap((r) => r.courses) ?? [], [programme]);
@@ -532,16 +621,35 @@ export default function ProgrammeClient({
     [programme],
   );
 
-  /* Prochaine course (toutes réunions, hors terminées/annulées) */
+  /* Prochaine course (toutes réunions, hors terminées/annulées et hors départs passés)
+   *
+   * Le tri ne portait que sur `statut` : une course dont l'heure de départ était passée
+   * mais dont le statut n'avait pas encore basculé restait « prochaine course ». À 14h
+   * la page annonçait toujours celle de 11h. Le statut ne se lit jamais seul, il se
+   * croise avec `date_heure` — c'est la même règle que côté serveur.
+   *
+   * Marges : le statut suit le départ avec un décalage, on garde donc 20 min après
+   * l'heure annoncée pour ne pas sauter la course qui part vraiment. Une course restée
+   * « en_cours » a droit à 60 min, le temps de la course plus la saisie de l'arrivée ;
+   * au-delà c'est une donnée bloquée, pas une course en piste.
+   */
   const nextRace = useMemo(() => {
     if (!programme || !isToday) return null;
+    const t = maintenant ? maintenant.getTime() : null;
+    const TOLERANCE_A_VENIR_MS = 20 * 60 * 1000;
+    const TOLERANCE_EN_COURS_MS = 60 * 60 * 1000;
     const cands: Array<{ course: CourseSummary; reunionNum: number }> = [];
     for (const r of programme.reunions) for (const c of r.courses) {
-      if (c.statut !== "termine" && c.statut !== "annule") cands.push({ course: c, reunionNum: r.numero });
+      if (c.statut === "termine" || c.statut === "annule") continue;
+      if (t !== null) {
+        const marge = c.statut === "en_cours" ? TOLERANCE_EN_COURS_MS : TOLERANCE_A_VENIR_MS;
+        if (new Date(c.date_heure).getTime() + marge < t) continue;
+      }
+      cands.push({ course: c, reunionNum: r.numero });
     }
     cands.sort((a, b) => new Date(a.course.date_heure).getTime() - new Date(b.course.date_heure).getTime());
     return cands[0] ?? null;
-  }, [programme, isToday]);
+  }, [programme, isToday, maintenant]);
 
   /* Aplatir + filtrer + trier par heure */
   const flat = useMemo(() => {
@@ -564,7 +672,7 @@ export default function ProgrammeClient({
   const groups = useMemo(() => {
     const map = new Map<string, typeof flat>();
     for (const it of flat) {
-      const key = `${new Date(it.course.date_heure).getHours()}h`;
+      const key = heureBucket(it.course.date_heure);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(it);
     }
@@ -614,7 +722,7 @@ export default function ProgrammeClient({
               </div>
               {!isToday && (
                 <button
-                  onClick={() => selectDate(new Date())}
+                  onClick={() => selectDate(new Date(`${jourCourant}T12:00:00`))}
                   className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors"
                   style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)" }}
                 >
@@ -626,7 +734,7 @@ export default function ProgrammeClient({
             {/* Une journée passée consultée depuis le sélecteur n'a pas d'adresse à elle :
                 l'URL reste /programme. Sa page permanente, c'est celle de ses arrivées —
                 elle porte les mêmes courses, plus les rapports, et elle est indexable. */}
-            {format(selectedDate, "yyyy-MM-dd") < jourParis() && (
+            {format(selectedDate, "yyyy-MM-dd") < jourCourant && (
               <a
                 href={`/resultats/${format(selectedDate, "yyyy-MM-dd")}`}
                 className="mb-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12.5px] font-medium text-amber-800 transition-colors hover:border-amber-400"
@@ -660,7 +768,7 @@ export default function ProgrammeClient({
         </div>
 
         {/* ── Sélecteur de jour ── */}
-        <DayStrip selected={selectedDate} onSelect={selectDate} />
+        <DayStrip selected={selectedDate} jourCourant={jourCourant} onSelect={selectDate} />
 
         {/* ── Prochaine course ── */}
         {nextRace && <NextRaceBanner item={nextRace} />}
@@ -775,7 +883,7 @@ export default function ProgrammeClient({
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100"><Trophy className="h-7 w-7 text-gray-300" /></div>
             <p className="font-semibold text-gray-600">Aucune course programmée</p>
             <p className="text-sm text-gray-600">Essayez une autre date</p>
-            <button onClick={() => setSelectedDate(new Date())} className="mt-1 text-sm font-medium text-amber-700 hover:underline">Revenir à aujourd&apos;hui</button>
+            <button onClick={() => selectDate(new Date(`${jourCourant}T12:00:00`))} className="mt-1 text-sm font-medium text-amber-700 hover:underline">Revenir à aujourd&apos;hui</button>
           </div>
         ) : groups.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16">

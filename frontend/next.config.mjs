@@ -2,6 +2,14 @@
 const nextConfig = {
   output: "standalone",
   compress: true,
+  // Fenêtre de péremption des pages ISR. Par défaut Next annonce
+  // `stale-while-revalidate=31535940`, soit un an : le cache du navigateur a alors le
+  // droit de resservir un HTML vieux d'une journée entière et de ne le rafraîchir qu'en
+  // arrière-plan. Sur /programme, dont le contenu ET le titre portent une date, cela
+  // rouvrait la page d'hier — jusqu'à ce qu'une seconde visite montre enfin celle du
+  // jour. Cinq minutes de péremption alignent le cache HTTP sur le `revalidate = 300`
+  // déjà déclaré par les pages datées ; le cache serveur, lui, ne change pas.
+  expireTime: 300,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
