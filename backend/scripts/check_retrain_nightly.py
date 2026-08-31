@@ -195,17 +195,36 @@ async def _etat_modele() -> dict:
             .order_by(ModelVersion.version_num.desc())
         )).scalars().first()
 
-        def _record(colonne):
-            """Meilleure valeur jamais atteinte sur cette colonne, et sa version.
+        # Volume plancher d'un modèle COMPARABLE. Le walk-forward ré-entraîne un
+        # modèle rapide sur des folds du dataset courant : c'est une mesure du
+        # DATASET autant que du modèle, et elle est d'autant plus optimiste que le
+        # jeu est petit. Sans ce plancher, le record remontait la v2 à 0,9949 —
+        # entraînée sur une poignée de courses aux tout débuts — et le rapport
+        # aurait annoncé −0,2079 chaque matin, une alerte permanente et vide.
+        # 80 % du volume courant garde la génération de dataset en cours (depuis la
+        # fenêtre 12 mois : ~176 000 lignes) et écarte la précédente (~41 000).
+        volume_courant = mv.nb_courses_train or 0
+        volume_min = int(volume_courant * 0.8)
 
-            Restreint aux versions NON synthétiques : un modèle de secours n'est pas
-            une référence de qualité. `NULLS LAST` n'est pas nécessaire ici, l'ordre
-            décroissant place déjà les NULL en tête sous PostgreSQL — d'où le
-            `IS NOT NULL` explicite.
+        def _record(colonne):
+            """Meilleure valeur atteinte par un modèle COMPARABLE, et sa version.
+
+            Comparable = non synthétique (un modèle de secours n'est pas une
+            référence de qualité) ET entraîné sur un volume du même ordre. Le
+            plancher de volume est indispensable au walk-forward ; il est appliqué
+            aussi à l'avantage sur la cote, dont la variance sur un petit jeu ne se
+            compare pas davantage.
+
+            `is_not(None)` est explicite : sous PostgreSQL un `ORDER BY … DESC`
+            placerait les NULL en tête.
             """
             return (
                 select(ModelVersion.version_num, colonne)
-                .where(colonne.is_not(None), ModelVersion.est_synthetique.is_(False))
+                .where(
+                    colonne.is_not(None),
+                    ModelVersion.est_synthetique.is_(False),
+                    ModelVersion.nb_courses_train >= volume_min,
+                )
                 .order_by(colonne.desc())
                 .limit(1)
             )
