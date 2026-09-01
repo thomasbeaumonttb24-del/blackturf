@@ -6,6 +6,7 @@ selon le montant entré et le profil de risque utilisateur.
 from dataclasses import dataclass, field
 from typing import Optional
 import math
+import os
 
 
 # Mise PLANCHER par pari joué (€) — règle produit : jamais moins de 2€ sur un
@@ -790,6 +791,16 @@ def generer_plan(
     selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
                                   respect_montant=respect_montant, ev_band_perf=ev_band_perf,
                                   pool_out=pool_couverture)
+
+    # DÉSACCORD MARCHÉ — banc d'essai A/B, INERTE par défaut (voir _mode_desaccord).
+    # Mesuré le 2026-09-01 : 1 € Simple Gagnant à plat sur le rang 1 du modèle rend
+    # +11,45 % sur les 837 courses où ce rang 1 n'est PAS le favori du marché, contre
+    # −6,32 % pour les plans réels sur ces mêmes courses. L'avantage existe dans le
+    # CLASSEMENT et se perd dans la construction du plan ; cette bascule sert à
+    # mesurer, en rejeu, ce qu'on récupère en jouant le signal tel qu'il a été mesuré.
+    _sel_des = _selection_desaccord(selected, cands, preds, cfg)
+    if _sel_des is not None:
+        selected = _sel_des
     if not selected:
         # Predictions existent mais AUCUN pari ne tombe dans la tranche de rapport du
         # profil (x2 / x2-10 / >=x10) -> plan vide honnete plutot qu un pari hors-regle.
@@ -863,6 +874,92 @@ def generer_plan(
 # on descend jusqu'à ce plancher sur les pires — sans jamais tomber à zéro, sinon
 # le plan disparaîtrait.
 DISCIPLINE_RATIO_PLANCHER = 0.40
+
+
+# ── Désaccord marché — banc d'essai A/B ───────────────────────────────────────
+#
+# Mesure du 2026-09-01 (4 060 courses sur 12 mois, cote FIGÉE au moment du conseil,
+# 1 € Simple Gagnant à plat sur le rang 1 du modèle, les deux côtés calculés dans la
+# MÊME requête et sur la MÊME cohorte) :
+#
+#     accord    (79,3 %, n=3 220)  modèle −16,67 %  marché −16,67 %  écart  +0,00 pt
+#     désaccord (20,7 %, n=  837)  modèle +11,45 %  marché −20,17 %  écart +31,65 pts
+#
+# Robuste : bootstrap 10 000 tirages → IC90 [−1,30 ; +24,91], P(ROI<0)=7,3 % ; stable
+# T2 +9,88 % / T3 +12,12 % ; +5,28 % après retrait des 5 plus gros gains ; effet de
+# prix écarté (à cote comparable, bande 3-6, l'écart reste +15 points).
+#
+# MAIS les plans réels sur ces mêmes courses rendent −6,32 % : l'avantage vit dans le
+# CLASSEMENT et meurt dans la construction du plan. Une première tentative de le
+# récupérer en réduisant la mise sur l'accord a été mesurée puis JETÉE (+0,42 point de
+# ROI pour 32 % de volume en moins, et sur le profil agressif le désaccord est la PIRE
+# cellule). La question n'est donc pas « combien miser » mais « quoi jouer ».
+#
+# Ce commutateur existe pour trancher ce point EN REJEU, jamais par raisonnement. Il
+# est INERTE tant que `BT_DESACCORD_MODE` n'est pas posé : la production ne change pas
+# tant que la mesure n'a pas parlé.
+#
+#   BT_DESACCORD_MODE=sg_seul      → sur désaccord, le plan devient CE seul pari
+#                                    (forme pure du signal mesuré)
+#   BT_DESACCORD_MODE=sg_prioritaire → le Simple Gagnant du rang 1 est ajouté en tête,
+#                                    le reste du plan est conservé
+_DESACCORD_MODES = ("sg_seul", "sg_prioritaire")
+
+
+def _mode_desaccord() -> Optional[str]:
+    mode = (os.getenv("BT_DESACCORD_MODE") or "").strip().lower()
+    return mode if mode in _DESACCORD_MODES else None
+
+
+def _desaccord_marche(preds: list[dict]) -> Optional[bool]:
+    """Le rang 1 du modèle est-il un AUTRE cheval que le favori du marché ?
+
+    `None` quand la question n'a pas de sens (pas de cote exploitable) : une donnée
+    absente ne doit jamais se lire comme un signal — sinon une panne de scraper
+    devient une décision de jeu, en silence.
+
+    Les deux termes sont connus AVANT le départ : aucune information d'après-course.
+    """
+    cotes = [(p, float(p["cote_pmu"])) for p in preds
+             if p.get("cote_pmu") not in (None, "") and float(p["cote_pmu"]) > 1.0]
+    probas = [p for p in preds if p.get("proba_top1") is not None]
+    if len(cotes) < 2 or not probas:
+        return None
+    favori = min(cotes, key=lambda t: t[1])[0]
+    rang1 = max(probas, key=lambda p: float(p["proba_top1"]))
+    try:
+        return int(rang1["numero"]) != int(favori["numero"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _selection_desaccord(selected: list[dict], cands: list[dict],
+                         preds: list[dict], cfg: dict) -> Optional[list[dict]]:
+    """Sélection alternative sur une course de désaccord, ou `None` (rien ne change).
+
+    Renvoie `None` — donc laisse la sélection d'origine — dans TOUS les cas douteux :
+    commutateur absent, course d'accord, cote manquante, ou Simple Gagnant du rang 1
+    absent des candidats (écarté par les gates du profil). Ne jamais rendre une liste
+    vide : le contrat « un plan sur CHAQUE course » ne se négocie pas, et une variante
+    de banc d'essai n'a pas à pouvoir supprimer le produit.
+    """
+    mode = _mode_desaccord()
+    if not mode or not selected or _desaccord_marche(preds) is not True:
+        return None
+    probas = [p for p in preds if p.get("proba_top1") is not None]
+    if not probas:
+        return None
+    rang1 = int(max(probas, key=lambda p: float(p["proba_top1"]))["numero"])
+    sg = next((c for c in cands
+               if c.get("type_pari") == "Simple Gagnant"
+               and len(c.get("chevaux") or []) == 1
+               and int(c["chevaux"][0].get("numero", -1)) == rang1), None)
+    if sg is None:
+        return None
+    if mode == "sg_seul":
+        return [dict(sg)]
+    autres = [c for c in selected if c is not sg]
+    return [dict(sg)] + autres
 
 
 def _appliquer_discipline_mise(selected: list[dict], montant: int,
