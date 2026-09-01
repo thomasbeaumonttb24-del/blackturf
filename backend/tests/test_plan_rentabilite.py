@@ -101,7 +101,42 @@ def test_petit_champ_le_plafond_cede_plutot_que_de_vider_le_plan():
         assert sum(len(niv.paris) for niv in plan.niveaux) >= 1
 
 
-# ── 2. Le gate marché ────────────────────────────────────────────────────────
+# ── 2. Les types qui ne paient jamais sont hors du profil risqué ────────────
+
+TYPES_SANS_AUCUN_GAGNANT = ["Super 4", "Pick5", "Multi en 4", "Multi en 5"]
+
+
+@pytest.mark.parametrize("type_mort", TYPES_SANS_AUCUN_GAGNANT + ["Trio", "Trio Ordre"])
+def test_le_profil_risque_ne_propose_plus_les_types_perdants(type_mort):
+    """Mesuré sur les règlements réels : Super 4, Pick5 et Multi en 4 comptent
+    ZÉRO gagnant sur 134, 86 et 145 paris — donc −100 % par construction, pas par
+    malchance. Le Trio rend −58,7 % winsorisé sur 13 682 paris."""
+    assert type_mort not in mc.PROFIL_CONFIG["agressif"]["types"]
+
+
+def test_le_profil_risque_garde_de_quoi_jouer():
+    """Retirer six types ne doit pas vider le catalogue : le risqué garde ses duos
+    et ses jackpots à l'ordre, qui portent sa tranche ≥ ×10."""
+    restants = mc.PROFIL_CONFIG["agressif"]["types"]
+    assert "Couplé Gagnant" in restants
+    assert "Simple Gagnant" in restants
+    assert len(restants) >= 5
+
+
+def test_les_mini_multi_sont_couverts_par_la_normalisation():
+    """`_fam` ramène « Mini Multi en N » à « Multi en N » : retirer Multi en 4/5
+    retire aussi leurs variantes Mini, sans avoir à les lister."""
+    for t in ("Mini Multi en 4", "Mini Multi en 5"):
+        assert mc._fam(t) not in mc.PROFIL_CONFIG["agressif"]["types"]
+
+
+def test_les_autres_profils_ne_sont_pas_touches():
+    """La mesure portait sur le seul profil risqué ; le Trio reste au modéré, où il
+    n'a pas été mesuré séparément."""
+    assert "Trio" in mc.PROFIL_CONFIG["equilibre"]["types"]
+
+
+# ── 3. Le gate marché ────────────────────────────────────────────────────────
 
 def test_le_gate_marche_est_actif_par_defaut():
     """Sa condition de réactivation est remplie : l'avantage sur le marché est

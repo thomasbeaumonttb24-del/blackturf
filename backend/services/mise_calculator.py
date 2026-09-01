@@ -401,11 +401,30 @@ PROFIL_CONFIG = {
         # Pas de plafond de bande : le risqué vise ×10 → l'infini (gain_cible_max None).
         "gain_cible_max": None,
         # Multi en 4/5 (gros lot) + Pick5 = gros rapports assumés du profil risqué.
-        "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Trio", "Trio Ordre",
-                  "Super 4", "Simple Gagnant",
-                  "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre",
-                  "Multi en 4", "Multi en 5", "Pick5"},
+        # RETIRÉS le 2026-09-01 : Trio, Trio Ordre, Super 4, Pick5, Multi en 4 et 5.
+        # Mesuré sur les règlements réels — Super 4 134 paris ZÉRO gagnant, Pick5 86
+        # paris ZÉRO gagnant, Multi en 4 145 paris ZÉRO gagnant, Trio −58,7 %
+        # winsorisé sur 13 682 paris. Un type sans aucun gagnant sur des centaines de
+        # paris ne peut rendre que −100 % : ce n'est pas un échantillon malchanceux.
+        #
+        # Rejeu A/B, 2 289 courses réglées aux vrais rapports PMU, ROI winsorisé :
+        #   référence −27,0 %  ·  sans jackpots −24,0 %  ·  sans Trio −22,5 %
+        #   sans les deux −13,4 %  ← retenu, +13,6 points
+        # Le nombre de paris ne bouge quasi pas (3 563 → 3 444) : le budget se
+        # reporte sur les types qui rendent, il n'est pas retiré du jeu.
+        #
+        # `_fam()` normalise « Mini Multi en N » → « Multi en N », donc les Mini Multi
+        # 4 et 5 partent avec eux ; Multi en 6/7 (filet large) n'ont jamais été dans
+        # ce profil.
+        "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Simple Gagnant",
+                  "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "objectif": "gain",
+        # Ancrage STRICT : sans combinaison ancrée sur les 2 premiers, on n'en joue
+        # aucune plutôt que d'en jouer une non ancrée (+0,3 % contre −14,6 % mesurés
+        # le 2026-08-23). Devenu nécessaire le 2026-09-01 : en retirant Trio et les
+        # jackpots morts du catalogue, on a retiré les candidats ancrés qui tenaient
+        # le filtre actif, et des Couplés Gagnants non ancrés passaient à leur place.
+        "ancrage_strict": True,
         # 8 → 5 (audit 2026-08-31). Le raisonnement « top-8 = 95,9 % des vrais
         # gagnants » (2026-08-20) répondait à la mauvaise question : ce qui compte
         # n'est pas de CONTENIR le gagnant, c'est ce que rapporte l'argent misé.
@@ -545,6 +564,12 @@ def _effective_config(profil: str, heat: float) -> dict:
         # _filtrer_ancrage_top2). Contrat produit mesuré → NON modulé par le heat :
         # un modèle « chaud » ne rend pas un couplé non ancré rentable.
         "ancrage_top2": base.get("ancrage_top2", True),
+        # ⚠ Cette config est reconstruite par LISTE BLANCHE : une clé de PROFIL_CONFIG
+        # absente d'ici n'atteint JAMAIS le moteur, en silence. Piège rencontré le
+        # 2026-09-01 avec `ancrage_strict`, ajouté au profil et sans aucun effet.
+        # Ancrage STRICT : sans combinaison ancrée disponible, n'en jouer AUCUNE
+        # plutôt qu'une non ancrée (+0,3 % contre −14,6 %, mesure du 2026-08-23).
+        "ancrage_strict": base.get("ancrage_strict", False),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -1411,6 +1436,16 @@ def _filtrer_ancrage_top2(ranked: list[dict], cfg: dict) -> list[dict]:
         return ranked
     ancres = [c for c in combos if c.get("_ancre_top2")]
     if not ancres:
+        # ANCRAGE STRICT (profil risqué) : plutôt que de laisser passer des
+        # combinaisons non ancrées, on les retire toutes. Mesure du 2026-08-23 :
+        # le Couplé Gagnant ancré rend +0,3 % contre −14,6 % non ancré. Quand plus
+        # aucune combinaison n'est ancrée, en jouer une quand même revient à prendre
+        # la version mesurée comme perdante. Le profil retombe sur ses paris à un
+        # cheval, puis sur le filet — la course reste jouée.
+        if cfg.get("ancrage_strict"):
+            return [c for c in ranked
+                    if len(c.get("chevaux", [])) < 2
+                    or c.get("type_pari") in TYPES_SANS_ANCRAGE]
         return ranked                      # aucune combinaison ancrée → on ne prive de rien
     garde = {id(c) for c in ancres}
     return [c for c in ranked
@@ -1767,7 +1802,28 @@ def _select_conviction(
 
         # Replis successifs : type+rapport+cote → type+rapport → rapport tout type →
         # type → tout. On garde la tranche du profil le plus longtemps possible.
-        rangeables = [c for c in cands if _rang_ok(c)]
+        def _ancrage_ok(c):
+            """Combinaison acceptable au regard de l'ancrage sur les 2 premiers.
+
+            Même trou que pour le plafond de rang : le filet ne testait pas l'ancrage,
+            si bien qu'un Couplé Gagnant NON ancré pouvait être servi alors que la
+            mesure du 2026-08-23 le donne à −14,6 % contre +0,3 % pour sa version
+            ancrée. Les paris à un cheval et les types sans ancrage ne sont pas
+            concernés.
+            """
+            if not cfg.get("ancrage_strict"):
+                return True
+            if (len(c.get("chevaux", [])) < 2
+                    or c.get("type_pari") in TYPES_SANS_ANCRAGE):
+                return True
+            return bool(c.get("_ancre_top2"))
+
+        rangeables = [c for c in cands if _rang_ok(c) and _ancrage_ok(c)]
+        # Si l'ancrage strict ne laisse plus rien, on le relâche AVANT le rang : un
+        # cheval bien classé mais mal accompagné coûte moins qu'un cheval que le
+        # modèle enterre.
+        if not rangeables:
+            rangeables = [c for c in cands if _rang_ok(c)]
         in_band = [c for c in rangeables if _in_type(c) and _in_rapport(c)
                    and cote_min <= _bet_cote_max(c) <= cote_max]
         in_band = in_band or [c for c in rangeables if _in_type(c) and _in_rapport(c)]
