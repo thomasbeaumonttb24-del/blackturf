@@ -586,3 +586,27 @@
   background: #FFFBEB; border-radius: 0 0.5rem 0.5rem 0;
   color: #4b5563; font-style: italic;
 }
+
+/* Tableaux d'article. Absents jusqu'au 2026-09-01 : un <table> posé dans un article
+   sortait sans bordure ni espacement, colonnes collées. Le conteneur scrollable est
+   porté par l'article lui-meme (overflow-x: auto) pour que la page ne defile jamais
+   horizontalement sur mobile, d'ou viennent 73 % des impressions. */
+.blog-prose table {
+  width: 100%; margin: 0 0 1.2rem; border-collapse: collapse;
+  font-size: 0.9rem; font-variant-numeric: tabular-nums;
+}
+.blog-prose thead th {
+  text-align: left; padding: 0.5rem 0.7rem;
+  background: #FFFBEB; color: #92400E;
+  font-weight: 600; font-size: 0.78rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  border-bottom: 1px solid rgba(180, 83, 9, 0.25);
+  white-space: nowrap;
+}
+.blog-prose tbody td {
+  padding: 0.5rem 0.7rem; border-bottom: 1px solid #F3F4F6;
+  color: #374151; white-space: nowrap;
+}
+.blog-prose tbody tr:last-child td { border-bottom: 0; }
+.blog-prose tbody tr:nth-child(even) td { background: #FAFAF9; }
+.blog-prose .overflow-x-auto { -webkit-overflow-scrolling: touch; }
