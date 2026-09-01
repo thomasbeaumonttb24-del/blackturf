@@ -490,33 +490,37 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: CX.ink2 }}>{p.type}</div>
                       <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map(c => `N°${c.numero}`).join(" + ")}</div>
-                      {/* Rang IA + prix RÉELLEMENT utilisé par le moteur, et le prix du
-                          marché quand il a bougé. Sans ces deux chiffres, cet onglet et
-                          l'onglet « Synthèse » affichaient deux cotes différentes pour le
-                          même cheval sans rien expliquer. */}
-                      <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: "3px 8px" }}>
-                        {p.chevaux.map((c) => (
-                          <span key={c.numero} style={{ fontSize: 10.5, color: CX.gray500, whiteSpace: "nowrap" }}>
-                            <span style={{ fontWeight: 650, color: CX.ink2 }}>N°{c.numero}</span>
-                            {c.rang != null && <span> · {c.rang}<sup>{c.rang === 1 ? "er" : "e"}</sup> IA</span>}
-                            {c.cote != null && <span> · joué à {c.cote.toFixed(1)}</span>}
-                            {c.cote_live != null && c.cote != null && Math.abs(c.cote_live / c.cote - 1) >= 0.1 && (
-                              <span style={{ color: CX.redDeep }}> · marché {c.cote_live.toFixed(1)}</span>
-                            )}
-                          </span>
-                        ))}
-                      </div>
+                      {/* Prix utilisé par le moteur vs prix du marché — affiché
+                          UNIQUEMENT quand les deux divergent. Le reste du temps la ligne
+                          n'apprendrait rien et alourdirait la page ; quand ils divergent,
+                          la taire revient à laisser deux cotes se contredire d'un onglet
+                          à l'autre sans explication. */}
+                      {p.chevaux.some(c => c.cote != null && c.cote_live != null
+                        && Math.abs(c.cote_live / c.cote - 1) >= 0.1) && (
+                        <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: "3px 8px" }}>
+                          {p.chevaux.map((c) => (
+                            c.cote != null && c.cote_live != null
+                              && Math.abs(c.cote_live / c.cote - 1) >= 0.1 ? (
+                              <span key={c.numero} style={{ fontSize: 10.5, color: CX.gray500, whiteSpace: "nowrap" }}>
+                                <span style={{ fontWeight: 650, color: CX.ink2 }}>N°{c.numero}</span>
+                                <span> joué à {c.cote.toFixed(1)}</span>
+                                <span style={{ color: CX.redDeep }}> · marché {c.cote_live.toFixed(1)}</span>
+                              </span>
+                            ) : null
+                          ))}
+                        </div>
+                      )}
                       <div style={{ marginTop: 3, fontSize: 10.5, color: CX.gray500 }}>Probabilité estimée {(p.probabilite * 100).toFixed(0)}%</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{p.mise.toFixed(2)}€</div>
                       <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 650, color: CX.emDeep }}>Gain estimé ~{p.gain_potentiel.toFixed(0)}€</div>
-                      {p.rapport_estime != null && p.rapport_estime > 0 && (
+                      {/* Le multiplicateur n'est montré QUE s'il a bougé : sinon il
+                          répète le gain estimé juste au-dessus. */}
+                      {p.rapport_a_bouge && p.rapport_estime != null && p.rapport_live != null && (
                         <div style={{ marginTop: 2, fontSize: 10, color: CX.gray400, fontVariantNumeric: "tabular-nums" }}>
                           ×{p.rapport_estime.toFixed(1)}
-                          {p.rapport_live != null && p.rapport_a_bouge && (
-                            <span style={{ color: CX.redDeep }}> → ×{p.rapport_live.toFixed(1)}</span>
-                          )}
+                          <span style={{ color: CX.redDeep }}> → ×{p.rapport_live.toFixed(1)}</span>
                         </div>
                       )}
                     </div>
@@ -548,60 +552,6 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           );
         })}
       </div>
-
-      {/* Le classement ET le plan, sur le même écran.
-          C'est la question que pose tout lecteur qui voit « N°5 · classé 1er · cote 12 »
-          dans l'onglet Synthèse et ne le retrouve pas dans le plan. Elle n'avait aucune
-          réponse sur la page : le motif de rejet existait dans le moteur mais n'était
-          jamais remonté pour les chevaux de tête. */}
-      {plan.classement && plan.classement.length > 0 && (
-        <section aria-label="Le classement dans le plan" style={{ marginTop: 12, borderRadius: 12, border: `1px solid ${CX.bd2}`, background: CX.surf2, overflow: "hidden" }}>
-          <div style={{ padding: "10px 12px 6px", fontSize: 11.5, fontWeight: 650, color: CX.gray600 }}>
-            Ce que le plan fait du classement
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            {plan.classement.map((c) => (
-              <div key={c.numero} style={{ padding: "8px 12px 10px", borderTop: `1px solid ${CX.bd4}` }}>
-                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, fontSize: 11.5 }}>
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: CX.ink2 }}>{c.rang}<sup>{c.rang === 1 ? "er" : "e"}</sup></span>
-                    <span style={{ marginLeft: 6, fontFamily: CX.sg, fontWeight: 650, color: CX.ink }}>N°{c.numero}</span>
-                    <span style={{ marginLeft: 6, color: CX.gray500 }}>{c.nom}</span>
-                  </span>
-                  <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    {c.value_bet && (
-                      <span title="Value bet détecté par la page Value bets" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".02em", padding: "1px 5px", borderRadius: 5, color: CX.emDeep, background: "rgba(16,185,129,.1)" }}>
-                        VALUE BET
-                      </span>
-                    )}
-                    <span style={{ fontWeight: 650, color: c.joue ? CX.emDeep : CX.gray400 }}>
-                      {c.joue ? "joué" : "non joué"}
-                    </span>
-                  </span>
-                </div>
-                {c.joue
-                  ? c.paris && c.paris.length > 0 && (
-                      <p style={{ margin: "3px 0 0", fontSize: 10.5, color: CX.gray500 }}>
-                        {Array.from(new Set(c.paris)).join(" · ")}
-                      </p>
-                    )
-                  : (
-                      <>
-                        {c.motif && <p style={{ margin: "3px 0 0", fontSize: 10.5, lineHeight: 1.45, color: CX.gray500 }}>{c.motif}</p>}
-                        {c.meilleur_pari_possible && (
-                          <p style={{ margin: "3px 0 0", fontSize: 10.5, color: CX.gray400 }}>
-                            Pari le plus proche : {c.meilleur_pari_possible.type}
-                            {" "}{c.meilleur_pari_possible.chevaux.map(h => `N°${h.numero}`).join(" + ")}
-                            {c.meilleur_pari_possible.rapport_estime ? ` (×${c.meilleur_pari_possible.rapport_estime.toFixed(1)})` : ""}
-                          </p>
-                        )}
-                      </>
-                    )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* Note « champ réduit » — modéré/risqué visent PLUSIEURS petites mises ; s'ils
           tombent à 1 ticket, c'est que la course n'offre qu'un pari dans leur bande de

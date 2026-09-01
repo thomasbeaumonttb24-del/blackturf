@@ -1657,18 +1657,30 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     """), {"cid": course_id})
     meteo_row = meteo_r.fetchone()
 
-    # 7. Pronostics presse (comptes par numéro de partant)
+    # 7. Pronostics presse — comptes ET rangs par numéro de partant.
+    #    Le rang était jeté : chaque journaliste publie une sélection ORDONNÉE, et on
+    #    n'en gardait que « combien de journalistes le citent ». Le rang moyen et le
+    #    score de Borda sont ce qui distingue un cheval donné 1er par deux sources
+    #    d'un cheval cité 6e par les deux.
     presse_r = await session.execute(text("""
         SELECT
             (sel->>'numero')::int AS numero,
             COUNT(*) AS nb_experts,
-            SUM(CASE WHEN (sel->>'rang')::int = 1 THEN 1 ELSE 0 END) AS nb_premier
+            SUM(CASE WHEN (sel->>'rang')::int = 1 THEN 1 ELSE 0 END) AS nb_premier,
+            AVG((sel->>'rang')::float) AS rang_moyen,
+            MIN((sel->>'rang')::int) AS rang_min
         FROM pronostics_presse pp,
              json_array_elements(pp.selection::json) sel
         WHERE pp.course_id = :cid
+          AND (sel->>'numero') ~ '^[0-9]+$' AND (sel->>'rang') ~ '^[0-9]+$'
         GROUP BY (sel->>'numero')::int
     """), {"cid": course_id})
-    presse_by_numero: dict = {r[0]: {"nb_experts": int(r[1]), "nb_premier": int(r[2])} for r in presse_r.fetchall()}
+    presse_by_numero: dict = {
+        r[0]: {"nb_experts": int(r[1]), "nb_premier": int(r[2]),
+               "rang_moyen": float(r[3]) if r[3] is not None else None,
+               "rang_min": int(r[4]) if r[4] is not None else None}
+        for r in presse_r.fetchall()
+    }
 
     # 8. ELO stats de la course (moyenne, max, min)
     elo_course_r = await session.execute(text("""
@@ -2068,7 +2080,83 @@ async def compute_all_features_for_course(
             imp = (1.0 / float(f["cote_pmu"])) / inv_sum if inv_sum > 0 else 1.0 / n_cl
             f["indice_valeur"] = round(imp - 1.0 / n_cl, 4)
 
+    _appliquer_consensus_presse(features_list, batch.get("presse_by_numero") or {})
+
     return features_list
+
+
+# Rang attribué à un cheval qu'AUCUN journaliste ne cite. La sélection de presse
+# porte sur ~8 chevaux : au-delà, on ne sait pas si le cheval est mauvais ou juste
+# hors sélection. On le place derrière tous les cités, sans exagérer l'écart.
+PRESSE_RANG_NON_CITE = 12
+
+
+def _appliquer_consensus_presse(features_list: list[dict], presse_by_numero: dict) -> None:
+    """Rend leur sens aux features presse, mortes depuis un an.
+
+    `participations.rang_pronostic_pmu` / `rang_pronostic_geny` sont NULL à 100 %
+    (mesuré le 2026-09-01 sur 24 988 participations de 45 jours), donc
+    `pronostic_expert_rang`, `consensus_sources` et `sagesse_foules_score`
+    tombaient sur leur défaut et n'avaient qu'UNE valeur distincte sur 218 640
+    lignes de features. On les recalcule ici, où tout le peloton est connu :
+
+    - `pronostic_expert_rang` : rang du cheval dans le consensus de presse
+      (score de Borda décroissant). Non cité → PRESSE_RANG_NON_CITE.
+    - `presse_score_borda`    : score normalisé 0-1 du même consensus.
+    - `presse_rang_moyen`     : rang moyen donné par les journalistes qui le citent.
+    - `consensus_sources`     : accord PRESSE ↔ MARCHÉ (1 = les deux le classent au
+      même niveau, 0 = désaccord complet). C'est l'intention d'origine de la
+      feature, qui comparait deux sources dont aucune n'était alimentée.
+    - `sagesse_foules_score`  : 1/rang de popularité, en repartant du rang par COTE
+      (vivant) au lieu du rang de pronostic PMU (NULL).
+
+    Ne lève jamais : sans presse, les features gardent des valeurs neutres et
+    `presse_nb_sources` vaut 0 — le modèle sait que le signal est absent.
+    """
+    if not features_list:
+        return
+    n = len(features_list)
+    # Borda : un cheval cité 1er par 2 journalistes marque plus qu'un cheval cité 5e
+    # par 3. On somme (rang_non_cité − rang) sur les journalistes qui le citent.
+    borda: dict = {}
+    for f in features_list:
+        num = f.get("numero")
+        p = presse_by_numero.get(num) or {}
+        nb = int(p.get("nb_experts") or 0)
+        rmoy = p.get("rang_moyen")
+        if nb > 0 and rmoy is not None:
+            borda[num] = nb * max(PRESSE_RANG_NON_CITE - float(rmoy), 0.0)
+        else:
+            borda[num] = 0.0
+    max_borda = max(borda.values()) if borda else 0.0
+    cites = [num for num, b in borda.items() if b > 0]
+    # Rang de consensus : 1 = le mieux noté par la presse. Les non cités partagent
+    # PRESSE_RANG_NON_CITE plutôt qu'un rang inventé.
+    rang_presse: dict = {}
+    for i, num in enumerate(sorted(cites, key=lambda x: -borda[x]), start=1):
+        rang_presse[num] = i
+
+    for f in features_list:
+        num = f.get("numero")
+        p = presse_by_numero.get(num) or {}
+        nb = int(p.get("nb_experts") or 0)
+        rp = rang_presse.get(num, PRESSE_RANG_NON_CITE)
+        f["pronostic_expert_rang"] = int(rp)
+        f["presse_rang_moyen"] = round(float(p["rang_moyen"]), 2) if p.get("rang_moyen") is not None else 0.0
+        f["presse_score_borda"] = round(borda.get(num, 0.0) / max_borda, 4) if max_borda > 0 else 0.0
+        f["presse_nb_sources"] = nb
+        # Accord presse ↔ marché : 1 quand les deux placent le cheval au même rang,
+        # décroît avec l'écart, rapporté à la taille du peloton. Neutre (0.5) quand
+        # la presse ne couvre pas la course : ni accord ni désaccord constatable.
+        rc = f.get("rang_cote")
+        if not cites or not rc:
+            f["consensus_sources"] = 0.5
+        else:
+            f["consensus_sources"] = round(1.0 - min(abs(int(rc) - rp), n) / max(n, 1), 4)
+        # Sagesse des foules : repart du rang par COTE, vivant, au lieu du rang de
+        # pronostic PMU qui est NULL partout.
+        if rc:
+            f["sagesse_foules_score"] = round(1.0 / max(int(rc), 1), 4)
 
 
 async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) -> Optional[dict]:
