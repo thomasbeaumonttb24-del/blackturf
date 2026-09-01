@@ -13,6 +13,7 @@ import * as reduc from "@/content/blog/reduction-kilometrique-trot";
 import * as champ from "@/content/blog/champ-reduit-base-tickets";
 import * as chatgpt from "@/content/blog/chatgpt-pronostic-hippique";
 import * as iaGratuit from "@/content/blog/pronostic-ia-gratuit";
+import * as quinteOrdre from "@/content/blog/quinte-ordre-ou-desordre";
 
 export interface ArticleMeta {
   slug: string;
@@ -31,7 +32,7 @@ export interface Article extends ArticleMeta {
 const MODULES = [
   quinte, cotes, bankroll, ia, trot, favori,
   flexi, tierce, deuxSurQuatre, couple, reduc, champ,
-  chatgpt, iaGratuit,
+  chatgpt, iaGratuit, quinteOrdre,
 ];
 
 // Trié du plus récent au plus ancien (date décroissante), puis par titre pour un ordre stable
