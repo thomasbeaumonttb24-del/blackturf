@@ -3151,7 +3151,16 @@ export default function CoursePage({
                 setOnglet(o.cle);
                 // replaceState : changer d'onglet ne doit pas empiler une entrée
                 // d'historique par clic, mais l'URL doit rester partageable.
-                if (typeof window !== "undefined") window.history.replaceState(null, "", `#${o.cle}`);
+                if (typeof window !== "undefined") {
+                  window.history.replaceState(null, "", `#${o.cle}`);
+                  // REMONTER EN HAUT. Sans ça on garde la position de défilement de
+                  // l'onglet précédent, et comme les onglets n'ont pas la même hauteur
+                  // on atterrit au milieu — ou en bas quand le nouveau est plus court.
+                  // Mesuré en production : depuis 2 550 px sur un onglet de 3 270, un
+                  // clic sur « Plan de mise » laissait à 1 002 px sur une page de
+                  // 1 722, c'est-à-dire tout en bas.
+                  window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+                }
               }}
               aria-current={actif ? "page" : undefined}
               className={`relative shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-[13px] font-semibold transition-colors sm:px-4 sm:text-[13.5px] ${
