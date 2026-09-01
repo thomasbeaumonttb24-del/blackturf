@@ -52,6 +52,12 @@ interface SystemError {
   detail: string | null;
   endpoint: string | null;
   resolved: boolean;
+  // Une anomalie persistante est UNE ligne qui se répète, pas N lignes :
+  // `created_at` date son DÉBUT, `derniere_occurrence` son dernier écho.
+  // Afficher l'heure de début seule laisserait croire à un incident ancien et
+  // clos ; afficher la dernière seule masquerait depuis quand ça dure.
+  occurrences?: number;
+  derniere_occurrence?: string | null;
 }
 
 interface ScraperStatus {
@@ -664,16 +670,30 @@ export default function AdminPage() {
                           {e.source}
                         </span>
                         {e.endpoint && <span className="truncate font-mono text-[10px] text-muted-foreground">{e.endpoint}</span>}
+                        {(e.occurrences ?? 1) > 1 && (
+                          <span className="shrink-0 rounded bg-orange-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-orange-700">
+                            ×{e.occurrences}
+                          </span>
+                        )}
                         {e.resolved && <span className="text-[10px] font-semibold text-emerald-700">✓ résolu</span>}
                       </span>
                       <span className="mt-1 block break-words font-medium text-foreground">{e.message}</span>
                     </span>
+                    {/* Une anomalie qui dure a deux dates, et l'horodatage de tête doit
+                        être la RÉCENTE : c'est elle qui dit si le problème est encore
+                        actif. Le début n'a d'intérêt qu'à côté, pour la durée. */}
                     <span className="shrink-0 font-mono text-[10px] text-muted-foreground sm:text-[11px]">
-                      {e.created_at ? depuis(e.created_at) : "—"}
+                      {(e.derniere_occurrence ?? e.created_at)
+                        ? depuis((e.derniere_occurrence ?? e.created_at)!)
+                        : "—"}
                     </span>
                   </summary>
                   {e.created_at && (
-                    <div className="mt-1 font-mono text-[10px] text-muted-foreground">{formatDateTime(e.created_at)}</div>
+                    <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                      {(e.occurrences ?? 1) > 1
+                        ? `depuis le ${formatDateTime(e.created_at)}`
+                        : formatDateTime(e.created_at)}
+                    </div>
                   )}
                   {e.detail && (
                     <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2 text-[11px]">{e.detail}</pre>

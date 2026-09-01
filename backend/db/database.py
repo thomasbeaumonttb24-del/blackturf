@@ -9,7 +9,17 @@ _engine_kwargs: dict = {
     "echo": settings.environment == "development",
 }
 if not _is_sqlite:
-    _engine_kwargs.update({"pool_size": 20, "max_overflow": 40, "pool_pre_ping": True})
+    # Le pool est un BUDGET PARTAGÉ entre processus, pas un réglage local : voir
+    # `api.config.Settings.db_pool_size` pour l'arithmétique complète et la panne
+    # qui l'a motivé. Ne PAS remettre de constante en dur ici — la surcharge par
+    # service passe par `environment:` dans les deux compose, et un invariant de
+    # déploiement vérifie que leur somme reste sous `max_connections`.
+    _engine_kwargs.update({
+        "pool_size": settings.db_pool_size,
+        "max_overflow": settings.db_max_overflow,
+        "pool_pre_ping": True,
+        "pool_recycle": settings.db_pool_recycle_s,
+    })
 
 engine = create_async_engine(settings.database_url, **_engine_kwargs)
 

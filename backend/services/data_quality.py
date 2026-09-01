@@ -946,6 +946,13 @@ async def verifier_et_alerter(session: AsyncSession) -> dict:
                 anomalie["message"],
                 detail=anomalie["code"],
                 level=anomalie["gravite"],
+                # Ce job tourne TOUTES LES HEURES. Sans clé, une anomalie qui
+                # dure produit une ligne par heure : deux faits persistants ont
+                # rempli 40 des 42 « erreurs ouvertes » du 01/09, chassant de
+                # l'affichage tout ce qui était réellement nouveau. Le code de
+                # l'anomalie est son identité — le message, lui, bouge (il porte
+                # des compteurs qui varient d'un passage à l'autre).
+                cle=anomalie["code"],
             )
     log.info("data_quality.checked", statut=rapport["statut_global"],
              n_anomalies=len(rapport["anomalies"]),

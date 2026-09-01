@@ -104,6 +104,15 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
         await record_error(
             "api", f"{type(exc).__name__}: {exc}", detail=tb,
             endpoint=f"{request.method} {request.url.path}",
+            # Une panne qui touche un endpoint le touche à CHAQUE appel : sans
+            # clé, un rafraîchissement du back-office suffit à écrire dix lignes
+            # identiques (deux `TooManyConnectionsError` à une seconde d'écart
+            # le 31/08). L'identité est le couple endpoint + type d'exception ;
+            # le message, lui, porte des valeurs variables. Le chemin BRUT est
+            # volontairement gardé — deux courses différentes qui plantent au
+            # même endroit sont deux faits distincts tant que rien ne prouve le
+            # contraire.
+            cle=f"{request.method} {request.url.path}|{type(exc).__name__}",
         )
     except Exception:  # noqa: BLE001
         pass

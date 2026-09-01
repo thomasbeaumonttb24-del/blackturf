@@ -388,6 +388,10 @@ async def compute_features_for_participation(
             p.poids_porte, p.decharge, p.retard_gains, p.musique,
             c.discipline, c.distance, c.terrain_officiel, c.hippodrome_nom,
             c.nb_partants, c.allocation, c.niveau_course, c.est_quinte,
+            -- categorie_particularite porte la CLASSE de la course (GROUPE_I,
+            -- HANDICAP, A_RECLAMER...). niveau_course, lui, porte les conditions
+            -- d'engagement en texte libre : il ne dit pas le niveau. Cf. _encode_niveau.
+            c.categorie_particularite,
             c.date_heure, c.corde,
             ch.age, ch.sexe,
             ch.elo_score_global, ch.elo_score_plat, ch.elo_score_trot, ch.elo_score_obstacle,
@@ -408,7 +412,7 @@ async def compute_features_for_participation(
         rang_prono_pmu, rang_prono_geny,
         poids, decharge, retard_gains, musique,
         discipline, distance, terrain, hippodrome,
-        nb_partants, allocation, niveau_course, est_quinte,
+        nb_partants, allocation, niveau_course, est_quinte, categorie_particularite,
         date_heure, corde,
         age, sexe,
         elo_global, elo_plat, elo_trot, elo_obstacle,
@@ -897,7 +901,7 @@ async def compute_features_for_participation(
         "nb_partants": nb_partants_int,
         "log_nb_partants": float(math.log(max(nb_partants_int, 2))),
         "discipline_code": DISCIPLINE_CODE.get(disc_lower.split()[0], 0),
-        "niveau_course_code": _encode_niveau(niveau_course),
+        "niveau_course_code": _encode_niveau(niveau_course, categorie_particularite),
         "dotation_log": dot_log,
         "course_designee": int(est_quinte or False),
         "heure_course": int(heure_course),
@@ -1393,9 +1397,70 @@ def _days_diff(d1, d2) -> int:
         return 999
 
 
-def _encode_niveau(niveau: Optional[str]) -> int:
+def _encode_niveau(niveau: Optional[str], categorie: Optional[str] = None) -> int:
+    """Classe de la course. Lit d'ABORD le champ structuré du PMU.
+
+    Défaut corrigé le 2026-09-01 : `niveau_course_code` figurait parmi les
+    features à variance strictement nulle, et pour une raison qui n'est pas un
+    manque de donnée — c'est la mauvaise colonne qui était lue.
+
+    `courses.niveau_course` est alimentée par `conditions` du PMU, et ce champ ne
+    décrit PAS le niveau de la course : il décrit qui a le droit d'y courir.
+    Valeurs réelles en production, 19 183 courses sur un an, remplies à 100 %,
+    7 869 libellés distincts — « Pour pur sang males, hongres et femelles de
+    trois ans… », « Pour juments de 4 ans et au-dessus… ». Aucune ne contient
+    « group1 », « listed » ni « reclam » : les six branches anglaises étaient
+    mortes-nées et TOUTES les courses tombaient sur le `return 3` final. Une
+    constante, donc du bruit pour le modèle.
+
+    Le vrai champ existe déjà, il est scrapé et stocké depuis longtemps :
+    `courses.categorie_particularite` (`categorieParticularite` du PMU) —
+    GROUPE_I (227), GROUPE_II (155), GROUPE_III (227), COURSE_A_CONDITIONS
+    (4 312), HANDICAP et ses variantes (4 226), A_RECLAMER (1 004), AMATEURS et
+    APPRENTIS_LADS_JOCKEYS (~800), INCONNU (3 483).
+
+    Échelle : elle ordonne le prestige de 0 (Groupe I) vers le bas, mais elle
+    reste une ÉCHELLE DE CLASSES, pas une mesure — un modèle à arbres n'y lit
+    que des seuils. Deux choix méritent d'être explicites :
+
+    - `INCONNU`, vide, et tout libellé non reconnu gardent la valeur **3**,
+      exactement celle que produisait l'ancien code pour l'intégralité du champ.
+      Le cas « on ne sait pas » ne change donc pas de valeur : ce qui bouge,
+      c'est uniquement ce qu'on sait désormais nommer.
+    - `AUTOSTART`, `NATIONALE`, `EUROPEENNE`, `INTERNATIONALE` ne sont PAS des
+      niveaux (mode de départ, recrutement géographique) : ils ne sont pas
+      encodés, sous peine de faire dire à l'échelle ce qu'elle ne mesure pas.
+
+    Le texte libre reste lu en repli : une source non-PMU qui écrirait
+    « Listed » ou « Group 2 » garde son encodage.
+
+    Aucun risque de décalage train/serve pour le modèle EN SERVICE : la feature
+    lui a été présentée constante, aucun arbre ne peut donc porter de coupure
+    dessus. C'est le prochain entraînement qui décidera si elle vaut quelque
+    chose, arbitré par le head-to-head champion/challenger.
+    """
+    cat = (categorie or "").strip().upper()
+    if cat and cat != "INCONNU":
+        # L'ordre compte : `A_RECLAMER_APPRENTIS_LADS_JOCKEYS` et
+        # `HANDICAP_A_RECLAMER` existent, et c'est la classe la plus
+        # DISCRIMINANTE qui doit gagner, pas la première rencontrée.
+        if "GROUPE_I" in cat and "GROUPE_II" not in cat and "GROUPE_III" not in cat:
+            return 0
+        if "GROUPE_II" in cat or "GROUPE_III" in cat:
+            return 1
+        if "LISTED" in cat:
+            return 2
+        if "RECLAMER" in cat:
+            return 4
+        if "HANDICAP" in cat:
+            return 5
+        if "AMATEURS" in cat or "APPRENTIS" in cat:
+            return 6
+        if "CONDITION" in cat:
+            return 7
+
     if not niveau:
-        return 2
+        return 3
     n = niveau.lower()
     if "group1" in n or "grade1" in n:
         return 0
@@ -1403,8 +1468,6 @@ def _encode_niveau(niveau: Optional[str]) -> int:
         return 1
     if "listed" in n:
         return 2
-    if "conditions" in n or "condition" in n:
-        return 3
     if "reclam" in n:
         return 4
     return 3
@@ -1496,6 +1559,9 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             -- Course
             c.discipline, c.distance, c.terrain_officiel, c.hippodrome_nom,
             c.nb_partants, c.allocation, c.niveau_course, c.est_quinte, c.date_heure,
+            -- Cf. _encode_niveau : la classe est dans categorie_particularite,
+            -- pas dans niveau_course (conditions d'engagement en texte libre).
+            c.categorie_particularite,
             c.corde, c.penetrometre_coef, c.pool_total_centimes, c.pool_gagnant_centimes,
             -- Cheval
             ch.age, ch.sexe, ch.running_style, ch.taux_en_tete, ch.prix_vente_yearling,
@@ -2173,6 +2239,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         non_partant, changement_jockey_flag, jours_depuis,
         discipline, distance, terrain, hippodrome,
         nb_partants, allocation, niveau_course, est_quinte, date_heure,
+        categorie_particularite,
         corde, penetrometre_coef, pool_total_c, pool_gagnant_c,
         age, sexe, running_style_raw, taux_en_tete_raw, prix_vente_yl,
         elo_global, elo_plat, elo_trot, elo_obstacle,
@@ -2556,7 +2623,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_course = {
         "nb_partants": nb_partants_int, "log_nb_partants": float(math.log(max(nb_partants_int, 2))),
         "discipline_code": DISCIPLINE_CODE.get(disc_lower.split()[0], 0),
-        "niveau_course_code": _encode_niveau(niveau_course),
+        "niveau_course_code": _encode_niveau(niveau_course, categorie_particularite),
         "dotation_log": float(math.log1p(allocation or 0)),
         "course_designee": int(est_quinte or False), "heure_course": int(heure_course),
         "nb_courses_reunion": int(batch.get("nb_courses_reunion", 0)),
