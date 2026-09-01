@@ -160,22 +160,62 @@ interface CourseData {
   partants: Partant[];
 }
 
+/** Cheval d'un pari du plan.
+ *  `cote` est le prix que le MOTEUR a utilisé pour construire le pari (cote figée au
+ *  gel du pronostic) ; `cote_live` est le prix du marché au moment de l'affichage.
+ *  Les deux peuvent différer beaucoup — dérive médiane mesurée à 30 % entre le gel et
+ *  le départ — et c'est exactement ce qui rendait le plan illisible en face de
+ *  l'onglet « Synthèse », qui affiche le prix live. On montre donc les DEUX. */
+interface ChevalPari {
+  numero: number;
+  nom: string;
+  cote?: number;        // prix utilisé par le moteur
+  cote_live?: number;   // prix du marché maintenant
+  rang?: number;        // place au classement de l'IA
+  /** Value bet détecté par l'autre outil du site sur ce cheval. Affiché seulement :
+   *  il n'entre dans aucune décision du moteur de mise. */
+  value_bet?: { ev_max?: number; niveau?: number } | null;
+}
+
 interface PariRec {
   type: string;
-  chevaux: { numero: number; nom: string }[];
+  chevaux: ChevalPari[];
   mise: number;
   gain_potentiel: number;
   probabilite: number;
   description: string;
   raisons?: string[];          // justification complète du pari (backend)
+  rapport_estime?: number;     // multiplicateur retenu au gel (gain = mise × rapport)
+  rapport_live?: number;       // multiplicateur aux cotes du marché maintenant
+  rapport_a_bouge?: boolean;   // écart ≥ 15 % entre les deux
+  hors_tranche_live?: boolean; // le marché a fait sortir le ticket de la tranche du profil
 }
 
 interface PariEcarte {
   type: string;
-  chevaux: { numero: number; nom: string }[];
+  chevaux: ChevalPari[];
   probabilite: number;
   ev_estime: number;
+  rapport_estime?: number;
   motif: string;
+}
+
+/** Raccord classement → plan pour les premiers du classement de l'IA : joué ou non,
+ *  et si non, pourquoi. Répond à « l'IA le met 1er et le plan ne le joue pas ». */
+interface CouvertureClassement {
+  numero: number;
+  nom: string;
+  rang: number;
+  joue: boolean;
+  paris?: string[];
+  motif?: string;
+  value_bet?: { ev_max?: number; niveau?: number } | null;
+  meilleur_pari_possible?: {
+    type: string;
+    chevaux: ChevalPari[];
+    rapport_estime?: number;
+    probabilite?: number;
+  };
 }
 
 interface NiveauPlan {
@@ -202,6 +242,9 @@ interface MisePlan {
   avertissement: string;
   niveaux: NiveauPlan[];
   paris_ecartes?: PariEcarte[];   // candidats rejetés + motif (transparence)
+  classement?: CouvertureClassement[];  // ce que le plan fait du haut du classement
+  marche_a_bouge?: boolean;             // au moins un ticket re-tarifé de ≥ 15 %
+  paris_hors_tranche_live?: number;     // tickets sortis de la tranche du profil
   prono_fige?: boolean;           // sélection figée (T-10) — paris/chevaux/mises immuables
   gains_live_post_gel?: boolean;  // gains ré-évalués sur cotes live MÊME après le gel
   roi_observe?: { roi: number; nb: number; jours: number };  // ROI RÉEL récent du profil (honnêteté vs espérance théorique)
@@ -407,6 +450,20 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         <p style={{ margin: 0, padding: "0 12px 12px 32px", fontSize: 11.5, lineHeight: 1.55, color: CX.gray600 }}>{plan.resume_ia}</p>
       </details>
 
+      {/* Le marché a bougé depuis le gel de la sélection.
+          La sélection, elle, ne bouge plus (c'est le contrat : le conseil doit être
+          jouable et vérifiable). Mais taire le mouvement revenait à afficher un gain
+          que le marché n'offre plus — cas mesuré : un ticket vendu « ×10 minimum »
+          dont la cote était retombée à ×4 au départ. */}
+      {(plan.marche_a_bouge || (plan.paris_hors_tranche_live ?? 0) > 0) && (
+        <div role="status" style={{ marginBottom: 12, borderRadius: 12, border: "1px solid rgba(239,68,68,.25)", background: "rgba(239,68,68,.06)", padding: "10px 12px", fontSize: 11, lineHeight: 1.5, color: CX.redDeep }}>
+          <strong style={{ fontWeight: 700 }}>Le marché a bougé depuis le calcul du plan.</strong>{" "}
+          {(plan.paris_hors_tranche_live ?? 0) > 0
+            ? `${plan.paris_hors_tranche_live} pari${(plan.paris_hors_tranche_live ?? 0) > 1 ? "s" : ""} ne paie plus le multiplicateur visé par ce profil.`
+            : "Les gains affichés sont recalculés aux cotes actuelles ; la sélection, elle, reste celle du gel."}
+        </div>
+      )}
+
       {/* Niveaux */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {plan.niveaux.map((niv) => {
@@ -433,13 +490,42 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: CX.ink2 }}>{p.type}</div>
                       <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map(c => `N°${c.numero}`).join(" + ")}</div>
+                      {/* Rang IA + prix RÉELLEMENT utilisé par le moteur, et le prix du
+                          marché quand il a bougé. Sans ces deux chiffres, cet onglet et
+                          l'onglet « Synthèse » affichaient deux cotes différentes pour le
+                          même cheval sans rien expliquer. */}
+                      <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: "3px 8px" }}>
+                        {p.chevaux.map((c) => (
+                          <span key={c.numero} style={{ fontSize: 10.5, color: CX.gray500, whiteSpace: "nowrap" }}>
+                            <span style={{ fontWeight: 650, color: CX.ink2 }}>N°{c.numero}</span>
+                            {c.rang != null && <span> · {c.rang}<sup>{c.rang === 1 ? "er" : "e"}</sup> IA</span>}
+                            {c.cote != null && <span> · joué à {c.cote.toFixed(1)}</span>}
+                            {c.cote_live != null && c.cote != null && Math.abs(c.cote_live / c.cote - 1) >= 0.1 && (
+                              <span style={{ color: CX.redDeep }}> · marché {c.cote_live.toFixed(1)}</span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
                       <div style={{ marginTop: 3, fontSize: 10.5, color: CX.gray500 }}>Probabilité estimée {(p.probabilite * 100).toFixed(0)}%</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{p.mise.toFixed(2)}€</div>
                       <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 650, color: CX.emDeep }}>Gain estimé ~{p.gain_potentiel.toFixed(0)}€</div>
+                      {p.rapport_estime != null && p.rapport_estime > 0 && (
+                        <div style={{ marginTop: 2, fontSize: 10, color: CX.gray400, fontVariantNumeric: "tabular-nums" }}>
+                          ×{p.rapport_estime.toFixed(1)}
+                          {p.rapport_live != null && p.rapport_a_bouge && (
+                            <span style={{ color: CX.redDeep }}> → ×{p.rapport_live.toFixed(1)}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
+                  {p.hors_tranche_live && (
+                    <p style={{ margin: "7px 0 0", padding: "6px 8px", borderRadius: 8, background: "rgba(239,68,68,.07)", fontSize: 10.5, lineHeight: 1.45, color: CX.redDeep }}>
+                      Le marché a bougé depuis le calcul : ce ticket ne paie plus le multiplicateur visé par le profil.
+                    </p>
+                  )}
                   {p.raisons && p.raisons.length > 0 && (
                     <details style={{ marginTop: 8 }}>
                       <summary style={{ minHeight: 32, cursor: "pointer", fontSize: 10.5, color: CX.goldDeep, fontWeight: 650, listStyle: "none", display: "inline-flex", alignItems: "center", gap: 4 }} className="select-none">
@@ -462,6 +548,60 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           );
         })}
       </div>
+
+      {/* Le classement ET le plan, sur le même écran.
+          C'est la question que pose tout lecteur qui voit « N°5 · classé 1er · cote 12 »
+          dans l'onglet Synthèse et ne le retrouve pas dans le plan. Elle n'avait aucune
+          réponse sur la page : le motif de rejet existait dans le moteur mais n'était
+          jamais remonté pour les chevaux de tête. */}
+      {plan.classement && plan.classement.length > 0 && (
+        <section aria-label="Le classement dans le plan" style={{ marginTop: 12, borderRadius: 12, border: `1px solid ${CX.bd2}`, background: CX.surf2, overflow: "hidden" }}>
+          <div style={{ padding: "10px 12px 6px", fontSize: 11.5, fontWeight: 650, color: CX.gray600 }}>
+            Ce que le plan fait du classement
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {plan.classement.map((c) => (
+              <div key={c.numero} style={{ padding: "8px 12px 10px", borderTop: `1px solid ${CX.bd4}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, fontSize: 11.5 }}>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, color: CX.ink2 }}>{c.rang}<sup>{c.rang === 1 ? "er" : "e"}</sup></span>
+                    <span style={{ marginLeft: 6, fontFamily: CX.sg, fontWeight: 650, color: CX.ink }}>N°{c.numero}</span>
+                    <span style={{ marginLeft: 6, color: CX.gray500 }}>{c.nom}</span>
+                  </span>
+                  <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    {c.value_bet && (
+                      <span title="Value bet détecté par la page Value bets" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".02em", padding: "1px 5px", borderRadius: 5, color: CX.emDeep, background: "rgba(16,185,129,.1)" }}>
+                        VALUE BET
+                      </span>
+                    )}
+                    <span style={{ fontWeight: 650, color: c.joue ? CX.emDeep : CX.gray400 }}>
+                      {c.joue ? "joué" : "non joué"}
+                    </span>
+                  </span>
+                </div>
+                {c.joue
+                  ? c.paris && c.paris.length > 0 && (
+                      <p style={{ margin: "3px 0 0", fontSize: 10.5, color: CX.gray500 }}>
+                        {Array.from(new Set(c.paris)).join(" · ")}
+                      </p>
+                    )
+                  : (
+                      <>
+                        {c.motif && <p style={{ margin: "3px 0 0", fontSize: 10.5, lineHeight: 1.45, color: CX.gray500 }}>{c.motif}</p>}
+                        {c.meilleur_pari_possible && (
+                          <p style={{ margin: "3px 0 0", fontSize: 10.5, color: CX.gray400 }}>
+                            Pari le plus proche : {c.meilleur_pari_possible.type}
+                            {" "}{c.meilleur_pari_possible.chevaux.map(h => `N°${h.numero}`).join(" + ")}
+                            {c.meilleur_pari_possible.rapport_estime ? ` (×${c.meilleur_pari_possible.rapport_estime.toFixed(1)})` : ""}
+                          </p>
+                        )}
+                      </>
+                    )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Note « champ réduit » — modéré/risqué visent PLUSIEURS petites mises ; s'ils
           tombent à 1 ticket, c'est que la course n'offre qu'un pari dans leur bande de
@@ -503,9 +643,14 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
               <div key={i} style={{ borderRadius: 9, background: CX.surf1, border: `1px solid ${CX.bd2}`, padding: "9px 10px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11.5 }}>
                   <span style={{ fontWeight: 600, color: CX.ink2 }}>
-                    {e.type} <span style={{ fontWeight: 400, color: CX.gray400 }}>{e.chevaux.map(c => `N°${c.numero}`).join(" + ")}</span>
+                    {e.type}{" "}
+                    <span style={{ fontWeight: 400, color: CX.gray400 }}>
+                      {e.chevaux.map(c => `N°${c.numero}${c.rang != null ? ` (${c.rang}${c.rang === 1 ? "er" : "e"} IA)` : ""}`).join(" + ")}
+                    </span>
                   </span>
-                  <span style={{ color: CX.gray400, fontFamily: CX.sg, flexShrink: 0 }}>{(e.probabilite * 100).toFixed(0)}%</span>
+                  <span style={{ color: CX.gray400, fontFamily: CX.sg, flexShrink: 0 }}>
+                    {e.rapport_estime ? `×${e.rapport_estime.toFixed(1)} · ` : ""}{(e.probabilite * 100).toFixed(0)}%
+                  </span>
                 </div>
                 <p style={{ margin: "4px 0 0", fontSize: 10.5, lineHeight: 1.4, color: CX.gray500 }}>{e.motif}</p>
               </div>

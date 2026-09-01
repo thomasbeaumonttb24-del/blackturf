@@ -346,6 +346,12 @@ def build_combo_proposals(
 # ──────────────────────────────────────────────────────────────────────────────
 # Énumération de candidats DIVERSES pour le plan de mise
 # ──────────────────────────────────────────────────────────────────────────────
+# Nombre de chevaux de TETE du classement dont le Simple Gagnant est garanti dans le
+# catalogue (si leur cote atteint SG_COTE_MIN). 0 = comportement d'avant le
+# 2026-09-01, utilise par le banc de mesure A/B pour rejouer l'ancienne version.
+SG_RANGS_GARANTIS = 2
+
+
 def enumerate_bet_candidates(
     predictions: list[dict],
     course_info: dict,
@@ -469,7 +475,14 @@ def enumerate_bet_candidates(
     # meilleurs par proba) pour ne JAMAIS écarter un cheval que l'analyse classe haut.
     sg_pool = [i for i in by_p1 if cotes[i] >= SG_COTE_MIN]
     sg_pool.sort(key=lambda i: (1 if edge_by_idx[i] > 0 else 0, p1[i]), reverse=True)
-    sg_take = list(dict.fromkeys(sg_pool[:3] + big_model_picks))  # top-3 + grosses cotes du modèle
+    # Les SG_RANGS_GARANTIS premiers du CLASSEMENT entrent toujours dans le catalogue
+    # quand leur cote est éligible. Sans cette garantie, le tri « edge d'abord » plus
+    # la troncature à 3 faisait sortir le favori du modèle dès qu'il n'avait pas
+    # d'edge : mesuré à 18,2 % des courses (721 courses, 2026-09-01), dont 22,9 % de
+    # victoires. Ce n'est pas une conviction ajoutée — les gates du profil décident
+    # ensuite — c'est la fin d'un angle mort entre le classement et le plan.
+    tetes = [i for i in by_p1[:SG_RANGS_GARANTIS] if cotes[i] >= SG_COTE_MIN]
+    sg_take = list(dict.fromkeys(tetes + sg_pool[:3] + big_model_picks))
     for i in sg_take:
         p_win = float(p1[i]); rap = float(cotes[i])
         ev = rap * p_win - 1

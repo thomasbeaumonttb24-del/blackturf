@@ -19,6 +19,13 @@ MISE_PLANCHER = 2
 # largeur 0 (ou absente) → ×1.0 (aucun effet). Valeur POLICY, à valider Point 11.
 CI_WIDTH_PENALTY = 3.0
 
+# Écart relatif entre le rapport FIGÉ d'un ticket et son rapport aux cotes LIVE
+# au-delà duquel on prévient le lecteur. 15 % : en dessous, c'est le bruit normal
+# d'un marché parimutuel ; au-dessus, le gain affiché n'est plus celui qui a servi
+# à construire le pari. Mesuré le 2026-09-01 : la dérive médiane du prix entre le
+# gel et le départ est de 30 %, donc ce seuil n'est pas théorique.
+_DERIVE_RAPPORT_SIGNALEE = 0.15
+
 # Montant minimum PMU par type de pari (référence réglementaire ; le moteur
 # applique MISE_PLANCHER=2€ par-dessus).
 def _cout_minimum_pmu(type_pari: str) -> float:
@@ -65,13 +72,19 @@ class ChevPred:
 @dataclass
 class PariRec:
     type: str
-    chevaux: list[dict]       # [{"numero": 7, "nom": "..."}]
+    # [{"numero": 7, "nom": "...", "cote": 12.0, "rang": 1}] — `cote` est le prix
+    # que le moteur a RÉELLEMENT utilisé pour dimensionner ce pari, `rang` la place
+    # du cheval au classement de l'IA. Les deux sont indispensables au lecteur :
+    # sans eux, la page « Plan de mise » et l'onglet « Synthèse » peuvent afficher
+    # deux prix différents pour le même cheval sans que rien ne le signale.
+    chevaux: list[dict]
     mise: float
     gain_potentiel: float
     probabilite: float
     description: str
     ev_estime: float = 0.0
     raisons: list[str] = field(default_factory=list)   # justification complète du pari
+    rapport_estime: float = 0.0    # multiplicateur retenu (gain = mise × rapport)
 
 
 @dataclass
@@ -101,6 +114,11 @@ class MisePlan:
     profil: str = ""                 # conservateur | equilibre | agressif
     mode_adaptatif: str = "normal"   # prudent | normal | offensif (selon heat)
     paris_ecartes: list[dict] = field(default_factory=list)  # candidats rejetés + motif
+    # Raccord explicite entre le CLASSEMENT de l'IA et le PLAN : pour les premiers
+    # du classement, dit s'ils sont joués et, sinon, pourquoi. C'est la question que
+    # se pose tout lecteur qui voit « N°5 classé 1er » et ne le retrouve pas dans le
+    # plan ; sans cette structure, la page ne peut pas y répondre.
+    classement: list[dict] = field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -614,6 +632,10 @@ def generer_plan(
             "proba_top1": p.get("proba_top1"),
             "proba_top3": p.get("proba_top3"),
             "cote_pmu": p.get("cote_pmu"),
+            # Value bet DÉTECTÉ par l'autre outil du site. N'entre dans aucune
+            # décision : sert à ce que le plan et la page « Value bets » se citent
+            # au lieu de parler des mêmes chevaux sans se connaître.
+            "value_bet": p.get("value_bet"),
         })
         lo, hi = p.get("proba_top1_low"), p.get("proba_top1_high")
         if lo is not None and hi is not None:
@@ -633,6 +655,8 @@ def generer_plan(
         except (TypeError, ValueError, KeyError):
             continue
 
+    _vb_par_num = {int(p["numero"]): p["value_bet"] for p in preds
+                   if p.get("value_bet") and p.get("numero") is not None}
     cands = enumerate_bet_candidates(preds, course_info)
     if not cands:
         return _plan_vide(montant, profil)
@@ -745,6 +769,8 @@ def generer_plan(
                     "disponibles sont hors de la tranche visee. Essaie un autre profil ou "
                     "une autre course."),
             avert="Probabilites estimees par simulation (Plackett-Luce). Jouez avec moderation.",
+            classement=_couverture_classement([], cands, cfg, _rang_par_num, preds,
+                                              roi_weights=roi_weights, montant=montant),
         )
 
     # SIMPLE PLACÉ = JAMAIS éclaté en plusieurs tickets. Un placé paie < la mise totale
@@ -789,9 +815,16 @@ def generer_plan(
         # Jamais appliqué quand l'utilisateur a SAISI un montant : il a demandé à
         # jouer cette somme-là, on la déploie en entier.
         _appliquer_discipline_mise(selected, montant, palier, cfg)
-    ecartes = _paris_ecartes(cands, selected, cfg)
+    ecartes = _paris_ecartes(cands, selected, cfg, rang_par_num=_rang_par_num,
+                             roi_weights=roi_weights, montant=montant,
+                             value_bets=_vb_par_num)
+    classement = _couverture_classement(selected, cands, cfg, _rang_par_num, preds,
+                                        roi_weights=roi_weights, montant=montant,
+                                        value_bets=_vb_par_num)
     return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
-                          facteurs_chevaux=facteurs_chevaux, ecartes=ecartes)
+                          facteurs_chevaux=facteurs_chevaux, ecartes=ecartes,
+                          rang_par_num=_rang_par_num, classement=classement,
+                          value_bets=_vb_par_num)
 
 
 # Qualité mesurée d'une cellule (type × tranche de rapport), telle qu'apprise par
@@ -2384,11 +2417,24 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict],
     return raisons
 
 
-def _motif_rejet(c: dict, cfg: dict) -> str:
+def _motif_rejet(c: dict, cfg: dict, roi_weights: Optional[dict] = None,
+                 montant: Optional[float] = None) -> str:
     """Motif honnête pour lequel un candidat n'a PAS été retenu par ce profil."""
     allowed = cfg.get("types")
     if allowed is not None and c["type_pari"] not in allowed:
         return "Type de pari hors méthode de ce profil."
+    # Type SUPPRIMÉ par l'apprentissage (ROI réel prouvé perdant sur ce contexte) :
+    # `passes_gates` le coupe, l'explication l'ignorait.
+    if roi_weights is not None and roi_weights.get(c["type_pari"], 1.0) <= 0.001:
+        return ("Type de pari suspendu : sur l'historique réel de ce profil dans ce "
+                "contexte, il perd de l'argent — on ne le propose plus.")
+    # Ticket le moins cher au guichet PMU au-dessus du budget (Multi surtout) :
+    # inutile de conseiller un pari que le joueur ne peut pas acheter.
+    if montant is not None:
+        _cout = _cout_minimum_pmu(c["type_pari"])
+        if _cout > montant:
+            return (f"Le ticket le moins cher de ce pari coûte {_cout:.0f} € au guichet "
+                    f"PMU — au-dessus du budget de {montant:.0f} €.")
     if _bet_cote_max(c) > cfg["cote_max"]:
         return f"Cote trop élevée pour ce profil (max {cfg['cote_max']:.0f})."
     if _bet_cote_max(c) < cfg.get("cote_min", 0.0) and "Désordre" not in c["type_pari"]:
@@ -2402,6 +2448,18 @@ def _motif_rejet(c: dict, cfg: dict) -> str:
         return f"Rapport trop élevé (~×{rap:.1f}) pour ce profil (max ×{rmax:.0f}) — réservé au profil risqué."
     if c["proba_gain"] < cfg["min_proba"]:
         return f"Probabilité trop faible ({c['proba_gain']*100:.0f}%) pour ce profil."
+    # Plafond de rang prédit : le motif existait dans la sélection mais jamais dans
+    # l'explication — un pari écarté parce qu'un de ses chevaux est trop bas au
+    # classement ressortait en « conviction inférieure », ce qui est faux.
+    _rmax_rg = cfg.get("rang_max")
+    if _rmax_rg is not None and c.get("_rang_max") is not None:
+        _plaf = int(_rmax_rg) + (RANG_MAX_BONUS_PLACE if "Placé" in c["type_pari"] else 0)
+        if int(c["_rang_max"]) > _plaf:
+            return (f"Un cheval de ce pari est {int(c['_rang_max'])}e au classement de l'IA "
+                    f"— au-delà du {_plaf}e, ce profil ne joue pas contre son propre modèle.")
+    if c["type_pari"] == "Simple Gagnant" and c["proba_gain"] < cfg.get("sg_min_proba", 0.0):
+        return (f"Gagnant sec écarté : {c['proba_gain']*100:.0f}% de chances de gagner, "
+                f"sous le minimum de {cfg.get('sg_min_proba', 0.0)*100:.0f}% exigé par ce profil.")
     spec_ok = cfg.get("spec_coup", False)
     if c["ev"] < 0 and c.get("edge", 0.0) <= 0:
         if not spec_ok:
@@ -2413,30 +2471,168 @@ def _motif_rejet(c: dict, cfg: dict) -> str:
     return "Conviction inférieure aux paris retenus (place limitée par le palier de mise)."
 
 
-def _paris_ecartes(cands: list[dict], selected: list[dict], cfg: dict) -> list[dict]:
-    """Top candidats NON retenus + motif — transparence sur ce que l'IA écarte et pourquoi."""
-    sel_keys = {(c["type_pari"], tuple(sorted(h["numero"] for h in c["chevaux"]))) for c in selected}
-    out = []
-    for c in sorted(cands, key=lambda x: x["proba_gain"], reverse=True):
-        key = (c["type_pari"], tuple(sorted(h["numero"] for h in c["chevaux"])))
-        if key in sel_keys:
-            continue
+def _paris_ecartes(cands: list[dict], selected: list[dict], cfg: dict,
+                   rang_par_num: Optional[dict] = None, max_out: int = 6,
+                   roi_weights: Optional[dict] = None,
+                   montant: Optional[float] = None,
+                   value_bets: Optional[dict] = None) -> list[dict]:
+    """Candidats NON retenus + motif — transparence sur ce que l'IA écarte et pourquoi.
+
+    L'ordre a été inversé le 2026-09-01. Trier par `proba_gain` décroissante ne
+    montrait QUE des Simple Placé (le pari le plus probable par construction), de
+    sorte que la page ne pouvait jamais répondre à la seule question que le lecteur
+    se pose vraiment : « pourquoi le cheval que l'IA classe 1er n'est-il pas joué ? ».
+    On remonte donc d'abord les paris portant sur le haut du classement, puis les
+    meilleurs par probabilité, et on ne garde qu'un motif par cheval de tête pour ne
+    pas noyer la liste sous six variantes du même Trio.
+    """
+    sel_keys = {(c["type_pari"], tuple(sorted(h["numero"] for h in c["chevaux"])))
+                for c in selected}
+    rangs = rang_par_num or {}
+
+    def _rang_min(c):
+        """Meilleure place au classement parmi les chevaux du pari (1 = le favori IA)."""
+        rs = [rangs.get(int(h["numero"])) for h in c.get("chevaux", [])
+              if h.get("numero") is not None]
+        rs = [r for r in rs if r]
+        return min(rs) if rs else 99
+
+    restants = [c for c in cands
+                if (c["type_pari"], tuple(sorted(h["numero"] for h in c["chevaux"])))
+                not in sel_keys]
+    _types_ok = cfg.get("types")
+
+    def _hors_methode(c) -> int:
+        return 0 if (_types_ok is None or _fam(c["type_pari"]) in _types_ok) else 1
+
+    # Clé de tri : d'abord le pari qui contient le cheval le mieux classé ; à rang
+    # égal, un pari de la MÉTHODE du profil avant un pari qui n'en fait pas partie
+    # (sinon on répond « type hors méthode » pour le favori de l'IA, ce qui n'apprend
+    # rien) ; enfin le plus probable. Sans classement disponible, on retombe sur
+    # l'ancien comportement (tri par probabilité seule).
+    restants.sort(key=lambda c: (_rang_min(c), _hors_methode(c),
+                                 -float(c.get("proba_gain") or 0.0)))
+
+    out, vus_tete = [], set()
+    for c in restants:
+        rg = _rang_min(c)
+        if rg <= 3:
+            if rg in vus_tete:
+                continue          # un seul motif par cheval de tête
+            vus_tete.add(rg)
         out.append({
             "type": c["type_pari"],
-            "chevaux": [{"numero": h["numero"], "nom": h["nom"]} for h in c["chevaux"]],
+            "chevaux": [_cheval_out(h, rangs, value_bets) for h in c["chevaux"]],
             "probabilite": c["proba_gain"],
             "ev_estime": c["ev"],
-            "motif": _motif_rejet(c, cfg),
+            "rapport_estime": round(float(c.get("rapport_estime") or 0.0), 2),
+            "motif": _motif_rejet(c, cfg, roi_weights, montant),
         })
-        if len(out) >= 4:
+        if len(out) >= max_out:
             break
+    return out
+
+
+def _couverture_classement(selected: list[dict], cands: list[dict], cfg: dict,
+                           rang_par_num: Optional[dict], preds: list[dict],
+                           top_n: int = 3, roi_weights: Optional[dict] = None,
+                           montant: Optional[float] = None,
+                           value_bets: Optional[dict] = None) -> list[dict]:
+    """Raccord explicite CLASSEMENT → PLAN pour les `top_n` premiers du classement.
+
+    Pour chacun : est-il joué, dans quel(s) pari(s), et sinon quel est le motif du
+    MEILLEUR pari qui le portait. C'est la réponse à « l'IA le met 1er et le plan ne
+    le joue pas » — question qui, jusqu'ici, n'avait aucune trace dans la réponse de
+    l'API et ne pouvait donc pas être affichée.
+
+    Aucune valeur inventée : si aucun candidat ne portait le cheval, on le dit.
+    """
+    if not rang_par_num:
+        return []
+    noms = {int(p["numero"]): (p.get("nom") or p.get("nom_cheval") or "")
+            for p in preds if p.get("numero") is not None}
+    par_rang = sorted(((r, n) for n, r in rang_par_num.items()), key=lambda x: x[0])
+    out = []
+    for rang, num in par_rang[:top_n]:
+        joues = [c for c in selected
+                 if any(int(h["numero"]) == num for h in c.get("chevaux", []))]
+        _vb = (value_bets or {}).get(num)
+        if joues:
+            out.append({
+                "numero": num, "nom": noms.get(num, ""), "rang": rang, "joue": True,
+                "paris": [c["type_pari"] for c in joues],
+                "value_bet": ({"ev_max": _vb.get("ev_max"), "niveau": _vb.get("niveau")}
+                              if _vb else None),
+            })
+            continue
+        portants = [c for c in cands
+                    if any(int(h["numero"]) == num for h in c.get("chevaux", []))]
+        if not portants:
+            out.append({"numero": num, "nom": noms.get(num, ""), "rang": rang,
+                        "joue": False,
+                        "value_bet": ({"ev_max": _vb.get("ev_max"),
+                                       "niveau": _vb.get("niveau")} if _vb else None),
+                        "motif": "Aucun pari proposé par le PMU sur cette course ne "
+                                 "porte ce cheval."})
+            continue
+        # Le « meilleur » porteur = celui dont on était le plus près de retenir le
+        # pari, donc celui dont le motif de rejet apprend le plus : type autorisé par
+        # le profil d'abord (sinon on répondrait « type hors méthode » alors que le
+        # vrai obstacle est ailleurs), puis rapport dans la bande, puis probabilité.
+        rmin = float(cfg.get("rapport_min", 0.0) or 0.0)
+        _types_ok = cfg.get("types")
+        meilleur = max(portants, key=lambda c: (
+            1 if (_types_ok is None or _fam(c["type_pari"]) in _types_ok) else 0,
+            1 if (roi_weights or {}).get(c["type_pari"], 1.0) > 0.001 else 0,
+            1 if float(c.get("rapport_estime") or 0.0) >= rmin else 0,
+            float(c.get("proba_gain") or 0.0)))
+        out.append({
+            "numero": num, "nom": noms.get(num, ""), "rang": rang, "joue": False,
+            "value_bet": ({"ev_max": _vb.get("ev_max"), "niveau": _vb.get("niveau")}
+                          if _vb else None),
+            "motif": _motif_rejet(meilleur, cfg, roi_weights, montant),
+            "meilleur_pari_possible": {
+                "type": meilleur["type_pari"],
+                "chevaux": [_cheval_out(h, rang_par_num, value_bets)
+                            for h in meilleur["chevaux"]],
+                "rapport_estime": round(float(meilleur.get("rapport_estime") or 0.0), 2),
+                "probabilite": meilleur.get("proba_gain"),
+            },
+        })
+    return out
+
+
+def _cheval_out(h: dict, rang_par_num: Optional[dict] = None,
+                value_bets: Optional[dict] = None) -> dict:
+    """Cheval d'un pari, AVEC le prix utilisé par le moteur et sa place au classement.
+
+    `cote` vient du candidat, donc du prix qui a servi à calculer le rapport et la
+    mise. L'afficher est la seule façon d'expliquer un plan quand le marché a bougé
+    depuis le gel : le lecteur voit alors « joué à 11,0 » en face du « 4,0 » du
+    tableau des cotes, au lieu de deux chiffres contradictoires sans explication.
+    """
+    out = {"numero": h.get("numero"), "nom": h.get("nom")}
+    cote = h.get("cote")
+    if cote:
+        out["cote"] = round(float(cote), 2)
+    if rang_par_num:
+        rg = rang_par_num.get(int(h["numero"])) if h.get("numero") is not None else None
+        if rg:
+            out["rang"] = int(rg)
+    if value_bets and h.get("numero") is not None:
+        vb = value_bets.get(int(h["numero"]))
+        if vb:
+            out["value_bet"] = {"ev_max": vb.get("ev_max"), "niveau": vb.get("niveau")}
     return out
 
 
 def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn: bool,
                    profil: str = "equilibre", heat: float = 0.0,
                    facteurs_chevaux: Optional[dict] = None,
-                   ecartes: Optional[list[dict]] = None) -> MisePlan:
+                   ecartes: Optional[list[dict]] = None,
+                   rang_par_num: Optional[dict] = None,
+                   classement: Optional[list[dict]] = None,
+                   value_bets: Optional[dict] = None) -> MisePlan:
     """Groupe les paris choisis par niveau → MisePlan (structure attendue par le front)."""
     niveaux_map: dict[str, list[PariRec]] = {}
     ev_pondere = 0.0
@@ -2450,13 +2646,14 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             gain = math.ceil(mise * _rmin)
         pari = PariRec(
             type=c["type_pari"],
-            chevaux=[{"numero": h["numero"], "nom": h["nom"]} for h in c["chevaux"]],
+            chevaux=[_cheval_out(h, rang_par_num, value_bets) for h in c["chevaux"]],
             mise=mise,
             gain_potentiel=gain,
             probabilite=c["proba_gain"],
             description=c["texte_explication"],
             ev_estime=c["ev"],
             raisons=_raisons_pari(c, profil, facteurs_chevaux, montant=montant),
+            rapport_estime=round(float(c.get("rapport_estime") or 0.0), 2),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
         ev_pondere += mise * c["ev"]            # espérance de profit net (€)
@@ -2526,6 +2723,7 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         profil=profil,
         mode_adaptatif=mode,
         paris_ecartes=ecartes or [],
+        classement=classement or [],
     )
 
 
@@ -2563,7 +2761,8 @@ def _pari(type_: str, chevs: list[ChevPred], mise: float, gain: float, proba: fl
 # ─────────────────────────────────────────────────────────────
 def _plan_vide(montant: float, profil: str,
                resume: str = "Prédictions non disponibles pour cette course.",
-               avert: str = "Lancez l'analyse IA avant de générer un plan.") -> MisePlan:
+               avert: str = "Lancez l'analyse IA avant de générer un plan.",
+               classement: Optional[list[dict]] = None) -> MisePlan:
     return MisePlan(
         montant_total=montant, montant_joue=0, montant_reserve=montant,
         ev_global=0,
@@ -2571,6 +2770,9 @@ def _plan_vide(montant: float, profil: str,
         resume_ia=resume,
         avertissement=avert,
         profil=profil,
+        # Un plan vide est justement le cas où le lecteur a le plus besoin de savoir
+        # ce qu'il est advenu du favori de l'IA.
+        classement=classement or [],
     )
 
 
@@ -2592,6 +2794,10 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
     d'affichage pour ne pas montrer un gain live trompeur. Mute et retourne `plan`."""
     if not plan or not predictions:
         return plan
+    # Tranche de gain du profil du plan : sert à dire si le marché a fait sortir un
+    # ticket de la promesse produit (×1.8-5 / ×4-15 / ≥×10).
+    rapport_min = float(
+        (PROFIL_CONFIG.get(plan.get("profil")) or {}).get("rapport_min") or 0.0)
     non_partants = {int(p["numero"]) for p in predictions
                     if p.get("non_partant") and p.get("numero") is not None}
     try:
@@ -2606,6 +2812,22 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
         return plan
     look = {(c["type_pari"], frozenset(int(h["numero"]) for h in c.get("chevaux", []))): c
             for c in cands}
+    # Cote LIVE par numéro. Un Simple Gagnant n'a pas besoin du catalogue pour être
+    # re-tarifé : son rapport EST la cote du cheval. Sans cette voie directe, un ticket
+    # dont le cheval sort du catalogue live (c'est précisément ce qui arrive quand son
+    # prix s'est effondré) gardait son gain figé et la page continuait d'afficher un
+    # gain que le marché n'offrait plus — cas mesuré le 2026-08-31 : Simple Gagnant
+    # annoncé à 103 € alors que la cote était retombée de 11,0 à 4,0.
+    cotes_live = {}
+    for p in predictions:
+        if p.get("non_partant") or p.get("numero") is None:
+            continue
+        try:
+            c_ = float(p.get("cote_pmu") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if c_ > 1:
+            cotes_live[int(p["numero"])] = c_
 
     ev_pondere = 0.0
     montant = float(plan.get("montant_total") or 0) or None
@@ -2628,10 +2850,47 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
             c = look.get(key)
             if c:
                 rap = float(c["rapport_estime"])
+                rap_fige = float(p.get("rapport_estime") or 0.0)
                 p["gain_potentiel"] = round(mise * rap)
                 p["ev_estime"] = c["ev"]
                 p["probabilite"] = c["proba_gain"]
+                p["rapport_live"] = round(rap, 2)
+                # Le prix a pu s'effondrer entre le gel et le départ : un ticket vendu
+                # « ×10 minimum » qui ne paie plus que ×4 doit le DIRE. Sans ce
+                # signalement, la page affichait un gain que le marché n'offrait plus.
+                if rap_fige > 0 and abs(rap / rap_fige - 1.0) >= _DERIVE_RAPPORT_SIGNALEE:
+                    p["rapport_a_bouge"] = True
+                if rapport_min and rap < rapport_min:
+                    p["hors_tranche_live"] = True
+                # Cote LIVE par cheval, en face de la cote utilisée par le plan : les
+                # deux chiffres côte à côte, jamais l'un à la place de l'autre.
+                _cotes_live = {int(h["numero"]): h.get("cote")
+                               for h in c.get("chevaux", []) if h.get("numero") is not None}
+                for h in p.get("chevaux", []):
+                    cl = _cotes_live.get(int(h["numero"])) if h.get("numero") is not None else None
+                    if cl:
+                        h["cote_live"] = round(float(cl), 2)
                 ev_pondere += mise * float(c["ev"])
+            elif p.get("type") == "Simple Gagnant" and len(pari_horses) == 1 \
+                    and next(iter(pari_horses)) in cotes_live:
+                # Gagnant sec : le rapport EST la cote du cheval, aucun catalogue requis.
+                num = next(iter(pari_horses))
+                rap = cotes_live[num]
+                rap_fige = float(p.get("rapport_estime") or 0.0)
+                p["gain_potentiel"] = round(mise * rap)
+                p["rapport_live"] = round(rap, 2)
+                if rap_fige > 0 and abs(rap / rap_fige - 1.0) >= _DERIVE_RAPPORT_SIGNALEE:
+                    p["rapport_a_bouge"] = True
+                if rapport_min and rap < rapport_min:
+                    p["hors_tranche_live"] = True
+                for h in p.get("chevaux", []):
+                    if h.get("numero") is not None and int(h["numero"]) == num:
+                        h["cote_live"] = round(rap, 2)
+                # L'EV suit la même définition : proba figée × rapport live − 1.
+                _pr = float(p.get("probabilite") or 0.0)
+                if _pr > 0:
+                    p["ev_estime"] = round(_pr * rap - 1.0, 3)
+                ev_pondere += mise * float(p.get("ev_estime") or 0.0)
             else:
                 # pari non re-tarifable → on garde son gain figé (et son EV figée)
                 ev_pondere += mise * float(p.get("ev_estime") or 0.0)
@@ -2641,6 +2900,11 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
         plan["ev_global"] = round(ev_pondere / montant, 3)
     plan["gains_live_post_gel"] = True
     plan["cotes_live_utilisees"] = True
+    # Résumé au niveau du plan : le front n'a pas à re-parcourir tous les paris pour
+    # savoir s'il doit afficher l'avertissement « le marché a bougé depuis le gel ».
+    _paris = [p for niv in plan.get("niveaux", []) for p in niv.get("paris", [])]
+    plan["marche_a_bouge"] = any(p.get("rapport_a_bouge") for p in _paris)
+    plan["paris_hors_tranche_live"] = sum(1 for p in _paris if p.get("hors_tranche_live"))
     return plan
 
 
@@ -2679,6 +2943,7 @@ def plan_to_dict(plan: MisePlan) -> dict:
                         "description": p.description,
                         "ev_estime": p.ev_estime,
                         "raisons": p.raisons,
+                        "rapport_estime": p.rapport_estime,
                     }
                     for p in n.paris
                 ],
@@ -2686,4 +2951,5 @@ def plan_to_dict(plan: MisePlan) -> dict:
             for n in plan.niveaux
         ],
         "paris_ecartes": plan.paris_ecartes,
+        "classement": plan.classement,
     }
