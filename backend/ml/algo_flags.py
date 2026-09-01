@@ -135,15 +135,27 @@ class AlgoFlags:
     # Refuse la promotion d'un modèle dont le CLASSEMENT intra-course ne bat pas
     # un simple `ORDER BY cote_pmu` sur le même hold-out (cf. ml/ranking_metrics).
     #
-    # DÉFAUT OFF, volontairement. Mesuré sur 3 322 courses pré-course, AUCUN modèle
-    # actuel ne passe ce gate : le modèle complet est à 0,7340 contre 0,7351 pour la
-    # cote qu'il a vue. L'activer aujourd'hui gèlerait le modèle indéfiniment —
-    # exactement le blocage de 48 jours de l'audit 2026-08-16, qu'on ne rejoue pas.
+    # DÉFAUT ON depuis le 2026-09-01. Il était OFF pour une raison explicite —
+    # « AUCUN modèle actuel ne passe ce gate : 0,7340 contre 0,7351 pour la cote ;
+    # l'activer gèlerait le modèle indéfiniment » — et cette raison a disparu.
     #
-    # L'écart au marché est donc MESURÉ, PERSISTÉ et remonté en rouge dans le
-    # rapport nocturne à chaque nuit, sans bloquer. À activer quand l'entraînement
-    # sur le résidu du marché (point 2 du diagnostic) rendra le delta positif.
-    market_gate: bool = field(default_factory=lambda: _env_bool("BT_MARKET_GATE", False))
+    # Depuis la bascule sur la fenêtre de 12 mois (v520, 2026-08-25), l'avantage sur
+    # le marché est positif sur HUIT versions consécutives :
+    #   v520 +0.0198  v521 +0.0197  v522 +0.0200  v523 +0.0199
+    #   v524 +0.0192  v525 +0.0201  v526 +0.0188  v527 +0.0190
+    # Minimum 0.0188, contre une marge de 0.0. Activer n'aurait bloqué AUCUNE de ces
+    # huit nuits : c'est une protection pure, sans effet sur le régime actuel.
+    #
+    # Ce qu'elle empêche est le seul scénario qui compte : un modèle qui repasserait
+    # sous la cote sans que rien ne l'arrête. Les 513 versions d'avant v520 l'ont fait
+    # sans qu'aucune alerte se déclenche, parce que le gate ne confrontait le
+    # challenger qu'au champion précédent, jamais au marché.
+    #
+    # ⚠ Si le delta redevenait durablement négatif, ce gate FIGERAIT le modèle (blocage
+    # de 48 jours de l'audit 2026-08-16). Le rapport nocturne remonte le delta chaque
+    # nuit : c'est lui qui doit alerter avant que le gel ne s'installe. Repli immédiat
+    # sans redéploiement : BT_MARKET_GATE=0 dans l'environnement.
+    market_gate: bool = field(default_factory=lambda: _env_bool("BT_MARKET_GATE", True))
     # Marge exigée quand le gate est actif. 0.0 = il suffit d'égaler la cote.
     market_gate_margin: float = field(default_factory=lambda: _env_float("BT_MARKET_GATE_MARGIN", 0.0))
 

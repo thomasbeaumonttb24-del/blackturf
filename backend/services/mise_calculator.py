@@ -26,6 +26,11 @@ CI_WIDTH_PENALTY = 3.0
 # gel et le départ est de 30 %, donc ce seuil n'est pas théorique.
 _DERIVE_RAPPORT_SIGNALEE = 0.15
 
+# Le filet « chaque course est jouée » respecte-t-il le plafond de rang du profil ?
+# False = comportement d'avant le 2026-09-01 (le plafond était ignoré par le repli),
+# conservé pour que le banc de mesure A/B puisse rejouer l'ancienne version.
+_REPLI_RESPECTE_RANG = True
+
 # Montant minimum PMU par type de pari (référence réglementaire ; le moteur
 # applique MISE_PLANCHER=2€ par-dessus).
 def _cout_minimum_pmu(type_pari: str) -> float:
@@ -1743,23 +1748,57 @@ def _select_conviction(
             r = float(c.get("rapport_estime", 0.0) or 0.0)
             return r >= rapport_min and (rapport_max_eff is None or r <= rapport_max_eff)
 
+        def _rang_ok(c):
+            """Le pari respecte-t-il le plafond de rang prédit du profil ?
+
+            Ce contrôle manquait à TOUS les étages du repli : le pari de secours
+            pouvait porter un cheval classé 9e, 12e ou 16e — précisément ce que le
+            plafond interdit dans la sélection normale. Mesuré le 2026-09-01 sur les
+            paris réglés depuis le resserrement du plafond : 30 % de la mise du profil
+            risqué partait au-delà du rang 6, pour un ROI winsorisé de −67 % à −100 %
+            selon le rang. Le plafond doit être la DERNIÈRE contrainte relâchée.
+            """
+            if (not _REPLI_RESPECTE_RANG or rang_max_eff is None
+                    or c.get("_rang_max") is None):
+                return True
+            plafond = rang_max_eff + (RANG_MAX_BONUS_PLACE
+                                      if "Placé" in c["type_pari"] else 0)
+            return int(c["_rang_max"]) <= plafond
+
         # Replis successifs : type+rapport+cote → type+rapport → rapport tout type →
         # type → tout. On garde la tranche du profil le plus longtemps possible.
-        in_band = [c for c in cands if _in_type(c) and _in_rapport(c)
+        rangeables = [c for c in cands if _rang_ok(c)]
+        in_band = [c for c in rangeables if _in_type(c) and _in_rapport(c)
                    and cote_min <= _bet_cote_max(c) <= cote_max]
-        in_band = in_band or [c for c in cands if _in_type(c) and _in_rapport(c)]
+        in_band = in_band or [c for c in rangeables if _in_type(c) and _in_rapport(c)]
         # CHAQUE COURSE EST JOUÉE (demande user) : on PRIVILÉGIE la bande de rapport du
         # profil, mais si AUCUN pari n'y tombe on RELÂCHE par étapes plutôt que de laisser
         # le plan vide — type+cote du profil → type seul → n'importe quel pari. On garde la
         # MÉTHODE du profil le plus longtemps possible ; on ne relâche le rapport qu'en
         # dernier recours, et on le SIGNALE (note honnête, le multiplicateur visé n'est pas
         # garanti sur cette course). Aucune invention : ce sont de vrais paris PMU éligibles.
+        # Le rang passe AVANT le type, le rapport et la cote dans l'ordre de
+        # relâchement : jouer un cheval que notre propre modèle enterre coûte plus
+        # cher que jouer hors de la tranche de gain visée.
         relaxed = (
-            [c for c in cands if _in_rapport(c)]
-            or [c for c in cands if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
-            or [c for c in cands if _in_type(c)]
-            or list(cands)
+            [c for c in rangeables if _in_rapport(c)]
+            or [c for c in rangeables
+                if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
+            or [c for c in rangeables if _in_type(c)]
+            or list(rangeables)
         )
+        # Dernier recours seulement : aucune combinaison ne tient dans le plafond de
+        # rang (petit champ, non-partants). On sort alors du plafond plutôt que de
+        # laisser la course sans plan, et on le MARQUE.
+        hors_rang = not relaxed and not in_band
+        if hors_rang:
+            relaxed = (
+                [c for c in cands if _in_rapport(c)]
+                or [c for c in cands
+                    if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
+                or [c for c in cands if _in_type(c)]
+                or list(cands)
+            )
         pool = in_band or relaxed
         if pool:
             def _fallback_score(c):
@@ -1790,6 +1829,8 @@ def _select_conviction(
             # Hors bande de rapport visée → marqué pour la note du plan.
             if not in_band:
                 safe["_hors_bande"] = True
+            if hors_rang:
+                safe["_hors_rang"] = True
             selected = [safe]
 
     # ── DÉPLOIEMENT INTÉGRAL (calculateur MANUEL, respect_montant) ──────────────
