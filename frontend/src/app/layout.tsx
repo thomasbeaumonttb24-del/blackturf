@@ -5,8 +5,6 @@ import Script from "next/script";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/useAuth";
-import { Suspense } from "react";
-import DefilementHaut from "@/components/DefilementHaut";
 
 // `display: "optional"` plutôt que `"swap"`, et on s'en tient au sous-ensemble `latin`.
 //
@@ -157,11 +155,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased min-h-screen bg-background`}>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(orgJsonLd) }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(siteJsonLd) }} />
-        {/* Toute page s'ouvre en haut. Sous Suspense : `useSearchParams`
-            basculerait sinon l'ensemble du site en rendu dynamique. */}
-        <Suspense fallback={null}>
-          <DefilementHaut />
-        </Suspense>
         <AuthProvider>{children}</AuthProvider>
         <Toaster
           theme="light"
