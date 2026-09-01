@@ -6,7 +6,7 @@ export const meta = {
   description:
     "Mesuré sur 300 courses : l'ordre exact paie 6,1 fois le désordre — soit très exactement le rapport des chances. Ce que ça change pour votre ticket.",
   date: "2026-06-23",
-  updated: "2026-08-31",
+  updated: "2026-09-01",
   tags: ["Tiercé", "PMU", "Stratégie"],
   readingMinutes: 6,
 };
@@ -77,6 +77,20 @@ export default function Body() {
         Beaucoup de parieurs jouent le même trio <strong>à la fois en ordre et en désordre</strong>.
         Si l&apos;ordre tombe, vous touchez le gros rapport ; sinon, le désordre vous sauve. Cela
         double la mise mais évite la frustration du « bons chevaux, mauvais ordre ».
+      </p>
+
+      <h2>Et au Quinté+, ce ×6 devient quoi ?</h2>
+      <p>
+        La régularité vue ici est propre au Tiercé. Au Quinté+, cinq chevaux se rangent de 120
+        façons, mais le rapport ne suit pas : mesuré sur 249 courses, le facteur médian est de
+        <strong> ×72,8</strong>, et il descend <strong>sous ×10 dans 29 % des Quintés</strong> —
+        précisément ceux qui paient le plus gros. Deuxième différence, moins connue : au Tiercé
+        l&apos;ordre est une formule qu&apos;on choisit, au Quinté+ c&apos;est un bonus
+        automatique qui ne coûte rien de plus.{" "}
+        <Link href="/blog/quinte-ordre-ou-desordre">
+          Le détail chiffré, Quinté par Quinté
+        </Link>
+        .
       </p>
 
       <h2>Tiercé ou Trio ?</h2>
