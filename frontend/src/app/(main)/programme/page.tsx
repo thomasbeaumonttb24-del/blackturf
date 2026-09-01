@@ -37,7 +37,7 @@ export async function generateMetadata(): Promise<Metadata> {
   // dans la description, où il informe sans manger la place du sujet.
   const title = nbCourses
     ? `Programme PMU du ${jourCourt(jour)} — ${nbCourses} courses analysées par l'IA`
-    : `Programme PMU du jour — courses analysées par l'IA`;
+    : `Programme PMU du ${jourCourt(jour)} — courses analysées par l'IA`;
   // Google tronque l'extrait autour de 155-160 caractères : l'information la plus
   // spécifique (date, volume, hippodromes) passe devant, la promesse produit derrière.
   const description = nbCourses

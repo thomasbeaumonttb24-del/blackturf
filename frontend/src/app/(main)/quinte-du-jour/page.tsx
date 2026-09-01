@@ -41,13 +41,13 @@ export async function generateMetadata(): Promise<Metadata> {
   // des requêtes les plus tapées sur ce créneau.
   const title = c
     ? `Quinté+ du ${jourCourt(jour)} à ${titleCase(c.hippodrome_nom)} — pronostic IA`
-    : `Quinté+ du jour — pronostic IA, partants et arrivée`;
+    : `Quinté+ du ${jourCourt(jour)} — pronostic IA, partants et arrivée`;
   // Extrait tronqué par Google vers 155-160 caractères : date, lieu et heure d'abord.
   const description = c
     ? `Quinté+ du ${jourLong(jour)} à ${titleCase(c.hippodrome_nom)} : ${
         c.nb_partants
       } partants, départ à ${heureParis(c.date_heure)}. Probabilité par cheval, arrivée et rapports.`
-    : "Le Quinté+ du jour analysé par l'IA : partants, probabilité par cheval, puis l'arrivée officielle et les rapports PMU.";
+    : `Le Quinté+ du ${jourLong(jour)} analysé par l'IA : partants, probabilité par cheval, puis l'arrivée officielle et les rapports PMU.`;
 
   return {
     title,
