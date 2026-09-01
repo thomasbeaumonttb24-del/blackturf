@@ -38,7 +38,7 @@ const MAJ = {
   guideTypesParis: "2026-09-01",
   guideMusique: "2026-09-01",
   guideValeur: "2026-06-23",
-  blogIndex: "2026-06-23",
+  blogIndex: "2026-09-01",
   hippodromesIndex: "2026-08-23",
   disciplinesIndex: "2026-08-23",
   newsletter: "2026-08-24",

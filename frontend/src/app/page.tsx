@@ -168,6 +168,10 @@ function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
       r: "Le temps de lire une fiche. Quand vous arrivez, la course est déjà analysée : vous choisissez la course, vous entrez votre mise, le plan s'affiche. Les alertes préviennent quand un pari de valeur apparaît — pas besoin de surveiller le programme toute la journée.",
     },
     {
+      q: "Quelle IA utilisez-vous ? Est-ce ChatGPT ?",
+      r: "Non. ChatGPT et les agents conversationnels du même type produisent du texte : ils n'ont ni les partants du jour, ni les cotes, ni aucune mesure de leur propre justesse, et fabriquent des chiffres plausibles quand la donnée leur manque. BlackTurf fait tourner un modèle d'apprentissage supervisé entraîné sur l'historique réel des courses PMU, réentraîné chaque nuit sur les arrivées de la veille. Il ne rédige pas un avis : il sort une probabilité par cheval, dont l'erreur est mesurée course après course.",
+    },
+    {
       q: "D'où viennent les données ?",
       r: "Du programme officiel PMU (partants, cotes, arrivées, rapports), complété par plusieurs sources de cotes pour repérer les écarts de marché. Les résultats qui servent à noter nos pronostics sont les rapports PMU publiés — jamais une estimation maison.",
     },
@@ -335,6 +339,21 @@ export default async function HomePage() {
                 </div>
               </ScrollReveal>
             ))}
+          {/* La page pilier de la méthode n'était atteignable que depuis le pied de page :
+              un lien de bas de site ne dit à personne, moteur compris, qu'elle porte le
+              sujet principal du site. Elle est citée ici, là où la question se pose. */}
+          <ScrollReveal>
+            <p className="mt-10 text-center text-sm text-gray-600">
+              <Link
+                href="/pronostics-ia"
+                className="font-semibold text-brand-gold-dark underline-offset-4 hover:underline"
+              >
+                Comment l&apos;IA calcule une probabilité par cheval
+              </Link>{" "}
+              — les données sur lesquelles le modèle apprend, son réentraînement quotidien, et la
+              façon dont sa justesse est vérifiée.
+            </p>
+          </ScrollReveal>
           </div>
         </div>
       </section>

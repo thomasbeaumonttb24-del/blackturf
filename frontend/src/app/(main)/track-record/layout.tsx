@@ -19,9 +19,14 @@ import { PalmaresResume } from "@/components/seo/PalmaresResume";
  */
 export const revalidate = 900;
 
-const TITLE = "Palmarès BlackTurf — résultats mesurés de l'algorithme";
+// Le titre disait « algorithme » ; personne ne tape ce mot. Les requêtes qui amènent ici
+// sont « fiabilité pronostic IA », « taux de réussite IA hippique », « résultats pronostic
+// IA » : c'est cette page qui y répond, et c'est le seul endroit du site où le terme est
+// adossé à des chiffres vérifiables. Le partage des rôles reste net — /pronostics-ia
+// explique la MÉTHODE, cette page publie les RÉSULTATS.
+const TITLE = "Résultats de nos pronostics IA — taux de réussite mesuré";
 const DESCRIPTION =
-  "Taux de réussite de l'algorithme mesuré course après course, comparé au hasard et au marché, et le rendement réel du favori — pertes comprises.";
+  "Ce que l'IA a produit course après course : taux de réussite comparé au hasard et au marché, et le rendement réel du favori — pertes comprises.";
 
 export const metadata: Metadata = {
   title: TITLE,

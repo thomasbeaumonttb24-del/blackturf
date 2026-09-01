@@ -5,14 +5,18 @@ import { Clock, ArrowRight, Newspaper } from "lucide-react";
 import { ARTICLES, formatDateFr } from "@/lib/blog";
 import { SeoHero, Container, Callout, Chip } from "@/components/seo/kit";
 
+// Le blog héberge désormais trois articles sur l'analyse par IA — c'est ce qui le
+// distingue des blogs turf existants, et cela ne figurait ni dans son titre ni dans sa
+// description. Le terme n'est écrit qu'une fois de chaque côté : le reste de la ligne
+// continue d'annoncer ce que le blog contient vraiment.
 export const metadata: Metadata = {
-  title: "Blog — paris hippiques & analyse PMU",
+  title: "Blog — analyse IA et paris hippiques PMU",
   description:
-    "Méthodes d'analyse des courses PMU : paris de valeur, gestion de bankroll, lecture des cotes, stratégies au trot.",
+    "Analyse des courses PMU par l'IA, paris de valeur, gestion de bankroll et lecture des cotes : les méthodes expliquées, chiffres à l'appui.",
   alternates: { canonical: "/blog" },
   openGraph: {
-    title: "Blog BlackTurf — paris hippiques & analyse PMU",
-    description: "Méthodes, stratégie et data pour mieux parier au PMU. Articles clairs et sans bullshit.",
+    title: "Blog BlackTurf — analyse IA et paris hippiques PMU",
+    description: "Ce que l'IA sait faire d'une course, et les méthodes de pari expliquées sans promesse de gain.",
     url: "https://blackturf.fr/blog",
     images: [OG_IMAGE],
   },

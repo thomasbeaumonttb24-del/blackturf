@@ -9,7 +9,7 @@ export const meta = {
   // Développé le 2026-08-27 : l'article expédiait son sujet en 585 mots. Trois sections
   // ajoutées — la comparaison avec les jeux à information complète, la distinction entre
   // bien prédire et gagner, et les signes d'une fausse promesse.
-  updated: "2026-08-27",
+  updated: "2026-09-01",
   tags: ["IA", "Machine learning", "Pronostics"],
   readingMinutes: 9,
 };
@@ -116,6 +116,28 @@ export default function Body() {
         la comparaison avec le hasard, un score de calibration, et un historique complet — périodes
         perdantes comprises.
       </p>
+
+      <h2>Deux questions voisines, traitées à part</h2>
+      <p>
+        Cet article répond à « le machine learning peut-il battre les courses ». Deux questions
+        très proches reviennent souvent et méritent leur propre réponse :
+      </p>
+      <ul>
+        <li>
+          <Link href="/blog/chatgpt-pronostic-hippique">
+            Peut-on demander ses pronostics à ChatGPT&nbsp;?
+          </Link>{" "}
+          — pourquoi un agent conversationnel et un modèle de prédiction ne sont pas le même
+          outil, et ce que le premier sait réellement faire pour un parieur.
+        </li>
+        <li>
+          <Link href="/blog/pronostic-ia-gratuit">
+            Ce qu&apos;on voit d&apos;une analyse par IA sans payer
+          </Link>{" "}
+          — le détail de ce qui reste ouvert (classement, probabilités, cote juste, palmarès
+          complet) et de ce qui ne l&apos;est pas.
+        </li>
+      </ul>
 
       <h2>IA + discipline humaine</h2>
       <p>

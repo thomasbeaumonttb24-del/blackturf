@@ -139,6 +139,7 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
           {[
             { href: "/programme", txt: "Programme PMU du jour" },
             { href: "/resultats", txt: "Arrivées et rapports du jour" },
+            { href: "/pronostics-ia", txt: "Comment fonctionne l'IA" },
             { href: "/guides/pari-de-valeur", txt: "Ce qu'est un pari de valeur" },
             { href: "/tarifs", txt: "Formules et tarifs" },
           ].map((l) => (

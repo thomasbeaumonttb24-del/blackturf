@@ -78,7 +78,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     `${libelleCourse(c)} — ${hippo}, ${disc}, ${c.distance} m, ${c.nb_partants} partants` +
     (jour ? `, ${jourCourt(jour)} à ${heureParis(c.date_heure)}` : "") +
     (c.est_quinte ? ". Support du Quinté+" : "") +
-    (termine ? ". Arrivée et rapports PMU." : ". Partants, cotes et probabilité par cheval.");
+    // Le mot « partants » figurait deux fois dans la même description (une fois dans le
+    // décompte, une fois dans la queue). La queue dit maintenant ce que la page a de
+    // singulier : la probabilité vient du modèle, pas d'un avis.
+    (termine ? ". Arrivée et rapports PMU." : ". Cotes et probabilité de victoire calculée par l'IA.");
 
   return {
     title,
@@ -111,7 +114,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  */
 function titreCourse(c: SeoCourseDetail, termine: boolean): string {
   const jour = jourDeCourseId(c.course_id);
-  const suffixe = termine ? "arrivée et rapports" : "partants et pronostic";
+  // Le mot « IA » figure dans le titre des courses à venir, pas dans celui des courses
+  // courues : sur une course à venir, ce que la page apporte de plus que le programme du
+  // PMU EST l'analyse du modèle ; une fois l'arrivée connue, l'intention de recherche
+  // bascule sur « arrivée » et « rapports ». Le terme est exact — la page publie bien une
+  // probabilité par cheval calculée par le modèle — et n'est écrit qu'une fois.
+  const suffixe = termine ? "arrivée et rapports" : "pronostic IA et partants";
   const dateTxt = jour ? ` du ${jourCourtAnnee(jour)}` : "";
   const nom = titleCase(c.nom ?? "");
 
@@ -363,7 +371,7 @@ export default async function CoursePage({ params }: Props) {
             {apercu && apercu.classement.length > 0 && (
               <>
                 <h3 className="mt-6 font-display text-[15px] font-bold text-slate-900">
-                  Analyse BlackTurf ({apercu.nb_analyses} chevaux notés)
+                  Analyse IA de la course ({apercu.nb_analyses} chevaux notés)
                 </h3>
                 <p className="mt-1.5 text-[13px] leading-relaxed text-stone-600">
                   {apercu.proba_top1 != null && (
@@ -375,9 +383,21 @@ export default async function CoursePage({ params }: Props) {
                   )}
                   {apercu.accord_marche === true && "Il est aussi le favori des cotes. "}
                   {apercu.accord_marche === false && "Le marché, lui, en désigne un autre. "}
-                  {apercu.nb_ecartes > 0 && `${apercu.nb_ecartes} chevaux sont crédités de moins de 3 % de chances. `}
+                  {/* L'accord était figé au pluriel : « 1 chevaux sont crédités » s'affichait tel
+                      quel sur toutes les fiches à un seul écarté. */}
+                  {apercu.nb_ecartes > 0 &&
+                    (apercu.nb_ecartes === 1
+                      ? `1 cheval est crédité de moins de 3 % de chances. `
+                      : `${apercu.nb_ecartes} chevaux sont crédités de moins de 3 % de chances. `)}
                   La cote juste est l&apos;inverse de la probabilité : au-dessus, le cheval est
-                  payé plus qu&apos;il ne vaut ; en dessous, moins.
+                  payé plus qu&apos;il ne vaut ; en dessous, moins.{" "}
+                  <a
+                    href="/pronostics-ia"
+                    className="font-medium text-brand-gold-dark underline-offset-2 hover:underline"
+                  >
+                    Comment l&apos;IA calcule ces probabilités
+                  </a>
+                  .
                 </p>
                 <div className="mt-3 overflow-x-auto rounded-xl border border-stone-200">
                   <table className="w-full min-w-[460px] border-collapse text-[13px]">
@@ -503,6 +523,8 @@ export default async function CoursePage({ params }: Props) {
                 { href: "/quinte-du-jour", txt: "Quinté+ du jour" },
                 { href: "/resultats", txt: "Arrivées et rapports du jour" },
                 { href: "/guides/types-de-paris-pmu", txt: "Comprendre les types de paris" },
+                { href: "/pronostics-ia", txt: "Comment l'IA analyse une course" },
+                { href: "/track-record", txt: "Les résultats mesurés de l'IA" },
               ].map((l) => (
                 <a
                   key={l.href}

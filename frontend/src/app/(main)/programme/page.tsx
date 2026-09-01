@@ -126,6 +126,24 @@ export default async function ProgrammePage() {
             ? `${prog.nb_courses} courses réparties sur ${prog.reunions.length} réunions. Cliquez sur une course pour ouvrir sa fiche : partants, cotes des principaux opérateurs, arrivée et rapports officiels une fois la course courue.`
             : "Le programme du jour n'est pas encore disponible. Il est publié par le PMU la veille au soir."}
         </p>
+        <p className="mt-2 max-w-3xl text-sm text-gray-600">
+          Chaque fiche porte le classement calculé par le modèle et une probabilité de victoire
+          par cheval.{" "}
+          <a
+            href="/pronostics-ia"
+            className="font-medium text-brand-gold-dark underline-offset-2 hover:underline"
+          >
+            Comment l&apos;IA analyse une course
+          </a>{" "}
+          détaille les données utilisées, et{" "}
+          <a
+            href="/track-record"
+            className="font-medium text-brand-gold-dark underline-offset-2 hover:underline"
+          >
+            le palmarès mesuré
+          </a>{" "}
+          publie ce que ces analyses ont donné à l&apos;arrivée, pertes comprises.
+        </p>
 
         <div className="mt-6 space-y-8">
           {(prog?.reunions ?? []).map((r) => (
