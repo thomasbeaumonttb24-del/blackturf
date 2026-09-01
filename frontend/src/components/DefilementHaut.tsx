@@ -56,6 +56,31 @@ export default function DefilementHaut() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    // PREMIER MONTAGE — on ne demande pas POURQUOI le navigateur aurait défilé, on
+    // regarde s'il l'a FAIT. Tester le fragment ne suffit pas : Chrome retire la
+    // directive `:~:text=` de `location.hash` avant de la donner au document, pour que
+    // les pages ne puissent pas lire ce que l'utilisateur a cherché. Une page arrivant
+    // d'un extrait en vedette Google voit donc un hash VIDE alors que le navigateur l'a
+    // positionnée sur un passage. Un test `getElementById` l'aurait ratée.
+    //
+    // La position déjà prise couvre les trois cas d'un coup — ancre `id`, fragment de
+    // texte, lien profond — sans avoir à les distinguer : si le navigateur a positionné
+    // la page, c'est une intention de l'appelant et on ne l'écrase pas.
+    //
+    // `requestAnimationFrame` laisse au navigateur le temps d'appliquer ce saut avant
+    // qu'on lise `scrollY` : le lire dans l'effet lui-même donnerait 0 trop tôt.
+    if (premierRendu.current) {
+      premierRendu.current = false;
+      window.requestAnimationFrame(() => {
+        if (window.scrollY === 0) {
+          window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+        }
+      });
+      return;
+    }
+
+    // NAVIGATIONS SUIVANTES — une ancre reste respectée : elle ne change ni le chemin
+    // ni les paramètres, donc cet effet ne se déclenche pas pour elle.
     const fragment = window.location.hash;
     if (fragment.length > 1) {
       let cible: Element | null = null;
@@ -64,16 +89,9 @@ export default function DefilementHaut() {
       } catch {
         cible = null;            // fragment non décodable : traité comme sans cible
       }
-      // Une ancre RÉELLE : le navigateur y a déjà sauté au premier rendu, et aux
-      // navigations suivantes c'est une intention explicite du lecteur. On n'y touche
-      // pas. Un fragment d'état (`#plan`) n'a pas de cible et tombe dans le cas normal.
-      if (cible) {
-        premierRendu.current = false;
-        return;
-      }
+      if (cible) return;
     }
 
-    premierRendu.current = false;
     // `instant` et non `smooth` : à l'ouverture d'une page, une animation donne
     // l'impression que la page a bougé toute seule.
     window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
