@@ -213,3 +213,99 @@ def test_la_cle_vapid_publique_atteint_le_build_du_frontend():
     assert "ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY" in dockerfile, (
         "le Dockerfile du frontend ne déclare pas l'ARG : compose la passe, "
         "Docker l'ignore, et la panne redevient silencieuse.")
+
+
+# --- Budget de connexions PostgreSQL -----------------------------------------
+# Le pool SQLAlchemy est un budget PARTAGÉ entre processus, mais il se configure
+# service par service : rien, dans un fichier, ne rappelle qu'il existe un
+# plafond commun. C'est ce qui a laissé passer 20 + 40 = 60 connexions par
+# processus contre 47 disponibles au total.
+
+_DEFAUT_POOL_SIZE = 4        # api.config.Settings.db_pool_size
+_DEFAUT_MAX_OVERFLOW = 4     # api.config.Settings.db_max_overflow
+# Valeur par défaut de PostgreSQL, jamais surchargée dans les compose. Ces
+# sessions sont réservées au superutilisateur : le rôle applicatif `bt_app` n'y
+# a pas droit, et c'est exactement ce que disait l'erreur du 31/08 —
+# « remaining connection slots are reserved for roles with the SUPERUSER attribute ».
+_RESERVE_SUPERUSER = 3
+# Marge laissée aux sessions humaines et outillées : `psql` de diagnostic,
+# `alembic upgrade` pendant un déploiement, workers de fond TimescaleDB (3
+# sessions observées en production le 01/09).
+_MARGE_HORS_APPLICATIF = 6
+
+_SERVICES_APPLICATIFS = ("api", "scraper", "worker", "scheduler")
+
+
+def _bloc_service(texte: str, service: str):
+    return re.search(rf"^  {service}:\n(.*?)(?=^  \S)", texte, re.S | re.M)
+
+
+def _pool_du_service(corps: str) -> tuple[int, int]:
+    """(pool_size, max_overflow) tels que le CONTENEUR les recevra.
+
+    Une variable absente du bloc `environment:` n'atteint pas le conteneur : on
+    retombe alors sur le défaut du code, et c'est bien ce défaut qu'il faut
+    compter — pas zéro.
+    """
+    def _lu(nom: str, defaut: int) -> int:
+        m = re.search(rf"^\s*-\s*{nom}=(\d+)\s*$", corps, re.M)
+        return int(m.group(1)) if m else defaut
+    return _lu("DB_POOL_SIZE", _DEFAUT_POOL_SIZE), _lu("DB_MAX_OVERFLOW", _DEFAUT_MAX_OVERFLOW)
+
+
+def _workers_uvicorn(corps: str) -> int:
+    """Nombre de PROCESSUS uvicorn — chacun a son propre pool.
+
+    Point aveugle du réglage d'origine : `--workers 2` double silencieusement la
+    consommation de l'API. Sans commande explicite, c'est le CMD du Dockerfile
+    qui s'applique.
+    """
+    m = re.search(r"^\s*command:\s*(.*uvicorn.*)$", corps, re.M)
+    source = m.group(1) if m else _lire(DOCKERFILE)
+    w = re.search(r"--workers\D+(\d+)", source)
+    return int(w.group(1)) if w else 1
+
+
+def test_budget_connexions_postgres():
+    """La somme des pools doit tenir sous `max_connections`.
+
+    Panne du 2026-08-31 20:31 : `/admin/api/adaptive-learning/history` en
+    `TooManyConnectionsError`. L'endpoint n'y était pour rien — il a seulement eu
+    le tort d'arriver après les autres. La cause est arithmétique : cinq
+    processus (deux workers uvicorn, scraper, worker RQ, scheduler) réclamaient
+    jusqu'à 60 connexions chacun, soit 300, contre 47 réellement accordées au
+    rôle applicatif.
+
+    Rien ne rendait ce dépassement visible : au repos la production n'ouvre que
+    ~23 sessions, tout va bien, et la saturation n'arrive qu'au premier pic
+    simultané — donc en production, sous charge, et jamais en test.
+    """
+    texte = _lire(COMPOSE_PROD)
+
+    bloc_db = _bloc_service(texte, "db")
+    assert bloc_db, "service `db` introuvable dans docker-compose.prod.yml"
+    m = re.search(r"-c\s+max_connections=(\d+)", bloc_db.group(1))
+    assert m, ("le service `db` ne fixe plus `max_connections` : le budget de "
+               "connexions ne repose plus sur rien de vérifiable.")
+    plafond = int(m.group(1)) - _RESERVE_SUPERUSER
+
+    detail: list[str] = []
+    total = 0
+    for service in _SERVICES_APPLICATIFS:
+        bloc = _bloc_service(texte, service)
+        assert bloc, (f"service `{service}` introuvable : un processus qui se connecte "
+                      "à PostgreSQL sans être compté dans le budget est exactement "
+                      "le défaut que ce test ferme.")
+        corps = bloc.group(1)
+        pool, overflow = _pool_du_service(corps)
+        procs = _workers_uvicorn(corps) if service == "api" else 1
+        cout = (pool + overflow) * procs
+        total += cout
+        detail.append(f"{service}: ({pool}+{overflow})x{procs} = {cout}")
+
+    assert total <= plafond - _MARGE_HORS_APPLICATIF, (
+        f"budget de connexions dépassé : {total} demandées, {plafond} accordées "
+        f"au rôle applicatif dont {_MARGE_HORS_APPLICATIF} à laisser libres pour "
+        f"psql/alembic/TimescaleDB. Détail — {' | '.join(detail)}. "
+        "Soit réduire les pools, soit monter `max_connections` (et la mémoire du "
+        "conteneur db avec).")

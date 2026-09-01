@@ -201,6 +201,10 @@ async def resolve_courses_sans_resultat(
                             detail=(f"hippodrome={row.hippodrome_nom} "
                                     f"date_heure={row.date_heure} statut_pmu={statut_pmu}"),
                             level="warning",
+                            # Une course donnée n'est abandonnée qu'une fois,
+                            # mais le balayage repasse : la clé garantit une
+                            # ligne par COURSE, pas une par passage.
+                            cle=f"course_sans_resultat:{course_id}",
                         )
                     cr["sans_resultat"] += 1
                     log.warning("course_resolution.sans_resultat", course_id=course_id,

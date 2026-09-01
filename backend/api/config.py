@@ -16,6 +16,34 @@ class Settings(BaseSettings):
     database_url: str
     database_url_sync: str = ""
 
+    # Pool de connexions PostgreSQL, PAR PROCESSUS. Ces valeurs sont un BUDGET
+    # partagé, pas un réglage local : le serveur n'accepte que
+    # `max_connections - superuser_reserved_connections` sessions au total
+    # (50 - 3 = 47 en production, cf. docker-compose.prod.yml), et cinq
+    # processus s'y connectent — les DEUX workers uvicorn de l'API, le scraper,
+    # le worker RQ et le scheduler.
+    #
+    # Les valeurs d'origine (20 + 40 = 60 par processus) autorisaient donc à
+    # elles seules 300 connexions contre 47 disponibles. La saturation n'arrive
+    # pas au repos (23 sessions ouvertes le 01/09) mais au premier pic simultané,
+    # et elle ne se manifeste pas là où elle naît : le 31/08 à 20:31 c'est
+    # `/admin/api/adaptive-learning/history` qui est tombé en
+    # `TooManyConnectionsError`, une requête parfaitement innocente qui n'avait
+    # que le tort d'arriver après les autres.
+    #
+    # Les défauts ci-dessous sont dimensionnés pour le PIRE cas : un processus
+    # qui ne reçoit aucune surcharge par `environment:` reste sous le budget
+    # (4+4=8 par processus, soit 8 × 5 = 40 < 47). Les surcharges par service
+    # vivent dans les deux compose et sont verrouillées par
+    # `tests/test_deploy_config_safety.py::test_budget_connexions_postgres`.
+    db_pool_size: int = Field(default=4, ge=1, le=50)
+    db_max_overflow: int = Field(default=4, ge=0, le=50)
+    # Une connexion gardée indéfiniment finit par être coupée en silence par le
+    # réseau ou par le serveur ; `pool_pre_ping` la détecte mais après un
+    # aller-retour perdu. Les recycler évite le cas — même classe de panne que la
+    # socket Redis morte après une nuit d'inactivité (27/08).
+    db_pool_recycle_s: int = Field(default=1800, ge=60)
+
     # Redis
     redis_url: str
 

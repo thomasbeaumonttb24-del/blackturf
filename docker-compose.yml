@@ -78,6 +78,16 @@ services:
       # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
       # basculer dessus par SET ROLE.
       - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      # Pool PostgreSQL - BUDGET PARTAGE, pas un reglage local. Le serveur
+      # n'accepte que `max_connections - superuser_reserved_connections`
+      # sessions au TOTAL (50 - 3 = 47 en prod) et cinq processus s'y
+      # connectent : les DEUX workers uvicorn de l'API (`--workers 2`), le
+      # scraper, le worker RQ et le scheduler. L'API en recoit la plus grosse
+      # part parce qu'elle sert les visiteurs : 2 x (8 + 4) = 24.
+      # Somme des cinq = 41 <= 47, verrouillee par
+      # tests/test_deploy_config_safety.py::test_budget_connexions_postgres.
+      - DB_POOL_SIZE=8
+      - DB_MAX_OVERFLOW=4
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -128,6 +138,10 @@ services:
       # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
       # basculer dessus par SET ROLE.
       - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      # Pool PostgreSQL - part du budget partage (cf. service `api`). Le scraper
+      # ecrit en rafale mais sur un seul processus : 4 + 2 = 6.
+      - DB_POOL_SIZE=4
+      - DB_MAX_OVERFLOW=2
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
       - BRIGHTDATA_PROXY=${BRIGHTDATA_PROXY}
@@ -158,6 +172,10 @@ services:
       # superutilisateur, et le GRANT porte SET FALSE : il ne peut pas non plus
       # basculer dessus par SET ROLE.
       - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:?APP_DB_USER absent du .env}:${APP_DB_PASSWORD:?APP_DB_PASSWORD absent du .env}@db:5432/${POSTGRES_DB:-blackturf}
+      # Pool PostgreSQL - part du budget partage (cf. service `api`). Le worker
+      # RQ est UNIQUE et traite une tache a la fois : 4 + 2 = 6.
+      - DB_POOL_SIZE=4
+      - DB_MAX_OVERFLOW=2
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}@redis:6379/0
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - RESEND_API_KEY=${RESEND_API_KEY}
