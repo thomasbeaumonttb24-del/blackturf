@@ -177,7 +177,14 @@ export default function TarifsPage() {
               variant="brand-outline"
               className="w-full"
             />
-            <p className="text-center text-xs text-muted-foreground mt-2">Sans CB requis</p>
+            {/* « Sans CB requis » était FAUX : la session Stripe est créée avec
+                payment_method_collection="always" (api/routes/stripe_routes.py), donc la carte
+                est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
+                l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
+                vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
+            <p className="text-center text-xs text-muted-foreground mt-2">
+              Carte requise, aucun prélèvement avant la fin de l&apos;essai
+            </p>
           </CardContent>
         </Card>
 
@@ -216,7 +223,14 @@ export default function TarifsPage() {
               variant="brand"
               className="w-full"
             />
-            <p className="text-center text-xs text-muted-foreground mt-2">Sans CB requis</p>
+            {/* « Sans CB requis » était FAUX : la session Stripe est créée avec
+                payment_method_collection="always" (api/routes/stripe_routes.py), donc la carte
+                est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
+                l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
+                vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
+            <p className="text-center text-xs text-muted-foreground mt-2">
+              Carte requise, aucun prélèvement avant la fin de l&apos;essai
+            </p>
           </CardContent>
         </Card>
       </div>
