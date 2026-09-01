@@ -4,12 +4,12 @@ import { Ticket, Music, Target, BookOpen } from "lucide-react";
 import { SeoHero, Container, LinkCard, Callout, Chip } from "@/components/seo/kit";
 
 export const metadata: Metadata = {
-  title: "Guides paris hippiques PMU",
+  title: "Guide des paris PMU : formules, musique et pari de valeur",
   description:
-    "Guides gratuits pour parier au PMU : types de paris, lecture de la musique d'un cheval, stratégie de pari de valeur.",
+    "Le guide gratuit des paris PMU : ce que paie chaque formule, comment lire la musique d'un cheval, et ce qu'est un pari de valeur.",
   alternates: { canonical: "/guides" },
   openGraph: {
-    title: "Guides paris hippiques PMU",
+    title: "Guide des paris PMU — BlackTurf",
     description: "Apprenez à parier au PMU : types de paris, lecture de la musique, paris de valeur.",
     url: "https://blackturf.fr/guides",
     images: [OG_IMAGE],
