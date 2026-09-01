@@ -2468,6 +2468,17 @@ def _motif_rejet(c: dict, cfg: dict, roi_weights: Optional[dict] = None,
             return "Coup trop improbable (espérance sous le plancher) même pour le profil risqué."
     if c["ev"] < cfg["ev_min"] and not _is_credible_coup(c) and not spec_ok:
         return f"EV insuffisante ({c['ev']*100:+.0f}%) pour le seuil du profil."
+    # Dernier cas : le pari passe TOUTES les règles du profil. Il n'est pas écarté par
+    # une règle, il est arrivé derrière au classement de conviction — et le budget ne
+    # finance pas un ticket de plus, puisque la tranche du profil impose une mise
+    # d'au moins cible/rapport par ticket. Le dire explicitement, sinon le lecteur
+    # croit à un refus alors que c'est une question de place.
+    _g = cfg.get("gain_cible_mult")
+    if montant and _g and rap > 0:
+        _besoin = math.ceil(float(montant) * float(_g) / rap)
+        return (f"Ce pari respecte les règles du profil, mais il arrive derrière ceux "
+                f"retenus. Pour viser ×{float(_g):.0f} du total, il faudrait lui mettre "
+                f"{_besoin} € — le budget de {float(montant):.0f} € est déjà engagé.")
     return "Conviction inférieure aux paris retenus (place limitée par le palier de mise)."
 
 
@@ -2642,7 +2653,13 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         # L arrondi ENTIER du gain ne doit jamais faire tomber le multiplicateur AFFICHE
         # sous la tranche du profil (ex. place x1.8 a 3e = 5.4 -> arrondi 5 -> x1.67 affiche).
         _rmin = PROFIL_CONFIG.get(profil, PROFIL_CONFIG["equilibre"]).get("rapport_min", 0.0) or 0.0
-        if mise > 0 and _rmin > 0 and gain < math.ceil(mise * _rmin):
+        # Le relèvement ne vaut que si le RAPPORT DU TICKET atteint réellement la
+        # tranche : il corrige un arrondi, il ne fabrique pas un gain. Sans cette
+        # condition, un pari retenu hors bande (repli « chaque course est jouée »,
+        # 27 plans sur 33 600 en 7 jours) voyait son gain affiché remonté au plancher
+        # du profil — un chiffre que le PMU ne paierait jamais.
+        if mise > 0 and _rmin > 0 and float(c.get("rapport_estime") or 0.0) >= _rmin \
+                and gain < math.ceil(mise * _rmin):
             gain = math.ceil(mise * _rmin)
         pari = PariRec(
             type=c["type_pari"],

@@ -168,6 +168,35 @@ def test_chaque_pari_ecarte_porte_rang_et_rapport():
             assert h.get("rang")
 
 
+# ── Le gain affiché ne doit jamais dépasser ce que le ticket peut payer ─────
+
+@pytest.mark.parametrize("profil", ["conservateur", "equilibre", "agressif"])
+@pytest.mark.parametrize("colonne", [2, 3])
+def test_le_gain_affiche_ne_depasse_jamais_mise_fois_rapport(profil, colonne):
+    """Le plancher de tranche servait à rattraper l'arrondi entier du gain ; appliqué
+    sans condition, il remontait aussi le gain d'un pari retenu HORS bande (repli
+    « chaque course est jouée ») au plancher du profil — un chiffre que le PMU ne
+    paierait jamais. Le gain affiché doit rester ≤ mise × rapport, à l'unité près."""
+    plan = mc.generer_plan(10, profil, _preds(colonne), COURSE_INFO,
+                           respect_montant=True)
+    for p in _paris(plan):
+        plafond = p.mise * p.rapport_estime
+        assert p.gain_potentiel <= plafond + 1, (
+            f"{profil} — {p.type} : {p.gain_potentiel}€ affichés pour "
+            f"{p.mise}€ × ×{p.rapport_estime}")
+
+
+def test_le_gain_dun_pari_hors_bande_nest_pas_remonte_au_plancher():
+    """Cas construit : un ticket dont le rapport (×3) est sous la tranche du risqué
+    (×10). Son gain doit rester 3 × la mise, pas 10 ×."""
+    c = {"type_pari": "Simple Gagnant", "chevaux": [{"numero": 5, "nom": "X"}],
+         "mise": 10, "rapport_estime": 3.0, "proba_gain": 0.3, "ev": -0.1,
+         "niveau": "surprise", "texte_explication": "test", "_hors_bande": True}
+    plan = mc._assemble_plan([c], 10, mc._palier(10), False, "agressif")
+    pari = plan.niveaux[0].paris[0]
+    assert pari.gain_potentiel == 30, pari.gain_potentiel
+
+
 # ── Le marché qui bouge après le gel doit se voir ───────────────────────────
 
 def test_reprice_signale_le_ticket_sorti_de_sa_tranche():
