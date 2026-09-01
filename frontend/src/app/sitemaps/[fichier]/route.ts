@@ -34,7 +34,7 @@ const BASE = "https://blackturf.fr";
 const MAJ = {
   accueil: "2026-09-01",
   tarifs: "2026-09-01",
-  guides: "2026-06-23",
+  guides: "2026-09-01",
   guideTypesParis: "2026-09-01",
   guideMusique: "2026-09-01",
   guideValeur: "2026-06-23",
