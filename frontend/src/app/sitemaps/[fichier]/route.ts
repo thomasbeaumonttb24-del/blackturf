@@ -32,11 +32,11 @@ const BASE = "https://blackturf.fr";
 // Dates de dernière refonte réelle des pages éditoriales fixes. À mettre à jour QUAND on
 // touche au contenu de la page, pas à chaque déploiement.
 const MAJ = {
-  accueil: "2026-08-23",
-  tarifs: "2026-08-23",
+  accueil: "2026-09-01",
+  tarifs: "2026-09-01",
   guides: "2026-06-23",
-  guideTypesParis: "2026-06-23",
-  guideMusique: "2026-06-23",
+  guideTypesParis: "2026-09-01",
+  guideMusique: "2026-09-01",
   guideValeur: "2026-06-23",
   blogIndex: "2026-06-23",
   hippodromesIndex: "2026-08-23",
@@ -44,7 +44,7 @@ const MAJ = {
   newsletter: "2026-08-24",
   inscription: "2026-08-23",
   archives: "2026-08-26",
-  pronosticsIa: "2026-08-27",
+  pronosticsIa: "2026-09-01",
   legal: "2026-07-02",
 } as const;
 

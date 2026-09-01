@@ -75,6 +75,7 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
     cheval_id = row[0]
 
     added = 0
+    enrichies = 0          # lignes DÉJÀ présentes dont une colonne vide a été comblée
     for c in courses or []:
         dms = c.get("date_ms")
         if not dms:
@@ -82,15 +83,33 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
         d_course = _dt.fromtimestamp(dms / 1000.0).date()
         hippo = _t(c.get("hippodrome"), 100) or "?"
 
-        # Dédup
+        ecart = c.get("ecart")
+
+        # Dédup — mais PAS un simple « on saute ».
+        #
+        # `ecart_longueurs` est resté NULL sur les 330 145 lignes de la table pendant
+        # des mois (le PMU renvoie un objet, pas un nombre ; cf. sources/pmu.py). Le
+        # correctif ne remplissait que les lignes NEUVES : une course déjà connue
+        # restait vide POUR TOUJOURS, alors que le PMU la renvoie à chaque fois qu'un
+        # de ses partants recourt. Mesure au lendemain du correctif : 432 lignes
+        # remplies sur 331 492, soit 0,13 %.
+        #
+        # On enrichit donc les lignes existantes DONT LA COLONNE EST VIDE. Jamais
+        # d'écrasement : une valeur déjà là est une observation, pas un brouillon.
         exist = await session.execute(text("""
-            SELECT 1 FROM historique_courses
+            SELECT historique_id, ecart_longueurs FROM historique_courses
             WHERE cheval_id = :cid AND date_course = :d AND hippodrome = :h LIMIT 1
         """), {"cid": cheval_id, "d": d_course, "h": hippo})
-        if exist.first():
+        deja = exist.first()
+        if deja:
+            if deja.ecart_longueurs is None and isinstance(ecart, (int, float)):
+                await session.execute(text("""
+                    UPDATE historique_courses SET ecart_longueurs = :e
+                    WHERE historique_id = :hid AND ecart_longueurs IS NULL
+                """), {"e": float(ecart), "hid": deja.historique_id})
+                enrichies += 1
             continue
 
-        ecart = c.get("ecart")
         session.add(HistoriqueCourse(
             historique_id=gen_uuid(),
             cheval_id=cheval_id,
@@ -111,6 +130,9 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
             commentaire_course=_t(c.get("commentaire"), 1000),   # déroulé / trip note (#9)
         ))
         added += 1
+
+    if enrichies:
+        log.info("db_writer.historique_enrichi", cheval=cheval_nom, n=enrichies)
     return added
 
 
