@@ -60,7 +60,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (res.status !== "ok") {
     // Course inconnue OU API en panne : on ne fabrique pas de titre, mais on ne pose pas
     // non plus de noindex sur un simple hoquet réseau — le rendu ci-dessous décide.
-    return { title: "Course PMU", alternates: { canonical: `/courses/${id}` } };
+    // Le repli ne doit PAS etre generique : mesure du 2026-09-01, une panne d'API
+    // pendant une revalidation fait servir ce titre en 200 pendant plus de dix
+    // minutes. « Course PMU » sur 18 000 fiches, c'est un titre dupliqué a l'echelle
+    // du site. Le code de course et la date se derivent de l'identifiant seul.
+    const jourRepli = jourDeCourseId(id);
+    return {
+      title: jourRepli
+        ? `${codeReunionCourse(id)} — course PMU du ${jourCourtAnnee(jourRepli)}`
+        : `Course PMU ${codeReunionCourse(id)}`,
+      // Sans description propre, la fiche heritait de celle de l'accueil : la meme
+      // phrase sur 18 000 pages, soit le meme defaut que le titre generique.
+      description: jourRepli
+        ? `Course ${codeReunionCourse(id)} du ${jourCourtAnnee(jourRepli)} : partants, cotes et probabilité par cheval calculée par l'IA.`
+        : `Course ${codeReunionCourse(id)} : partants, cotes et probabilité par cheval calculée par l'IA.`,
+      alternates: { canonical: `/courses/${id}` },
+    };
   }
 
   const c = res.course;
