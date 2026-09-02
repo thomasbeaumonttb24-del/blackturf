@@ -32,14 +32,21 @@ paysage, sans marges). Les images sont dans le même dossier.
 
 ## Le plan de mise imprimé
 
-Le volet de droite reproduit la sortie réelle du calculateur, pas un résumé :
-profils Prudent / Modéré / Risqué, niveaux Sécurité / Rendement / Coup, espérance
-estimée, mise totale. Les chiffres sont ceux que le site produit pour un plan
-Modéré à 20 € — les pondérations viennent de `frontend/src/components/home/
-CalculatorDemo.tsx` (0,40 / 0,35 / 0,15, renormalisées à 100 %), et les couleurs
-de niveau des classes `.plan-securite` / `.plan-rendement` / `.plan-coup` de
-`globals.css`. Si ces pondérations changent dans le produit, les pourcentages du
-dépliant sont à refaire.
+Le volet de droite reproduit le plan tel qu'il sort sur la **page course**
+(`frontend/src/app/(main)/courses/[id]/page.tsx`), pas la démo de la landing :
+onglets de profil, cartes Budget et Rendement estimé, puis les niveaux
+**SÉCURITÉ / RENDEMENT / GROS LOT** — les libellés viennent de `NIVEAU_META`
+dans `backend/services/mise_calculator.py`. Les teintes sont celles du `CX` de la
+page course : sécurité émeraude (`#ECFDF5` / `#A7F3D0` / `#047857`), rendement or
+(`#FEF6E7` / `#F5DCA8` / `#92400E`), gros lot rouge (`#FEF2F2` / `#FECACA` /
+`#B91C1C`). Chaque pari porte son type, ses chevaux en `N°x + N°y`, sa
+probabilité estimée, sa mise et son gain estimé — comme à l'écran.
+
+Écarté volontairement pour le papier : « Lecture de l'algorithme », « Voir les
+raisons », les paris écartés et le bloc de rendement réel observé. Le rendement
+estimé affiché (+2,1 %) est de l'ordre de ce que le moteur produit réellement —
+le commentaire de la page course note que l'espérance théorique ressort autour
+de 0 à +2 %.
 
 ## Les silhouettes de disciplines
 
