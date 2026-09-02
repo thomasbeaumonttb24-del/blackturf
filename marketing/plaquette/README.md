@@ -43,14 +43,27 @@ dépliant sont à refaire.
 
 ## Les silhouettes de disciplines
 
-Normalisées depuis `frontend/public/img/disciplines/` sur un gabarit commun de
-340 × 210 px : recadrage au contenu, mise à l'échelle dans 86 % × 78 % du
-gabarit, puis pose sur une ligne de sol commune à 90 % de la hauteur. Deux
-raisons : les fichiers d'origine portent des marges transparentes inégales
-(17 à 32 px) qui posaient les quatre chevaux sur quatre sols différents, et un
-recadrage collé au contenu fait toucher les quatre bords — ce qui se lit comme
-un rognage. Les quatre gabarits étant identiques, les images s'affichent en
-boîtes de taille égale (71 × 44 px).
+`attele-v2.png` du site est **défectueux** : la roue du sulky y est une
+demi-galette, tranchée à y=211 alors que le cercle a pour centre (72, 202) et
+pour rayon 38 — la coupe passe au-dessus de l'équateur, avant même le point le
+plus large. Aucun recadrage ni redimensionnement ne rattrape ça. `attele-repare.png`
+complète le disque manquant sous la ligne de coupe ; le reste du tracé d'origine
+est intact.
+
+`gen_disc.py` produit les quatre `disc-*.png` : recadrage au contenu, mise à
+l'échelle, pose sur une toile de 200 px de haut avec une ligne de sol commune à
+y=176 et 15 px de marge latérale. Toile de hauteur identique pour les quatre,
+largeur propre à chacun — d'où l'alignement des sols en `align-items: flex-end`
+avec `width: auto` côté HTML.
+
+Les multiplicateurs `1.00 / 1.06 / 1.13 / 1.17` corrigent ce que la boîte
+englobante ne mesure pas : elle englobe le sulky de l'attelé, la haie de
+l'obstacle et le cavalier redressé du monté, si bien qu'à hauteur de boîte égale
+leurs **chevaux** sont plus petits que celui du plat. Pour régénérer :
+
+    python3 gen_disc.py 1.00 1.06 1.13 1.17
+
+Imprimées à 42 px de haut. En dessous d'environ 34 px les pattes disparaissent.
 
 ## Les critères affichés
 
