@@ -6,12 +6,12 @@ Cache Redis pour éviter requêtes lourdes répétées.
 import json
 import asyncio
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
 
@@ -1666,6 +1666,65 @@ async def stats_palmares_public(
     return result
 
 
+@router.get("/stats/chiffres-site")
+async def stats_chiffres_site(
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    """
+    Les chiffres de fond du service, pour les visuels de communication.
+
+    POURQUOI UN ENDPOINT PLUTÔT QUE DES NOMBRES ÉCRITS DANS LE VISUEL : une
+    publication Instagram est définitive. Un chiffre figé dans le code aurait été
+    exact le soir de la publication puis faux pour toujours, et surtout il aurait
+    fini par contredire la page track-record, qui le calcule, elle, en direct.
+
+    `courses_reglees` et `journees_publiees` sortent EXACTEMENT de la même cohorte
+    que le palmarès public — `_palmares_rows`, donc pronostic figé avant le départ et
+    backfill exclu. Deux définitions du même chiffre finiraient par diverger, et
+    c'est précisément le chiffre sur lequel repose l'argument d'intégrité.
+
+    À NE PAS EXPOSER ICI : le nombre de paris gagnés et le nombre de courses
+    gagnantes. Rapportés au dénominateur ils se lisent comme un taux de réussite,
+    donc comme une rentabilité — alors que le ROI mesuré est négatif. Ils restent sur
+    le track-record, où ils sont présentés avec leur contexte.
+    """
+    CACHE_KEY = "stats:chiffres-site"
+    cached = await _cache_get(redis, CACHE_KEY)
+    if cached:
+        return cached
+
+    volumes = await db.execute(text("""
+        SELECT (SELECT COUNT(*) FROM courses)         AS courses_en_base,
+               (SELECT COUNT(*) FROM participations)  AS partants_analyses
+    """))
+    v = volumes.mappings().first() or {}
+
+    cohorte = await db.execute(text("""
+        SELECT COUNT(DISTINCT r.course_id)                       AS courses_reglees,
+               COUNT(DISTINCT substring(r.course_id, 1, 8))      AS journees_publiees,
+               MIN(c.date_heure)::date                           AS depuis
+        FROM profil_run_log r
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
+          AND c.date_heure IS NOT NULL
+          AND r.created_at < c.date_heure
+          AND COALESCE(r.meta->>'backfill', '') <> 'true'
+    """))
+    co = cohorte.mappings().first() or {}
+
+    result = {
+        "courses_en_base": int(v.get("courses_en_base") or 0),
+        "partants_analyses": int(v.get("partants_analyses") or 0),
+        "courses_reglees": int(co.get("courses_reglees") or 0),
+        "journees_publiees": int(co.get("journees_publiees") or 0),
+        "depuis": co.get("depuis").isoformat() if co.get("depuis") else None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await _cache_set(redis, CACHE_KEY, result, ttl=3600)  # 1 h : ces chiffres bougent lentement
+    return result
+
+
 @router.get("/stats/palmares-gagnants")
 async def stats_palmares_gagnants(
     db: AsyncSession = Depends(get_db),
@@ -1760,9 +1819,26 @@ async def stats_bet_plan_performance(
 
 
 @router.get("/stats/meilleurs-plans-jour")
-async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
+async def stats_meilleurs_plans_jour(
+    jour: Optional[str] = Query(
+        None,
+        description="Journée présentée, au format AAAA-MM-JJ. Par défaut : aujourd'hui à Paris.",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Les meilleurs plans de la journée, pour les visuels de communication.
+    Les meilleurs plans d'une journée, pour les visuels de communication.
+
+    `jour` EXISTE POUR LA MOSAÏQUE INSTAGRAM, et ce n'est pas un confort.
+    Elle se publie le lendemain matin, une fois la journée complète : les dernières
+    courses du programme sont sud-américaines et se courent jusqu'à 23 h 30, réglées
+    une vingtaine de minutes plus tard. Publier « aujourd'hui » laissait donc une
+    fenêtre de dix minutes avant que la journée ne bascule — et une mosaïque publiée
+    de l'autre côté de minuit aurait figé, pour toujours, une journée vide.
+
+    Deuxième raison, aussi importante : les six publications s'étalent sur deux
+    minutes. Sans journée figée, une série lancée à cheval sur minuit produirait des
+    tuiles qui ne parlent pas du même jour.
 
     ATTENTION AU VOCABULAIRE — ces montants sont ceux de PLANS calculés et réglés aux
     rapports réels du PMU, pas d'argent encaissé par qui que ce soit. Tout libellé du
@@ -1778,7 +1854,21 @@ async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
     minuit heure de Paris : filtrer sur l'horodatage la rattachait au lendemain, et le
     visuel du 23 août affichait une course du 22 (constaté sur 22082026R8C10).
     """
-    lignes = await db.execute(text("""
+    # Le PMU écrit le jour en JJMMAAAA en tête du `course_id`. On le construit ici une
+    # seule fois, et les DEUX requêtes s'en servent : elles doivent parler du même jour,
+    # sans quoi le nombre de courses annoncé ne serait pas celui des plans montrés.
+    from services.temps_courses import jour_courses
+
+    if jour:
+        try:
+            jjmmaaaa = date.fromisoformat(jour).strftime("%d%m%Y")
+        except ValueError:
+            raise HTTPException(status_code=422, detail="jour attendu au format AAAA-MM-JJ")
+    else:
+        jjmmaaaa = jour_courses().strftime("%d%m%Y")
+
+    lignes = await db.execute(
+        text("""
         SELECT s.course_id,
                COALESCE(h.nom, c.hippodrome_nom, '') AS hippodrome,
                s.montant_mise, s.montant_retour, s.net, s.nb_gagnes, s.nb_paris,
@@ -1787,12 +1877,13 @@ async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
         JOIN courses c ON c.course_id = s.course_id
         LEFT JOIN reunions r ON r.reunion_id = c.reunion_id
         LEFT JOIN hippodromes h ON h.hippodrome_id = r.hippodrome_id
-        WHERE substring(s.course_id, 1, 8)
-              = to_char(now() AT TIME ZONE 'Europe/Paris', 'DDMMYYYY')
+        WHERE substring(s.course_id, 1, 8) = :jjmmaaaa
           AND s.net > 0
         ORDER BY s.net DESC
         LIMIT 20
-    """))
+    """),
+        {"jjmmaaaa": jjmmaaaa},
+    )
 
     vus: set[str] = set()
     plans: list[dict] = []
@@ -1815,16 +1906,23 @@ async def stats_meilleurs_plans_jour(db: AsyncSession = Depends(get_db)):
         if len(plans) >= 3:
             break
 
-    volume = await db.execute(text("""
+    volume = await db.execute(
+        text("""
         SELECT COUNT(DISTINCT c.course_id) AS nb_courses,
                COUNT(DISTINCT c.reunion_id) AS nb_reunions
         FROM courses c
-        WHERE substring(c.course_id, 1, 8)
-              = to_char(now() AT TIME ZONE 'Europe/Paris', 'DDMMYYYY')
-    """))
+        WHERE substring(c.course_id, 1, 8) = :jjmmaaaa
+    """),
+        {"jjmmaaaa": jjmmaaaa},
+    )
     v = volume.mappings().first() or {}
 
+    # `jour` est renvoyé tel qu'il a été RÉSOLU, jamais tel qu'il a été demandé : le
+    # visuel affiche cette date, et une date d'affichage qui ne serait pas celle des
+    # chiffres est le pire défaut possible sur une publication qu'on ne peut plus
+    # corriger.
     return {
+        "jour": f"{jjmmaaaa[4:]}-{jjmmaaaa[2:4]}-{jjmmaaaa[:2]}",
         "plans": plans,
         "nb_courses": int(v.get("nb_courses") or 0),
         "nb_reunions": int(v.get("nb_reunions") or 0),

@@ -146,7 +146,7 @@ const euro = (n: number) =>
 
 /* ────────────────────────────── Fragments de composition ────────────────────────────── */
 
-function Eyebrow({ children, ton = "or" }: { children: string; ton?: "or" | "tenu" | "sombre" }) {
+export function Eyebrow({ children, ton = "or" }: { children: string; ton?: "or" | "tenu" | "sombre" }) {
   const couleur =
     ton === "or" ? COULEURS.or : ton === "sombre" ? COULEURS.orVif : COULEURS.encreTenue;
   return (
@@ -170,7 +170,7 @@ function Eyebrow({ children, ton = "or" }: { children: string; ton?: "or" | "ten
  * Dans le fil, une tuile est vue seule : sans cette ligne, cinq publications sur six ne
  * disent nulle part où aller.
  */
-function Adresse({ ton = "clair" }: { ton?: "clair" | "sombre" }) {
+export function Adresse({ ton = "clair" }: { ton?: "clair" | "sombre" }) {
   return (
     <div style={{ display: "flex", alignItems: "center" }}>
       <div style={{ display: "flex", width: 22, height: 3, background: COULEURS.orVif }} />
@@ -291,7 +291,7 @@ function LignePlan({ p, rang }: { p: PlanJour; rang: number }) {
   );
 }
 
-function Atout({ titre, texte }: { titre: string; texte: string }) {
+export function Atout({ titre, texte }: { titre: string; texte: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", marginBottom: 40 }}>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
@@ -325,7 +325,7 @@ function Atout({ titre, texte }: { titre: string; texte: string }) {
 }
 
 /** Carte blanche posée sur la photo. */
-function Carte({
+export function Carte({
   x,
   y,
   l,

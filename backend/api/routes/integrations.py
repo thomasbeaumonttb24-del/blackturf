@@ -22,7 +22,7 @@ from typing import Optional
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -145,14 +145,33 @@ async def _verifier(valeur: str):
         return False, f"{type(e).__name__}: {e}"[:200]
 
 
+#: Les séries de mosaïques publiables, et où le SITE les décrit.
+#
+# `site`  : la vitrine — chiffres de fond du service et argumentaire, vraie en
+#           permanence. C'est celle qu'on installe en premier sur un profil vide.
+# `jour`  : les meilleurs plans d'une journée. Ne vaut que pour la journée qu'elle
+#           montre, donc se publie une fois la journée complète.
+MOSAIQUES = {
+    "site": "/visuels/mosaique-site/legendes.json",
+    "jour": "/visuels/mosaique/legendes.json",
+}
+
+
 @router.post("/integrations/instagram/publier-mosaique")
 async def publier_mosaique_instagram(
+    serie: str = Query("site", description="Série à publier : « site » ou « jour »."),
+    attendu: Optional[str] = Query(
+        None,
+        description=(
+            "Garde-fou : première tuile attendue (par exemple « 1-2 »). Si elle ne "
+            "correspond pas à ce que renvoie le site, rien n'est publié."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
     """
-    Publie la mosaïque du jour — six publications qui forment une seule image sur la
-    grille du profil.
+    Publie une mosaïque — six publications qui forment une seule image sur la grille.
 
     Les tuiles et leurs légendes viennent du SITE, déjà triées dans l'ordre de
     publication : la grille se remplissant du plus récent en haut à gauche, il faut
@@ -160,13 +179,24 @@ async def publier_mosaique_instagram(
 
     Cette route ne publie QUE si l'interrupteur global est ouvert. Elle ne le force
     jamais : publier au nom d'une marque reste une décision explicite.
+
+    `attendu` existe parce qu'une publication Instagram ne se reprend pas. Six
+    publications parties dans le mauvais ordre, ou tirées de la mauvaise série,
+    ne se réparent qu'en supprimant tout le profil. Le garde-fou coûte une ligne.
     """
     from services.instagram import publier_mosaique, publication_active
+
+    chemin = MOSAIQUES.get(serie)
+    if not chemin:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Série inconnue : {serie!r}. Attendu : {', '.join(sorted(MOSAIQUES))}.",
+        )
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
-                "http://frontend:3000/visuels/mosaique/legendes.json",
+                f"http://frontend:3000{chemin}",
                 headers={"Host": "blackturf.fr"},
             )
             resp.raise_for_status()
@@ -177,8 +207,15 @@ async def publier_mosaique_instagram(
     if len(tuiles) != 6:
         raise HTTPException(status_code=502, detail=f"Mosaïque incomplète ({len(tuiles)} tuiles)")
 
+    if attendu and tuiles[0].get("tuile") != attendu:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Première tuile {tuiles[0].get('tuile')!r}, attendue {attendu!r} — rien n'a été publié.",
+        )
+
     resultats = await publier_mosaique(tuiles)
     return {
+        "serie": serie,
         "publication_active": publication_active(),
         "tuiles": resultats,
         "publiees": sum(1 for r in resultats if r["publie"]),
