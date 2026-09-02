@@ -32,22 +32,28 @@ paysage, sans marges). Les images sont dans le même dossier.
 
 ## Le logo
 
-Le logo au cercle doré vient de `frontend/src/app/icon.png` (768 × 768, la plus
-grande version disponible ; `public/logo.png` ne fait que 160 × 87). Fond blanc
-détouré par une rampe de luminance, la couleur d'origine intacte.
+Signature horizontale : le rond doré + « BlackTurf » composé (Black en encre,
+Turf en or), comme dans la barre de navigation du site.
 
-- `logo-or.png` — version fond clair, telle quelle.
-- `logo-or-inv.png` — version fond sombre pour la couverture : le cheval noir ne
-  lit pas sur la photo, il est passé en aplat blanc. Ses détails internes sont
-  dessinés **en blanc pur** dans l'original, donc en inversion ils ressortaient
-  en creux et mouchetaient la silhouette : les contre-formes sont bouchées
-  (`binary_fill_holes`) avant le remplissage. Palette réduite à 12 couleurs — le
-  logo n'a que deux encres — pour tenir sous la limite de poids de la page.
+Le logo de `frontend/src/app/icon.png` porte le mot **à l'intérieur du cercle** :
+sous ~100 px il devient illisible, donc inutilisable en pied de page. Le rond est
+donc reconstruit sans le mot, à partir de la géométrie mesurée sur l'original —
+ajustement de cercle par moindres carrés sur les pixels d'or, secteurs hors mot :
 
-**Le mot est dans le cercle** : en dessous d'environ 100 px il devient illisible.
-Il n'est donc utilisé en entier que sur la couverture, à 128 px. Les pieds de
-page gardent le lockup compact (silhouette `mark-ink.png` + « BlackTurf »
-composé), qui reste lisible à 20 px.
+    centre (384,5 · 365,0)   anneau fin r 247 → 256   anneau épais r 266 → 275,5
+    or #AE9457
+
+Les anneaux sont retracés à ce gabarit (suréchantillonnage ×4), puis la
+silhouette du cheval est reposée à sa position d'origine dans le cercle.
+
+- `rond-or.png` — fond clair.
+- `rond-or-inv.png` — fond sombre : cheval en aplat blanc, contre-formes bouchées
+  (ses détails internes sont blancs dans l'original, en inversion ils
+  mouchetaient la silhouette).
+- `rond-or-s.png` — **variante petites tailles**, anneaux épaissis ×1,9. Sous
+  34 px d'affichage le trait d'origine tombe à 0,5 px : un filet qui disparaît au
+  tirage. Utilisée dans les deux pieds de page (28 et 32 px) ; la couverture garde
+  `rond-or-inv.png` à 50 px.
 
 ## Les performances imprimées
 
