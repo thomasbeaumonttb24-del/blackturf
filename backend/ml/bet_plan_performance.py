@@ -563,35 +563,73 @@ async def compute_forward_performance(
         params["since"] = since
 
     # ROW_NUMBER() plutôt que DISTINCT ON : compatible SQLite (tests) ET PostgreSQL
-    # (même convention que admin.py / clv_monitor.py). Dernier règlement 'settled'
-    # de chaque plan émis avant le départ.
+    # (même convention que admin.py / clv_monitor.py).
+    #
+    # DEUX déduplications imbriquées, et la seconde est celle qui manquait :
+    #
+    #   1. `rn`      — dernier RÈGLEMENT de chaque plan (les règlements sont
+    #                  append-only : un rapport publié tardivement en ajoute un).
+    #   2. `rn_plan` — dernier PLAN ÉMIS de chaque (course × profil × montant ×
+    #                  bankroll). Le même conseil est ré-émis à chaque mouvement de
+    #                  cote : ~33 snapshots pré-course par course en production.
+    #
+    # Sans (2), ces ~33 copies quasi identiques entraient TOUTES dans l'agrégat, et
+    # c'est toute la statistique du plan de mise qui s'en trouvait faussée :
+    #   - `n_paris` / `n_plans` gonflés d'un facteur ~33, donc des seuils de
+    #     fiabilité atteints avec une seule course (Tiercé Désordre : 35 paris,
+    #     1 course ; Pick5 : 86 paris, 3 courses) ;
+    #   - l'IC bootstrap ré-échantillonnait 33 copies du même résultat → intervalle
+    #     ~5,7× (√33) trop étroit, c'est-à-dire une fausse certitude publiée ;
+    #   - `losing_streak_max` multiplié par ~33 pendant que `losing_streak_attendue`
+    #     ne croît qu'en ln(n) → le test « série > 2× l'attendu » devenait vrai
+    #     presque partout et rétrogradait des segments sans raison réelle ;
+    #   - `drawdown_max` en euros multiplié par ~33 ;
+    #   - pondération biaisée vers les courses longues et liquides (un quinté suivi
+    #     toute la journée pesait plusieurs fois une petite réunion).
+    #
+    # La règle de dédup est celle qui sert déjà à l'apprentissage des profils
+    # (`ml.profil_learning.record_profil_runs`) : le DERNIER conseil émis avant le
+    # départ fait foi. `subject_hash` est volontairement hors de la clé — deux
+    # utilisateurs servis par le même conseil, c'est un conseil, pas deux.
+    #
     # STREAM et non `.execute(...).all()` : la ligne porte deux blobs JSON (`plan`
-    # et `bilan`, un par pari) et il y a ~33 plans pré-course par course. Sur
-    # l'historique complet (`since=None`, 60 802 plans) tout matérialiser d'un coup
-    # faisait tuer le conteneur API — `exit 137`, limite 1,5 Go — pour TOUS les
-    # utilisateurs, depuis un simple `/stats/bet-plan-performance?days=`.
-    # En flux, chaque blob est libéré dès qu'il est agrégé : seul l'agrégat reste.
+    # et `bilan`, un par pari). Sur l'historique complet (`since=None`, 60 802 plans)
+    # tout matérialiser d'un coup faisait tuer le conteneur API — `exit 137`, limite
+    # 1,5 Go — pour TOUS les utilisateurs, depuis un simple
+    # `/stats/bet-plan-performance?days=`. En flux, chaque blob est libéré dès qu'il
+    # est agrégé : seul l'agrégat reste.
     resultat = await session.stream(text(f"""
         SELECT plan_snapshot_id, course_id, profil, bankroll, model_version_id,
                emitted_at, course_start_at, plan, discipline, hippodrome_nom,
                nb_partants, bilan, net, roi, settled_at
         FROM (
-            SELECT s.plan_snapshot_id, s.course_id, s.profil, s.bankroll,
-                   s.model_version_id, s.emitted_at, s.course_start_at, s.plan,
-                   c.discipline, c.hippodrome_nom, c.nb_partants,
-                   t.bilan, t.net, t.roi, t.settled_at,
+            SELECT plan_snapshot_id, course_id, profil, bankroll, model_version_id,
+                   emitted_at, course_start_at, plan, discipline, hippodrome_nom,
+                   nb_partants, bilan, net, roi, settled_at,
                    ROW_NUMBER() OVER (
-                       PARTITION BY s.plan_snapshot_id
-                       ORDER BY t.settled_at DESC, t.settlement_id DESC
-                   ) AS rn
-            FROM bet_plan_snapshots s
-            JOIN courses c ON c.course_id = s.course_id
-            JOIN bet_plan_settlements t
-                ON t.plan_snapshot_id = s.plan_snapshot_id AND t.statut = 'settled'
-            WHERE s.is_pre_course = true
-              {since_clause}
-        ) ranked
-        WHERE rn = 1
+                       PARTITION BY course_id, profil, montant_demande, bankroll
+                       ORDER BY emitted_at DESC, plan_snapshot_id DESC
+                   ) AS rn_plan
+            FROM (
+                SELECT s.plan_snapshot_id, s.course_id, s.profil, s.bankroll,
+                       s.montant_demande, s.model_version_id, s.emitted_at,
+                       s.course_start_at, s.plan,
+                       c.discipline, c.hippodrome_nom, c.nb_partants,
+                       t.bilan, t.net, t.roi, t.settled_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY s.plan_snapshot_id
+                           ORDER BY t.settled_at DESC, t.settlement_id DESC
+                       ) AS rn
+                FROM bet_plan_snapshots s
+                JOIN courses c ON c.course_id = s.course_id
+                JOIN bet_plan_settlements t
+                    ON t.plan_snapshot_id = s.plan_snapshot_id AND t.statut = 'settled'
+                WHERE s.is_pre_course = true
+                  {since_clause}
+            ) dernier_reglement
+            WHERE rn = 1
+        ) dernier_plan
+        WHERE rn_plan = 1
     """), params)
 
     plan_rows: list[dict] = []
@@ -771,10 +809,28 @@ def evaluate_segment_gates(perf: dict) -> dict[str, dict]:
     ``n_courses >= 30``. Mesuré, cela réhabilitait 8 types ruineux (Multi en 4 à
     −100 % sur 7 courses, Pick5 −100 % sur 3, Tiercé et Quinté+ Désordre −100 % sur
     1 course chacun), parce qu'un segment redevenu "observed" retombe en "active"
-    par défaut. Le seuil de SUSPENSION reste donc volontairement permissif.
+    par défaut.
+
+    C'est ce DERNIER point qui est corrigé ici, et il vaut bien mieux que le
+    contournement : un segment sous le seuil de fiabilité ne produit plus AUCUNE
+    décision. Il est absent du dict retourné, donc ``persist_segment_gates`` ne le
+    touche pas et la dernière décision connue continue de s'appliquer — la règle
+    que ce module énonçait déjà (« on ne réactive jamais un segment suspendu par
+    simple absence de données ») mais que cette fonction violait en émettant
+    "active" par défaut.
+
+    C'est aussi ce qui rend la déduplication des plans (un conseil par course, et
+    non ses ~33 ré-émissions) exploitable : les compteurs redeviennent honnêtes
+    SANS que la chute mécanique de ``n_paris`` ne réhabilite en silence les types
+    déjà prouvés ruineux.
     """
     out: dict[str, dict] = {}
     for key, m in (perf.get("segments") or {}).items():
+        if not m.get("reliable"):
+            # Pas assez d'observations pour trancher quoi que ce soit → on ne
+            # tranche pas. Ne RIEN écrire laisse la décision précédente en place ;
+            # écrire "active" l'aurait effacée.
+            continue
         status, factor, reason = "active", 1.0, None
         # DÉCISION SUR L'AVANTAGE WINSORISÉ (audit 2026-08-31), pas sur le brut :
         # un segment ne doit ni survivre ni être condamné à cause d'un seul ticket.

@@ -426,6 +426,29 @@ class HistoriqueCourse(Base):
 
     __table_args__ = (
         Index("ix_historique_cheval_date", "cheval_id", "date_course"),
+        # UN PARTANT, UNE LIGNE D'HISTORIQUE.
+        #
+        # `_save_historical_course` faisait un `on_conflict_do_nothing` SANS cible :
+        # la clé primaire étant un uuid neuf à chaque exécution, il n'y avait jamais
+        # de conflit et les re-scrapes empilaient jusqu'à dix copies du même
+        # partant. Le jeu d'entraînement se joint sur (cheval_id, course_id) : chaque
+        # copie y devenait une ligne d'apprentissage supplémentaire, features et
+        # label identiques, poids multiplié d'autant.
+        #
+        # La migration 0012 a dédoublonné et posé cet index en SQL brut. Il n'était
+        # pas déclaré ici : `Base.metadata.create_all` — donc toute la suite de
+        # tests et l'environnement de développement — tournait sans la garde qui
+        # protège la production. Le déclarer fait tenir l'invariant partout.
+        #
+        # PARTIEL, comme en base : les courses EXTERNES (`course_id` nul) n'ont pas
+        # d'identifiant PMU, elles ne peuvent pas être dédoublonnées sur cette clé
+        # et la jointure d'entraînement ne les atteint jamais.
+        Index(
+            "uq_hist_cheval_course", "cheval_id", "course_id",
+            unique=True,
+            sqlite_where=text("course_id IS NOT NULL"),
+            postgresql_where=text("course_id IS NOT NULL"),
+        ),
     )
 
 

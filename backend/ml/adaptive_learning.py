@@ -39,6 +39,11 @@ T_LEARNING_RATE = 0.02
 T_DECAY = 0.95
 # Borne temperature
 T_MIN, T_MAX = 0.6, 2.0
+# Nombre minimal de COURSES (pas de lignes) avant d'ajuster la température sur les
+# données. En dessous, on préserve l'état existant plutôt que de le remplacer par
+# une valeur tirée de trois réunions — même règle de cold start que les autres
+# apprentissages du système.
+TEMP_MIN_COURSES = 300
 
 # Poids des features adaptatifs — groupe → poids relatif
 DEFAULT_FEATURE_WEIGHTS = {
@@ -457,9 +462,34 @@ class AdaptiveLearning:
             updates[group] = {"ancien": round(old_w, 4), "nouveau": round(new_w, 4),
                               "delta": round(delta, 4), "cause": "causal"}
 
-        if not was_surprise:
-            return updates  # Hors surprise : seuls les nudges causaux s'appliquent
+        if was_surprise:
+            updates.update(self._renforcer_sur_surprise(autopsy))
+        # La DÉCROISSANCE vers le défaut s'applique à TOUTES les courses, pas
+        # seulement aux surprises.
+        #
+        # C'était un cliquet : les nudges causaux montent à chaque course (ils sont
+        # appliqués juste au-dessus, hors du garde `was_surprise`) tandis que le
+        # retour vers le défaut vivait APRÈS le `return` ci-dessus, donc uniquement
+        # les jours de surprise. Les poids ne pouvaient que grimper jusqu'à leur
+        # plafond de 2.0 et y rester — et `apply_feature_weight_tilt` applique ce
+        # plafond à CHAQUE prédiction.
+        for group in self.feature_weights:
+            default_w = DEFAULT_FEATURE_WEIGHTS.get(group, 1.0)
+            current_w = self.feature_weights[group]
+            self.feature_weights[group] = round(
+                current_w + (default_w - current_w) * 0.02,  # 2% de retour vers défaut
+                4
+            )
+        return updates
 
+    def _renforcer_sur_surprise(self, autopsy: dict) -> dict:
+        """Renforce les groupes dont l'autopsie montre un signal non exploité.
+
+        Extrait de `_update_feature_weights` pour que la DÉCROISSANCE vers les
+        poids par défaut cesse d'être enfermée derrière le `return` du cas
+        « pas de surprise ».
+        """
+        updates: dict = {}
         # Mapping autopsie → groupe de features
         autopsy_to_group = {
             "spi_manque": "signaux_avances",
@@ -481,16 +511,6 @@ class AdaptiveLearning:
                 new_w = min(old_w + delta, 2.0)  # Plafond à 2.0
                 self.feature_weights[group] = round(new_w, 4)
                 updates[group] = {"ancien": round(old_w, 4), "nouveau": round(new_w, 4), "delta": round(delta, 4)}
-
-        # Décroissance lente vers les poids par défaut pour éviter l'explosion
-        for group in self.feature_weights:
-            default_w = DEFAULT_FEATURE_WEIGHTS.get(group, 1.0)
-            current_w = self.feature_weights[group]
-            self.feature_weights[group] = round(
-                current_w + (default_w - current_w) * 0.02,  # 2% de retour vers défaut
-                4
-            )
-
         return updates
 
     def apply_calibration(
@@ -689,6 +709,183 @@ class AdaptiveLearning:
             ],
             "alerte_calibration": self.brier_ema > 0.22 or self.surprise_rate_ema > 0.45,
         }
+
+
+def _nll_temperature(logits_par_course: list, labels_par_course: list, T: float) -> float:
+    """Log-vraisemblance négative moyenne du champ pour une température donnée.
+
+    Le scaling est CENTRÉ sur la moyenne des logits de la course, exactement comme
+    `AdaptiveLearning.apply_calibration` : sans ce centrage, T > 1 tirerait toute
+    proba < 0,5 VERS 0,5, donc gonflerait les outsiders — l'inverse de l'effet
+    recherché. Fonction pure, testable sans base.
+    """
+    T = max(float(T), 0.1)
+    total, n = 0.0, 0
+    for logits, y in zip(logits_par_course, labels_par_course):
+        if logits.size == 0:
+            continue
+        moyenne = float(logits.mean())
+        p = 1.0 / (1.0 + np.exp(-(moyenne + (logits - moyenne) / T)))
+        p = np.clip(p, 1e-9, 1 - 1e-9)
+        total += float(-np.sum(y * np.log(p) + (1 - y) * np.log(1 - p)))
+        n += int(logits.size)
+    return total / n if n else float("inf")
+
+
+def fit_temperature(logits_par_course: list, labels_par_course: list,
+                    t_min: float = T_MIN, t_max: float = T_MAX,
+                    n_pas: int = 60) -> Optional[float]:
+    """Température qui MINIMISE la NLL sur un échantillon hors-échantillon.
+
+    Fonction pure, testable sans base. `None` si l'échantillon ne permet pas de
+    conclure (aucune course, une seule classe) — on ne renvoie jamais une valeur
+    par défaut qui écraserait une calibration existante.
+
+    Recherche en deux passes sur une grille : le problème est unidimensionnel et
+    la NLL y est lisse ; une grille grossière puis un raffinement local coûtent
+    quelques millisecondes et évitent d'embarquer un optimiseur.
+
+    Ce que ça REMPLACE — et c'est tout l'objet du drapeau `BT_TEMP_FIT` :
+
+      - drapeau à 0 (le défaut, donc la production) : un cliquet asymétrique
+        montait T à chaque surprise et ne la baissait que sur `brier < 0,14 ET
+        pas de surprise`. Les surprises étant fréquentes en course, T dérivait
+        vers le haut (1,2567 observée) — un aplatissement du champ qui REMONTE
+        les outsiders, sans rapport avec la calibration réelle ;
+      - drapeau à 1 : `_update_temperature` renvoyait 0.0 et RIEN ne prenait le
+        relais. `fit_temperature_holdout` n'existait que dans un commentaire.
+        Activer le drapeau GELAIT donc la température sur la valeur dérivée, au
+        lieu de la corriger.
+    """
+    total_positifs = sum(int(np.sum(y)) for y in labels_par_course)
+    total_lignes = sum(int(y.size) for y in labels_par_course)
+    if total_lignes == 0 or total_positifs == 0 or total_positifs == total_lignes:
+        return None
+
+    def _meilleure(grille):
+        return min(grille, key=lambda t: _nll_temperature(
+            logits_par_course, labels_par_course, t))
+
+    grossiere = np.linspace(t_min, t_max, n_pas)
+    t0 = float(_meilleure(grossiere))
+    pas = (t_max - t_min) / (n_pas - 1)
+    fine = np.linspace(max(t_min, t0 - pas), min(t_max, t0 + pas), 21)
+    return float(np.clip(_meilleure(fine), t_min, t_max))
+
+
+async def fit_temperature_holdout(session: AsyncSession,
+                                  frac_holdout: float = 0.2) -> dict:
+    """Ajuste la température sur les courses les PLUS RÉCENTES, et la persiste.
+
+    Source : `prediction_evaluation`, les probas top3 BRUTES des prédictions figées
+    avant le départ (mêmes gardes anti-fuite que les calibrations isotones). La
+    courbe isotone top3 est appliquée d'abord, parce que c'est l'ordre de la chaîne
+    d'inférence : la température corrige ce que l'isotone a laissé, pas la sortie
+    nue du modèle.
+
+    Hold-out découpé PAR COURSE et postérieur : les partants d'une même course
+    partagent leurs features de champ, un découpage par ligne laisserait chaque
+    course fuir dans son propre hold-out.
+
+    N'écrase JAMAIS l'état existant quand la mesure ne conclut pas (trop peu de
+    courses, une seule classe) : même règle de cold start que les autres
+    apprentissages du système.
+    """
+    from ml.isotonic_calibration_top3 import apply_calibration as _t3_apply
+    from ml.isotonic_calibration_top3 import load_curve as _t3_load
+
+    try:
+        rows = (await session.execute(text("""
+            SELECT pe.course_id, pa.numero, pe.proba_top3_raw,
+                   c.nb_partants, c.date_heure, r.classement
+            FROM prediction_evaluation pe
+            JOIN participations pa ON pa.participation_id = pe.participation_id
+            JOIN courses c         ON c.course_id         = pe.course_id
+            JOIN resultats r       ON r.course_id         = pe.course_id
+            WHERE pe.is_replayable = true
+              AND pe.proba_top3_raw IS NOT NULL
+              AND r.classement IS NOT NULL
+              AND c.date_heure IS NOT NULL
+              AND pe.created_at IS NOT NULL
+              AND pe.created_at < c.date_heure
+            ORDER BY c.date_heure ASC, pe.course_id ASC
+        """))).all()
+    except Exception as e:
+        log.warning("adaptive.temperature.requete_echouee", err=str(e)[:160])
+        return {"status": "error", "message": str(e)[:160]}
+
+    courbe = None
+    try:
+        courbe = await _t3_load(session)
+    except Exception as e:
+        log.warning("adaptive.temperature.isotone_indisponible", err=str(e)[:140])
+
+    # Regroupement par course, en préservant l'ordre chronologique.
+    courses: list[tuple] = []
+    courant, lot = None, []
+    for r in rows:
+        if r[0] != courant:
+            if lot:
+                courses.append((courant, lot))
+            courant, lot = r[0], []
+        lot.append(r)
+    if lot:
+        courses.append((courant, lot))
+
+    if len(courses) < TEMP_MIN_COURSES:
+        log.warning("adaptive.temperature.cold_start_preserve",
+                    n_courses=len(courses), min_courses=TEMP_MIN_COURSES)
+        return {"status": "skipped_insufficient_data", "n_courses": len(courses)}
+
+    coupe = int(len(courses) * (1.0 - frac_holdout))
+    holdout = courses[coupe:]
+
+    logits_par_course, labels_par_course = [], []
+    for _cid, lignes in holdout:
+        top3 = set()
+        classement = lignes[0][5]
+        if isinstance(classement, str):
+            try:
+                classement = json.loads(classement)
+            except (ValueError, TypeError):
+                classement = None
+        for e in classement or []:
+            try:
+                if int(e.get("position")) in (1, 2, 3):
+                    top3.add(int(e.get("numero")))
+            except (TypeError, ValueError, AttributeError):
+                continue
+        if not top3:
+            continue
+        p = np.clip(np.array([float(r[2]) for r in lignes], dtype=float), 1e-6, 0.999)
+        if courbe:
+            try:
+                p = np.asarray(_t3_apply(p, courbe, int(lignes[0][3] or len(lignes))),
+                               dtype=float)
+            except Exception:
+                pass
+        p = np.clip(p, 1e-7, 1 - 1e-7)
+        logits_par_course.append(np.log(p / (1 - p)))
+        labels_par_course.append(
+            np.array([1.0 if int(r[1]) in top3 else 0.0 for r in lignes]))
+
+    T = fit_temperature(logits_par_course, labels_par_course)
+    if T is None:
+        log.warning("adaptive.temperature.indecidable", n_courses_holdout=len(holdout))
+        return {"status": "undecidable", "n_courses_holdout": len(holdout)}
+
+    nll_avant = _nll_temperature(logits_par_course, labels_par_course, 1.0)
+    nll_apres = _nll_temperature(logits_par_course, labels_par_course, T)
+    al = get_adaptive_learning()
+    ancienne = al.temperature
+    al.temperature = float(T)
+    await al.save_state(session)
+    log.info("adaptive.temperature.ajustee", ancienne=round(ancienne, 4),
+             nouvelle=round(T, 4), n_courses_holdout=len(logits_par_course),
+             nll_a_T1=round(nll_avant, 6), nll_ajustee=round(nll_apres, 6))
+    return {"status": "ok", "temperature": float(T), "temperature_avant": ancienne,
+            "n_courses_holdout": len(logits_par_course),
+            "nll_a_T1": nll_avant, "nll_ajustee": nll_apres}
 
 
 # ── Instance globale (singleton) ────────────────────────────────────────────

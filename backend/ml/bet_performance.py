@@ -335,6 +335,15 @@ async def compute_model_heat(session: AsyncSession) -> dict:
     n_bets = 0
     try:
         since = datetime.now(timezone.utc) - timedelta(days=_HEAT_ROI_JOURS)
+        # DEUX déduplications, comme dans `ml.bet_plan_performance` :
+        #   `rn`      = dernier RÈGLEMENT de chaque plan (append-only) ;
+        #   `rn_plan` = dernier CONSEIL de chaque (course × profil × montant ×
+        #               bankroll). Le même plan est ré-émis à chaque mouvement de
+        #               cote (~33 fois par course) : sans cette seconde dédup, le
+        #               thermostat pondérait les courses par leur nombre de
+        #               ré-émissions — donc par leur liquidité, pas par leur
+        #               résultat — et atteignait son seuil de 100 plans avec trois
+        #               courses.
         row = (await session.execute(text("""
             SELECT COALESCE(SUM(mise), 0), COALESCE(SUM(retour), 0), COUNT(*)
             FROM (
@@ -342,18 +351,28 @@ async def compute_model_heat(session: AsyncSession) -> dict:
                        CASE WHEN montant_retour < montant_mise * :cap
                             THEN montant_retour ELSE montant_mise * :cap END AS retour
                 FROM (
-                    SELECT t.montant_mise, t.montant_retour,
+                    SELECT montant_mise, montant_retour,
                            ROW_NUMBER() OVER (
-                               PARTITION BY t.plan_snapshot_id
-                               ORDER BY t.settled_at DESC, t.settlement_id DESC
-                           ) AS rn
-                    FROM bet_plan_settlements t
-                    JOIN bet_plan_snapshots s
-                      ON s.plan_snapshot_id = t.plan_snapshot_id
-                    WHERE t.statut = 'settled' AND s.is_pre_course = true
-                      AND t.settled_at >= :since AND t.montant_mise > 0
-                ) ranked
-                WHERE rn = 1
+                               PARTITION BY course_id, profil, montant_demande, bankroll
+                               ORDER BY emitted_at DESC, plan_snapshot_id DESC
+                           ) AS rn_plan
+                    FROM (
+                        SELECT t.montant_mise, t.montant_retour,
+                               s.course_id, s.profil, s.montant_demande, s.bankroll,
+                               s.emitted_at, s.plan_snapshot_id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY t.plan_snapshot_id
+                                   ORDER BY t.settled_at DESC, t.settlement_id DESC
+                               ) AS rn
+                        FROM bet_plan_settlements t
+                        JOIN bet_plan_snapshots s
+                          ON s.plan_snapshot_id = t.plan_snapshot_id
+                        WHERE t.statut = 'settled' AND s.is_pre_course = true
+                          AND t.settled_at >= :since AND t.montant_mise > 0
+                    ) dernier_reglement
+                    WHERE rn = 1
+                ) dernier_plan
+                WHERE rn_plan = 1
             ) q
         """), {"since": since, "cap": _HEAT_GAIN_CAP})).first()
         if row and float(row[0] or 0) > 0 and int(row[2] or 0) >= _MIN_PLANS_FOR_ROI:

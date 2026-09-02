@@ -33,17 +33,31 @@ async def lifespan(app: FastAPI):
         from db.database import AsyncSessionLocal
         from ml.adaptive_learning import initialize_adaptive_learning
         from ml.drift_detector import initialize_drift_detector
+        from ml.blend_calibration import charger_alpha
+        from ml.harville_calibration import charger_exposants
         from ml.meta_learner import initialize_meta_learner
         async with AsyncSessionLocal() as al_session:
             al = await initialize_adaptive_learning(al_session)
             dd = await initialize_drift_detector(al_session)
             ml_meta = await initialize_meta_learner(al_session)
+            # Exposants de position du modele d'arrivee (biais de Harville). Le
+            # moteur de plan est appele en SYNCHRONE : il ne peut pas ouvrir de
+            # session, il lit un cache memoire. Sans ce chargement au demarrage, il
+            # tournerait avec les exposants neutres jusqu'au premier recalcul
+            # nocturne -- une correction apprise mais jamais servie.
+            _exp = await charger_exposants(al_session)
+            # ALPHA appris : la confiance accordée au modèle face au marché.
+            # `predict_course` le lit dans un cache mémoire ; sans ce chargement, un
+            # alpha appris resterait appris et jamais servi jusqu'au redémarrage.
+            _alpha = await charger_alpha(al_session)
             log.info(
                 "adaptive_learning.initialized",
                 temperature=round(al.temperature, 4),
                 n_races=al.n_races_processed,
                 drift_status=dd.get_drift_report().get("status", "healthy"),
                 meta_learner_trained=ml_meta.is_trained,
+                exposants_arrivee=[round(x, 3) for x in _exp],
+                alpha_marche=round(float(_alpha.get("alpha_max") or 0.42), 3),
             )
     except Exception as e:
         log.warning("adaptive_learning.init_failed", err=str(e))

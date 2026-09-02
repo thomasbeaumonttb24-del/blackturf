@@ -1786,6 +1786,28 @@ async def supervision_algo_evolution(
     return await compute_algo_evolution(db, limit=limit)
 
 
+@router.get("/supervision/outils-apprentissage")
+async def supervision_outils_apprentissage(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Ce que le systeme apprend, quand il l'a appris, et ce que ca a change.
+
+    Les dix-huit apprentissages nocturnes vivent tous derriere le retrain, dans un
+    seul job RQ : quand le worker se fait OOM-killer, ils sautent EN SILENCE (vecu
+    le 20/08/2026, quatre-vingt-treize secondes apres un deploiement annonce
+    reussi). Cet endpoint expose leur etat PERSISTE — date du dernier succes,
+    peremption au-dela de 48 h — plus le verdict de chaque correcteur : a-t-il
+    prouve qu'il ameliorait quelque chose, ou est-il en place sans preuve ?
+
+    Tout provient d'un etat reellement persiste. Un outil sans mesure suffisante
+    rend `mesure_disponible = false` et dit pourquoi : aucune valeur neutre n'est
+    deguisee en mesure.
+    """
+    from ml.supervision_apprentissage import etat_outils_apprentissage
+    return await etat_outils_apprentissage(db)
+
+
 @router.get("/supervision/pulse")
 async def supervision_pulse(
     db: AsyncSession = Depends(get_db),

@@ -250,10 +250,29 @@ def test_streak_attendue_croit_quand_le_pari_est_rare():
     assert bpp._streak_attendue(0.5, 1) is None
 
 
-def test_gate_reste_actif_sous_le_seuil_de_fiabilite_meme_si_roi_tres_negatif():
+def test_sous_le_seuil_de_fiabilite_aucune_decision_n_est_prise():
+    """Un segment trop mince ne tranche RIEN — il ne suspend pas, et surtout il ne
+    réactive pas.
+
+    L'ancienne version émettait ``status="active"``, ce qui EFFAÇAIT une suspension
+    déjà prouvée dès que l'échantillon récent devenait mince. C'est exactement le
+    piège qui avait fait rejeter le passage du seuil en courses : 8 types ruineux
+    (Multi en 4 à −100 %, Pick5 −100 %…) remontaient par ce chemin. Ne rien écrire
+    laisse `persist_segment_gates` conserver la dernière décision connue.
+    """
     perf = {"segments": {"Simple Gagnant": {
         "reliable": False, "roi_pct": None, "roi_pct_raw": -90.0,
         "n_paris": 5, "n_plans": 2, "drawdown_max": None, "montant_mise": 5.0,
+    }}}
+    assert bpp.evaluate_segment_gates(perf) == {}
+
+
+def test_un_segment_fiable_et_sain_reste_bien_actif():
+    """La réactivation reste possible : elle exige seulement d'être MESURÉE."""
+    perf = {"segments": {"Simple Gagnant": {
+        "reliable": True, "roi_pct": -10.0, "edge_pct_winsor": 5.5,
+        "edge_pct": 5.5, "n_paris": 120, "n_plans": 60, "n_courses": 60,
+        "montant_mise": 120.0, "prelevement_pct": 15.5,
     }}}
     gates = bpp.evaluate_segment_gates(perf)
     assert gates["Simple Gagnant"]["status"] == "active"

@@ -135,3 +135,74 @@ def test_la_fenetre_par_defaut_couvre_un_cycle_saisonnier():
         "le plafond mémoire est descendu sous le volume réellement disponible : "
         "il rognerait de l'historique au lieu de servir de garde-fou"
     )
+
+
+@pytest.mark.asyncio
+async def test_un_partant_ne_peut_pas_avoir_deux_lignes_d_historique(db):
+    """UN PARTANT, UNE LIGNE D'ENTRAÎNEMENT — garanti par le schéma, pas par un
+    filtre à la lecture.
+
+    `_save_historical_course` faisait un `on_conflict_do_nothing` SANS cible : la
+    clé primaire étant un uuid neuf à chaque exécution, il n'y avait jamais de
+    conflit et les re-scrapes empilaient jusqu'à dix copies du même partant. Le jeu
+    d'entraînement se joint sur (cheval_id, course_id) : chaque copie y devenait une
+    ligne d'apprentissage supplémentaire, features et label identiques, poids
+    multiplié d'autant.
+
+    La migration 0012 a dédoublonné et posé un index unique partiel. Il n'était PAS
+    déclaré dans le modèle : `Base.metadata.create_all` — donc toute cette suite de
+    tests et l'environnement de développement — tournait sans la garde qui protège
+    la production. Ce test verrouille sa déclaration.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from db.models import HistoriqueCourse
+
+    base = datetime.now() - timedelta(hours=1)
+    await _semer(db, 3, base)
+
+    db.add(HistoriqueCourse(
+        historique_id="DOUBLON", cheval_id="H0000", course_id="C0000",
+        date_course=base.date(), hippodrome="Vincennes", discipline="Attelé",
+        distance=2700, position_arrivee=1,
+    ))
+    with pytest.raises(IntegrityError):
+        await db.commit()
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_les_courses_externes_echappent_a_l_unicite(db):
+    """L'index est PARTIEL, comme en base : une course externe n'a pas
+    d'identifiant PMU (`course_id` nul), on ne peut pas la dédoublonner sur cette
+    clé — et la jointure d'entraînement ne l'atteint jamais."""
+    from db.models import HistoriqueCourse
+
+    for i in range(2):
+        db.add(HistoriqueCourse(
+            historique_id=f"EXT{i}", cheval_id="H9999", course_id=None,
+            date_course=(datetime.now() - timedelta(days=30)).date(),
+            hippodrome="Baden-Baden", discipline="Plat", distance=2000,
+            position_arrivee=i + 1,
+        ))
+    await db.commit()          # aucune erreur : elles sont hors index partiel
+
+    from ml.pipeline import _build_training_dataset_from_db
+    X, _, _ = await _build_training_dataset_from_db(db, mois=12)
+    assert "H9999" not in set(X["cheval_id"]) if len(X) else True, (
+        "une course externe n'entre jamais dans le jeu d'entraînement")
+
+
+@pytest.mark.asyncio
+async def test_le_plafond_memoire_compte_des_partants(db):
+    """Le plafond borne la MÉMOIRE : il compte les lignes réellement produites."""
+    from ml.pipeline import _build_training_dataset_from_db
+
+    base = datetime.now() - timedelta(hours=1)
+    await _semer(db, 20, base)
+    await db.commit()
+
+    X, _, _ = await _build_training_dataset_from_db(db, mois=12, max_rows=10)
+    assert len(X) <= 10
+    assert "C0000" in set(X["course_id"]), "le plus récent est toujours gardé"
+    assert X["course_id"].is_unique

@@ -296,9 +296,15 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             # respect_montant=True : MÊME méthode que le calculateur live (mise du
             # montant complet + concentration gain_target) → le plan FIGÉ est identique
             # à ce que l'utilisateur voit, donc identique au bilan affiché après course.
+            # discipline_mise=True : c'est LE plan du système, celui que personne
+            # n'a demandé et sur lequel toute la rentabilité est mesurée. La somme
+            # engagée suit la qualité mesurée des tickets retenus, le reste part en
+            # réserve (cf. services.mise_calculator._budget_discipline). Le drapeau
+            # est distinct de respect_montant, qui ne décide QUE de l'allocation.
             plan = generer_plan(MISE_REF, profil, preds, course_info,
                                 None, roi_weights, heat, sig_mults, respect_montant=True,
-                                rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
+                                rapport_calib=rapport_calib, ev_band_perf=ev_band_perf,
+                                discipline_mise=True)
             plan_d = plan_to_dict(plan)
         except Exception as e:
             log.warning("profil_learning.plan_failed", course_id=course_id,
