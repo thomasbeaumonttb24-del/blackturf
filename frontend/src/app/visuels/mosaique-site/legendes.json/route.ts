@@ -85,10 +85,15 @@ export async function GET() {
         `repartent aux gagnants. Les 20 € restants sont partis, quoi que vous jouiez.\n\n` +
         `Conséquence que personne n'écrit : aucun pronostiqueur n'efface ces 20 %. Un site ` +
         `qui vous promet un gain régulier vous ment, ou ne sait pas compter.\n\n` +
-        `Ce qui se joue, c'est le reste. Une cote n'est pas une probabilité : elle reflète ` +
-        `ce que la FOULE a misé. Un cheval à 8,0 est jugé à 12,5 % de chances par le marché. ` +
-        `S'il en vaut réellement 18 %, il est sous-coté — et c'est le seul endroit où un ` +
-        `avantage existe.\n\n` +
+        // Formulé en RAPPORT et non en pourcentage, volontairement : en pari mutuel les
+        // cotes sont déjà nettes du prélèvement, la somme des 1/cote vaut ~0,80 et non 1.
+        // Écrire « un cheval à 8,0 est jugé à 12,5 % » serait donc faux d'un cinquième —
+        // sur la tuile même où l'on reproche aux autres de ne pas savoir compter. « Gagner
+        // plus d'une fois sur huit » est exact : miser à 8,0 est rentable ssi p > 1/8.
+        `Ce qui se joue, c'est le reste. Une cote n'est pas une probabilité : elle dit ce ` +
+        `que la FOULE a misé. Un cheval à 8,0 rapporte 8 fois la mise — le jouer n'a de ` +
+        `sens que s'il gagne plus souvent qu'une course sur huit. Trouver ces chevaux-là ` +
+        `est le seul endroit où un avantage existe.\n\n` +
         `BlackTurf mesure cet écart sur chaque partant, avant le départ, puis publie le ` +
         `résultat aux vrais rapports. Y compris quand il a tort.\n\n` +
         `Le bilan complet, pertes comprises : ${SITE}/track-record` + pied,
