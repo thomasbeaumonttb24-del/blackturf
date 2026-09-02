@@ -287,7 +287,7 @@ function Surtitre({ children, ton = "or" }: { children: string; ton?: "or" | "gr
 }
 
 /** Carte blanche, avec l'ombre et le liseré doré du site. */
-function Carte({ children, padding = 52 }: { children: React.ReactNode; padding?: number }) {
+function Carte({ children, padding = 60 }: { children: React.ReactNode; padding?: number }) {
   return (
     <div
       style={{
@@ -319,14 +319,14 @@ function Barre({
 }) {
   const largeur = Math.max(60, Math.round((utile - 104) * (valeur / max)));
   return (
-    <div style={{ display: "flex", flexDirection: "column", marginBottom: 34 }}>
+    <div style={{ display: "flex", flexDirection: "column", marginBottom: 46 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", width: "100%" }}>
         <span style={{ fontFamily: "Inter", fontSize: 27, color: doree ? ENCRE : GRIS }}>{libelle}</span>
         <span
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: doree ? 62 : 50,
+            fontSize: doree ? 76 : 60,
             color: doree ? OR_SOMBRE : "#9CA3AF",
             letterSpacing: -2,
           }}
@@ -338,7 +338,7 @@ function Barre({
         style={{
           display: "flex",
           width: largeur,
-          height: doree ? 26 : 20,
+          height: doree ? 32 : 24,
           marginTop: 12,
           borderRadius: 13,
           background: doree ? DEGRADE_OR : "#E5E7EB",
@@ -416,8 +416,8 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
               </span>
             </Carte>
           </div>
-          <span style={{ ...titre(58, ENCRE), marginTop: 52 }}>Deux fois mieux</span>
-          <span style={{ ...titre(58, OR_SOMBRE) }}>que le hasard.</span>
+          <span style={{ ...titre(70, ENCRE), marginTop: 58 }}>Deux fois mieux</span>
+          <span style={{ ...titre(70, OR_SOMBRE) }}>que le hasard.</span>
         </div>
       </Plan>
     );
@@ -430,7 +430,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
         <div style={{ width: utile, display: "flex", flexDirection: "column" }}>
           <Surtitre>VOTRE BUDGET, RÉPARTI PARI PAR PARI</Surtitre>
           <div style={{ display: "flex", flexDirection: "column", marginTop: 40 }}>
-            <Carte padding={44}>
+            <Carte padding={48}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
                 <div style={{ display: "flex", flexDirection: "column" }}>
                   <span style={{ fontFamily: "Inter", fontSize: 24, color: GRIS }}>Budget</span>
@@ -460,8 +460,8 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
                   style={{
                     display: "flex",
                     flexDirection: "column",
-                    marginTop: i === 0 ? 34 : 14,
-                    padding: 22,
+                    marginTop: i === 0 ? 36 : 18,
+                    padding: 26,
                     borderRadius: 16,
                     background: fond,
                     border: `1px solid ${bord}`,
@@ -480,7 +480,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%", marginTop: 8 }}>
-                    <span style={{ fontFamily: "Inter", fontSize: 26, color: ENCRE }}>{pari}</span>
+                    <span style={{ fontFamily: "Inter", fontSize: 28, color: ENCRE }}>{pari}</span>
                     <span style={{ fontFamily: "Inter", fontSize: 23, color: GRIS }}>proba. {proba}</span>
                   </div>
                 </div>
@@ -504,7 +504,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
         <div style={{ width: utile, display: "flex", flexDirection: "column" }}>
           <Surtitre>CE QUE L&apos;ALGORITHME REGARDE</Surtitre>
           <div style={{ display: "flex", alignItems: "baseline", marginTop: 28 }}>
-            <span style={titre(150, OR_SOMBRE)}>80+</span>
+            <span style={titre(172, OR_SOMBRE)}>80+</span>
             <span
               style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 60, color: ENCRE, marginLeft: 24, letterSpacing: -2 }}
             >
@@ -527,15 +527,15 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  marginBottom: 16,
-                  padding: "22px 26px",
+                  marginBottom: 20,
+                  padding: "26px 30px",
                   borderRadius: 16,
                   background: "#FFFFFF",
                   border: `1px solid ${OR_TEINTE}`,
                 }}
               >
                 <div style={{ display: "flex", width: 10, height: 10, borderRadius: 5, background: OR }} />
-                <span style={{ fontFamily: "Inter", fontSize: 30, color: ENCRE, marginLeft: 20 }}>{l}</span>
+                <span style={{ fontFamily: "Inter", fontSize: 32, color: ENCRE, marginLeft: 20 }}>{l}</span>
               </div>
             ))}
           </div>
@@ -556,13 +556,13 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
       <Plan n={4} sombre>
         <div style={{ width: utile, display: "flex", flexDirection: "column" }}>
           <Surtitre ton="gris">ET LES JOURS OÙ ON SE TROMPE ?</Surtitre>
-          <span style={{ ...titre(94, "#FFFFFF"), marginTop: 34 }}>Ils sont</span>
-          <span style={titre(94, OR)}>publiés aussi.</span>
+          <span style={{ ...titre(106, "#FFFFFF"), marginTop: 34 }}>Ils sont</span>
+          <span style={titre(106, OR)}>publiés aussi.</span>
           <div style={{ display: "flex", width: 140, height: 6, background: DEGRADE_OR, marginTop: 44 }} />
           <span
             style={{
               fontFamily: "Inter",
-              fontSize: 34,
+              fontSize: 36,
               lineHeight: 1.45,
               color: "rgba(255,255,255,0.82)",
               marginTop: 44,
