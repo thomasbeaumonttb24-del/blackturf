@@ -194,3 +194,32 @@ def test_le_rapport_reste_lisible_sans_journal():
 
     html = _bloc_apprentissages({})
     assert "Aucune étape journalisée" in html
+
+
+def test_les_horodatages_portent_leur_fuseau_dans_le_schema():
+    """asyncpg REFUSE de lier un datetime conscient du fuseau à une colonne
+    `TIMESTAMP` sans fuseau : « invalid input for query argument ».
+
+    SQLite l'accepte sans broncher — le défaut ne se voit donc QU'EN PRODUCTION,
+    où il rendait ce journal muet : `etapes_perimees` renvoyait une liste vide et
+    aucune étape ne s'écrivait. C'est exactement la panne silencieuse que ce
+    module existe pour rendre visible, et elle se serait cachée dans son propre
+    angle mort. Constaté en prod le 02/09/2026, quelques minutes après le
+    déploiement.
+
+    Aucun test sur SQLite ne peut reproduire ça : on verrouille donc le SCHÉMA.
+    """
+    from ml.learning_steps import _DDL
+
+    assert "TIMESTAMPTZ" in _DDL
+    assert "last_attempt_at  TIMESTAMPTZ" in _DDL
+    assert "last_success_at  TIMESTAMPTZ" in _DDL
+
+
+def test_les_horodatages_ecrits_portent_bien_un_fuseau():
+    """L'autre moitié de l'invariant : si le code se mettait à écrire des dates
+    naïves, la colonne TIMESTAMPTZ les interpréterait dans le fuseau du serveur —
+    et une étape passerait pour périmée, ou pour fraîche, selon l'heure."""
+    from ml.learning_steps import _maintenant
+
+    assert _maintenant().tzinfo is not None

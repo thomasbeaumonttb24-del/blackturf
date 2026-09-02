@@ -47,11 +47,18 @@ log = structlog.get_logger(module="learning_steps")
 # laisse passer une nuit ratée — deux, c'est une panne.
 PERIME_APRES_HEURES = 48
 
+# TIMESTAMPTZ et non TIMESTAMP : les horodatages écrits ici portent leur fuseau
+# (`datetime.now(timezone.utc)`), et asyncpg REFUSE de lier un datetime conscient
+# du fuseau à une colonne qui ne l'est pas — « invalid input for query argument ».
+# SQLite l'accepte sans broncher : le défaut ne se voyait qu'en production, où il
+# aurait rendu le journal des apprentissages muet, c'est-à-dire exactement la
+# panne silencieuse que ce module existe pour rendre visible. Même convention que
+# `cote_cloture_log` et le reste du schéma.
 _DDL = """
 CREATE TABLE IF NOT EXISTS learning_step_runs (
     step             VARCHAR(64) PRIMARY KEY,
-    last_attempt_at  TIMESTAMP,
-    last_success_at  TIMESTAMP,
+    last_attempt_at  TIMESTAMPTZ,
+    last_success_at  TIMESTAMPTZ,
     last_status      VARCHAR(20),
     last_error       VARCHAR(300),
     n_obs            INTEGER,
