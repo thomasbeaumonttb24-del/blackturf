@@ -699,9 +699,31 @@ export function PlanSite({ d }: { d: DonneesSite }) {
               <span style={{ fontFamily: "Inter", fontSize: 23, color: COULEURS.surSombreDoux }}>
                 probabilité estimée {proba as string}
               </span>
-              <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 24, color: COULEURS.surSombre }}>
-                {gain as string} si ça passe
-              </span>
+              {/* Le montant accroche, la réserve reste collée à lui. Les séparer sur deux
+                  lignes laisserait le nombre seul — et un nombre seul se lit comme acquis. */}
+              <div style={{ display: "flex", alignItems: "baseline" }}>
+                <span
+                  style={{
+                    fontFamily: "Grotesk",
+                    fontWeight: 700,
+                    fontSize: 28,
+                    color: COULEURS.orVif,
+                    letterSpacing: -0.8,
+                  }}
+                >
+                  {gain as string}
+                </span>
+                <span
+                  style={{
+                    fontFamily: "Inter",
+                    fontSize: 23,
+                    color: COULEURS.surSombreDoux,
+                    marginLeft: 8,
+                  }}
+                >
+                  si ça passe
+                </span>
+              </div>
             </div>
           </div>
         ))}
