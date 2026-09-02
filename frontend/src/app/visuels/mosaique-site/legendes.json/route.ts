@@ -82,24 +82,24 @@ export async function GET() {
       tuile: "1-1",
       image: `${SITE}/visuels/mosaique-site/1-1`,
       legende:
-        `Vous entrez 20 €. Le plan de jeu s'écrit tout seul.\n\n` +
-        `C'est ce que fait BlackTurf que personne d'autre ne fait : un ticket type se ` +
-        `recopie à l'identique pour tout le monde, une répartition non. Elle part de VOTRE ` +
-        `budget et du profil que vous choisissez.\n\n` +
-        `SÉCURITÉ — 40 % du budget, 8 €\n` +
-        `Couplé Placé 2 + 4 · probabilité estimée 41 % · ~35 € si le pari passe\n\n` +
-        `RENDEMENT — 40 % du budget, 8 €\n` +
-        `Simple Gagnant 4 · probabilité estimée 17 % · ~62 € si le pari passe\n\n` +
-        `GROS LOT — 20 % du budget, 4 €\n` +
-        `Couplé Gagnant 2 + 4 · probabilité estimée 9 % · ~112 € si le pari passe\n\n` +
-        `Trois profils changent l'équilibre : prudent vise le petit rapport souvent, risqué ` +
-        `le gros rapport rarement. Et à dix euros comme à cent, la répartition se recalcule ` +
-        `— elle ne se contente pas de multiplier les mises.\n\n` +
+        `Un budget, trois plans. C'est vous qui choisissez le risque.\n\n` +
+        `Vous entrez 20 €, vous choisissez un profil, et le plan de jeu s'écrit sur la ` +
+        `même course. Un ticket type se recopie à l'identique pour tout le monde ; une ` +
+        `répartition, non.\n\n` +
+        `PRUDENT — viser ×1,8 à ×5 de la mise totale\n` +
+        `Cote courte, gain fréquent. Sur 20 €, l'objectif est de 36 à 100 €.\n\n` +
+        `MODÉRÉ — viser ×4 à ×15\n` +
+        `Plus de cote, plus de risque. Sur 20 €, de 80 à 300 €.\n\n` +
+        `RISQUÉ — viser ×10 et plus\n` +
+        `Gros rapport, rarement. Sur 20 €, à partir de 200 €.\n\n` +
+        `Ce sont des OBJECTIFS visés sur la mise totale, pas des gains attendus : un plan ` +
+        `risqué ne passe que rarement, c'est exactement son principe. Et à dix euros comme ` +
+        `à cent, la répartition se recalcule — elle ne se contente pas de multiplier les ` +
+        `mises.\n\n` +
         `Après l'arrivée, chaque pari est réglé au rapport PMU officiel et votre suivi se ` +
-        `met à jour. Les paris perdus sont affichés aussi.\n\n` +
-        `Plan d'exemple. Les probabilités sont estimées et les gains sont potentiels : ils ` +
-        `ne tombent que si le pari passe. Notre rendement réellement mesuré est publié, ` +
-        `négatif compris, sur ${SITE}/track-record\n\n${SITE}` + pied,
+        `met à jour. Les paris perdus sont affichés aussi, et notre rendement réellement ` +
+        `mesuré est publié, négatif compris.\n\n` +
+        `${SITE}/track-record` + pied,
     },
     {
       tuile: "1-0",
