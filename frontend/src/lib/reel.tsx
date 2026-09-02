@@ -24,8 +24,7 @@ import { COULEURS } from "./mosaique";
 export const REEL_L = 1080;
 export const REEL_H = 1920;
 
-/** Zone sûre : sous cette limite, l'interface d'Instagram recouvre le texte. */
-const HAUT = 260;
+/** Marge latérale. La zone sûre verticale est portée par le conteneur centré. */
 const MARGE = 88;
 const utile = REEL_L - MARGE * 2;
 
@@ -113,7 +112,25 @@ function Plan({
         </span>
       </div>
 
-      {children}
+      {/* Le contenu est CENTRÉ dans la zone sûre, jamais posé en haut.
+          Première version : chaque plan commençait à une hauteur fixe, et les deux tiers
+          bas de l'image restaient vides — sur un téléphone tenu à la main, le regard est
+          au milieu de l'écran, pas sous la marque. Centrer règle aussi le fait que les
+          plans n'ont pas la même quantité de texte : ils restent alignés entre eux. */}
+      <div
+        style={{
+          position: "absolute",
+          left: MARGE,
+          top: 300,
+          width: utile,
+          height: 1260,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+        }}
+      >
+        {children}
+      </div>
 
       {legal ? (
         <div style={{ position: "absolute", left: MARGE, top: 1700, width: utile, display: "flex" }}>
@@ -144,7 +161,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
     return (
       <Plan photo={d.photo} legal={false}>
         <div
-          style={{ position: "absolute", left: MARGE, top: HAUT + 380, width: utile, display: "flex", flexDirection: "column" }}
+          style={{ width: utile, display: "flex", flexDirection: "column" }}
         >
           <span style={titre(112, COULEURS.surSombre)}>Vous pariez</span>
           <span style={titre(112, COULEURS.surSombre)}>au feeling ?</span>
@@ -169,7 +186,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
     return (
       <Plan>
         <div
-          style={{ position: "absolute", left: MARGE, top: HAUT + 240, width: utile, display: "flex", flexDirection: "column" }}
+          style={{ width: utile, display: "flex", flexDirection: "column" }}
         >
           <span
             style={{
@@ -216,7 +233,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
     return (
       <Plan>
         <div
-          style={{ position: "absolute", left: MARGE, top: HAUT + 240, width: utile, display: "flex", flexDirection: "column" }}
+          style={{ width: utile, display: "flex", flexDirection: "column" }}
         >
           <span
             style={{
@@ -276,7 +293,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
     return (
       <Plan>
         <div
-          style={{ position: "absolute", left: MARGE, top: HAUT + 200, width: utile, display: "flex", flexDirection: "column" }}
+          style={{ width: utile, display: "flex", flexDirection: "column" }}
         >
           <span style={titre(104, COULEURS.surSombre)}>80+ critères</span>
           <span style={titre(104, COULEURS.orVif)}>par cheval.</span>
@@ -320,7 +337,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
     return (
       <Plan>
         <div
-          style={{ position: "absolute", left: MARGE, top: HAUT + 300, width: utile, display: "flex", flexDirection: "column" }}
+          style={{ width: utile, display: "flex", flexDirection: "column" }}
         >
           <span style={titre(92, COULEURS.surSombre)}>Et les jours</span>
           <span style={titre(92, COULEURS.surSombre)}>où on se trompe ?</span>
@@ -381,7 +398,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
         }}
       />
       <div
-        style={{ position: "absolute", left: MARGE, top: HAUT + 400, width: utile, display: "flex", flexDirection: "column" }}
+        style={{ width: utile, display: "flex", flexDirection: "column" }}
       >
         <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 36, color: "#4A3504" }}>
           Le programme du jour est déjà en ligne
