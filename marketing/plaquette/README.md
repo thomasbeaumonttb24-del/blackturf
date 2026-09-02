@@ -30,6 +30,16 @@ Les deux faces sont du HTML à styles en ligne, sans dépendance : on ouvre le
 fichier, on change le texte, on réimprime depuis le navigateur (format A4
 paysage, sans marges). Les images sont dans le même dossier.
 
+## Les performances imprimées
+
+La couverture porte les trois taux publiés sur `blackturf.fr/track-record` —
+précision Top-3 60,1 %, favori placé 64,1 %, favori gagnant 30,7 % — avec le
+dénominateur qui les rend lisibles : 4 265 courses réglées aux résultats PMU
+officiels. **Ces chiffres bougent à chaque réunion.** Toute réimpression doit
+les relire sur le site ; sinon le dépliant affiche un palmarès périmé. Le
+dénominateur et la mention « palmarès public » doivent rester avec eux : des
+pourcentages sans nombre de courses ne valent rien.
+
 ## Le plan de mise imprimé
 
 Le volet de droite reproduit le plan tel qu'il sort sur la **page course**
@@ -41,6 +51,12 @@ page course : sécurité émeraude (`#ECFDF5` / `#A7F3D0` / `#047857`), rendemen
 (`#FEF6E7` / `#F5DCA8` / `#92400E`), gros lot rouge (`#FEF2F2` / `#FECACA` /
 `#B91C1C`). Chaque pari porte son type, ses chevaux en `N°x + N°y`, sa
 probabilité estimée, sa mise et son gain estimé — comme à l'écran.
+
+Les trois paris retenus respectent la configuration réelle du profil modéré
+(`PROFIL_CONFIG["equilibre"]`) : bande de rapport ×4 à ×15, et pour le Simple
+Gagnant une probabilité au-dessus de `sg_min_proba` (0,11). Un 2 sur 4 y figurait
+au départ : sa mise et son rapport ne se calculent pas comme ceux d'un pari
+simple, il a été remplacé.
 
 Écarté volontairement pour le papier : « Lecture de l'algorithme », « Voir les
 raisons », les paris écartés et le bloc de rendement réel observé. Le rendement
