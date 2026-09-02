@@ -60,7 +60,7 @@ const nb = (n: number) => n.toLocaleString("fr-FR").replace(/[  ]/g, " ");
 function Chiffre({
   valeur,
   legende,
-  taille = 150,
+  taille = 172,
 }: {
   valeur: string;
   legende: string;
@@ -105,7 +105,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
   const CARTE_X = 56;
   const CARTE_L = VISIBLE_L - CARTE_X * 2;
   const CARTE_Y = 150;
-  const CARTE_H = 968;
+  const CARTE_H = 900;
 
   return (
     <div
@@ -251,20 +251,20 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           il a réglées, gagnantes ou non. C'est ce qui rend le reste crédible. */}
       <Carte x={col(1) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
         <Eyebrow>LA PREUVE, PAS LA PROMESSE</Eyebrow>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 78 }}>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 96 }}>
           <Chiffre
             valeur={nb(d.coursesReglees)}
             legende="courses réglées aux rapports officiels du PMU"
           />
         </div>
-        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 74 }} />
+        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 88 }} />
         <span
           style={{
             fontFamily: "Inter",
             fontSize: 27,
             lineHeight: 1.5,
             color: COULEURS.encre,
-            marginTop: 30,
+            marginTop: 36,
           }}
         >
           Chaque pronostic est figé AVANT le départ, puis réglé à l&apos;arrivée. Aucune
@@ -276,12 +276,12 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             fontSize: 26,
             lineHeight: 1.5,
             color: COULEURS.encreDouce,
-            marginTop: 22,
+            marginTop: 28,
           }}
         >
           {nb(d.journeesPubliees)} journées publiées, gagnantes comme perdantes.
         </span>
-        <div style={{ display: "flex", marginTop: 40 }}>
+        <div style={{ display: "flex", marginTop: 52 }}>
           <Adresse />
         </div>
       </Carte>
@@ -289,17 +289,17 @@ export function PlanSite({ d }: { d: DonneesSite }) {
       {/* ═══════════ (0,2) — comment c'est calculé ═══════════ */}
       <Carte x={col(2) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
         <Eyebrow>COMMENT C&apos;EST CALCULÉ</Eyebrow>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 78 }}>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 96 }}>
           <Chiffre valeur="80" legende="critères par cheval, à chaque course" />
         </div>
-        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 74 }} />
+        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 88 }} />
         <span
           style={{
             fontFamily: "Inter",
             fontSize: 27,
             lineHeight: 1.5,
             color: COULEURS.encre,
-            marginTop: 30,
+            marginTop: 36,
           }}
         >
           Une probabilité calculée pour chaque partant, publiée avant le départ. Pas un avis :
@@ -311,12 +311,12 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             fontSize: 26,
             lineHeight: 1.5,
             color: COULEURS.encreDouce,
-            marginTop: 22,
+            marginTop: 28,
           }}
         >
           Et les cotes du PMU et des principaux opérateurs, côte à côte.
         </span>
-        <div style={{ display: "flex", marginTop: 40 }}>
+        <div style={{ display: "flex", marginTop: 52 }}>
           <Adresse />
         </div>
       </Carte>
@@ -337,9 +337,11 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           flexDirection: "column",
         }}
       >
+        {/* Le chiffre « 80 critères » porte déjà la tuile (0,2) : le répéter ici le
+            banaliserait, et sur la grille les deux se lisent côte à côte. */}
         <Atout
           titre="Il lit le programme pour vous"
-          texte="80 critères par cheval, une probabilité calculée pour chaque partant, publiée avant le départ."
+          texte="Toutes les courses de la carte, tous les partants, dépouillés avant le départ."
         />
         <Atout
           titre="Il calcule sur VOTRE mise"
