@@ -43,11 +43,25 @@ dépliant sont à refaire.
 
 ## Les silhouettes de disciplines
 
-Recadrées au contenu depuis `frontend/public/img/disciplines/` : les fichiers
-d'origine portent des marges transparentes inégales (17 à 32 px) qui posaient les
-quatre chevaux sur quatre lignes de sol différentes. Elles sont imprimées à 38 px
-de haut — en dessous de ~34 px les pattes disparaissent et les silhouettes
-paraissent tronquées.
+Normalisées depuis `frontend/public/img/disciplines/` sur un gabarit commun de
+340 × 210 px : recadrage au contenu, mise à l'échelle dans 86 % × 78 % du
+gabarit, puis pose sur une ligne de sol commune à 90 % de la hauteur. Deux
+raisons : les fichiers d'origine portent des marges transparentes inégales
+(17 à 32 px) qui posaient les quatre chevaux sur quatre sols différents, et un
+recadrage collé au contenu fait toucher les quatre bords — ce qui se lit comme
+un rognage. Les quatre gabarits étant identiques, les images s'affichent en
+boîtes de taille égale (71 × 44 px).
+
+## Les critères affichés
+
+Les 25 critères nommés au volet du milieu sont de vraies variables du moteur,
+relevées dans `backend/ml/features.py` et `backend/ml/race_dynamics.py` — par
+exemple `bounce_score` (contrecoup après un gros effort), `draw_bias_score`
+(biais de corde), `pace_conflict_score` (combien de chevaux veulent mener),
+`sire_terrain_winrate` (réussite du père sur ce terrain), `distance_deplacement`
+(kilomètres faits pour venir courir), `spi_score` (argent professionnel). Elles
+sont choisies pour être peu courantes : c'est ce qui distingue l'analyse d'une
+lecture de la musique. Aucun détail d'implémentation du modèle n'est imprimé.
 
 ## Ce qui n'est pas imprimé, et pourquoi
 
