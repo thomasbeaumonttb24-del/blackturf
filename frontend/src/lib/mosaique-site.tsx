@@ -457,11 +457,14 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             }}
           />
         </div>
+        {/* Chaque libellé prend la couleur de SON segment. Sans ça, l'or désignait les
+            80 € dans la barre et les 20 € dans le libellé, et l'œil ne savait plus ce que
+            la couleur voulait dire. */}
         <div style={{ display: "flex", justifyContent: "space-between", width: utile, marginTop: 16 }}>
-          <span style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.surSombre }}>
+          <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: COULEURS.orVif }}>
             80&#160;€ redistribués
           </span>
-          <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: COULEURS.orVif }}>
+          <span style={{ fontFamily: "Inter", fontSize: 25, color: "#A8B0BA" }}>
             20&#160;€ prélevés
           </span>
         </div>
