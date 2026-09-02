@@ -256,12 +256,12 @@ export function PlanSite({ d }: { d: DonneesSite }) {
       <Carte x={col(1) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
         <Eyebrow>CE QUE ÇA DONNE, MESURÉ</Eyebrow>
         {d.precisionTop3 !== null ? (
-          <div style={{ display: "flex", flexDirection: "column", marginTop: 54 }}>
+          <div style={{ display: "flex", flexDirection: "column", marginTop: 72 }}>
             <span
               style={{
                 fontFamily: "Grotesk",
                 fontWeight: 700,
-                fontSize: 148,
+                fontSize: 162,
                 lineHeight: 1,
                 color: COULEURS.encre,
                 letterSpacing: -6,
@@ -284,7 +284,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         ) : null}
 
         {d.hasardTop3 !== null ? (
-          <div style={{ display: "flex", alignItems: "center", marginTop: 34 }}>
+          <div style={{ display: "flex", alignItems: "center", marginTop: 44 }}>
             <div style={{ display: "flex", width: 40, height: 3, background: COULEURS.ligne }} />
             <span
               style={{
@@ -299,13 +299,13 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           </div>
         ) : null}
 
-        <div style={{ display: "flex", marginTop: 46 }}>
+        <div style={{ display: "flex", marginTop: 62 }}>
           <div style={{ display: "flex", flexDirection: "column", width: 380 }}>
             <span
               style={{
                 fontFamily: "Grotesk",
                 fontWeight: 700,
-                fontSize: 60,
+                fontSize: 66,
                 lineHeight: 1,
                 color: COULEURS.or,
                 letterSpacing: -2,
@@ -322,7 +322,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
               style={{
                 fontFamily: "Grotesk",
                 fontWeight: 700,
-                fontSize: 60,
+                fontSize: 66,
                 lineHeight: 1,
                 color: COULEURS.or,
                 letterSpacing: -2,
@@ -342,12 +342,12 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             fontSize: 24,
             lineHeight: 1.45,
             color: COULEURS.encreDouce,
-            marginTop: 40,
+            marginTop: 52,
           }}
         >
           Mesuré sur {nb(d.coursesMesurees)} courses réglées aux rapports officiels du PMU.
         </span>
-        <div style={{ display: "flex", marginTop: 26 }}>
+        <div style={{ display: "flex", marginTop: 38 }}>
           <Adresse />
         </div>
       </Carte>
@@ -717,7 +717,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         style={{
           position: "absolute",
           left: col(2) + MARGE,
-          top: bas + 452,
+          top: bas + 512,
           width: utile,
           display: "flex",
           flexDirection: "column",
@@ -762,7 +762,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         style={{
           position: "absolute",
           left: col(2) + MARGE,
-          top: bas + 872,
+          top: bas + 892,
           width: utile,
           display: "flex",
           flexDirection: "column",
