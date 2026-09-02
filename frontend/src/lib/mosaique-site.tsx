@@ -473,19 +473,22 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         <Adresse ton="sombre" />
       </div>
 
-      {/* ═══════════ (1,1) — le plan de mise, la démonstration ═══════════
-          Cette tuile portait le prélèvement du PMU. Retirée sur décision produit.
+      {/* ═══════════ (1,1) — le plan de mise, démontré ═══════════
+          C'est ce que le produit fait de plus singulier : personne d'autre ne répartit une
+          mise sur le budget du joueur. Un ticket type se recopie à l'identique pour tout
+          le monde ; une répartition, non.
 
-          Ce qui la remplace est ce que le produit fait de plus singulier : personne
-          d'autre ne répartit une mise sur le budget du joueur. Un ticket type se recopie ;
-          une répartition, non.
+          La tuile doit RESSEMBLER au plan, pas le raconter : le budget saisi, la barre de
+          répartition 40/40/20, les numéros des chevaux, et sur chaque ligne mise → gain
+          potentiel. Une liste de trois phrases ne montrait pas le produit.
 
-          CE QUI N'EST VOLONTAIREMENT PAS AFFICHÉ : les gains potentiels de chaque ticket.
-          « 4 € » en face de « ~112 € » se lit comme un rendement attendu alors que c'est
-          un rapport conditionnel. Les probabilités estimées, elles, sont montrées — ce
-          sont les seules qui disent la vérité sur ce qu'on achète. */}
+          HONNÊTETÉ DE L'EXEMPLE — les gains sont CONDITIONNELS et le visuel le dit trois
+          fois : « probabilité estimée » sur chaque ligne, « si le pari passe » sur la
+          colonne, « plan d'exemple » en pied. Rapportés à leurs probabilités, ces rapports
+          décrivent une course particulièrement favorable ; le rendement réellement mesuré
+          du service est négatif et publié sur le track-record. */}
       <div
-        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 108, width: utile, display: "flex" }}
+        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 104, width: utile, display: "flex" }}
       >
         <Eyebrow ton="sombre">LE PLAN DE MISE</Eyebrow>
       </div>
@@ -493,7 +496,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 190,
+          top: bas + 182,
           width: utile,
           display: "flex",
           flexDirection: "column",
@@ -503,7 +506,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 68,
+            fontSize: 66,
             lineHeight: 1.1,
             color: COULEURS.surSombre,
             letterSpacing: -2.2,
@@ -515,7 +518,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 68,
+            fontSize: 66,
             lineHeight: 1.1,
             color: COULEURS.orVif,
             letterSpacing: -2.2,
@@ -523,41 +526,119 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         >
           pari par pari.
         </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 29,
-            lineHeight: 1.5,
-            color: COULEURS.surSombreDoux,
-            marginTop: 26,
-          }}
-        >
-          Vous entrez un montant, le plan s&apos;écrit. Exemple pour 20&#160;€ :
-        </span>
+      </div>
+
+      {/* Ce que l'utilisateur SAISIT : c'est le point de départ du plan, il doit se voir. */}
+      <div
+        style={{
+          position: "absolute",
+          left: col(1) + MARGE,
+          top: bas + 344,
+          width: utile,
+          display: "flex",
+        }}
+      >
+        {[
+          ["BUDGET", "20 €"],
+          ["PROFIL", "Modéré"],
+        ].map(([etiquette, valeur], i) => (
+          <div
+            key={etiquette}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              paddingTop: 12,
+              paddingBottom: 12,
+              paddingLeft: 20,
+              paddingRight: 28,
+              marginLeft: i ? 18 : 0,
+              borderRadius: 12,
+              background: "#1E232A",
+              border: `1px solid ${COULEURS.ligneSombre}`,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "Inter",
+                fontWeight: 600,
+                fontSize: 19,
+                letterSpacing: 2.2,
+                color: COULEURS.surSombreDoux,
+              }}
+            >
+              {etiquette}
+            </span>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 32,
+                color: COULEURS.surSombre,
+                marginTop: 2,
+                letterSpacing: -0.8,
+              }}
+            >
+              {valeur}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* La barre de répartition : 40/40/20 se voit d'un coup d'œil, là où trois
+          pourcentages écrits demandent d'être lus puis additionnés. */}
+      <div
+        style={{
+          position: "absolute",
+          left: col(1) + MARGE,
+          top: bas + 460,
+          width: utile,
+          display: "flex",
+        }}
+      >
+        {[
+          [0.4, "#E0A63C"],
+          [0.4, "#B8801E"],
+          [0.2, "#6E5214"],
+        ].map(([part, teinte], i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              width: Math.round(utile * (part as number)) - (i < 2 ? 6 : 0),
+              height: 22,
+              marginRight: i < 2 ? 6 : 0,
+              background: teinte as string,
+              borderTopLeftRadius: i === 0 ? 11 : 0,
+              borderBottomLeftRadius: i === 0 ? 11 : 0,
+              borderTopRightRadius: i === 2 ? 11 : 0,
+              borderBottomRightRadius: i === 2 ? 11 : 0,
+            }}
+          />
+        ))}
       </div>
 
       <div
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 462,
+          top: bas + 512,
           width: utile,
           display: "flex",
           flexDirection: "column",
         }}
       >
         {[
-          ["SÉCURITÉ · 40 %", "8 €", "Couplé Placé — 2 + 4", "probabilité estimée 41 %"],
-          ["RENDEMENT · 40 %", "8 €", "Simple Gagnant — 4", "probabilité estimée 17 %"],
-          ["GROS LOT · 20 %", "4 €", "Couplé Gagnant — 2 + 4", "probabilité estimée 9 %"],
-        ].map(([part, mise, pari, proba]) => (
+          ["SÉCURITÉ · 40 %", "8 €", "Couplé Placé", ["2", "4"], "41 %", "~35 €"],
+          ["RENDEMENT · 40 %", "8 €", "Simple Gagnant", ["4"], "17 %", "~62 €"],
+          ["GROS LOT · 20 %", "4 €", "Couplé Gagnant", ["2", "4"], "9 %", "~112 €"],
+        ].map(([part, mise, pari, chevaux, proba, gain]) => (
           <div
-            key={part}
+            key={part as string}
             style={{
               display: "flex",
               flexDirection: "column",
-              paddingTop: 20,
-              paddingBottom: 20,
+              paddingTop: 16,
+              paddingBottom: 16,
               borderTop: `1px solid ${COULEURS.ligneSombre}`,
             }}
           >
@@ -566,40 +647,62 @@ export function PlanSite({ d }: { d: DonneesSite }) {
                 style={{
                   fontFamily: "Inter",
                   fontWeight: 600,
-                  fontSize: 22,
-                  letterSpacing: 2.4,
+                  fontSize: 21,
+                  letterSpacing: 2.2,
                   color: COULEURS.orVif,
                 }}
               >
-                {part}
+                {part as string}
               </span>
               <span
                 style={{
                   fontFamily: "Grotesk",
                   fontWeight: 700,
-                  fontSize: 34,
+                  fontSize: 32,
                   color: COULEURS.surSombre,
                   letterSpacing: -1,
                 }}
               >
-                {mise}
+                {mise as string}
               </span>
             </div>
-            <span
-              style={{
-                fontFamily: "Inter",
-                fontSize: 28,
-                color: COULEURS.surSombre,
-                marginTop: 10,
-              }}
-            >
-              {pari}
-            </span>
-            <span
-              style={{ fontFamily: "Inter", fontSize: 24, color: COULEURS.surSombreDoux, marginTop: 4 }}
-            >
-              {proba}
-            </span>
+
+            <div style={{ display: "flex", alignItems: "center", marginTop: 10 }}>
+              <span style={{ fontFamily: "Inter", fontSize: 27, color: COULEURS.surSombre }}>
+                {pari as string}
+              </span>
+              {(chevaux as string[]).map((n, j) => (
+                <span
+                  key={n}
+                  style={{
+                    display: "flex",
+                    width: 34,
+                    height: 34,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 8,
+                    marginLeft: j === 0 ? 14 : 8,
+                    background: "#232931",
+                    border: `1px solid ${COULEURS.ligneSombre}`,
+                    fontFamily: "Grotesk",
+                    fontWeight: 700,
+                    fontSize: 21,
+                    color: COULEURS.orVif,
+                  }}
+                >
+                  {n}
+                </span>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", marginTop: 8 }}>
+              <span style={{ fontFamily: "Inter", fontSize: 23, color: COULEURS.surSombreDoux }}>
+                probabilité estimée {proba as string}
+              </span>
+              <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 24, color: COULEURS.surSombre }}>
+                {gain as string} si ça passe
+              </span>
+            </div>
           </div>
         ))}
       </div>
@@ -608,22 +711,14 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 978,
+          top: bas + 1010,
           width: utile,
           display: "flex",
           flexDirection: "column",
         }}
       >
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 25,
-            lineHeight: 1.45,
-            color: COULEURS.surSombreDoux,
-          }}
-        >
-          Plan d&apos;exemple. La répartition s&apos;adapte à votre budget et à votre profil —
-          prudent, modéré ou risqué.
+        <span style={{ fontFamily: "Inter", fontSize: 24, lineHeight: 1.45, color: COULEURS.surSombreDoux }}>
+          Plan d&apos;exemple. Gains potentiels, si le pari passe — jamais garantis.
         </span>
       </div>
       <div style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1092, display: "flex" }}>
