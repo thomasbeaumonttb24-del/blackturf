@@ -502,13 +502,13 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 212,
+          top: bas + 200,
           width: utile,
           display: "flex",
           flexDirection: "column",
           background: COULEURS.blanc,
           borderRadius: 22,
-          padding: 26,
+          padding: 22,
         }}
       >
         {/* Onglets de profil — « Modéré » actif, comme sur le site. */}
@@ -627,9 +627,9 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             style={{
               display: "flex",
               flexDirection: "column",
-              marginTop: i === 0 ? 16 : 12,
-              paddingTop: 16,
-              paddingBottom: 16,
+              marginTop: i === 0 ? 14 : 11,
+              paddingTop: 14,
+              paddingBottom: 14,
               paddingLeft: 20,
               paddingRight: 20,
               borderRadius: 14,
@@ -696,7 +696,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
       </div>
 
       <div
-        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1030, width: utile, display: "flex" }}
+        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1024, width: utile, display: "flex" }}
       >
         <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.4, color: COULEURS.surSombreDoux }}>
           Plan d&apos;exemple. Rendement et gains estimés, jamais garantis.
