@@ -470,23 +470,27 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         <Adresse ton="sombre" />
       </div>
 
-      {/* ═══════════ (1,1) — nommer l'adversaire, puis vendre contre lui ═══════════
-          Première version : trois paragraphes qui expliquaient pourquoi on ne peut PAS
-          gagner. C'était vrai, et ça ne vendait rien — un mur de texte qui prévient au
-          lieu de proposer.
-          Celle-ci garde exactement la même honnêteté mais renverse le mouvement : le
-          prélèvement devient l'ADVERSAIRE, la barre le rend visible en une seconde, et
-          la suite dit ce qu'on peut faire contre lui — et où aller le vérifier. */}
+      {/* ═══════════ (1,1) — le plan de mise, la démonstration ═══════════
+          Cette tuile portait le prélèvement du PMU. Retirée sur décision produit.
+
+          Ce qui la remplace est ce que le produit fait de plus singulier : personne
+          d'autre ne répartit une mise sur le budget du joueur. Un ticket type se recopie ;
+          une répartition, non.
+
+          CE QUI N'EST VOLONTAIREMENT PAS AFFICHÉ : les gains potentiels de chaque ticket.
+          « 4 € » en face de « ~112 € » se lit comme un rendement attendu alors que c'est
+          un rapport conditionnel. Les probabilités estimées, elles, sont montrées — ce
+          sont les seules qui disent la vérité sur ce qu'on achète. */}
       <div
         style={{ position: "absolute", left: col(1) + MARGE, top: bas + 108, width: utile, display: "flex" }}
       >
-        <Eyebrow ton="sombre">VOTRE VRAI ADVERSAIRE</Eyebrow>
+        <Eyebrow ton="sombre">LE PLAN DE MISE</Eyebrow>
       </div>
       <div
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 196,
+          top: bas + 190,
           width: utile,
           display: "flex",
           flexDirection: "column",
@@ -496,178 +500,131 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 76,
+            fontSize: 68,
             lineHeight: 1.1,
             color: COULEURS.surSombre,
-            letterSpacing: -2.5,
+            letterSpacing: -2.2,
           }}
         >
-          Ce n&apos;est pas le favori.
+          Votre budget, réparti
         </span>
         <span
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 76,
+            fontSize: 68,
             lineHeight: 1.1,
             color: COULEURS.orVif,
-            letterSpacing: -2.5,
+            letterSpacing: -2.2,
           }}
         >
-          C&apos;est le prélèvement.
+          pari par pari.
         </span>
-      </div>
-
-      {/* La barre : 20 % d'un trait valent trois phrases. Les largeurs sont en pixels et
-          non en pourcentages — Satori calcule mal les pourcentages dans un flex absolu. */}
-      <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 396,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontWeight: 600,
-            fontSize: 23,
-            letterSpacing: 2.6,
-            color: COULEURS.surSombreDoux,
-          }}
-        >
-          SUR 100&#160;€ JOUÉS AU PMU
-        </span>
-        <div style={{ display: "flex", marginTop: 20 }}>
-          <div
-            style={{
-              display: "flex",
-              width: Math.round(utile * 0.8),
-              height: 28,
-              background: COULEURS.orVif,
-              borderTopLeftRadius: 14,
-              borderBottomLeftRadius: 14,
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              width: utile - Math.round(utile * 0.8),
-              height: 28,
-              background: "#3A424C",
-              borderTopRightRadius: 14,
-              borderBottomRightRadius: 14,
-            }}
-          />
-        </div>
-        {/* Chaque libellé prend la couleur de SON segment. Sans ça, l'or désignait les
-            80 € dans la barre et les 20 € dans le libellé, et l'œil ne savait plus ce que
-            la couleur voulait dire. */}
-        <div style={{ display: "flex", justifyContent: "space-between", width: utile, marginTop: 16 }}>
-          <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: COULEURS.orVif }}>
-            80&#160;€ redistribués
-          </span>
-          <span style={{ fontFamily: "Inter", fontSize: 25, color: "#A8B0BA" }}>
-            20&#160;€ prélevés
-          </span>
-        </div>
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 560,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
         <span
           style={{
             fontFamily: "Inter",
             fontSize: 29,
-            lineHeight: 1.55,
+            lineHeight: 1.5,
             color: COULEURS.surSombreDoux,
+            marginTop: 26,
           }}
         >
-          Aucun pronostiqueur n&apos;efface ces 20&#8239;%. Qui vous promet le contraire vous
-          ment, ou ne sait pas compter.
+          Vous entrez un montant, le plan s&apos;écrit. Exemple pour 20&#160;€ :
         </span>
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
+          left: col(1) + MARGE,
+          top: bas + 462,
+          width: utile,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {[
+          ["SÉCURITÉ · 40 %", "8 €", "Couplé Placé — 2 + 4", "probabilité estimée 41 %"],
+          ["RENDEMENT · 40 %", "8 €", "Simple Gagnant — 4", "probabilité estimée 17 %"],
+          ["GROS LOT · 20 %", "4 €", "Couplé Gagnant — 2 + 4", "probabilité estimée 9 %"],
+        ].map(([part, mise, pari, proba]) => (
+          <div
+            key={part}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              paddingTop: 20,
+              paddingBottom: 20,
+              borderTop: `1px solid ${COULEURS.ligneSombre}`,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
+              <span
+                style={{
+                  fontFamily: "Inter",
+                  fontWeight: 600,
+                  fontSize: 22,
+                  letterSpacing: 2.4,
+                  color: COULEURS.orVif,
+                }}
+              >
+                {part}
+              </span>
+              <span
+                style={{
+                  fontFamily: "Grotesk",
+                  fontWeight: 700,
+                  fontSize: 34,
+                  color: COULEURS.surSombre,
+                  letterSpacing: -1,
+                }}
+              >
+                {mise}
+              </span>
+            </div>
+            <span
+              style={{
+                fontFamily: "Inter",
+                fontSize: 28,
+                color: COULEURS.surSombre,
+                marginTop: 10,
+              }}
+            >
+              {pari}
+            </span>
+            <span
+              style={{ fontFamily: "Inter", fontSize: 24, color: COULEURS.surSombreDoux, marginTop: 4 }}
+            >
+              {proba}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
+          left: col(1) + MARGE,
+          top: bas + 928,
+          width: utile,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <span
           style={{
             fontFamily: "Inter",
-            fontSize: 30,
-            lineHeight: 1.55,
-            color: COULEURS.surSombre,
-            marginTop: 34,
+            fontSize: 25,
+            lineHeight: 1.45,
+            color: COULEURS.surSombreDoux,
           }}
         >
-          Ce qui se joue, c&apos;est le reste : repérer les chevaux dont la cote est plus
-          haute que leur vraie chance. BlackTurf le calcule sur chaque partant, avant le
-          départ.
+          Plan d&apos;exemple. La répartition s&apos;adapte à votre budget et à votre profil —
+          prudent, modéré ou risqué.
         </span>
       </div>
-
-      <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 878,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div style={{ display: "flex", width: 96, height: 3, background: COULEURS.ligneSombre }} />
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 42,
-            lineHeight: 1.24,
-            color: COULEURS.orVif,
-            letterSpacing: -1,
-            marginTop: 30,
-          }}
-        >
-          Le seul service de pronostics qui publie aussi ses pertes.
-        </span>
-      </div>
-
-      {/* L'adresse seule ne demandait rien. Ici elle porte une action et une raison d'y
-          aller — c'est le seul endroit de la mosaïque où on invite à VÉRIFIER. */}
-      <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 1072,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <span style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.surSombreDoux }}>
-          Le bilan complet, pertes comprises :
-        </span>
-        <div style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
-          <div style={{ display: "flex", width: 22, height: 3, background: COULEURS.orVif }} />
-          <span
-            style={{
-              fontFamily: "Grotesk",
-              fontWeight: 700,
-              fontSize: 34,
-              letterSpacing: -0.8,
-              color: COULEURS.orVif,
-              marginLeft: 14,
-            }}
-          >
-            blackturf.fr/track-record
-          </span>
-        </div>
+      <div style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1092, display: "flex" }}>
+        <Adresse ton="sombre" />
       </div>
 
       {/* ═══════════ (1,2) — la conversion ═══════════ */}

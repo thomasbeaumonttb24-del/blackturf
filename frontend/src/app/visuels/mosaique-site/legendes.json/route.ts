@@ -82,19 +82,22 @@ export async function GET() {
       tuile: "1-1",
       image: `${SITE}/visuels/mosaique-site/1-1`,
       legende:
-        `Votre vrai adversaire, ce n'est pas le favori. C'est le prélèvement.\n\n` +
-        `Le PMU est un pari mutuel : les joueurs jouent les uns contre les autres, et la ` +
-        `maison prend sa part avant de redistribuer. Sur 100 € misés, environ 80 € ` +
-        `repartent aux gagnants. Les 20 € restants sont partis, quoi que vous jouiez.\n\n` +
-        `Conséquence que personne n'écrit : aucun pronostiqueur n'efface ces 20 %. Un site ` +
-        `qui vous promet un gain régulier vous ment, ou ne sait pas compter.\n\n` +
-        `Ce qui se joue, c'est le reste. Une cote n'est pas une probabilité : elle dit ce ` +
-        `que la foule a misé. Un cheval à 8,0 rapporte 8 fois la mise — le jouer n'a de ` +
-        `sens que s'il gagne plus souvent qu'une course sur huit. Trouver ces chevaux-là ` +
-        `est le seul endroit où un avantage existe.\n\n` +
-        `BlackTurf mesure cet écart sur chaque partant, avant le départ, puis publie le ` +
-        `résultat aux vrais rapports. Y compris quand il a tort.\n\n` +
-        `Le bilan complet, pertes comprises : ${SITE}/track-record` + pied,
+        `Vous entrez 20 €. Le plan de jeu s'écrit tout seul.\n\n` +
+        `C'est ce que fait BlackTurf que personne d'autre ne fait : un ticket type se ` +
+        `recopie à l'identique pour tout le monde, une répartition non. Elle part de VOTRE ` +
+        `budget et du profil que vous choisissez.\n\n` +
+        `SÉCURITÉ — 40 % du budget, 8 €\n` +
+        `Couplé Placé 2 + 4, probabilité estimée 41 %\n\n` +
+        `RENDEMENT — 40 % du budget, 8 €\n` +
+        `Simple Gagnant 4, probabilité estimée 17 %\n\n` +
+        `GROS LOT — 20 % du budget, 4 €\n` +
+        `Couplé Gagnant 2 + 4, probabilité estimée 9 %\n\n` +
+        `Trois profils changent l'équilibre : prudent vise le petit rapport souvent, risqué ` +
+        `le gros rapport rarement. Et à dix euros comme à cent, la répartition se recalcule ` +
+        `— elle ne se contente pas de multiplier les mises.\n\n` +
+        `Après l'arrivée, chaque pari est réglé au rapport PMU officiel et votre suivi se ` +
+        `met à jour. Les paris perdus sont affichés aussi.\n\n` +
+        `Plan d'exemple : les probabilités sont estimées, pas garanties.\n${SITE}` + pied,
     },
     {
       tuile: "1-0",
