@@ -364,17 +364,23 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         <Adresse ton="sombre" />
       </div>
 
-      {/* ═══════════ (1,1) — l'argument que personne d'autre ne tient ═══════════ */}
+      {/* ═══════════ (1,1) — nommer l'adversaire, puis vendre contre lui ═══════════
+          Première version : trois paragraphes qui expliquaient pourquoi on ne peut PAS
+          gagner. C'était vrai, et ça ne vendait rien — un mur de texte qui prévient au
+          lieu de proposer.
+          Celle-ci garde exactement la même honnêteté mais renverse le mouvement : le
+          prélèvement devient l'ADVERSAIRE, la barre le rend visible en une seconde, et
+          la suite dit ce qu'on peut faire contre lui — et où aller le vérifier. */}
       <div
-        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 112, width: utile, display: "flex" }}
+        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 108, width: utile, display: "flex" }}
       >
-        <Eyebrow ton="sombre">CE QU&apos;ON NE VOUS DIRA PAS AILLEURS</Eyebrow>
+        <Eyebrow ton="sombre">VOTRE VRAI ADVERSAIRE</Eyebrow>
       </div>
       <div
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 214,
+          top: bas + 196,
           width: utile,
           display: "flex",
           flexDirection: "column",
@@ -384,73 +390,124 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 80,
+            fontSize: 76,
             lineHeight: 1.1,
             color: COULEURS.surSombre,
             letterSpacing: -2.5,
           }}
         >
-          Le PMU prélève environ
+          Ce n&apos;est pas le favori.
         </span>
         <span
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 80,
+            fontSize: 76,
             lineHeight: 1.1,
             color: COULEURS.orVif,
             letterSpacing: -2.5,
           }}
         >
-          20&#8239;% des enjeux.
-        </span>
-
-        <div
-          style={{ display: "flex", width: 96, height: 3, background: COULEURS.ligneSombre, marginTop: 50 }}
-        />
-
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 29,
-            lineHeight: 1.55,
-            color: COULEURS.surSombreDoux,
-            marginTop: 44,
-          }}
-        >
-          Personne ne peut promettre un gain régulier là-dessus. Qui vous le promet vous ment,
-          ou ne sait pas compter.
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 29,
-            lineHeight: 1.55,
-            color: COULEURS.surSombreDoux,
-            marginTop: 32,
-          }}
-        >
-          Ce qui se mesure, en revanche, c&apos;est l&apos;écart entre la probabilité réelle
-          d&apos;un cheval et celle qu&apos;implique sa cote.
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 29,
-            lineHeight: 1.55,
-            color: COULEURS.surSombre,
-            marginTop: 32,
-          }}
-        >
-          C&apos;est ce que BlackTurf calcule, course par course — et ce qu&apos;il publie
-          ensuite, résultat en main.
+          C&apos;est le prélèvement.
         </span>
       </div>
+
+      {/* La barre : 20 % d'un trait valent trois phrases. Les largeurs sont en pixels et
+          non en pourcentages — Satori calcule mal les pourcentages dans un flex absolu. */}
       <div
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 896,
+          top: bas + 396,
+          width: utile,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "Inter",
+            fontWeight: 600,
+            fontSize: 23,
+            letterSpacing: 2.6,
+            color: COULEURS.surSombreDoux,
+          }}
+        >
+          SUR 100&#160;€ JOUÉS AU PMU
+        </span>
+        <div style={{ display: "flex", marginTop: 20 }}>
+          <div
+            style={{
+              display: "flex",
+              width: Math.round(utile * 0.8),
+              height: 28,
+              background: COULEURS.orVif,
+              borderTopLeftRadius: 14,
+              borderBottomLeftRadius: 14,
+            }}
+          />
+          <div
+            style={{
+              display: "flex",
+              width: utile - Math.round(utile * 0.8),
+              height: 28,
+              background: "#3A424C",
+              borderTopRightRadius: 14,
+              borderBottomRightRadius: 14,
+            }}
+          />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", width: utile, marginTop: 16 }}>
+          <span style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.surSombre }}>
+            80&#160;€ redistribués
+          </span>
+          <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: COULEURS.orVif }}>
+            20&#160;€ prélevés
+          </span>
+        </div>
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
+          left: col(1) + MARGE,
+          top: bas + 560,
+          width: utile,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "Inter",
+            fontSize: 29,
+            lineHeight: 1.55,
+            color: COULEURS.surSombreDoux,
+          }}
+        >
+          Aucun pronostiqueur n&apos;efface ces 20&#8239;%. Qui vous promet le contraire vous
+          ment, ou ne sait pas compter.
+        </span>
+        <span
+          style={{
+            fontFamily: "Inter",
+            fontSize: 30,
+            lineHeight: 1.55,
+            color: COULEURS.surSombre,
+            marginTop: 34,
+          }}
+        >
+          Ce qui se joue, c&apos;est le reste : repérer les chevaux dont la cote est plus
+          haute que leur vraie chance. BlackTurf le calcule sur chaque partant, avant le
+          départ.
+        </span>
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
+          left: col(1) + MARGE,
+          top: bas + 878,
           width: utile,
           display: "flex",
           flexDirection: "column",
@@ -461,18 +518,47 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 40,
-            lineHeight: 1.25,
+            fontSize: 42,
+            lineHeight: 1.24,
             color: COULEURS.orVif,
             letterSpacing: -1,
-            marginTop: 32,
+            marginTop: 30,
           }}
         >
           Le seul service de pronostics qui publie aussi ses pertes.
         </span>
       </div>
-      <div style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1092, display: "flex" }}>
-        <Adresse ton="sombre" />
+
+      {/* L'adresse seule ne demandait rien. Ici elle porte une action et une raison d'y
+          aller — c'est le seul endroit de la mosaïque où on invite à VÉRIFIER. */}
+      <div
+        style={{
+          position: "absolute",
+          left: col(1) + MARGE,
+          top: bas + 1072,
+          width: utile,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <span style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.surSombreDoux }}>
+          Le bilan complet, pertes comprises :
+        </span>
+        <div style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
+          <div style={{ display: "flex", width: 22, height: 3, background: COULEURS.orVif }} />
+          <span
+            style={{
+              fontFamily: "Grotesk",
+              fontWeight: 700,
+              fontSize: 34,
+              letterSpacing: -0.8,
+              color: COULEURS.orVif,
+              marginLeft: 14,
+            }}
+          >
+            blackturf.fr/track-record
+          </span>
+        </div>
       </div>
 
       {/* ═══════════ (1,2) — la conversion ═══════════ */}
