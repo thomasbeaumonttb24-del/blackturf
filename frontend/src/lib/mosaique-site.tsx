@@ -449,9 +449,12 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           titre="Tout le programme, analysé"
           texte="Chaque partant classé, avec sa probabilité et sa cote juste, avant le départ."
         />
+        {/* Le plan de mise a sa propre tuile juste à côté (1,1) : le décrire ici aussi
+            ferait deux fois la même chose sur la même rangée de la grille. La place
+            revient aux cotes comparées, qui n'étaient nulle part. */}
         <Atout
-          titre="Un plan de mise sur votre budget"
-          texte="Vous entrez un montant, la répartition s'affiche : sécurité, rendement, coup."
+          titre="Les cotes comparées"
+          texte="PMU et principaux opérateurs côte à côte, avec le mouvement : on voit où la cote décroche."
         />
         <Atout
           titre="Les paris de valeur"
