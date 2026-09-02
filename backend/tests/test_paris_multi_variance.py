@@ -635,22 +635,57 @@ class TestAncrageTop2:
         out = _filtrer_ancrage_top2([cp_ancre, trio_libre], {"ancrage_top2": True})
         assert out == [cp_ancre, trio_libre]
 
-    def test_les_combinaisons_du_plan_contiennent_les_deux_premiers(self):
+    def _combinaisons_non_ancrees(self, profil, champ, montant=30):
         from services.mise_calculator import TYPES_SANS_ANCRAGE
-        champ = _field(12)
         rang = {int(p["numero"]): i for i, p in enumerate(
             sorted(champ, key=lambda x: float(x["proba_top1"]), reverse=True), start=1)}
         top2 = {n for n, r in rang.items() if r <= 2}
-        for profil in ("conservateur", "equilibre", "agressif"):
-            d = plan_to_dict(generer_plan(30, profil, champ, self.COURSE,
-                                          respect_montant=True))
-            for niv in d["niveaux"]:
-                for p in niv["paris"]:
-                    nums = {c["numero"] for c in p["chevaux"]}
-                    if len(nums) >= 2 and p["type"] not in TYPES_SANS_ANCRAGE:
-                        assert top2 <= nums, (
-                            f"{profil} : {p['type']} {sorted(nums)} sans appui "
-                            f"sur les 2 premiers {sorted(top2)}")
+        d = plan_to_dict(generer_plan(montant, profil, champ, self.COURSE,
+                                      respect_montant=True))
+        hors = []
+        for niv in d["niveaux"]:
+            for p in niv["paris"]:
+                nums = {c["numero"] for c in p["chevaux"]}
+                if len(nums) >= 2 and p["type"] not in TYPES_SANS_ANCRAGE:
+                    if not top2 <= nums:
+                        hors.append((p["type"], sorted(nums)))
+        return hors, sorted(top2)
+
+    @pytest.mark.parametrize("profil", ["conservateur", "equilibre"])
+    def test_les_combinaisons_du_plan_contiennent_les_deux_premiers(self, profil):
+        """Bandes de rapport ×1,8–5 et ×4–15 : une combinaison ancrée sur les deux
+        favoris y tombe, donc le filtre souple trouve toujours de quoi préférer."""
+        hors, top2 = self._combinaisons_non_ancrees(profil, _field(12))
+        assert not hors, (f"{profil} : {hors} sans appui sur les 2 premiers {top2}")
+
+    def test_le_risque_accepte_une_combinaison_non_ancree_faute_d_ancree(self):
+        """DÉCISION MESURÉE DU 2026-09-02, et elle va contre l'intuition du 2026-09-01.
+
+        Le profil risqué exige ≥ ×10 du total misé. Deux favoris ne paient jamais ×10 :
+        sur un champ ouvert, AUCUNE combinaison ancrée sur les deux premiers n'entre
+        dans sa tranche. Le mode `ancrage_strict`, posé la veille, les interdisait
+        toutes dans ce cas — mais ce n'est pas « rien » qui prenait leur place : le
+        profil se rabattait sur un Simple Gagnant au rang 5-6 ou, le plus souvent, sur
+        le filet de secours.
+
+        Rejeu A/B, 1 200 dernières courses réglées, prédictions figées avant le départ,
+        mêmes courses des deux côtés, ROI winsorisé au 30× :
+
+            ancrage_strict = True   → −22,5 %   1,03 pari/course
+            ancrage_strict = False  → −12,3 %   1,46 pari/course
+
+        Le veto coûtait 10 points : une combinaison non ancrée à −14,6 % reste
+        meilleure que ce sur quoi le profil se rabat quand on la lui interdit. La
+        PRÉFÉRENCE mesurée reste, elle, entièrement en place (`ancrage_top2` souple,
+        testé juste au-dessus) : dès qu'une combinaison ancrée est disponible, aucune
+        non ancrée ne sort.
+        """
+        from services.mise_calculator import PROFIL_CONFIG
+        assert PROFIL_CONFIG["agressif"].get("ancrage_strict") is False
+        hors, _ = self._combinaisons_non_ancrees("agressif", _field(12))
+        assert hors, ("le risqué ne sort plus aucune combinaison non ancrée sur ce "
+                      "champ : si c'est voulu, c'est la mesure ci-dessus qu'il faut "
+                      "refaire, pas ce test qu'il faut retirer")
 
     def test_le_rang_du_pied_libre_ne_departage_plus_rien(self):
         """Le bonus porte par le rang du 3e pied est NEUTRALISE (_ANC_NEUTRE, 2026-08-31).

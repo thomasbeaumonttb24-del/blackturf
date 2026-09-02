@@ -32,6 +32,15 @@ _DERIVE_RAPPORT_SIGNALEE = 0.15
 # conservé pour que le banc de mesure A/B puisse rejouer l'ancienne version.
 _REPLI_RESPECTE_RANG = True
 
+# Le filet garde-t-il le TYPE du profil plus longtemps que sa bande de rapport ?
+# False = comportement d'avant le 2026-09-02 (le type était la PREMIÈRE contrainte
+# lâchée), conservé pour rejouer l'ancienne version au banc de mesure A/B.
+_REPLI_RESPECTE_TYPE = True
+
+# Le filet refuse-t-il la loterie pure (EV sous `SPEC_EV_FLOOR`) quand il a le choix ?
+# False = comportement d'avant le 2026-09-02 (aucune borne d'EV sur ce chemin).
+_REPLI_PLANCHER_EV = True
+
 # Montant minimum PMU par type de pari (référence réglementaire ; le moteur
 # applique MISE_PLANCHER=2€ par-dessus).
 def _cout_minimum_pmu(type_pari: str) -> float:
@@ -420,12 +429,30 @@ PROFIL_CONFIG = {
         "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Simple Gagnant",
                   "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "objectif": "gain",
-        # Ancrage STRICT : sans combinaison ancrée sur les 2 premiers, on n'en joue
-        # aucune plutôt que d'en jouer une non ancrée (+0,3 % contre −14,6 % mesurés
-        # le 2026-08-23). Devenu nécessaire le 2026-09-01 : en retirant Trio et les
-        # jackpots morts du catalogue, on a retiré les candidats ancrés qui tenaient
-        # le filtre actif, et des Couplés Gagnants non ancrés passaient à leur place.
-        "ancrage_strict": True,
+        # Ancrage STRICT : posé le 2026-09-01, RETIRÉ le 2026-09-02 après mesure.
+        #
+        # L'intention était juste : un Couplé Gagnant ancré sur les 2 premiers rend
+        # +0,3 % contre −14,6 % non ancré (mesure du 2026-08-23). Mais le mode STRICT
+        # ne choisit pas entre deux combinaisons — il VETO toutes les combinaisons
+        # quand aucune n'est ancrée. Or ce n'est pas « rien » qui prend leur place :
+        # le profil retombe sur un Simple Gagnant à ≥ ×10 (donc le cheval du rang 5-6,
+        # le plus mal classé encore autorisé) ou, le plus souvent, sur le FILET.
+        #
+        # Rejeu A/B sur les 1 200 dernières courses réglées, prédictions figées avant
+        # le départ, mêmes courses dans les deux branches, ROI winsorisé au 30× :
+        #
+        #     ancrage_strict = True   → −22,5 %   1,03 pari/course
+        #     ancrage_strict = False  → −12,3 %   1,46 pari/course
+        #
+        # 10 points, et le plan cesse d'être mono-ticket. Le veto coûtait donc plus
+        # cher que ce qu'il évitait : une combinaison non ancrée à −14,6 % reste
+        # meilleure que ce sur quoi le profil se rabat quand on la lui interdit.
+        #
+        # L'ancrage lui-même n'est PAS abandonné : `ancrage_top2` (souple) reste actif
+        # et continue d'écarter les combinaisons non ancrées CHAQUE FOIS qu'une
+        # combinaison ancrée est disponible. C'est le veto absolu qui est retiré, pas
+        # la préférence mesurée.
+        "ancrage_strict": False,
         # 8 → 5 (audit 2026-08-31). Le raisonnement « top-8 = 95,9 % des vrais
         # gagnants » (2026-08-20) répondait à la mauvaise question : ce qui compte
         # n'est pas de CONTENIR le gagnant, c'est ce que rapporte l'argent misé.
@@ -1933,26 +1960,72 @@ def _select_conviction(
         # Le rang passe AVANT le type, le rapport et la cote dans l'ordre de
         # relâchement : jouer un cheval que notre propre modèle enterre coûte plus
         # cher que jouer hors de la tranche de gain visée.
-        relaxed = (
-            [c for c in rangeables if _in_rapport(c)]
-            or [c for c in rangeables
-                if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
-            or [c for c in rangeables if _in_type(c)]
-            or list(rangeables)
-        )
+        #
+        # ⚠ ORDRE CORRIGÉ LE 2026-09-02. Le commentaire ci-dessus décrivait déjà la
+        # règle « on garde la MÉTHODE du profil le plus longtemps possible », mais le
+        # code faisait l'inverse : la première branche gardait la BANDE DE RAPPORT et
+        # lâchait le TYPE. Or les types retirés d'un profil l'ont été parce qu'ils sont
+        # mesurés perdants — et ce sont justement des types à GROS RAPPORT, donc ceux
+        # que la branche « rapport dans la bande, type quelconque » ressort en premier.
+        # Constat en production le 2026-09-02, profil risqué, 54 courses : 18 des
+        # 57 paris émis (32 %) portaient un type retiré du profil la veille — Trio,
+        # Trio Ordre, Super 4, Mini Multi en 4 — plus des Couplés Placés qui n'y ont
+        # jamais figuré. TOUS dans des plans à un seul pari, c'est-à-dire tous issus de
+        # ce filet. Le retrait des types morts n'avait donc pas retiré ces paris : il
+        # les avait déplacés de la sélection vers le filet, où aucune gate d'EV ne
+        # s'applique (EV moyenne −0,269 contre −0,105 pour les paris du catalogue).
+        # Le type passe donc APRÈS le rapport dans l'ordre de relâchement.
+        if _REPLI_RESPECTE_TYPE:
+            relaxed = (
+                [c for c in rangeables
+                 if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
+                or [c for c in rangeables if _in_type(c)]
+                or [c for c in rangeables if _in_rapport(c)]
+                or list(rangeables)
+            )
+        else:
+            relaxed = (
+                [c for c in rangeables if _in_rapport(c)]
+                or [c for c in rangeables
+                    if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
+                or [c for c in rangeables if _in_type(c)]
+                or list(rangeables)
+            )
         # Dernier recours seulement : aucune combinaison ne tient dans le plafond de
         # rang (petit champ, non-partants). On sort alors du plafond plutôt que de
         # laisser la course sans plan, et on le MARQUE.
         hors_rang = not relaxed and not in_band
         if hors_rang:
-            relaxed = (
-                [c for c in cands if _in_rapport(c)]
-                or [c for c in cands
-                    if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
-                or [c for c in cands if _in_type(c)]
-                or list(cands)
-            )
+            # Même ordre que ci-dessus : le TYPE du profil tient plus longtemps que
+            # sa bande de rapport (correction du 2026-09-02).
+            if _REPLI_RESPECTE_TYPE:
+                relaxed = (
+                    [c for c in cands
+                     if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
+                    or [c for c in cands if _in_type(c)]
+                    or [c for c in cands if _in_rapport(c)]
+                    or list(cands)
+                )
+            else:
+                relaxed = (
+                    [c for c in cands if _in_rapport(c)]
+                    or [c for c in cands
+                        if _in_type(c) and cote_min <= _bet_cote_max(c) <= cote_max]
+                    or [c for c in cands if _in_type(c)]
+                    or list(cands)
+                )
         pool = in_band or relaxed
+        # PLANCHER D'EV SUR LE FILET (2026-09-02). La sélection normale refuse la
+        # loterie pure (`SPEC_EV_FLOOR`, −0,40) ; le filet, lui, n'avait AUCUNE borne
+        # d'EV — c'est la seule voie du moteur où un pari arbitrairement mauvais peut
+        # sortir. Mesuré en production le 2026-08-31 : des paris de filet à EV −0,428
+        # de moyenne. On préfère donc les candidats au-dessus du plancher ; s'il n'y en
+        # a aucun, on garde le pool tel quel — la promesse « chaque course est jouée »
+        # prime, et le pari sera de toute façon marqué hors bande.
+        if _REPLI_PLANCHER_EV:
+            _pool_ev = [c for c in pool
+                        if float(c.get("ev", 0.0) or 0.0) >= SPEC_EV_FLOOR]
+            pool = _pool_ev or pool
         if pool:
             def _fallback_score(c):
                 """Meilleur compromis disponible quand toutes les gates ont échoué.

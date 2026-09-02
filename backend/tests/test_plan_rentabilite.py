@@ -136,6 +136,188 @@ def test_les_autres_profils_ne_sont_pas_touches():
     assert "Trio" in mc.PROFIL_CONFIG["equilibre"]["types"]
 
 
+# ── 2 bis. Retirer un type du profil doit le retirer des PLANS ──────────────
+# Les tests ci-dessus vérifient la CONFIG. Ils étaient verts pendant que la
+# production émettait quand même ces types : le 2026-09-02, 18 des 57 paris du
+# profil risqué portaient un type retiré la veille (Trio, Trio Ordre, Super 4,
+# Mini Multi en 4) ou jamais présent (Couplé Placé). Tous venaient du FILET, dont
+# la première étape de relâchement lâchait le TYPE en gardant la bande de rapport
+# — c'est-à-dire exactement la porte par laquelle les types à gros rapport
+# rentraient. Un test sur la config ne peut pas voir ça ; il faut regarder le plan.
+
+# Course RÉELLE 02092026R7C5 (Plat, 8 partants), prédictions figées avant le départ.
+# Choisie parce qu'elle reproduit exactement le cas de production : aucun cheval
+# au-dessus de la cote 5,7, donc aucun Simple Gagnant à ×10 et aucune combinaison
+# ancrée sur les deux favoris (1,9 et 3,8) qui atteigne la tranche du profil. Seules
+# des combinaisons HORS catalogue y arrivent — et c'est un Trio à EV −0,498 que la
+# production a effectivement servi ce jour-là.
+_COURSE_REELLE_02092026R7C5 = [
+    # numero, cote figée, proba_top1, proba_top3   (dans l'ordre du rang prédit)
+    (6, 1.9, 0.254281, 0.393272),
+    (5, 3.8, 0.132223, 0.513108),
+    (4, 5.7, 0.098921, 0.336218),
+    (1, 5.0, 0.098772, 0.310585),
+    (2, 5.0, 0.101687, 0.559948),
+    (7, 5.0, 0.112382, 0.358819),
+    (3, 5.7, 0.102391, 0.312622),
+    (8, 5.0, 0.099342, 0.215428),
+]
+
+
+def _course_ou_seuls_les_types_hors_profil_paient(n=8):
+    """Peloton où AUCUN pari du catalogue risqué n'atteint ×10, alors que des
+    combinaisons hors catalogue (Trio, Couplé Placé) y arrivent — c'est là que le
+    filet lâchait le type."""
+    return [{"numero": num, "nom_cheval": "Cheval%d" % num, "cote_pmu": cote,
+             "proba_top1": p1, "proba_top3": p3, "non_partant": False}
+            for num, cote, p1, p3 in _COURSE_REELLE_02092026R7C5[:n]]
+
+
+# La course R7C5 n'offrait ni Tiercé ni Quarté ni Quinté : sans ces jackpots, le
+# catalogue du risqué se réduit aux duos et au Simple Gagnant, aucun n'atteignant ×10.
+COURSE_INFO_R7C5 = dict(COURSE_INFO, nb_partants=8, est_tierce=False)
+
+
+def _types_joues(plan):
+    return [p.type for niv in plan.niveaux for p in niv.paris]
+
+
+def _plans_du_risque(preds, info):
+    return [mc.generer_plan(m, "agressif", preds, info, respect_montant=True)
+            for m in (5, 10, 20, 50)]
+
+
+class _RisqueAncrageStrict:
+    """Reproduit l'état EXACT de la production du 2026-09-02 : le risqué en ancrage
+    strict. C'est cet état qui vidait la sélection et faisait tomber toutes les
+    courses sur le filet — la démonstration du défaut a donc besoin de lui, même si
+    le réglage a depuis été retiré du profil (cf. `ancrage_strict`)."""
+
+    def __enter__(self):
+        self._ancien = mc.PROFIL_CONFIG["agressif"].get("ancrage_strict", False)
+        mc.PROFIL_CONFIG["agressif"]["ancrage_strict"] = True
+
+    def __exit__(self, *exc):
+        mc.PROFIL_CONFIG["agressif"]["ancrage_strict"] = self._ancien
+        return False
+
+
+def _types_hors_catalogue(preds, info):
+    autorises = mc.PROFIL_CONFIG["agressif"]["types"]
+    return [t for plan in _plans_du_risque(preds, info)
+            for t in _types_joues(plan) if mc._fam(t) not in autorises]
+
+
+@pytest.mark.parametrize("fabrique,info", [
+    (_course_ou_seuls_les_types_hors_profil_paient, COURSE_INFO_R7C5),
+    (_course_sans_candidat_dans_la_bande, dict(COURSE_INFO, nb_partants=14)),
+])
+def test_le_filet_ne_sert_jamais_un_type_hors_du_profil(fabrique, info):
+    """Invariant : un type absent du catalogue d'un profil ne doit sortir d'AUCUN
+    chemin du moteur — sélection, complément manuel ou filet de secours."""
+    preds = fabrique(info["nb_partants"])
+    with _RisqueAncrageStrict():
+        hors = _types_hors_catalogue(preds, info)
+    assert not hors, ("le plan risqué sert %s, hors de son catalogue %s"
+                      % (sorted(set(hors)),
+                         sorted(mc.PROFIL_CONFIG["agressif"]["types"])))
+
+
+def test_sans_la_garde_le_filet_sortait_du_catalogue():
+    """Contrôle négatif : en repassant le drapeau à False, le type hors catalogue
+    doit réapparaître. C'est le Trio — le type le plus lourdement retiré du profil
+    (−58,7 % winsorisé sur 13 682 paris) — qui revient, parce que la première étape
+    de relâchement gardait la bande de rapport et lâchait le type, et que les types à
+    gros rapport sont précisément ceux qui tiennent la tranche ×10.
+
+    Si ce test cesse d'échouer, c'est que la course de démonstration ne déclenche plus
+    le filet et qu'il faut en construire une autre — surtout pas retirer la garde."""
+    preds = _course_ou_seuls_les_types_hors_profil_paient(8)
+    ancien = mc._REPLI_RESPECTE_TYPE
+    mc._REPLI_RESPECTE_TYPE = False
+    try:
+        with _RisqueAncrageStrict():
+            hors = _types_hors_catalogue(preds, COURSE_INFO_R7C5)
+    finally:
+        mc._REPLI_RESPECTE_TYPE = ancien
+    assert hors, ("la course de démonstration ne fait plus sortir de type hors "
+                  "catalogue même sans la garde : le test ne prouve plus rien")
+
+
+def test_la_garde_ne_vide_aucun_plan():
+    """La garde de type ne doit pas coûter la promesse « chaque course est jouée » :
+    le catalogue du risqué contient le Simple Gagnant, disponible sur toute course.
+    """
+    for fabrique, info in ((_course_ou_seuls_les_types_hors_profil_paient,
+                            COURSE_INFO_R7C5),
+                           (_course_sans_candidat_dans_la_bande,
+                            dict(COURSE_INFO, nb_partants=14)),
+                           (_course_sans_candidat_dans_la_bande,
+                            dict(COURSE_INFO, nb_partants=5))):
+        preds = fabrique(info["nb_partants"])
+        for profil in ("conservateur", "equilibre", "agressif"):
+            plan = mc.generer_plan(10, profil, preds, info, respect_montant=True)
+            assert sum(len(niv.paris) for niv in plan.niveaux) >= 1, (
+                "%s : plan vide sur un champ de %d"
+                % (profil, info["nb_partants"]))
+
+
+def _champ_ou_le_filet_choisissait_la_loterie(n=8):
+    """Cotes très étalées (×1,35 par rang) et probabilités plates : le filet y avait
+    le choix entre un pari à EV −0,42 et un pari à EV nulle, et prenait le premier."""
+    horses = []
+    for i in range(n):
+        p1 = max(0.20 - i * 0.02, 0.004)
+        horses.append({"numero": i + 1, "nom_cheval": "Cheval%d" % (i + 1),
+                       "cote_pmu": round(1.5 * (1.35 ** i), 2),
+                       "proba_top1": p1, "proba_top3": min(p1 * 2.6, 0.95),
+                       "non_partant": False})
+    return horses
+
+
+def _pire_ev_du_risque(preds, info):
+    evs = [p.ev_estime for plan in _plans_du_risque(preds, info)
+           for niv in plan.niveaux for p in niv.paris if p.ev_estime is not None]
+    return min(evs) if evs else None
+
+
+def test_le_filet_refuse_la_loterie_pure_quand_il_a_le_choix():
+    """Le filet est le seul chemin du moteur sans borne d'EV : la sélection normale
+    refuse sous `SPEC_EV_FLOOR` (−0,40), pas lui. En production le 2026-09-02 il a
+    servi des Trios à −0,498 et −0,483 d'EV.
+
+    ⚠ HONNÊTETÉ DE LA MESURE : au rejeu A/B sur 1 200 courses, ce plancher seul vaut
+    +0,3 point de ROI winsorisé — c'est-à-dire RIEN de mesurable. Il est conservé
+    parce qu'il ferme le seul chemin du moteur sans borne d'EV, pas parce qu'il
+    rapporte. Le gain mesuré du lot vient de la garde de TYPE, pas d'ici."""
+    preds = _champ_ou_le_filet_choisissait_la_loterie(8)
+    info = dict(COURSE_INFO, nb_partants=8)
+    avec = _pire_ev_du_risque(preds, info)
+
+    ancien = mc._REPLI_PLANCHER_EV
+    mc._REPLI_PLANCHER_EV = False
+    try:
+        sans = _pire_ev_du_risque(preds, info)
+    finally:
+        mc._REPLI_PLANCHER_EV = ancien
+
+    assert sans is not None and sans < -0.40, (
+        "ce champ ne fait plus sortir de pari sous le plancher même sans la garde : "
+        "le test ne prouve plus rien, il faut en construire un autre")
+    assert avec is not None and avec >= -0.40, (
+        "pari de filet à EV %.3f, sous le plancher de loterie pure" % avec)
+
+
+def test_le_plancher_dev_ne_vide_pas_le_plan():
+    """Le plancher est une PRÉFÉRENCE : si aucun candidat ne le tient, la course reste
+    jouée. Champ de cotes courtes où rien n'atteint la tranche du risqué."""
+    preds = _course_sans_candidat_dans_la_bande(6)
+    info = dict(COURSE_INFO, nb_partants=6)
+    for profil in ("conservateur", "equilibre", "agressif"):
+        plan = mc.generer_plan(10, profil, preds, info, respect_montant=True)
+        assert sum(len(niv.paris) for niv in plan.niveaux) >= 1
+
+
 # ── 3. Le gate marché ────────────────────────────────────────────────────────
 
 def test_le_gate_marche_est_actif_par_defaut():
