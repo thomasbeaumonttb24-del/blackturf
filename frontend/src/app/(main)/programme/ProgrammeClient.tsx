@@ -9,10 +9,10 @@
  *
  * ⚠ ASSETS À COPIER dans le dossier /public :
  *   public/img/logo-horse.png
- *   public/img/disciplines/attele-v7.png
- *   public/img/disciplines/plat-v7.png
- *   public/img/disciplines/monte-v7.png
- *   public/img/disciplines/obstacle-v7.png
+ *   public/img/disciplines/attele-v8.png
+ *   public/img/disciplines/plat-v8.png
+ *   public/img/disciplines/monte-v8.png
+ *   public/img/disciplines/obstacle-v8.png
  * (fournis dans ce même paquet, sous /public)
  */
 
@@ -70,13 +70,13 @@ type DiscMeta = { color: string; bg: string; ring: string; mask: string };
 // #6B7280 y donnait 4,38:1 sur le fond creme #F5F4EF — le dernier echec de contraste du
 // site. #4B5563 passe a 6,86:1. Les cinq disciplines connues etaient deja assez foncees ;
 // seul ce repli, servi quand la discipline n'est pas reconnue, echouait.
-const DISC_FALLBACK: DiscMeta = { color: "#4B5563", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v7.png" };
+const DISC_FALLBACK: DiscMeta = { color: "#4B5563", bg: "#F3F4F6", ring: "#E5E7EB", mask: "plat-v8.png" };
 
 function discMeta(discipline: string): DiscMeta {
   const d = (discipline || "").toLowerCase();
-  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v7.png" };
-  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v7.png" };
-  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v7.png" };
+  if (d.includes("attel")) return { color: "#0E7C66", bg: "#ECFDF5", ring: "#B7E4D3", mask: "attele-v8.png" };
+  if (d.includes("plat")) return { color: "#B45309", bg: "#FEF6E7", ring: "#F5DCA8", mask: "plat-v8.png" };
+  if (d.includes("mont")) return { color: "#2A5BD7", bg: "#EEF3FF", ring: "#C5D6FB", mask: "monte-v8.png" };
   // « Obstacle » est la valeur renvoyée telle quelle par l'API (au même titre que
   // « Haies ») : sans ce cas, ces courses tombaient sur le repli et s'affichaient
   // avec le cheval de plat en gris, sans la barrière — alors que la fiche course,
@@ -88,8 +88,8 @@ function discMeta(discipline: string): DiscMeta {
   // fait référence : `color` sert aussi de couleur de TEXTE au nom de la discipline
   // sur la carte de course (fonds réels : #FFFFFF à venir, #F5F4EF terminée,
   // #F0FDF8 en direct). Toute nouvelle teinte se vérifie contre les trois.
-  if (d.includes("obstacle") || d.includes("haie")) return { color: "#86198F", bg: "#FAF2FC", ring: "#E9C7EE", mask: "obstacle-v7.png" };
-  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v7.png" };
+  if (d.includes("obstacle") || d.includes("haie")) return { color: "#86198F", bg: "#FAF2FC", ring: "#E9C7EE", mask: "obstacle-v8.png" };
+  if (d.includes("steeple") || d.includes("cross")) return { color: "#A32C3E", bg: "#FCEEF0", ring: "#F0C9CF", mask: "obstacle-v8.png" };
   return DISC_FALLBACK;
 }
 
