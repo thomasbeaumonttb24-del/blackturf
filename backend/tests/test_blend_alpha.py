@@ -190,3 +190,30 @@ def test_l_api_charge_l_alpha_au_demarrage():
     from api import main
 
     assert "charger_alpha" in inspect.getsource(main)
+
+
+@pytest.mark.asyncio
+async def test_un_chargement_impossible_ne_tue_pas_la_transaction(db):
+    """asyncpg marque la transaction AVORTÉE dès qu'une requête échoue — ici
+    typiquement « relation inexistante » avant le premier calcul nocturne. Sans
+    rollback, la requête SUIVANTE échoue non pour son propre défaut mais parce que
+    la transaction est déjà morte, et son diagnostic ment.
+
+    Constaté au démarrage de l'API en production le 02/09/2026 : `blend_alpha`
+    rapportait « transaction avortée » alors que son seul tort était de passer
+    après `harville`.
+    """
+    from sqlalchemy import text
+
+    from ml.blend_calibration import charger_alpha
+    from ml.harville_calibration import charger_exposants
+
+    await db.execute(text("DROP TABLE IF EXISTS harville_exposants"))
+    await db.execute(text("DROP TABLE IF EXISTS blend_alpha"))
+    await db.commit()
+
+    await charger_exposants(db)          # échoue : table absente
+    await charger_alpha(db)              # doit échouer PROPREMENT, pas par contagion
+
+    # La session doit rester utilisable après les deux échecs.
+    assert (await db.execute(text("SELECT 1"))).scalar() == 1

@@ -265,6 +265,17 @@ async def charger_exposants(session: AsyncSession) -> tuple[float, ...]:
             if exps:
                 _cache = tuple(float(x) for x in exps)
     except Exception as e:
+        # DÉSEMPOISONNER la transaction. asyncpg marque la transaction AVORTÉE dès
+        # qu'une requête échoue — ici typiquement « relation inexistante » avant le
+        # premier calcul nocturne. Sans ce rollback, la requête SUIVANTE échoue non
+        # pour son propre défaut mais parce que la transaction est déjà morte, et
+        # son diagnostic ment (constaté au démarrage : `blend_alpha` rapportait
+        # « transaction avortée » alors que son seul tort était de passer après
+        # `harville`).
+        try:
+            await session.rollback()
+        except Exception:
+            pass
         log.debug("harville.chargement_ignore", err=str(e)[:120])
     return _cache or EXPOSANTS_NEUTRES
 
