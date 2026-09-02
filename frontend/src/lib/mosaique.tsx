@@ -61,7 +61,7 @@ export const COULEURS = {
   /** Sur la rangée sombre : l'ivoire pur brûle, il faut le tenir d'un cran. */
   surSombre: "#E8E4DA",
   surSombreDoux: "#9AA2AE",
-  surSombreTenu: "#78808C",
+  surSombreTenu: "#868E9A",
   ligneSombre: "#2B3138",
 } as const;
 
@@ -876,7 +876,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           background: COULEURS.orVif,
         }}
       >
-        <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: "#5E4406" }}>
+        <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: "#4A3504" }}>
           Le programme du jour est déjà en ligne
         </span>
         <span

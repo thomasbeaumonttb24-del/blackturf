@@ -572,7 +572,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           background: COULEURS.orVif,
         }}
       >
-        <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: "#5E4406" }}>
+        <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: "#4A3504" }}>
           Le programme du jour est déjà en ligne
         </span>
         <span

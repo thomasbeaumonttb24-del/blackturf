@@ -18,7 +18,7 @@ const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/
  * différents, et donc impossible de republier une tuile à l'identique si Instagram en
  * refusait une en cours de série.
  */
-const PHOTO = "showcase.webp";
+const PHOTO = "hero-1600.webp";
 
 /**
  * Les polices sont EMBARQUÉES, pas référencées : Satori n'a pas de navigateur derrière
