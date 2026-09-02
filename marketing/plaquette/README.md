@@ -30,6 +30,25 @@ Les deux faces sont du HTML à styles en ligne, sans dépendance : on ouvre le
 fichier, on change le texte, on réimprime depuis le navigateur (format A4
 paysage, sans marges). Les images sont dans le même dossier.
 
+## Le logo
+
+Le logo au cercle doré vient de `frontend/src/app/icon.png` (768 × 768, la plus
+grande version disponible ; `public/logo.png` ne fait que 160 × 87). Fond blanc
+détouré par une rampe de luminance, la couleur d'origine intacte.
+
+- `logo-or.png` — version fond clair, telle quelle.
+- `logo-or-inv.png` — version fond sombre pour la couverture : le cheval noir ne
+  lit pas sur la photo, il est passé en aplat blanc. Ses détails internes sont
+  dessinés **en blanc pur** dans l'original, donc en inversion ils ressortaient
+  en creux et mouchetaient la silhouette : les contre-formes sont bouchées
+  (`binary_fill_holes`) avant le remplissage. Palette réduite à 12 couleurs — le
+  logo n'a que deux encres — pour tenir sous la limite de poids de la page.
+
+**Le mot est dans le cercle** : en dessous d'environ 100 px il devient illisible.
+Il n'est donc utilisé en entier que sur la couverture, à 128 px. Les pieds de
+page gardent le lockup compact (silhouette `mark-ink.png` + « BlackTurf »
+composé), qui reste lisible à 20 px.
+
 ## Les performances imprimées
 
 La couverture porte les trois taux publiés sur `blackturf.fr/track-record` —
