@@ -38,15 +38,28 @@ export interface DonneesReel {
 const pct = (n: number) => `${n.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
 const nb = (n: number) => n.toLocaleString("fr-FR").replace(/[  ]/g, " ");
 
-/** Le cadre commun : fond encre, marque en haut, mention légale en bas. */
+/**
+ * Le cadre commun : fond, marque en haut, mention légale en bas.
+ *
+ * Le FOND est une propriété du cadre, jamais un enfant. Première version : le plan
+ * doré posait un aplat plein écran parmi les enfants — or ceux-ci vivent dans le
+ * conteneur centré, donc l'aplat se positionnait par rapport à LUI et débordait de
+ * travers. Un fond appartient au cadre.
+ */
 function Plan({
   children,
   photo,
   legal = true,
+  fond = COULEURS.encre,
+  surFond = COULEURS.surSombre,
+  legalCouleur = "#868E9A",
 }: {
   children: React.ReactNode;
   photo?: string | null;
   legal?: boolean;
+  fond?: string;
+  surFond?: string;
+  legalCouleur?: string;
 }) {
   return (
     <div
@@ -56,7 +69,7 @@ function Plan({
         position: "relative",
         width: REEL_L,
         height: REEL_H,
-        background: COULEURS.encre,
+        background: fond,
       }}
     >
       {/* Deux expressions SÉPARÉES, jamais un fragment : Satori ignore les fragments
@@ -103,7 +116,7 @@ function Plan({
             fontFamily: "Grotesk",
             fontWeight: 700,
             fontSize: 40,
-            color: COULEURS.surSombre,
+            color: surFond,
             marginLeft: 16,
             letterSpacing: -0.8,
           }}
@@ -134,7 +147,7 @@ function Plan({
 
       {legal ? (
         <div style={{ position: "absolute", left: MARGE, top: 1700, width: utile, display: "flex" }}>
-          <span style={{ fontFamily: "Inter", fontSize: 24, lineHeight: 1.4, color: "#868E9A" }}>
+          <span style={{ fontFamily: "Inter", fontSize: 24, lineHeight: 1.4, color: legalCouleur }}>
             Jouer comporte des risques : endettement, isolement, dépendance.
             09&#160;74&#160;75&#160;13&#160;13. Interdit aux mineurs.
           </span>
@@ -159,7 +172,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
   // ── 0 · l'accroche. Elle ne présente rien, elle interpelle. ──
   if (n === 0) {
     return (
-      <Plan photo={d.photo} legal={false}>
+      <Plan photo={d.photo}>
         <div
           style={{ width: utile, display: "flex", flexDirection: "column" }}
         >
@@ -385,18 +398,7 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
 
   // ── 5 · l'adresse, en plein écran doré. ──
   return (
-    <Plan legal={false}>
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: REEL_L,
-          height: REEL_H,
-          display: "flex",
-          background: COULEURS.orVif,
-        }}
-      />
+    <Plan fond={COULEURS.orVif} surFond="#1B1405" legalCouleur="#4A3504">
       <div
         style={{ width: utile, display: "flex", flexDirection: "column" }}
       >
@@ -426,12 +428,6 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
           }}
         >
           7 jours offerts. Le programme, les cotes et les rapports restent gratuits.
-        </span>
-      </div>
-      <div style={{ position: "absolute", left: MARGE, top: 1700, width: utile, display: "flex" }}>
-        <span style={{ fontFamily: "Inter", fontSize: 24, lineHeight: 1.4, color: "#4A3504" }}>
-          Jouer comporte des risques : endettement, isolement, dépendance.
-          09&#160;74&#160;75&#160;13&#160;13. Interdit aux mineurs.
         </span>
       </div>
     </Plan>
