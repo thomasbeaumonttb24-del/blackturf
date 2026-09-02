@@ -1,0 +1,279 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #B45309; text-decoration: none; } a:hover { color: #92400E; }
+  </style>
+</helmet>
+
+<div style="width: 794px; height: 1123px; overflow: hidden; background: #FFFFFF; font-family: Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #111827; display: flex; flex-direction: column;">
+
+  <!-- ── En-tête ── -->
+  <div style="padding: 40px 56px 0; flex-shrink: 0;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 13px; border-bottom: 1px solid #EFE6D2;">
+      <div style="display: flex; align-items: center; gap: 9px;">
+        <img src="mark-ink.png" alt="" style="width: 24px; height: auto; display: block;">
+        <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 700; letter-spacing: -0.01em;">Black<span style="color: #B45309;">Turf</span></span>
+      </div>
+      <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: #9CA3AF;">Le produit</span>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1; padding: 32px 56px 0; display: flex; flex-direction: column;">
+
+    <div style="display: flex; align-items: center; gap: 9px;">
+      <span style="width: 20px; height: 2px; background: #D97706; display: block;"></span>
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #B45309;">Plan de mise</span>
+    </div>
+
+    <h2 style="margin: 12px 0 0; font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 32px; line-height: 1.13; font-weight: 700; letter-spacing: -0.025em;">
+      Même course, <span style="color: #B45309;">trois façons de jouer.</span>
+    </h2>
+
+    <p style="margin: 12px 0 0; font-size: 15.5px; line-height: 1.55; color: #4B5563; max-width: 645px;">
+      Vous choisissez votre profil et votre budget. BlackTurf construit les paris adaptés,
+      calcule le gain potentiel de chacun, et vous dit exactement quoi jouer.
+    </p>
+
+    <!-- ── Trois profils ── -->
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 22px;">
+
+      <div style="border: 1px solid #E5E7EB; border-radius: 15px; padding: 16px 15px 15px; background: #FFFFFF;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5.5c0 4.3-2.9 8.2-7 9.5-4.1-1.3-7-5.2-7-9.5V6z"/></svg>
+          <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 700;">Prudent</span>
+        </div>
+        <p style="margin: 7px 0 0; height: 34px; font-size: 12.5px; line-height: 1.4; color: #6B7280;">Des gains réguliers, le risque minimal</p>
+        <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 7px;">
+          <div style="background: #F9FAFB; border: 1px solid #F0F1F3; border-radius: 10px; padding: 9px 11px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+              <span style="font-size: 13px; font-weight: 600;">Placé</span>
+              <span style="font-size: 11.5px; color: #9CA3AF;">N°2</span>
+            </div>
+            <div style="margin-top: 5px; display: flex; align-items: baseline; justify-content: space-between;">
+              <span style="font-size: 12px; color: #6B7280;">Mise 3 €</span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #047857;">≈ 6 €</span>
+            </div>
+          </div>
+          <div style="background: #F9FAFB; border: 1px solid #F0F1F3; border-radius: 10px; padding: 9px 11px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+              <span style="font-size: 13px; font-weight: 600;">Couplé Placé</span>
+              <span style="font-size: 11.5px; color: #9CA3AF;">2 · 4</span>
+            </div>
+            <div style="margin-top: 5px; display: flex; align-items: baseline; justify-content: space-between;">
+              <span style="font-size: 12px; color: #6B7280;">Mise 2 €</span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #047857;">≈ 14 €</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="border: 2px solid #F0C15C; border-radius: 15px; padding: 15px 14px 14px; background: #FFFDF6; position: relative;">
+        <div style="position: absolute; top: -10px; left: 14px; background: #B45309; color: #FFFFFF; font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px;">Le + choisi</div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 1px;">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16"/><path d="M6 8h12"/><path d="M6 8l-3 6h6z"/><path d="M18 8l-3 6h6z"/></svg>
+          <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 700;">Modéré</span>
+        </div>
+        <p style="margin: 7px 0 0; height: 34px; font-size: 12.5px; line-height: 1.4; color: #6B7280;">L'équilibre rendement / sécurité</p>
+        <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 7px;">
+          <div style="background: #FFFFFF; border: 1px solid #F3E7C9; border-radius: 10px; padding: 9px 11px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+              <span style="font-size: 13px; font-weight: 600;">Couplé Placé</span>
+              <span style="font-size: 11.5px; color: #9CA3AF;">2 · 4 · 5</span>
+            </div>
+            <div style="margin-top: 5px; display: flex; align-items: baseline; justify-content: space-between;">
+              <span style="font-size: 12px; color: #6B7280;">Mise 3 €</span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #047857;">≈ 32 €</span>
+            </div>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #F3E7C9; border-radius: 10px; padding: 9px 11px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+              <span style="font-size: 13px; font-weight: 600;">2 sur 4</span>
+              <span style="font-size: 11.5px; color: #9CA3AF;">2 · 4 · 5 · 7</span>
+            </div>
+            <div style="margin-top: 5px; display: flex; align-items: baseline; justify-content: space-between;">
+              <span style="font-size: 12px; color: #6B7280;">Mise 2 €</span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #047857;">≈ 48 €</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="border: 1px solid #E5E7EB; border-radius: 15px; padding: 16px 15px 15px; background: #FFFFFF;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#C2410C" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.5 3.2.4 5-1 6.4C9.3 11.2 7 12.7 7 15.5A5 5 0 0017 16c0-2.4-1.3-3.6-2.2-5.3"/></svg>
+          <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 700;">Risqué</span>
+        </div>
+        <p style="margin: 7px 0 0; height: 34px; font-size: 12.5px; line-height: 1.4; color: #6B7280;">On vise les gros gains</p>
+        <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 7px;">
+          <div style="background: #F9FAFB; border: 1px solid #F0F1F3; border-radius: 10px; padding: 9px 11px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+              <span style="font-size: 13px; font-weight: 600;">Couplé Gagnant</span>
+              <span style="font-size: 11.5px; color: #9CA3AF;">2 · 4</span>
+            </div>
+            <div style="margin-top: 5px; display: flex; align-items: baseline; justify-content: space-between;">
+              <span style="font-size: 12px; color: #6B7280;">Mise 2 €</span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #047857;">≈ 259 €</span>
+            </div>
+          </div>
+          <div style="background: #F9FAFB; border: 1px solid #F0F1F3; border-radius: 10px; padding: 9px 11px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+              <span style="font-size: 13px; font-weight: 600;">Tiercé</span>
+              <span style="font-size: 11.5px; color: #9CA3AF;">2 · 4 · 5</span>
+            </div>
+            <div style="margin-top: 5px; display: flex; align-items: baseline; justify-content: space-between;">
+              <span style="font-size: 12px; color: #6B7280;">Mise 2 €</span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #047857;">≈ 430 €</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <p style="margin: 10px 0 0; font-size: 11.5px; line-height: 1.45; color: #9CA3AF;">
+      Exemple illustratif sur une course type. Gains potentiels si le pari est gagnant — ils varient
+      selon la course, votre mise et les rapports PMU réels.
+    </p>
+
+    <!-- ── Deux colonnes : valeur + capital ── -->
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 30px;">
+
+      <div>
+        <div style="display: flex; align-items: center; gap: 9px;">
+          <span style="width: 20px; height: 2px; background: #D97706; display: block;"></span>
+          <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #B45309;">Paris de valeur</span>
+        </div>
+        <h3 style="margin: 11px 0 0; font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 21px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em;">
+          Miser quand la cote se trompe
+        </h3>
+        <p style="margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: #5B6472;">
+          Un pari de valeur, c'est un cheval qui a plus de chances que sa cote ne le laisse croire.
+          Seuls ces écarts sont signalés — là où, sur la durée, le jeu penche de votre côté.
+        </p>
+
+        <div style="margin-top: 14px; border: 1px solid #F0DFAE; background: #FFFDF6; border-radius: 14px; padding: 14px 15px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #B45309;">Signal détecté</span>
+            <span style="font-size: 9.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #9CA3AF; border: 1px solid #E5E7EB; border-radius: 999px; padding: 2px 8px;">Exemple</span>
+          </div>
+          <div style="margin-top: 10px; font-size: 15px; font-weight: 700;">Vent d'Est <span style="font-weight: 400; color: #9CA3AF; font-size: 13px;">N°7</span></div>
+          <div style="margin-top: 3px; font-size: 12.5px; color: #6B7280;">Deauville · Plat 1600 m</div>
+          <div style="margin-top: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+            <div style="background: #FFFFFF; border: 1px solid #F1E6CE; border-radius: 10px; padding: 8px 6px; text-align: center;">
+              <div style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 700; color: #111827;">15 %</div>
+              <div style="margin-top: 3px; font-size: 10.5px; color: #6B7280;">proba modèle</div>
+            </div>
+            <div style="background: #FFFFFF; border: 1px solid #F1E6CE; border-radius: 10px; padding: 8px 6px; text-align: center;">
+              <div style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 700; color: #6B7280;">11,8 %</div>
+              <div style="margin-top: 3px; font-size: 10.5px; color: #6B7280;">proba marché</div>
+            </div>
+            <div style="background: #FFFFFF; border: 1px solid #C7E7D8; border-radius: 10px; padding: 8px 6px; text-align: center;">
+              <div style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 700; color: #047857;">+27,5 %</div>
+              <div style="margin-top: 3px; font-size: 10.5px; color: #6B7280;">espérance</div>
+            </div>
+          </div>
+          <p style="margin: 11px 0 0; font-size: 12px; line-height: 1.5; color: #6B7280;">
+            À la cote 8,5 le marché lui donne 11,8 % de chances ; le modèle en voit 15 %.
+            (8,5 × 0,15) − 1 = <span style="color: #047857; font-weight: 600;">+27,5 %</span> : la cote paie plus que le risque réel.
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <div style="display: flex; align-items: center; gap: 9px;">
+          <span style="width: 20px; height: 2px; background: #D97706; display: block;"></span>
+          <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #B45309;">Gestion du capital</span>
+        </div>
+        <h3 style="margin: 11px 0 0; font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 21px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em;">
+          Votre bankroll, suivie sans triche
+        </h3>
+        <p style="margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: #5B6472;">
+          Chaque pari validé est réglé automatiquement aux vrais rapports PMU. Vous voyez votre
+          rendement réel — les gains comme les pertes. Aucun chiffre maquillé.
+        </p>
+
+        <div style="margin-top: 14px; border: 1px solid #E5E7EB; border-radius: 14px; padding: 14px 15px; background: #FFFFFF;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7280;">Suivi du capital</span>
+            <span style="font-size: 9.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #9CA3AF; border: 1px solid #E5E7EB; border-radius: 999px; padding: 2px 8px;">Exemple</span>
+          </div>
+          <div style="margin-top: 10px; display: flex; align-items: flex-end; justify-content: space-between; background: #F3FAF6; border: 1px solid #DCEFE5; border-radius: 11px; padding: 10px 13px;">
+            <div>
+              <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #6B7280;">Capital</div>
+              <div style="margin-top: 4px; font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 18px; font-weight: 700;">100 € <span style="color: #C9D3CE; font-weight: 400;">→</span> 134 €</div>
+            </div>
+            <div style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 18px; font-weight: 700; color: #047857;">+34 €</div>
+          </div>
+          <div style="margin-top: 9px; display: flex; flex-direction: column; gap: 5px;">
+            <div style="display: flex; align-items: center; gap: 8px; background: #F9FAFB; border-radius: 8px; padding: 7px 10px;">
+              <span style="width: 6px; height: 6px; border-radius: 999px; background: #059669; flex-shrink: 0;"></span>
+              <span style="font-size: 12.5px; font-weight: 600; flex-grow: 1;">Couplé Placé <span style="font-weight: 400; color: #9CA3AF;">2 · 4</span></span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #047857;">+12 €</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; background: #F9FAFB; border-radius: 8px; padding: 7px 10px;">
+              <span style="width: 6px; height: 6px; border-radius: 999px; background: #D1D5DB; flex-shrink: 0;"></span>
+              <span style="font-size: 12.5px; font-weight: 600; flex-grow: 1;">Simple Placé <span style="font-weight: 400; color: #9CA3AF;">N°6</span></span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #9CA3AF;">−4 €</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; background: #F9FAFB; border-radius: 8px; padding: 7px 10px;">
+              <span style="width: 6px; height: 6px; border-radius: 999px; background: #059669; flex-shrink: 0;"></span>
+              <span style="font-size: 12.5px; font-weight: 600; flex-grow: 1;">2 sur 4 <span style="font-weight: 400; color: #9CA3AF;">1 · 3 · 5 · 8</span></span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #047857;">+24 €</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; background: #F9FAFB; border-radius: 8px; padding: 7px 10px;">
+              <span style="width: 6px; height: 6px; border-radius: 999px; background: #D1D5DB; flex-shrink: 0;"></span>
+              <span style="font-size: 12.5px; font-weight: 600; flex-grow: 1;">Couplé Gagnant <span style="font-weight: 400; color: #9CA3AF;">4 · 7</span></span>
+              <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #9CA3AF;">−4 €</span>
+            </div>
+          </div>
+          <p style="margin: 10px 0 0; font-size: 11.5px; color: #9CA3AF;">Les paris perdus sont affichés comme les autres — c'est ce qui rend le rendement lisible.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Ce qui vient avec ── -->
+    <div style="margin-top: 16px; border-top: 1px solid #EFE6D2; padding-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px;">
+      <div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 10-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 20a2 2 0 003.4 0"/></svg>
+        <div style="margin-top: 7px; font-size: 13.5px; font-weight: 700;">Alertes en temps réel</div>
+        <p style="margin: 4px 0 0; font-size: 12px; line-height: 1.4; color: #5B6472;">Push, e-mail et digest matinal dès qu'un signal sort.</p>
+      </div>
+      <div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15a3 3 0 01-3 3H8l-4 3V6a3 3 0 013-3h10a3 3 0 013 3z"/></svg>
+        <div style="margin-top: 7px; font-size: 13.5px; font-weight: 700;">Assistant hippique</div>
+        <p style="margin: 4px 0 0; font-size: 12px; line-height: 1.4; color: #5B6472;">Vos questions sur une course, posées en langage naturel.</p>
+      </div>
+      <div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"/><path d="M7 12h10"/><path d="M10 19h4"/></svg>
+        <div style="margin-top: 7px; font-size: 13.5px; font-weight: 700;">Créateur de stratégies</div>
+        <p style="margin: 4px 0 0; font-size: 12px; line-height: 1.4; color: #5B6472;">30+ filtres combinables, éprouvés sur l'historique.</p>
+      </div>
+      <div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h9l7 7v9a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1z"/><path d="M13 4v7h7"/></svg>
+        <div style="margin-top: 7px; font-size: 13.5px; font-weight: 700;">Historique &amp; export</div>
+        <p style="margin: 4px 0 0; font-size: 12px; line-height: 1.4; color: #5B6472;">Jusqu'à 18 mois de résultats, exportables.</p>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex-shrink: 0; padding: 0 56px 20px; display: flex; align-items: center; justify-content: space-between;">
+    <span style="font-size: 11.5px; color: #9CA3AF;">blackturf.fr</span>
+    <span style="font-family: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11.5px; font-weight: 600; color: #C0B7A4;">03</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":794,"height":1123}}'>
+class Component extends DCLogic {}
+</script>
+</body>
+</html>
