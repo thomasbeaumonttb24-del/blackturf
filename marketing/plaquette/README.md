@@ -43,27 +43,32 @@ dépliant sont à refaire.
 
 ## Les silhouettes de disciplines
 
-`attele-v2.png` du site est **défectueux** : la roue du sulky y est une
-demi-galette, tranchée à y=211 alors que le cercle a pour centre (72, 202) et
-pour rayon 38 — la coupe passe au-dessus de l'équateur, avant même le point le
-plus large. Aucun recadrage ni redimensionnement ne rattrape ça. `attele-repare.png`
-complète le disque manquant sous la ligne de coupe ; le reste du tracé d'origine
-est intact.
+Elles ne viennent plus de `frontend/public/img/disciplines/` : `attele-v2.png` y
+est défectueux — la roue du sulky y est tranchée en passant par son moyeu, et
+aucun recadrage ne rattrape ça. Elles ont été refournies, complètes et mieux
+dessinées, et sont conservées ici comme sources :
 
-`gen_disc.py` produit les quatre `disc-*.png` : recadrage au contenu, mise à
-l'échelle, pose sur une toile de 200 px de haut avec une ligne de sol commune à
-y=176 et 15 px de marge latérale. Toile de hauteur identique pour les quatre,
-largeur propre à chacun — d'où l'alignement des sols en `align-items: flex-end`
-avec `width: auto` côté HTML.
+    src-plat.png  src-attele.png  src-monte.png  src-obstacle.png
 
-Les multiplicateurs `1.00 / 1.06 / 1.13 / 1.17` corrigent ce que la boîte
-englobante ne mesure pas : elle englobe le sulky de l'attelé, la haie de
-l'obstacle et le cavalier redressé du monté, si bien qu'à hauteur de boîte égale
-leurs **chevaux** sont plus petits que celui du plat. Pour régénérer :
+Détourées du fond blanc par la luminance (`alpha = (240 − L) / 180`), ce qui
+garde l'antialiasing des traits fins — rênes, crinière, rayons de roue — là où
+un seuil sec les hacherait. Les taches d'artefact JPEG de moins de 60 px sont
+supprimées.
 
-    python3 gen_disc.py 1.00 1.06 1.13 1.17
+`gen_disc.py` produit ensuite les quatre `disc-*.png` : recadrage au contenu,
+mise à l'échelle, pose sur une toile de 200 px de haut avec une ligne de sol
+commune à y=178 et 14 px de marge latérale. Toile de hauteur identique pour les
+quatre, largeur propre à chacun — d'où l'alignement des sols en
+`align-items: flex-end` avec `width: auto` côté HTML.
 
-Imprimées à 42 px de haut. En dessous d'environ 34 px les pattes disparaissent.
+Les multiplicateurs `1.00 / 0.95 / 1.00 / 1.08` corrigent ce que la boîte
+englobante ne mesure pas : elle englobe la haie de l'obstacle et le sulky de
+l'attelé, si bien qu'à hauteur de boîte égale leurs **chevaux** ne font pas la
+même taille que celui du plat. Pour régénérer :
+
+    python3 gen_disc.py 1.00 0.95 1.00 1.08
+
+Imprimées à 46 px de haut ; les quatre occupent 213 px dans une colonne de 314.
 
 ## Les critères affichés
 

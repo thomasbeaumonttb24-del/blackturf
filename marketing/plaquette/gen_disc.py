@@ -1,24 +1,20 @@
 from PIL import Image
 import sys, os
 
-SRC = "/home/user/blackturf/frontend/public/img/disciplines"
+# Sources : silhouettes fournies par l'utilisateur, detourees du fond blanc
+# (src-*.png, alpha issu de la luminance, antialiasing du bord conserve).
 H       = 200      # hauteur de toile commune -> meme ratio px/affichage pour les quatre
-SOL     = 176      # ligne de sol partagee dans la toile
-MARGE_X = 15
+SOL     = 178      # ligne de sol partagee dans la toile
+MARGE_X = 14
 
-# Multiplicateur par image : la boite englobante ne mesure pas le CHEVAL.
-# L'attele traine un sulky (boite large), l'obstacle porte une haie (boite haute),
-# le monte a un cavalier redresse. Sans correction, leurs chevaux sont plus petits.
 def build(mult):
     out = {}
     for n, m in mult.items():
-        src = "attele-repare.png" if n == "attele" else f"{SRC}/{n}-v2.png"
-        im = Image.open(src).convert("RGBA")
+        im = Image.open(f"src-{n}.png").convert("RGBA")
         im = im.crop(im.getbbox())
         h = round(SOL * 0.80 * m)
         im = im.resize((max(1, round(im.width * h / im.height)), h), Image.LANCZOS)
-        W = im.width + 2 * MARGE_X
-        canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        canvas = Image.new("RGBA", (im.width + 2 * MARGE_X, H), (0, 0, 0, 0))
         canvas.alpha_composite(im, (MARGE_X, SOL - im.height))
         out[n] = canvas
     return out
@@ -29,12 +25,12 @@ if __name__ == "__main__":
     imgs = build(mult)
     for n, c in imgs.items():
         c.save(f"disc-{n}.png", "PNG", optimize=True)
-    # planche de controle, a la taille d'affichage x8
-    ech = 8 * 40 / H
-    strip = Image.new("RGBA", (round(sum(c.width for c in imgs.values()) * ech) + 3 * 40, round(H * ech)), (255, 251, 240, 255))
+    ech = 8 * 42 / H                                   # planche de controle a x8 la taille imprimee
+    strip = Image.new("RGBA", (round(sum(c.width for c in imgs.values()) * ech) + 3 * 40,
+                               round(H * ech)), (255, 251, 240, 255))
     x = 0
     for n in ["plat", "attele", "monte", "obstacle"]:
         c = imgs[n].resize((round(imgs[n].width * ech), round(H * ech)), Image.LANCZOS)
         strip.alpha_composite(c, (x, 0)); x += c.width + 40
     strip.convert("RGB").save("_strip.png")
-    print({n: f"{c.width}x{c.height}" for n, c in imgs.items()})
+    print({n: f"{c.width}x{c.height}  {os.path.getsize(f'disc-{n}.png')//1024}KB" for n, c in imgs.items()})
