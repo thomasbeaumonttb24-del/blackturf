@@ -44,8 +44,17 @@ export interface DonneesSite {
   partantsAnalyses: number;
   coursesReglees: number;
   journeesPubliees: number;
+  /** Taux mesurés, en pourcents. `null` = indisponible : le bloc n'est pas rendu. */
+  precisionTop3: number | null;
+  hasardTop3: number | null;
+  favoriPlace: number | null;
+  favoriGagnant: number | null;
+  coursesMesurees: number;
   photo: string | null;
 }
+
+/** « 60.2 » → « 60,2 % ». Les taux sont affichés à la décimale, comme sur le site. */
+const pct = (n: number) => `${n.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
 
 /**
  * Séparateur de milliers insécable.
@@ -165,9 +174,10 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         }}
       />
 
-      {/* ═══════════ (0,0) — la marque et ce qu'elle fait ═══════════
+      {/* ═══════════ (0,0) — la marque, la promesse, la phrase qui reste ═══════════
           Publiée en DERNIER, donc en tête du profil et en tête du fil : c'est elle qui doit
-          expliquer BlackTurf à quelqu'un qui n'en a jamais entendu parler. */}
+          expliquer BlackTurf à quelqu'un qui n'en a jamais entendu parler. La ligne dorée
+          est celle du dépliant — c'est la formule la plus juste que la marque possède. */}
       <Carte x={col(0) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
         <div
           style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}
@@ -192,140 +202,235 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           </span>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 72 }}>
-          <Eyebrow>PRONOSTICS PMU CALCULÉS</Eyebrow>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 64 }}>
+          <Eyebrow>PARIS HIPPIQUES PMU</Eyebrow>
           <span
             style={{
               fontFamily: "Grotesk",
               fontWeight: 700,
-              fontSize: 74,
+              fontSize: 70,
               lineHeight: 1.08,
               color: COULEURS.encre,
-              marginTop: 22,
+              marginTop: 20,
               letterSpacing: -2.5,
             }}
           >
-            Le programme du jour, passé au calcul.
+            Chaque course du PMU, analysée avant le départ.
           </span>
+        </div>
+
+        <div style={{ display: "flex", width: 120, height: 4, background: COULEURS.orVif, marginTop: 44 }} />
+
+        <span
+          style={{
+            fontFamily: "Grotesk",
+            fontWeight: 700,
+            fontSize: 38,
+            lineHeight: 1.28,
+            color: COULEURS.or,
+            letterSpacing: -0.8,
+            marginTop: 40,
+          }}
+        >
+          Pendant qu&apos;ils jouent au feeling, vous jouez aux chiffres.
+        </span>
+
+        <span
+          style={{
+            fontFamily: "Inter",
+            fontSize: 26,
+            lineHeight: 1.5,
+            color: COULEURS.encreDouce,
+            marginTop: 44,
+          }}
+        >
+          {nb(d.coursesEnBase)} courses et {nb(d.partantsAnalyses)} partants en base. Programme,
+          cotes et rapports officiels en accès libre.
+        </span>
+      </Carte>
+
+      {/* ═══════════ (0,1) — LE chiffre, et son témoin ═══════════
+          Un taux seul ne prouve rien : 60 % sur des champs de onze partants, est-ce beaucoup ?
+          Le hasard sur EXACTEMENT les mêmes courses répond, et c'est la seule façon honnête
+          de vendre une précision — sans jamais parler d'argent. */}
+      <Carte x={col(1) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
+        <Eyebrow>CE QUE ÇA DONNE, MESURÉ</Eyebrow>
+        {d.precisionTop3 !== null ? (
+          <div style={{ display: "flex", flexDirection: "column", marginTop: 54 }}>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 148,
+                lineHeight: 1,
+                color: COULEURS.encre,
+                letterSpacing: -6,
+              }}
+            >
+              {pct(d.precisionTop3)}
+            </span>
+            <span
+              style={{
+                fontFamily: "Inter",
+                fontSize: 30,
+                lineHeight: 1.4,
+                color: COULEURS.encre,
+                marginTop: 16,
+              }}
+            >
+              des courses : le gagnant est dans notre top 3
+            </span>
+          </div>
+        ) : null}
+
+        {d.hasardTop3 !== null ? (
+          <div style={{ display: "flex", alignItems: "center", marginTop: 34 }}>
+            <div style={{ display: "flex", width: 40, height: 3, background: COULEURS.ligne }} />
+            <span
+              style={{
+                fontFamily: "Inter",
+                fontSize: 26,
+                color: COULEURS.encreDouce,
+                marginLeft: 14,
+              }}
+            >
+              Le hasard, sur les mêmes courses : {pct(d.hasardTop3)}
+            </span>
+          </div>
+        ) : null}
+
+        <div style={{ display: "flex", marginTop: 46 }}>
+          <div style={{ display: "flex", flexDirection: "column", width: 380 }}>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 60,
+                lineHeight: 1,
+                color: COULEURS.or,
+                letterSpacing: -2,
+              }}
+            >
+              {d.favoriPlace !== null ? pct(d.favoriPlace) : "—"}
+            </span>
+            <span style={{ fontFamily: "Inter", fontSize: 24, color: COULEURS.encreDouce, marginTop: 8 }}>
+              notre favori dans les trois
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 60,
+                lineHeight: 1,
+                color: COULEURS.or,
+                letterSpacing: -2,
+              }}
+            >
+              {d.favoriGagnant !== null ? pct(d.favoriGagnant) : "—"}
+            </span>
+            <span style={{ fontFamily: "Inter", fontSize: 24, color: COULEURS.encreDouce, marginTop: 8 }}>
+              notre favori gagnant
+            </span>
+          </div>
+        </div>
+
+        <span
+          style={{
+            fontFamily: "Inter",
+            fontSize: 24,
+            lineHeight: 1.45,
+            color: COULEURS.encreDouce,
+            marginTop: 40,
+          }}
+        >
+          Mesuré sur {nb(d.coursesMesurees)} courses réglées aux rapports officiels du PMU.
+        </span>
+        <div style={{ display: "flex", marginTop: 26 }}>
+          <Adresse />
+        </div>
+      </Carte>
+
+      {/* ═══════════ (0,2) — l'algorithme, et ce qu'il fait la nuit ═══════════
+          Les familles de critères sont celles du dépliant, et volontairement les moins
+          attendues : « forme et cotes » n'impressionne personne, « contrecoup après un gros
+          effort » et « coups de cote à 30 minutes » disent qu'on a vraiment regardé. */}
+      <Carte x={col(2) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
+        <Eyebrow>L&apos;ALGORITHME</Eyebrow>
+        <div style={{ display: "flex", alignItems: "baseline", marginTop: 44 }}>
           <span
             style={{
               fontFamily: "Grotesk",
               fontWeight: 700,
-              fontSize: 74,
-              lineHeight: 1.08,
-              color: COULEURS.or,
-              letterSpacing: -2.5,
+              fontSize: 132,
+              lineHeight: 1,
+              color: COULEURS.encre,
+              letterSpacing: -6,
             }}
           >
-            Pas au feeling.
+            80+
+          </span>
+          <span
+            style={{
+              fontFamily: "Inter",
+              fontSize: 29,
+              color: COULEURS.encreDouce,
+              marginLeft: 20,
+            }}
+          >
+            critères par cheval
           </span>
         </div>
 
-        <div style={{ display: "flex", width: 120, height: 4, background: COULEURS.orVif, marginTop: 52 }} />
-
-        <div style={{ display: "flex", marginTop: 48 }}>
-          <div style={{ display: "flex", width: 400 }}>
-            <Chiffre valeur={nb(d.coursesEnBase)} legende="courses en base" taille={72} />
-          </div>
-          <div style={{ display: "flex" }}>
-            <Chiffre valeur={nb(d.partantsAnalyses)} legende="partants analysés" taille={72} />
-          </div>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 40 }}>
+          {[
+            "Contrecoup, surmenage, descente de catégorie",
+            "Biais de corde, déferrage, pénétromètre",
+            "Père sur ce terrain, jockey × ce cheval",
+            "Argent professionnel, coups de cote à 30 min",
+          ].map((ligne) => (
+            <div key={ligne} style={{ display: "flex", alignItems: "center", marginBottom: 22 }}>
+              <div
+                style={{ display: "flex", width: 9, height: 9, borderRadius: 5, background: COULEURS.orVif }}
+              />
+              <span
+                style={{
+                  fontFamily: "Inter",
+                  fontSize: 26,
+                  lineHeight: 1.35,
+                  color: COULEURS.encre,
+                  marginLeft: 16,
+                }}
+              >
+                {ligne}
+              </span>
+            </div>
+          ))}
         </div>
 
+        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 24 }} />
         <span
           style={{
             fontFamily: "Inter",
             fontSize: 26,
             lineHeight: 1.5,
             color: COULEURS.encreDouce,
-            marginTop: 46,
+            marginTop: 26,
           }}
         >
-          Programme, cotes et rapports officiels en accès libre.
+          Recalibré chaque nuit sur les arrivées réelles. Ce qui s&apos;est trompé hier corrige
+          le pronostic d&apos;aujourd&apos;hui.
         </span>
-      </Carte>
-
-      {/* ═══════════ (0,1) — LE chiffre ═══════════
-          Le seul chiffre que personne d'autre n'affiche : le dénominateur. Un site de
-          pronostics montre ses coups gagnants ; celui-ci montre d'abord combien de courses
-          il a réglées, gagnantes ou non. C'est ce qui rend le reste crédible. */}
-      <Carte x={col(1) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
-        <Eyebrow>LA PREUVE, PAS LA PROMESSE</Eyebrow>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 96 }}>
-          <Chiffre
-            valeur={nb(d.coursesReglees)}
-            legende="courses réglées aux rapports officiels du PMU"
-          />
-        </div>
-        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 88 }} />
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 27,
-            lineHeight: 1.5,
-            color: COULEURS.encre,
-            marginTop: 36,
-          }}
-        >
-          Chaque pronostic est figé AVANT le départ, puis réglé à l&apos;arrivée. Aucune
-          reconstruction après coup.
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 26,
-            lineHeight: 1.5,
-            color: COULEURS.encreDouce,
-            marginTop: 28,
-          }}
-        >
-          {nb(d.journeesPubliees)} journées publiées, gagnantes comme perdantes.
-        </span>
-        <div style={{ display: "flex", marginTop: 52 }}>
+        <div style={{ display: "flex", marginTop: 34 }}>
           <Adresse />
         </div>
       </Carte>
-
-      {/* ═══════════ (0,2) — comment c'est calculé ═══════════ */}
-      <Carte x={col(2) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
-        <Eyebrow>COMMENT C&apos;EST CALCULÉ</Eyebrow>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 96 }}>
-          <Chiffre valeur="80" legende="critères par cheval, à chaque course" />
-        </div>
-        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 88 }} />
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 27,
-            lineHeight: 1.5,
-            color: COULEURS.encre,
-            marginTop: 36,
-          }}
-        >
-          Une probabilité calculée pour chaque partant, publiée avant le départ. Pas un avis :
-          un calcul.
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 26,
-            lineHeight: 1.5,
-            color: COULEURS.encreDouce,
-            marginTop: 28,
-          }}
-        >
-          Et les cotes du PMU et des principaux opérateurs, côte à côte.
-        </span>
-        <div style={{ display: "flex", marginTop: 52 }}>
-          <Adresse />
-        </div>
-      </Carte>
-
       {/* ═══════════ (1,0) — ce que fait le site ═══════════ */}
       <div
         style={{ position: "absolute", left: col(0) + MARGE, top: bas + 112, width: utile, display: "flex" }}
       >
-        <Eyebrow ton="sombre">CE QUE BLACKTURF FAIT, CHAQUE JOUR</Eyebrow>
+        <Eyebrow ton="sombre">CE QUE VOUS OBTENEZ</Eyebrow>
       </div>
       <div
         style={{
@@ -337,27 +442,28 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           flexDirection: "column",
         }}
       >
-        {/* Le chiffre « 80 critères » porte déjà la tuile (0,2) : le répéter ici le
-            banaliserait, et sur la grille les deux se lisent côte à côte. */}
+        {/* Formulé en BÉNÉFICES, comme le dépliant : « ce que vous obtenez », pas « ce que
+            le logiciel fait ». Et le chiffre « 80+ » porte déjà la tuile (0,2) — le répéter
+            ici le banaliserait, alors que les deux se lisent côte à côte sur la grille. */}
         <Atout
-          titre="Il lit le programme pour vous"
-          texte="Toutes les courses de la carte, tous les partants, dépouillés avant le départ."
+          titre="Tout le programme, analysé"
+          texte="Chaque partant classé, avec sa probabilité et sa cote juste, avant le départ."
         />
         <Atout
-          titre="Il calcule sur VOTRE mise"
-          texte="Vous entrez votre budget, le plan de jeu se construit dessus. Aucun ticket type imposé."
+          titre="Un plan de mise sur votre budget"
+          texte="Vous entrez un montant, la répartition s'affiche : sécurité, rendement, coup."
         />
         <Atout
-          titre="Il compare les cotes"
-          texte="PMU et principaux opérateurs côte à côte : on voit où la cote décroche."
+          titre="Les paris de valeur"
+          texte="Signalés seulement quand la cote paie plus que le risque réel du cheval."
         />
         <Atout
-          titre="Il publie son bilan"
-          texte="Chaque plan est réglé aux rapports réels du PMU. Les journées rouges restent en ligne."
+          titre="Votre capital suivi sans triche"
+          texte="Réglé aux vrais rapports PMU. Les paris perdus sont affichés aussi."
         />
         <Atout
-          titre="Il répond à vos questions"
-          texte="Une course, un partant, un type de pari : la réponse s'appuie sur vos données."
+          titre="Alerté dès qu'un signal sort"
+          texte="Notification et e-mail sur les courses que vous suivez."
         />
       </div>
       <div style={{ position: "absolute", left: col(0) + MARGE, top: bas + 1092, display: "flex" }}>
@@ -580,17 +686,19 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           flexDirection: "column",
         }}
       >
+        {/* Titre repris du dépliant. « 7 jours offerts » annonce une durée ; « moins cher
+            qu'un ticket perdu » annonce un ordre de grandeur, et se retient. */}
         <span
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 100,
-            lineHeight: 1.04,
+            fontSize: 76,
+            lineHeight: 1.08,
             color: COULEURS.surSombre,
-            letterSpacing: -3.5,
+            letterSpacing: -2.6,
           }}
         >
-          7 jours offerts
+          Moins cher qu&apos;un ticket perdu.
         </span>
         <span
           style={{
@@ -598,11 +706,10 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             fontSize: 28,
             lineHeight: 1.5,
             color: COULEURS.surSombreDoux,
-            marginTop: 26,
+            marginTop: 24,
           }}
         >
-          Vous créez un compte, vous entrez votre budget : le plan du jour se calcule dessus.
-          Résiliable à tout moment.
+          Sept jours d&apos;essai gratuit, puis 12&nbsp;€/mois. Annulation en deux clics.
         </span>
       </div>
 
@@ -616,10 +723,13 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           flexDirection: "column",
         }}
       >
+        {/* Quotas réels, pas des formules commerciales : `MISE_PLAN_DAILY_LIMITS` vaut
+            {"{"}free: 1, standard: 5{"}"} côté API, et l'expert n'y figure pas — donc
+            illimité. Annoncer autre chose se verrait dès le premier essai. */}
         {[
-          ["Découverte", "0 €", "programme, cotes, arrivées"],
-          ["Standard", "12 €/mois", "prédictions et plan de mise"],
-          ["Expert", "19 €/mois", "paris de valeur en temps réel"],
+          ["Découverte", "0 €", "1 plan de mise par jour, cotes et arrivées"],
+          ["Standard", "12 €/mois", "5 plans par jour, suivi du capital, alertes"],
+          ["Expert", "19 €/mois", "illimité, paris de valeur en temps réel"],
         ].map(([nom, prix, quoi]) => (
           <div
             key={nom}

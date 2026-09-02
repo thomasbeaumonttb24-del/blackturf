@@ -49,11 +49,20 @@ async function polices() {
  * volontaire : mieux vaut un visuel manifestement faux qu'un visuel plausible fabriqué à
  * partir de valeurs de repli écrites en dur, qu'on publierait sans s'en apercevoir.
  */
+/** `null` plutôt que 0 : un taux absent ne doit pas s'afficher « 0 % ». */
+const taux = (v: unknown): number | null =>
+  v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v);
+
 async function donnees(): Promise<DonneesSite> {
   let coursesEnBase = 0;
   let partantsAnalyses = 0;
   let coursesReglees = 0;
   let journeesPubliees = 0;
+  let precisionTop3: number | null = null;
+  let hasardTop3: number | null = null;
+  let favoriPlace: number | null = null;
+  let favoriGagnant: number | null = null;
+  let coursesMesurees = 0;
   try {
     const res = await fetch(`${API}/stats/chiffres-site`, { next: { revalidate: 3600 } });
     if (res.ok) {
@@ -62,6 +71,11 @@ async function donnees(): Promise<DonneesSite> {
       partantsAnalyses = Number(d.partants_analyses ?? 0);
       coursesReglees = Number(d.courses_reglees ?? 0);
       journeesPubliees = Number(d.journees_publiees ?? 0);
+      precisionTop3 = taux(d.precision_top3);
+      hasardTop3 = taux(d.hasard_top3);
+      favoriPlace = taux(d.favori_place);
+      favoriGagnant = taux(d.favori_gagnant);
+      coursesMesurees = Number(d.courses_mesurees ?? 0);
     }
   } catch {
     // Un visuel sans données reste rendu ; un visuel qui plante, non.
@@ -71,6 +85,11 @@ async function donnees(): Promise<DonneesSite> {
     partantsAnalyses,
     coursesReglees,
     journeesPubliees,
+    precisionTop3,
+    hasardTop3,
+    favoriPlace,
+    favoriGagnant,
+    coursesMesurees,
     photo: await photoEnDataUri(PHOTO),
   };
 }

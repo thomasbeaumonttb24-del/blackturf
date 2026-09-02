@@ -1713,12 +1713,33 @@ async def stats_chiffres_site(
     """))
     co = cohorte.mappings().first() or {}
 
+    # Les taux de réussite sortent du MÊME cache que la page track-record publique.
+    # Les recalculer ici donnerait deux chiffres pour la même chose, et le jour où
+    # ils divergeraient d'un dixième, c'est le visuel — définitif — qui aurait tort.
+    tr, _frais = await _cache_get_swr(redis, TRACK_RECORD_CACHE_KEY)
+    if tr is None:
+        # Cache froid : on paie le calcul une fois. `chiffres-site` étant lui-même
+        # gardé une heure, ça n'arrive qu'au premier appel après un vidage de Redis.
+        tr = await _compute_track_record(db)
+        await _cache_set_swr(redis, TRACK_RECORD_CACHE_KEY, tr, fresh_ttl=TRACK_RECORD_FRESH_TTL)
+    g = (tr or {}).get("global", {}) or {}
+
     result = {
         "courses_en_base": int(v.get("courses_en_base") or 0),
         "partants_analyses": int(v.get("partants_analyses") or 0),
         "courses_reglees": int(co.get("courses_reglees") or 0),
         "journees_publiees": int(co.get("journees_publiees") or 0),
         "depuis": co.get("depuis").isoformat() if co.get("depuis") else None,
+        # Taux mesurés, et le HASARD sur les mêmes courses. Le second n'est pas
+        # décoratif : « 60 % » ne veut rien dire sans savoir ce que vaut un tirage
+        # au sort sur des champs de 11 partants. C'est la comparaison qui prouve,
+        # et c'est la seule façon honnête de vendre une précision.
+        "precision_top3": g.get("accuracy_top3"),
+        "hasard_top3": g.get("hasard_top3"),
+        "favori_place": g.get("favori_place_rate"),
+        "favori_gagnant": g.get("favori_win_rate"),
+        "courses_mesurees": g.get("nb_courses_analysees"),
+        "mesure_depuis": g.get("mesure_depuis"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await _cache_set(redis, CACHE_KEY, result, ttl=3600)  # 1 h : ces chiffres bougent lentement
