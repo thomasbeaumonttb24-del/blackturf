@@ -77,6 +77,13 @@ def _maintenant() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Le compte Instagram n'était annoncé nulle part : ni sur le site, ni dans les e-mails.
+# Les gens déjà inscrits à la lettre sont l'audience la plus qualifiée qui existe pour
+# ce compte — ils ont donné leur adresse pour recevoir exactement ce qu'il publie.
+INSTAGRAM_PSEUDO = "@blackturf.fr"
+INSTAGRAM_URL = "https://www.instagram.com/blackturf.fr/"
+
+
 def _mail_confirmation_html(lien: str) -> str:
     return f"""<!doctype html>
 <html lang="fr"><body style="margin:0;background:#f6f6f3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#16181c">
@@ -96,6 +103,10 @@ def _mail_confirmation_html(lien: str) -> str:
       <span style="word-break:break-all">{lien}</span>
     </p>
     <p style="font-size:13px;line-height:1.6;color:#7c818a;margin:24px 0 0;padding-top:16px;border-top:1px solid #dcdcd5">
+      En attendant lundi, le bilan du jour passe aussi sur Instagram :
+      <a href="{INSTAGRAM_URL}" style="color:#9a6b11">{INSTAGRAM_PSEUDO}</a>
+    </p>
+    <p style="font-size:13px;line-height:1.6;color:#7c818a;margin:16px 0 0">
       Vous n'êtes pas à l'origine de cette demande ? Ignorez ce message : sans
       confirmation de votre part, aucune lettre ne partira et cette adresse sera oubliée.
     </p>
@@ -108,6 +119,7 @@ def _mail_confirmation_texte(lien: str) -> str:
         "Confirmez votre inscription à la lettre hebdomadaire BlackTurf.\n\n"
         "Chaque lundi : le bilan chiffré de la semaine, gains comme pertes.\n\n"
         f"{lien}\n\n"
+        f"En attendant lundi, le bilan du jour passe aussi sur Instagram : {INSTAGRAM_URL}\n\n"
         "Vous n'êtes pas à l'origine de cette demande ? Ignorez ce message : sans "
         "confirmation, aucune lettre ne partira."
     )

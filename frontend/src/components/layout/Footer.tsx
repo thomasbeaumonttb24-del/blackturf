@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
-import { ShieldCheck, Database, Mail } from "lucide-react";
+import { ShieldCheck, Database, Mail, Instagram } from "lucide-react";
+import { INSTAGRAM } from "@/lib/social";
 
 /**
  * `rel="nofollow"` sur les liens vers des espaces privés.
@@ -109,6 +110,24 @@ export function Footer() {
               className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 transition-colors hover:text-brand-gold-dark"
             >
               <Mail className="h-3.5 w-3.5" /> contact@blackturf.fr
+            </a>
+
+            {/*
+              Le compte Instagram n'était lié depuis AUCUNE page du site : les visiteurs
+              ne pouvaient pas savoir qu'il existait. Le pied de page est le seul endroit
+              qui donne un lien depuis chaque page.
+
+              `rel="me"` déclare que ce profil appartient à la même entité que le site.
+              C'est le pendant du `sameAs` du balisage : les deux se répondent, et un
+              robot qui ne lit pas le JSON-LD lit celui-là.
+            */}
+            <a
+              href={INSTAGRAM.url}
+              target="_blank"
+              rel="me noopener noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 transition-colors hover:text-brand-gold-dark"
+            >
+              <Instagram className="h-3.5 w-3.5" /> {INSTAGRAM.pseudo}
             </a>
           </div>
 

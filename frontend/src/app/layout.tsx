@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { jsonLd } from "@/lib/seo";
+import { SAME_AS } from "@/lib/social";
 import { Inter, Space_Grotesk } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
@@ -128,6 +129,11 @@ const orgJsonLd = {
   // Identifiant d'entreprise français : c'est la référence vérifiable auprès d'un tiers.
   identifier: { "@type": "PropertyValue", propertyID: "SIREN", value: "907548184" },
   areaServed: "FR",
+  // `sameAs` est ce qui rattache un compte social à CETTE entité plutôt qu'à une marque
+  // homonyme. Sans lui, le compte Instagram et le site restaient deux choses sans lien
+  // déclaré. La liste vient de `lib/social` : le pied de page pose les mêmes adresses,
+  // et deux déclarations qui divergent d'un caractère ne rattachent rien.
+  sameAs: SAME_AS,
 };
 const siteJsonLd = {
   "@context": "https://schema.org",
