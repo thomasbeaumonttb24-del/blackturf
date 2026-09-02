@@ -15,6 +15,7 @@ Dans cet état, le service fait tout — construction, vérifications, journalis
 l'appel qui publie. Publier au nom d'une marque est irréversible et public : ça ne doit
 jamais démarrer parce qu'un jeton s'est trouvé présent dans l'environnement.
 """
+import asyncio
 import os
 from typing import Optional
 
@@ -110,6 +111,54 @@ def _tronquer(legende: str) -> str:
     return legende[: MAX_LEGENDE - 1].rstrip() + "…"
 
 
+async def _attendre_conteneur(
+    client: httpx.AsyncClient,
+    creation_id: str,
+    jeton: str,
+    essais: int = 25,
+    pause: float = 4.0,
+) -> tuple[bool, Optional[str]]:
+    """
+    Attend que Meta ait FINI de préparer le conteneur, avant de publier.
+
+    POURQUOI (constaté le 2026-09-02, première tentative de publication réelle) :
+    `POST /media` ne fait qu'enregistrer une URL. Meta va CHERCHER l'image lui-même,
+    la télécharge et la transcode, et tant que ce n'est pas fini `media_publish`
+    répond 400 / code 9007 / sous-code 2207027 — « Die Medien können noch nicht
+    veröffentlicht werden ». Le service enchaînait les deux appels sans respirer :
+    la publication échouait donc systématiquement, sans que rien ne soit publié.
+
+    Le délai dépend de la vitesse à laquelle NOTRE serveur sert l'image, pas de la
+    taille du fichier : une tuile est composée par Satori à la demande. D'où une
+    attente généreuse — 25 essais de 4 s, soit 100 s au plus.
+
+    Renvoie (prêt, raison d'échec).
+    """
+    for _ in range(essais):
+        try:
+            r = await client.get(
+                f"{_base()}/{creation_id}",
+                params={"fields": "status_code,status", "access_token": jeton},
+            )
+        except Exception as e:  # noqa: BLE001
+            return False, f"état du conteneur illisible : {type(e).__name__}"[:200]
+
+        if r.status_code != 200:
+            return False, f"état du conteneur refusé ({r.status_code})"
+
+        etat = (r.json() or {}).get("status_code")
+        if etat == "FINISHED":
+            return True, None
+        if etat in ("ERROR", "EXPIRED"):
+            # `status` porte le détail lisible ; sans lui on ne saurait pas si c'est
+            # l'image qui est refusée ou notre serveur qui n'a pas répondu.
+            return False, f"conteneur {etat} : {(r.json() or {}).get('status')}"[:200]
+
+        await asyncio.sleep(pause)
+
+    return False, f"conteneur toujours pas prêt après {int(essais * pause)} s"
+
+
 async def publier_image(url_image: str, legende: str) -> ResultatPublication:
     """
     Publie une image sur le compte Instagram configuré.
@@ -156,6 +205,10 @@ async def publier_image(url_image: str, legende: str) -> ResultatPublication:
             creation_id = conteneur.json().get("id")
             if not creation_id:
                 return ResultatPublication(False, raison="conteneur sans identifiant")
+
+            pret, pourquoi = await _attendre_conteneur(client, creation_id, jeton)
+            if not pret:
+                return ResultatPublication(False, raison=pourquoi)
 
             publication = await client.post(
                 f"{_base()}/{compte}/media_publish",
@@ -220,7 +273,7 @@ async def publier_mosaique(tuiles: list[dict], pause_secondes: int = 20) -> list
     `pause_secondes` espace les envois : six publications en rafale sur un compte neuf est
     exactement le motif que les plateformes traitent comme automatisé.
     """
-    import asyncio
+
 
     resultats: list[dict] = []
     for i, t in enumerate(tuiles):
