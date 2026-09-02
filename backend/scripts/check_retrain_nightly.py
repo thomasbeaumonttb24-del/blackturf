@@ -352,8 +352,59 @@ def _bloc_tendance(modele: dict) -> str:
     <table style="border-collapse:collapse;font-size:14px;">{corps}</table>{avertissement}"""
 
 
+def _bloc_apprentissages(etat: dict) -> str:
+    """État des ÉTAPES d'apprentissage — celles qui n'existent que derrière le retrain.
+
+    Le rapport savait dire « le retrain a réussi ». Il ne savait pas dire que les
+    onze apprentissages qui SUIVENT le retrain dans le même job n'avaient pas
+    tourné : le worker OOM-killé le 20/08/2026 l'a été 93 s APRÈS avoir déployé
+    v511 avec succès, et le rapport de ce matin-là annonçait donc une nuit
+    réussie. C'est cet angle mort que ce bloc ferme.
+
+    On lit l'ÉTAT PERSISTANT (`learning_step_runs`), pas les logs : un journal qui
+    ne dit rien ne prouve rien, une date de dernier succès vieille de trois jours
+    si — même règle que le verdict de promotion, qui fait déjà primer la base.
+    """
+    etapes = etat.get("etapes") or []
+    if not etapes:
+        return ("<h3 style='font-size:14px;margin-top:24px;'>Apprentissages</h3>"
+                "<p style='color:#666;font-size:13px;'>Aucune étape journalisée "
+                "pour l'instant — le journal se remplit à la première nuit qui suit "
+                "le déploiement.</p>")
+    perimees = {e["step"] for e in (etat.get("perimees") or [])}
+    seuil = etat.get("seuil_heures", 48)
+    from html import escape as _esc
+    rangs = []
+    for e in etapes:
+        perimee = e["step"] in perimees
+        couleur = "#dc2626" if perimee else ("#16a34a" if e["last_status"] == "ok"
+                                             else "#d97706")
+        succes = e["last_success_at"]
+        succes_txt = succes.strftime("%d/%m %H:%M") if hasattr(succes, "strftime") \
+            else (str(succes)[:16] if succes else "jamais")
+        detail = ""
+        if perimee:
+            detail = " ← PÉRIMÉ"
+        elif e["last_status"] != "ok" and e.get("last_error"):
+            detail = f" — {_esc(str(e['last_error'])[:80])}"
+        rangs.append(
+            f'<tr><td style="padding:3px 12px 3px 0;color:#666;">{_esc(e["step"])}</td>'
+            f'<td style="color:{couleur};">{succes_txt}{detail}</td></tr>')
+    entete = ""
+    if perimees:
+        entete = (f'<div style="background:#fef2f2;border-left:4px solid #dc2626;'
+                  f'padding:10px 14px;margin:12px 0;font-size:13px;">'
+                  f'<b>{len(perimees)} apprentissage(s) sans succès depuis plus de '
+                  f'{seuil} h.</b> Ce qu\'ils produisent (courbes de calibration, '
+                  f'poids, gates) décrit un état du monde qui n\'existe plus.</div>')
+    return (f"<h3 style='font-size:14px;margin-top:24px;'>Apprentissages "
+            f"(dernier succès)</h3>{entete}"
+            f"<table style='border-collapse:collapse;font-size:13px;'>"
+            f"{''.join(rangs)}</table>")
+
+
 def _html(verdict: tuple, modele: dict, lignes: list[str],
-          rss_pic_mb: float = 0.0) -> str:
+          rss_pic_mb: float = 0.0, apprentissages: dict | None = None) -> str:
     icone, titre, action = verdict
     couleur = {"✅": "#16a34a", "⚠️": "#d97706", "🔴": "#dc2626", "❓": "#6b7280"}[icone]
     # Pic mémoire du retrain. Le VPS a 7,6 Gio partagés : au-delà d'environ
@@ -396,8 +447,9 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
           <td style="color:{_coul};font-weight:bold;">{_dtxt} — {_verdict}</td></tr>
     </table>
     <p style="color:#666;font-size:12px;margin-top:6px;">
-      0,5 = hasard. Mesuré sur les folds walk-forward, chaque course pesant pareil.
-      Ne se compare pas à l'AUC poolée ci-dessus.
+      0,5 = hasard. Mesuré sur l'ensemble RÉELLEMENT déployé, sur son hold-out
+      hors-échantillon, chaque course pesant pareil (et non plus sur le XGBoost
+      jetable des folds walk-forward). Ne se compare pas à l'AUC poolée ci-dessus.
     </p>"""
 
     # ── Tendance ─────────────────────────────────────────────────────────────
@@ -439,6 +491,7 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
   {bloc_modele}
   {bloc_classement}
   {bloc_tendance}
+  {_bloc_apprentissages(apprentissages or {})}
   <h3 style="font-size:14px;margin-top:24px;">Extrait des logs</h3>
   {logs}
   <p style="color:#999;font-size:11px;margin-top:24px;">
@@ -452,6 +505,15 @@ async def main(dry_run: bool = False) -> None:
     logs = _worker_logs()
     analyse = _analyser_logs(logs)
     modele = await _etat_modele()
+    try:
+        from ml.learning_steps import etat_apprentissages
+        async with AsyncSessionLocal() as s:
+            apprentissages = await etat_apprentissages(s)
+    except Exception as e:
+        # Le rapport doit partir même si le journal est illisible : mieux vaut un
+        # rapport amputé qu'aucun rapport — c'est le silence qu'on combat ici.
+        print(f"apprentissages indisponibles : {e}")
+        apprentissages = {}
     # La BASE prime sur les logs quand les deux se contredisent. `docker logs`
     # ne couvre que l'instance courante du conteneur : un déploiement entre le
     # retrain et le rapport efface les traces et faisait annoncer « aucun
@@ -466,7 +528,8 @@ async def main(dry_run: bool = False) -> None:
 
     icone, titre, _ = verdict
     sujet = f"{icone} BlackTurf retrain — {titre}"
-    corps = _html(verdict, modele, lignes, analyse.get("rss_pic_mb", 0.0))
+    corps = _html(verdict, modele, lignes, analyse.get("rss_pic_mb", 0.0),
+                  apprentissages=apprentissages)
 
     if dry_run:
         print(f"SUJET : {sujet}")
@@ -474,6 +537,9 @@ async def main(dry_run: bool = False) -> None:
         print(f"MODELE : {modele}")
         print(f"LIGNES : {len(lignes)}")
         print(f"PIC RSS : {analyse.get('rss_pic_mb', 0.0)} Mo")
+        _perimees = [e["step"] for e in (apprentissages.get("perimees") or [])]
+        print(f"APPRENTISSAGES : {len(apprentissages.get('etapes') or [])} journalisés, "
+              f"périmés={_perimees}")
         return
 
     from services.alerts import send_email

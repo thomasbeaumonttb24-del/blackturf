@@ -26,10 +26,11 @@ Persistance :
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import pickle
 import structlog
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -43,8 +44,30 @@ log = structlog.get_logger(module="meta_learner")
 
 # ── Constantes ──────────────────────────────────────────────────────────────
 META_LEARNER_PATH = Path("/app/models/meta_learner.pkl")
-MIN_SAMPLES_TO_TRAIN = 200
+# Le méta-apprenant s'entraîne sur des PARTANTS, pas sur des courses : ~10 lignes
+# par course, donc 200 exemples valaient une vingtaine de courses. Trop peu pour
+# qu'un correcteur contextuel signifie quoi que ce soit — le seuil porte désormais
+# sur la bonne unité.
+MIN_SAMPLES_TO_TRAIN = 2000
 TRAINING_WINDOW_MONTHS = 6
+# Poids de la proba de BASE dans le mélange final. Le méta-apprenant est un
+# correcteur, pas un second modèle : il ne remplace jamais la proba, il l'infléchit.
+# Nommé ici parce que le gate d'utilité DOIT juger le mélange réellement servi, et
+# non la sortie brute du correcteur.
+META_BLEND_BASE = 0.4
+# CONTRAT D'ENTRAÎNEMENT — identifie CE QUE le modèle a appris, pas sa version de
+# code. Il est écrit dans le pickle et vérifié au chargement.
+#
+# Sans lui, le déploiement de cette correction aurait été inopérant : le pickle
+# resté sur disque a été entraîné par PARTANT ? Non — par COURSE, avec un autre
+# label, une autre entrée et six features constantes. `get_meta_learner()` le
+# recharge au démarrage de l'API ; il aurait donc continué à corriger les probas
+# exactement comme avant, silencieusement, jusqu'au premier retrain réussi — et
+# indéfiniment si le gate d'utilité le rejette.
+#
+# À incrémenter à CHAQUE changement de la nature des exemples (label, entrée,
+# vecteur de features). Pas pour un simple réglage d'hyperparamètre.
+TRAINING_CONTRACT = "partant/top3/base=isotone+temperature/v1"
 
 # Encodages catégoriels déterministes (hash stable) pour éviter une dépendance
 # sklearn LabelEncoder au moment de l'inférence.
@@ -223,6 +246,9 @@ class MetaLearner:
         self._trained_at: Optional[datetime] = None
         self._n_samples: int = 0
         self._metrics: dict = {}
+        # Nature des exemples sur lesquels ce modèle a été entraîné (cf.
+        # TRAINING_CONTRACT). Persisté dans le pickle, vérifié au chargement.
+        self._contract: str = TRAINING_CONTRACT
 
     @property
     def is_trained(self) -> bool:
@@ -230,26 +256,49 @@ class MetaLearner:
         return self._model is not None
 
     async def train(self, session: AsyncSession) -> dict:
-        """
-        Entraîne le méta-apprenant sur les 6 derniers mois de données.
+        """Entraîne le méta-apprenant PAR PARTANT sur les conseils réellement émis.
 
-        Requête sur race_learning_log JOIN predictions JOIN courses JOIN participations
-        pour construire les features contextuelles + proba de base.
+        Ce que corrigeait la version précédente, et pourquoi elle ne le pouvait pas
+        ─────────────────────────────────────────────────────────────────────────
+        Elle s'entraînait sur ``race_learning_log``, à raison d'UNE ligne par COURSE :
 
-        Le label est top3_precision (booléen : le vrai gagnant était-il dans le top-3
-        prédit par le modèle de base ?).
+          - le label était « le vrai gagnant est-il dans le top-3 prédit ? », une
+            propriété de la COURSE, alors que la sortie est appliquée à la proba de
+            CHAQUE partant ;
+          - ``base_proba`` était ``gagnant_proba_ia``, la proba du GAGNANT — une
+            quantité connue seulement après l'arrivée — alors qu'à l'inférence elle
+            reçoit la proba de tous les partants ;
+          - six des quinze features (``jours_repos``, ``elo_vs_moyenne``,
+            ``forme_5_courses``, ``spi_score``…) étaient des CONSTANTES à
+            l'entraînement et de vraies valeurs au service ;
+          - ``rang_cote`` était fabriqué depuis ``base_proba``, et ``cote_pmu``
+            valait le MIN du champ.
 
-        Parameters
-        ----------
-        session :
-            Session SQLAlchemy asyncrone.
+        Le taux de base différait d'un facteur deux (0,617 par course contre ~0,27
+        par partant) et la sortie remplaçait ``probas_top3`` pour tout le monde.
 
-        Returns
-        -------
-        dict
-            Métriques du training : n_samples, auc_roc, logloss, trained_at.
-            Si moins de MIN_SAMPLES_TO_TRAIN exemples disponibles, retourne
-            {"status": "insufficient_data", "n_samples": <n>}.
+        Ce que fait cette version
+        ─────────────────────────
+        Une ligne par PARTANT, depuis ``prediction_evaluation`` — la vue qui expose
+        les prédictions FIGÉES avant le départ avec leurs features gelées (mêmes
+        gardes anti-fuite que les calibrations isotones : ``is_replayable``,
+        ``created_at < date_heure``). Le label est « CE cheval est arrivé dans les
+        trois premiers », c'est-à-dire exactement ce que la sortie corrige.
+
+        L'entrée ``base_proba`` est reconstruite comme à l'inférence : la proba
+        BRUTE du modèle passée dans la courbe isotone top3 puis dans le température
+        scaling, par COURSE. Fit et service voient donc la même grandeur. Il n'y a
+        pas de boucle fermée : tout est dérivé de ``proba_top3_raw``, jamais de la
+        sortie du méta-apprenant de la veille.
+
+        GATE DE VALIDATION — un correcteur non prouvé ne corrige rien
+        ────────────────────────────────────────────────────────────
+        Le modèle n'est retenu que s'il fait MIEUX, en log-loss, que l'absence de
+        correction sur un hold-out découpé PAR COURSE et postérieur à tout ce qu'il
+        a vu. Sinon ``is_trained`` reste faux et la chaîne applique l'identité.
+        C'est le contrôle qui manquait : rien ne vérifiait que la correction
+        apportait quoi que ce soit, et son AUC de validation flattait parce qu'elle
+        était mesurée sur SA tâche à elle, pas sur celle qu'on lui faisait faire.
         """
         try:
             from lightgbm import LGBMClassifier
@@ -257,248 +306,135 @@ class MetaLearner:
             log.error("meta_learner.lgbm_not_installed")
             return {"status": "error", "message": "lightgbm not installed"}
 
-        cutoff = datetime.utcnow() - timedelta(days=30 * TRAINING_WINDOW_MONTHS)
-
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30 * TRAINING_WINDOW_MONTHS)
         log.info("meta_learner.train_start", cutoff=cutoff.isoformat())
 
-        # ── Requête principale ───────────────────────────────────────────────
-        # On joint race_learning_log (contexte + label top3_precision)
-        # avec predictions (proba de base)
-        # et courses (date_heure pour heure_of_day + est_quinte + distance)
-        # et participations (cote_pmu, rang_pronostic_pmu)
-        # et elo_history pour elo_vs_moyenne via la snapshot dans feature_autopsy
-        # (ou on se contente des colonnes disponibles dans rll + pred)
         try:
             result = await session.execute(text("""
-                SELECT
-                    rll.course_id,
-                    (rll.gagnant_rang_predit <= 3)  AS top3_precision,
-                    rll.gagnant_proba_ia            AS base_proba,
-                    rll.discipline,
-                    rll.terrain,
-                    rll.hippodrome,
-                    rll.nb_partants,
-                    rll.brier_score                 AS brier_course,
-                    rll.was_surprise,
-                    c.date_heure,
-                    c.est_quinte,
-                    c.distance,
-                    -- Features agrégées au niveau course (moyennes / médianes partants)
-                    AVG(p.cote_pmu)              AS avg_cote_pmu,
-                    MIN(p.cote_pmu)              AS min_cote_pmu,
-                    AVG(p.rang_pronostic_pmu)    AS avg_rang_cote,
-                    -- Proba min cote = favori (rang=1) → approximation rang_cote pour le gagnant
-                    (SELECT pr2.cote_pmu
-                     FROM participations pr2
-                     WHERE pr2.course_id = rll.course_id
-                       AND pr2.rang_pronostic_pmu = 1
-                     LIMIT 1)                   AS favori_cote
-                FROM race_learning_log rll
-                JOIN courses c ON c.course_id = rll.course_id
-                JOIN participations p ON p.course_id = rll.course_id
-                WHERE rll.analyzed_at >= :cutoff
-                  AND rll.gagnant_rang_predit IS NOT NULL
-                  AND rll.gagnant_proba_ia IS NOT NULL
-                  -- ANTI-LEAKAGE : ne garder que les courses dont les features ont été
-                  -- FIGÉES AVANT le départ (prédiction live). Une course seulement
-                  -- backfillée/recalculée (features_ml.computed_at > date_heure) est
-                  -- exclue : sa base_proba est reconstruite a posteriori.
+                SELECT pe.course_id,
+                       pa.numero,
+                       pe.proba_top3_raw,
+                       pe.features,
+                       c.discipline,
+                       c.terrain_officiel,
+                       c.hippodrome_nom,
+                       c.nb_partants,
+                       c.date_heure,
+                       c.est_quinte,
+                       c.distance,
+                       r.classement
+                FROM prediction_evaluation pe
+                JOIN participations pa ON pa.participation_id = pe.participation_id
+                JOIN courses c         ON c.course_id         = pe.course_id
+                JOIN resultats r       ON r.course_id         = pe.course_id
+                WHERE pe.is_replayable = true
+                  AND pe.proba_top3_raw IS NOT NULL
+                  AND pe.features IS NOT NULL
+                  AND r.classement IS NOT NULL
                   AND c.date_heure IS NOT NULL
-                  AND EXISTS (
-                      SELECT 1 FROM features_ml fm
-                      JOIN participations pp ON pp.participation_id = fm.participation_id
-                      WHERE pp.course_id = rll.course_id
-                        AND fm.computed_at < c.date_heure
-                  )
-                  AND EXISTS (
-                      SELECT 1 FROM prediction_evaluation pred
-                      WHERE pred.course_id = rll.course_id
-                        AND pred.created_at IS NOT NULL
-                        AND pred.created_at < c.date_heure
-                        AND pred.is_replayable = true
-                  )
-                GROUP BY
-                    rll.course_id,
-                    rll.gagnant_rang_predit,
-                    rll.gagnant_proba_ia,
-                    rll.discipline,
-                    rll.terrain,
-                    rll.hippodrome,
-                    rll.nb_partants,
-                    rll.brier_score,
-                    rll.was_surprise,
-                    c.date_heure,
-                    c.est_quinte,
-                    c.distance
-                ORDER BY c.date_heure ASC
+                  AND c.date_heure >= :cutoff
+                  AND pe.created_at IS NOT NULL
+                  AND pe.created_at < c.date_heure
+                ORDER BY c.date_heure ASC, pe.course_id ASC
             """), {"cutoff": cutoff})
             rows = result.fetchall()
         except Exception as e:
             log.error("meta_learner.train_query_error", err=str(e))
             return {"status": "error", "message": str(e)}
 
-        n_samples = len(rows)
-        log.info("meta_learner.train_data_fetched", n_samples=n_samples)
+        log.info("meta_learner.train_data_fetched", n_lignes=len(rows))
 
-        if n_samples < MIN_SAMPLES_TO_TRAIN:
-            log.warning(
-                "meta_learner.insufficient_data",
-                n_samples=n_samples,
-                min_required=MIN_SAMPLES_TO_TRAIN,
-            )
-            return {
-                "status": "insufficient_data",
-                "n_samples": n_samples,
-                "min_required": MIN_SAMPLES_TO_TRAIN,
-            }
+        # La courbe isotone top3 est celle que l'inférence appliquera cette nuit :
+        # le job tourne à 03:00, après son recalcul par le retrain de 02:00.
+        try:
+            from ml.isotonic_calibration_top3 import load_curve as _t3_load
+            courbe_t3 = await _t3_load(session)
+        except Exception as e:
+            log.warning("meta_learner.isotone_indisponible", err=str(e)[:140])
+            courbe_t3 = None
 
-        # ── Construction de X et y ───────────────────────────────────────────
-        X_list: list[list[float]] = []
-        y_list: list[int] = []
-
-        for row in rows:
-            (
-                _course_id,
-                top3_precision,
-                base_proba,
-                discipline,
-                terrain,
-                hippodrome,
-                nb_partants,
-                _brier,
-                _was_surprise,
-                date_heure,
-                est_quinte,
-                distance,
-                _avg_cote,
-                _min_cote,
-                _avg_rang,
-                _favori_cote,
-            ) = row
-
-            if base_proba is None:
-                continue
-
-            # Heure de la journée
-            hour_of_day = date_heure.hour if date_heure else 14
-
-            # Mois de la saison
-            season_month = date_heure.month if date_heure else 6
-
-            # Rang de cote : on approxime avec rang_pronostic moyen → non dispo ici
-            # On utilise une estimation : si proba_base est haute → petit rang
-            rang_cote = max(1, round(1.0 / max(float(base_proba), 0.01) * 0.5))
-            rang_cote = min(rang_cote, 20)
-
-            # Mismatch distance/discipline
-            dist_ok = _distance_normal_for_discipline(discipline, distance)
-            spi_score = 0.0  # Non disponible à ce niveau agrégé
-
-            context = {
-                "discipline": discipline,
-                "terrain": terrain,
-                "hippodrome": hippodrome,
-                "nb_partants": nb_partants or 8,
-                "hour_of_day": hour_of_day,
-                "est_quinte": bool(est_quinte),
-                "jours_repos": 20,  # Non disponible au niveau course → valeur neutre
-                "cote_pmu": _min_cote or 5.0,  # cote du favori ≈ min cote
-                "rang_cote": rang_cote,
-                "elo_vs_moyenne": 0.0,  # Non disponible ici
-                "forme_5_courses": 0.5,
-                "spi_score": spi_score,
-                "season_month": season_month,
-                # extra feature pour distance mismatch
-                "_distance_mismatch": float(not dist_ok),
-            }
-
-            feat = _build_feature_vector(float(base_proba), context)
-            # Ajouter distance_mismatch comme 15e feature
-            feat.append(float(not dist_ok))
-
-            X_list.append(feat)
-            y_list.append(int(bool(top3_precision)))
+        courses = _grouper_par_course(rows)
+        X_list, y_list, groupes = [], [], []
+        for course_id, lignes in courses:
+            echantillons = _echantillons_de_course(lignes, courbe_t3)
+            for feat, label in echantillons:
+                X_list.append(feat)
+                y_list.append(label)
+                groupes.append(course_id)
 
         if len(X_list) < MIN_SAMPLES_TO_TRAIN:
-            return {
-                "status": "insufficient_data",
-                "n_samples": len(X_list),
-                "min_required": MIN_SAMPLES_TO_TRAIN,
-            }
+            log.warning("meta_learner.insufficient_data", n_samples=len(X_list),
+                        min_required=MIN_SAMPLES_TO_TRAIN)
+            return {"status": "insufficient_data", "n_samples": len(X_list),
+                    "min_required": MIN_SAMPLES_TO_TRAIN}
 
         X = np.array(X_list, dtype=np.float32)
         y = np.array(y_list, dtype=np.int32)
 
-        # ── Split temporel 80/20 ─────────────────────────────────────────────
-        split_idx = int(len(X) * 0.8)
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
+        # Découpage temporel PAR COURSE : aucun frère de course ne peut se trouver
+        # des deux côtés (les features de champ les rendraient reconnaissables).
+        masque_val = _masque_holdout_par_course(groupes, frac_train=0.8)
+        X_train, X_val = X[~masque_val], X[masque_val]
+        y_train, y_val = y[~masque_val], y[masque_val]
+        if len(X_val) == 0 or len(np.unique(y_train)) < 2 or len(np.unique(y_val)) < 2:
+            log.warning("meta_learner.holdout_inexploitable",
+                        n_train=len(X_train), n_val=len(X_val))
+            return {"status": "insufficient_data", "n_samples": len(X),
+                    "min_required": MIN_SAMPLES_TO_TRAIN}
 
-        pos_rate = float(y_train.mean()) if len(y_train) > 0 else 0.5
-        scale_pos_weight = (1.0 - pos_rate) / max(pos_rate, 1e-6)
-
-        log.info(
-            "meta_learner.train_split",
-            n_train=len(X_train),
-            n_val=len(X_val),
-            pos_rate=round(pos_rate, 3),
-        )
-
-        # ── Entraînement LightGBM ────────────────────────────────────────────
-        feature_names_ext = FEATURE_NAMES + ["distance_mismatch"]
+        pos_rate = float(y_train.mean())
+        log.info("meta_learner.train_split", n_train=len(X_train), n_val=len(X_val),
+                 pos_rate=round(pos_rate, 4))
 
         model = LGBMClassifier(
-            n_estimators=300,
-            max_depth=5,
-            learning_rate=0.05,
-            num_leaves=31,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            min_child_samples=10,
-            scale_pos_weight=scale_pos_weight,
-            random_state=42,
-            verbose=-1,
-            # Aligné sur BT_TRAIN_NJOBS comme ml/models.py. `-1` prenait tous
-            # les cœurs, et chaque thread LightGBM porte ses propres tampons :
-            # sur ce VPS 4 vCPU / 7,6 Gio partagés, le gain de temps ne vaut pas
-            # le pic. Ce job tourne à 03:00, juste après le retrain nocturne.
+            n_estimators=300, max_depth=5, learning_rate=0.05, num_leaves=31,
+            subsample=0.8, colsample_bytree=0.8, min_child_samples=30,
+            random_state=42, verbose=-1,
+            # Aligné sur BT_TRAIN_NJOBS comme ml/models.py. `-1` prenait tous les
+            # cœurs, et chaque thread LightGBM porte ses propres tampons : sur ce
+            # VPS 4 vCPU / 7,6 Gio partagés, le gain de temps ne vaut pas le pic.
             n_jobs=_N_JOBS,
         )
-
+        # PAS de `scale_pos_weight` : il DÉCALIBRE volontairement les probabilités
+        # pour équilibrer les classes. Or ce modèle ne classe pas, il produit une
+        # probabilité qui doit être juste — le rééquilibrage aurait gonflé toutes
+        # les sorties et le gate de log-loss l'aurait rejeté à chaque fois.
         try:
-            model.fit(
-                X_train,
-                y_train,
-                eval_set=[(X_val, y_val)],
-                feature_name=feature_names_ext,
-                callbacks=[],
-            )
+            model.fit(X_train, y_train, eval_set=[(X_val, y_val)],
+                      feature_name=FEATURE_NAMES + ["distance_mismatch"], callbacks=[])
         except TypeError:
-            # Ancienne API LightGBM sans feature_name dans fit
-            model.fit(X_train, y_train)
+            model.fit(X_train, y_train)   # ancienne API LightGBM
 
-        # ── Métriques de validation ──────────────────────────────────────────
         metrics = _compute_validation_metrics(model, X_val, y_val)
-        metrics["n_samples"] = len(X)
-        metrics["n_train"] = len(X_train)
-        metrics["n_val"] = len(X_val)
-        metrics["pos_rate"] = round(pos_rate, 4)
-        metrics["trained_at"] = datetime.utcnow().isoformat()
+        verdict = _verdict_utilite(model, X_val, y_val)
+        metrics.update(verdict)
+        metrics.update({
+            "n_samples": len(X), "n_train": len(X_train), "n_val": len(X_val),
+            "n_courses": len(courses), "pos_rate": round(pos_rate, 4),
+            "trained_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        if not verdict["utile"]:
+            # Un correcteur qui n'améliore rien ne doit pas être appliqué. On ne
+            # garde PAS le modèle : `is_trained` reste faux et la chaîne applique
+            # l'identité, ce qui est la bonne réponse quand la mesure ne conclut pas.
+            self._model = None
+            self._metrics = metrics
+            log.warning("meta_learner.rejete_inutile",
+                        logloss_meta=verdict["logloss_meta"],
+                        logloss_sans_correction=verdict["logloss_sans_correction"])
+            return {"status": "rejected_not_useful", **metrics}
 
         self._model = model
-        self._trained_at = datetime.utcnow()
+        self._trained_at = datetime.now(timezone.utc)
+        self._contract = TRAINING_CONTRACT
         self._n_samples = len(X)
         self._metrics = metrics
-
-        log.info(
-            "meta_learner.train_complete",
-            n_samples=len(X),
-            auc=metrics.get("auc_roc"),
-            logloss=metrics.get("log_loss"),
-        )
-
+        log.info("meta_learner.train_complete", n_samples=len(X),
+                 n_courses=len(courses), auc=metrics.get("auc_roc"),
+                 logloss=metrics.get("log_loss"),
+                 gain_logloss=verdict["gain_logloss"])
         return {"status": "ok", **metrics}
-
     def predict_correction(self, base_proba: float, context: dict) -> float:
         """
         Retourne la probabilité corrigée par le méta-apprenant.
@@ -527,7 +463,8 @@ class MetaLearner:
             proba_corrected = float(self._model.predict_proba(X)[0, 1])
             # Blend correction : moyenne pondérée entre base et meta
             # (évite les sauts brutaux en cas d'extrapolation)
-            blended = 0.4 * float(base_proba) + 0.6 * proba_corrected
+            blended = (META_BLEND_BASE * float(base_proba)
+                       + (1.0 - META_BLEND_BASE) * proba_corrected)
             return float(np.clip(blended, 0.01, 0.99))
         except Exception as e:
             log.warning("meta_learner.predict_error", err=str(e))
@@ -579,7 +516,8 @@ class MetaLearner:
 
             results = []
             for base_p, corr_p in zip(base_probas, probas_corrected):
-                blended = 0.4 * float(base_p) + 0.6 * float(corr_p)
+                blended = (META_BLEND_BASE * float(base_p)
+                           + (1.0 - META_BLEND_BASE) * float(corr_p))
                 results.append(float(np.clip(blended, 0.01, 0.99)))
             return results
         except Exception as e:
@@ -630,6 +568,18 @@ class MetaLearner:
         load_path = Path(path) if path else META_LEARNER_PATH
         with open(load_path, "rb") as f:
             instance = pickle.load(f)
+        # Un modèle entraîné sous un AUTRE contrat n'est pas un modèle périmé, c'est
+        # un modèle qui a appris autre chose. Le servir reviendrait à appliquer la
+        # correction qu'on vient précisément de corriger. On le neutralise plutôt
+        # que de le refuser : l'appelant reçoit une instance saine, non entraînée,
+        # et la chaîne applique l'identité jusqu'au prochain retrain.
+        contrat = getattr(instance, "_contract", None)
+        if contrat != TRAINING_CONTRACT:
+            log.warning("meta_learner.contrat_perime", path=str(load_path),
+                        contrat_du_pickle=contrat, contrat_attendu=TRAINING_CONTRACT)
+            neuf = cls()
+            neuf._metrics = {"status": "contrat_perime", "contrat_du_pickle": contrat}
+            return neuf
         log.info(
             "meta_learner.loaded",
             path=str(load_path),
@@ -825,6 +775,208 @@ def _distance_normal_for_discipline(
     if not bounds:
         return True
     return bounds[0] <= distance <= bounds[1]
+
+
+def _grouper_par_course(rows) -> list[tuple[str, list]]:
+    """Regroupe les lignes (déjà triées chronologiquement) par course, en préservant
+    l'ordre. Le champ ENTIER est nécessaire : la température est centrée sur la
+    moyenne des logits de la course, et la courbe isotone top3 renormalise à
+    Σ = min(3, nb_partants). Une ligne isolée ne permet ni l'une ni l'autre."""
+    courses: list[tuple[str, list]] = []
+    courant, lignes = None, []
+    for r in rows:
+        cid = r[0]
+        if cid != courant:
+            if lignes:
+                courses.append((courant, lignes))
+            courant, lignes = cid, []
+        lignes.append(r)
+    if lignes:
+        courses.append((courant, lignes))
+    return courses
+
+
+def _top3_du_classement(classement) -> set:
+    """Numéros arrivés dans les trois premiers. Ensemble vide si illisible — une
+    course sans arrivée exploitable ne doit produire aucun exemple, jamais un label
+    par défaut."""
+    if not classement:
+        return set()
+    if isinstance(classement, str):
+        try:
+            classement = json.loads(classement)
+        except (ValueError, TypeError):
+            return set()
+    top3 = set()
+    for e in classement or []:
+        try:
+            if int(e.get("position")) in (1, 2, 3):
+                top3.add(int(e.get("numero")))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return top3
+
+
+def base_proba_de_course(raw_top3, courbe_t3, nb_partants: int,
+                         temperature: float = 1.0) -> np.ndarray:
+    """Reconstruit EXACTEMENT l'entrée que le méta-apprenant reçoit à l'inférence :
+    la proba brute du modèle, passée dans la courbe isotone top3 puis dans le
+    température scaling centré sur la course.
+
+    Fonction pure, testable sans base. Elle DOIT rester le miroir de
+    ``ml.pipeline.predict_course`` : si les deux divergent, le méta-apprenant est de
+    nouveau ajusté sur une grandeur et appliqué à une autre — le défaut même qu'il
+    s'agit de corriger.
+
+    Pas de boucle fermée : tout dérive de ``proba_top3_raw``, jamais d'une sortie de
+    méta-apprenant.
+    """
+    p = np.clip(np.asarray(raw_top3, dtype=float), 1e-6, 0.999)
+    if courbe_t3:
+        try:
+            from ml.isotonic_calibration_top3 import apply_calibration as _t3_apply
+            p = np.asarray(_t3_apply(p, courbe_t3, nb_partants), dtype=float)
+        except Exception as e:
+            log.warning("meta_learner.isotone_application_echec", err=str(e)[:140])
+    p = np.clip(p, 1e-7, 1 - 1e-7)
+    logits = np.log(p / (1 - p))
+    T = max(float(temperature or 1.0), 0.1)
+    moyenne = float(logits.mean()) if logits.size else 0.0
+    return 1.0 / (1.0 + np.exp(-(moyenne + (logits - moyenne) / T)))
+
+
+def _normaliser_datetime(valeur):
+    """Normalise une colonne DateTime lue par ``text()``.
+
+    asyncpg (PostgreSQL) rend déjà un ``datetime`` ; le driver SQLite des tests rend
+    une chaîne ISO pour une requête brute non-ORM — même précédent que
+    ``ml.bet_plan_performance._as_dt`` et ``ml.features`` pour ``last_date``.
+    """
+    if valeur is None or isinstance(valeur, datetime):
+        return valeur
+    if isinstance(valeur, str):
+        try:
+            return datetime.fromisoformat(valeur)
+        except ValueError:
+            return None
+    return None
+
+
+def _echantillons_de_course(lignes, courbe_t3, temperature: float = 1.0):
+    """(vecteur de features, label) pour chaque PARTANT d'une course.
+
+    Label = ce cheval est arrivé dans les trois premiers. C'est exactement ce que la
+    sortie du méta-apprenant corrige — l'ancienne version apprenait « le vrai gagnant
+    est-il dans le top-3 prédit ? », une propriété de la COURSE, et l'appliquait
+    ensuite partant par partant.
+    """
+    top3 = _top3_du_classement(lignes[0][11])
+    if not top3:
+        return []
+    raw = [float(r[2]) for r in lignes]
+    nb_partants = int(lignes[0][7] or len(lignes))
+    base = base_proba_de_course(raw, courbe_t3, nb_partants, temperature)
+
+    date_heure = _normaliser_datetime(lignes[0][8])
+    discipline, terrain, hippodrome = lignes[0][4], lignes[0][5], lignes[0][6]
+    est_quinte, distance = lignes[0][9], lignes[0][10]
+    dist_ok = _distance_normal_for_discipline(discipline, distance)
+
+    out = []
+    for i, r in enumerate(lignes):
+        feats = r[3]
+        if isinstance(feats, str):
+            try:
+                feats = json.loads(feats)
+            except (ValueError, TypeError):
+                feats = {}
+        feats = feats or {}
+        try:
+            numero = int(r[1])
+        except (TypeError, ValueError):
+            continue
+        contexte = {
+            "discipline": discipline,
+            "terrain": terrain,
+            "hippodrome": hippodrome,
+            "nb_partants": nb_partants,
+            "hour_of_day": date_heure.hour if date_heure is not None else 14,
+            "est_quinte": bool(est_quinte),
+            "distance": distance,
+            # Vraies valeurs du PARTANT, prises dans ses features figées. C'est ici
+            # que l'ancienne version mettait des constantes (jours_repos=20,
+            # elo_vs_moyenne=0.0, forme_5_courses=0.5, spi_score=0.0) tandis que
+            # l'inférence lui passait les vraies : six features sur quinze étaient
+            # muettes à l'entraînement et parlantes au service.
+            "jours_repos": feats.get("jours_repos"),
+            "cote_pmu": feats.get("cote_pmu"),
+            "rang_cote": feats.get("rang_cote"),
+            "elo_vs_moyenne": feats.get("elo_vs_moyenne"),
+            "forme_5_courses": feats.get("forme_5_courses"),
+            "spi_score": feats.get("spi_score"),
+            "season_month": date_heure.month if date_heure is not None else 6,
+        }
+        vecteur = _build_feature_vector(float(base[i]), contexte)
+        vecteur.append(float(not dist_ok))
+        out.append((vecteur, int(numero in top3)))
+    return out
+
+
+def _masque_holdout_par_course(groupes: list, frac_train: float = 0.8) -> np.ndarray:
+    """Masque booléen du hold-out : True = courses les plus RÉCENTES.
+
+    Découpage PAR COURSE et non par ligne : les partants d'une même course partagent
+    leurs features de champ (nb_partants, hippodrome, heure…) et se reconnaissent
+    entre eux. Un découpage par ligne laisserait donc chaque course fuir dans son
+    propre hold-out, et le gate d'utilité validerait n'importe quoi.
+    """
+    ordre = list(dict.fromkeys(groupes))          # chronologique, sans doublon
+    coupe = int(len(ordre) * frac_train)
+    train = set(ordre[:coupe])
+    return np.array([g not in train for g in groupes], dtype=bool)
+
+
+# Gain minimal de log-loss exigé pour qu'une correction soit appliquée. Strictement
+# positif : un modèle qui fait « aussi bien » que l'absence de correction ne doit pas
+# être appliqué — il ajouterait de la variance sans rien apporter.
+MIN_GAIN_LOGLOSS = 1e-4
+
+
+def _verdict_utilite(model, X_val: np.ndarray, y_val: np.ndarray) -> dict:
+    """Le correcteur fait-il MIEUX que l'absence de correction ?
+
+    Comparaison sur le hold-out, en log-loss, entre :
+      - la proba de base seule (colonne 0 de X, c'est-à-dire ne rien corriger) ;
+      - la proba mélangée exactement comme au service (cf. `predict_correction`).
+
+    Rien ne vérifiait cela. L'AUC de validation publiée mesurait la performance du
+    méta-apprenant SUR SA PROPRE TÂCHE, jamais le fait que l'appliquer améliore la
+    probabilité servie. Un correcteur non prouvé ne corrige rien : `train` le jette.
+    """
+    try:
+        from sklearn.metrics import log_loss
+    except ImportError:
+        return {"utile": False, "logloss_meta": None,
+                "logloss_sans_correction": None, "gain_logloss": None}
+    if len(X_val) == 0 or len(np.unique(y_val)) < 2:
+        return {"utile": False, "logloss_meta": None,
+                "logloss_sans_correction": None, "gain_logloss": None}
+    try:
+        base = np.clip(X_val[:, 0].astype(float), 1e-6, 1 - 1e-6)
+        corrige = model.predict_proba(X_val)[:, 1]
+        melange = np.clip(META_BLEND_BASE * base + (1.0 - META_BLEND_BASE) * corrige,
+                          0.01, 0.99)
+        ll_sans = float(log_loss(y_val, base, labels=[0, 1]))
+        ll_meta = float(log_loss(y_val, melange, labels=[0, 1]))
+    except Exception as e:
+        log.warning("meta_learner.verdict_utilite_echec", err=str(e)[:140])
+        return {"utile": False, "logloss_meta": None,
+                "logloss_sans_correction": None, "gain_logloss": None}
+    gain = ll_sans - ll_meta
+    return {"utile": bool(gain > MIN_GAIN_LOGLOSS),
+            "logloss_meta": round(ll_meta, 6),
+            "logloss_sans_correction": round(ll_sans, 6),
+            "gain_logloss": round(gain, 6)}
 
 
 def _compute_validation_metrics(model, X_val: np.ndarray, y_val: np.ndarray) -> dict:

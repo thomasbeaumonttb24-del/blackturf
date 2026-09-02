@@ -1691,10 +1691,17 @@ async def get_mise_plan(
 
     # respect_montant : le montant SAISI par l'utilisateur est sa décision explicite →
     # on ne le rabote pas par le cap bankroll (sinon bankroll défaut 1.0 → plan 2€).
+    #
+    # discipline_mise : question SÉPARÉE — combien engager au total. Vraie uniquement
+    # sur le plan du SYSTÈME (le montant de référence figé avant course), faux dès que
+    # l'utilisateur a saisi une somme. C'est aussi ce qui garde le recalcul live
+    # d'avant-gel identique au plan qui sera figé par `record_profil_runs`.
+    from services.mise_calculator import est_plan_systeme
     try:
         plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
                             signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True,
-                            rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
+                            rapport_calib=rapport_calib, ev_band_perf=ev_band_perf,
+                            discipline_mise=est_plan_systeme(montant))
         out = plan_to_dict(plan)
     except HTTPException:
         raise
@@ -1897,9 +1904,13 @@ async def enregistrer_paris(
     except Exception:
         ev_band_perf = None
 
+    # Le plan enregistré doit être CELUI QUI A ÉTÉ MONTRÉ : même règle de discipline
+    # que l'aperçu, sinon l'utilisateur enregistre un plan différent de ce qu'il a vu.
+    from services.mise_calculator import est_plan_systeme
     plan = plan_to_dict(generer_plan(montant, profil, preds, course_info, None,
                                      roi_weights, heat, signal_mults, respect_montant=True,
-                                     rapport_calib=rapport_calib, ev_band_perf=ev_band_perf))
+                                     rapport_calib=rapport_calib, ev_band_perf=ev_band_perf,
+                                     discipline_mise=est_plan_systeme(montant)))
 
     # Bankroll principale
     main = (await db.execute(
@@ -2179,11 +2190,16 @@ async def get_bilan_pronostic(
                 ev_band_perf_p = await _levb(db)
             except Exception:
                 ev_band_perf_p = None
+            # Simulation rétrospective du plan SYSTÈME → mêmes règles que lui,
+            # discipline comprise, sinon le bilan simulé décrit un plan que le
+            # moteur n'aurait jamais émis.
+            from services.mise_calculator import est_plan_systeme as _eps
             plan_p = plan_to_dict(generer_plan(montant, prof, preds, course_info, None,
                                                roi_weights_p, heat, sig_mults_p,
                                                respect_montant=True,
                                                rapport_calib=rapport_calib_p,
-                                               ev_band_perf=ev_band_perf_p))
+                                               ev_band_perf=ev_band_perf_p,
+                                               discipline_mise=_eps(montant)))
             bilan_p = settle_plan(plan_p, resultat.classement, resultat.rapports, nb_partants,
                                   getattr(resultat, "rapports_detail", None), non_partants)
             source = "simulation"

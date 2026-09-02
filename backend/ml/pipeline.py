@@ -26,6 +26,7 @@ from db.models import (
     Cheval, Jockey, Entraineur
 )
 from ml.elo import update_elo_after_race
+from ml.learning_steps import etape
 from ml.features import compute_all_features_for_course
 from ml.models import BlackTurfEnsemble
 from ml.valuebets import detect_value_bet, save_value_bet, calculer_mise_kelly
@@ -263,6 +264,48 @@ def _motif_promotion(
     if h2h_delta is not None:
         return "better_h2h" if h2h_delta >= 0 else "regression_toleree_h2h"
     return "better_wf" if new_wf >= current_wf else "regression_toleree_wf"
+
+
+def _source_rang_marche(metrics: dict, h2h: Optional[dict]) -> dict:
+    """Classement du modèle, celui de la cote, et l'écart — depuis la MEILLEURE
+    source disponible. Fonction pure, testable sans DB ni modèle.
+
+    CE QUI EST MESURÉ COMPTE AUTANT QUE LA MESURE. Trois sources existent et elles
+    ne décrivent pas le même modèle :
+
+      ``hold_out``     — l'ENSEMBLE COMPLET qu'on s'apprête à déployer, sur les 20 %
+                         de courses les plus récentes qu'il n'a pas vues. Plus gros
+                         échantillon hors-échantillon disponible sur le vrai modèle.
+      ``h2h``          — le même ensemble, mais restreint aux courses postérieures à
+                         la fin d'entraînement du CHAMPION. Cette restriction
+                         n'existe que pour rendre le duel champion/challenger
+                         équitable ; pour la question « ce modèle bat-il la cote »
+                         elle ne fait que réduire l'échantillon.
+      ``walk_forward`` — un XGBoost JETABLE de 100 arbres, ré-entraîné fold par fold
+                         (cf. `BlackTurfEnsemble._walk_forward_validation`). Il
+                         mesure le DATASET, pas le modèle.
+
+    Le walk-forward était pourtant la SEULE valeur écrite dans
+    ``model_versions.rank_auc`` / ``market_rank_auc`` / ``rank_delta_market``, et le
+    premier repli du gate marché. Le chiffre qui décide si le modèle mérite
+    d'exister — et celui qui a justifié de laisser ``BT_MARKET_GATE`` fermé —
+    décrivait donc un modèle qui n'a jamais été déployé. Il reste en dernier
+    recours : une mesure imparfaite vaut mieux qu'aucune, mais elle ne passe plus
+    devant celles qui portent sur le vrai modèle.
+    """
+    for source, rank, marche, delta in (
+        ("hold_out", metrics.get("rank_auc"), metrics.get("market_rank_auc"),
+         metrics.get("rank_delta_market")),
+        ("h2h", (h2h or {}).get("rank_challenger"), (h2h or {}).get("rank_marche"),
+         (h2h or {}).get("delta_marche")),
+        ("walk_forward", metrics.get("wf_rank_auc"), metrics.get("wf_market_rank_auc"),
+         metrics.get("wf_rank_delta_market")),
+    ):
+        if delta is not None:
+            return {"source": source, "rank_auc": rank,
+                    "market_rank_auc": marche, "delta_market": delta}
+    return {"source": None, "rank_auc": metrics.get("rank_auc"),
+            "market_rank_auc": None, "delta_market": None}
 
 
 def _edge_undecidable(em: dict) -> bool:
@@ -1038,7 +1081,22 @@ async def _run_nightly_retraining_unlocked() -> None:
     (cf. `_build_training_dataset_from_db`), pas en jetant des données.
     """
     log.info("pipeline.nightly_retrain.start")
-    await _do_retraining(mois=settings.retrain_history_months, label="nightly")
+    # CHAQUE ÉTAPE LAISSE UNE TRACE DURABLE (cf. ml/learning_steps).
+    #
+    # Les onze apprentissages ci-dessous n'ont AUCUNE entrée propre dans
+    # services/jobs.py : ils n'existent que derrière ce retrain. Le worker s'est
+    # fait OOM-killer le 20/08/2026 à 02:04, quatre-vingt-treize secondes APRÈS
+    # avoir déployé v511 avec succès — cette nuit-là, aucun d'eux n'a tourné,
+    # pendant que le journal annonçait un déploiement réussi.
+    #
+    # Et chaque étape était enveloppée d'un `try/except` qui journalisait un
+    # `warning` : une étape pouvait échouer toutes les nuits pendant des semaines
+    # sans que rien ne le signale, la calibration restant figée sur une courbe
+    # périmée. `etape(...)` garde ce comportement — une panne n'interrompt jamais
+    # la nuit — mais persiste l'issue, et c'est l'ÉTAT PERSISTANT qui fait foi
+    # contre les logs.
+    async with etape(AsyncSessionLocal, "retrain"):
+        await _do_retraining(mois=settings.retrain_history_months, label="nightly")
     # L'ensemble entraîné et le dataset meurent en sortant de `_do_retraining`,
     # mais la libc garde leurs arènes : le worker restait à 4,9 Gio de RSS
     # pendant TOUTE la série d'analyses ci-dessous, alors qu'elles ne pèsent que
@@ -1047,29 +1105,62 @@ async def _run_nightly_retraining_unlocked() -> None:
     # 93 s après avoir déployé v511 avec succès).
     _release_memory("nightly.after_training")
     # Recalcule la calibration longshots sur toutes les données réelles à jour
-    try:
+    async with etape(AsyncSessionLocal, "calibration_longshots"):
         from ml.longshot_calibration import compute_and_store
         async with AsyncSessionLocal() as cal_session:
             await compute_and_store(cal_session)
-    except Exception as e:
-        log.warning("pipeline.nightly_calibration_skip", err=str(e)[:140])
     # Recalcule la calibration isotonique (proba_top1 finale → fréquence réelle)
-    try:
+    async with etape(AsyncSessionLocal, "isotone_top1"):
         from ml.isotonic_calibration import compute_and_store as _iso_compute
         async with AsyncSessionLocal() as iso_session:
             await _iso_compute(iso_session)
-    except Exception as e:
-        log.warning("pipeline.nightly_isotonic_skip", err=str(e)[:140])
     # Recalcule la calibration isotonique du proba_top3 (placé → fréquence réelle)
-    try:
+    async with etape(AsyncSessionLocal, "isotone_top3"):
         from ml.isotonic_calibration_top3 import compute_and_store as _iso3_compute
         async with AsyncSessionLocal() as iso3_session:
             await _iso3_compute(iso3_session)
-    except Exception as e:
-        log.warning("pipeline.nightly_isotonic_top3_skip", err=str(e)[:140])
+    # Ajuste la TEMPÉRATURE sur la NLL hors-échantillon (FLAG temp_fit). Après les
+    # isotones : la température corrige ce que la courbe top3 a laissé, c'est l'ordre
+    # de la chaîne d'inférence. Sans ce recalcul, le drapeau `temp_fit` gèle la
+    # température au lieu de la corriger — il n'avait aucun remplaçant.
+    async with etape(AsyncSessionLocal, "temperature"):
+        from ml.algo_flags import FLAGS as _AF_T
+        if _AF_T.temp_fit:
+            from ml.adaptive_learning import (
+                fit_temperature_holdout, initialize_adaptive_learning,
+            )
+            async with AsyncSessionLocal() as t_session:
+                await initialize_adaptive_learning(t_session)
+                _t = await fit_temperature_holdout(t_session)
+                await t_session.commit()
+            log.info("pipeline.temperature_done", **{
+                k: v for k, v in _t.items() if k != "message"})
+    # Ajuste les EXPOSANTS DE POSITION du modèle d'arrivée (biais de Harville).
+    # Prendre les probas de victoire comme forces reproduit exactement la première
+    # place, mais surestime le PLACÉ du favori et sous-estime celui des outsiders.
+    # Tout le catalogue combiné en dépend (Couplé Placé, Trio, 2sur4, Multi) : une
+    # proba de placé surestimée donne une EV surestimée, donc des paris émis qui ne
+    # devaient pas l'être. Neutres tant que la mesure ne conclut pas.
+    async with etape(AsyncSessionLocal, "exposants_harville"):
+        from ml.harville_calibration import calculer_et_persister
+        async with AsyncSessionLocal() as h_session:
+            _h = await calculer_et_persister(h_session)
+            await h_session.commit()
+        log.info("pipeline.harville_done", **{k: v for k, v in _h.items()
+                                              if k != "exposants"})
+    # Ajuste ALPHA — la confiance accordée au modèle face au marché. Dernier
+    # arbitrage de la chaîne : il décide du classement affiché, des cotes justes et
+    # de l'EV. Après les exposants d'arrivée, parce qu'il porte sur la proba de
+    # victoire déjà calibrée. Conservé en l'état si la mesure ne conclut pas.
+    async with etape(AsyncSessionLocal, "alpha_marche"):
+        from ml.blend_calibration import calculer_et_persister as _calc_alpha
+        async with AsyncSessionLocal() as a_session:
+            _a = await _calc_alpha(a_session)
+            await a_session.commit()
+        log.info("pipeline.alpha_marche_done", **_a)
     # Recalcule la calibration par tranche de cote (corrige favori/longshot dans l'EV
     # des value bets) — auto-apprentissage : s'affine à chaque nuit avec les résultats.
-    try:
+    async with etape(AsyncSessionLocal, "calibration_cote"):
         from ml.cote_calibration import compute_cote_calibration, persist_cote_calibration
         async with AsyncSessionLocal() as cc_session:
             _cc = await compute_cote_calibration(cc_session)
@@ -1079,34 +1170,28 @@ async def _run_nightly_retraining_unlocked() -> None:
                 else "pipeline.cote_calibration_cold_start_preserved",
                 n=_cc.get("n_total"),
             )
-    except Exception as e:
-        log.warning("pipeline.nightly_cote_calib_skip", err=str(e)[:140])
     # RATTRAPAGE du règlement des runs profils (audit ROI 2026-07-02 : 287 runs
     # pending/partial bloqués = apprentissage sur échantillon amputé). AVANT les
     # apprentissages ci-dessous pour qu'ils agrègent des données complètes.
-    try:
+    async with etape(AsyncSessionLocal, "rattrapage_runs_profils"):
         from ml.profil_learning import settle_catchup
         async with AsyncSessionLocal() as sc_session:
             _sc = await settle_catchup(sc_session)
             log.info("pipeline.settle_catchup_done", **_sc)
-    except Exception as e:
-        log.warning("pipeline.nightly_settle_catchup_skip", err=str(e)[:140])
     # Même rattrapage pour les PLANS ÉMIS : un rapport PMU publié tardivement doit
     # entrer dans la mesure de rentabilité, sinon le ROI ne porte que sur les
     # courses faciles à régler (biais vers le haut).
-    try:
+    async with etape(AsyncSessionLocal, "rattrapage_plans"):
         from services.bet_plan_snapshots import settle_catchup_plans
         async with AsyncSessionLocal() as bpc_session:
             _bpc = await settle_catchup_plans(bpc_session)
             log.info("pipeline.bet_plan_catchup_done", **_bpc)
-    except Exception as e:
-        log.warning("pipeline.nightly_bet_plan_catchup_skip", err=str(e)[:140])
     # Point 11 — gates automatiques sur les plans RÉELLEMENT émis (bet_plan_evaluation).
     # Un type de pari (ou profil) durablement négatif ou en drawdown excessif voit ses
     # poids appris plafonnés (jamais relevés) via bet_performance.get_learned_type_weights.
     # Fenêtre glissante 90j : un segment qui a mal tourné il y a un an ne doit pas rester
     # suspendu indéfiniment une fois le comportement corrigé en amont.
-    try:
+    async with etape(AsyncSessionLocal, "gates_segments"):
         from datetime import timedelta as _td
         from ml.bet_plan_performance import (
             compute_forward_performance, evaluate_segment_gates, persist_segment_gates,
@@ -1120,11 +1205,14 @@ async def _run_nightly_retraining_unlocked() -> None:
                 _susp = [k for k, g in _gates.items() if g["status"] != "active"]
                 log.info("pipeline.bet_plan_gates_done", dimension=_dim, n_segments=_n,
                          n_flagged=len(_susp), flagged=_susp[:10])
-    except Exception as e:
-        log.warning("pipeline.nightly_bet_plan_gates_skip", err=str(e)[:140])
+    # `compute_signal_performance` et `compute_edge_monitor` lisent `features_ml`
+    # EN ENTIER : ce sont les deux plus gros consommateurs de la nuit après
+    # l'entraînement, et ce sont eux qui tournaient encore quand l'OOM killer a
+    # choisi sa victime. On rend les arènes au noyau juste avant.
+    _release_memory("nightly.avant_agregats_lourds")
     # Ré-apprend le ROI réel PAR SIGNAL (duo J/E, ELO, pedigree, forme-piège…) →
     # module la sélection des value bets vers ce qui rapporte. Auto-amélioration.
-    try:
+    async with etape(AsyncSessionLocal, "performance_signaux"):
         from ml.signal_performance import (
             compute_signal_performance, compute_signal_performance_by_profile,
             persist_signal_performance,
@@ -1139,11 +1227,9 @@ async def _run_nightly_retraining_unlocked() -> None:
                 else "pipeline.signal_performance_cold_start_preserved",
                 n=_sp.get("n_total"),
             )
-    except Exception as e:
-        log.warning("pipeline.nightly_signal_perf_skip", err=str(e)[:140])
     # Ré-apprend le ROI réel PAR BANDE D'EV → rétrograde les bandes perdantes (zone
     # toxique) au lieu d'un couperet dur. La sélection s'adapte au ROI mesuré.
-    try:
+    async with etape(AsyncSessionLocal, "performance_bandes_ev"):
         from ml.signal_performance import (
             compute_ev_band_performance, persist_ev_band_performance,
         )
@@ -1155,11 +1241,9 @@ async def _run_nightly_retraining_unlocked() -> None:
                 else "pipeline.ev_band_performance_cold_start_preserved",
                 n=_evb.get("n_total"),
             )
-    except Exception as e:
-        log.warning("pipeline.nightly_ev_band_perf_skip", err=str(e)[:140])
     # Ré-apprend les poids PAR PROFIL depuis les PRONOS ÉMIS réglés (profil_run_log) :
     # l'algo apprend de SES recommandations réelles par profil, pas du top-3.
-    try:
+    async with etape(AsyncSessionLocal, "poids_profils"):
         from ml.profil_learning import compute_profil_weights
         async with AsyncSessionLocal() as plw_session:
             _plw = await compute_profil_weights(plw_session)
@@ -1169,13 +1253,11 @@ async def _run_nightly_retraining_unlocked() -> None:
                 else "pipeline.profil_weights_done",
                 n_runs=_plw.get("n_observed_runs", _plw.get("n_total_runs")),
             )
-    except Exception as e:
-        log.warning("pipeline.nightly_profil_weights_skip", err=str(e)[:140])
     # Ré-apprend la calibration estimé→réel du RAPPORT par (profil × type) depuis les
     # pronos figés réglés → le gate de bande s'applique au rapport RÉELLEMENT attendu :
     # un type qui paie sous la tranche de son profil (ex. Placé favori ×1.3 en prudent)
     # est écarté. C'est l'apprentissage qui fait respecter les tranches sur le réel.
-    try:
+    async with etape(AsyncSessionLocal, "calibration_rapports"):
         from ml.signal_performance import (
             compute_payout_bucket_performance, compute_rapport_calibration,
             persist_rapport_calibration)
@@ -1198,47 +1280,39 @@ async def _run_nightly_retraining_unlocked() -> None:
                 else "pipeline.rapport_calibration_cold_start_preserved",
                 n_runs=_rc.get("n_runs"),
             )
-    except Exception as e:
-        log.warning("pipeline.nightly_rapport_calib_skip", err=str(e)[:140])
     # Surveillance HONNÊTE de l'edge : test hors-échantillon (le filtre conviction≥1.1
     # bat-il encore le marché ?) journalisé → on détecte une dégradation de l'edge.
-    try:
+    async with etape(AsyncSessionLocal, "edge_monitor"):
         from ml.edge_monitor import compute_edge_monitor, persist_edge_monitor
         async with AsyncSessionLocal() as em_session:
             _em = await compute_edge_monitor(em_session)
             await persist_edge_monitor(em_session, _em)
             log.info("pipeline.edge_monitor_done", edge_ok=_em.get("edge_ok"),
                      win_filt=_em.get("win_filt"), roi_cap=_em.get("roi_cap"))
-    except Exception as e:
-        log.warning("pipeline.nightly_edge_monitor_skip", err=str(e)[:140])
     # Santé des FEATURES : détecte les features mortes/constantes (scraper cassé →
     # valeur défaut figée). Le drift_detector ne surveille que la perf, pas la
     # distribution des features. On LOGGE + persiste (pas d'exclusion auto = pas de
     # surprise silencieuse sur le modèle ; la liste sert d'alerte/diagnostic).
-    try:
+    async with etape(AsyncSessionLocal, "sante_features"):
         from ml.feature_health import compute_feature_health, persist_feature_health
         async with AsyncSessionLocal() as fh_session:
             _fh = await compute_feature_health(fh_session)
             await persist_feature_health(fh_session, _fh)
             log.info("pipeline.feature_health_done", n_dead=_fh.get("n_dead"),
                      dead=(_fh.get("dead") or [])[:15])
-    except Exception as e:
-        log.warning("pipeline.nightly_feature_health_skip", err=str(e)[:140])
     # CLV (Closing Line Value) : nos choix battent-ils la ligne de clôture PMU ? Proxy
     # d'edge le plus robuste à la variance. On suit la CLV des top picks modèle vs marché
     # → si > 0 et > moyenne, le modèle anticipe le marché (signal d'edge non-circulaire).
-    try:
+    async with etape(AsyncSessionLocal, "clv_monitor"):
         from ml.clv_monitor import compute_clv_monitor, persist_clv_monitor
         async with AsyncSessionLocal() as clv_session:
             _clv = await compute_clv_monitor(clv_session)
             await persist_clv_monitor(clv_session, _clv)
             log.info("pipeline.clv_monitor_done", n_top1=_clv.get("n_top1"),
                      clv_top1=_clv.get("clv_top1"), edge_signal=_clv.get("edge_signal"))
-    except Exception as e:
-        log.warning("pipeline.nightly_clv_monitor_skip", err=str(e)[:140])
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
-    try:
+    async with etape(AsyncSessionLocal, "poids_appris_types"):
         import json as _json
         from api.profil_backtest import backtest_profils
         from db.redis_client import get_redis
@@ -1247,17 +1321,13 @@ async def _run_nightly_retraining_unlocked() -> None:
         redis = await get_redis()
         await redis.set("stats:profils", _json.dumps(data), ex=86400)
         log.info("pipeline.nightly_learned_weights", type_weights=data.get("type_weights"))
-    except Exception as e:
-        log.warning("pipeline.nightly_learned_weights_skip", err=str(e)[:140])
     # Garde-fou intégrité : nos données collent-elles à PMU ? (logge toute dérive)
-    try:
+    async with etape(AsyncSessionLocal, "integrite_pmu"):
         from datetime import date as _date
         from scripts.validate_pmu_integrity import validate as _validate_pmu
         res = await _validate_pmu(_date.today().strftime("%d%m%Y"))
         if res.get("mismatches"):
             log.error("pipeline.nightly_pmu_drift", n=len(res["mismatches"]), sample=res["mismatches"][:5])
-    except Exception as e:
-        log.warning("pipeline.nightly_pmu_integrity_skip", err=str(e)[:140])
 
 
 async def _do_retraining(mois: int, label: str) -> None:
@@ -1385,24 +1455,27 @@ async def _do_retraining(mois: int, label: str) -> None:
         _release_memory(f"{label}.holdout_freed")
         _h2h_delta = _h2h["delta"] if _h2h else None
 
-        # ── Écart au MARCHÉ (diagnostic 2026-08-20) ───────────────────────────
-        # Source préférée : le head-to-head, qui l'a mesuré sur l'échantillon
-        # hors-échantillon commun aux deux modèles. Repli : les folds walk-forward,
-        # disponibles même quand le h2h renonce faute de courses postérieures au
-        # champion (`h2h.sample_too_small`, le cas courant en régime normal).
-        _rank_delta_market = (_h2h or {}).get("delta_marche")
-        _rank_source = "h2h"
-        if _rank_delta_market is None:
-            _rank_delta_market = metrics.get("wf_rank_delta_market")
-            _rank_source = "walk_forward"
+        # ── Écart au MARCHÉ (diagnostic 2026-08-20) — cf. `_source_rang_marche` ──
+        _rang = _source_rang_marche(metrics, _h2h)
+        _rank_auc = _rang["rank_auc"]
+        _market_rank_auc = _rang["market_rank_auc"]
+        _rank_delta_market = _rang["delta_market"]
+        _rank_source = _rang["source"]
         log.info(
             "pipeline.retrain.rank_vs_marche",
             delta_marche=round(_rank_delta_market, 4) if _rank_delta_market is not None else None,
             source=_rank_source,
-            rank_auc=round(metrics["wf_rank_auc"], 4) if metrics.get("wf_rank_auc") is not None else None,
-            market_rank_auc=round(metrics["wf_market_rank_auc"], 4) if metrics.get("wf_market_rank_auc") is not None else None,
+            rank_auc=round(_rank_auc, 4) if _rank_auc is not None else None,
+            market_rank_auc=round(_market_rank_auc, 4) if _market_rank_auc is not None else None,
             gate_actif=_AF.market_gate,
             bat_le_marche=(_rank_delta_market > 0) if _rank_delta_market is not None else None,
+            # Les deux autres sources restent journalisées : leur ÉCART avec la source
+            # retenue est le diagnostic (un walk-forward très au-dessus du hold-out
+            # signale un dataset plus facile que la réalité, pas un meilleur modèle).
+            delta_marche_h2h=(round(_h2h["delta_marche"], 4)
+                              if _h2h and _h2h.get("delta_marche") is not None else None),
+            delta_marche_walk_forward=(round(metrics["wf_rank_delta_market"], 4)
+                                       if metrics.get("wf_rank_delta_market") is not None else None),
         )
 
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
@@ -1434,9 +1507,11 @@ async def _do_retraining(mois: int, label: str) -> None:
                 walk_forward_auc=metrics.get("walk_forward_auc"),
                 walk_forward_variance=metrics.get("walk_forward_variance"),
                 # Le couple qui dit si ce modèle mérite d'exister : son classement
-                # intra-course, celui de la cote sur les mêmes folds, et l'écart.
-                rank_auc=metrics.get("wf_rank_auc"),
-                market_rank_auc=metrics.get("wf_market_rank_auc"),
+                # intra-course, celui de la cote sur le MÊME échantillon, et l'écart.
+                # Mesurés sur l'ensemble RÉELLEMENT déployé (cf. `_rank_source`
+                # ci-dessus), et non plus sur le XGBoost jetable du walk-forward.
+                rank_auc=_rank_auc,
+                market_rank_auc=_market_rank_auc,
                 rank_delta_market=_rank_delta_market,
                 # PARTANTS, pas courses (≈9,3 lignes par course). Le nom de la
                 # colonne date de la migration 0001 ; les 519 versions déjà
@@ -1575,6 +1650,31 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # et casser la boucle fermée (cf. audit edge). Aligné à features_list.
         _raw_p3_snap = np.clip(np.asarray(probas_top3_raw, dtype=float), 1e-6, 0.999)
 
+        # ── Calibration isotonique du proba_top3 (placé) — SUR LE BRUT ──────────
+        # Corrige la sur-confiance milieu de gamme du placé (mesurée : prédit 0.5
+        # → réel ~0.40) → EV/proba des paris PLACÉ honnêtes (cœur prudent/modéré).
+        # Régression monotone apprise sur les vraies arrivées, recalc nightly.
+        #
+        # APPLIQUÉE ICI, ET PAS PLUS BAS : la courbe est un tableau
+        # `proba_top3_raw → fréquence réelle` (FLAG calib_on_raw, cf.
+        # ml/isotonic_calibration_top3._fetch_proba_top3_outcomes). Elle était
+        # appliquée après la température, le méta-apprenant, le tilt et la
+        # renormalisation Σ=3 — c'est-à-dire à un `x` qui n'était plus celui sur
+        # lequel elle avait été ajustée. Le drapeau `calib_on_raw` avait bien cassé
+        # la boucle fermée côté FIT ; il restait à faire correspondre le domaine
+        # côté INFÉRENCE, sans quoi la courbe corrige une grandeur qu'elle n'a
+        # jamais observée.
+        _nb_partants_champ = max(course.nb_partants or len(features_list), 3)
+        probas_top3_raw = _raw_p3_snap
+        try:
+            from ml.isotonic_calibration_top3 import (
+                load_curve as _t3_load, apply_calibration as _t3_apply)
+            _t3_curve = await _t3_load(session)
+            if _t3_curve:
+                probas_top3_raw = _t3_apply(_raw_p3_snap, _t3_curve, _nb_partants_champ)
+        except Exception as e:
+            log.warning("pipeline.isotonic_top3_skip", err=str(e)[:140])
+
         # ── Calibration adaptative (temperature scaling + biais contextuel) ──
         al = get_adaptive_learning()
         bias_correction = await al.get_bias_correction(
@@ -1583,7 +1683,18 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             terrain=course.terrain_officiel or "",
             hippodrome=course.hippodrome_nom or "",
         )
-        # Temperature scaling + biais contextuel (AdaptiveLearning)
+        # Temperature scaling SEUL — la correction contextuelle vient juste après,
+        # et une seule fois.
+        #
+        # `bias_correction` (moyenne apprise par discipline × terrain × hippodrome)
+        # et le méta-apprenant font le MÊME travail : corriger la proba selon le
+        # contexte. Les appliquer tous les deux, c'était compter la correction deux
+        # fois. On garde celui qui a une preuve : le méta-apprenant quand il a passé
+        # son gate d'utilité, la matrice de biais sinon.
+        #
+        # C'est aussi ce qui rend l'entrée du méta-apprenant EXACTEMENT celle qu'il a
+        # apprise (cf. `ml.meta_learner.base_proba_de_course`, qui reconstruit cette
+        # même grandeur au fit) : isotone top3, puis température, rien d'autre.
         probas_calibrated = al.apply_calibration(
             probas_top3_raw,
             context={
@@ -1591,12 +1702,14 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 "terrain": course.terrain_officiel,
                 "hippodrome": course.hippodrome_nom,
             },
-            bias_correction=bias_correction,
+            bias_correction=0.0,
         )
 
-        # ── Meta-learner correction (Layer 3) ────────────────────────────
-        # Applique le meta-learner ou le correcteur contextuel pour affiner
-        # les probas en tenant compte des biais systématiques appris
+        # ── Correction contextuelle (Layer 3) — UNE seule, jamais deux ──────────
+        # Le méta-apprenant s'il a prouvé son utilité (gate log-loss sur hold-out
+        # groupé par course, cf. ml.meta_learner._verdict_utilite), sinon la matrice
+        # de biais + le correcteur par tables. Jamais les deux : ils corrigent la
+        # même chose.
         meta = get_meta_learner()
         corrector = get_contextual_corrector()
         probas_top3 = probas_calibrated.copy()
@@ -1619,7 +1732,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                         "elo_vs_moyenne": feat.get("elo_vs_moyenne", 0.0),
                         "forme_5_courses": feat.get("forme_5_courses", 0.5),
                         "spi_score": feat.get("spi_score", 0.0),
-                        "season_month": feat.get("mois_course", 6),
+                        # Le mois vient de la COURSE, pas des features : c'est ce
+                        # que voit l'entrainement (cf. _echantillons_de_course).
+                        # `mois_course` n'existe pas toujours dans le JSONB, et un
+                        # defaut a 6 aurait fait diverger fit et service.
+                        "season_month": (course.date_heure.month
+                                         if course.date_heure else 6),
                         "distance": course.distance or 2000,
                     })
                 corrected = meta.predict_corrections_batch(
@@ -1667,7 +1785,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # outsiders) → P(top1) absurde (ex. 0.20 sur un 219/1) → faux value bets.
         # Contraintes réelles : exactement 1 gagnant (Σ P(top1)=1) et 3 placés
         # (Σ P(top3)=min(3, nb_partants)). On renormalise donc le champ.
-        nb_partants = max(course.nb_partants or len(features_list), 3)
+        nb_partants = _nb_partants_champ
         p3_arr = np.clip(np.asarray(probas_top3, dtype=float), 1e-4, 0.999)
         n = len(p3_arr)
 
@@ -1697,17 +1815,51 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         s3 = float(p3_arr.sum())
         probas_top3 = np.clip(p3_arr * (target_sum3 / s3), 0.0, 0.99) if s3 > 0 else p3_arr
 
-        # ── Calibration isotonique du proba_top3 (placé) ─────────────────────────
-        # Corrige la sur-confiance milieu de gamme du placé (mesurée : prédit 0.5
-        # → réel ~0.40) → EV/proba des paris PLACÉ honnêtes (cœur prudent/modéré).
-        # Régression monotone apprise sur les vraies arrivées, recalc nightly.
+        # ── Calibrations DU MODÈLE, appliquées sur la proba MODÈLE ──────────────
+        # Elles sont toutes deux ajustées sur `proba_top1_raw`, c'est-à-dire sur la
+        # proba de victoire du modèle AVANT tout apport extérieur (FLAG calib_on_raw ;
+        # cf. ml/isotonic_calibration._fetch_proba_outcomes et
+        # scripts/calibration_longshots.fetch_rows). Elles s'appliquent donc ici, sur
+        # cette même grandeur — et non après le blend marché, qui produit une
+        # troisième chose dont aucune des deux courbes n'a jamais vu la distribution.
+        #
+        # L'ordre qui en découle a un sens simple : on finit de corriger le modèle,
+        # PUIS on le mélange à un prior externe. Le blend marché n'est pas une
+        # calibration, c'est un avis extérieur — il vient donc en dernier.
+
+        # Longshots : ramène la proba vers la fréquence RÉELLE observée par bucket de
+        # cote, puis renormalise. FLAG collapse_longshot : on saute cette étape pour
+        # ne PAS empiler une 3e correction favori-longshot (l'isotone ci-dessous + le
+        # blend marché suffisent). L'empilement écrasait l'edge quand le modèle a
+        # raison (cf. audit edge : triple-comptage du biais). Flag off → étape active.
+        cotes_pmu = np.array([float(f.get("cote_pmu") or 0.0) for f in features_list])
         try:
-            from ml.isotonic_calibration_top3 import load_curve as _t3_load, apply_calibration as _t3_apply
-            _t3_curve = await _t3_load(session)
-            if _t3_curve:
-                probas_top3 = _t3_apply(probas_top3, _t3_curve, nb_partants)
+            from ml.algo_flags import FLAGS as _AF3
+            _skip_longshot = _AF3.collapse_longshot
+        except Exception:
+            _skip_longshot = False
+        if not _skip_longshot:
+            try:
+                from ml.longshot_calibration import load_factors, apply_calibration
+                _cal_factors = await load_factors(session)
+                if _cal_factors:
+                    probas_top1 = apply_calibration(probas_top1, cotes_pmu, _cal_factors)
+            except Exception as e:
+                log.warning("pipeline.longshot_calibration_skip", err=str(e)[:140])
+
+        # Isotone : ajuste la proba_top1 du modèle pour qu'elle colle à la fréquence
+        # de victoire réelle (régression monotone apprise sur les vraies courses,
+        # recalc nightly). Identité si peu de données. Renormalise Σ=1.
+        try:
+            from ml.isotonic_calibration import load_curve, apply_calibration as _iso_apply, seg_key as _iso_seg
+            _iso_curve = await load_curve(session)
+            if _iso_curve:
+                # Calibration PAR SEGMENT (discipline × tranche de partants) si dispo,
+                # sinon courbe globale (fallback). nb_partants = nb de lignes scorées.
+                _seg = _iso_seg(course.discipline, len(features_list))
+                probas_top1 = _iso_apply(probas_top1, _iso_curve, seg=_seg)
         except Exception as e:
-            log.warning("pipeline.isotonic_top3_skip", err=str(e)[:140])
+            log.warning("pipeline.isotonic_calibration_skip", err=str(e)[:140])
 
         # ── Calibration par le marché (blend modèle × proba implicite PMU) ───────
         # Le marché PMU est un prior fort et bien calibré. On mélange la proba
@@ -1726,11 +1878,22 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # — l'edge doit venir d'un vrai désaccord persistant, pas d'une sur-confiance.
         # ALPHA_DECAY 0.022→0.030 : au-delà de cote 12 la confiance modèle tombe plus
         # vite (ratio proba/réel 1.76 mesuré sur cote 20-40 = sur-évaluation avérée).
-        ALPHA_MAX = 0.42          # confiance modèle sur favoris (cote ≤ ALPHA_FULL_COTE)
+        # ALPHA_MAX est désormais APPRIS (ml.blend_calibration) : ajusté chaque nuit
+        # en maximisant la log-vraisemblance du VRAI gagnant, et retenu seulement
+        # s'il tient hors échantillon SANS dégrader le classement intra-course.
+        #
+        # Pourquoi l'apprendre. C'est le dernier arbitrage de toute la chaîne — il
+        # décide du classement affiché, des cotes justes, de l'EV, donc des paris
+        # émis — et il était posé à la main, justifié par un raisonnement plutôt que
+        # par une mesure. Mesuré sur six jeux simulés en faisant varier la finesse
+        # du marché, l'alpha optimal va de 0,05 à 0,95 : aucune constante ne couvre
+        # cet écart. Tant que rien n'est appris, on rend exactement 0,42 — la valeur
+        # d'avant.
+        from ml.blend_calibration import alpha_en_cache as _alpha_appris
+        ALPHA_MAX = _alpha_appris()
         ALPHA_MIN = 0.12          # plancher : sur gros outsiders le marché domine
         ALPHA_FULL_COTE = 12.0    # en-deçà : modèle de confiance
         ALPHA_DECAY = 0.030       # pente de décroissance par unité de cote au-delà du seuil
-        cotes_pmu = np.array([float(f.get("cote_pmu") or 0.0) for f in features_list])
         alpha = np.clip(
             ALPHA_MAX - ALPHA_DECAY * np.maximum(cotes_pmu - ALPHA_FULL_COTE, 0.0),
             ALPHA_MIN, ALPHA_MAX,
@@ -1748,43 +1911,6 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             bs = float(blend.sum())
             if bs > 0:
                 probas_top1 = blend / bs
-
-        # ── Calibration longshots : corrige le sur-fit sur grosses cotes en
-        # ramenant la proba vers la fréquence RÉELLE observée par bucket de cote,
-        # puis renormalise. Facteurs appris sur données réelles (recalc nightly).
-        # FLAG collapse_longshot : on saute cette étape pour ne PAS empiler une 3e
-        # correction favori-longshot (le blend marché ci-dessus + l'isotonic résiduel
-        # ci-dessous suffisent). L'empilement écrasait l'edge quand le modèle a raison
-        # (cf. audit edge : triple-comptage du biais). Flag off → comportement d'avant.
-        try:
-            from ml.algo_flags import FLAGS as _AF3
-            _skip_longshot = _AF3.collapse_longshot
-        except Exception:
-            _skip_longshot = False
-        if not _skip_longshot:
-            try:
-                from ml.longshot_calibration import load_factors, apply_calibration
-                _cal_factors = await load_factors(session)
-                if _cal_factors:
-                    probas_top1 = apply_calibration(probas_top1, cotes_pmu, _cal_factors)
-            except Exception as e:
-                log.warning("pipeline.longshot_calibration_skip", err=str(e)[:140])
-
-        # ── Calibration isotonique RÉSIDUELLE : ajuste la proba_top1 finale pour
-        # qu'elle colle à la fréquence de victoire réelle (régression monotone apprise
-        # sur les vraies courses, recalc nightly). Dernière étape de calibration —
-        # ferme la boucle après temperature/blend marché/longshots. Identité si peu
-        # de données. Renormalise Σ=1.
-        try:
-            from ml.isotonic_calibration import load_curve, apply_calibration as _iso_apply, seg_key as _iso_seg
-            _iso_curve = await load_curve(session)
-            if _iso_curve:
-                # Calibration PAR SEGMENT (discipline × tranche de partants) si dispo,
-                # sinon courbe globale (fallback). nb_partants = nb de lignes scorées.
-                _seg = _iso_seg(course.discipline, len(features_list))
-                probas_top1 = _iso_apply(probas_top1, _iso_curve, seg=_seg)
-        except Exception as e:
-            log.warning("pipeline.isotonic_calibration_skip", err=str(e)[:140])
 
         # Désactive avant recalcul, sans SUPPRIMER : l'identité du value bet et son
         # flag `notifie` doivent survivre aux rafraîchissements de cotes. L'ancien
@@ -2434,6 +2560,13 @@ async def _build_training_dataset_from_db(
     # (chaque ligne portant un JSONB de 173 clés). Le curseur serveur laisse
     # Postgres garder le gros du résultat de son côté et ne matérialise qu'une
     # partition à la fois.
+    # UN PARTANT, UNE LIGNE — garanti par l'index unique partiel
+    # `uq_hist_cheval_course` (migration 0012, désormais déclaré dans
+    # db.models.HistoriqueCourse). La jointure porte exactement sur les deux
+    # colonnes qu'il couvre, et `participations.course_id` n'est jamais nul :
+    # aucun doublon ne peut donc entrer dans le jeu d'entraînement. Se défendre
+    # ici en plus coûterait une fenêtre de tri sur 175 000 lignes chaque nuit
+    # pour un cas que le schéma rend impossible.
     result = await session.stream(text(f"""
         SELECT
             fm.features,

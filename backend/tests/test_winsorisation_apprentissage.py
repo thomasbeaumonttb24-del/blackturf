@@ -171,12 +171,18 @@ def test_un_type_ruineux_sur_peu_de_courses_reste_SUSPENDU():
 
 
 def test_sous_le_seuil_de_fiabilite_rien_n_est_tranche():
-    """Trop peu de paris → ni suspendu, ni réduit : on observe, on ne décide pas."""
-    g = bpp.evaluate_segment_gates(
+    """Trop peu de paris → ni suspendu, ni réduit, ET SURTOUT PAS réactivé.
+
+    Le segment sort du dict : `persist_segment_gates` ne l'écrit donc pas et la
+    dernière décision connue continue de s'appliquer. Émettre "active" par défaut,
+    comme avant, effaçait une suspension prouvée dès que l'échantillon récent
+    devenait mince — le piège même qui avait fait rejeter le passage du seuil de
+    fiabilité en courses distinctes.
+    """
+    gates = bpp.evaluate_segment_gates(
         _perf(n_paris=5, n_courses=5, reliable=False,
-              edge_pct=-70.0, edge_pct_winsor=-70.0))["X"]
-    assert g["status"] == "active"
-    assert g["factor"] == 1.0
+              edge_pct=-70.0, edge_pct_winsor=-70.0))
+    assert gates == {}
 
 
 def test_repli_sur_l_avantage_brut_si_la_winsorisation_manque():

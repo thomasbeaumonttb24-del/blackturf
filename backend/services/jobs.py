@@ -97,8 +97,10 @@ async def job_meta_learner_retrain() -> None:
     """
     03:00 UTC (après nightly retrain) — réentraîne le meta-learner contextuel.
 
-    Le meta-learner apprend des biais systématiques (terrain/hippodrome/heure)
-    sur les 6 derniers mois de race_learning_log. Nécessite ≥ 200 courses analysées.
+    Le meta-learner apprend, PAR PARTANT, les biais contextuels résiduels de la
+    chaîne de calibration, sur les 6 derniers mois de prédictions figées avant
+    départ (`prediction_evaluation`). Il n'est conservé que s'il fait mieux que
+    l'absence de correction sur un hold-out découpé par course.
     """
     log.info("jobs.meta_learner_retrain.start")
     try:
@@ -114,6 +116,24 @@ async def job_meta_learner_retrain() -> None:
                     "jobs.meta_learner_retrain.done",
                     n_samples=result.get("n_samples"),
                     auc=result.get("auc_roc"),
+                )
+            elif result.get("status") == "rejected_not_useful":
+                # Le correcteur n'a pas battu l'absence de correction sur le
+                # hold-out. Le rejet doit être DURABLE : sans effacer le pickle,
+                # le prochain démarrage de l'API rechargerait le modèle précédent
+                # et continuerait d'appliquer une correction que la mesure vient
+                # de refuser.
+                from ml.meta_learner import META_LEARNER_PATH
+                try:
+                    META_LEARNER_PATH.unlink(missing_ok=True)
+                except OSError as err:
+                    log.warning("jobs.meta_learner_retrain.purge_failed", error=str(err))
+                log.warning(
+                    "jobs.meta_learner_retrain.rejected",
+                    logloss_meta=result.get("logloss_meta"),
+                    logloss_sans_correction=result.get("logloss_sans_correction"),
+                    gain_logloss=result.get("gain_logloss"),
+                    n_samples=result.get("n_samples", 0),
                 )
             else:
                 log.info(

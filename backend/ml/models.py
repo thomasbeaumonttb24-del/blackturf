@@ -77,6 +77,15 @@ META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "lab
              #     sciemment lors d'un retrain dédié, en retirant ces deux noms.
              "class_drop_ratio_reel", "elo_vs_champ"}
 
+# Colonnes de MARCHÉ — retirées du vecteur d'entraînement quand le drapeau
+# `market_residual` est actif (cf. ml.algo_flags). Elles restent calculées et
+# disponibles pour l'affichage, le blend marché et les métriques de classement :
+# c'est bien l'APPRENTISSAGE qu'on prive de la cote, pas le produit.
+COLONNES_MARCHE = {
+    "cote_pmu", "prob_implicite", "rang_cote", "est_favori",
+    "rang_popularite", "rang_cote_relatif", "indice_valeur",
+}
+
 # Brier score minimum requis avant déploiement
 BRIER_THRESHOLD = 0.18
 
@@ -95,6 +104,41 @@ def _try_import_catboost():
     except ImportError:
         log.warning("catboost.not_installed", fallback="using LogisticRegression")
         return None
+
+
+def plis_calibration(X_train: "pd.DataFrame", y_train: "pd.Series",
+                     groupes: "np.ndarray | None", n_splits: int = 3):
+    """Plis de la calibration isotone interne, GROUPÉS PAR COURSE.
+
+    `CalibratedClassifierCV(..., cv=3)` construit un `StratifiedKFold` qui découpe
+    par LIGNE. Les partants d'une même course tombent donc des deux côtés du pli :
+    le calibrateur est ajusté sur des probabilités produites par un modèle qui a vu
+    les frères de course de ce qu'il calibre — via les features de champ
+    (`nb_partants`, `field_hhi`, `elo_vs_moyenne`…), une course se reconnaît.
+
+    Le drapeau `group_split` protégeait le hold-out temporel, les plis OOF du
+    stacking et le walk-forward. Il ne protégeait PAS cette calibration-là, qui est
+    pourtant la dernière chose que traverse chaque probabilité servie.
+
+    Retourne une LISTE de plis (indices positionnels) que
+    `CalibratedClassifierCV` accepte telle quelle, ou `n_splits` (entier) quand le
+    regroupement est impossible — comportement historique inchangé.
+    """
+    if groupes is None:
+        return n_splits
+    try:
+        from sklearn.model_selection import StratifiedGroupKFold
+        plis = list(StratifiedGroupKFold(n_splits=n_splits).split(
+            X_train, y_train, groups=groupes))
+    except Exception as e:
+        log.warning("model.plis_calibration_indisponibles", err=str(e)[:160])
+        return n_splits
+    # Un pli sans les deux classes rendrait la calibration isotone dégénérée.
+    for _, val in plis:
+        if len(np.unique(np.asarray(y_train)[val])) < 2:
+            log.warning("model.plis_calibration_degeneres", n_splits=n_splits)
+            return n_splits
+    return plis
 
 
 def temporal_holdout_mask(X: "pd.DataFrame", frac_train: float = 0.8) -> "np.ndarray":
@@ -183,7 +227,35 @@ class BlackTurfEnsemble:
         Si y_win fourni, entraîne aussi le modèle de VICTOIRE dédié (P(top1) apprise).
         """
         n_samples = len(X)
-        self.feature_names = [c for c in X.columns if c not in META_COLS]
+        from ml.algo_flags import FLAGS as _AF0
+        # FLAG market_residual : le modèle apprend ce que la cote NE DIT PAS.
+        # Avec la cote en entrée, un arbre la relit — c'est le chemin de moindre
+        # perte — et le modèle complet classe à 0,7340 contre 0,7351 pour un simple
+        # `ORDER BY cote_pmu`. Le blend marché en aval ne peut rien y changer :
+        # mélanger deux prédicteurs qui disent la même chose n'apporte rien.
+        _exclues = META_COLS | (COLONNES_MARCHE if _AF0.market_residual else set())
+        self.feature_names = [c for c in X.columns if c not in _exclues]
+        # `fillna(0)` — MESURÉ puis CONSERVÉ, pas un oubli.
+        #
+        # XGBoost, LightGBM et CatBoost gèrent nativement le NaN et apprennent une
+        # direction de défaut par découpe. Remplir par 0 rend « absent »
+        # indistinguable d'une vraie valeur nulle — et 0 est signifiant pour
+        # `elo_vs_moyenne`, `conf_bilan_net`, `delta_elo_5courses` : un cheval sans
+        # historique passe pour un cheval EXACTEMENT dans la moyenne du champ.
+        #
+        # L'objection est réelle, l'effet ne l'est pas. Mesuré sur 9 jeux simulés
+        # (3 taux de manquants × 3 graines, hold-out groupé par course, manquants
+        # NON aléatoires — les chevaux sans ELO sont les débutants, donc les plus
+        # faibles) :
+        #
+        #     taux 10 %  ΔBrier +0,00032  ΔLogloss +0,00074  ΔrangAUC +0,0016
+        #     taux 25 %  ΔBrier +0,00046  ΔLogloss −0,00578  ΔrangAUC +0,0002
+        #     taux 45 %  ΔBrier −0,00007  ΔLogloss +0,00049  ΔrangAUC −0,0022
+        #
+        # Aucune direction : le ΔrangAUC individuel va de −0,0092 à +0,0058 selon la
+        # graine. Changer la représentation d'entrée d'un modèle en production sur
+        # un pile ou face rendrait en plus incohérents tous les pickles déjà
+        # entraînés sur des zéros. On garde, et on le dit.
         X_feat = X[self.feature_names].fillna(0)
 
         from ml.algo_flags import FLAGS as _AF
@@ -195,6 +267,16 @@ class BlackTurfEnsemble:
         log.info("model.training", n_train=len(X_train), n_test=len(X_test), pos_rate=float(y_train.mean()))
 
         pos_weight = float((y_train == 0).sum()) / max(float((y_train == 1).sum()), 1)
+
+        # Plis de la calibration isotone interne, groupés par course (cf.
+        # `plis_calibration`). Calculés UNE fois et partagés par les quatre modèles
+        # calibrés : XGBoost, LightGBM, CatBoost et le modèle de victoire.
+        _groupes_tr = (X.loc[X_train.index, "course_id"].to_numpy()
+                       if (_AF.group_split and "course_id" in X.columns) else None)
+        _cv_calib = plis_calibration(X_train, y_train, _groupes_tr)
+        log.info("model.calibration_groupee",
+                 groupee=not isinstance(_cv_calib, int),
+                 n_plis=(len(_cv_calib) if not isinstance(_cv_calib, int) else _cv_calib))
 
         # ── XGBoost 50% ──────────────────────────────────
         xgb_base = XGBClassifier(
@@ -211,7 +293,7 @@ class BlackTurfEnsemble:
             random_state=42,
             n_jobs=_N_JOBS,
         )
-        self.xgb = CalibratedClassifierCV(xgb_base, method="isotonic", cv=3)
+        self.xgb = CalibratedClassifierCV(xgb_base, method="isotonic", cv=_cv_calib)
         self.xgb.fit(X_train, y_train)
         log.info("model.xgb_trained")
 
@@ -229,7 +311,7 @@ class BlackTurfEnsemble:
             verbose=-1,
             n_jobs=_N_JOBS,
         )
-        self.lgbm = CalibratedClassifierCV(lgbm_base, method="isotonic", cv=3)
+        self.lgbm = CalibratedClassifierCV(lgbm_base, method="isotonic", cv=_cv_calib)
         self.lgbm.fit(X_train, y_train)
         log.info("model.lgbm_trained")
 
@@ -247,14 +329,14 @@ class BlackTurfEnsemble:
                 thread_count=_N_JOBS,
                 verbose=0,
             )
-            self.catboost = CalibratedClassifierCV(cb_base, method="isotonic", cv=3)
+            self.catboost = CalibratedClassifierCV(cb_base, method="isotonic", cv=_cv_calib)
             self.catboost.fit(X_train, y_train)
             self._catboost_available = True
             log.info("model.catboost_trained")
         else:
             X_scaled = self.scaler.fit_transform(X_train)
             logistic_base = LogisticRegression(max_iter=1000, C=0.1, random_state=42)
-            self.catboost = CalibratedClassifierCV(logistic_base, method="isotonic", cv=3)
+            self.catboost = CalibratedClassifierCV(logistic_base, method="isotonic", cv=_cv_calib)
             self.catboost.fit(X_scaled, y_train)
             self._catboost_available = False
             log.info("model.logistic_fallback")
@@ -339,7 +421,11 @@ class BlackTurfEnsemble:
 
         # ── Walk-forward validation (6 fenêtres) ──────────
         _wf_groups = X["course_id"] if (_AF.group_split and "course_id" in X.columns) else None
-        wf_scores = self._walk_forward_validation(X_feat, y, groups=_wf_groups)
+        _wf_cotes = (X["cote_pmu"].to_numpy(dtype=float)
+                     if ("cote_pmu" in X.columns and "cote_pmu" not in X_feat.columns)
+                     else None)
+        wf_scores = self._walk_forward_validation(X_feat, y, groups=_wf_groups,
+                                                  cotes=_wf_cotes)
         log.info("model.walk_forward", scores=[round(s, 4) for s in wf_scores], mean=round(float(np.mean(wf_scores)), 4))
         if self.wf_rank_auc is not None:
             _d = (self.wf_rank_auc - self.wf_market_rank_auc
@@ -356,7 +442,20 @@ class BlackTurfEnsemble:
         # course_id est une colonne META (retirée de X_feat) → on la repasse alignée sur
         # l'index de X_test pour que la précision top-3 puisse grouper PAR COURSE (sinon 0).
         _test_cid = X.loc[X_test.index, "course_id"] if "course_id" in X.columns else None
-        metrics = self._evaluate(X_test, y_test, _test_cid)
+        # La cote sert de RÉFÉRENCE aux métriques de classement, même quand elle est
+        # retirée du vecteur appris : sans elle, `rank_delta_market` — le seul chiffre
+        # qui dit si le modèle mérite d'exister — deviendrait incalculable, et une
+        # absence de mesure se lirait comme un succès.
+        _test_cotes = (X.loc[X_test.index, "cote_pmu"]
+                       if "cote_pmu" in X.columns and "cote_pmu" not in X_test.columns
+                       else None)
+        # Le label VICTOIRE aligné sur le hold-out : sans lui, `precision_top3` et
+        # `roi_simule` ne peuvent pas être calculés honnêtement (cf. leurs
+        # docstrings) et valent 0.0 plutôt qu'un chiffre faux.
+        _test_win = (y_win.loc[X_test.index]
+                     if (y_win is not None and len(y_win) == n_samples) else None)
+        metrics = self._evaluate(X_test, y_test, _test_cid, y_win_test=_test_win,
+                                 cotes_test=_test_cotes)
         metrics["walk_forward_auc"] = float(np.mean(wf_scores))
         metrics["walk_forward_variance"] = float(np.var(wf_scores))
         # Classement intra-course moyenné sur les folds walk-forward, et la même
@@ -427,7 +526,11 @@ class BlackTurfEnsemble:
                         eval_metric="logloss", tree_method="hist",
                         random_state=42, n_jobs=_N_JOBS,
                     )
-                    self.win_model = CalibratedClassifierCV(win_base, method="isotonic", cv=3)
+                    # Plis regroupés par course AUSSI pour le modèle de victoire :
+                    # même fuite, même correctif. Stratifiés sur SON label (yw), qui
+                    # est bien plus déséquilibré que le top-3.
+                    _cv_win = plis_calibration(X_train, yw_train, _groupes_tr)
+                    self.win_model = CalibratedClassifierCV(win_base, method="isotonic", cv=_cv_win)
                     self.win_model.fit(X_train, yw_train)
                     if yw_test.nunique() > 1:
                         p_win_test = self.win_model.predict_proba(X_test)[:, 1]
@@ -489,7 +592,7 @@ class BlackTurfEnsemble:
         return metrics
 
     def _get_l0_predictions(self, X_feat: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Retourne les 3 prédictions L0 : (p_xgb, p_lgbm, p_cb)."""
+        """Retourne les 3 prédictions L0 CALIBRÉES : (p_xgb, p_lgbm, p_cb)."""
         p_xgb = self.xgb.predict_proba(X_feat)[:, 1]
         p_lgbm = self.lgbm.predict_proba(X_feat)[:, 1]
         if self._catboost_available:
@@ -509,6 +612,35 @@ class BlackTurfEnsemble:
         p_xgb, p_lgbm, p_cb = self._get_l0_predictions(X_feat)
 
         if self._stacking_trained and self.meta_learner is not None:
+            # ÉCART FIT/SERVICE CONNU, ET MESURÉ — ne pas « corriger » sans remesurer.
+            #
+            # Le méta-apprenant L2 apprend sur des prédictions out-of-fold produites
+            # par des modèles de pli SANS calibration (`xgb_fold`, `lgbm_fold`,
+            # `cb_fold` ci-dessus), et il est servi avec les sorties de
+            # `CalibratedClassifierCV`. La calibration isotone change la forme de la
+            # distribution : l'écart est réel.
+            #
+            # Le servir avec les L0 NON calibrées (moyenne des estimateurs internes
+            # de chaque `CalibratedClassifierCV`) a été essayé et MESURÉ sur 700
+            # courses simulées, hold-out groupé par course :
+            #
+            #     L2 servi avec les L0 calibrées   Brier 0.15470   logloss 0.47924
+            #     L2 servi avec les L0 brutes      Brier 0.17051   logloss 0.52056
+            #
+            # Soit 10,2 % de Brier et 8,6 % de logloss EN PLUS. Le raisonnement
+            # échouait pour une raison précise : les estimateurs internes du modèle
+            # final n'ont ni les mêmes hyperparamètres (600 arbres profondeur 6)
+            # ni le même échantillon que les modèles de pli (200 arbres, profondeur
+            # 5) — servir « du brut » ne reproduit donc pas l'entrée d'entraînement,
+            # ça fabrique une TROISIÈME distribution. Et le L2 est un modèle à
+            # arbres : la calibration isotone étant MONOTONE, elle préserve l'ordre
+            # sur lequel il a appris à découper, tout en lui donnant des valeurs
+            # mieux échelonnées.
+            #
+            # Le vrai alignement consisterait à donner aux modèles de pli les mêmes
+            # hyperparamètres ET la même calibration que les modèles servis. Cela
+            # triple le nombre d'ajustements de la phase OOF et son pic mémoire, sur
+            # un VPS qui se fait déjà OOM-killer : à chiffrer avant d'y toucher.
             try:
                 stacking_cols = [c for c in self.stacking_feature_names if c in X_feat.columns]
                 meta_X = np.column_stack(
@@ -611,7 +743,8 @@ class BlackTurfEnsemble:
             return None
 
     def _walk_forward_validation(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 6,
-                                 groups: Optional[pd.Series] = None) -> list[float]:
+                                 groups: Optional[pd.Series] = None,
+                                 cotes: Optional["np.ndarray"] = None) -> list[float]:
         """Walk-forward validation pour détecter l'instabilité du modèle.
 
         Si `groups` (course_id) fourni (FLAG group_split), les fenêtres expandantes
@@ -654,7 +787,10 @@ class BlackTurfEnsemble:
                 return
             try:
                 g_te = groups[te_mask]
-                rep = rank_auc_report(y_te, p, g_te, cotes=extract_cotes(X_te))
+                _c = extract_cotes(X_te)
+                if _c is None and cotes is not None:
+                    _c = np.asarray(cotes)[te_mask]
+                rep = rank_auc_report(y_te, p, g_te, cotes=_c)
                 rank_scores.append(rep["rank_auc"])
                 if rep["market_rank_auc"] is not None:
                     market_scores.append(rep["market_rank_auc"])
@@ -702,18 +838,27 @@ class BlackTurfEnsemble:
         return scores if scores else [0.5]
 
     def _evaluate(self, X_test: pd.DataFrame, y_test: pd.Series,
-                  course_ids: "pd.Series | None" = None) -> dict:
-        """Métriques sur le set de test."""
+                  course_ids: "pd.Series | None" = None,
+                  y_win_test: "pd.Series | None" = None,
+                  cotes_test: "pd.Series | None" = None) -> dict:
+        """Métriques sur le set de test.
+
+        `y_test` est le label TOP-3 (celui de l'ensemble). `y_win_test` est le
+        label VICTOIRE, et il est indispensable à deux métriques qui, sans lui, ne
+        mesuraient pas ce qu'elles annonçaient — voir `_compute_precision_top3` et
+        `_simulate_roi`. Absent (anciens appels) → ces deux métriques valent 0.0
+        plutôt qu'un chiffre faux.
+        """
         probas = self.predict_proba(X_test)
 
         auc = float(roc_auc_score(y_test, probas)) if y_test.nunique() > 1 else 0.5
         brier = float(brier_score_loss(y_test, probas))
 
         # Précision top-3 : pour chaque course, le top-3 IA contient-il le vrai gagnant ?
-        prec_top3 = self._compute_precision_top3(X_test, y_test, probas, course_ids)
+        prec_top3 = self._compute_precision_top3(X_test, probas, course_ids, y_win_test)
 
         # ROI simulé value bets (EV > 0.05)
-        roi = self._simulate_roi(X_test, y_test, probas)
+        roi = self._simulate_roi(X_test, probas, y_win_test)
 
         # ── Classement intra-course, et la cote sur le MÊME hold-out ──────────
         # `auc` ci-dessus est poolée : elle ne dit pas si le modèle sait ordonner
@@ -723,8 +868,14 @@ class BlackTurfEnsemble:
         rapport = {"rank_auc": None, "market_rank_auc": None, "delta_market": None}
         if course_ids is not None:
             try:
+                # `cotes_test` prend la main quand la cote a été retirée du vecteur
+                # appris (drapeau market_residual) : la référence marché doit rester
+                # mesurable, sinon le seul chiffre qui juge le modèle disparaît.
+                _cotes = extract_cotes(X_test)
+                if _cotes is None and cotes_test is not None:
+                    _cotes = cotes_test.to_numpy(dtype=float, na_value=np.nan)
                 rapport = rank_auc_report(
-                    y_test, probas, course_ids, cotes=extract_cotes(X_test))
+                    y_test, probas, course_ids, cotes=_cotes)
             except Exception as e:
                 log.warning("model.rank_metrics_failed", err=str(e)[:160])
         self.rank_auc = rapport["rank_auc"]
@@ -740,29 +891,42 @@ class BlackTurfEnsemble:
             "rank_delta_market": rapport["delta_market"],
         }
 
-    def _compute_precision_top3(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray,
-                                course_ids: "pd.Series | None" = None) -> float:
-        """Taux de courses où le top-3 IA inclut le gagnant réel.
+    def _compute_precision_top3(self, X: pd.DataFrame, probas: np.ndarray,
+                                course_ids: "pd.Series | None" = None,
+                                y_win: "pd.Series | None" = None) -> float:
+        """Taux de courses où le top-3 IA inclut le VRAI GAGNANT.
 
-        `course_id` est une colonne META retirée des features → la passer explicitement
-        (sinon, absente de X, la fonction renvoyait toujours 0)."""
+        Le label passé était `y_top3` — celui de l'ensemble. « le gagnant » se
+        réduisait donc au PREMIER des trois placés dans l'ordre de l'index, et le
+        chiffre publié sous le nom `precision_top3` mesurait « mon top-3 contient-il
+        un cheval arrivé dans les trois premiers, choisi arbitrairement ». Cette
+        métrique alimente `model_versions.precision_top3` et l'admin : elle doit
+        porter le nom de ce qu'elle mesure.
+
+        Sans `y_win` (anciens appels), on renvoie 0.0 plutôt qu'un chiffre faux :
+        une métrique qu'on ne sait pas calculer ne s'invente pas.
+
+        `course_id` est une colonne META retirée des features → la passer
+        explicitement (sinon, absente de X, la fonction renvoyait toujours 0)."""
         cid = course_ids
         if cid is None and "course_id" in X.columns:
             cid = X["course_id"]
-        if cid is None:
+        if cid is None or y_win is None:
             return 0.0
         df = pd.DataFrame({
             "proba": np.asarray(probas),
-            "label": np.asarray(y.values if hasattr(y, "values") else y),
+            "gagnant": np.asarray(y_win.values if hasattr(y_win, "values") else y_win),
             "course_id": np.asarray(cid),
         })
 
         correct = 0
         total = 0
         for _, group in df.groupby("course_id"):
+            gagnants = group.index[group["gagnant"] == 1]
+            if len(gagnants) == 0:
+                continue          # course sans gagnant identifié : elle ne compte pas
             top3_ia = set(group.nlargest(3, "proba").index)
-            gagnant = group.index[group["label"] == 1]
-            if len(gagnant) > 0 and gagnant[0] in top3_ia:
+            if gagnants[0] in top3_ia:
                 correct += 1
             total += 1
 
@@ -773,22 +937,34 @@ class BlackTurfEnsemble:
     _ROI_MAX_COTE = 30.0   # au-delà : pari non réaliste en flat-stake, ignoré
     _ROI_MIN_BETS = 20     # sous ce nombre de value bets, ROI non significatif
 
-    def _simulate_roi(self, X: pd.DataFrame, y: pd.Series, probas: np.ndarray) -> float:
+    def _simulate_roi(self, X: pd.DataFrame, probas: np.ndarray,
+                      y_win: "pd.Series | None" = None) -> float:
         """
         Simule le ROI si on joue tous les value bets (EV > 0.05), en flat-stake.
+
+        UNITÉS. `cote_pmu` paie une VICTOIRE : le gain et l'espérance doivent donc
+        se calculer contre le label victoire. La version précédente recevait
+        `y_top3` et calculait `ev = cote × P(top3) − 1` : une probabilité de PLACÉ
+        multipliée par le rapport du GAGNANT, soit une EV surestimée d'un facteur
+        proche de trois, puis créditée d'un gain à chaque fois qu'un cheval PLACÉ
+        « gagnait ». Ce chiffre est stocké dans `model_versions.roi_simule` et
+        affiché ; il doit être calculable ou absent, jamais approximatif.
+
+        Sans `y_win` on renvoie donc 0.0 — la métrique est indisponible, pas fausse.
 
         Garde-fous : on ignore les cotes > _ROI_MAX_COTE (bruit non tradeable) et on
         exige au moins _ROI_MIN_BETS paris, sinon le ROI n'est pas significatif et
         on renvoie 0.0 — on ne stocke jamais une valeur aberrante.
         """
-        if "cote_pmu" not in X.columns:
+        if "cote_pmu" not in X.columns or y_win is None:
             return 0.0
 
         mise_totale = 0.0
         gains_totaux = 0.0
         nb_bets = 0
 
-        for proba, label, cote in zip(probas, y.values, X["cote_pmu"].values):
+        _labels = y_win.values if hasattr(y_win, "values") else np.asarray(y_win)
+        for proba, label, cote in zip(probas, _labels, X["cote_pmu"].values):
             if not cote or cote <= 1.0 or cote > self._ROI_MAX_COTE:
                 continue
             ev = (cote * proba) - 1

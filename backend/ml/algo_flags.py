@@ -13,7 +13,6 @@ Chaque flag reste désactivable individuellement via env (rollback ciblé) :
     BT_DEVIG_GATES=0        # exemple : désactive le dé-vig des gates value bet
 
 Restent OPT-IN (expérimentaux / dépendances externes) :
-    BT_TEMP_FIT=1           # fit 1-D de température sur NLL held-out
     BT_RANKER_BLEND=1       # nécessite un modèle entraîné AVEC LGBMRanker
 
 Usage :
@@ -108,8 +107,21 @@ class AlgoFlags:
     # plans y sont écartés. Mesuré sur 12 432 paris : bandes 0.10-0.35 = ROI +1.7/+2.7%,
     # bande <0 = −21%, bande >0.60 = −21% → on n'émet que là où l'algo GAGNE.
     ev_band_gate: bool = field(default_factory=lambda: _env_bool("BT_EV_BAND_GATE", True))
-    # Temperature ajustée par fit 1-D sur NLL held-out au lieu du ratchet asymétrique.
-    temp_fit: bool = field(default_factory=lambda: _env_bool("BT_TEMP_FIT"))
+    # ── Température : fit 1-D sur la NLL hors-échantillon — ACTIF PAR DÉFAUT ──
+    # Remplace le cliquet asymétrique par course, qui ne montait T que sur les
+    # surprises et ne la baissait que sur `brier < 0,14 ET pas de surprise`. Les
+    # surprises étant fréquentes, T dérivait vers le haut (1,2567 observée) : un
+    # aplatissement du champ qui REMONTE les outsiders et nourrit le biais longshot,
+    # sans rapport avec la calibration réelle.
+    #
+    # Le drapeau est resté OPT-IN parce que son remplaçant n'existait pas :
+    # `_update_temperature` renvoyait 0.0 et `fit_temperature_holdout` n'était
+    # qu'un nom dans un commentaire. L'activer GELAIT donc la température sur la
+    # valeur déjà dérivée au lieu de la corriger. La fonction existe désormais
+    # (ml/adaptive_learning.fit_temperature_holdout, ajustée chaque nuit sur les
+    # courses les plus récentes), le drapeau peut enfin valoir ce qu'il annonce.
+    # Rollback ciblé : BT_TEMP_FIT=0 rend le cliquet d'origine.
+    temp_fit: bool = field(default_factory=lambda: _env_bool("BT_TEMP_FIT", True))
     # ── Calibration isotone CENTRÉE (CIR) — ACTIF PAR DÉFAUT (2026-08-31) ────
     # L'isotone classique est une fonction EN ESCALIER : la courbe prod avait 62
     # points pour 31 `y` distincts, tout x ∈ [0.0363, 0.0470] tombant sur 0.042435.
@@ -131,6 +143,34 @@ class AlgoFlags:
     # p~0.11), neutre top3/ndcg. Réversible. Nécessite un modèle entraîné AVEC ranker.
     ranker_blend: bool = field(default_factory=lambda: _env_bool("BT_RANKER_BLEND"))
     ranker_blend_weight: float = field(default_factory=lambda: _env_float("BT_RANKER_BLEND_WEIGHT", 1.0))
+    # ── Apprendre le RÉSIDU du marché (diagnostic 2026-08-20) — DÉFAUT OFF ───
+    # Retire les colonnes de MARCHÉ du vecteur d'entraînement : `cote_pmu`,
+    # `prob_implicite`, `rang_cote`, `est_favori`, `rang_popularite`,
+    # `rang_cote_relatif`, `indice_valeur`.
+    #
+    # POURQUOI. Le modèle a la cote en entrée, et c'est le chemin de moindre perte :
+    # un arbre qui relit la cote obtient presque toute la performance atteignable
+    # sans rien apprendre d'autre. Mesuré sur 3 322 courses pré-course, le modèle
+    # complet classe à 0,7340 contre 0,7351 pour un simple `ORDER BY cote_pmu` — il
+    # ne fait pas mieux que ce qu'il lit. Et le blend marché en aval ne peut rien y
+    # changer : mélanger deux prédicteurs qui disent la même chose n'apporte rien.
+    #
+    # Sans les colonnes de marché, le modèle DOIT s'appuyer sur ELO, forme, dynamique
+    # de course, confrontations. Son classement seul sera plus BAS — c'est attendu,
+    # il perd sa feature la plus forte. Ce qui compte est ailleurs : ses erreurs
+    # deviennent indépendantes de celles du marché, et c'est cette indépendance qui
+    # rend le blend `alpha × modèle + (1−alpha) × marché` capable de battre les deux.
+    #
+    # COMMENT TRANCHER, sans croire personne : `model_versions.rank_delta_market`
+    # porte désormais le classement de l'ensemble RÉELLEMENT déployé face à la cote,
+    # sur le même hold-out (cf. ml.pipeline._source_rang_marche). Activer ce drapeau
+    # une nuit, puis comparer ce champ entre les deux versions, est une mesure
+    # directe — pas une opinion.
+    #
+    # DÉFAUT OFF : ce drapeau change ce que le modèle apprend. Il ne s'active pas
+    # sans qu'on regarde le résultat le lendemain.
+    market_residual: bool = field(default_factory=lambda: _env_bool("BT_MARKET_RESIDUAL", False))
+
     # ── Gate marché (diagnostic 2026-08-20) ──────────────────────────────────
     # Refuse la promotion d'un modèle dont le CLASSEMENT intra-course ne bat pas
     # un simple `ORDER BY cote_pmu` sur le même hold-out (cf. ml/ranking_metrics).
@@ -176,6 +216,7 @@ class AlgoFlags:
             "ev_band_gate": self.ev_band_gate,
             "combo_market_cap": self.combo_market_cap,
             "temp_fit": self.temp_fit,
+            "market_residual": self.market_residual,
             "cir_calibration": self.cir_calibration,
             "ranker_blend": self.ranker_blend,
             "ranker_blend_weight": self.ranker_blend_weight,

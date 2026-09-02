@@ -40,6 +40,21 @@ MULTI_UNIT = 3.0
 PICK5_UNIT = 1.0
 
 
+def _exposants_harville():
+    """Exposants de position pour la simulation d'arrivee (cf. ml.harville_calibration).
+
+    Lecture SANS acces base : ce module est appele en synchrone depuis le moteur de
+    plan. Le cache est rempli au demarrage de l'API et a chaque recalcul nocturne ;
+    tant qu'il est vide on rend les exposants neutres, c'est-a-dire exactement le
+    Plackett-Luce d'aujourd'hui. Jamais une correction devinee.
+    """
+    try:
+        from ml.harville_calibration import exposants_en_cache
+        return exposants_en_cache()
+    except Exception:
+        return None
+
+
 def _bet_flags(course_info: dict) -> dict:
     """Drapeaux de disponibilité des paris (vérité PMU ou fallback). Robuste : si la
     route a déjà injecté les drapeaux canoniques (est_couple_ordre…) on les utilise,
@@ -114,65 +129,199 @@ def _topk_membership(order: np.ndarray, n_horses: int, k: int) -> np.ndarray:
 # Probabilités par type de pari, pour une sélection donnée (indices)
 # ──────────────────────────────────────────────────────────────────────────────
 class _Sim:
-    """Pré-calcule les appartenances top-k pour réutilisation."""
-    def __init__(self, order: np.ndarray, n_horses: int):
+    """Probabilités d'arrivée d'une course.
+
+    EN FORME FERMÉE dès que `forces` est fourni — c'est-à-dire partout en
+    production. La simulation reste le repli, et sert encore le seul calcul qui n'a
+    pas d'expression simple (`p_2sur4`, « au moins deux des choisis dans le top-4 »).
+
+    Pourquoi la forme fermée : les 20 000 tirages de Gumbel se faisaient à graine
+    FIXE (12345 pour le modèle, 67890 pour le marché).
+
+    Mesuré sur 2 452 candidats produits par 42 courses simulées (champs de 8 à 20
+    partants), la probabilité médiane d'un candidat vaut 4,6 % — la simulation y
+    est excellente. Le problème est la QUEUE : le Couplé Gagnant et le Trio ont
+    respectivement 0,0024 et 0,0029 au premier décile (14 % et 13 % d'erreur
+    relative sur 20 000 tirages) et, surtout, un MINIMUM NUL : la simulation rend
+    zéro, le pari est écarté, et la raison n'existe pas. Les autres types restent
+    sous 4 % d'erreur.
+
+    Et la graine étant la même sur toutes les courses, cette erreur n'est PAS du
+    bruit qui se moyenne sur la saison : c'est un biais reproductible, corrélé à la
+    position dans le classement, sur la SÉLECTION des paris.
+
+    `exposants` porte la correction du biais de Harville (cf. ml.plackett_luce) :
+    à 1,0 — le défaut — le comportement est identique au Plackett-Luce nu.
+    """
+    def __init__(self, order: np.ndarray, n_horses: int,
+                 forces=None, exposants=None):
         self.order = order
         self.n = n_horses
-        self.in_top2 = _topk_membership(order, n_horses, 2)
-        self.in_top3 = _topk_membership(order, n_horses, 3)
-        self.in_top4 = _topk_membership(order, n_horses, 4)
-        self.in_top5 = _topk_membership(order, n_horses, 5)
+        self._sp = None
+        if forces is not None:
+            try:
+                from ml.plackett_luce import forces_par_position
+                self._sp = forces_par_position(forces, exposants)
+            except Exception as e:      # jamais au prix d'une course non chiffrée
+                log.warning("combo.forme_fermee_indisponible", err=str(e)[:140])
+                self._sp = None
         # Règle PMU du « placé » : top-2 si 4-7 partants, top-3 si ≥8, top-1 si <4.
         # Le « placé » N'EST PAS toujours top-3 → sur 4-7 partants, P(placé) doit être
         # P(top-2) sinon les probas/EV des Simple & Couplé Placé sont surestimées.
         self._place_k = 2 if 4 <= n_horses <= 7 else (3 if n_horses >= 8 else 1)
-        self.in_place = _topk_membership(order, n_horses, self._place_k)
-        self.top1 = order[:, 0]
-        self.top2 = order[:, 1] if order.shape[1] > 1 else order[:, 0]
-        self.top3 = order[:, 2] if order.shape[1] > 2 else order[:, 0]
-        self.top4 = order[:, 3] if order.shape[1] > 3 else order[:, 0]
-        self.top5p = order[:, 4] if order.shape[1] > 4 else order[:, 0]
+        # Les structures Monte-Carlo sont construites À LA DEMANDE. En forme fermée,
+        # une seule méthode les utilise encore (`p_2sur4`) : les matérialiser
+        # d'office, c'était cinq matrices booléennes de 20 000 × n par `_Sim`, deux
+        # `_Sim` par course, pour des tableaux dont plus personne ne lit une case.
+        self._cache_mc: dict = {}
+        self._places = None
+
+    def _membre(self, k: int) -> np.ndarray:
+        cle = f"in_top{k}"
+        if cle not in self._cache_mc:
+            if self.order is None:
+                raise RuntimeError(
+                    "simulation demandée sans ordres tirés — "
+                    "cette méthode n'a pas de forme fermée, il lui faut `order`")
+            self._cache_mc[cle] = _topk_membership(self.order, self.n, k)
+        return self._cache_mc[cle]
+
+    def _colonne(self, rang: int) -> np.ndarray:
+        cle = f"col{rang}"
+        if cle not in self._cache_mc:
+            if self.order is None:
+                raise RuntimeError("simulation demandée sans ordres tirés")
+            self._cache_mc[cle] = (self.order[:, rang]
+                                   if self.order.shape[1] > rang
+                                   else self.order[:, 0])
+        return self._cache_mc[cle]
+
+    # Les attributs historiques restent lisibles — ils se construisent au premier accès.
+    @property
+    def in_top2(self):
+        return self._membre(2)
+
+    @property
+    def in_top3(self):
+        return self._membre(3)
+
+    @property
+    def in_top4(self):
+        return self._membre(4)
+
+    @property
+    def in_top5(self):
+        return self._membre(5)
+
+    @property
+    def in_place(self):
+        return self._membre(self._place_k)
+
+    @property
+    def top1(self):
+        return self._colonne(0)
+
+    @property
+    def top2(self):
+        return self._colonne(1)
+
+    @property
+    def top3(self):
+        return self._colonne(2)
+
+    @property
+    def top4(self):
+        return self._colonne(3)
+
+    @property
+    def top5p(self):
+        return self._colonne(4)
 
     def p_simple_place(self, a: int) -> float:
         # Placé selon la règle PMU (top-2 ou top-3 selon le nombre de partants).
+        if self._sp is not None:
+            if self._places is None:
+                # Calculé POUR TOUS les partants d'un coup et mémorisé : appelé
+                # cheval par cheval, il refaisait n fois les mêmes sommes sur les
+                # vainqueurs et les paires de tête.
+                from ml.plackett_luce import p_dans_topk_tous
+                self._places = p_dans_topk_tous(self._sp, self._place_k)
+            return float(self._places[int(a)])
         return float(self.in_place[:, a].mean())
 
     def p_couple_ordre(self, sel: list[int]) -> float:
         """Couplé ORDRE : sel[0] 1er ET sel[1] 2e, dans CET ordre exact."""
+        if self._sp is not None:
+            from ml.plackett_luce import p_ordre_exact
+            return p_ordre_exact(self._sp, [int(sel[0]), int(sel[1])])
         a, b = sel[0], sel[1]
         return float(((self.top1 == a) & (self.top2 == b)).mean())
 
     def p_trio_ordre(self, sel: list[int]) -> float:
         """Trio ORDRE : les 3 premiers dans l'ordre exact."""
+        if self._sp is not None:
+            from ml.plackett_luce import p_ordre_exact
+            return p_ordre_exact(self._sp, [int(x) for x in sel[:3]])
         a, b, c = sel[0], sel[1], sel[2]
         return float(((self.top1 == a) & (self.top2 == b) & (self.top3 == c)).mean())
 
     def p_super4(self, sel: list[int]) -> float:
-        """Super 4 : les 4 premiers dans l'ordre exact."""
+        """Super 4 : les 4 premiers dans l'ordre exact.
+
+        L'événement le plus rare que ce module calcule. Mesuré sur un champ de 12 :
+        même sur les QUATRE FAVORIS dans l'ordre, il vaut 0,001135 — soit une sur
+        881, et 21 % d'erreur relative sur 20 000 tirages. Sur n'importe quelle
+        autre quadruplette, c'est bien pire."""
+        if self._sp is not None:
+            from ml.plackett_luce import p_ordre_exact
+            return p_ordre_exact(self._sp, [int(x) for x in sel[:4]])
         a, b, c, d = sel[0], sel[1], sel[2], sel[3]
         return float(((self.top1 == a) & (self.top2 == b)
                       & (self.top3 == c) & (self.top4 == d)).mean())
 
     def p_couple_gagnant(self, sel: list[int]) -> float:
         # les 2 chevaux exactement 1er+2e (ordre indifférent)
+        if self._sp is not None:
+            from ml.plackett_luce import p_ensemble_topk
+            return p_ensemble_topk(self._sp, [int(x) for x in sel])
         return float(self.in_top2[:, sel].all(axis=1).mean())
 
     def p_couple_place(self, sel: list[int]) -> float:
         # Couplé Placé : les 2 chevaux dans les places payées (règle PMU top-2/top-3).
+        if self._sp is not None and len(sel) <= self._place_k <= 3:
+            from ml.plackett_luce import p_tous_dans_topk
+            return p_tous_dans_topk(self._sp, [int(x) for x in sel], self._place_k)
         return float(self.in_place[:, sel].all(axis=1).mean())
 
     def p_trio(self, sel: list[int]) -> float:
+        if self._sp is not None:
+            from ml.plackett_luce import p_ensemble_topk
+            return p_ensemble_topk(self._sp, [int(x) for x in sel])
         return float(self.in_top3[:, sel].all(axis=1).mean())
 
     def p_tierce_ordre(self, sel: list[int]) -> float:
+        if self._sp is not None:
+            from ml.plackett_luce import p_ordre_exact
+            return p_ordre_exact(self._sp, [int(x) for x in sel[:3]])
         a, b, c = sel[0], sel[1], sel[2]
         return float(((self.top1 == a) & (self.top2 == b) & (self.top3 == c)).mean())
 
     def p_2sur4(self, sel: list[int]) -> float:
-        # ≥ 2 des chevaux choisis dans le top-4
+        # ≥ 2 des chevaux choisis dans le top-4.
+        #
+        # SEUL calcul resté en simulation : « au moins deux » demande une
+        # inclusion-exclusion sur les sous-ensembles, sans expression courte. Et
+        # c'est aussi celui qui en souffre le moins — la probabilité est de l'ordre
+        # de quelques dizaines de pourcents, là où 20 000 tirages sont largement
+        # suffisants (l'erreur relative est le problème des ÉVÉNEMENTS RARES).
         return float((self.in_top4[:, sel].sum(axis=1) >= 2).mean())
 
     def p_topk_exact(self, sel: list[int], k: int) -> float:
+        if self._sp is not None and len(set(sel)) == k:
+            # |sel| == k : « tous dans le top-k » signifie exactement « ils SONT le
+            # top-k ». C'est le cas de tous les appelants (Quarté+/Quinté+ Désordre).
+            from ml.plackett_luce import p_ensemble_topk
+            return p_ensemble_topk(self._sp, [int(x) for x in sel])
         member = self.in_top4 if k == 4 else self.in_top5 if k == 5 else self.in_top3
         return float(member[:, sel].all(axis=1).mean())
 
@@ -182,6 +331,9 @@ class _Sim:
         Le ticket gagne si les k chevaux arrivés aux k premières places sont TOUS
         dans la sélection (peu importe l'ordre). Exactement k des |sel| colonnes
         doivent appartenir au top-k de la simulation."""
+        if self._sp is not None:
+            from ml.plackett_luce import p_couverture_topk
+            return p_couverture_topk(self._sp, [int(x) for x in sel], int(k))
         member = self.in_top4 if k == 4 else self.in_top5 if k == 5 else self.in_top3
         return float((member[:, sel].sum(axis=1) == k).mean())
 
@@ -221,10 +373,15 @@ def build_combo_proposals(
     pm = pm / pm.sum()
     p1 = _cap_model_probas(p1, pm, cotes)   # cap 1.55× marché sur cote ≥ 4 (flag)
 
+    # Les forces sont passées à `_Sim` : il calcule alors en FORME FERMÉE (exacte,
+    # déterministe) et ne garde la simulation que pour `p_2sur4`. Les exposants de
+    # position corrigent le biais de Harville — 1,0 tant qu'ils ne sont pas mesurés,
+    # soit exactement le comportement d'avant.
+    _exp = _exposants_harville()
     order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
-    sim = _Sim(order, len(parts))
+    sim = _Sim(order, len(parts), forces=p1, exposants=_exp)
     order_m = simulate_orderings(pm, n_sims=n_sims, seed=67890)
-    sim_m = _Sim(order_m, len(parts))
+    sim_m = _Sim(order_m, len(parts), forces=pm, exposants=_exp)
 
     # Ordre d'arrivée le plus probable (modal top-5) — scénario de référence
     by_p1 = np.argsort(-p1)
@@ -379,10 +536,15 @@ def enumerate_bet_candidates(
     pm = pm / pm.sum()
     p1 = _cap_model_probas(p1, pm, cotes)   # cap 1.55× marché sur cote ≥ 4 (flag)
 
+    # Les forces sont passées à `_Sim` : il calcule alors en FORME FERMÉE (exacte,
+    # déterministe) et ne garde la simulation que pour `p_2sur4`. Les exposants de
+    # position corrigent le biais de Harville — 1,0 tant qu'ils ne sont pas mesurés,
+    # soit exactement le comportement d'avant.
+    _exp = _exposants_harville()
     order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
-    sim = _Sim(order, len(parts))
+    sim = _Sim(order, len(parts), forces=p1, exposants=_exp)
     order_m = simulate_orderings(pm, n_sims=n_sims, seed=67890)
-    sim_m = _Sim(order_m, len(parts))
+    sim_m = _Sim(order_m, len(parts), forces=pm, exposants=_exp)
 
     by_p1 = list(np.argsort(-p1))                 # favoris modèle
     implied = pm                                   # proba marché par cheval
@@ -837,10 +999,15 @@ def build_coverage_bets(
     pm = pm / pm.sum()
     p1 = _cap_model_probas(p1, pm, cotes)   # cap 1.55× marché sur cote ≥ 4 (flag)
 
+    # Les forces sont passées à `_Sim` : il calcule alors en FORME FERMÉE (exacte,
+    # déterministe) et ne garde la simulation que pour `p_2sur4`. Les exposants de
+    # position corrigent le biais de Harville — 1,0 tant qu'ils ne sont pas mesurés,
+    # soit exactement le comportement d'avant.
+    _exp = _exposants_harville()
     order = simulate_orderings(p1, n_sims=n_sims, seed=12345)
-    sim = _Sim(order, len(parts))
+    sim = _Sim(order, len(parts), forces=p1, exposants=_exp)
     order_m = simulate_orderings(pm, n_sims=n_sims, seed=67890)
-    sim_m = _Sim(order_m, len(parts))
+    sim_m = _Sim(order_m, len(parts), forces=pm, exposants=_exp)
 
     by_p1 = list(np.argsort(-p1))      # favoris modèle
     by_pm = list(np.argsort(-pm))      # favoris marché (pour le rapport modal)

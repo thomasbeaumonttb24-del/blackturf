@@ -631,6 +631,11 @@ def generer_plan(
     respect_montant: bool = False,
     rapport_calib: Optional[dict] = None,
     ev_band_perf: Optional[dict] = None,
+    # DISCIPLINE DE MISE — indépendante de `respect_montant`. Voir `est_plan_systeme`
+    # et `_budget_discipline`. `None` = repli historique (`not respect_montant`), qui
+    # revenait à ne jamais l'appliquer en production puisque TOUS les appelants
+    # passent `respect_montant=True`.
+    discipline_mise: Optional[bool] = None,
     # Zone de marché — banc de mesure uniquement, aucun appelant produit ne la passe
     # (cf. le commentaire de la calibration plus bas).
     zone: Optional[str] = None,
@@ -649,6 +654,14 @@ def generer_plan(
       sélection ; `heat` intègre le ROI récent → après une série perdante le système
       devient prudent même en profil agressif ; après une bonne série, plus offensif.
     Aucune valeur inventée : signaux absents → neutre (poids 1.0, heat 0).
+
+    `respect_montant` et `discipline_mise` sont deux questions DISTINCTES, longtemps
+    confondues dans un seul drapeau :
+      - `respect_montant` : COMMENT répartir (allocation spread/dutch plutôt que
+        Kelly), et faut-il déployer la somme en entier ;
+      - `discipline_mise` : COMBIEN engager au total sur cette course.
+    Les confondre rendait la discipline — le plus gros levier de ROI mesuré du
+    produit — inatteignable, puisque aucun appelant ne passe `respect_montant=False`.
     """
     from ml.combo_bets import enumerate_bet_candidates
 
@@ -670,6 +683,9 @@ def generer_plan(
                 montant = max(2, min(montant, int(bankroll * _AF.bankroll_cap_frac)))
         except Exception:
             pass
+    # Repli historique : le comportement d'avant la séparation des deux drapeaux.
+    if discipline_mise is None:
+        discipline_mise = not respect_montant
     palier = _palier(montant)
     roi_weights = roi_weights or {}
     heat = max(-1.0, min(1.0, float(heat or 0.0)))
@@ -851,27 +867,47 @@ def generer_plan(
         _keep = max(_sp, key=lambda c: c.get("proba_gain", 0.0))
         selected[:] = [c for c in selected if c.get("type_pari") != "Simple Placé" or c is _keep]
 
+    # SOMME ENGAGÉE — décidée AVANT l'allocation pour que le contrat de gain, le
+    # plancher de mise et le coût guichet du ticket tiennent exactement dessus.
+    _min_stake_plan = max(MISE_PLANCHER,
+                          round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
+    #
+    # Deux chemins, une seule discipline : sur spread/dutch elle agit ICI, sur le
+    # budget, parce que ces allocations portent un contrat de tranche (gain ≥ ×g de
+    # la mise totale) qu'un rabot après coup romprait. Sur le chemin Kelly, qui n'a
+    # pas ce contrat, elle agit plus bas, PAR PARI. Jamais les deux — ce serait
+    # réduire deux fois.
+    montant_engage = montant
+    if discipline_mise and respect_montant:
+        montant_engage = _budget_discipline(selected, montant, _min_stake_plan)
+
     if respect_montant:
         if cfg.get("alloc") == "spread":
             # MODÉRÉ / RISQUÉ : contrat de gain vs mise TOTALE — chaque ticket gagnant
             # rapporte ≥ gain_cible_mult × montant du plan (mise du ticket taillée à
             # ceil(cible/rapport)), diversification ≥2 tickets si possible, reliquat
             # ∝ conviction (proba×rapport, edge outsider, signal, bande d'EV).
-            _min_stake_eff = max(MISE_PLANCHER,
-                                 round(palier["min_stake"] * cfg.get("min_stake_factor", 1.0)))
-            _allocate_spread(selected, montant, cfg, _min_stake_eff,
+            _allocate_spread(selected, montant_engage, cfg, _min_stake_plan,
                              pool=pool_couverture,
-                             nb_partants=(course_info or {}).get("nb_partants"))
+                             nb_partants=(course_info or {}).get("nb_partants"),
+                             autoriser_reserve=bool(discipline_mise))
         else:
             # PRUDENT : RESPECT STRICT DE LA TRANCHE DE COEFFICIENT (×1.8-4) SUR LA MISE
             # COMPLÈTE par DUTCHING : chaque gagnant unique rend le même total = coef ×
             # montant, coef = 1/Σ(1/rapport_i) calé dans la bande. Fonctionne bien sur les
             # petits rapports du prudent (ajouter un pari garde le coef dans la bande).
             selected = _enforce_band_dutch(selected, cfg)
-            _allocate_dutch(selected, montant, cfg)
+            _allocate_dutch(selected, montant_engage, cfg)
+            # Le dutching n'a pas de plafond de bande à respecter : le garde-fou de
+            # corrélation s'applique donc directement, comme il le faisait déjà côté
+            # Kelly. Sous allocation spread il vit DANS `_allocate_spread`, là où le
+            # plafond haut de bande est en portée.
+            _apply_correlation_cap(selected, montant_engage, _min_stake_plan,
+                                   respect_montant=not discipline_mise)
     else:
         min_keep = 2 if (len(selected) >= 2 and not _solo_confident(selected[0])) else 1
-        _allocate_kelly(selected, montant, palier, cfg, respect_montant=respect_montant,
+        _allocate_kelly(selected, montant_engage, palier, cfg,
+                        respect_montant=respect_montant,
                         min_keep=min_keep)  # remplit "mise"
         # DISCIPLINE DE MISE — on ne joue pas la même somme sur une course où
         # l'argent revient et sur une course où il ne revient pas. Contrefactuel
@@ -882,7 +918,15 @@ def generer_plan(
         #
         # Jamais appliqué quand l'utilisateur a SAISI un montant : il a demandé à
         # jouer cette somme-là, on la déploie en entier.
-        _appliquer_discipline_mise(selected, montant, palier, cfg)
+        #
+        # Le rabot PAR PARI reste ici, sur le chemin Kelly : il n'y a pas de contrat
+        # de tranche à préserver, donc rien n'interdit de rogner une mise après coup,
+        # et cela déplace en plus le MÉLANGE de l'argent vers les bonnes cellules.
+        # Sur les chemins spread/dutch la discipline passe par le BUDGET en amont
+        # (`_budget_discipline`), sans quoi la promesse ×g du profil serait rompue en
+        # silence.
+        if discipline_mise:
+            _appliquer_discipline_mise(selected, montant, palier, cfg)
     ecartes = _paris_ecartes(cands, selected, cfg, rang_par_num=_rang_par_num,
                              roi_weights=roi_weights, montant=montant,
                              value_bets=_vb_par_num)
@@ -901,6 +945,70 @@ def generer_plan(
 # on descend jusqu'à ce plancher sur les pires — sans jamais tomber à zéro, sinon
 # le plan disparaîtrait.
 DISCIPLINE_RATIO_PLANCHER = 0.40
+
+# Montant du plan de RÉFÉRENCE du système : celui que `ml.profil_learning` fige
+# avant chaque course, que le produit affiche par défaut et sur lequel TOUTE la
+# mesure de rentabilité est faite. Dupliqué depuis `ml.profil_learning.MISE_REF`
+# — l'importer ici créerait un cycle (profil_learning importe ce module). Un test
+# verrouille l'égalité des deux valeurs.
+MISE_REF_SYSTEME = 10
+
+
+def est_plan_systeme(montant) -> bool:
+    """Ce plan est-il celui du SYSTÈME, ou une somme saisie par l'utilisateur ?
+
+    La distinction commande la DISCIPLINE DE MISE. Sur une somme saisie, l'invariant
+    produit est « montant saisi = montant joué » : l'utilisateur a décidé, on déploie.
+    Sur le plan du système, personne n'a rien décidé — c'est le moteur qui choisit
+    combien engager, et rien ne l'oblige à tout engager sur une course où l'argent ne
+    revient pas.
+    """
+    try:
+        return int(round(float(montant or 0))) == MISE_REF_SYSTEME
+    except (TypeError, ValueError):
+        return False
+
+
+def _budget_discipline(selected: list[dict], montant: int, min_stake: int) -> int:
+    """Somme réellement ENGAGÉE sur un plan système, selon la qualité mesurée des
+    tickets retenus (tranche de rapport apprise, `_pb_mult`). Le reste part en réserve.
+
+    Contrefactuel mesuré sur les 19 996 paris réglés (gains winsorisés) :
+
+        tout jouer, toutes cellules              -16,0 %
+        Simple Gagnant ×4-15 + Simple Placé <×4   -6,1 %
+        Simple Gagnant ×4-8 seul                  -1,9 %
+
+    C'est le levier qui reste quand le modèle n'a pas d'avantage suffisant. Il agit
+    sur le BUDGET, AVANT l'allocation, et non sur les mises après coup : c'est ce qui
+    permet à tous les contrats aval de tenir EXACTEMENT (contrat de gain ×g, plancher
+    de mise, coût minimum PMU du ticket) — ils sont simplement honorés sur la somme
+    engagée. Rogner les mises APRÈS l'allocation romprait la promesse de tranche du
+    profil sans rien en dire.
+
+    Plancher : de quoi acheter au guichet le plus cher des tickets retenus. Réduire
+    en dessous ne ferait pas économiser de l'argent, ça rendrait le plan injouable.
+    """
+    if not selected:
+        return int(montant)
+    qualites = [float(c.get("_pb_mult", 1.0) or 1.0) for c in selected]
+    q = sum(qualites) / len(qualites)
+    if q >= 1.0:
+        return int(montant)
+    # 0.60 (pire tranche mesurée) → 40 % engagés ; 1.00 (neutre) → budget plein.
+    ratio = (DISCIPLINE_RATIO_PLANCHER
+             + (q - 0.60) * (1.0 - DISCIPLINE_RATIO_PLANCHER) / 0.40)
+    ratio = max(DISCIPLINE_RATIO_PLANCHER, min(1.0, ratio))
+    if ratio >= 0.995:
+        return int(montant)
+    plancher = max(int(min_stake),
+                   int(math.ceil(max((_cout_minimum_pmu(c.get("type_pari") or "")
+                                      for c in selected), default=0.0))))
+    engage = min(int(montant), max(plancher, int(round(int(montant) * ratio))))
+    if engage < int(montant):
+        for c in selected:
+            c["_discipline_ratio"] = round(engage / max(int(montant), 1), 2)
+    return engage
 
 
 # ── Désaccord marché — banc d'essai A/B ───────────────────────────────────────
@@ -1257,7 +1365,8 @@ def _financer_couverture(kept: list[dict], selected: list[dict], reste: int,
 
 def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake: int,
                      pool: Optional[list[dict]] = None,
-                     nb_partants: Optional[int] = None) -> None:
+                     nb_partants: Optional[int] = None,
+                     autoriser_reserve: bool = False) -> None:
     """Allocation « SPREAD » (modéré/risqué, calculateur manuel & pronos figés).
 
     CONTRAT DE GAIN vs MISE TOTALE (demande user 2026-07-02) : chaque ticket GAGNANT
@@ -1300,7 +1409,12 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
         edge = max(float(b.get("edge") or 0.0), 0.0)
         sig = max(0.5, min(float(b.get("_sig", 1.0) or 1.0), 2.0))
         evb = float(b.get("_evb", 1.0) or 1.0)
-        return max(p * min(r, 40.0), 0.05) * (1.0 + 3.0 * edge) * sig * evb
+        # Incertitude du modèle (largeur de l'IC de proba_top1) : plus l'IC est
+        # large, moins l'avantage mesuré est fiable → on engage moins de reliquat.
+        # Ce discount n'existait que dans `_allocate_kelly`, c'est-à-dire nulle part
+        # en production (aucun appelant ne passe respect_montant=False).
+        unc = _uncertainty_discount(b.get("_ci_width", 0.0))
+        return max(p * min(r, 40.0), 0.05) * (1.0 + 3.0 * edge) * sig * evb * unc
 
     def _cap(b):
         # Plafond de mise = variance (HV) ∩ borne HAUTE de bande (gain = rapport×mise ≤
@@ -1444,6 +1558,21 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
             pool = [b for b in kept if not _is_high_variance(b)] or kept
             tgt = min(pool, key=lambda b: float(b.get("rapport_estime") or 1.0))
             tgt["mise"] += overflow
+    # GARDE-FOU CORRÉLATION — dernier passage, ICI et pas dans `generer_plan` :
+    # c'est le seul endroit où `_cap` (plafond haut de bande du profil) est en
+    # portée, et déplacer de l'argent sans le connaître ferait sortir un ticket de
+    # sa tranche. Plusieurs paris qui misent sur le MÊME cheval ne sont pas
+    # diversifiés — le plafond de variance, lui, ne regarde que le TYPE de pari.
+    #
+    # `autoriser_reserve` décide de ce qu'on fait quand AUCUN pari décorrélé ne peut
+    # absorber l'excédent — le cas NORMAL, et non l'exception : les combinaisons sont
+    # ancrées sur les deux premiers du classement, donc elles partagent leurs chevaux
+    # par construction. Rendre l'excédent au pari sur-exposé, comme le faisait
+    # l'unique chemin d'origine, revenait à ne jamais plafonner quoi que ce soit.
+    # Sur un plan système, la bonne réponse est de ne pas engager cet argent ; sur un
+    # montant saisi, le contrat « tout jouer » prime et le plafond cède.
+    _apply_correlation_cap(kept, M, min_stake,
+                           respect_montant=not autoriser_reserve, cap_fn=_cap)
     selected[:] = kept
 
 
@@ -2487,12 +2616,20 @@ MAX_HORSE_EXPOSURE_FRAC = 0.70
 
 
 def _apply_correlation_cap(selected: list[dict], montant: int, min_stake: int,
-                           respect_montant: bool = False) -> None:
+                           respect_montant: bool = False,
+                           cap_fn=None) -> None:
     """Plafonne l'exposition cumulée à un seul cheval à `MAX_HORSE_EXPOSURE_FRAC`
     × montant. Dernier passage (après variance cap) : transfère l'excédent des
     paris impliquant le cheval sur-exposé vers des paris qui NE LE PARTAGENT PAS
     (jamais vers un autre pari corrélé, ce qui ne ferait que déplacer le
-    problème). Ne peut réduire une mise sous `min_stake`."""
+    problème). Ne peut réduire une mise sous `min_stake`.
+
+    `cap_fn(pari) -> int` : plafond de mise propre à l'allocation appelante. Sous
+    allocation spread il porte la borne HAUTE de la tranche du profil (gain ≤
+    gain_cible_max × total) ; sans lui, déplacer de l'argent pour corriger une
+    corrélation ferait sortir un ticket par le haut de sa tranche — on aurait
+    corrigé un risque en cassant un contrat produit. Absent → aucun plafond
+    supplémentaire (comportement historique du chemin Kelly)."""
     if len(selected) < 2:
         return
     ceil_amt = max(int(min_stake), int(montant * MAX_HORSE_EXPOSURE_FRAC))
@@ -2515,12 +2652,24 @@ def _apply_correlation_cap(selected: list[dict], montant: int, min_stake: int,
         # Réduit en priorité le pari le MOINS convaincant (proba×rapport le plus faible),
         # jamais sous le plancher (ni min_stake, ni le "_besoin" du contrat de gain — même
         # garde que _apply_variance_cap : on ne défait pas la promesse ≥ gain_cible_mult).
+        #
+        # On prend le moins convaincant QUI A ENCORE DE LA MARGE, et non le moins
+        # convaincant tout court : dès que celui-ci touchait son plancher contractuel,
+        # la boucle rendait la main sans jamais regarder les autres paris exposés au
+        # même cheval — le plafond restait donc dépassé alors qu'il était atteignable
+        # en rognant le suivant.
         involved.sort(key=lambda c: c.get("proba_gain", 0.0) * c.get("rapport_estime", 0.0))
-        weakest = involved[0]
-        floor_w = max(int(min_stake), int(weakest.get("_besoin", 0) or 0))
-        reduce_by = min(int(weakest["mise"]) - floor_w, int(exposure[worst] - ceil_amt) + 1)
-        if reduce_by <= 0:
-            return
+        weakest = None
+        reduce_by = 0
+        for cand in involved:
+            floor_c = max(int(min_stake), int(cand.get("_besoin", 0) or 0))
+            marge = int(cand["mise"]) - floor_c
+            if marge > 0:
+                weakest = cand
+                reduce_by = min(marge, int(exposure[worst] - ceil_amt) + 1)
+                break
+        if weakest is None or reduce_by <= 0:
+            return  # tous au plancher contractuel : le plafond n'est plus atteignable
         weakest["mise"] -= reduce_by
         # Redistribue vers les paris NE PARTAGEANT AUCUN cheval avec `worst`.
         weakest_horses = {int(h["numero"]) for h in weakest.get("chevaux", [])
@@ -2532,16 +2681,24 @@ def _apply_correlation_cap(selected: list[dict], montant: int, min_stake: int,
                                  if h.get("numero") is not None}]
         moved = reduce_by
         k = 0
-        while moved > 0 and free:
-            free[k % len(free)]["mise"] += 1
-            moved -= 1
+        garde = 0
+        while moved > 0 and free and garde < 10 ** 6:
+            garde += 1
+            cible = free[k % len(free)]
             k += 1
+            if cap_fn is not None and cible["mise"] >= cap_fn(cible):
+                if all(c["mise"] >= cap_fn(c) for c in free):
+                    break          # tous au plafond de bande : plus rien à absorber
+                continue
+            cible["mise"] += 1
+            moved -= 1
         if moved > 0 and respect_montant:
             # Aucun pari décorrélé pour absorber : le montant saisi doit rester
             # ENTIÈREMENT joué (contrat manuel) → on rend l'excédent à `weakest`
             # plutôt que de sous-jouer le montant demandé. Le plafond n'est donc
             # pas garanti dans ce cas (peu de candidats), mais jamais le contrat.
             weakest["mise"] += moved
+            return  # rendre puis reboucler ne ferait que refaire le même constat
 
 
 # Pourquoi ce TYPE de pari sert ce PROFIL — pédagogie de la méthode de jeu.
@@ -2914,6 +3071,11 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
     """Groupe les paris choisis par niveau → MisePlan (structure attendue par le front)."""
     niveaux_map: dict[str, list[PariRec]] = {}
     ev_pondere = 0.0
+    # Dénominateur des justificatifs = la somme RÉELLEMENT engagée. Quand la
+    # discipline de mise laisse une réserve, « ×N de la mise totale » calculé sur le
+    # montant nominal annoncerait un multiplicateur que le ticket ne tient pas — et
+    # c'est aussi sur la mise engagée que `settle_plan` calcule le ROI.
+    _montant_joue = sum(c.get("mise", 0) for c in selected) or montant
     for c in selected:
         mise = c["mise"]
         gain = round(mise * c["rapport_estime"])
@@ -2936,7 +3098,7 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             probabilite=c["proba_gain"],
             description=c["texte_explication"],
             ev_estime=c["ev"],
-            raisons=_raisons_pari(c, profil, facteurs_chevaux, montant=montant),
+            raisons=_raisons_pari(c, profil, facteurs_chevaux, montant=_montant_joue),
             rapport_estime=round(float(c.get("rapport_estime") or 0.0), 2),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
@@ -2951,7 +3113,7 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
         m_niv = sum(p.mise for p in paris)
         niveaux.append(NiveauPlan(
             niveau=niv, label=label, emoji=emoji, couleur=couleur,
-            montant=m_niv, pct=round(m_niv / montant * 100), paris=paris,
+            montant=m_niv, pct=round(m_niv / _montant_joue * 100), paris=paris,
         ))
 
     montant_joue = sum(c["mise"] for c in selected)

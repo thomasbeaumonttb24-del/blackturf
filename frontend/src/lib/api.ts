@@ -258,6 +258,10 @@ export const adminApi = {
     api.get("/supervision/algo-evolution", { baseURL: `${API_URL}/admin/api`, params: { limit } }),
   supervisionPulse: () =>
     api.get("/supervision/pulse", { baseURL: `${API_URL}/admin/api` }),
+  // Outils d'apprentissage : quelles étapes ont réellement tourné cette nuit, et
+  // quels correcteurs ont PROUVÉ qu'ils amélioraient quelque chose.
+  supervisionOutilsApprentissage: () =>
+    api.get("/supervision/outils-apprentissage", { baseURL: `${API_URL}/admin/api` }),
   // Suivi des abonnements : essais en cours, carte manquante, journal des mouvements.
   abonnements: () =>
     api.get("/abonnements", { baseURL: `${API_URL}/admin/api` }),

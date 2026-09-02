@@ -26,6 +26,9 @@ import ParisTab from "@/components/admin/supervision/ParisTab";
 import RentabiliteTab from "@/components/admin/supervision/RentabiliteTab";
 import ModeleTab from "@/components/admin/supervision/ModeleTab";
 import ApprentissageTab from "@/components/admin/supervision/ApprentissageTab";
+import OutilsApprentissage, {
+  type OutilsApprentissagePayload,
+} from "@/components/admin/supervision/OutilsApprentissage";
 import type {
   AlgoEvolutionPayload, ParisPayload, PulsePayload, RentabilitePayload,
 } from "@/components/admin/supervision/types";
@@ -36,6 +39,7 @@ const TABS = [
   { key: "rentabilite", label: "Rentabilité" },
   { key: "modele", label: "Modèle" },
   { key: "apprentissage", label: "Apprentissage" },
+  { key: "outils", label: "Outils" },
 ] as const;
 
 const FENETRES = [
@@ -129,6 +133,15 @@ export default function SupervisionIAPage() {
   const { data: biasMatrix } = useSWR(
     isAdmin ? "sup-bias" : null,
     () => adminApi.biasMatrix().then((r) => r.data),
+    { refreshInterval: every(300_000), keepPreviousData: true }
+  );
+  // Outils d'apprentissage : quelles étapes ont réellement tourné, et quels
+  // correcteurs ont PROUVÉ qu'ils amélioraient quelque chose. Rafraîchi lentement
+  // — ces états ne bougent qu'une fois par nuit — mais rafraîchi quand même : une
+  // étape qui cesse de tourner ne se signale que par le vieillissement de sa date.
+  const { data: outils } = useSWR<OutilsApprentissagePayload>(
+    isAdmin ? "sup-outils" : null,
+    () => adminApi.supervisionOutilsApprentissage().then((r) => r.data),
     { refreshInterval: every(300_000), keepPreviousData: true }
   );
 
@@ -278,6 +291,7 @@ export default function SupervisionIAPage() {
             loadingHistory={loadingHistory}
           />
         )}
+        {tab === "outils" && <OutilsApprentissage data={outils} />}
 
         <p className="pb-6 text-center text-[10px] text-gray-600">
           Source : conseils de mise réellement émis avant le départ, réglés sur les rapports PMU
