@@ -1,35 +1,41 @@
-# Plaquette commerciale BlackTurf
+# Dépliant commercial BlackTurf
 
-Plaquette 4 pages A4 (210 × 297 mm), destinée à la publicité : envoi par e-mail,
-impression, publication en ligne.
+Dépliant trois volets, à laisser sur les tables des points PMU. Une feuille A4
+paysage (297 × 210 mm), imprimée recto/verso et pliée en trois.
 
-- `plaquette-blackturf.pdf` — le document prêt à diffuser (4 pages, 96 px/pouce).
-- `Main.dc.html` · `Methode.dc.html` · `Produit.dc.html` · `Formules.dc.html` —
-  une page par fichier, HTML pur avec styles en ligne. Ce sont les sources : pour
-  corriger un texte ou un prix, on édite ici.
-- `canvas.json` — l'ordre et la position des quatre pages.
-- Images : recadrées et recompressées depuis `frontend/public/img/`.
-  `mark-white.png` / `mark-ink.png` sont le cheval du logo, décliné pour fond
-  sombre et fond clair.
+- `depliant-blackturf.pdf` — le document à donner à l'imprimeur, 2 pages
+  (extérieur, intérieur).
+- `Main.dc.html` — la face **extérieure**. De gauche à droite : rabat intérieur ·
+  dos · couverture. La couverture est à droite parce que c'est elle qui se
+  retrouve dessus une fois plié.
+- `Interieur.dc.html` — la face **intérieure**, lue d'un seul tenant quand le
+  dépliant s'ouvre : comment ça marche · les critères · le plan de mise.
+- `canvas.json` — la disposition des deux faces.
+- `qr.png` — code QR vers `https://blackturf.fr`, présent sur la couverture et
+  sur le dos. Il est décodable aux deux tailles imprimées (≈ 20 et 26 mm).
 
-## Contenu
+## Imprimer et plier
 
-| Page | Sujet |
-|------|-------|
-| 1 | Couverture — promesse, trois faits clés |
-| 2 | La méthode — les trois étapes, les 80+ critères en 4 familles |
-| 3 | Le produit — plan de mise par profil, pari de valeur, suivi du capital |
-| 4 | Formules — les trois plans, ce qui ne change pas, appel à l'action |
+Recto/verso, **retournement sur le bord court**, sans marges, à **100 %** (aucune
+mise à l'échelle : c'est ce qui garde les plis au bon endroit). Puis rabattre le
+volet de gauche vers l'intérieur et le volet de droite par-dessus. Les deux traits
+gris clair, en haut et en bas de la feuille, marquent les plis.
 
-## Régénérer le PDF
+Le papier : un 170 g mat tient debout sur une table et ne gondole pas. En 80 g
+ordinaire le dépliant s'affaisse.
 
-Les pages sont du HTML classique : n'importe quel navigateur en mode
-« Imprimer → Enregistrer au format PDF », format A4 sans marges, produit le
-document. Les chiffres montrés (paris, capital, cote 8,5) sont des exemples
-illustratifs, marqués comme tels sur les pages.
+## Modifier un texte ou un prix
 
-## Ce qui reste à décider
+Les deux faces sont du HTML à styles en ligne, sans dépendance : on ouvre le
+fichier, on change le texte, on réimprime depuis le navigateur (format A4
+paysage, sans marges). Les images sont dans le même dossier.
 
-Aucun taux de réussite n'est imprimé : les statistiques du palmarès évoluent à
-chaque réunion, et une plaquette imprimée les fige. La plaquette renvoie donc au
-palmarès public de blackturf.fr plutôt que d'avancer un pourcentage.
+## Ce qui n'est pas imprimé, et pourquoi
+
+Aucun taux de réussite ne figure sur le dépliant. Ces chiffres bougent à chaque
+réunion et un imprimé les figerait ; le dépliant renvoie donc au palmarès public
+de blackturf.fr. Les paris et les gains montrés au volet « plan de mise » sont
+des exemples sur une course type, signalés comme tels sous le bloc.
+
+La mention de jeu responsable et le numéro de joueurs-info-service figurent au
+dos — ils doivent rester sur toute réimpression.

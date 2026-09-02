@@ -1,9 +1,10 @@
 {
   "artboards": [
-    { "file": "Main.dc.html",     "x": 0,    "y": 0, "w": 794, "h": 1123, "title": "1 · Couverture", "print": "fixed" },
-    { "file": "Methode.dc.html",  "x": 914,  "y": 0, "w": 794, "h": 1123, "title": "2 · La méthode", "print": "fixed" },
-    { "file": "Produit.dc.html",  "x": 1828, "y": 0, "w": 794, "h": 1123, "title": "3 · Le produit", "print": "fixed" },
-    { "file": "Formules.dc.html", "x": 2742, "y": 0, "w": 794, "h": 1123, "title": "4 · Formules", "print": "fixed" }
+    { "file": "Main.dc.html",      "x": 0,    "y": 0,   "w": 1123, "h": 794, "title": "Extérieur — rabat · dos · couverture", "print": "fixed" },
+    { "file": "Interieur.dc.html", "x": 0,    "y": 914, "w": 1123, "h": 794, "title": "Intérieur — le triptyque qui s'ouvre", "print": "fixed" }
+  ],
+  "annotations": [
+    { "id": "pliage", "x": 1223, "y": 0, "w": 300, "text": "Dépliant 3 volets — A4 paysage (297 × 210 mm).\n\nImpression : recto/verso, bord court, sans marges, 100 % (aucune mise à l'échelle).\n\nPliage : rabattre le volet de GAUCHE vers l'intérieur, puis le volet de DROITE par-dessus. La couverture se retrouve dessus.\n\nLes petits traits gris en haut et en bas marquent les deux plis." }
   ],
   "launch": { "view": "canvas" }
 }
