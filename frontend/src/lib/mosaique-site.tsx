@@ -473,240 +473,233 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         <Adresse ton="sombre" />
       </div>
 
-      {/* ═══════════ (1,1) — le plan de mise, les trois profils ═══════════
-          C'est ce que le produit fait de plus singulier : le MÊME budget produit trois
-          plans différents. Un ticket type se recopie à l'identique pour tout le monde ;
-          une répartition, non — et la montrer sur un seul profil ne le prouvait pas.
+      {/* ═══════════ (1,1) — le plan de mise, l'écran du produit ═══════════
+          Les versions précédentes REFORMULAIENT le plan de mise : une liste, puis une
+          comparaison de profils. Aucune ne montrait ce que l'abonné voit réellement.
+          Celle-ci reproduit l'écran, en grand — onglets de profil, budget saisi, et les
+          trois cartes SÉCURITÉ / RENDEMENT / GROS LOT avec leurs couleurs.
 
-          Une barre de répartition 40/40/20 occupait cette place. Retirée : sans légende
-          elle ne se lisait pas, et elle décrivait un découpage interne à un seul profil.
+          Le widget est posé en CLAIR sur la rangée sombre : c'est ce qui le fait lire
+          comme une capture du produit et non comme une nouvelle mise en page.
 
-          LES MULTIPLES NE SONT PAS INVENTÉS. Ce sont les objectifs écrits dans
-          `services/mise_calculator.py` : prudent ×1,8 à ×5 de la mise totale, modéré ×4 à
-          ×15, risqué au moins ×10. Les montants de droite en sont le produit sur 20 € —
-          donc des OBJECTIFS, pas des gains attendus, et le pied le dit. */}
+          « Rendement estimé » et « Gain estimé » sont des ESTIMATIONS du plan, pas des
+          résultats. Le mot « estimé » reste collé à chaque nombre, et le pied de tuile
+          renvoie au rendement réellement mesuré, publié négatif compris. */}
       <div
-        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 104, width: utile, display: "flex" }}
+        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 100, width: utile, display: "flex" }}
       >
         <Eyebrow ton="sombre">LE PLAN DE MISE</Eyebrow>
       </div>
       <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 180,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
+        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 146, width: utile, display: "flex" }}
       >
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 66,
-            lineHeight: 1.1,
-            color: COULEURS.surSombre,
-            letterSpacing: -2.2,
-          }}
-        >
-          Un budget.
-        </span>
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 66,
-            lineHeight: 1.1,
-            color: COULEURS.orVif,
-            letterSpacing: -2.2,
-          }}
-        >
-          Trois plans.
+        <span style={{ fontFamily: "Inter", fontSize: 29, color: COULEURS.surSombreDoux }}>
+          Vous entrez votre budget. Le plan s&apos;écrit.
         </span>
       </div>
 
-      {/* Ce que l'utilisateur SAISIT : le plan part de là, ça doit se voir. */}
       <div
         style={{
           position: "absolute",
           left: col(1) + MARGE,
-          top: bas + 340,
+          top: bas + 212,
           width: utile,
           display: "flex",
-          alignItems: "center",
+          flexDirection: "column",
+          background: COULEURS.blanc,
+          borderRadius: 22,
+          padding: 26,
         }}
       >
+        {/* Onglets de profil — « Modéré » actif, comme sur le site. */}
         <div
           style={{
             display: "flex",
-            flexDirection: "column",
-            paddingTop: 12,
-            paddingBottom: 12,
-            paddingLeft: 20,
-            paddingRight: 28,
-            borderRadius: 12,
-            background: "#1E232A",
-            border: `1px solid ${COULEURS.ligneSombre}`,
+            background: "#F2EFE7",
+            borderRadius: 14,
+            padding: 6,
           }}
         >
-          <span
-            style={{
-              fontFamily: "Inter",
-              fontWeight: 600,
-              fontSize: 19,
-              letterSpacing: 2.2,
-              color: COULEURS.surSombreDoux,
-            }}
-          >
-            VOTRE BUDGET
-          </span>
-          <span
-            style={{
-              fontFamily: "Grotesk",
-              fontWeight: 700,
-              fontSize: 32,
-              color: COULEURS.surSombre,
-              marginTop: 2,
-              letterSpacing: -0.8,
-            }}
-          >
-            20 €
-          </span>
-        </div>
-        {/* Deux spans plutôt qu'un `<br />` : Satori ne garantit pas le saut de ligne. */}
-        <div style={{ display: "flex", flexDirection: "column", marginLeft: 22 }}>
-          <span style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.surSombreDoux }}>
-            sur la même course,
-          </span>
-          <span
-            style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.surSombreDoux, marginTop: 4 }}
-          >
-            selon le profil choisi
-          </span>
-        </div>
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 468,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {[
-          ["PRUDENT", "×1,8 à ×5", "Cote courte, gain fréquent", "Couplé Placé", ["2", "4"], "36 à 100 €"],
-          ["MODÉRÉ", "×4 à ×15", "Plus de cote, plus de risque", "Simple Gagnant", ["4"], "80 à 300 €"],
-          ["RISQUÉ", "×10 et plus", "Viser gros, rarement", "Couplé Gagnant", ["2", "4"], "200 € et plus"],
-        ].map(([nom, multiple, caractere, pari, chevaux, objectif]) => (
-          <div
-            key={nom as string}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              paddingTop: 18,
-              paddingBottom: 18,
-              borderTop: `1px solid ${COULEURS.ligneSombre}`,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
-              <span
+          {["Prudent", "Modéré", "Risqué"].map((p) => {
+            const actif = p === "Modéré";
+            return (
+              <div
+                key={p}
                 style={{
+                  display: "flex",
+                  width: 262,
+                  height: 52,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 10,
+                  background: actif ? COULEURS.blanc : "#F2EFE7",
+                  border: actif ? `2px solid ${COULEURS.orVif}` : "2px solid #F2EFE7",
                   fontFamily: "Inter",
-                  fontWeight: 600,
-                  fontSize: 22,
-                  letterSpacing: 2.4,
-                  color: COULEURS.orVif,
+                  fontWeight: actif ? 600 : 400,
+                  fontSize: 26,
+                  color: actif ? COULEURS.encre : COULEURS.encreDouce,
                 }}
               >
-                {nom as string}
+                {p}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Ce que l'utilisateur saisit, et ce que le plan vise. */}
+        <div style={{ display: "flex", marginTop: 16 }}>
+          {[
+            ["Budget", "20 €", COULEURS.encre],
+            ["Rendement estimé", "+2,1 %", "#146B47"],
+          ].map(([etiquette, valeur, teinte], i) => (
+            <div
+              key={etiquette}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 391,
+                marginLeft: i ? 14 : 0,
+                paddingTop: 16,
+                paddingBottom: 16,
+                paddingLeft: 20,
+                paddingRight: 20,
+                borderRadius: 14,
+                border: `1px solid ${COULEURS.ligne}`,
+              }}
+            >
+              <span style={{ fontFamily: "Inter", fontSize: 23, color: COULEURS.encreDouce }}>
+                {etiquette}
               </span>
               <span
                 style={{
                   fontFamily: "Grotesk",
                   fontWeight: 700,
-                  fontSize: 30,
-                  color: COULEURS.surSombre,
-                  letterSpacing: -1,
+                  fontSize: 42,
+                  color: teinte,
+                  marginTop: 4,
+                  letterSpacing: -1.2,
                 }}
               >
-                {multiple as string}
+                {valeur}
               </span>
             </div>
+          ))}
+        </div>
 
+        {/* Les trois postes du plan, aux couleurs du site. */}
+        {[
+          {
+            nom: "SÉCURITÉ",
+            part: "40 % du budget",
+            montant: "8,00 €",
+            pari: "Couplé Placé · N°2 + N°4",
+            gain: "Gain estimé ~35 €",
+            proba: "Probabilité estimée 41 %",
+            teinte: "#146B47",
+            fond: "#EAF6F0",
+            bord: "#CBE8DA",
+          },
+          {
+            nom: "RENDEMENT",
+            part: "40 % du budget",
+            montant: "8,00 €",
+            pari: "Simple Gagnant · N°4",
+            gain: "Gain estimé ~62 €",
+            proba: "Probabilité estimée 17 %",
+            teinte: "#8A5D12",
+            fond: "#FCF5E6",
+            bord: "#F0E1BE",
+          },
+          {
+            nom: "GROS LOT",
+            part: "20 % du budget",
+            montant: "4,00 €",
+            pari: "Couplé Gagnant · N°2 + N°4",
+            gain: "Gain estimé ~112 €",
+            proba: "Probabilité estimée 9 %",
+            teinte: "#9C2F24",
+            fond: "#FCEFEE",
+            bord: "#F3D5D2",
+          },
+        ].map((c, i) => (
+          <div
+            key={c.nom}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              marginTop: i === 0 ? 16 : 12,
+              paddingTop: 16,
+              paddingBottom: 16,
+              paddingLeft: 20,
+              paddingRight: 20,
+              borderRadius: 14,
+              background: c.fond,
+              border: `1px solid ${c.bord}`,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <div
+                  style={{ display: "flex", width: 12, height: 12, borderRadius: 6, background: c.teinte }}
+                />
+                <span
+                  style={{
+                    fontFamily: "Grotesk",
+                    fontWeight: 700,
+                    fontSize: 28,
+                    letterSpacing: 0.6,
+                    color: c.teinte,
+                    marginLeft: 12,
+                  }}
+                >
+                  {c.nom}
+                </span>
+              </div>
+              <span
+                style={{
+                  fontFamily: "Grotesk",
+                  fontWeight: 700,
+                  fontSize: 30,
+                  color: c.teinte,
+                  letterSpacing: -0.8,
+                }}
+              >
+                {c.montant}
+              </span>
+            </div>
             <span
-              style={{ fontFamily: "Inter", fontSize: 24, color: COULEURS.surSombreDoux, marginTop: 6 }}
+              style={{ fontFamily: "Inter", fontSize: 22, color: COULEURS.encreDouce, marginLeft: 24 }}
             >
-              {caractere as string}
+              {c.part}
             </span>
 
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                alignItems: "center",
                 width: "100%",
-                marginTop: 12,
+                marginTop: 14,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center" }}>
-                <span style={{ fontFamily: "Inter", fontSize: 27, color: COULEURS.surSombre }}>
-                  {pari as string}
-                </span>
-                {(chevaux as string[]).map((n, j) => (
-                  <span
-                    key={n}
-                    style={{
-                      display: "flex",
-                      width: 32,
-                      height: 32,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: 8,
-                      marginLeft: j === 0 ? 14 : 8,
-                      background: "#232931",
-                      border: `1px solid ${COULEURS.ligneSombre}`,
-                      fontFamily: "Grotesk",
-                      fontWeight: 700,
-                      fontSize: 20,
-                      color: COULEURS.orVif,
-                    }}
-                  >
-                    {n}
-                  </span>
-                ))}
-              </div>
+              <span style={{ fontFamily: "Inter", fontSize: 26, color: COULEURS.encre }}>{c.pari}</span>
               <span
-                style={{
-                  fontFamily: "Grotesk",
-                  fontWeight: 700,
-                  fontSize: 27,
-                  color: COULEURS.orVif,
-                  letterSpacing: -0.8,
-                }}
+                style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 24, color: "#146B47" }}
               >
-                {objectif as string}
+                {c.gain}
               </span>
             </div>
+            <span style={{ fontFamily: "Inter", fontSize: 22, color: COULEURS.encreDouce, marginTop: 4 }}>
+              {c.proba}
+            </span>
           </div>
         ))}
       </div>
 
       <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 998,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
+        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1030, width: utile, display: "flex" }}
       >
-        <span style={{ fontFamily: "Inter", fontSize: 24, lineHeight: 1.45, color: COULEURS.surSombreDoux }}>
-          Objectifs visés sur la mise totale, pas des gains attendus. Plan d&apos;exemple.
+        <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.4, color: COULEURS.surSombreDoux }}>
+          Plan d&apos;exemple. Rendement et gains estimés, jamais garantis.
         </span>
       </div>
       <div style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1092, display: "flex" }}>
