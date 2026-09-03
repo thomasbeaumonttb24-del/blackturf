@@ -186,8 +186,13 @@ async def _etat_modele() -> dict:
             _r = (await s.execute(text(
                 "SELECT dette, depuis_version FROM retrain_ratchet WHERE id = 1"
             ))).first()
-            if _r is not None:
-                dette, dette_depuis = float(_r[0] or 0.0), _r[1]
+            # TABLE PRESENTE MAIS VIDE = dette nulle, et non « on ne sait
+            # pas » : c'est l'etat normal tant qu'aucune promotion n'a suivi la
+            # migration. Les confondre affichait « cliquet pas encore en place »
+            # sur une prod ou il l'etait — le rapport sous-declarait sa propre
+            # protection.
+            dette = float(_r[0] or 0.0) if _r is not None else 0.0
+            dette_depuis = _r[1] if _r is not None else None
         except Exception:
             # Table absente (avant la migration) : on n'invente pas une dette
             # nulle, qui se lirait « aucune derive » alors qu'on n'en sait rien.
@@ -318,6 +323,53 @@ async def _etat_modele() -> dict:
             "delta_vs_record": _ecart(mv.rank_delta_market,
                                       rec_delta[1] if rec_delta else None),
         }
+
+
+def _bloc_cliquet(modele: dict) -> str:
+    """Etat du cliquet anti-derive. Fonction pure, testable sans base.
+
+    La dette dit ce qu'aucune ligne du jour ne peut dire : de combien le modele
+    actif est descendu SOUS le meilleur niveau jamais mesure, en cumulant des
+    nuits qui, prises une a une, restaient toutes sous la tolerance.
+
+    TROIS etats distincts, et les confondre ferait mentir le rapport :
+      - `dette` absente  : table illisible, on ne SAIT pas. Jamais « 0 ».
+      - 0 sans record    : cliquet en place, aucune promotion depuis. Rien n'a
+                           encore pu deriver.
+      - 0 avec record    : le modele actif EST le meilleur niveau mesure.
+    """
+    if modele.get("version") is None:
+        return ""
+    _dette = modele.get("dette")
+    if _dette is None:
+        return ("<p style='color:#666;font-size:13px;'>Cliquet anti-dérive : "
+                "état illisible (table <code>retrain_ratchet</code>).</p>")
+    _depuis = modele.get("dette_depuis")
+    _rec = f"v{_depuis}" if _depuis is not None else "—"
+    if _dette >= 0:
+        _dtxt = "0,0000"
+        _dcoul = "#16a34a"
+        _dexp = ("le modèle actif EST le meilleur niveau mesuré"
+                 if _depuis is not None else
+                 "aucune promotion depuis la mise en place du cliquet : rien "
+                 "n’a encore pu dériver")
+    else:
+        _dtxt = f"{_dette:+.4f}"
+        _dcoul = "#dc2626"
+        _dexp = (f"le modèle actif est sous le niveau de {_rec} ; la prochaine "
+                 f"promotion doit combler cet écart")
+    return f"""
+    <h3 style="font-size:14px;margin-top:24px;">Cliquet anti-dérive</h3>
+    <table style="border-collapse:collapse;font-size:14px;">
+      <tr><td style="padding:4px 12px 4px 0;color:#666;">Dette cumulée</td>
+          <td style="color:{_dcoul};font-weight:bold;">{_dtxt}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#666;">Niveau record</td><td>{_rec}</td></tr>
+    </table>
+    <p style="color:#666;font-size:12px;margin-top:6px;">
+      {_dexp}. La promotion nocturne tolère une régression de 0,0020 par nuit ;
+      le cliquet lui interdit de s’accumuler, en comparant le challenger à la
+      distance au RECORD (dette + écart) et non au seul champion de la veille.
+    </p>"""
 
 
 def _ligne_tendance(libelle: str, valeur, ecart, reference: str) -> str:
@@ -496,41 +548,7 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
       jetable des folds walk-forward). Ne se compare pas à l'AUC poolée ci-dessus.
     </p>"""
 
-    # ── Cliquet anti-derive ──────────────────────────────────────────────────
-    # La dette dit ce qu'aucune ligne du jour ne peut dire : de combien le modele
-    # actif est descendu SOUS le meilleur niveau jamais mesure, en cumulant des
-    # nuits qui, prises une a une, restaient toutes sous la tolerance.
-    _dette = modele.get("dette")
-    if modele.get("version") is None:
-        bloc_cliquet = ""
-    elif _dette is None:
-        bloc_cliquet = (
-            "<p style='color:#666;font-size:13px;'>Cliquet anti-dérive pas encore "
-            "en place (table <code>retrain_ratchet</code> absente).</p>")
-    else:
-        _depuis = modele.get("dette_depuis")
-        _rec = f"v{_depuis}" if _depuis is not None else "—"
-        if _dette >= 0:
-            _dtxt = "0,0000"
-            _dcoul = "#16a34a"
-            _dexp = "le modèle actif EST le meilleur niveau mesuré"
-        else:
-            _dtxt = f"{_dette:+.4f}"
-            _dcoul = "#dc2626"
-            _dexp = (f"le modèle actif est sous le niveau de {_rec} ; la prochaine "
-                     f"promotion doit combler cet écart")
-        bloc_cliquet = f"""
-    <h3 style="font-size:14px;margin-top:24px;">Cliquet anti-dérive</h3>
-    <table style="border-collapse:collapse;font-size:14px;">
-      <tr><td style="padding:4px 12px 4px 0;color:#666;">Dette cumulée</td>
-          <td style="color:{_dcoul};font-weight:bold;">{_dtxt}</td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#666;">Niveau record</td><td>{_rec}</td></tr>
-    </table>
-    <p style="color:#666;font-size:12px;margin-top:6px;">
-      {_dexp}. La promotion nocturne tolère une régression de 0,0020 par nuit ;
-      le cliquet lui interdit de s’accumuler, en comparant le challenger à la
-      distance au RECORD (dette + écart) et non au seul champion de la veille.
-    </p>"""
+    bloc_cliquet = _bloc_cliquet(modele)
 
     # ── Tendance ─────────────────────────────────────────────────────────────
     # Une valeur isolée ne dit pas si le modèle monte ou descend, et le gate de

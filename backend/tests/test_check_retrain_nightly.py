@@ -197,3 +197,63 @@ def test_modele_fige_depuis_plusieurs_jours_reste_une_vraie_alerte(mod):
 
 def test_aucun_modele_en_base_nest_pas_une_promotion(mod):
     assert mod._promu_recemment({"version": None}) is False
+
+
+# ── Cliquet anti-dérive (2026-09-03) ────────────────────────────────────────
+# Trois états que le rapport doit distinguer. Les confondre ferait mentir la
+# seule ligne qui dit si la protection est active — exactement le silence que ce
+# script existe pour briser.
+
+def test_cliquet_etat_illisible_ne_dit_pas_zero(mod):
+    """Dette absente = on ne SAIT pas. Jamais « aucune dérive »."""
+    html = mod._bloc_cliquet({"version": 527, "dette": None})
+    assert "illisible" in html
+    assert "0,0000" not in html
+
+
+def test_cliquet_en_place_sans_promotion(mod):
+    """Table vide : le cliquet EST en place, il n'a simplement rien à raconter.
+
+    Premier état après la migration. Le confondre avec « pas encore en place »
+    faisait sous-déclarer au rapport sa propre protection.
+    """
+    html = mod._bloc_cliquet({"version": 527, "dette": 0.0, "dette_depuis": None})
+    assert "0,0000" in html
+    assert "aucune promotion" in html
+    assert "illisible" not in html
+
+
+def test_cliquet_modele_actif_au_record(mod):
+    html = mod._bloc_cliquet({"version": 528, "dette": 0.0, "dette_depuis": 528})
+    assert "EST le meilleur niveau" in html
+    assert "v528" in html
+
+
+def test_cliquet_dette_nomme_le_record_a_combler(mod):
+    html = mod._bloc_cliquet({"version": 529, "dette": -0.0031, "dette_depuis": 525})
+    assert "-0.0031" in html
+    assert "v525" in html
+    assert "#dc2626" in html, "une dette doit se voir en rouge"
+
+
+def test_cliquet_muet_sans_modele(mod):
+    assert mod._bloc_cliquet({"version": None}) == ""
+
+
+def test_tendance_ne_promet_plus_la_derive_indefinie(mod):
+    """La phrase décrivait le défaut que le cliquet corrige.
+
+    La laisser en l'état ferait mentir le rapport dans l'autre sens : il
+    annoncerait chaque matin qu'une régression s'accumule alors que le gate
+    l'interdit désormais.
+    """
+    html = mod._bloc_tendance({
+        "wf_auc": 0.7869, "wf_vs_prec": -0.0001, "prec_version": 526,
+        "rank_delta_market": 0.0188, "delta_vs_prec": -0.0002,
+        "wf_record": 0.7888, "wf_record_version": 521, "wf_vs_record": -0.0019,
+        "delta_record": 0.0201, "delta_record_version": 525,
+        "delta_vs_record": -0.0013,
+    })
+    assert "sous son record" in html, "l'écart au record doit rester signalé"
+    assert "jamais au meilleur" not in html
+    assert "cliquet" in html
