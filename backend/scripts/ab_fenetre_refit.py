@@ -38,6 +38,34 @@ Trois gardes, chacune pour une erreur déjà commise ici
   n'est ni bonne ni mauvaise dans l'absolu ; ce qui compte est ce qu'elle ajoute
   à un `ORDER BY cote_pmu`.
 
+Résultat de la première mesure (2026-09-03) — MESURÉ, PUIS CONSERVÉ
+──────────────────────────────────────────────────────────────────
+Coupure 01/07/2026, fenêtre 12 mois, évaluation sur les 2 838 courses du 01/07 au
+30/08. Écart au marché, par moitié chronologique :
+
+    fenêtre entière   prod −0,0371   frais −0,0394   gain frais −0,0023
+    première moitié   prod −0,0427   frais −0,0484   gain frais −0,0057
+    seconde moitié    prod −0,0314   frais −0,0301   gain frais +0,0012
+
+Gain sur UNE SEULE moitié : ça ne réplique pas. Rattraper les 78 jours d'angle
+mort n'améliore pas le classement, et l'hypothèse de départ — « le modèle
+déployé est handicapé par ce qu'il n'a pas appris » — est fausse. Le découpage
+80/20 reste donc en place, et la refonte du gate de promotion qu'un refit aurait
+exigée n'a pas lieu d'être.
+
+Deux réserves qui empêchent de lire ces chiffres comme un verdict sur la
+production, et qu'il ne faut pas perdre :
+
+- Le niveau absolu n'est PAS comparable au `rank_delta_market` = +0,019 de v527.
+  L'évaluation ci-dessus porte sur le label VICTOIRE avec une proba de TOP-3,
+  quand la production mesure top-3 contre top-3. La cote (1/cote) étant une
+  probabilité de victoire, elle part avantagée sur ce label. La comparaison
+  ENTRE LES DEUX BRAS reste valide — scoring identique des deux côtés.
+- Le produit ne sert jamais la proba nue mais `alpha × modèle + (1 − alpha) ×
+  marché` (cf. `_head_to_head_auc`). Mesuré le 02/09 sur 727 courses : le modèle
+  NU perd contre la cote (−0,0114) là où la proba SERVIE la bat (+0,0012). Le
+  résultat ci-dessus va dans le même sens et ne révèle donc rien de neuf.
+
 Usage
 ─────
     python -m scripts.ab_fenetre_refit --coupure 2026-07-01
