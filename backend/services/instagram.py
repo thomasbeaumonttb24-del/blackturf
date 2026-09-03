@@ -140,8 +140,14 @@ async def _attendre_conteneur(
                 f"{_base()}/{creation_id}",
                 params={"fields": "status_code,status", "access_token": jeton},
             )
-        except Exception as e:  # noqa: BLE001
-            return False, f"état du conteneur illisible : {type(e).__name__}"[:200]
+        except httpx.HTTPError as e:
+            # UNIQUEMENT les erreurs de transport. Un `except Exception` large ici a
+            # déjà transformé une faute de programmation (AttributeError) en « état du
+            # conteneur illisible » : le défaut ressemblait alors à un incident réseau de
+            # production, et rien ne permettait de trancher. Une erreur non-HTTP
+            # remonte donc au garde-fou de `publier_image`, qui la rapporte telle
+            # quelle — sans jamais lever.
+            return False, f"état du conteneur illisible : {type(e).__name__}: {e}"[:200]
 
         if r.status_code != 200:
             return False, f"état du conteneur refusé ({r.status_code})"

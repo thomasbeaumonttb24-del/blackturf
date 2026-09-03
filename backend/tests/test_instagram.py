@@ -27,7 +27,17 @@ class _Reponse:
         return self._payload
 
 
-def _client(appels, reponses):
+def _client(appels, reponses, statuts=None):
+    """
+    Double du client httpx.
+
+    `reponses` répond aux POST (conteneur, puis publication). `statuts` répond aux GET
+    d'état du conteneur — l'appel que Meta impose ENTRE les deux : `POST /media`
+    n'enregistre qu'une URL, et publier avant que Meta ait fini de télécharger l'image
+    échoue en 400 / 9007 / 2207027. Par défaut le conteneur est prêt du premier coup :
+    un test qui ne porte pas sur l'attente n'a pas à la décrire.
+    """
+
     class _C:
         def __init__(self, *a, **k):
             pass
@@ -42,7 +52,22 @@ def _client(appels, reponses):
             appels.append(url)
             return reponses.pop(0)
 
+        async def get(self, url, params=None):
+            appels.append(url)
+            if statuts is None:
+                return _Reponse(200, {"status_code": "FINISHED"})
+            return statuts.pop(0)
+
     return _C
+
+
+def _sans_attente(monkeypatch):
+    """Neutralise les pauses : l'attente réelle va jusqu'à 100 s (25 essais de 4 s)."""
+
+    async def _dors_pas(_):
+        return None
+
+    monkeypatch.setattr(instagram.asyncio, "sleep", _dors_pas)
 
 
 async def test_un_jeton_present_ne_suffit_pas_a_publier(monkeypatch):
@@ -59,6 +84,12 @@ async def test_un_jeton_present_ne_suffit_pas_a_publier(monkeypatch):
 
 
 async def test_publication_en_deux_temps_quand_elle_est_autorisee(monkeypatch):
+    """
+    Trois appels, dans cet ordre : création du conteneur, état du conteneur, publication.
+
+    Le nom dit « deux temps » parce que c'est le vocabulaire de Meta (media puis
+    media_publish) ; la consultation d'état s'intercale entre les deux depuis f8e45b6.
+    """
     _configurer(monkeypatch, actif=True)
     appels: list[str] = []
     reponses = [
@@ -72,7 +103,127 @@ async def test_publication_en_deux_temps_quand_elle_est_autorisee(monkeypatch):
     assert res.publie is True
     assert res.media_id == "media-9"
     assert appels[0].endswith("/media")
-    assert appels[1].endswith("/media_publish")
+    assert appels[1].endswith("/conteneur-1")  # l'état est bien consulté...
+    assert appels[2].endswith("/media_publish")  # ...AVANT de publier
+
+
+async def test_on_attend_que_meta_ait_prepare_le_conteneur(monkeypatch):
+    """
+    L'invariant de f8e45b6 : tant que le conteneur n'est pas FINISHED, on ne publie pas.
+
+    Sans cette attente, Meta refusait CHAQUE publication (400 / 9007 / 2207027) : le
+    défaut était invisible en simulation, où l'on s'arrête avant l'appel qui échoue.
+    """
+    _configurer(monkeypatch, actif=True)
+    _sans_attente(monkeypatch)
+    appels: list[str] = []
+    statuts = [
+        _Reponse(200, {"status_code": "IN_PROGRESS"}),
+        _Reponse(200, {"status_code": "IN_PROGRESS"}),
+        _Reponse(200, {"status_code": "FINISHED"}),
+    ]
+    reponses = [_Reponse(200, {"id": "conteneur-1"}), _Reponse(200, {"id": "media-9"})]
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client(appels, reponses, statuts))
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is True
+    # On a bien patienté : trois consultations d'état, et la publication en dernier.
+    assert [a.rsplit("/", 1)[-1] for a in appels] == [
+        "media",
+        "conteneur-1",
+        "conteneur-1",
+        "conteneur-1",
+        "media_publish",
+    ]
+
+
+async def test_un_conteneur_en_erreur_n_est_jamais_publie(monkeypatch):
+    _configurer(monkeypatch, actif=True)
+    _sans_attente(monkeypatch)
+    appels: list[str] = []
+    statuts = [_Reponse(200, {"status_code": "ERROR", "status": "Media download failed"})]
+    monkeypatch.setattr(
+        instagram.httpx,
+        "AsyncClient",
+        _client(appels, [_Reponse(200, {"id": "conteneur-1"})], statuts),
+    )
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is False
+    assert "ERROR" in (res.raison or "")
+    assert "Media download failed" in (res.raison or "")
+    assert not any(a.endswith("/media_publish") for a in appels)
+
+
+async def test_conteneur_jamais_pret_abandonne_sans_publier(monkeypatch):
+    """Meta peut ne jamais finir : on abandonne au lieu de publier dans le vide."""
+    _configurer(monkeypatch, actif=True)
+    _sans_attente(monkeypatch)
+    appels: list[str] = []
+
+    class _ToujoursEnCours(list):
+        def pop(self, _=0):
+            return _Reponse(200, {"status_code": "IN_PROGRESS"})
+
+    monkeypatch.setattr(
+        instagram.httpx,
+        "AsyncClient",
+        _client(appels, [_Reponse(200, {"id": "conteneur-1"})], _ToujoursEnCours()),
+    )
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is False
+    assert "pas prêt" in (res.raison or "")
+    assert not any(a.endswith("/media_publish") for a in appels)
+
+
+async def test_une_panne_reseau_pendant_l_attente_ne_leve_pas(monkeypatch):
+    _configurer(monkeypatch, actif=True)
+    appels: list[str] = []
+
+    _Base = _client(appels, [_Reponse(200, {"id": "conteneur-1"})])
+
+    class _C(_Base):
+        async def get(self, url, params=None):
+            appels.append(url)
+            raise instagram.httpx.ConnectError("connexion coupee")
+
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _C)
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is False
+    assert "illisible" in (res.raison or "")
+    assert "ConnectError" in (res.raison or "")
+    assert not any(a.endswith("/media_publish") for a in appels)
+
+
+async def test_une_faute_de_programmation_n_est_pas_maquillee_en_panne_reseau(monkeypatch):
+    """
+    Le 2026-09-03, ce fichier lui-même échouait sur « état du conteneur illisible :
+    AttributeError » — le double n'avait pas de `get`. La raison, identique à celle
+    d'une panne réseau, laissait croire à une publication cassée en production. Une
+    erreur qui n'est pas de transport doit se nommer.
+    """
+    _configurer(monkeypatch, actif=True)
+    appels: list[str] = []
+
+    _Base = _client(appels, [_Reponse(200, {"id": "conteneur-1"})])
+
+    class _C(_Base):
+        async def get(self, url, params=None):
+            raise AttributeError("boum")
+
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _C)
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is False
+    assert "illisible" not in (res.raison or "")
+    assert "AttributeError: boum" in (res.raison or "")
 
 
 async def test_sans_jeton_rien_ne_part(monkeypatch):
