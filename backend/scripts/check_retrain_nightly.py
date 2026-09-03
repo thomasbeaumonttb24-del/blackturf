@@ -177,6 +177,25 @@ async def _etat_modele() -> dict:
             SELECT count(*) FROM courses
             WHERE statut = 'termine' AND date_heure > now() - interval '24 hours'
         """))).scalar() or 0
+        # ── Cliquet anti-derive (migration 0045) ────────────────────────────
+        # La dette est la distance cumulee au meilleur niveau atteint. Elle est la
+        # seule facon de voir une derive que le gate accepte nuit apres nuit :
+        # chaque nuit prise isolement reste sous la tolerance.
+        dette, dette_depuis = None, None
+        try:
+            _r = (await s.execute(text(
+                "SELECT dette, depuis_version FROM retrain_ratchet WHERE id = 1"
+            ))).first()
+            if _r is not None:
+                dette, dette_depuis = float(_r[0] or 0.0), _r[1]
+        except Exception:
+            # Table absente (avant la migration) : on n'invente pas une dette
+            # nulle, qui se lirait « aucune derive » alors qu'on n'en sait rien.
+            try:
+                await s.rollback()
+            except Exception:
+                pass
+
         # ── Tendance ────────────────────────────────────────────────────────
         # Le rapport ne montrait que les chiffres du jour. Or le gate de promotion
         # tolère une régression par rapport au champion de la VEILLE, sans jamais
@@ -194,6 +213,11 @@ async def _etat_modele() -> dict:
             .where(ModelVersion.version_num < mv.version_num)
             .order_by(ModelVersion.version_num.desc())
         )).scalars().first()
+        # Deux provenances differentes ne se soustraient pas : l'ecart au
+        # predecesseur n'a de sens que si les deux valeurs mesurent le meme objet
+        # (cf. `rank_source` dans `_record`). Le walk-forward, lui, reste
+        # comparable -- sa definition n'a jamais change.
+        prec_comparable = prec is not None and prec.rank_source == mv.rank_source
 
         # Volume plancher d'un modèle COMPARABLE. Le walk-forward ré-entraîne un
         # modèle rapide sur des folds du dataset courant : c'est une mesure du
@@ -228,6 +252,9 @@ async def _etat_modele() -> dict:
             `is_not(None)` est explicite : sous PostgreSQL un `ORDER BY … DESC`
             placerait les NULL en tête.
             """
+            meme_source = (ModelVersion.rank_source.is_(None)
+                           if mv.rank_source is None
+                           else ModelVersion.rank_source == mv.rank_source)
             return (
                 select(ModelVersion.version_num, colonne)
                 .where(
@@ -235,6 +262,19 @@ async def _etat_modele() -> dict:
                     ModelVersion.est_synthetique.is_(False),
                     ModelVersion.nb_courses_train >= volume_min,
                     ModelVersion.rank_auc.is_not(None),
+                    # MEME PROVENANCE de mesure (`rank_source`, migration 0045).
+                    # Jusqu'au 2026-09-02 `rank_auc` / `rank_delta_market`
+                    # recevaient la mesure du WALK-FORWARD et non celle de
+                    # l'ensemble deploye : v527 porte +0,0190 la ou le hold-out du
+                    # vrai ensemble donne -0,0472 sur la meme nuit. Sans cette
+                    # condition, le premier modele mesure correctement se
+                    # comparerait a un record de walk-forward et le rapport
+                    # annoncerait chaque matin une chute de 0,066 qui n'a pas eu
+                    # lieu -- la meme faute que la reference de juin qui avait gele
+                    # le modele 48 jours, a une generation de mesure pres.
+                    # NULL ne s'egale pas a NULL en SQL : les versions sans
+                    # provenance forment leur propre population.
+                    meme_source,
                 )
                 .order_by(colonne.desc())
                 .limit(1)
@@ -250,6 +290,8 @@ async def _etat_modele() -> dict:
 
         return {
             "version": mv.version_num,
+            "dette": dette,
+            "dette_depuis": dette_depuis,
             "cree_le": mv.created_at.strftime("%d/%m/%Y"),
             "age_jours": age,
             "wf_auc": round(mv.walk_forward_auc, 4) if mv.walk_forward_auc else None,
@@ -266,7 +308,8 @@ async def _etat_modele() -> dict:
             "wf_vs_prec": _ecart(mv.walk_forward_auc,
                                  prec.walk_forward_auc if prec else None),
             "delta_vs_prec": _ecart(mv.rank_delta_market,
-                                    prec.rank_delta_market if prec else None),
+                                    prec.rank_delta_market if prec_comparable else None),
+            "rank_source": mv.rank_source,
             "wf_record": round(rec_wf[1], 4) if rec_wf else None,
             "wf_record_version": rec_wf[0] if rec_wf else None,
             "wf_vs_record": _ecart(mv.walk_forward_auc, rec_wf[1] if rec_wf else None),
@@ -343,9 +386,10 @@ def _bloc_tendance(modele: dict) -> str:
     avertissement = (
         f'<p style="color:#d97706;font-size:13px;margin-top:6px;">'
         f'Le modèle actif est sous son record historique sur {" et ".join(sous_record)}. '
-        f'La promotion nocturne se compare au modèle de la veille, jamais au meilleur '
-        f'jamais atteint : une baisse répétée sous le seuil de tolérance est acceptée '
-        f'nuit après nuit.</p>'
+        f"Ces deux écarts portent sur des PROMOTIONS PASSÉES : ils disent d’où "
+        f"vient le niveau actuel, pas que la dérive continue. Depuis le cliquet "
+        f"(03/09), c’est la dette ci-dessus qui borne la suite — une régression "
+        f"ne peut plus s’accumuler nuit après nuit.</p>"
     ) if sous_record else ""
     return f"""
     <h3 style="font-size:14px;margin-top:24px;">Tendance</h3>
@@ -452,6 +496,42 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
       jetable des folds walk-forward). Ne se compare pas à l'AUC poolée ci-dessus.
     </p>"""
 
+    # ── Cliquet anti-derive ──────────────────────────────────────────────────
+    # La dette dit ce qu'aucune ligne du jour ne peut dire : de combien le modele
+    # actif est descendu SOUS le meilleur niveau jamais mesure, en cumulant des
+    # nuits qui, prises une a une, restaient toutes sous la tolerance.
+    _dette = modele.get("dette")
+    if modele.get("version") is None:
+        bloc_cliquet = ""
+    elif _dette is None:
+        bloc_cliquet = (
+            "<p style='color:#666;font-size:13px;'>Cliquet anti-dérive pas encore "
+            "en place (table <code>retrain_ratchet</code> absente).</p>")
+    else:
+        _depuis = modele.get("dette_depuis")
+        _rec = f"v{_depuis}" if _depuis is not None else "—"
+        if _dette >= 0:
+            _dtxt = "0,0000"
+            _dcoul = "#16a34a"
+            _dexp = "le modèle actif EST le meilleur niveau mesuré"
+        else:
+            _dtxt = f"{_dette:+.4f}"
+            _dcoul = "#dc2626"
+            _dexp = (f"le modèle actif est sous le niveau de {_rec} ; la prochaine "
+                     f"promotion doit combler cet écart")
+        bloc_cliquet = f"""
+    <h3 style="font-size:14px;margin-top:24px;">Cliquet anti-dérive</h3>
+    <table style="border-collapse:collapse;font-size:14px;">
+      <tr><td style="padding:4px 12px 4px 0;color:#666;">Dette cumulée</td>
+          <td style="color:{_dcoul};font-weight:bold;">{_dtxt}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#666;">Niveau record</td><td>{_rec}</td></tr>
+    </table>
+    <p style="color:#666;font-size:12px;margin-top:6px;">
+      {_dexp}. La promotion nocturne tolère une régression de 0,0020 par nuit ;
+      le cliquet lui interdit de s’accumuler, en comparant le challenger à la
+      distance au RECORD (dette + écart) et non au seul champion de la veille.
+    </p>"""
+
     # ── Tendance ─────────────────────────────────────────────────────────────
     # Une valeur isolée ne dit pas si le modèle monte ou descend, et le gate de
     # promotion ne se compare jamais au meilleur modèle jamais atteint : sans ces
@@ -490,6 +570,7 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
   </div>
   {bloc_modele}
   {bloc_classement}
+  {bloc_cliquet}
   {bloc_tendance}
   {_bloc_apprentissages(apprentissages or {})}
   <h3 style="font-size:14px;margin-top:24px;">Extrait des logs</h3>

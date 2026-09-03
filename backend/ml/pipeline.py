@@ -48,6 +48,12 @@ settings = get_settings()
 # 0.52 laisse une petite marge au-dessus du hasard pur tout en bloquant les runs cassés.
 MIN_DEPLOYABLE_AUC = 0.52
 
+# Tolérance de régression du head-to-head, en points d'AUC de classement. Définie
+# ici et non en littéral : le gate (`_should_deploy`) et le motif de rejet
+# journalisé doivent lire LE MÊME seuil, sans quoi le rapport nommerait « cliquet »
+# un rejet qui n'en est pas un.
+H2H_TOLERANCE = 0.002
+
 
 # ─────────────────────────────
 # Empreinte mémoire du retrain
@@ -139,7 +145,8 @@ def _should_deploy(
     roi_gate_enabled: bool = False,
     betting_edge_ok: bool = True,
     h2h_delta: Optional[float] = None,
-    h2h_tolerance: float = 0.002,
+    h2h_tolerance: float = H2H_TOLERANCE,
+    dette_h2h: float = 0.0,
     market_gate_enabled: bool = False,
     rank_delta_market: Optional[float] = None,
     market_gate_margin: float = 0.0,
@@ -184,6 +191,20 @@ def _should_deploy(
     NOTE sur `h2h_delta` : depuis le diagnostic du 2026-08-20 il porte sur l'AUC de
     CLASSEMENT intra-course, plus sur l'AUC poolée. La poolée mélangeait variance
     inter-course et classement, et flattait un simple lecteur de cote.
+
+    CLIQUET (`dette_h2h`, migration 0045) : la tolérance ci-dessus est accordée
+    contre le champion de LA VEILLE, jamais contre le meilleur niveau jamais
+    atteint. Une dérive de quelques dix-millièmes par nuit passait donc
+    indéfiniment — mesuré du 25 au 31/08 : classement 0,7632 → 0,7608 et
+    walk-forward 0,7886 → 0,7869 sans qu'aucune nuit ne dépasse le seuil.
+    `dette_h2h` (≤ 0) porte le cumul des régressions déjà acceptées depuis le
+    dernier niveau record : le critère devient `dette + delta ≥ -tolérance`,
+    c'est-à-dire la distance au RECORD et non l'écart à la veille.
+
+    Ce n'est pas le gel de l'audit 2026-08-16, dont la cause était une référence
+    FIGÉE (un walk-forward de juin, sur un autre dataset) que rien ne recalculait :
+    ici chaque delta est mesuré la nuit même sur un hold-out commun aux deux
+    modèles, et une seule nuit meilleure rembourse la dette (cf. `_nouvelle_dette`).
     """
     if new_wf < min_auc:
         return False
@@ -212,7 +233,10 @@ def _should_deploy(
     # Mérite de ranking : head-to-head si mesuré, sinon walk-forward (repli).
     if h2h_delta is not None:
         ranking_improvement = h2h_delta >= 0.0
-        ranking_acceptable = h2h_delta >= -h2h_tolerance
+        # CLIQUET : la tolérance porte sur la distance au MEILLEUR niveau atteint
+        # (`dette` + delta), pas sur le seul écart au champion de la veille. Une
+        # dette nulle rend le critère strictement identique à celui d'avant.
+        ranking_acceptable = (h2h_delta + min(0.0, dette_h2h)) >= -h2h_tolerance
     else:
         ranking_improvement = new_wf >= current_wf
         ranking_acceptable = new_wf >= current_wf - seuil_regression
@@ -264,6 +288,118 @@ def _motif_promotion(
     if h2h_delta is not None:
         return "better_h2h" if h2h_delta >= 0 else "regression_toleree_h2h"
     return "better_wf" if new_wf >= current_wf else "regression_toleree_wf"
+
+
+def _nouvelle_dette(dette: float, h2h_delta: Optional[float]) -> float:
+    """Dette de cliquet APRÈS une promotion. Fonction pure, testable sans base.
+
+    La dette est le cumul des deltas head-to-head acceptés depuis le dernier
+    niveau record. Deux règles, et une seule raison chacune :
+
+    - **Plafonnée à 0.** Une nuit meilleure rembourse la dette, mais ne peut pas
+      la rendre positive : sans ce plafond, un bon soir achèterait le droit de
+      reculer les suivants, et le cliquet ne cliquetterait plus. Dépasser le
+      record REMET le compteur à zéro — le nouveau modèle DEVIENT le record.
+    - **Inchangée quand `h2h_delta` est None.** La promotion s'est alors décidée
+      sur le walk-forward, qui n'est pas comparable d'une génération de données à
+      l'autre : y accumuler une dette reviendrait à mesurer la dérive du DATASET
+      et non celle du modèle.
+    """
+    if h2h_delta is None:
+        return float(dette)
+    return min(0.0, float(dette) + float(h2h_delta))
+
+
+def _rang_melange(labels, probas, cotes, groupes,
+                  alpha_max: float) -> Optional[float]:
+    """Classement intra-course de la proba SERVIE (mélange marché), ou None.
+
+    Le produit ne sert jamais la proba brute du modèle mais
+    `alpha × p_modèle + (1 − alpha) × p_marché` : mesuré le 2026-09-02 sur 727
+    courses, le modèle NU perd contre la cote (−0,0114) là où la proba SERVIE la
+    bat (+0,0012). Une mesure du modèle nu ne dit donc rien de ce que le produit
+    affiche.
+
+    Le mélange se normalise SUR UNE COURSE (`implied / somme` dans
+    `blend_calibration.melange`) : l'appliquer au tableau entier normaliserait sur
+    des milliers de courses à la fois et ne produirait pas la probabilité servie.
+    D'où le regroupement, qui est la seule subtilité de cette fonction.
+
+    Fonction TOTALE : elle renvoie None plutôt que de lever. Elle est appelée
+    depuis le chemin d'arbitrage champion/challenger, dont l'exception vaut
+    « head-to-head impossible » et fait retomber la promotion sur le walk-forward.
+    Une mesure ajoutée pour éclairer ne doit jamais pouvoir éteindre le gate.
+    """
+    if cotes is None:
+        return None
+    try:
+        from ml.blend_calibration import melange
+        from ml.ranking_metrics import within_race_auc
+
+        p = np.asarray(probas, dtype=float)
+        servies = np.empty_like(p)
+        positions = pd.DataFrame({"g": np.asarray(groupes),
+                                  "i": np.arange(len(p))})
+        for _, idx in positions.groupby("g", sort=False)["i"]:
+            m = idx.to_numpy()
+            servies[m] = melange(p[m], np.asarray(cotes)[m], alpha_max=alpha_max)
+        return float(within_race_auc(labels, servies, groupes))
+    except Exception as e:
+        log.warning("pipeline.h2h.melange_impossible", err=str(e)[:160])
+        return None
+
+
+async def _charger_dette(session: AsyncSession) -> tuple[float, Optional[int]]:
+    """Dette de cliquet en base, et la version depuis laquelle elle court.
+
+    Renvoie `(0.0, None)` quand la table n'existe pas encore : le comportement est
+    alors EXACTEMENT celui d'avant le cliquet, jamais un blocage. L'échec est
+    journalisé et non avalé — une dette qu'on ne sait pas lire est une protection
+    qui ne protège pas, et cela doit se voir.
+    """
+    try:
+        r = (await session.execute(text(
+            "SELECT dette, depuis_version FROM retrain_ratchet WHERE id = 1"
+        ))).first()
+    except Exception as e:
+        # DÉSEMPOISONNER la transaction : asyncpg la marque AVORTÉE dès qu'une
+        # requête échoue (ici « relation inexistante » avant la migration 0045),
+        # si bien que la requête SUIVANTE échouerait pour cette raison-là et non
+        # pour la sienne — son diagnostic mentirait.
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        log.warning("pipeline.ratchet.lecture_impossible", err=str(e)[:160])
+        return 0.0, None
+    if r is None:
+        return 0.0, None
+    return float(r[0] or 0.0), (int(r[1]) if r[1] is not None else None)
+
+
+async def _persister_dette(session: AsyncSession, dette: float,
+                           depuis_version: Optional[int]) -> bool:
+    """Écrit la dette. Renvoie si l'écriture a eu lieu — jamais un succès muet.
+
+    `CURRENT_TIMESTAMP` et non `now()` : la même requête doit passer sur SQLite
+    (tests) et PostgreSQL (production).
+    """
+    try:
+        await session.execute(text("""
+            INSERT INTO retrain_ratchet (id, dette, depuis_version, maj)
+            VALUES (1, :dette, :version, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET dette = EXCLUDED.dette,
+                                           depuis_version = EXCLUDED.depuis_version,
+                                           maj = EXCLUDED.maj
+        """), {"dette": float(dette), "version": depuis_version})
+        return True
+    except Exception as e:
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        log.warning("pipeline.ratchet.ecriture_impossible", err=str(e)[:160])
+        return False
 
 
 def _source_rang_marche(metrics: dict, h2h: Optional[dict]) -> dict:
@@ -439,11 +575,24 @@ async def _head_to_head_auc(
     _groupes = X_oos["course_id"]
     _cotes = extract_cotes(X_oos)
 
-    def _mesures(probas) -> tuple[float, float]:
-        """(AUC poolée, AUC de classement intra-course) sur le hold-out commun."""
+    # ── ALPHA du mélange servi ────────────────────────────────────────────────
+    # Le produit ne sert JAMAIS la proba brute du modèle, mais
+    # `alpha × p_modèle + (1 − alpha) × p_marché`. Mesuré le 2026-09-02 sur 727
+    # courses : le modèle NU perd contre la cote (−0,0114) là où la proba SERVIE
+    # la bat (+0,0012). Arbitrer sur le modèle nu, c'est arbitrer sur un objet que
+    # personne ne consomme — d'où la mesure du classement servi ci-dessous.
+    # Lu AVANT l'étape `alpha_marche` de la même nuit : c'est bien l'alpha qui a
+    # servi les courses du hold-out, pas celui de demain.
+    from ml.blend_calibration import ALPHA_MAX_DEFAUT, charger_alpha
+    _alpha_max = float((await charger_alpha(session)).get("alpha_max")
+                       or ALPHA_MAX_DEFAUT)
+
+    def _mesures(probas) -> tuple[float, float, Optional[float]]:
+        """(AUC poolée, classement intra-course, classement SERVI) sur le hold-out."""
         return (
             float(roc_auc_score(y_oos, probas)),
             float(within_race_auc(y_oos, probas, _groupes)),
+            _rang_melange(y_oos, probas, _cotes, _groupes, _alpha_max),
         )
 
     try:
@@ -452,7 +601,8 @@ async def _head_to_head_auc(
             return None
         # predict_proba reindexe sur ses propres feature_names → tolère une dérive
         # du schéma de features entre les deux générations.
-        auc_champion, rank_champion = _mesures(champion.predict_proba(X_oos))
+        auc_champion, rank_champion, servi_champion = _mesures(
+            champion.predict_proba(X_oos))
     except Exception as e:
         log.warning("pipeline.h2h.champion_scoring_failed", err=str(e)[:160])
         return None
@@ -461,7 +611,8 @@ async def _head_to_head_auc(
         gc.collect()
 
     try:
-        auc_challenger, rank_challenger = _mesures(challenger.predict_proba(X_oos))
+        auc_challenger, rank_challenger, servi_challenger = _mesures(
+            challenger.predict_proba(X_oos))
     except Exception as e:
         log.warning("pipeline.h2h.challenger_scoring_failed", err=str(e)[:160])
         return None
@@ -485,6 +636,14 @@ async def _head_to_head_auc(
     # affiche. L'AUC poolée est conservée pour la continuité du diagnostic.
     delta = rank_challenger - rank_champion
     delta_marche = (rank_challenger - rank_marche) if rank_marche is not None else None
+    # Écart challenger/champion sur ce que le produit SERT réellement. Mesuré et
+    # journalisé, il n'arbitre encore rien : le mélange rapproche mécaniquement
+    # les deux modèles (ils partagent la part marché), donc un arbitrage porté
+    # dessus serait plus permissif — à juger sur des nuits mesurées avant de
+    # basculer, jamais sur un raisonnement.
+    delta_servi = ((servi_challenger - servi_champion)
+                   if (servi_challenger is not None and servi_champion is not None)
+                   else None)
     n_courses = int(_groupes.nunique())
     log.info("pipeline.h2h.measured",
              rank_challenger=round(rank_challenger, 4), rank_champion=round(rank_champion, 4),
@@ -494,6 +653,12 @@ async def _head_to_head_auc(
              bat_le_marche=(delta_marche > 0) if delta_marche is not None else None,
              auc_challenger_poolee=round(auc_challenger, 4),
              auc_champion_poolee=round(auc_champion, 4),
+             servi_challenger=(round(servi_challenger, 4)
+                               if servi_challenger is not None else None),
+             servi_champion=(round(servi_champion, 4)
+                             if servi_champion is not None else None),
+             delta_servi=round(delta_servi, 4) if delta_servi is not None else None,
+             alpha_max=_alpha_max,
              n_rows=n_rows, n_courses=n_courses)
     return {
         "auc_challenger": auc_challenger,
@@ -503,6 +668,10 @@ async def _head_to_head_auc(
         "rank_marche": rank_marche,
         "delta": delta,
         "delta_marche": delta_marche,
+        "servi_challenger": servi_challenger,
+        "servi_champion": servi_champion,
+        "delta_servi": delta_servi,
+        "alpha_max": _alpha_max,
         "n_rows": n_rows,
         "n_courses": n_courses,
     }
@@ -1478,6 +1647,11 @@ async def _do_retraining(mois: int, label: str) -> None:
                                        if metrics.get("wf_rank_delta_market") is not None else None),
         )
 
+        # CLIQUET : distance cumulée au meilleur niveau atteint (cf. _charger_dette).
+        # Lue AVANT la décision, écrite seulement APRÈS une promotion effective —
+        # un rejet ne déplace pas le champion, donc ne change pas la dette.
+        _dette, _dette_depuis = await _charger_dette(session)
+
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
         if _should_deploy(
             new_wf, current_wf,
@@ -1488,6 +1662,7 @@ async def _do_retraining(mois: int, label: str) -> None:
             roi_gate_enabled=_AF.roi_deploy_gate,
             betting_edge_ok=_betting_edge_ok,
             h2h_delta=_h2h_delta,
+            dette_h2h=_dette,
             market_gate_enabled=_AF.market_gate,
             rank_delta_market=_rank_delta_market,
             market_gate_margin=_AF.market_gate_margin,
@@ -1513,6 +1688,10 @@ async def _do_retraining(mois: int, label: str) -> None:
                 rank_auc=_rank_auc,
                 market_rank_auc=_market_rank_auc,
                 rank_delta_market=_rank_delta_market,
+                # Provenance de ces trois valeurs (migration 0045). Sans elle, le
+                # rapport matinal comparerait un hold-out à un record de
+                # walk-forward et annoncerait une chute de 0,066 qui n'a pas eu lieu.
+                rank_source=_rank_source,
                 # PARTANTS, pas courses (≈9,3 lignes par course). Le nom de la
                 # colonne date de la migration 0001 ; les 519 versions déjà
                 # enregistrées portent cette unité et les garde-fous
@@ -1534,6 +1713,17 @@ async def _do_retraining(mois: int, label: str) -> None:
                 .values(est_actif=False)
             )
 
+            # Cliquet : cumul des deltas depuis le dernier record, plafonné à 0.
+            # `depuis_version` nomme le modèle qui DÉTIENT le record — remis à la
+            # version du jour dès qu'elle le dépasse.
+            _dette_apres = _nouvelle_dette(_dette, _h2h_delta)
+            _record_version = (
+                version_num if _dette_apres == 0.0
+                else (_dette_depuis if _dette_depuis is not None
+                      else (current_mv.version_num if current_mv else None))
+            )
+            _dette_ecrite = await _persister_dette(session, _dette_apres, _record_version)
+
             _raison = _motif_promotion(
                 new_wf=new_wf,
                 current_wf=current_wf,
@@ -1553,6 +1743,11 @@ async def _do_retraining(mois: int, label: str) -> None:
                 h2h_delta=round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 h2h_n_courses=_h2h["n_courses"] if _h2h else None,
                 train_n=new_train_n,
+                dette_avant=round(_dette, 4),
+                dette_apres=round(_dette_apres, 4),
+                dette_record_version=_record_version,
+                dette_ecrite=_dette_ecrite,
+                rank_source=_rank_source,
             )
 
             # AUTO-PURGE : garder seulement les N derniers .pkl archivés (model_v*.pkl
@@ -1582,12 +1777,16 @@ async def _do_retraining(mois: int, label: str) -> None:
                 h2h_delta=round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 h2h_auc_challenger=round(_h2h["auc_challenger"], 4) if _h2h else None,
                 h2h_auc_champion=round(_h2h["auc_champion"], 4) if _h2h else None,
+                # La dette explique les rejets que le seul delta ne suffit pas à
+                # expliquer : à -0,0015 de dette, un delta de -0,001 est refusé.
+                dette=round(_dette, 4),
                 reason=(
                     "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
                     else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
                                         and not (_h2h_delta is not None and _h2h_delta >= 0)
                                         and new_wf < current_wf)
-                    else "worse_h2h" if _h2h_delta is not None
+                    else ("cliquet" if (_h2h_delta >= -H2H_TOLERANCE and _dette < 0.0)
+                          else "worse_h2h") if _h2h_delta is not None
                     else "worse_wf"
                 ),
             )

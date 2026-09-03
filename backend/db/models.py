@@ -1064,6 +1064,17 @@ class ModelVersion(Base):
     rank_auc: Mapped[float | None] = mapped_column(Float)
     market_rank_auc: Mapped[float | None] = mapped_column(Float)
     rank_delta_market: Mapped[float | None] = mapped_column(Float)
+    # PROVENANCE des trois colonnes ci-dessus (migration 0045) : "hold_out",
+    # "h2h" ou "walk_forward" (cf. `ml.pipeline._source_rang_marche`). Jusqu'au
+    # 2026-09-02 elles recevaient la mesure du WALK-FORWARD - un XGBoost jetable
+    # de 100 arbres - et non celle de l'ensemble reellement deploye : v527 porte
+    # ainsi +0,0190 la ou le hold-out du vrai ensemble donne -0,0472 sur la meme
+    # nuit. Deux versions de provenances differentes ne se comparent donc PAS ;
+    # sans ce marqueur, le bloc "record" du rapport matinal opposerait une mesure
+    # de hold-out a un record de walk-forward et annoncerait chaque matin une
+    # chute de 0,066 qui n'a jamais eu lieu. NULL = versions anterieures a la
+    # migration, dont la provenance n'est pas reconstituable apres coup.
+    rank_source: Mapped[str | None] = mapped_column(String(16))
     feature_importance: Mapped[dict | None] = mapped_column(JSON)
     # ── Fin d'entraînement (migration 0043) ───────────────────────────────────
     # Date de la dernière course RÉELLEMENT apprise, à ne pas confondre avec
