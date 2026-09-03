@@ -223,3 +223,106 @@ def test_les_horodatages_ecrits_portent_bien_un_fuseau():
     from ml.learning_steps import _maintenant
 
     assert _maintenant().tzinfo is not None
+
+
+# ── Trace de DÉMARRAGE (2026-09-03) ─────────────────────────────────────────
+# Une étape tuée par l'OOM killer ne repasse jamais par `__aexit__` : sans trace
+# de départ, la table était indiscernable d'une nuit où le scheduler n'a jamais
+# tiré. Deux pannes, deux actions opposées — de la mémoire d'un côté, un
+# scheduler de l'autre.
+
+@pytest.mark.asyncio
+async def test_une_etape_tuee_en_vol_laisse_sa_trace_de_demarrage(db):
+    async with ls.etape(_factory(db), "retrain"):
+        pass                       # le démarrage est écrit à l'ENTRÉE
+    # On simule le SIGKILL : l'entrée seule, sans sortie.
+    await ls.demarrer_etape(db, "retrain")
+    await db.commit()
+
+    run = await ls.dernier_run(db, "retrain")
+    assert run["last_status"] == "en_cours"
+    assert run["last_attempt_at"] is not None
+    # Le dernier succès RESTE : c'est l'écart entre les deux qui rend visible
+    # qu'une nuit s'est perdue.
+    assert run["last_success_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_un_demarrage_efface_le_verdict_de_la_veille(db):
+    """Sinon le rapport du matin lirait le verdict d'hier comme celui de la nuit."""
+    async with ls.etape(_factory(db), "retrain") as e:
+        e.detail = {"issue": "promu", "version": 527}
+    assert (await ls.dernier_run(db, "retrain"))["detail"]["issue"] == "promu"
+
+    await ls.demarrer_etape(db, "retrain")
+    await db.commit()
+    assert (await ls.dernier_run(db, "retrain"))["detail"] is None
+
+
+@pytest.mark.asyncio
+async def test_l_issue_de_la_nuit_est_persistee(db):
+    """Le rapport doit pouvoir dire promu / rejeté SANS `docker logs`."""
+    async with ls.etape(_factory(db), "retrain") as e:
+        e.detail = {"issue": "rejete", "raison": "worse_h2h", "dette": -0.0031}
+    run = await ls.dernier_run(db, "retrain")
+    assert run["last_status"] == "ok"
+    assert run["detail"] == {"issue": "rejete", "raison": "worse_h2h",
+                             "dette": -0.0031}
+
+
+@pytest.mark.asyncio
+async def test_dernier_run_muet_sur_une_etape_jamais_lancee(db):
+    assert await ls.dernier_run(db, "etape_qui_n_existe_pas") is None
+
+
+@pytest.mark.asyncio
+async def test_un_detail_illisible_ne_masque_pas_le_statut(db):
+    """Un JSON corrompu ne doit pas emporter l'information utile : le statut."""
+    from sqlalchemy import text
+
+    await ls.enregistrer_etape(db, "retrain", statut="ok")
+    await db.execute(text("UPDATE learning_step_runs SET detail = 'pas du json' "
+                          "WHERE step = 'retrain'"))
+    await db.commit()
+    run = await ls.dernier_run(db, "retrain")
+    assert run["last_status"] == "ok"
+    assert run["detail"] is None
+
+
+# ── Le type que rend un SELECT dépend du driver ─────────────────────────────
+# asyncpg décode TIMESTAMPTZ en `datetime` conscient du fuseau, aiosqlite rend
+# la chaîne brute. Un appelant qui compare à `datetime.now(timezone.utc)` marche
+# alors d'un côté et lève `AttributeError: 'str' object has no attribute
+# 'tzinfo'` de l'autre — et le rapport du matin ne partirait pas du tout, la pire
+# panne possible pour un outil dont le seul rôle est de rompre le silence.
+# Même embûche que le JSON brut de `detail`, traitée au même endroit.
+
+@pytest.mark.asyncio
+async def test_les_horodatages_lus_sont_toujours_des_datetimes_conscients(db):
+    from sqlalchemy import text
+
+    await ls.enregistrer_etape(db, "retrain", statut="ok")
+    await db.execute(text("UPDATE learning_step_runs "
+                          "SET last_attempt_at = '2026-09-03 02:00:00', "
+                          "    last_success_at = '2026-09-03 02:19:07' "
+                          "WHERE step = 'retrain'"))
+    await db.commit()
+
+    run = await ls.dernier_run(db, "retrain")
+    for champ in ("last_attempt_at", "last_success_at"):
+        assert isinstance(run[champ], datetime), champ
+        assert run[champ].tzinfo is not None, champ
+        # Comparable sans lever : c'est tout ce qu'on demande aux appelants.
+        assert run[champ] < datetime.now(timezone.utc) + timedelta(days=365)
+
+
+def test_un_horodatage_illisible_ne_leve_pas():
+    assert ls._vers_datetime("pas une date") is None
+    assert ls._vers_datetime(None) is None
+
+
+def test_un_horodatage_naif_est_lu_en_utc():
+    """C'est ce que `_maintenant()` écrit : le relire dans un autre fuseau ferait
+    passer une étape pour périmée, ou pour fraîche, selon l'heure."""
+    naif = datetime(2026, 9, 3, 2, 0, 0)
+    assert ls._vers_datetime(naif) == datetime(2026, 9, 3, 2, 0, 0, tzinfo=timezone.utc)

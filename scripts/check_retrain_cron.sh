@@ -21,13 +21,24 @@ docker logs blackturf_worker --since 12h > "$LOGS" 2>&1 || true
 # lire le fichier monté (le rapport tomberait en « logs indisponibles »).
 chmod 0644 "$LOGS"
 
-# Le script est monté depuis l'hôte plutôt que bâké dans l'image : il peut ainsi
-# être corrigé sans rebuild, et le cron lit de toute façon le même fichier.
+# Les logs sont un CONFORT, pas la source du verdict (celui-ci vient de
+# `learning_step_runs`, cf. backend/scripts/check_retrain_nightly.py). Un
+# fichier vide — conteneur worker recréé, rotation — n'empêche donc plus rien ;
+# on le signale ici pour que la plomberie se répare, et on continue.
+if [ ! -s "$LOGS" ]; then
+  echo "AVERTISSEMENT : docker logs blackturf_worker n'a rien renvoyé sur 12 h."
+fi
+
+# Le script n'est plus monté depuis l'hôte. Il l'était pour pouvoir être corrigé
+# sans rebuild, mais son verdict dépend désormais de `ml/learning_steps.py` : un
+# fichier hôte plus récent que l'image donnerait un rapport à moitié à jour,
+# c'est-à-dire un rapport dont on ne sait plus ce qu'il mesure. Une seule source
+# de vérité : l'image déployée.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   run --rm --no-deps \
   -e BT_WORKER_LOGS_FILE=/tmp/worker_logs.txt \
+  -e BT_RAPPORT_CANAL=cron \
   -v "$LOGS:/tmp/worker_logs.txt:ro" \
-  -v /opt/blackturf/backend/scripts/check_retrain_nightly.py:/app/scripts/check_retrain_nightly.py:ro \
   api python -m scripts.check_retrain_nightly
 
 # ─────────────────────────────────────────────────────────────────────────────

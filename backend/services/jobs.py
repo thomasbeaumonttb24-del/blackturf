@@ -611,6 +611,18 @@ def start_scheduler() -> None:
         misfire_grace_time=7200,
     )
 
+    # Filet du rapport de retrain — 06:30 UTC, soit 1 h 30 après le cron de
+    # l'hôte (05:00 UTC). Assez tard pour ne jamais doubler un cron qui a
+    # simplement pris du retard, assez tôt pour que le rapport reste un rapport
+    # du matin le jour où ce cron ne tire plus.
+    scheduler.add_job(
+        job_filet_rapport_retrain,
+        CronTrigger(hour=6, minute=30, timezone="UTC"),
+        id="filet_rapport_retrain",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     scheduler.start()
     log.info("jobs.scheduler.started", nb_jobs=len(scheduler.get_jobs()))
 
@@ -745,3 +757,54 @@ async def job_renouveler_jetons() -> None:
             log.info("jobs.jetons.renouvellement", ok=ok, raison=raison)
     except Exception as e:  # noqa: BLE001
         log.warning("jobs.jetons.echec", err=str(e)[:200])
+
+
+# Au-delà de ce délai sans rapport de retrain envoyé, le filet prend le relais.
+# 26 h : une nuit complète de marge au cron de 05:00 UTC, sans jamais laisser
+# passer deux matins de suite.
+FILET_RAPPORT_APRES_H = 26
+
+
+async def job_filet_rapport_retrain() -> None:
+    """Envoie le rapport de retrain si le cron de l'HÔTE ne l'a pas fait.
+
+    Le rapport du matin est le garde-fou du retrain. Mais il est lancé par un
+    cron système, hors Docker : le 2026-08-19, ce cron n'a jamais tourné parce
+    que le script n'était pas exécutable — des semaines sans aucun e-mail, et
+    l'absence d'e-mail ne fait pas de bruit. Un garde-fou qui peut disparaître
+    en silence n'en est pas un.
+
+    Ce filet vit dans le scheduler, qui tourne 24 h/24 dans Docker et se relance
+    tout seul. Il ne double JAMAIS le cron : il lit d'abord l'état persistant
+    laissé par le dernier envoi et ne fait rien si un rapport est parti dans les
+    dernières 26 h. Le rapport qu'il envoie est le même, en un peu plus pauvre —
+    il n'a pas accès à `docker logs` — mais son verdict, lui, vient de la base
+    et vaut exactement celui du cron.
+    """
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from db.database import AsyncSessionLocal
+
+    try:
+        from ml.learning_steps import dernier_run
+        async with AsyncSessionLocal() as session:
+            run = await dernier_run(session, "rapport_retrain")
+        dernier = (run or {}).get("last_success_at")
+        if dernier is not None:
+            if dernier.tzinfo is None:
+                dernier = dernier.replace(tzinfo=timezone.utc)
+            limite = datetime.now(timezone.utc) - timedelta(hours=FILET_RAPPORT_APRES_H)
+            if dernier > limite:
+                log.info("jobs.filet_rapport.deja_envoye", dernier=str(dernier))
+                return
+
+        log.warning("jobs.filet_rapport.cron_muet", dernier=str(dernier))
+        # `BT_RAPPORT_CANAL` distingue les deux canaux dans le journal : un
+        # rapport « filet » deux matins de suite dit que le cron de l'hôte est
+        # mort, ce que le rapport lui-même ne peut pas raconter.
+        os.environ["BT_RAPPORT_CANAL"] = "filet"
+        from scripts.check_retrain_nightly import main as rapport_retrain
+        await rapport_retrain()
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.filet_rapport.echec", err=str(e)[:200])

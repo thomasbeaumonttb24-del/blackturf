@@ -6,9 +6,24 @@ totalement silencieux — soit OOM-killed (7 nuits sur 14 en août), soit rejet�
 par un gate de promotion cassé. Ce script existe pour que ce silence ne se
 reproduise jamais : chaque matin, un e-mail dit ce qui s'est passé cette nuit.
 
-Lancé par cron sur le VPS (voir scripts/install_check_retrain_cron.sh), il
-inspecte l'état RÉEL (base + logs du worker) et n'invente rien : si une
-information n'est pas disponible, il le dit au lieu de supposer.
+Lancé par cron sur le VPS (voir scripts/check_retrain_cron.sh), il inspecte
+l'état RÉEL et n'invente rien : si une information n'est pas disponible, il le
+dit au lieu de supposer.
+
+Le verdict vient de la BASE — `learning_step_runs`, écrit par le retrain
+lui-même (ml/learning_steps) — et non des logs du worker. Ceux-ci ne sont qu'un
+complément : `docker logs` ne remonte pas au-delà de l'instance courante du
+conteneur, disparaît au premier déploiement, et n'existe tout simplement pas
+depuis l'intérieur d'un conteneur. Le 03/09/2026, cette dépendance a produit un
+rapport « ❓ Impossible de lire les logs du worker » qui ne disait plus rien du
+retrain, alors que la base savait qu'il avait tourné et rejeté son challenger :
+une panne de plomberie déguisée en panne d'apprentissage. Le silence que ce
+script combat revenait par la fenêtre.
+
+Deux canaux le lancent, et l'un rattrape l'autre :
+  - le cron de l'HÔTE à 05:00 UTC, seul à pouvoir joindre `docker logs` ;
+  - le filet du scheduler à 06:30 UTC (services/jobs.job_filet_rapport_retrain),
+    qui n'envoie que si aucun rapport n'est parti depuis 26 h.
 
 Usage :
     python -m scripts.check_retrain_nightly            # envoie l'e-mail
@@ -28,6 +43,26 @@ from db.models import ModelVersion
 DEST = os.getenv("RETRAIN_REPORT_TO", "thomas.beaumont.tb24@gmail.com")
 WORKER_CONTAINER = os.getenv("BT_WORKER_CONTAINER", "blackturf_worker")
 
+# Fenêtre couverte par le rapport. 12 h couvre largement le retrain de 02:00 UTC
+# vu depuis 05:00 UTC, même en cas de démarrage tardif, et exclut sans ambiguïté
+# celui de la veille. Même valeur que `--since` du wrapper cron.
+FENETRE_HEURES = 12
+
+# Nom de l'étape sous laquelle le rapport journalise SON PROPRE passage. Le
+# rapport est le garde-fou du retrain ; sans cette ligne, rien ne garde le
+# garde-fou — le cron a déjà été muet plusieurs semaines faute de `chmod +x`
+# (2026-08-19), et personne ne l'a vu puisque l'absence d'e-mail ne fait pas
+# de bruit.
+ETAPE_RAPPORT = "rapport_retrain"
+
+# Au-delà de ce délai, une étape encore « en_cours » est MORTE, pas lente : la
+# file RQ tue le job de retrain à 3 600 s (`default_timeout` de la queue `ml`,
+# cf. services/jobs.job_retrain_trigger), et le work-horse tué n'écrit jamais son
+# issue. 90 min laisse une demi-heure de marge à ce plafond. En deçà, le rapport
+# dit « encore en cours » — annoncer une panne à un retrain qui travaille encore
+# serait exactement l'alerte menteuse qu'on cherche à supprimer.
+EN_COURS_TROP_LONG_MIN = 90
+
 # Motifs cherchés dans les logs du worker sur la fenêtre de la nuit écoulée.
 PATTERNS = (
     "nightly_retrain.start", "retrain.deployed", "retrain.rollback",
@@ -37,8 +72,13 @@ PATTERNS = (
 )
 
 
+def _dans_un_conteneur() -> bool:
+    """Sommes-nous DANS un conteneur ? `/.dockerenv` est posé par le runtime."""
+    return os.path.exists("/.dockerenv")
+
+
 def _worker_logs(since_hours: int = 12) -> str:
-    """Logs du worker sur les N dernières heures.
+    """Logs du worker sur les N dernières heures. CONFORT, jamais preuve.
 
     Deux modes, parce que les informations nécessaires ne vivent pas au même
     endroit : la base et la clé Resend sont accessibles depuis le CONTENEUR,
@@ -46,6 +86,14 @@ def _worker_logs(since_hours: int = 12) -> str:
     déversant d'abord les logs dans un fichier qu'il monte dans le conteneur
     (`BT_WORKER_LOGS_FILE`). Sans cette variable, on retombe sur un appel
     docker direct — pratique pour un lancement manuel depuis l'hôte.
+
+    Ces logs n'ARBITRENT plus rien : le verdict vient de la base (cf.
+    `_verdict`). Le 03/09/2026, un lancement manuel depuis le conteneur avait
+    produit « ❓ Impossible de lire les logs du worker » — le rapport ne disait
+    plus rien du retrain alors que la base savait parfaitement qu'il avait
+    tourné et rejeté son challenger. Une panne de plomberie ne doit pas
+    ressembler à une panne d'apprentissage : c'est le silence de l'audit
+    2026-08-16 qui revenait par la fenêtre.
     """
     fichier = os.getenv("BT_WORKER_LOGS_FILE")
     if fichier:
@@ -54,6 +102,14 @@ def _worker_logs(since_hours: int = 12) -> str:
                 return fh.read()
         except Exception as e:
             return f"__LOGS_INDISPONIBLES__ fichier {fichier}: {e}"
+    if _dans_un_conteneur():
+        # Diagnostic exact plutôt qu'un « [Errno 2] No such file or directory:
+        # 'docker' » qui laisse chercher des droits inexistants : le binaire
+        # docker n'a jamais été dans l'image, et il n'a pas à y être.
+        return ("__LOGS_INDISPONIBLES__ lancé DANS un conteneur sans "
+                "BT_WORKER_LOGS_FILE : `docker` n'existe pas dans l'image. "
+                "Utiliser scripts/check_retrain_cron.sh depuis l'hôte, qui "
+                "déverse les logs et monte le fichier.")
     try:
         out = subprocess.run(
             ["docker", "logs", WORKER_CONTAINER, "--since", f"{since_hours}h"],
@@ -85,9 +141,16 @@ def _pic_rss(logs: str) -> float:
 
 
 def _analyser_logs(logs: str) -> dict:
-    """Extrait ce qui s'est passé cette nuit. Fonction pure → testable."""
+    """Extrait ce qui s'est passé cette nuit. Fonction pure → testable.
+
+    Le `statut` renvoyé ici n'est plus le verdict du rapport : c'est l'AVIS des
+    logs, que `_verdict` arbitre avec l'état persistant en base. `disponible` dit
+    si cet avis vaut quelque chose, `oom` porte le seul fait que la base ne peut
+    pas connaître (un SIGKILL n'écrit rien).
+    """
     if logs.startswith("__LOGS_INDISPONIBLES__"):
-        return {"statut": "inconnu", "detail": logs, "lignes": []}
+        return {"statut": "inconnu", "detail": logs, "lignes": [],
+                "disponible": False, "oom": False, "rss_pic_mb": 0.0}
 
     lignes = [l.strip() for l in logs.splitlines()
               if any(p in l for p in PATTERNS)]
@@ -115,6 +178,7 @@ def _analyser_logs(logs: str) -> dict:
     else:
         statut = "absent"      # le job n'a même pas démarré
     return {"statut": statut, "detail": "", "lignes": lignes[-12:],
+            "disponible": True, "oom": a_oom,
             "rss_pic_mb": _pic_rss(logs)}
 
 
@@ -148,10 +212,142 @@ VERDICTS = {
     "absent": ("🔴", "Aucun retrain n'a démarré cette nuit",
                "Le job planifié 02:00 UTC ne s'est pas déclenché. Vérifier que le "
                "conteneur scheduler tourne et que le job est bien enregistré."),
-    "inconnu": ("❓", "Impossible de lire les logs du worker",
-                "Le script n'a pas pu interroger Docker. Vérifier les droits ou "
-                "que le conteneur worker existe."),
+    # Le retrain a été VU démarrer par la base (`learning_step_runs` = en_cours)
+    # et n'a jamais écrit son issue : le processus a disparu en cours de route.
+    # Sans la trace de démarrage, ce cas était indiscernable de « le scheduler
+    # n'a pas tiré » — deux pannes, deux actions opposées.
+    "interrompu": ("🔴", "Le retrain a démarré puis a disparu sans conclure",
+                   "Le processus a été tué en cours d'exécution — OOM-kill "
+                   "(`dmesg -T | grep -i oom` sur le VPS le confirme en une "
+                   "commande) ou dépassement du plafond RQ d'une heure. Le job "
+                   "est dans la FailedJobRegistry de la file `ml`."),
+    # Le retrain vient de démarrer et n'a pas encore conclu : ce n'est PAS une
+    # panne. Le dire en rouge ferait chercher une cause à un travail en cours,
+    # et c'est ainsi qu'on apprend à ignorer les alertes.
+    "en_cours": ("⚠️", "Le retrain tournait encore au moment du rapport",
+                 "Aucune action immédiate : l'issue n'était simplement pas encore "
+                 "écrite. Relancer scripts/check_retrain_cron.sh dans l'heure pour "
+                 "obtenir le verdict ; si l'état reste le même, le job a été tué."),
+    "insuffisant": ("🔴", "Le retrain s'est arrêté faute de données d'entraînement",
+                    "Moins de 300 lignes exploitables : le problème est en amont "
+                    "(features non calculées, ou courses non réglées), pas dans le "
+                    "modèle. Vérifier le calcul des features et le règlement des "
+                    "courses des dernières 24 h."),
+    "inconnu": ("❓", "État du retrain indéterminable",
+                "Ni la base ni les logs du worker n'ont pu être lus — c'est la "
+                "supervision elle-même qui est en panne, pas forcément le "
+                "retrain. Vérifier que la base répond et relancer "
+                "scripts/check_retrain_cron.sh depuis l'hôte."),
 }
+
+
+async def _etat_retrain_db(fenetre_heures: int = FENETRE_HEURES) -> dict:
+    """Ce que la BASE sait du retrain de la nuit — la source de vérité.
+
+    `learning_step_runs` porte, pour l'étape `retrain` : l'heure de démarrage
+    (écrite AVANT le travail, donc survivante à un OOM-kill), le statut de
+    sortie, et depuis le 03/09/2026 l'issue elle-même (promu / rejeté /
+    données insuffisantes) avec son motif. Aucune de ces informations ne
+    dépend de `docker logs`, qui ne remonte pas au-delà de l'instance courante
+    du conteneur et disparaît au premier déploiement.
+
+    `lisible=False` signifie que la base n'a pas répondu — et RIEN d'autre : ne
+    jamais confondre « la supervision est aveugle » avec « le retrain n'a pas
+    tourné ».
+    """
+    try:
+        from ml.learning_steps import dernier_run
+        async with AsyncSessionLocal() as s:
+            run = await dernier_run(s, "retrain")
+    except Exception as e:
+        return {"lisible": False, "erreur": str(e)[:200]}
+
+    if run is None:
+        return {"lisible": True, "vu": False, "detail": None}
+
+    attempt = run.get("last_attempt_at")
+    if attempt is not None and attempt.tzinfo is None:
+        # SQLite (tests) rend des datetimes naïfs ; PostgreSQL non. Comparer un
+        # naïf à un conscient lève un TypeError, et le rapport ne partirait pas.
+        attempt = attempt.replace(tzinfo=timezone.utc)
+    maintenant = datetime.now(timezone.utc)
+    recent = (attempt is not None
+              and attempt > maintenant - timedelta(hours=fenetre_heures))
+    trop_long = (attempt is None
+                 or attempt < maintenant - timedelta(minutes=EN_COURS_TROP_LONG_MIN))
+    detail = run.get("detail") or None
+    return {
+        "lisible": True,
+        "vu": True,
+        "recent": recent,
+        "demarre_depuis_trop_longtemps": trop_long,
+        "statut_etape": run.get("last_status"),
+        "erreur": run.get("last_error"),
+        "attempt_at": attempt,
+        "detail": detail,
+        "issue": (detail or {}).get("issue"),
+        "raison": (detail or {}).get("raison"),
+    }
+
+
+def _verdict(db: dict, logs: dict, modele: dict) -> str:
+    """Statut final. Fonction PURE → testable sans base ni conteneur.
+
+    Ordre des priorités, et pourquoi :
+
+    1. La BASE d'abord. Elle sait ce que les logs oublient (déploiement,
+       rotation) et elle survit à ce qui tue le worker.
+    2. Les LOGS ensuite, pour ce que la base ne peut pas savoir : un signal 9
+       n'écrit rien nulle part, seul le journal du conteneur le montre.
+    3. « Indéterminable » en tout dernier recours — et seulement si les DEUX
+       sources se taisent. Le 03/09/2026 le rapport tombait sur ce verdict dès
+       que les logs manquaient, en ignorant une base parfaitement lisible :
+       une panne de plomberie prenait l'apparence d'une panne d'apprentissage.
+    """
+    oom = logs.get("oom", False)
+
+    if db.get("lisible") and db.get("vu") and db.get("recent"):
+        statut_etape = db.get("statut_etape")
+        if statut_etape == "en_cours":
+            # Démarrage enregistré, aucune issue. Deux lectures possibles, et
+            # c'est l'ÂGE du démarrage qui tranche : en deçà du plafond RQ, le
+            # retrain travaille peut-être encore ; au-delà, il est mort sans
+            # avoir pu écrire quoi que ce soit.
+            if oom:
+                return "oom"
+            return "interrompu" if db.get("demarre_depuis_trop_longtemps", True) \
+                else "en_cours"
+        if statut_etape == "echec":
+            return "incomplet"
+        issue = db.get("issue")
+        if issue == "promu":
+            return "promu_puis_oom" if oom else "promu"
+        if issue == "rejete":
+            return "rejete"
+        if issue == "insuffisant":
+            return "insuffisant"
+        # Étape terminée sans issue enregistrée : soit un worker antérieur au
+        # 03/09/2026, soit une issue perdue. Les logs tranchent s'ils sont là ;
+        # sinon la présence d'un modèle promu sur la fenêtre suffit — un retrain
+        # qui se termine sans nouveau modèle EST un rejet.
+        if logs.get("statut") in ("promu", "rejete", "oom", "promu_puis_oom"):
+            return logs["statut"]
+        return "promu" if _promu_recemment(modele) else "rejete"
+
+    if db.get("lisible") and (not db.get("vu") or not db.get("recent")):
+        # La base est formelle : aucune tentative sur la fenêtre. C'est LE cas
+        # que ce rapport existe pour attraper (48 jours de gel en 2026).
+        # Exception : un modèle promu ce jour-ci prouve le contraire ; on ne
+        # crie pas au loup contre l'état réel du système.
+        if _promu_recemment(modele):
+            return "promu_logs_absents"
+        return "absent"
+
+    # Base illisible : on retombe sur les logs, tels quels.
+    statut = logs.get("statut", "inconnu")
+    if statut == "absent" and _promu_recemment(modele):
+        return "promu_logs_absents"
+    return statut
 
 
 def _promu_recemment(modele: dict, fenetre_jours: int = 1) -> bool:
@@ -499,8 +695,63 @@ def _bloc_apprentissages(etat: dict) -> str:
             f"{''.join(rangs)}</table>")
 
 
+def _bloc_source(db: dict | None, logs: dict | None) -> str:
+    """D'où vient le verdict, et ce qui manquait pour l'établir. Fonction pure.
+
+    Deux choses que le rapport taisait :
+
+    - sur quoi il s'appuie. Un verdict sans provenance ne se vérifie pas.
+    - que les logs du worker étaient injoignables. Le 03/09/2026, cette panne de
+      plomberie occupait TOUT le rapport (« ❓ Impossible de lire les logs ») et
+      effaçait le verdict ; désormais elle se range ici, à sa place : une ligne
+      d'entretien, sous un verdict qui, lui, reste établi.
+    """
+    db = db or {}
+    logs = logs or {}
+    if not db and not logs:
+        return ""
+
+    if db.get("lisible") and db.get("vu") and db.get("recent"):
+        issue = db.get("issue")
+        raison = db.get("raison")
+        quand = db.get("attempt_at")
+        quand_txt = quand.strftime("%d/%m %H:%M UTC") if quand else "—"
+        detail_txt = {
+            "promu": "challenger promu",
+            "rejete": "challenger rejeté",
+            "insuffisant": "arrêt faute de données",
+        }.get(issue, f"issue non enregistrée (statut « {db.get('statut_etape')} »)")
+        if raison:
+            detail_txt += f" — motif <code>{raison}</code>"
+        provenance = (f"base <code>learning_step_runs</code> : démarré {quand_txt}, "
+                      f"{detail_txt}")
+    elif db.get("lisible"):
+        provenance = ("base <code>learning_step_runs</code> : <b>aucune tentative "
+                      "de retrain</b> enregistrée sur la fenêtre")
+    else:
+        provenance = ("base injoignable — verdict établi sur les seuls logs du "
+                      "worker")
+
+    bloc = ('<p style="color:#666;font-size:12px;margin:12px 0 0;">'
+            f'<b>Source du verdict</b> — {provenance}.</p>')
+
+    if logs.get("disponible") is False:
+        raison_logs = (logs.get("detail") or "").replace("__LOGS_INDISPONIBLES__", "").strip()
+        from html import escape as _esc
+        bloc += (
+            '<p style="background:#fff7ed;border-left:4px solid #d97706;'
+            'padding:8px 12px;margin:8px 0 0;color:#92400e;font-size:12px;">'
+            '<b>Entretien</b> — logs du worker non lus : '
+            f'{_esc(raison_logs) or "raison inconnue"}<br>'
+            "Le verdict ci-dessus ne dépend pas d'eux ; seuls le détail des "
+            "lignes et le pic mémoire manquent.</p>"
+        )
+    return bloc
+
+
 def _html(verdict: tuple, modele: dict, lignes: list[str],
-          rss_pic_mb: float = 0.0, apprentissages: dict | None = None) -> str:
+          rss_pic_mb: float = 0.0, apprentissages: dict | None = None,
+          db: dict | None = None, logs_etat: dict | None = None) -> str:
     icone, titre, action = verdict
     couleur = {"✅": "#16a34a", "⚠️": "#d97706", "🔴": "#dc2626", "❓": "#6b7280"}[icone]
     # Pic mémoire du retrain. Le VPS a 7,6 Gio partagés : au-delà d'environ
@@ -586,6 +837,7 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
   <div style="background:#fff7ed;border-left:4px solid {couleur};padding:12px 16px;margin:16px 0;">
     <b>À faire :</b> {action}
   </div>
+  {_bloc_source(db, logs_etat)}
   {bloc_modele}
   {bloc_classement}
   {bloc_cliquet}
@@ -600,9 +852,40 @@ def _html(verdict: tuple, modele: dict, lignes: list[str],
 </body></html>"""
 
 
+async def _journaliser_passage(statut: str, envoi_ok: bool, erreur: str | None) -> None:
+    """Trace le passage du rapport dans `learning_step_runs`.
+
+    Le rapport surveille le retrain ; cette ligne est ce qui surveille le
+    rapport. Elle a un consommateur concret : le filet de sécurité du scheduler
+    (`job_filet_rapport_retrain`), qui renvoie le rapport si aucun n'est parti
+    depuis plus de 26 h. Sans elle, la panne du cron du 2026-08-19 — un
+    `chmod +x` manquant, aucun e-mail pendant des semaines — se reproduirait à
+    l'identique, et personne ne remarque l'absence d'un e-mail.
+
+    Ne jamais faire échouer le rapport : il est déjà envoyé quand on écrit ici.
+    """
+    try:
+        from ml.learning_steps import enregistrer_etape
+        async with AsyncSessionLocal() as s:
+            await enregistrer_etape(
+                s, ETAPE_RAPPORT,
+                statut="ok" if envoi_ok else "echec",
+                erreur=erreur,
+                detail={"verdict": statut,
+                        "canal": os.getenv("BT_RAPPORT_CANAL", "cron")},
+            )
+            await s.commit()
+    except Exception as e:
+        print(f"journalisation du rapport impossible : {e}")
+
+
 async def main(dry_run: bool = False) -> None:
     logs = _worker_logs()
     analyse = _analyser_logs(logs)
+    # L'ÉTAT PERSISTANT d'abord : il survit aux déploiements et aux OOM, les logs
+    # du conteneur non. Lu avant tout le reste pour que le verdict ne dépende
+    # jamais de la disponibilité de `docker logs`.
+    db = await _etat_retrain_db()
     modele = await _etat_modele()
     try:
         from ml.learning_steps import etat_apprentissages
@@ -613,26 +896,21 @@ async def main(dry_run: bool = False) -> None:
         # rapport amputé qu'aucun rapport — c'est le silence qu'on combat ici.
         print(f"apprentissages indisponibles : {e}")
         apprentissages = {}
-    # La BASE prime sur les logs quand les deux se contredisent. `docker logs`
-    # ne couvre que l'instance courante du conteneur : un déploiement entre le
-    # retrain et le rapport efface les traces et faisait annoncer « aucun
-    # retrain n'a démarré » alors qu'un modèle tout neuf était actif. C'est le
-    # même travers que le verdict OOM qui primait sur la promotion : une alerte
-    # qui contredit l'état réel du système fait perdre plus de temps qu'elle
-    # n'en fait gagner.
-    if analyse["statut"] == "absent" and _promu_recemment(modele):
-        analyse["statut"] = "promu_logs_absents"
-    verdict = VERDICTS[analyse["statut"]]
+
+    statut = _verdict(db, analyse, modele)
+    verdict = VERDICTS[statut]
     lignes = analyse["lignes"] or ([analyse["detail"]] if analyse["detail"] else [])
 
     icone, titre, _ = verdict
     sujet = f"{icone} BlackTurf retrain — {titre}"
     corps = _html(verdict, modele, lignes, analyse.get("rss_pic_mb", 0.0),
-                  apprentissages=apprentissages)
+                  apprentissages=apprentissages, db=db, logs_etat=analyse)
 
     if dry_run:
         print(f"SUJET : {sujet}")
-        print(f"STATUT : {analyse['statut']}")
+        print(f"STATUT : {statut}")
+        print(f"AVIS LOGS : {analyse['statut']} (disponibles={analyse.get('disponible')})")
+        print(f"BASE : {db}")
         print(f"MODELE : {modele}")
         print(f"LIGNES : {len(lignes)}")
         print(f"PIC RSS : {analyse.get('rss_pic_mb', 0.0)} Mo")
@@ -643,7 +921,9 @@ async def main(dry_run: bool = False) -> None:
 
     from services.alerts import send_email
     ok = await send_email(to=DEST, subject=sujet, html=corps)
-    print(f"envoi={ok} statut={analyse['statut']} modele=v{modele.get('version')}")
+    await _journaliser_passage(statut, envoi_ok=bool(getattr(ok, "ok", False)),
+                               erreur=getattr(ok, "erreur", None))
+    print(f"envoi={ok} statut={statut} modele=v{modele.get('version')}")
 
 
 if __name__ == "__main__":

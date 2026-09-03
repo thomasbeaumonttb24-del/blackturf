@@ -109,6 +109,93 @@ async def enregistrer_etape(session: AsyncSession, step: str, *, statut: str,
     """), params)
 
 
+async def demarrer_etape(session: AsyncSession, step: str) -> None:
+    """Marque une étape COMME DÉMARRÉE, avant d'en connaître l'issue.
+
+    Sans cette écriture, le journal ne contient que ce qui a eu le temps de se
+    terminer : un ``SIGKILL`` en plein retrain (7 nuits sur 14 en août 2026)
+    n'écrit rien du tout, et la table est alors indiscernable d'une nuit où le
+    scheduler n'a jamais tiré. Or ces deux pannes n'appellent pas la même
+    action — la première demande de la mémoire, la seconde un scheduler.
+
+    ``last_success_at`` est préservé (c'est l'écart qui rend la panne visible),
+    mais l'erreur, le volume et le détail de la run PRÉCÉDENTE sont effacés :
+    les laisser en place ferait lire au rapport du matin le verdict de la
+    veille comme s'il était celui de la nuit.
+    """
+    await ensure_table(session)
+    await session.execute(text("""
+        INSERT INTO learning_step_runs
+            (step, last_attempt_at, last_success_at, last_status, last_error,
+             n_obs, detail)
+        VALUES (:step, :now, NULL, 'en_cours', NULL, NULL, NULL)
+        ON CONFLICT (step) DO UPDATE SET
+            last_attempt_at = EXCLUDED.last_attempt_at,
+            last_status     = 'en_cours',
+            last_error      = NULL,
+            n_obs           = NULL,
+            detail          = NULL
+    """), {"step": step, "now": _maintenant()})
+
+
+def _vers_datetime(valeur) -> Optional[datetime]:
+    """Normalise un horodatage lu en SQL brut en `datetime` CONSCIENT du fuseau.
+
+    Le même `SELECT` ne rend pas le même type partout : asyncpg décode
+    `TIMESTAMPTZ` en `datetime` conscient, aiosqlite renvoie la chaîne telle
+    quelle. Un appelant qui compare directement à `datetime.now(timezone.utc)`
+    marche donc en production et casse en test — ou l'inverse le jour où le
+    driver change. C'est la même embûche que le JSON brut de `detail`, et elle
+    se traite au même endroit : à la lecture, une fois pour tous les appelants.
+
+    Un horodatage naïf est lu en UTC : c'est ce que `_maintenant()` écrit.
+    """
+    if valeur is None or isinstance(valeur, datetime):
+        return (valeur.replace(tzinfo=timezone.utc)
+                if valeur is not None and valeur.tzinfo is None else valeur)
+    try:
+        dt = datetime.fromisoformat(str(valeur).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+async def dernier_run(session: AsyncSession, step: str) -> Optional[dict]:
+    """État persistant d'UNE étape, décodé. ``None`` si elle n'a jamais tourné.
+
+    C'est la source de vérité du rapport du matin : `docker logs` ne couvre que
+    l'instance courante du conteneur et disparaît au moindre déploiement, la
+    table non.
+    """
+    try:
+        await ensure_table(session)
+        row = (await session.execute(text("""
+            SELECT step, last_attempt_at, last_success_at, last_status,
+                   last_error, n_obs, detail
+            FROM learning_step_runs WHERE step = :step
+        """), {"step": step})).first()
+    except Exception as e:
+        log.warning("learning_steps.lecture_impossible", step=step, err=str(e)[:160])
+        return None
+    if row is None:
+        return None
+    detail = row[6]
+    # asyncpg rend le TEXT tel quel (str) ; certains dialectes le décodent déjà.
+    # Un détail illisible ne doit jamais empêcher de lire le statut.
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except Exception:
+            detail = None
+    if not isinstance(detail, dict):
+        detail = None
+    return {"step": row[0],
+            "last_attempt_at": _vers_datetime(row[1]),
+            "last_success_at": _vers_datetime(row[2]),
+            "last_status": row[3], "last_error": row[4], "n_obs": row[5],
+            "detail": detail}
+
+
 class etape:
     """Gestionnaire de contexte : journalise une étape et n'interrompt jamais la nuit.
 
@@ -129,6 +216,17 @@ class etape:
         self.detail: Optional[dict] = None
 
     async def __aenter__(self) -> "etape":
+        # Marquer le DÉPART, pas seulement l'arrivée : une étape tuée par l'OOM
+        # ne repasse jamais par `__aexit__`, et sans cette trace elle est
+        # indiscernable d'une étape jamais lancée. Comme l'écriture de sortie,
+        # elle ne doit jamais casser la nuit si le journal est indisponible.
+        try:
+            async with self._factory() as s:
+                await demarrer_etape(s, self.step)
+                await s.commit()
+        except Exception as e:
+            log.warning("learning_steps.journal_indisponible",
+                        step=self.step, phase="demarrage", err=str(e)[:160])
         return self
 
     async def __aexit__(self, exc_type, exc, _tb) -> bool:

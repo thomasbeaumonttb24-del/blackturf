@@ -1264,8 +1264,13 @@ async def _run_nightly_retraining_unlocked() -> None:
     # périmée. `etape(...)` garde ce comportement — une panne n'interrompt jamais
     # la nuit — mais persiste l'issue, et c'est l'ÉTAT PERSISTANT qui fait foi
     # contre les logs.
-    async with etape(AsyncSessionLocal, "retrain"):
-        await _do_retraining(mois=settings.retrain_history_months, label="nightly")
+    async with etape(AsyncSessionLocal, "retrain") as _e_retrain:
+        # L'ISSUE de la nuit (promu / rejeté / données insuffisantes) est
+        # persistée avec l'étape. Sans elle, `last_status = 'ok'` ne distingue
+        # pas une promotion d'un rejet, et le rapport du matin devait aller la
+        # chercher dans `docker logs` — qui disparaît au premier déploiement.
+        _e_retrain.detail = await _do_retraining(
+            mois=settings.retrain_history_months, label="nightly")
     # L'ensemble entraîné et le dataset meurent en sortant de `_do_retraining`,
     # mais la libc garde leurs arènes : le worker restait à 4,9 Gio de RSS
     # pendant TOUTE la série d'analyses ci-dessous, alors qu'elles ne pèsent que
@@ -1499,8 +1504,16 @@ async def _run_nightly_retraining_unlocked() -> None:
             log.error("pipeline.nightly_pmu_drift", n=len(res["mismatches"]), sample=res["mismatches"][:5])
 
 
-async def _do_retraining(mois: int, label: str) -> None:
-    """Pipeline de retraining commun."""
+async def _do_retraining(mois: int, label: str) -> dict:
+    """Pipeline de retraining commun.
+
+    Renvoie l'ISSUE de la nuit — ``promu``, ``rejete`` ou ``insuffisant`` — avec
+    de quoi la diagnostiquer. Jusqu'ici cette issue n'existait QUE dans les logs
+    du worker, et `docker logs` ne remonte pas au-delà de l'instance courante du
+    conteneur : un déploiement entre 02:00 et le rapport de 05:00 l'effaçait, et
+    le rapport ne pouvait plus dire ce qui s'était passé. Le retour est persisté
+    par `etape(...)` (cf. ml/learning_steps) — l'état persistant fait foi.
+    """
     t0 = datetime.now()
     async with AsyncSessionLocal() as session:
         # Construire le dataset
@@ -1514,7 +1527,7 @@ async def _do_retraining(mois: int, label: str) -> None:
         # un vrai modèle, cf. override est_synthetique ci-dessous).
         if len(X) < 300:
             log.warning("pipeline.retrain.insufficient_data", nb_rows=len(X))
-            return
+            return {"issue": "insuffisant", "label": label, "n_lignes": int(len(X))}
 
         log.info("pipeline.retrain.dataset_ready", n=len(X), mois=mois,
                  n_courses=int(X["course_id"].nunique()) if "course_id" in X.columns else None,
@@ -1652,6 +1665,14 @@ async def _do_retraining(mois: int, label: str) -> None:
         # un rejet ne déplace pas le champion, donc ne change pas la dette.
         _dette, _dette_depuis = await _charger_dette(session)
 
+        # Valeur de repli de l'issue. Elle ne doit jamais servir — les deux
+        # branches ci-dessous la remplacent — mais sans elle, une exception dans
+        # la branche de promotion sortirait sur un `NameError` APRÈS un déploiement
+        # réussi, et le rapport du matin annoncerait un échec avec le nouveau
+        # modèle en production. Une alerte qui contredit l'état réel coûte plus
+        # cher que pas d'alerte du tout (nuit du 19→20/08/2026).
+        _issue: dict = {"issue": "indetermine", "label": label}
+
         # Décision de promotion (garde-fou absolu MIN_DEPLOYABLE_AUC inclus, cf _should_deploy).
         if _should_deploy(
             new_wf, current_wf,
@@ -1749,6 +1770,17 @@ async def _do_retraining(mois: int, label: str) -> None:
                 dette_ecrite=_dette_ecrite,
                 rank_source=_rank_source,
             )
+            # Issue PERSISTÉE (cf. docstring). Écrite ici et non après la purge
+            # d'archives : cette purge est best-effort, elle ne doit pas pouvoir
+            # faire disparaître le fait qu'un modèle a été promu.
+            _issue = {
+                "issue": "promu", "label": label, "version": version_num,
+                "raison": _raison,
+                "wf_auc": round(new_wf, 4),
+                "wf_precedent": round(current_wf, 4),
+                "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
+                "dette": round(_dette_apres, 4),
+            }
 
             # AUTO-PURGE : garder seulement les N derniers .pkl archivés (model_v*.pkl
             # ~18 Mo chacun) pour que models/ ne grossisse pas indéfiniment (était 7,1 Go
@@ -1767,6 +1799,27 @@ async def _do_retraining(mois: int, label: str) -> None:
             except Exception as _e:  # purge best-effort : ne jamais faire échouer un deploy
                 log.warning("pipeline.retrain.prune_failed", err=str(_e)[:120])
         else:
+            # Le motif du rejet est nommé UNE fois et sert deux consommateurs :
+            # le log (diagnostic à chaud) et l'état persistant lu par le rapport
+            # du matin. Le calculer en double, c'est se garantir qu'ils
+            # divergeront un jour.
+            _raison_rejet = (
+                "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
+                else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
+                                    and not (_h2h_delta is not None and _h2h_delta >= 0)
+                                    and new_wf < current_wf)
+                else ("cliquet" if (_h2h_delta >= -H2H_TOLERANCE and _dette < 0.0)
+                      else "worse_h2h") if _h2h_delta is not None
+                else "worse_wf"
+            )
+            _issue = {
+                "issue": "rejete", "label": label, "raison": _raison_rejet,
+                "version_active": current_mv.version_num if current_mv else None,
+                "wf_auc": round(new_wf, 4),
+                "wf_champion": round(current_wf, 4),
+                "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
+                "dette": round(_dette, 4),
+            }
             log.warning(
                 "pipeline.retrain.rollback",
                 new_wf_auc=round(new_wf, 4),
@@ -1780,21 +1833,15 @@ async def _do_retraining(mois: int, label: str) -> None:
                 # La dette explique les rejets que le seul delta ne suffit pas à
                 # expliquer : à -0,0015 de dette, un delta de -0,001 est refusé.
                 dette=round(_dette, 4),
-                reason=(
-                    "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
-                    else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
-                                        and not (_h2h_delta is not None and _h2h_delta >= 0)
-                                        and new_wf < current_wf)
-                    else ("cliquet" if (_h2h_delta >= -H2H_TOLERANCE and _dette < 0.0)
-                          else "worse_h2h") if _h2h_delta is not None
-                    else "worse_wf"
-                ),
+                reason=_raison_rejet,
             )
 
         await session.commit()
 
     elapsed = (datetime.now() - t0).total_seconds()
     log.info(f"pipeline.retrain.{label}.done", elapsed_min=round(elapsed / 60, 1))
+    _issue["duree_min"] = round(elapsed / 60, 1)
+    return _issue
 
 
 # ─────────────────────────────────────────────
