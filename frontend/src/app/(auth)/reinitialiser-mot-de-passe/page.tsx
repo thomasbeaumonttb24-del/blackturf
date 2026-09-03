@@ -3,17 +3,19 @@ export const dynamic = "force-dynamic";
 
 import { useState, Suspense } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Zap, Loader2, ArrowLeft, CheckCircle, Eye, EyeOff } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { champMotDePasse, MOT_DE_PASSE_AIDE } from "@/lib/motdepasse";
 
 const schema = z.object({
-  password: z.string().min(8, "8 caractères minimum"),
+  password: champMotDePasse,
   confirm: z.string(),
 }).refine((d) => d.password === d.confirm, {
   message: "Les mots de passe ne correspondent pas",
@@ -69,9 +71,7 @@ function ReinitialiserContent() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-4">
-            <div className="h-10 w-10 rounded-xl bg-brand-gold flex items-center justify-center">
-              <Zap className="h-5 w-5 text-white" />
-            </div>
+            <Image src="/logo.png" alt="BlackTurf" width={40} height={40} priority className="rounded-xl object-contain" />
             <span className="text-2xl font-bold">Black<span className="text-brand-gold-dark">Turf</span></span>
           </Link>
           <h1 className="text-2xl font-bold">Nouveau mot de passe</h1>
@@ -97,9 +97,10 @@ function ReinitialiserContent() {
                   <input
                     {...register("password")}
                     type={showPwd ? "text" : "password"}
-                    placeholder="8 caractères minimum"
+                    placeholder="Au moins 10 caractères"
                     className="w-full rounded-lg border border-input bg-background px-3 py-2.5 pr-10 text-sm outline-none focus:ring-2 focus:ring-ring"
                     autoComplete="new-password"
+                    aria-describedby="aide-mot-de-passe"
                   />
                   <button
                     type="button"
@@ -109,7 +110,13 @@ function ReinitialiserContent() {
                     {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                {errors.password && <p className="text-xs text-destructive mt-1">{errors.password.message}</p>}
+                {errors.password ? (
+                  <p className="text-xs text-destructive mt-1">{errors.password.message}</p>
+                ) : (
+                  <p id="aide-mot-de-passe" className="text-xs text-muted-foreground mt-1">
+                    {MOT_DE_PASSE_AIDE}
+                  </p>
+                )}
               </div>
 
               <div>

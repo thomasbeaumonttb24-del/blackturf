@@ -3,8 +3,9 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle, XCircle, Loader2, Zap } from "lucide-react";
+import { CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -32,9 +33,7 @@ function VerifierEmailContent() {
     <div className="min-h-screen gradient-hero flex items-center justify-center p-4">
       <div className="w-full max-w-md text-center">
         <Link href="/" className="inline-flex items-center gap-2 mb-8 justify-center">
-          <div className="h-10 w-10 rounded-xl bg-brand-gold flex items-center justify-center">
-            <Zap className="h-5 w-5 text-white" />
-          </div>
+          <Image src="/logo.png" alt="BlackTurf" width={40} height={40} priority className="rounded-xl object-contain" />
           <span className="text-2xl font-bold">Black<span className="text-brand-gold-dark">Turf</span></span>
         </Link>
 

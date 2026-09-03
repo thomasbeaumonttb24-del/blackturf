@@ -3,6 +3,7 @@ import { Footer } from "@/components/layout/Footer";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { EmailVerificationBanner } from "@/components/layout/EmailVerificationBanner";
 import { EssaiSansCarteBanner } from "@/components/layout/EssaiSansCarteBanner";
+import { PaiementEchoueBanner } from "@/components/layout/PaiementEchoueBanner";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -20,6 +21,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <Navbar />
       <EmailVerificationBanner />
       <EssaiSansCarteBanner />
+      <PaiementEchoueBanner />
       {/* pb mobile = hauteur réelle BottomNav (item 52px + marge) + safe-area iPhone,
           sinon le bas du contenu passe sous la barre sur écran à encoche. */}
       <main id="contenu" className="flex-1 pb-[calc(68px+env(safe-area-inset-bottom))] md:pb-0">{children}</main>

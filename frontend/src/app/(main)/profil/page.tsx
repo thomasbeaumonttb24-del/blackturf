@@ -7,7 +7,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import {
   Loader2, CreditCard, Bell, User, Shield, Check, X,
-  TrendingUp, Zap, Brain, Star, ChevronRight, Lock,
+  TrendingUp, Zap, Brain, Star, ChevronRight, Lock, AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRequireAuth } from "@/hooks/useAuth";
@@ -165,6 +165,13 @@ export default function ProfilPage() {
 
   const profilRisque = watch("profil_risque");
   const isFree = user && ["free", "decouverte"].includes(user.plan);
+  // Le portail Stripe se décide sur l'existence d'un abonnement, PAS sur le plan.
+  // Un paiement refusé rétrograde le compte en `free` sans rien annuler chez
+  // Stripe : décider d'après `plan` faisait disparaître le seul chemin pour
+  // changer de carte, pendant que /tarifs refusait un nouveau checkout (409).
+  // Impasse constatée le 2026-09-03 sur deux abonnés à 19 €/mois.
+  const abonnementGerable = Boolean(user?.abonnement_gerable);
+  const paiementEnEchec = Boolean(user?.paiement_en_echec);
   const planKey = user?.plan ?? "free";
   const features = PLAN_FEATURES[planKey] ?? PLAN_FEATURES.free;
 
@@ -463,8 +470,12 @@ export default function ProfilPage() {
                   </div>
                 </div>
 
-                {/* CTA */}
-                {isFree ? (
+                {/* CTA — l'offre ne s'affiche que si rien n'est à gérer chez
+                    Stripe. Un abonné dont le paiement a échoué est en `free`
+                    mais garde un abonnement vivant : lui montrer « Voir les
+                    offres » l'envoyait vers un checkout qui refuse (409) en le
+                    renvoyant ici, vers un bouton qui n'était plus affiché. */}
+                {isFree && !abonnementGerable ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 space-y-3">
                     <div className="flex items-center gap-2">
                       <Zap className="h-5 w-5 text-amber-700" />
@@ -482,13 +493,27 @@ export default function ProfilPage() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
+                    {paiementEnEchec && (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 p-4 sm:p-5 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-5 w-5 text-red-700" />
+                          <p className="font-semibold text-red-800">Paiement refusé</p>
+                        </div>
+                        <p className="text-sm text-red-700">
+                          Votre banque a refusé le dernier prélèvement, l&apos;accès à votre
+                          formule est suspendu. Votre abonnement n&apos;est pas résilié :
+                          mettez votre carte à jour ci-dessous et l&apos;accès revient
+                          immédiatement.
+                        </p>
+                      </div>
+                    )}
                     <button
                       onClick={handlePortal}
                       disabled={loadingPortal}
                       className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors disabled:opacity-50"
                     >
                       {loadingPortal ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                      Gérer l&apos;abonnement via Stripe
+                      {paiementEnEchec ? "Mettre ma carte à jour" : "Gérer l'abonnement via Stripe"}
                       <ChevronRight className="h-3.5 w-3.5" />
                     </button>
                     <button

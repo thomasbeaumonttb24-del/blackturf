@@ -169,6 +169,18 @@ class UserMeResponse(BaseModel):
     # croit à une panne et écrit au support au lieu d'aller régulariser.
     essai_bloque_sans_carte: bool = False
     essai_fin: Optional[datetime] = None
+    # Un abonnement Stripe existe et reste pilotable, MÊME si le compte est
+    # retombé en `free`. Sans ce signal, la page profil décidait d'après le seul
+    # `plan` : un paiement en échec rétrograde en `free`, le bouton « Gérer
+    # l'abonnement via Stripe » disparaissait, et c'était le seul chemin pour
+    # changer de carte. Le client était alors renvoyé vers /tarifs, où le
+    # checkout refuse (409, `past_due` compte parmi les statuts vivants) en le
+    # renvoyant vers le bouton qu'on venait de lui cacher. Impasse constatée le
+    # 2026-09-03 sur deux abonnés à 19 €/mois.
+    abonnement_gerable: bool = False
+    # Cause de la rétrogradation, pour l'expliquer au lieu de laisser croire à
+    # une panne. Vrai tant que Stripe relance la carte.
+    paiement_en_echec: bool = False
 
 
 # ─────────────────────────────────────────────
@@ -503,15 +515,25 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
     # Essai en attente de carte : le front doit pouvoir l'expliquer et proposer
     # le portail Stripe. Import local — `stripe_routes` importe `auth`, l'importer
     # en tête d'`auth` créerait un cycle.
-    from api.routes.stripe_routes import STATUT_SANS_CARTE
+    from api.routes.stripe_routes import STATUT_SANS_CARTE, STATUTS_VIVANTS
     from db.models import Subscription
 
-    bloque = (await db.execute(
+    # Une seule lecture pour les trois signaux : l'essai sans carte, l'existence
+    # d'un abonnement pilotable, et le paiement en échec.
+    vivants = (await db.execute(
         select(Subscription)
         .where(Subscription.user_id == user.user_id,
-               Subscription.statut == STATUT_SANS_CARTE)
+               Subscription.statut.in_(STATUTS_VIVANTS))
         .order_by(Subscription.created_at.desc())
-    )).scalars().first()
+    )).scalars().all()
+
+    bloque = next((s for s in vivants if s.statut == STATUT_SANS_CARTE), None)
+    # `essai_sans_carte` est un statut maison : il n'existe pas d'abonnement à
+    # piloter tant que la carte n'est pas posée, et le portail Stripe n'a rien à
+    # y montrer. Seuls les abonnements réellement portés par Stripe comptent.
+    gerable = any(s.stripe_subscription_id and s.statut != STATUT_SANS_CARTE
+                  for s in vivants)
+    en_echec = any(s.statut == "past_due" for s in vivants)
 
     return UserMeResponse(
         user_id=user.user_id,
@@ -526,6 +548,8 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         created_at=user.created_at,
         essai_bloque_sans_carte=bloque is not None,
         essai_fin=bloque.essai_fin if bloque else None,
+        abonnement_gerable=gerable,
+        paiement_en_echec=en_echec,
     )
 
 

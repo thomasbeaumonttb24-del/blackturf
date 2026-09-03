@@ -16,6 +16,13 @@ export interface AuthUser {
   // d'accès serait inexplicable pour l'abonné.
   essai_bloque_sans_carte?: boolean;
   essai_fin?: string | null;
+  // Un abonnement Stripe existe et reste pilotable, MÊME quand `plan` vaut
+  // `free`. Décider d'après `plan` seul cachait le portail Stripe à l'abonné
+  // dont le paiement venait d'échouer — or c'est le seul endroit où changer de
+  // carte, et /tarifs le refuse (409) tant que l'abonnement en échec vit.
+  abonnement_gerable?: boolean;
+  // Vrai tant que Stripe relance la carte. Sert à EXPLIQUER la perte d'accès.
+  paiement_en_echec?: boolean;
 }
 
 // Les JETONS ne sont plus stockés ici : ils vivent dans des cookies httpOnly posés
