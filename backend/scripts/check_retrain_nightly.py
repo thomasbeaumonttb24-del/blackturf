@@ -43,10 +43,19 @@ from db.models import ModelVersion
 DEST = os.getenv("RETRAIN_REPORT_TO", "thomas.beaumont.tb24@gmail.com")
 WORKER_CONTAINER = os.getenv("BT_WORKER_CONTAINER", "blackturf_worker")
 
-# Fenêtre couverte par le rapport. 12 h couvre largement le retrain de 02:00 UTC
-# vu depuis 05:00 UTC, même en cas de démarrage tardif, et exclut sans ambiguïté
-# celui de la veille. Même valeur que `--since` du wrapper cron.
+# Fenêtre de LECTURE DES LOGS, en heures. Même valeur que le `--since` du wrapper
+# cron : 12 h couvre largement le retrain de 02:00 UTC vu depuis 05:00 UTC.
 FENETRE_HEURES = 12
+
+# Heure UTC du retrain nocturne (services/jobs.job_retrain_trigger). La fenêtre
+# de la BASE est ancrée sur ce créneau, pas sur « il y a 12 heures » : un rapport
+# lancé à la main en fin de journée annonçait sinon « 🔴 Aucun retrain n'a
+# démarré cette nuit » alors que celui de 02:19 s'était parfaitement déroulé —
+# la même alerte menteuse que celle qu'on vient de supprimer, par l'autre bout.
+RETRAIN_HEURE_UTC = 2
+# Tolérance avant le créneau : le job peut partir avec un peu d'avance selon la
+# dérive du scheduler. Une heure suffit et ne mord pas sur la nuit précédente.
+TOLERANCE_AVANT_H = 1
 
 # Nom de l'étape sous laquelle le rapport journalise SON PROPRE passage. Le
 # rapport est le garde-fou du retrain ; sans cette ligne, rien ne garde le
@@ -77,7 +86,7 @@ def _dans_un_conteneur() -> bool:
     return os.path.exists("/.dockerenv")
 
 
-def _worker_logs(since_hours: int = 12) -> str:
+def _worker_logs(since_hours: int = FENETRE_HEURES) -> str:
     """Logs du worker sur les N dernières heures. CONFORT, jamais preuve.
 
     Deux modes, parce que les informations nécessaires ne vivent pas au même
@@ -241,7 +250,22 @@ VERDICTS = {
 }
 
 
-async def _etat_retrain_db(fenetre_heures: int = FENETRE_HEURES) -> dict:
+def _debut_fenetre(maintenant: datetime) -> datetime:
+    """Début de la nuit dont ce rapport parle. Fonction pure → testable.
+
+    Ancrée sur le créneau du retrain (02:00 UTC) et non sur « maintenant moins
+    douze heures » : la question posée est « qu'a fait le retrain de cette
+    nuit ? », et sa réponse ne doit pas changer selon l'heure à laquelle on
+    ouvre le rapport.
+    """
+    debut = maintenant.replace(hour=RETRAIN_HEURE_UTC, minute=0, second=0,
+                               microsecond=0)
+    if debut > maintenant:
+        debut -= timedelta(days=1)
+    return debut - timedelta(hours=TOLERANCE_AVANT_H)
+
+
+async def _etat_retrain_db() -> dict:
     """Ce que la BASE sait du retrain de la nuit — la source de vérité.
 
     `learning_step_runs` porte, pour l'étape `retrain` : l'heure de démarrage
@@ -271,8 +295,7 @@ async def _etat_retrain_db(fenetre_heures: int = FENETRE_HEURES) -> dict:
         # naïf à un conscient lève un TypeError, et le rapport ne partirait pas.
         attempt = attempt.replace(tzinfo=timezone.utc)
     maintenant = datetime.now(timezone.utc)
-    recent = (attempt is not None
-              and attempt > maintenant - timedelta(hours=fenetre_heures))
+    recent = attempt is not None and attempt >= _debut_fenetre(maintenant)
     trop_long = (attempt is None
                  or attempt < maintenant - timedelta(minutes=EN_COURS_TROP_LONG_MIN))
     detail = run.get("detail") or None

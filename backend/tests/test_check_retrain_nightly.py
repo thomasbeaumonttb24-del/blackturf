@@ -570,3 +570,36 @@ async def test_un_envoi_rate_ne_compte_pas_comme_un_rapport_envoye(mod, monkeypa
     run = await ls.dernier_run(db, mod.ETAPE_RAPPORT)
     assert run["last_status"] == "echec"
     assert run["last_success_at"] is None
+
+
+# ── La fenêtre est ancrée sur la NUIT, pas sur l'heure de lecture ───────────
+# Ancrée sur « maintenant − 12 h », la même nuit changeait de verdict selon
+# l'heure : lancé en soirée, le rapport annonçait « 🔴 Aucun retrain n'a démarré
+# cette nuit » alors que celui de 02:19 s'était parfaitement déroulé. C'est la
+# même alerte menteuse que celle qu'on vient de supprimer, prise par l'autre bout.
+# Constaté en rejeu sur la base de production le 03/09/2026 à 21:00 UTC.
+
+def test_le_retrain_de_la_nuit_compte_quelle_que_soit_lheure_de_lecture(mod):
+    nuit = datetime(2026, 9, 3, 2, 19, tzinfo=timezone.utc)
+    for heure in (5, 12, 21, 23):
+        lu_a = datetime(2026, 9, 3, heure, 0, tzinfo=timezone.utc)
+        assert nuit >= mod._debut_fenetre(lu_a), f"perdu de vue à {heure} h UTC"
+
+
+def test_le_retrain_de_la_veille_ne_compte_pas_pour_cette_nuit(mod):
+    """Sans quoi un modèle gelé depuis vingt-quatre heures passerait inaperçu."""
+    veille = datetime(2026, 9, 2, 2, 19, tzinfo=timezone.utc)
+    assert veille < mod._debut_fenetre(datetime(2026, 9, 3, 5, 0, tzinfo=timezone.utc))
+
+
+def test_avant_le_creneau_la_fenetre_parle_de_la_nuit_precedente(mod):
+    """Lancé à 00:30 UTC, le retrain de la nuit n'a pas encore eu lieu : la seule
+    nuit dont on puisse parler est celle d'avant."""
+    debut = mod._debut_fenetre(datetime(2026, 9, 3, 0, 30, tzinfo=timezone.utc))
+    assert debut == datetime(2026, 9, 2, 1, 0, tzinfo=timezone.utc)
+
+
+def test_un_demarrage_legerement_en_avance_reste_dans_la_fenetre(mod):
+    """La dérive du scheduler ne doit pas transformer une nuit réussie en alerte."""
+    avance = datetime(2026, 9, 3, 1, 58, tzinfo=timezone.utc)
+    assert avance >= mod._debut_fenetre(datetime(2026, 9, 3, 5, 0, tzinfo=timezone.utc))
