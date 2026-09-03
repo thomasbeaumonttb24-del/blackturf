@@ -220,11 +220,19 @@ class BlackTurfEnsemble:
         # probas/EV. None si non entraîné / LightGBM indispo.
         self.ranker = None
 
-    def train(self, X: pd.DataFrame, y: pd.Series, y_win: Optional[pd.Series] = None) -> dict:
+    def train(self, X: pd.DataFrame, y: pd.Series, y_win: Optional[pd.Series] = None,
+              frac_train: float = 0.8) -> dict:
         """
         Entraîne l'ensemble (top-3). Split temporel 80/20.
         Walk-forward validation sur 6 fenêtres.
         Si y_win fourni, entraîne aussi le modèle de VICTOIRE dédié (P(top1) apprise).
+
+        `frac_train` n'existe QUE pour les rejeux : la production garde 0,8, et le
+        hold-out qui en résulte est ce sur quoi l'arbitrage champion/challenger se
+        joue. Le déplacer changerait la mesure en même temps que le modèle. Il
+        rend en revanche mesurable la question que ce découpage pose : le modèle
+        déployé n'apprend rien des 20 % de courses les plus récentes — 78 jours
+        depuis que la fenêtre est passée à douze mois.
         """
         n_samples = len(X)
         from ml.algo_flags import FLAGS as _AF0
@@ -259,7 +267,7 @@ class BlackTurfEnsemble:
         X_feat = X[self.feature_names].fillna(0)
 
         from ml.algo_flags import FLAGS as _AF
-        holdout_mask = temporal_holdout_mask(X)
+        holdout_mask = temporal_holdout_mask(X, frac_train=frac_train)
         train_mask = ~holdout_mask
         X_train, X_test = X_feat[train_mask], X_feat[holdout_mask]
         y_train, y_test = y[train_mask], y[holdout_mask]

@@ -2743,9 +2743,16 @@ async def _get_alertes_equipement(session: AsyncSession, course_id: str) -> list
 
 
 async def _build_training_dataset_from_db(
-    session: AsyncSession, mois: int, max_rows: int | None = None
+    session: AsyncSession, mois: int, max_rows: int | None = None,
+    date_fin: datetime | None = None,
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """Construit (X, y_top3, y_win) depuis PostgreSQL, par blocs.
+
+    `date_fin` borne le dataset EN HAUT. Inutilisé par la production (None =
+    jusqu'à maintenant, comportement inchangé) ; indispensable à tout rejeu
+    walk-forward, qui doit reconstruire le dataset TEL QU'IL ÉTAIT à une date
+    passée. Sans cette borne, un rejeu « entraîné jusqu'au 01/07 » verrait les
+    courses d'août et mesurerait sa propre fuite.
 
     Rend directement les matrices d'entraînement et NON la liste de dicts brute :
     un partant pèse ~30 Ko en dict Python (173 clés JSON) contre ~700 octets en
@@ -2766,13 +2773,26 @@ async def _build_training_dataset_from_db(
         if _AF.train_prerace_only else ""
     )
 
+    # La borne haute vit dans le MÊME `WHERE` que la borne basse : appliquée
+    # après coup, elle laisserait le plafond `max_rows` compter des lignes
+    # posérieures à `date_fin` et remonter la borne basse pour rien.
+    _clause_fin = "AND c.date_heure < :date_fin" if date_fin is not None else ""
+
     _where = f"""
         WHERE c.date_heure > :date_limite
           AND c.statut = 'termine'
           AND h.position_arrivee IS NOT NULL
           AND h.position_arrivee < 99
           {_prerace_clause}
+          {_clause_fin}
     """
+    _bornes = {"date_limite": date_limite}
+    if date_fin is not None:
+        _bornes["date_fin"] = date_fin
+        # Sinon un rejeu à date_fin ancienne demanderait « douze mois avant
+        # AUJOURD'HUI » et ne trouverait presque rien.
+        date_limite = date_fin - timedelta(days=mois * 30)
+        _bornes["date_limite"] = date_limite
     _from = """
         -- affichage : ce fragment ne porte que les jointures. La borne pré-départ
         -- vit dans `_where` ci-dessus (`_prerace_clause`, drapeau
@@ -2792,12 +2812,13 @@ async def _build_training_dataset_from_db(
         _cut = await session.scalar(text(f"""
             SELECT c.date_heure {_from} {_where}
             ORDER BY c.date_heure DESC LIMIT 1 OFFSET :max_rows
-        """), {"date_limite": date_limite, "max_rows": int(max_rows)})
+        """), {**_bornes, "max_rows": int(max_rows)})
         if _cut is not None:
             log.warning("pipeline.dataset.row_cap_hit",
                         max_rows=int(max_rows), mois=mois,
                         date_limite_effective=str(_cut))
             date_limite = _cut
+            _bornes["date_limite"] = date_limite
 
     # Récupérer les features sauvegardées avec leurs labels.
     #
@@ -2822,7 +2843,7 @@ async def _build_training_dataset_from_db(
         {_from}
         {_where}
         ORDER BY c.date_heure
-    """), {"date_limite": date_limite})
+    """), _bornes)
 
     # Chaque partition devient TOUT DE SUITE un petit DataFrame float32 puis est
     # relâchée : à aucun moment les 175 000 dicts ne coexistent. Les labels sont
