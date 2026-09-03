@@ -262,17 +262,27 @@ def test_la_garde_ne_vide_aucun_plan():
                 % (profil, info["nb_partants"]))
 
 
-def _champ_ou_le_filet_choisissait_la_loterie(n=8):
-    """Cotes très étalées (×1,35 par rang) et probabilités plates : le filet y avait
-    le choix entre un pari à EV −0,42 et un pari à EV nulle, et prenait le premier."""
-    horses = []
-    for i in range(n):
-        p1 = max(0.20 - i * 0.02, 0.004)
-        horses.append({"numero": i + 1, "nom_cheval": "Cheval%d" % (i + 1),
-                       "cote_pmu": round(1.5 * (1.35 ** i), 2),
-                       "proba_top1": p1, "proba_top3": min(p1 * 2.6, 0.95),
-                       "non_partant": False})
-    return horses
+def _champ_ou_le_filet_choisissait_la_loterie():
+    """Tête de champ SUR-JOUÉE et queue longue : le filet y a le choix entre un
+    Simple Gagnant à EV −0,417 et un Couplé Gagnant à EV nulle, et prenait le
+    premier sans la garde.
+
+    Reconstruit le 2026-09-03 avec le passage du plafond de rang du risqué à 4.
+    L'ancien champ (cotes ×1,35 par rang à partir de 1,5) plaçait son pari sous le
+    plancher au rang 5 et au-delà : hors du plafond, il ne sortait plus du tout, et
+    le test devenait vert sans rien prouver — ce que son assertion annonçait
+    elle-même. Les quatre premiers sont désormais courts (2,20 / 2,53 / 2,91 /
+    3,35) pour que l'EV négative soit ACCESSIBLE au profil, et la queue reste
+    longue pour que le Couplé Gagnant des deux premiers reste finançable comme
+    alternative à EV nulle. Marge conservée sur le seuil : −0,417 contre −0,40.
+    """
+    rows = [(0.19, 2.20), (0.18, 2.53), (0.17, 2.91), (0.16, 3.35),
+            (0.09, 13.0), (0.07, 20.0), (0.05, 30.0), (0.04, 45.0),
+            (0.03, 60.0), (0.03, 75.0), (0.02, 90.0), (0.02, 110.0)]
+    return [{"numero": i + 1, "nom_cheval": "Cheval%d" % (i + 1),
+             "cote_pmu": c, "proba_top1": p, "proba_top3": min(p * 2.6, 0.95),
+             "non_partant": False}
+            for i, (p, c) in enumerate(rows)]
 
 
 def _pire_ev_du_risque(preds, info):
@@ -290,8 +300,8 @@ def test_le_filet_refuse_la_loterie_pure_quand_il_a_le_choix():
     +0,3 point de ROI winsorisé — c'est-à-dire RIEN de mesurable. Il est conservé
     parce qu'il ferme le seul chemin du moteur sans borne d'EV, pas parce qu'il
     rapporte. Le gain mesuré du lot vient de la garde de TYPE, pas d'ici."""
-    preds = _champ_ou_le_filet_choisissait_la_loterie(8)
-    info = dict(COURSE_INFO, nb_partants=8)
+    preds = _champ_ou_le_filet_choisissait_la_loterie()
+    info = dict(COURSE_INFO, nb_partants=len(preds))
     avec = _pire_ev_du_risque(preds, info)
 
     ancien = mc._REPLI_PLANCHER_EV

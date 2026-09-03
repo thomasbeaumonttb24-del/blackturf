@@ -500,7 +500,52 @@ PROFIL_CONFIG = {
         # −7,3 % à 8 contre −8,4 % à 5, c'est-à-dire PIRE. Le plafond de rang est
         # un levier du seul profil risqué ; l'appliquer partout aurait dégradé
         # l'équilibré au nom d'une moyenne portée par le risqué.
-        "rang_max": 6,
+        #
+        # 6 → 4 (2026-09-03). L'argent réel du plan sur 60 jours dit où il part :
+        # 53 % de la mise va sur des tickets contenant un cheval que notre propre
+        # modèle classe 4e ou pire, et cette zone perd 20 à 54 % (paris à un cheval
+        # au rang 5+ : −33,6 % ; combinaisons dont le pire cheval est au rang 6+ :
+        # −54,4 % winsorisé — le +33,9 % brut de cette même case n'était que
+        # dix-sept tickets chanceux).
+        #
+        # Rejeu A/B sur TROIS périodes DISJOINTES (4 178 courses), `heat` figé à
+        # 0,20 dans les deux bras — il se recalcule sur le ROI récent : non figé, il
+        # avait bougé de 0,203 à 0,171 en trente minutes et invalidé une première
+        # comparaison. ROI du profil risqué, brut puis winsorisé ×30 :
+        #     05/06 → 15/07, 1 832 c. : brut −26,7 → −26,2   winsor −36,3 → −31,3
+        #     15/07 → 25/08, 1 866 c. : brut  +9,5 →  +3,0   winsor  −9,5 →  −8,8
+        #     25/08 → 03/09,   480 c. : brut  −5,7 → +21,9   winsor −12,1 →  −0,3
+        #     cumul                   : brut  −8,1 →  −7,6   winsor −21,6 → −17,7
+        #
+        # Le winsorisé s'améliore dans les TROIS périodes. Le brut est positif au
+        # cumul mais COÛTE 6,5 points sur la période B : le plafond coupe une queue
+        # de très gros rapports (un couplé qui tombe sur un cheval mal classé), et
+        # c'est un arbitrage assumé — on échange une loterie contre un rendement
+        # typique meilleur. La signature est mécanique et non du bruit : −25 % de
+        # paris et un taux de réussite qui DOUBLE dans chacune des trois périodes
+        # (3,9 → 7,4 ; 4,7 → 8,9 ; 5,3 → 11,1).
+        #
+        # Prudent et modéré sont inchangés au centime près dans les trois périodes —
+        # le plafond n'est posé QUE sur le risqué, exactement comme le disait la
+        # mesure ci-dessus.
+        #
+        # PIÈGE DE COHORTE, pour qui refait la mesure : `prediction_evaluation.
+        # is_replayable` ne couvre que le 18/08 → 03/09 (775 courses). Un rejeu
+        # appuyé dessus mesure ces 17 jours QUELLE QUE SOIT la fenêtre demandée —
+        # deux « fenêtres indépendantes » peuvent ainsi être la même. Les trois
+        # périodes ci-dessus viennent de `predictions` avec les mêmes gardes
+        # anti-fuite (created_at < date_heure, cote_figee non nulle) : 4 178
+        # courses depuis juin au lieu de 775.
+        #
+        # Mesuré et NON RETENU dans la même session : le plafond serré sur les trois
+        # profils (3/3/4) avec RANG_MAX_BONUS_PLACE à 0 — il dégradait l'équilibré
+        # (−3,1 % → −5,1 %) ; et `var_cap` porté à 1.0 pour cesser d'étaler le
+        # budget, qui dégradait l'équilibré bien plus fort (−3,1 % → −10,2 %).
+        # L'observation d'origine reste vraie (dans un même plan, le plus gros
+        # ticket rend 18 à 22 points de plus que les tickets secondaires) mais
+        # `var_cap` n'est pas le levier : il ne redirige pas le budget vers le
+        # meilleur ticket, il autorise un ticket haute-variance à tout prendre.
+        "rang_max": 4,
         # var_cap 0.20 (0.45 → 0.35 → 0.20) : le risqué reste 100% gros rapport, MAIS
         # jamais plus de 20% du budget sur un seul ticket TOUT-OU-RIEN → la mise s'étale
         # sur plusieurs gros-rapports DÉCORRÉLÉS (demande user : « plus de mises

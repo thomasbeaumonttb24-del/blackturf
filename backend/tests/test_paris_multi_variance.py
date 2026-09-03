@@ -252,11 +252,22 @@ class TestTicketsAppoint:
     CHAMP_LARGE = [(0.16, 5.5), (0.14, 6.5), (0.12, 8.0), (0.10, 11.0), (0.09, 13.0),
                    (0.08, 15.0), (0.07, 18.0), (0.06, 22.0), (0.05, 28.0), (0.04, 35.0),
                    (0.04, 42.0), (0.03, 55.0), (0.03, 70.0), (0.02, 90.0)]
-    # Champ OUVERT : aucun cheval ne domine, les trios ancrés paient ×59-100 — c'est là
-    # que le profil risqué peut réellement étaler plusieurs gros rapports.
-    CHAMP_OUVERT = [(0.10, 9.0), (0.09, 10.0), (0.09, 11.0), (0.08, 13.0), (0.08, 15.0),
-                    (0.07, 17.0), (0.07, 20.0), (0.06, 24.0), (0.06, 28.0), (0.05, 33.0),
-                    (0.05, 40.0), (0.04, 50.0), (0.04, 65.0), (0.03, 85.0)]
+    # Champ OUVERT : aucun cheval ne domine — c'est là que le profil risqué peut
+    # réellement étaler plusieurs gros rapports.
+    #
+    # Tête de champ allongée (9-10-11-13 → 11-13-15-18) le 2026-09-03, avec le passage
+    # du plafond de rang du risqué à 4. Le contrat ×10 porte sur la MISE TOTALE : un
+    # ticket d'appoint à 2 € sur un plan de 10 € doit donc rapporter ×50 à lui seul.
+    # Sur l'ancienne tête de champ, les seules combinaisons encore ouvertes au risqué
+    # (rangs ≤ 4, Trio retiré du profil le 2026-09-01) plafonnaient à ×15,4 : le moteur
+    # se rabattait légitimement sur UN ticket, et le test ne pouvait plus exercer
+    # l'étalement qu'il existe pour protéger. Ce sont les COTES de la fixture qui ont
+    # bougé, pas le seuil exigé — abaisser l'attente à un ticket aurait rendu ce test
+    # vert et muet.
+    CHAMP_OUVERT = [(0.09, 11.0), (0.085, 13.0), (0.08, 15.0), (0.075, 18.0),
+                    (0.07, 21.0), (0.065, 24.0), (0.06, 28.0), (0.058, 32.0),
+                    (0.055, 37.0), (0.05, 43.0), (0.048, 50.0), (0.045, 60.0),
+                    (0.042, 72.0), (0.04, 90.0)]
 
     def _champ(self, rows=None):
         rows = rows if rows is not None else self.CHAMP_LARGE
@@ -282,19 +293,22 @@ class TestTicketsAppoint:
 
         LE SEUIL D'EXIGENCE DÉPEND DE LA MISE (2026-08-31). La cible ×10 impose
         `mise ≥ cible / rapport` : plus le plan est gros, plus chaque ticket coûte cher,
-        donc moins il en tient. Mesuré sur ce champ ouvert de 14 partants, plafond de
-        rang 6 : 2 tickets à 10 € et à 20 €, 1 seul à 30 € et 50 €. Exiger 2 tickets à
-        30 € reviendrait à exiger que le moteur casse le contrat ×10 — c'est-à-dire à
-        tester l'inverse de ce que l'exploitant a arbitré le 2026-08-31.
+        donc moins il en tient. Exiger un ticket de plus reviendrait à exiger que le
+        moteur casse le contrat ×10 — c'est-à-dire à tester l'inverse de ce que
+        l'exploitant a arbitré le 2026-08-31.
 
-        À 30 €, on exige donc seulement que le plan reste dans sa tranche. Ce que la
-        version précédente obtenait à 30 € : 3 tickets, dont un Simple Gagnant sur le
-        cheval de RANG 8 et un Trio avec un pied au rang 7 — les bandes mesurées à
-        −54,5 % de ROI winsorisé, contre −40,6 % au rang 6 et −22,0 % au rang ≤3.
+        Avec le plafond de rang à 4 (2026-09-03) et la tête de champ allongée qui va
+        avec (cf. CHAMP_OUVERT), le moteur tient 2 tickets à 10, 20 et 30 €, tous
+        ancrés sur les rangs ≤ 4 : Couplé Ordre sur les deux premiers prédits +
+        Simple Gagnant sur le quatrième, chacun à ×10,1 à ×11,4 de la mise TOTALE.
+        Ce que la version à plafond 8 obtenait à 30 € : 3 tickets, dont un Simple
+        Gagnant sur le cheval de RANG 8 et un Trio avec un pied au rang 7 — les bandes
+        mesurées à −54,5 % de ROI winsorisé, contre −40,6 % au rang 6 et −22,0 % au
+        rang ≤ 3.
         """
         champ = self._champ(self.CHAMP_OUVERT)
         course = dict(self.COURSE, nb_partants=len(self.CHAMP_OUVERT))
-        for montant, mini in ((10, 2), (20, 2), (30, 1)):
+        for montant, mini in ((10, 2), (20, 2), (30, 2)):
             d = plan_to_dict(generer_plan(montant, "agressif", champ, course,
                                           respect_montant=True))
             paris = [p for niv in d["niveaux"] for p in niv["paris"]]
@@ -365,12 +379,35 @@ class TestTicketsAppoint:
         ce plafond porte sur le rang des chevaux, pas sur la tranche de gain visee.
         Mesure et NON retenu : le meme plafond sur les deux autres profils
         (conservateur -17,6 % a 8 contre -16,8 % a 5 = rien ; equilibre -7,3 % contre
-        -8,4 % = pire)."""
+        -8,4 % = pire).
+
+        Resserre a 4 le 2026-09-03. Rejeu A/B des PLANS sur courses reglees aux
+        rapports PMU reels, `heat` fige a 0,20 dans les deux bras, TROIS periodes
+        DISJOINTES (4 178 courses), ROI du profil risque, brut et winsorise x30 :
+            05/06 -> 15/07, 1 832 c. :  brut -26,7 -> -26,2   winsor -36,3 -> -31,3
+            15/07 -> 25/08, 1 866 c. :  brut  +9,5 ->  +3,0   winsor  -9,5 ->  -8,8
+            25/08 -> 03/09,   480 c. :  brut  -5,7 -> +21,9   winsor -12,1 ->  -0,3
+            cumul                     :  brut  -8,1 ->  -7,6   winsor -21,6 -> -17,7
+        Le winsorise s'ameliore dans les TROIS periodes ; le brut est positif au
+        cumul mais coute 6,5 points sur la periode B — le plafond coupe une queue
+        de tres gros rapports, et c'est assume. La signature est mecanique et non
+        du bruit : -25 % de paris et un taux de reussite qui double dans chaque
+        periode (3,9 -> 7,4 ; 4,7 -> 8,9 ; 5,3 -> 11,1).
+        Prudent et modere sont inchanges au centime pres dans les trois periodes :
+        le plafond n'est pose QUE sur le risque, conformement a la mesure ci-dessus.
+        Le contrat de gain x10 reste CONSERVE : ce plafond porte sur le rang des
+        chevaux, pas sur la tranche de gain visee.
+
+        PIEGE DE COHORTE, pour qui refait la mesure : `prediction_evaluation.
+        is_replayable` ne couvre que le 18/08 -> 03/09 (775 courses). Un rejeu
+        appuye dessus mesure ces 17 jours QUELLE QUE SOIT la fenetre demandee.
+        Les trois periodes ci-dessus viennent de `predictions` avec les memes
+        gardes anti-fuite (created_at < date_heure, cote_figee non nulle)."""
         from services.mise_calculator import _rang_max_effectif, PROFIL_CONFIG
         # bornes par profil, du plus strict au plus large
         assert PROFIL_CONFIG["conservateur"]["rang_max"] == 5
         assert PROFIL_CONFIG["equilibre"]["rang_max"] == 6
-        assert PROFIL_CONFIG["agressif"]["rang_max"] == 6
+        assert PROFIL_CONFIG["agressif"]["rang_max"] == 4
         # champ large : c'est le plafond du profil qui borne
         assert _rang_max_effectif(8, 20) == 8
         # champ reduit : le rang 8 serait le dernier cheval -> le champ borne
@@ -679,10 +716,23 @@ class TestAncrageTop2:
         PRÉFÉRENCE mesurée reste, elle, entièrement en place (`ancrage_top2` souple,
         testé juste au-dessus) : dès qu'une combinaison ancrée est disponible, aucune
         non ancrée ne sort.
+
+        Champ reconstruit le 2026-09-03 avec le plafond de rang du risqué à 4 : il
+        faut deux favoris COURTS (2,2 et 2,8 — leur couplé ne paie pas ×10) et des
+        rangs 3-4 LONGS (13 et 16 — leur couplé, lui, y entre). C'est exactement la
+        configuration décrite ci-dessus, et `_field()` ne la produisait plus une fois
+        les rangs 5+ écartés : le plan retombait sur un Simple Gagnant, donc sur
+        aucune combinaison du tout, et le test passait sans rien démontrer.
         """
         from services.mise_calculator import PROFIL_CONFIG
         assert PROFIL_CONFIG["agressif"].get("ancrage_strict") is False
-        hors, _ = self._combinaisons_non_ancrees("agressif", _field(12))
+        rows = [(0.34, 2.2), (0.26, 2.8), (0.14, 13.0), (0.11, 16.0),
+                (0.06, 26.0), (0.04, 34.0), (0.03, 45.0), (0.02, 60.0)]
+        champ = [{"numero": i + 1, "nom": f"H{i+1}", "nom_cheval": f"H{i+1}",
+                  "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
+                  "cote_pmu": c, "non_partant": False}
+                 for i, (p, c) in enumerate(rows)]
+        hors, _ = self._combinaisons_non_ancrees("agressif", champ)
         assert hors, ("le risqué ne sort plus aucune combinaison non ancrée sur ce "
                       "champ : si c'est voulu, c'est la mesure ci-dessus qu'il faut "
                       "refaire, pas ce test qu'il faut retirer")
@@ -720,14 +770,17 @@ class TestAncrageTop2:
         palier = {"nom": "petit", "max_bets": 3, "min_stake": 3,
                   "favor_value": True, "cap_spec": 0.6}
         cfg = _effective_config("agressif", 0.0)
-        ordre = _select_conviction([_cand(3, 3), _cand(5, 5)], 30, palier, cfg, {})
+        # Les deux pieds libres sont pris DANS le plafond de rang du profil (4 depuis
+        # le 2026-09-03) : au-dela, c'est la gate de rang qui ecarterait le candidat et
+        # le test mesurerait le plafond au lieu de l'ordre, ce qu'il ne veut pas.
+        ordre = _select_conviction([_cand(3, 3), _cand(4, 4)], 30, palier, cfg, {})
         # Les deux candidats sont identiques hors rang du pied libre : aucun des deux
         # ne doit etre avantage. On verifie que le rang ne cree plus d'ecart d'ordre
         # en inversant l'ordre d'entree — le resultat doit suivre l'entree, pas le rang.
-        ordre_inverse = _select_conviction([_cand(5, 5), _cand(3, 3)], 30, palier, cfg, {})
+        ordre_inverse = _select_conviction([_cand(4, 4), _cand(3, 3)], 30, palier, cfg, {})
         assert ordre and ordre_inverse
         assert ordre[0]["_rang_hors_ancre"] == 3
-        assert ordre_inverse[0]["_rang_hors_ancre"] == 5
+        assert ordre_inverse[0]["_rang_hors_ancre"] == 4
 
 
 # ── Prix réel des formules Multi ─────────────────────────────────────────────
