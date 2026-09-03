@@ -34,6 +34,7 @@ import numpy as np
 
 __all__ = [
     "within_race_auc",
+    "within_race_auc_par_course",
     "market_scores_from_cotes",
     "extract_cotes",
     "rank_auc_report",
@@ -75,6 +76,40 @@ def _auc_one_group(scores: np.ndarray, labels: np.ndarray) -> float | None:
     return (somme_rangs_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
 
 
+def within_race_auc_par_course(labels, scores, groups) -> dict:
+    """AUC de classement COURSE PAR COURSE — les termes que `within_race_auc` moyenne.
+
+    Existe pour rendre possible le seul test qui vaille entre deux variantes :
+    le test APPARIÉ. Comparer deux moyennes agrégées, c'est comparer deux
+    nombres dont le bruit dominant — quel cheval a gagné ce jour-là — est
+    pourtant COMMUN aux deux bras et devrait donc s'annuler. Mesuré le
+    2026-09-03 sur le profil risqué : l'écart-type du rendement par pari est de
+    359 %, ce qui demanderait 371 jours de production pour distinguer deux
+    points de ROI en échantillons indépendants. Sur les mêmes courses, la
+    différence par course est bien plus stable, et c'est elle qu'il faut tester.
+
+    Renvoie {course_id: auc}. Une course inexploitable (aucun positif, ou aucun
+    négatif) est ABSENTE plutôt que remplacée par 0,5 : une valeur neutre
+    inventée diluerait l'écart mesuré vers zéro.
+    """
+    labels = np.asarray(labels, dtype=float)
+    scores = np.asarray(scores, dtype=float)
+    groups = np.asarray(groups)
+    if len(labels) == 0 or not (len(labels) == len(scores) == len(groups)):
+        return {}
+
+    par_course: dict = {}
+    # np.unique trie et donne les indices par groupe en une passe.
+    ordre = np.argsort(groups, kind="mergesort")
+    g_tri, s_tri, l_tri = groups[ordre], scores[ordre], labels[ordre]
+    frontieres = np.flatnonzero(np.r_[True, g_tri[1:] != g_tri[:-1], True])
+    for deb, fin in zip(frontieres[:-1], frontieres[1:]):
+        a = _auc_one_group(s_tri[deb:fin], l_tri[deb:fin])
+        if a is not None:
+            par_course[g_tri[deb]] = a
+    return par_course
+
+
 def within_race_auc(labels, scores, groups) -> float:
     """AUC de classement moyennée PAR COURSE. 0,5 = hasard, 1,0 = parfait.
 
@@ -87,23 +122,12 @@ def within_race_auc(labels, scores, groups) -> float:
 
     Renvoie 0,5 si aucune course n'est exploitable, pour rester une valeur
     neutre comparable plutôt qu'un NaN qui contaminerait un gate.
+
+    Moyenne exactement les termes de `within_race_auc_par_course` : une seule
+    définition du classement intra-course, pour que le chiffre affiché et le
+    test apparié ne puissent jamais diverger.
     """
-    labels = np.asarray(labels, dtype=float)
-    scores = np.asarray(scores, dtype=float)
-    groups = np.asarray(groups)
-    if len(labels) == 0 or not (len(labels) == len(scores) == len(groups)):
-        return 0.5
-
-    aucs: list[float] = []
-    # np.unique trie et donne les indices par groupe en une passe.
-    ordre = np.argsort(groups, kind="mergesort")
-    g_tri, s_tri, l_tri = groups[ordre], scores[ordre], labels[ordre]
-    frontieres = np.flatnonzero(np.r_[True, g_tri[1:] != g_tri[:-1], True])
-    for deb, fin in zip(frontieres[:-1], frontieres[1:]):
-        a = _auc_one_group(s_tri[deb:fin], l_tri[deb:fin])
-        if a is not None:
-            aucs.append(a)
-
+    aucs = list(within_race_auc_par_course(labels, scores, groups).values())
     return float(np.mean(aucs)) if aucs else 0.5
 
 

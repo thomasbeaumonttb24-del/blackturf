@@ -31,12 +31,30 @@ Trois gardes, chacune pour une erreur déjà commise ici
 - Anti-fuite : `fm.computed_at < c.date_heure` des deux côtés (features figées
   AVANT le départ), et le dataset d'entraînement est reconstruit TEL QU'IL ÉTAIT
   à la coupure (`date_fin`), sans quoi le bras « frais » verrait l'avenir.
-- Réplication : le verdict est rendu sur DEUX MOITIÉS chronologiques de la
-  fenêtre d'évaluation. Une seule moitié positive ne conclut rien — sur 42
-  cellules mesurées ailleurs ce mois-ci, une seule répliquait, soit le hasard.
+- Décision APPARIÉE : le verdict vient de la différence de classement COURSE PAR
+  COURSE entre les deux bras, et de son intervalle de confiance. Les deux
+  moitiés chronologiques restent affichées — elles montrent si l'effet tient
+  dans le temps, et un effet de régime s'y voit — mais elles ne décident plus.
+  « Même signe deux fois » est un pile ou face gagné deux fois ; et
+  symétriquement, un effet réel tombe du mauvais côté une fois sur quatre.
 - Référence : l'écart au MARCHÉ (`delta_market`), pas l'AUC nue. Une AUC de 0,76
   n'est ni bonne ni mauvaise dans l'absolu ; ce qui compte est ce qu'elle ajoute
   à un `ORDER BY cote_pmu`.
+
+Pourquoi apparié, chiffré
+─────────────────────────
+Le bruit dominant est de savoir quel cheval a gagné, et il est COMMUN aux deux
+bras puisque ce sont les mêmes courses. Le laisser dans les deux termes, c'est
+comparer deux nombres noyés dans une variance qui aurait dû s'annuler. Mesuré le
+2026-09-03 sur le profil risqué : écart-type du rendement PAR PARI de 359 %, à 87
+paris par jour — soit 371 jours pour distinguer deux points de ROI en
+échantillons indépendants, ~870 pour en distinguer quatre. Aucune décision
+produit n'attend ça, et c'est pourquoi le ROI vécu n'arbitre RIEN : les journées
+vont de −66 % à +24 % sans qu'aucune gate n'ait bougé. Corollaire pratique :
+séquencer les déploiements pour « préserver l'attribution » n'achète rien,
+puisque aucune séquence ne rend deux gates attribuables par le ROI vécu. Elles
+restent en revanche séparables au banc, où on les active une à une sur les mêmes
+courses.
 
 Résultat de la première mesure (2026-09-03) — MESURÉ, PUIS CONSERVÉ
 ──────────────────────────────────────────────────────────────────
@@ -83,7 +101,8 @@ from sqlalchemy import text
 from db.database import AsyncSessionLocal
 from ml.models import BlackTurfEnsemble
 from ml.pipeline import _build_training_dataset_from_db
-from ml.ranking_metrics import extract_cotes, rank_auc_report
+from ml.ranking_metrics import (extract_cotes, rank_auc_report,
+                                within_race_auc_par_course)
 
 # En deçà, aucune moitié ne conclut : l'écart mesuré serait du bruit.
 MIN_COURSES_MOITIE = 200
@@ -147,6 +166,54 @@ def _mesurer(modele: BlackTurfEnsemble, X: pd.DataFrame) -> dict:
     }
 
 
+def _auc_par_course(modele, X: pd.DataFrame) -> dict:
+    """Classement du modèle, COURSE PAR COURSE — la matière du test apparié."""
+    if X.empty:
+        return {}
+    return within_race_auc_par_course(X["_win"].to_numpy(), modele.predict_proba(X),
+                                      X["course_id"].to_numpy())
+
+
+def _test_apparie(a: dict, b: dict, n_tirages: int = 2000,
+                  graine: int = 42) -> dict:
+    """Différence MOYENNE PAR COURSE entre deux bras, et son intervalle.
+
+    Pourquoi apparié plutôt que deux moyennes comparées : le bruit dominant
+    est de savoir quel cheval a gagné, et il est COMMUN aux deux bras puisque
+    ce sont les mêmes courses. En le laissant dans les deux termes, on compare
+    deux nombres noyés dans une variance qui aurait dû s'annuler. Chiffré sur
+    le profil risqué le 2026-09-03 : l'écart-type du rendement par pari atteint
+    359 %, soit 371 jours de production pour distinguer deux points de ROI en
+    échantillons indépendants. Aucune décision produit ne peut attendre ça —
+    donc tout arbitrage se fait apparié, sur les mêmes courses.
+
+    L'intervalle vient d'un bootstrap sur les COURSES (et non sur les
+    partants) : c'est la course qui est l'unité d'observation indépendante,
+    deux partants d'une même course ne l'étant évidemment pas.
+
+    Renvoie l'écart moyen, son intervalle à 95 %, et `conclut` — vrai seulement
+    si l'intervalle exclut zéro. « Même signe deux fois » n'est pas une preuve,
+    c'est un pile ou face gagné deux fois.
+    """
+    communes = sorted(set(a) & set(b))
+    if len(communes) < 30:
+        return {"n_courses": len(communes), "conclut": False, "ecart": None,
+                "ic_bas": None, "ic_haut": None}
+    d = np.array([b[c] - a[c] for c in communes], dtype=float)
+    rng = np.random.default_rng(graine)
+    tirages = rng.integers(0, len(d), size=(n_tirages, len(d)))
+    moyennes = d[tirages].mean(axis=1)
+    bas, haut = np.percentile(moyennes, [2.5, 97.5])
+    return {
+        "n_courses": len(communes),
+        "ecart": float(d.mean()),
+        "ecart_type": float(d.std(ddof=1)),
+        "ic_bas": float(bas),
+        "ic_haut": float(haut),
+        "conclut": bool(bas > 0 or haut < 0),
+    }
+
+
 def _moities(X: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Deux moitiés CHRONOLOGIQUES, découpées par course et non par ligne."""
     courses = list(dict.fromkeys(X["course_id"].tolist()))
@@ -193,6 +260,7 @@ async def main(coupure: datetime, mois: int, horizon_jours: int,
 
     premiere, seconde = _moities(X_eval)
     resultats: dict[str, dict] = {}
+    par_course: dict[str, dict] = {}
     for nom, frac in (("prod", 0.80), ("frais", 0.98)):
         print(f"[{nom}] entraînement frac_train={frac} …", flush=True)
         t0 = datetime.now()
@@ -205,6 +273,9 @@ async def main(coupure: datetime, mois: int, horizon_jours: int,
             "moitie_1": _mesurer(modele, premiere),
             "moitie_2": _mesurer(modele, seconde),
         }
+        # Gardé pour le test apparié : ce sont les MÊMES courses des deux côtés,
+        # c'est ce qui permet au bruit commun de s'annuler.
+        par_course[nom] = _auc_par_course(modele, X_eval)
         del modele
 
     print("\n" + "=" * 72)
@@ -219,20 +290,33 @@ async def main(coupure: datetime, mois: int, horizon_jours: int,
         if a is not None and b is not None:
             print(f"  {'gain frais':<12} {b - a:+.4f} d'écart au marché")
 
-    # Verdict : le gain doit exister DES DEUX CÔTÉS. Un seul côté positif est
-    # indiscernable du hasard, et c'est ainsi qu'on déploie une régression.
-    gains = [resultats["frais"][p].get("delta_market", None) is not None
-             and resultats["prod"][p].get("delta_market", None) is not None
-             and resultats["frais"][p]["delta_market"] > resultats["prod"][p]["delta_market"]
-             for p in ("moitie_1", "moitie_2")]
+    # ── Le verdict, lui, est APPARIÉ ────────────────────────────────────────
+    # Les deux moitiés ci-dessus restent affichées : elles montrent si l'effet
+    # tient dans le temps. Mais elles ne DÉCIDENT plus. « Même signe deux fois »
+    # est un pile ou face gagné deux fois, pas une preuve — et l'inverse est vrai
+    # aussi : un effet réel peut tomber du mauvais côté une fois sur quatre.
+    # Seul l'intervalle sur la différence PAR COURSE tranche.
+    apparie = _test_apparie(par_course["prod"], par_course["frais"])
     print("\n" + "=" * 72)
-    if all(gains):
-        print("VERDICT : le bras frais gagne sur LES DEUX moitiés — l'angle mort coûte.")
-    elif any(gains):
-        print("VERDICT : gain sur UNE SEULE moitié — ne réplique pas, ne rien conclure.")
+    print("\nTest apparié — différence de classement PAR COURSE (frais − prod)")
+    if apparie["ecart"] is None:
+        print(f"  échantillon insuffisant ({apparie['n_courses']} courses appariées)")
+        return 1
+    print(f"  écart moyen      {apparie['ecart']:+.5f}")
+    print(f"  IC 95 %          [{apparie['ic_bas']:+.5f} ; {apparie['ic_haut']:+.5f}]")
+    print(f"  courses          {apparie['n_courses']}  "
+          f"(écart-type par course {apparie['ecart_type']:.4f})")
+
+    print("\n" + "=" * 72)
+    if not apparie["conclut"]:
+        print("VERDICT : l'intervalle contient zéro — aucun effet démontré. "
+              "Garder le découpage actuel.")
+    elif apparie["ecart"] > 0:
+        print("VERDICT : le bras frais gagne, intervalle strictement positif — "
+              "l'angle mort coûte du classement.")
     else:
-        print("VERDICT : aucun gain — l'angle mort du hold-out ne coûte pas de "
-              "classement, garder le découpage actuel.")
+        print("VERDICT : le bras frais PERD, intervalle strictement négatif — "
+              "élargir l'apprentissage dégraderait le classement.")
     return 0
 
 
