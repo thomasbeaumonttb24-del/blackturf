@@ -56,8 +56,8 @@ puisque aucune séquence ne rend deux gates attribuables par le ROI vécu. Elles
 restent en revanche séparables au banc, où on les active une à une sur les mêmes
 courses.
 
-Résultat de la première mesure (2026-09-03) — MESURÉ, PUIS CONSERVÉ
-──────────────────────────────────────────────────────────────────
+Résultat (2026-09-03, verdict apparié le 2026-09-04) — MESURÉ, PUIS CONSERVÉ
+───────────────────────────────────────────────────────────────────────────
 Coupure 01/07/2026, fenêtre 12 mois, évaluation sur les 2 838 courses du 01/07 au
 30/08. Écart au marché, par moitié chronologique :
 
@@ -65,11 +65,34 @@ Coupure 01/07/2026, fenêtre 12 mois, évaluation sur les 2 838 courses du 01/07
     première moitié   prod −0,0427   frais −0,0484   gain frais −0,0057
     seconde moitié    prod −0,0314   frais −0,0301   gain frais +0,0012
 
-Gain sur UNE SEULE moitié : ça ne réplique pas. Rattraper les 78 jours d'angle
-mort n'améliore pas le classement, et l'hypothèse de départ — « le modèle
-déployé est handicapé par ce qu'il n'a pas appris » — est fausse. Le découpage
-80/20 reste donc en place, et la refonte du gate de promotion qu'un refit aurait
-exigée n'a pas lieu d'être.
+Test apparié, différence de classement PAR COURSE (frais − prod), 2 733 courses
+appariées, écart-type par course 0,2190 :
+
+    écart moyen  −0,00228     IC 95 %  [−0,01081 ; +0,00614]
+
+CONCLUSION, ET SA LIMITE — la seconde compte autant que la première.
+
+L'intervalle contient zéro : aucun gain n'est démontré, donc rien à déployer, et
+la refonte du gate de promotion qu'un refit aurait exigée n'a pas lieu d'être.
+
+Mais il ne dit PAS que l'hypothèse est fausse — première rédaction de ce fichier
+(commit « l'angle mort du hold-out ne coûte pas de classement — hypothèse
+fausse »), qui concluait au SIGNE des deux moitiés et qui est ici RETIRÉE. La
+borne haute vaut +0,006, soit environ le tiers de tout l'avantage de v527 sur le
+marché (+0,019) : un effet de cette taille serait considérable et cette mesure ne
+l'exclut pas. Le bon énoncé est « non résolu à cette taille d'échantillon ».
+
+Ce que ce banc peut voir, chiffré, parce que c'est la vraie leçon :
+erreur-type de l'écart apparié = 0,2190 / √2 733 ≈ 0,0042. Il tranche donc les
+effets d'environ 0,012 et plus. Descendre à 0,002 demanderait ~98 000 courses,
+soit ~2 000 jours au rythme actuel — et même en jetant TOUT l'historique
+disponible (~20 000 courses) on ne descendrait qu'à ~0,004. Le banc de plans
+souffre de la même limite par un autre chemin (session blackturf-97, 2026-09-04 :
+écart apparié à ±5,5 points de ROI sur 4 147 courses, ~15 points détectables).
+
+Autrement dit : on cherche des gains de 3 à 5 points avec des instruments qui
+n'en voient que 15. Aucun raffinement de protocole ne rattrape ça — seul un effet
+GROS (retirer un type de pari entier, pas resserrer un seuil) est arbitrable ici.
 
 Deux réserves qui empêchent de lire ces chiffres comme un verdict sur la
 production, et qu'il ne faut pas perdre :
