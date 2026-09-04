@@ -371,6 +371,109 @@ NB_LIGNES_REVELEES = 2
 MIN_CHAMP_POUR_REVELER = 8
 
 
+# Familles de signaux → libellé lisible. Les clés sont celles produites par
+# ml.narrative (`categorie`) : une famille inconnue est IGNORÉE plutôt que rendue
+# telle quelle, sinon un ajout côté ML ferait apparaître « regularite » brut dans
+# l'interface publique.
+_FAMILLES_SIGNAUX = {
+    "marche": "Marché et mouvements de cote",
+    "forme": "Forme récente",
+    "elo": "Niveau (ELO)",
+    "confrontation": "Confrontations directes",
+    "vitesse": "Vitesse de référence",
+    "classe": "Classe et catégorie",
+    "conditions": "Terrain, distance, corde",
+    "pedigree": "Pedigree",
+    "regularite": "Régularité au podium",
+    "equipement": "Équipement",
+    "professionnel": "Jockey et entraîneur",
+    "modele": "Lecture du modèle",
+    "alerte": "Points de vigilance",
+}
+
+# Nombre de signaux joints à une ligne RÉVÉLÉE. Trois suffisent à montrer le
+# vocabulaire (un atout, une réserve, une vigilance) sans transformer le bas du
+# classement en analyse complète.
+NB_SIGNAUX_PAR_LIGNE = 3
+
+
+def _signaux_du_champ(rows, vbs, features_par_pid: dict) -> tuple[dict, dict]:
+    """Signaux réels du champ, calculés à partir des features déjà en base.
+
+    Retourne ``(signaux_par_participation, agrégat_anonyme)``.
+
+    Les deux fonctions appelées (`explain_prediction`, `_build_signaux`) sont
+    PURES : aucun appel réseau, aucun modèle chargé, aucune requête. Elles sont
+    donc utilisables sur un endpoint public sans risque de coût. L'import est
+    différé pour ne pas payer `ml.narrative` sur les appels qui n'en ont pas
+    besoin (une course sans features sort avant).
+    """
+    if not features_par_pid:
+        return {}, {}
+    try:
+        from ml.narrative import explain_prediction, _build_signaux
+    except Exception:  # pragma: no cover — défense : l'aperçu doit survivre
+        return {}, {}
+
+    vb_par_pid = {vb.participation_id: {"ev_max": vb.ev_max, "niveau": vb.niveau}
+                  for vb in vbs}
+    taille_champ = len(rows)
+    par_pid: dict[str, list[dict]] = {}
+    total = pour = contre = vigilance = 0
+    familles: dict[str, int] = {}
+
+    for pred, part, _cheval in rows:
+        feats = features_par_pid.get(part.participation_id)
+        if not feats:
+            continue
+        try:
+            exp = explain_prediction(
+                features=feats,
+                proba_top3=pred.proba_top3 or 0.0,
+                proba_top1=pred.proba_top1 or 0.0,
+                vb=vb_par_pid.get(part.participation_id),
+            )
+            sig = _build_signaux(
+                {"cote_pmu": part.cote_pmu or pred.cote_figee,
+                 "proba_top1": pred.proba_top1 or 0.0,
+                 "proba_top3": pred.proba_top3 or 0.0,
+                 "rang_predit": pred.rang_predit},
+                exp, taille_champ,
+            )
+        except Exception:
+            continue
+        if not sig:
+            continue
+        par_pid[part.participation_id] = sig
+        for sg in sig:
+            total += 1
+            sens = sg.get("sens")
+            if sens == "positif":
+                pour += 1
+            elif sens == "negatif":
+                contre += 1
+            else:
+                vigilance += 1
+            libelle = _FAMILLES_SIGNAUX.get(sg.get("categorie") or "")
+            if libelle:
+                familles[libelle] = familles.get(libelle, 0) + 1
+
+    if not total:
+        return par_pid, {}
+
+    agregat = {
+        "total": total,
+        "pour": pour,
+        "contre": contre,
+        "vigilance": vigilance,
+        # Familles triées par poids RÉEL dans cette course, pas par un ordre figé :
+        # un prospect doit lire ce que le modèle a regardé ici, pas un catalogue.
+        "familles": [{"label": lib, "n": n}
+                     for lib, n in sorted(familles.items(), key=lambda kv: -kv[1])],
+    }
+    return par_pid, agregat
+
+
 def _bande_cote(cote: float | None) -> str | None:
     """Tranche de cote — assez large pour ne pas désigner un cheval précis."""
     if not cote or cote <= 1:
@@ -400,6 +503,14 @@ class ApercuAnalyseOut(BaseModel):
     # numéro ni nom ne quittent le serveur.
     classement: list[dict] = []
     nb_lignes_revelees: int = 0
+    # Ce que le modèle a RÉELLEMENT lu sur cette course, sans nommer personne :
+    # nombre de signaux retenus, répartition pour / contre et familles couvertes.
+    # C'est la preuve chiffrée que l'analyse ne se résume pas à la cote — et la
+    # seule qu'on puisse donner gratuitement sans livrer la sélection.
+    signaux_course: Optional[dict] = None
+    # Critères réellement calculés pour cette course (clés de features non nulles).
+    # Remplace la promesse commerciale figée « 80 critères » par une mesure.
+    nb_criteres: int = 0
 
 
 @router.get("/courses/{course_id}/apercu", response_model=ApercuAnalyseOut)
@@ -452,6 +563,46 @@ async def get_apercu_analyse(
         # Arrondi à 5 % : une espérance au point près servirait à identifier le cheval.
         base.ev_max_pct = int(round(ev * 100 / 5.0) * 5)
 
+    # ── Ce que le modèle a lu, sans nommer personne ───────────────────────────
+    # Les signaux sont recalculés depuis les features DÉJÀ en base par deux
+    # fonctions pures (cf. `_signaux_du_champ`). Ils servent à deux choses :
+    #   • l'agrégat anonyme — combien de signaux, pour / contre, quelles familles :
+    #     un prospect voit la profondeur réelle de l'analyse sans sa sélection ;
+    #   • les signaux des lignes RÉVÉLÉES (le bas du classement) — le vocabulaire
+    #     complet montré sur des chevaux que le modèle écarte, donc sans valeur
+    #     de pari. Le haut du classement, lui, reste payant.
+    from db.models import FeatureML
+    from db.database import desempoisonner
+    features_par_pid: dict[str, dict] = {}
+    try:
+        pids = [pa.participation_id for _, pa, _ in rows]
+        if pids:
+            fr = await db.execute(
+                select(FeatureML.participation_id, FeatureML.features)
+                .where(FeatureML.participation_id.in_(pids))
+            )
+            features_par_pid = {pid: (f or {}) for pid, f in fr.all() if f}
+    except Exception:
+        # Cette requête est OPTIONNELLE : sans elle, l'aperçu perd ses signaux
+        # mais reste juste. En revanche PostgreSQL avorte la transaction entière
+        # dès qu'une requête échoue — sans ce rollback, l'échec ressortirait sur
+        # la lecture du résultat, quinze lignes plus bas, avec un message qui
+        # n'aurait plus aucun rapport avec la cause (cf. db.database).
+        await desempoisonner(db)
+        features_par_pid = {}
+
+    # Critères RÉELLEMENT calculés : union des clés à valeur non nulle sur le champ.
+    # Compter les clés d'un seul cheval sous-estime (une feature peut manquer pour
+    # lui seul) ; compter toutes les clés du schéma surestime (colonnes vides).
+    if features_par_pid:
+        cles: set[str] = set()
+        for f in features_par_pid.values():
+            cles.update(k for k, v in f.items() if v is not None)
+        base.nb_criteres = len(cles)
+
+    signaux_par_pid, agregat_signaux = _signaux_du_champ(rows, vbs, features_par_pid)
+    base.signaux_course = agregat_signaux or None
+
     # ── Aperçu du classement ──────────────────────────────────────────────────
     # Avant la course : toutes les lignes portent le rang et les probabilités
     # (la FORME du classement, qui n'identifie personne), et seules les
@@ -497,6 +648,12 @@ async def get_apercu_analyse(
             })
             if part.numero in positions:
                 ligne["position"] = positions[part.numero]
+            sig = signaux_par_pid.get(part.participation_id)
+            if sig:
+                ligne["signaux"] = [
+                    {"label": sg["label"], "detail": sg.get("detail") or "", "sens": sg["sens"]}
+                    for sg in sig[:NB_SIGNAUX_PAR_LIGNE]
+                ]
         lignes.append(ligne)
     base.classement = lignes
     base.nb_lignes_revelees = sum(1 for l in lignes if l["revele"])

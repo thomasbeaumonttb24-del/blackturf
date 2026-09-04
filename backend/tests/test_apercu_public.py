@@ -15,13 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
     Hippodrome, Reunion, Course, Cheval, Participation, Prediction, Resultat,
+    FeatureML,
 )
 
 pytestmark = pytest.mark.asyncio
 
 
 async def _course_analysee(db: AsyncSession, course_id: str, statut: str = "a_venir",
-                           champ: int = 3) -> None:
+                           champ: int = 3, avec_features: bool = False) -> None:
     """Course notée : le n°1 du modèle (n°7) N'EST PAS le favori des cotes (n°3),
     ce qui est précisément le cas que la carte met en avant. `champ` complète le
     lot avec des chevaux de fond pour tester la queue de classement révélée."""
@@ -60,6 +61,20 @@ async def _course_analysee(db: AsyncSession, course_id: str, statut: str = "a_ve
             proba_top1=proba, proba_top3=min(0.99, proba * 2), rang_predit=rang,
             confidence_score=61.4,
         ))
+        if avec_features:
+            # Features réelles au sens du modèle : ce sont elles qui produisent
+            # les signaux (forme excellente, terrain défavorable, jockey en
+            # forme…). `None` est posé volontairement pour vérifier que le
+            # comptage des critères ne compte pas les colonnes vides.
+            db.add(FeatureML(participation_id=part_id, features={
+                "forme_5_courses": 0.72 if proba > 0.2 else 0.28,
+                "forme_tendance": 0.15 if proba > 0.2 else -0.12,
+                "jockey_win_rate_30d": 0.24,
+                "terrain_win_rate": 0.05 if proba > 0.2 else 0.45,
+                "elo_vs_moyenne": 90.0 if proba > 0.2 else -80.0,
+                "jours_repos": 21,
+                "feature_jamais_calculee": None,
+            }))
     await db.commit()
 
 
@@ -203,3 +218,80 @@ async def test_apercu_classement_entierement_nomme_apres_la_course(client: Async
     assert lignes[0]["numero"] == 7 and lignes[0]["position"] == 2
     # Un cheval hors des trois premiers n'a pas de position (arrivée partielle).
     assert "position" not in lignes[-1]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Profondeur de l'analyse montrée gratuitement
+# ─────────────────────────────────────────────────────────────────────────────
+# La page gratuite ne disait plus que « une analyse existe » : elle dit
+# maintenant CE QUE le modèle a lu (combien de signaux, pour / contre, quelles
+# familles) et le prouve sur les chevaux qu'il écarte. Ces deux tests gardent la
+# frontière : l'agrégat ne doit désigner personne, et les signaux ne doivent
+# jamais être joints à une ligne masquée.
+
+
+async def test_apercu_compte_les_signaux_sans_designer_de_cheval(
+    client: AsyncClient, db: AsyncSession,
+):
+    """L'agrégat de signaux est la preuve gratuite de profondeur : il chiffre ce
+    que le modèle a retenu sur le champ. Il ne doit contenir aucun numéro, aucun
+    nom, et aucune répartition qui permette de remonter à un cheval."""
+    await _course_analysee(db, "RAP7C1", champ=10, avec_features=True)
+    resp = await client.get("/api/v1/courses/RAP7C1/apercu")
+    data = resp.json()
+
+    sig = data["signaux_course"]
+    assert sig is not None, "des features en base doivent produire des signaux"
+    assert sig["total"] > 0
+    # La répartition est cohérente : chaque signal tombe dans exactement un sens.
+    assert sig["pour"] + sig["contre"] + sig["vigilance"] == sig["total"]
+    # Les familles sont des libellés lisibles, jamais les clés brutes du ML.
+    assert sig["familles"], "au moins une famille de signaux"
+    assert all(f["n"] > 0 for f in sig["familles"])
+    assert all(f["label"][0].isupper() for f in sig["familles"])
+
+    # Le comptage des critères ne retient que les features RÉELLEMENT calculées :
+    # `feature_jamais_calculee` vaut None, elle ne doit pas gonfler le chiffre.
+    assert data["nb_criteres"] == 6
+
+    # Le haut du classement ne fuit toujours pas — l'ajout des signaux ne doit
+    # pas avoir ouvert une porte dérobée.
+    brut = resp.text.upper()
+    assert "OUTSIDER TEST" not in brut and "FAVORI MARCHE" not in brut
+
+
+async def test_apercu_ne_joint_de_signaux_quaux_lignes_revelees(
+    client: AsyncClient, db: AsyncSession,
+):
+    """Les signaux sont le cœur de ce qu'on vend : ils n'accompagnent que les
+    chevaux que le modèle ÉCARTE (le bas du classement, déjà nommé). Une ligne
+    masquée qui porterait ses signaux livrerait l'analyse ligne par ligne."""
+    await _course_analysee(db, "RAP8C1", champ=10, avec_features=True)
+    lignes = (await client.get("/api/v1/courses/RAP8C1/apercu")).json()["classement"]
+
+    masquees = [l for l in lignes if not l["revele"]]
+    revelees = [l for l in lignes if l["revele"]]
+    assert masquees and revelees
+
+    assert all("signaux" not in l for l in masquees)
+    # Au moins une ligne révélée porte ses signaux, et chacun est complet.
+    portees = [l for l in revelees if l.get("signaux")]
+    assert portees, "les chevaux écartés doivent montrer POURQUOI ils le sont"
+    for l in portees:
+        assert len(l["signaux"]) <= 3
+        for sg in l["signaux"]:
+            assert sg["sens"] in ("positif", "negatif", "neutre")
+            assert sg["label"]
+
+
+async def test_apercu_sans_features_ne_fabrique_aucun_signal(
+    client: AsyncClient, db: AsyncSession,
+):
+    """Aucune feature en base → aucun signal, aucun critère. On préfère une
+    carte plus maigre à un chiffre reconstitué : c'est la règle de la fiche
+    course (rien d'affiché qui ne vienne d'un champ réel)."""
+    await _course_analysee(db, "RAP9C1", champ=10)
+    data = (await client.get("/api/v1/courses/RAP9C1/apercu")).json()
+    assert data["signaux_course"] is None
+    assert data["nb_criteres"] == 0
+    assert all("signaux" not in l for l in data["classement"])
