@@ -1158,6 +1158,18 @@ async def _run_nightly_retraining_unlocked() -> None:
             _a = await _calc_alpha(a_session)
             await a_session.commit()
         log.info("pipeline.alpha_marche_done", **_a)
+    # Ajuste la NETTETÉ de la distribution servie — la dernière correction de la
+    # chaîne, et la seule qui porte sur ce qui sort vraiment (blend marché compris).
+    # APRÈS alpha, dans le même ordre qu'à l'inférence : mesurer une correction sur
+    # une grandeur qu'on ne sert pas est précisément l'erreur que l'ordre des
+    # calibrations a déjà coûtée une fois. Identité tant que la mesure ne conclut pas.
+    async with etape(AsyncSessionLocal, "nettete_probas"):
+        from ml.sharpness_calibration import calculer_et_persister as _calc_nettete
+        async with AsyncSessionLocal() as n_session:
+            _n = await _calc_nettete(n_session)
+            await n_session.commit()
+        log.info("pipeline.nettete_done", **{k: v for k, v in _n.items()
+                                             if k != "raisons"})
     # Recalcule la calibration par tranche de cote (corrige favori/longshot dans l'EV
     # des value bets) — auto-apprentissage : s'affine à chaque nuit avec les résultats.
     async with etape(AsyncSessionLocal, "calibration_cote"):
@@ -1911,6 +1923,37 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             bs = float(blend.sum())
             if bs > 0:
                 probas_top1 = blend / bs
+
+        # ── Netteté de la distribution servie (DERNIÈRE étape) ──────────────────
+        # p ∝ p^exposant, Σ = 1. Elle vient après tout le reste parce qu'elle corrige
+        # ce qui est SERVI — la grandeur que `data_quality.calibration_par_bande`
+        # mesure, et celle dont sortent la cote juste, l'EV et le plan de mise.
+        #
+        # Ce qu'elle règle : la probabilité servie est trop CONCENTRÉE sur le haut du
+        # classement. Mesuré sur 90 jours — bande 0,40-0,50 annoncée à 44,3 % pour
+        # 36,4 % réalisés, pendant que toute la masse sous 0,40 est sous-estimée de
+        # 0,0013 sur 46 497 partants. Ce n'est pas la courbe isotone qui échoue :
+        # c'est la renormalisation Σ=1 qui, appliquée APRÈS elle, rend au favori la
+        # confiance qu'elle venait de lui retirer. Une puissance, elle, EST
+        # normalisée : la renormalisation ne peut plus la défaire.
+        #
+        # L'ORDRE NE BOUGE PAS (x ↦ x^a est croissante) : rang affiché, classement,
+        # ordre des value bets sont identiques au partant près. Seules les VALEURS
+        # changent — exactement ce que l'alerte dit faussé.
+        #
+        # Exposant APPRIS chaque nuit et retenu seulement s'il tient hors échantillon
+        # (cf. ml.sharpness_calibration). Tant que rien n'est prouvé il vaut 1,0,
+        # c'est-à-dire l'identité exacte : ce bloc est alors sans effet.
+        try:
+            from ml.algo_flags import FLAGS as _AFsh
+            if _AFsh.sharpness_calibration:
+                from ml.sharpness_calibration import (
+                    appliquer as _sh_appliquer, exposant_en_cache as _sh_exposant,
+                )
+                _exposant = _sh_exposant()
+                probas_top1 = _sh_appliquer(probas_top1, _exposant)
+        except Exception as e:
+            log.warning("pipeline.sharpness_skip", err=str(e)[:140])
 
         # Désactive avant recalcul, sans SUPPRIMER : l'identité du value bet et son
         # flag `notifie` doivent survivre aux rafraîchissements de cotes. L'ancien

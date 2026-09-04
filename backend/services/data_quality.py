@@ -138,6 +138,12 @@ SEUIL_ECHECS_TACHES_RECENTS = 5
 # Le seuil n'est pas zéro : quelques features légitimement constantes existent
 # (`saison_code` l'est sur toute fenêtre courte). 12 est au-dessus de ce bruit de
 # fond et bien en dessous des 29 constatées.
+#
+# IL PORTE SUR LES SEULES MORTES INEXPLIQUÉES (cf. `ml.feature_health.SANS_SOURCE`).
+# Compter les autres revenait à répéter chaque heure un fait établi et vérifié — ce
+# qu'a fait l'alerte 93 fois — en noyant dedans les features dont personne n'a
+# cherché la cause. Le total, lui, reste rapporté : il n'est pas caché, il n'alerte
+# simplement plus tout seul.
 SEUIL_FEATURES_MORTES = 12
 # Une hausse BRUSQUE compte autant que le niveau : +5 features mortes d'un snapshot
 # à l'autre, c'est une source qui vient de tomber, même si le total reste sous le
@@ -596,6 +602,17 @@ async def sante_features(session: AsyncSession) -> dict:
 
     On compare aussi au snapshot précédent : une source qui tombe fait bondir le
     compte d'un coup, et ce saut doit alerter même sous le seuil absolu.
+
+    UN COMPTE GLOBAL NE SUFFIT PAS, et c'est ce que l'alerte a démontré en tournant :
+    93 répétitions du même message, listant chaque heure les huit premiers noms par
+    ordre alphabétique — dont la moitié documentée depuis l'audit du 2026-08-31 comme
+    dépendant d'une donnée qui n'existe pas à la source. Une alerte qui répète un fait
+    connu ne fait pas remonter celui qui ne l'est pas. On sépare donc les deux
+    (`ml.feature_health.SANS_SOURCE`) : ce qui alerte, c'est l'INEXPLIQUÉ.
+
+    Et le registre lui-même est vérifié en retour : une entrée dont la feature a
+    retrouvé de la variance est signalée (`registre_perime`), sinon une liste
+    d'exceptions se transforme en angle mort permanent.
     """
     # `feature_health` est créée à la volée par `persist_feature_health` : elle
     # n'existe pas tant que le calcul nocturne n'a jamais tourné (base neuve, tests).
@@ -632,6 +649,12 @@ async def sante_features(session: AsyncSession) -> dict:
 
     nouvelles = sorted(set(mortes) - set(precedent)) if precedent is not None else []
     n_features = int(actuel.get("n_features") or 0)
+
+    from ml.feature_health import classer_mortes, registre_perime
+    classees = classer_mortes(mortes)
+    # Une feature documentée qui « meurt » à nouveau n'apprend rien : elle était déjà
+    # morte, et sa cause est connue. Le saut brutal ne doit désigner que l'inattendu.
+    nouvelles_inexpliquees = [f for f in nouvelles if f in set(classees["inexpliquees"])]
     return {
         "disponible": True,
         # `_as_dt` : aiosqlite (tests) rend un TEXTE là où asyncpg rend un datetime.
@@ -641,8 +664,16 @@ async def sante_features(session: AsyncSession) -> dict:
         "part_mortes": round(len(mortes) / n_features, 3) if n_features else None,
         # Les noms sont bornés : une anomalie doit rester lisible dans une alerte.
         "mortes": sorted(mortes)[:40],
-        "nouvelles_mortes": nouvelles[:20],
-        "n_nouvelles_mortes": len(nouvelles),
+        # Ce que l'audit a établi (cause connue) vs ce que personne n'a expliqué.
+        "mortes_documentees": classees["documentees"],
+        "n_mortes_documentees": len(classees["documentees"]),
+        "mortes_inexpliquees": classees["inexpliquees"][:40],
+        "n_mortes_inexpliquees": len(classees["inexpliquees"]),
+        "raisons_connues": classees["raisons"],
+        # Entrées du registre dont la feature revit : la cause inscrite n'est plus vraie.
+        "registre_perime": registre_perime(mortes),
+        "nouvelles_mortes": nouvelles_inexpliquees[:20],
+        "n_nouvelles_mortes": len(nouvelles_inexpliquees),
     }
 
 
@@ -678,9 +709,18 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
     que 0,08 % des lignes. Toute la queue >= 0,40 pèse ~490 partants sur 47 045 :
     à ce volume, aucune méthode de calibration ne peut être départagée.
 
-    On ne change donc pas la calibration sur ces données-là. On rend la dérive
-    VISIBLE, avec un seuil de preuve, pour qu'elle devienne actionnable le jour où
-    le volume le permettra — plutôt que d'être redécouverte par un audit.
+    CE QUI A CHANGÉ DEPUIS (2026-09-04). Les cinq variantes se battaient toutes sur
+    la même queue de ~490 partants, c'est-à-dire au mauvais endroit. Le défaut se lit
+    aussi de l'autre bout : la masse qui manque sous 0,40 (−0,0013 sur 46 497
+    partants, ≈ 60 victoires) est celle qui déborde au-dessus (≈ 45 victoires). C'est
+    UNE seule grandeur — la netteté de la distribution — et elle s'ajuste sur les
+    47 045 partants, pas sur 96. `ml.sharpness_calibration` le fait, sous la même
+    règle que le reste : identité tant que rien ne tient hors échantillon.
+
+    Cette mesure-ci ne change pas de rôle pour autant : elle reste le juge, pas le
+    correcteur. Elle rapporte en plus ce qui a été servi APRÈS la mise en service de
+    l'exposant (`bandes_depuis_correction`) — sans quoi une fenêtre de 90 jours
+    continuerait de crier des semaines durant sur un défaut déjà corrigé.
     """
     # SQL volontairement PORTABLE : ni `LATERAL`, ni `jsonb_array_elements`, ni
     # `make_interval` — la suite tourne sur SQLite, et une supervision dont
@@ -689,7 +729,7 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
     # sur la fenêtre, contre une jointure latérale par partant.
     depuis = datetime.now(timezone.utc) - timedelta(days=int(jours))
     partants = (await session.execute(text("""
-        SELECT p.course_id, pa.numero, p.proba_top1
+        SELECT p.course_id, pa.numero, p.proba_top1, p.created_at
         FROM prediction_evaluation p
         JOIN participations pa ON pa.participation_id = p.participation_id
         JOIN courses c ON c.course_id = p.course_id
@@ -730,22 +770,43 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
                 except (TypeError, ValueError):
                     continue
 
-    lignes: list[tuple[float, int]] = []
-    for course_id, numero, proba in partants:
+    lignes: list[tuple[float, int, datetime | None]] = []
+    for course_id, numero, proba, produit_le in partants:
         gagnant = vainqueur.get(course_id)
         if gagnant is None:
             continue                      # course sans arrivée exploitable
         try:
-            lignes.append((float(proba), 1 if int(numero) == gagnant else 0))
+            lignes.append((float(proba), 1 if int(numero) == gagnant else 0,
+                           _as_dt(produit_le)))
         except (TypeError, ValueError):
             continue
 
     if len(lignes) < MIN_OBS_BANDE_CALIBRATION:
         return {"disponible": False, "raison": "cohorte trop courte", "n": len(lignes)}
 
+    # Date de mise en service de la correction de netteté, s'il y en a une. Une
+    # fenêtre de 90 jours regarde très majoritairement des pronostics produits AVANT
+    # elle : sans cette date, l'alerte continuerait de crier des semaines durant sur
+    # un défaut déjà corrigé — et personne ne saurait dire si la correction a pris.
+    corrige_depuis = await _correction_nettete_depuis(session)
+
+    resultat = {
+        "disponible": True, "fenetre_jours": jours, "n": len(lignes),
+        "bandes": _bandes(lignes),
+        "correction_nettete_depuis": (corrige_depuis.isoformat() if corrige_depuis else None),
+    }
+    if corrige_depuis:
+        depuis_correction = [l for l in lignes if l[2] and l[2] >= corrige_depuis]
+        resultat["n_depuis_correction"] = len(depuis_correction)
+        resultat["bandes_depuis_correction"] = _bandes(depuis_correction)
+    return resultat
+
+
+def _bandes(lignes) -> list[dict]:
+    """Découpe (proba servie, gagné) en bandes de probabilité. Fonction PURE."""
     bandes = []
     for bas, haut in BANDES_CALIBRATION:
-        pris = [(p, g) for p, g in lignes if bas <= p < haut]
+        pris = [(p, g) for p, g, *_ in lignes if bas <= p < haut]
         if not pris:
             continue
         n = len(pris)
@@ -762,7 +823,27 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
             # aucune conclusion — c'est la différence entre mesurer et conclure.
             "concluant": n >= MIN_OBS_BANDE_CALIBRATION,
         })
-    return {"disponible": True, "fenetre_jours": jours, "n": len(lignes), "bandes": bandes}
+    return bandes
+
+
+async def _correction_nettete_depuis(session: AsyncSession) -> datetime | None:
+    """Quand l'exposant de netteté en vigueur a-t-il été mis en service ?
+
+    Lecture DÉFENSIVE : la table n'existe pas tant que le premier calcul nocturne
+    n'a pas tourné, et une requête échouée avorte la transaction entière sous
+    PostgreSQL (cf. `desempoisonner`).
+    """
+    try:
+        r = (await session.execute(text(
+            "SELECT data FROM sharpness_calibration WHERE id = 1"))).first()
+    except Exception:                                            # noqa: BLE001
+        from db.database import desempoisonner
+        await desempoisonner(session)
+        return None
+    if not r or not r[0]:
+        return None
+    data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+    return _as_dt(data.get("applique_depuis"))
 
 
 async def rapport_qualite(session: AsyncSession) -> dict:
@@ -833,25 +914,55 @@ async def rapport_qualite(session: AsyncSession) -> dict:
                             f"({', '.join(features['nouvelles_mortes'][:8])}) — une source "
                             "de données vient probablement de tomber"),
             })
-        elif features["n_mortes"] >= SEUIL_FEATURES_MORTES:
+        elif features["n_mortes_inexpliquees"] >= SEUIL_FEATURES_MORTES:
+            # Le message ne dit plus « le modèle les apprend comme du bruit » : depuis
+            # `ml.models.train`, une colonne constante sur la part d'apprentissage n'entre
+            # plus dans le modèle. Ce qui reste vrai, et seul en jeu, c'est qu'elles ne
+            # servent à rien tant que leur cause n'est pas trouvée.
             anomalies.append({
                 "code": "features_mortes",
                 "gravite": "warning",
-                "message": (f"{features['n_mortes']} features sur {features['n_features']} "
-                            "sont à variance nulle : le modèle les apprend comme du bruit "
-                            f"({', '.join(features['mortes'][:8])}…)"),
+                "message": (f"{features['n_mortes_inexpliquees']} features sur "
+                            f"{features['n_features']} sont à variance nulle sans cause "
+                            f"établie ({', '.join(features['mortes_inexpliquees'][:8])}"
+                            f"{'…' if features['n_mortes_inexpliquees'] > 8 else ''}) — "
+                            "elles n'apportent rien au modèle, qui ne les apprend plus, "
+                            f"et {features['n_mortes_documentees']} autres sont "
+                            "documentées comme dépourvues de source"),
+            })
+        if features.get("registre_perime"):
+            # Le registre des causes établies affirme « cette donnée n'existe pas ». Si
+            # la feature revit, l'affirmation est fausse et masque désormais un signal.
+            anomalies.append({
+                "code": "registre_features_perime",
+                "gravite": "warning",
+                "message": (f"{len(features['registre_perime'])} feature(s) inscrites "
+                            "comme sans source ont retrouvé de la variance "
+                            f"({', '.join(features['registre_perime'][:8])}) — le registre "
+                            "ml.feature_health.SANS_SOURCE doit être mis à jour"),
             })
 
+    # Ce que la fenêtre observe est le PASSÉ : 90 jours de pronostics, presque tous
+    # produits avant la correction en vigueur. Sans le dire, l'alerte se répète des
+    # semaines après le correctif et laisse croire qu'il n'a rien donné.
+    _depuis_corr = {b["bande"]: b for b in (calibration.get("bandes_depuis_correction") or [])}
     for bande in (calibration.get("bandes") or []):
         if bande["concluant"] and abs(bande["ecart"]) >= SEUIL_ECART_CALIBRATION:
+            _suite = ""
+            _recent = _depuis_corr.get(bande["bande"])
+            if _recent:
+                _suite = (f" ; depuis la correction de netteté, l'écart est de "
+                          f"{_recent['ecart']:+.1%} sur {_recent['n']} partants"
+                          f"{'' if _recent['concluant'] else ' (pas encore concluant)'}")
             anomalies.append({
                 "code": "calibration_derive",
                 "gravite": "warning",
-                "message": (f"Probabilités de la bande {bande['bande']} : annoncées "
+                "message": (f"Probabilités de la bande {bande['bande']} sur "
+                            f"{calibration.get('fenetre_jours')} j : annoncées "
                             f"{bande['proba_moyenne']:.1%}, réalisées {bande['taux_reel']:.1%} "
                             f"({bande['ecart']:+.1%} sur {bande['n']} partants) — la cote "
                             "juste affichée et l'espérance qui en découle sont faussées "
-                            "d'autant"),
+                            f"d'autant{_suite}"),
             })
 
     if fraicheur["statut"] == "stale":

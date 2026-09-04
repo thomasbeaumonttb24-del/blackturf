@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
         from ml.drift_detector import initialize_drift_detector
         from ml.blend_calibration import charger_alpha
         from ml.harville_calibration import charger_exposants
+        from ml.sharpness_calibration import charger_exposant as charger_nettete
         from ml.meta_learner import initialize_meta_learner
         async with AsyncSessionLocal() as al_session:
             al = await initialize_adaptive_learning(al_session)
@@ -50,6 +51,10 @@ async def lifespan(app: FastAPI):
             # `predict_course` le lit dans un cache mémoire ; sans ce chargement, un
             # alpha appris resterait appris et jamais servi jusqu'au redémarrage.
             _alpha = await charger_alpha(al_session)
+            # Netteté de la distribution servie : `predict_course` la lit dans un
+            # cache mémoire, comme alpha. Sans ce chargement, un exposant appris
+            # resterait appris et jamais servi jusqu'au redémarrage suivant.
+            _nettete = await charger_nettete(al_session)
             log.info(
                 "adaptive_learning.initialized",
                 temperature=round(al.temperature, 4),
@@ -58,6 +63,7 @@ async def lifespan(app: FastAPI):
                 meta_learner_trained=ml_meta.is_trained,
                 exposants_arrivee=[round(x, 3) for x in _exp],
                 alpha_marche=round(float(_alpha.get("alpha_max") or 0.42), 3),
+                nettete_probas=round(float(_nettete.get("exposant") or 1.0), 3),
             )
     except Exception as e:
         log.warning("adaptive_learning.init_failed", err=str(e))

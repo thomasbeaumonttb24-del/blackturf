@@ -193,6 +193,10 @@ class BlackTurfEnsemble:
         self.win_auc: float = 0.0
         self.win_brier: float = 1.0
         self.feature_names: list[str] = []
+        # Colonnes écartées à l'entraînement parce qu'elles étaient CONSTANTES sur la
+        # part d'apprentissage. Conservées pour que le back-office puisse dire ce que
+        # le modèle a refusé d'apprendre, et pourquoi (cf. `train`).
+        self.constant_features: list[str] = []
         self.stacking_feature_names: list[str] = []
         self.scaler = StandardScaler()
         self.version_num: int = 0
@@ -234,7 +238,36 @@ class BlackTurfEnsemble:
         # `ORDER BY cote_pmu`. Le blend marché en aval ne peut rien y changer :
         # mélanger deux prédicteurs qui disent la même chose n'apporte rien.
         _exclues = META_COLS | (COLONNES_MARCHE if _AF0.market_residual else set())
-        self.feature_names = [c for c in X.columns if c not in _exclues]
+        candidates = [c for c in X.columns if c not in _exclues]
+
+        # ── Aucune colonne CONSTANTE n'entre dans l'apprentissage ────────────
+        # Une feature à variance nulle ne porte aucune information : aucun arbre ne
+        # peut la couper. Elle n'est pas inoffensive pour autant. `colsample_bytree`
+        # tire les colonnes candidates AU HASARD — 20 colonnes mortes sur 211, c'est
+        # près d'une candidate sur dix gaspillée à chaque découpe — et elle pollue
+        # ensuite tout ce qui se lit par colonne : importances, SHAP, et le vecteur
+        # servi à l'inférence.
+        #
+        # Mesuré sur la variance des lignes d'ENTRAÎNEMENT seules : le hold-out ne
+        # participe à aucune décision d'apprentissage, pas même à celle-ci.
+        # L'exclusion est RECALCULÉE à chaque nuit : le jour où une source revient,
+        # sa feature retrouve de la variance et rentre d'elle-même. Rien n'est figé.
+        #
+        # Sans effet de bord à l'inférence : `predict` fait un `reindex` sur
+        # `feature_names`, donc une colonne exclue est simplement ignorée — et une
+        # colonne attendue mais absente reste comblée comme avant.
+        holdout_mask = temporal_holdout_mask(X)
+        _train_rows = X.loc[~holdout_mask, candidates]
+        # Part d'apprentissage vide (jeu minuscule) : on n'exclut rien. Un vecteur de
+        # features vide serait pire que des colonnes mortes.
+        self.constant_features = sorted(
+            c for c in candidates if _train_rows[c].nunique(dropna=False) <= 1
+        ) if len(_train_rows) else []
+        self.feature_names = [c for c in candidates if c not in set(self.constant_features)]
+        if self.constant_features:
+            log.warning("model.constant_features_excluded",
+                        n=len(self.constant_features), n_apprises=len(self.feature_names),
+                        features=self.constant_features[:40])
         # `fillna(0)` — MESURÉ puis CONSERVÉ, pas un oubli.
         #
         # XGBoost, LightGBM et CatBoost gèrent nativement le NaN et apprennent une
@@ -259,7 +292,6 @@ class BlackTurfEnsemble:
         X_feat = X[self.feature_names].fillna(0)
 
         from ml.algo_flags import FLAGS as _AF
-        holdout_mask = temporal_holdout_mask(X)
         train_mask = ~holdout_mask
         X_train, X_test = X_feat[train_mask], X_feat[holdout_mask]
         y_train, y_test = y[train_mask], y[holdout_mask]

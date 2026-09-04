@@ -22,7 +22,7 @@
  */
 
 import { AlertTriangle, CheckCircle2, Clock, Info, XCircle } from "lucide-react";
-import { Empty, Note, Section, StatTile, num, pct, tone } from "./kit";
+import { Empty, Note, Section, StatTile, num, pct, signedPct, tone } from "./kit";
 
 export interface EtapeApprentissage {
   step: string;
@@ -71,6 +71,21 @@ export interface OutilsApprentissagePayload {
     alpha_en_place?: number | null;
     gain_logv?: number | null;
     gain_rang?: number | null;
+    n_courses?: number | null;
+    min_courses?: number | null;
+    raison?: string | null;
+    mis_a_jour_le?: string | null;
+    pourquoi?: string;
+  };
+  nettete_probas?: {
+    mesure_disponible: boolean;
+    exposant?: number | null;
+    appris: boolean;
+    residuel?: number | null;
+    gain_logv?: number | null;
+    ecart_bande_haute_en_place?: number | null;
+    ecart_bande_haute_candidat?: number | null;
+    n_bande_haute?: number | null;
     n_courses?: number | null;
     min_courses?: number | null;
     raison?: string | null;
@@ -126,6 +141,7 @@ const NOMS_ETAPES: Record<string, string> = {
   clv_monitor: "Valeur à la clôture (CLV)",
   poids_appris_types: "Poids appris par type de pari",
   integrite_pmu: "Intégrité des données PMU",
+  nettete_probas: "Netteté des probabilités servies",
 };
 
 function nomEtape(step: string): string {
@@ -196,6 +212,7 @@ export default function OutilsApprentissage({
   const arrivee = data.modele_arrivee;
   const temp = data.temperature;
   const alpha = data.alpha_marche;
+  const nettete = data.nettete_probas;
   const plans = data.plans;
   const gates = data.gates_types;
 
@@ -226,7 +243,7 @@ export default function OutilsApprentissage({
       )}
 
       {/* ── Les correcteurs, et ce qu'ils ont prouvé ──────────── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatTile
           label="Correcteur contextuel"
           hint="Ajuste la probabilité selon la discipline, le terrain, l'hippodrome, l'heure. Il n'est mis en service que s'il fait MIEUX que ne rien corriger, sur des courses qu'il n'a pas vues."
@@ -283,6 +300,22 @@ export default function OutilsApprentissage({
                     ? `+${(alpha.gain_logv ?? 0).toFixed(4)} de vraisemblance, classement ${(alpha.gain_rang ?? 0) >= 0 ? "préservé" : "dégradé"}`
                     : (alpha.raison ?? "aucun réglage ne fait mieux"))
                 : `en attente — ${num(alpha?.min_courses)} courses nécessaires`}
+            </span>
+          }
+        />
+        <StatTile
+          label="Netteté des probabilités"
+          hint="La probabilité servie est-elle trop concentrée sur les premiers du classement ? Cet exposant l'aplatit ou la resserre sur TOUTE la course (somme préservée, ordre inchangé). 1,00 = servie telle quelle. Il n'est retenu que s'il améliore la vraisemblance hors échantillon SANS dégrader la calibration de la queue."
+          value={nettete?.exposant != null ? nettete.exposant.toFixed(2) : "1,00"}
+          valueClass={nettete?.appris ? "text-emerald-700" : "text-gray-900"}
+          sub={nettete?.appris ? "ajustée sur les arrivées" : "distribution servie telle quelle"}
+          footer={
+            <span className="text-[11px] text-gray-600">
+              {nettete?.mesure_disponible
+                ? (nettete.appris
+                    ? `écart de la queue ${signedPct((nettete.ecart_bande_haute_en_place ?? 0) * 100)} → ${signedPct((nettete.ecart_bande_haute_candidat ?? 0) * 100)} sur ${num(nettete.n_bande_haute)} partants`
+                    : (nettete.raison ?? "aucun exposant ne fait mieux"))
+                : `en attente — ${num(nettete?.min_courses)} courses nécessaires`}
             </span>
           }
         />
