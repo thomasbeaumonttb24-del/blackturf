@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, and_, or_, case, text
+from sqlalchemy import select, func, desc, and_, or_, case, text, delete, update
 
 from api.model_metrics import plausible_roi, real_model_metrics
 from api.routes.auth import require_admin
@@ -478,6 +478,91 @@ async def adjust_bankroll(
     log.info("admin.bankroll_adjust", user_id=user_id, delta=delta, nouveau_capital=nouveau,
              note=str(body.get("note") or "")[:200])
     return {"ok": True, "delta": delta, "nouveau_capital_initial": nouveau}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Supprime définitivement un compte et ce qui n'appartient qu'à lui.
+
+    Sert au ménage (inscriptions bidon jamais confirmées) et au droit à
+    l'effacement. Trois refus, parce qu'ils coûtent plus cher que le ménage :
+
+    - son propre compte : l'admin se fermerait la porte de la console ;
+    - un autre compte admin : on ne retire pas un accès de supervision d'un clic
+      dans un tableau — il faut d'abord lui ôter le rôle ;
+    - un compte dont l'abonnement est encore vivant côté Stripe : la facturation
+      continuerait sans personne en face. Résiliation d'abord.
+
+    L'historique comptable (`subscription_events`) est CONSERVÉ, détaché du
+    compte (`user_id` à NULL) : la ligne y porte déjà l'e-mail en clair, elle
+    reste lisible sans l'utilisateur — c'est ce que dit le modèle, et ce
+    qu'impose la conservation des pièces comptables. Le client Stripe, lui,
+    survit chez Stripe : rien ici ne le touche.
+    """
+    from api.routes.stripe_routes import STATUTS_VIVANTS
+    from db.models import Bankroll, Recommandation, Strategie
+
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if user_id == admin.user_id:
+        raise HTTPException(status_code=400, detail="Auto-suppression interdite")
+    if user.is_admin:
+        raise HTTPException(
+            status_code=400,
+            detail="Compte admin : retirez-lui d'abord le rôle avant de le supprimer.")
+
+    vivant = (await db.execute(
+        select(Subscription).where(and_(
+            Subscription.user_id == user_id,
+            Subscription.statut.in_(STATUTS_VIVANTS),
+        ))
+    )).scalars().first()
+    if vivant is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Abonnement encore actif ({vivant.statut}) : résiliez-le dans Stripe "
+                   "avant de supprimer le compte, sinon la facturation continue.")
+
+    email = user.email
+    supprime: dict[str, int] = {}
+
+    # L'ordre suit les clés étrangères : un enfant avant son parent, sinon la
+    # base refuse la suppression et la transaction entière repart en arrière.
+    supprime["paris"] = (await db.execute(
+        delete(BankrollEntry).where(BankrollEntry.user_id == user_id))).rowcount or 0
+    # Un pari d'un AUTRE compte pourrait pointer une reco de celui-ci : on coupe
+    # le lien plutôt que de faire échouer la suppression sur une contrainte.
+    await db.execute(
+        update(BankrollEntry)
+        .where(BankrollEntry.reco_id.in_(
+            select(Recommandation.reco_id).where(Recommandation.user_id == user_id)))
+        .values(reco_id=None))
+    supprime["recommandations"] = (await db.execute(
+        delete(Recommandation).where(Recommandation.user_id == user_id))).rowcount or 0
+    supprime["portefeuilles"] = (await db.execute(
+        delete(Bankroll).where(Bankroll.user_id == user_id))).rowcount or 0
+    supprime["strategies"] = (await db.execute(
+        delete(Strategie).where(Strategie.user_id == user_id))).rowcount or 0
+    supprime["alertes"] = (await db.execute(
+        delete(AlerteLog).where(AlerteLog.user_id == user_id))).rowcount or 0
+    supprime["evenements_abonnement_detaches"] = (await db.execute(
+        update(SubscriptionEvent)
+        .where(SubscriptionEvent.user_id == user_id)
+        .values(user_id=None))).rowcount or 0
+    supprime["abonnements"] = (await db.execute(
+        delete(Subscription).where(Subscription.user_id == user_id))).rowcount or 0
+
+    await db.delete(user)
+    await db.commit()
+
+    log.warning("admin.delete_user", admin_id=admin.user_id, user_id=user_id,
+                email=email, supprime=supprime)
+    return {"ok": True, "email": email, "supprime": supprime}
 
 
 @router.get("/users-export")

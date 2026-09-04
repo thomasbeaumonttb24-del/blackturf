@@ -9,6 +9,11 @@ tiers — donnait un compte pleinement fonctionnel. Deux dégâts concrets :
   destinés aux vrais abonnés ;
 - l'essai gratuit Stripe se multiplie à volonté, une adresse bidon par compte.
 
+La règle vaut maintenant à la CONNEXION (`api.routes.auth.login`) : sans
+confirmation, pas de session, donc pas de compte utilisable. Elle est également
+relue devant ce qui coûte de l'argent (`require_verified_email`), car les
+sessions ouvertes avant sa mise en service vivent encore jusqu'à 7 jours.
+
 On exige donc la confirmation — mais seulement pour les comptes créés à partir de
 la mise en service. Les comptes antérieurs sont dispensés : ils se sont inscrits
 sous une règle qui ne l'exigeait pas, et l'un d'eux est un abonné payant. Leur

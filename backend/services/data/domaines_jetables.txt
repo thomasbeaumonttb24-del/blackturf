@@ -1,0 +1,140 @@
+# Domaines de boîtes jetables refusés à l'inscription.
+#
+# Une boîte jetable est ouverte sans mot de passe, expire en quelques minutes et
+# personne ne la relève : le lien de confirmation y meurt, les alertes achetées
+# n'atteignent personne, et l'essai Stripe se rouvre autant de fois qu'on veut.
+#
+# Lignes vides et lignes commençant par « # » ignorées. Un domaine listé couvre
+# aussi ses sous-domaines (« x.yopmail.com » est refusé par « yopmail.com »).
+# Ajouts sans redéploiement : variable d'environnement BT_DOMAINES_JETABLES_EXTRA
+# (séparés par des virgules).
+
+# ── Yopmail et ses alias publiés ─────────────────────────────────────────────
+yopmail.com
+yopmail.fr
+yopmail.net
+cool.fr.nf
+jetable.fr.nf
+nospam.ze.tc
+nomail.xl.cx
+mega.zik.dj
+speed.1s.fr
+courriel.fr.nf
+moncourrier.fr.nf
+monemail.fr.nf
+monmail.fr.nf
+hide.biz.st
+mymail.infos.st
+
+# ── Mailinator et ses alias ──────────────────────────────────────────────────
+mailinator.com
+mailinator.net
+mailinator.org
+mailinator2.com
+mailinater.com
+notmailinator.com
+binkmail.com
+bobmail.info
+chammy.info
+devnullmail.com
+letthemeatspam.com
+reallymymail.com
+safetymail.info
+sendspamhere.com
+sogetthis.com
+spamherelots.com
+spamhereplease.com
+streetwisemail.com
+suremail.info
+thisisnotmyrealemail.com
+tradermail.info
+veryrealemail.com
+zippymail.info
+
+# ── Guerrilla Mail ───────────────────────────────────────────────────────────
+guerrillamail.com
+guerrillamail.net
+guerrillamail.org
+guerrillamail.biz
+guerrillamail.de
+guerrillamail.info
+guerrillamailblock.com
+sharklasers.com
+grr.la
+spam4.me
+pokemail.net
+
+# ── Boîtes « 10 minutes » et générateurs d'adresses ──────────────────────────
+10minutemail.com
+10minutemail.net
+10minutemail.org
+10minemail.com
+20minutemail.com
+1secmail.com
+1secmail.net
+1secmail.org
+minuteinbox.com
+tempmail.com
+tempmail.net
+tempmail.plus
+tempmailo.com
+tempmailaddress.com
+temp-mail.org
+temp-mail.io
+tempail.com
+tempinbox.com
+tempr.email
+tmail.ws
+tmailor.com
+mail.tm
+dropmail.me
+moakt.com
+mohmal.com
+luxusmail.org
+emailondeck.com
+emailfake.com
+generator.email
+fakemail.net
+fakeinbox.com
+inboxkitten.com
+throwawaymail.com
+getnada.com
+nada.email
+dispostable.com
+mailnesia.com
+maildrop.cc
+mailcatch.com
+mailpoof.com
+mailsac.com
+harakirimail.com
+mintemail.com
+deadaddress.com
+spamavert.com
+mailexpire.com
+mailnull.com
+spamex.com
+spamgourmet.com
+e4ward.com
+incognitomail.org
+discard.email
+discardmail.com
+discardmail.de
+burnermail.io
+
+# ── Équivalents germanophones et russophones fréquents ───────────────────────
+trashmail.com
+trashmail.de
+trashmail.net
+trash-mail.com
+mytrashmail.com
+wegwerfmail.de
+wegwerfemail.de
+spambog.com
+spambog.de
+spambog.ru
+jetable.org
+
+# ── Domaines réservés à la documentation (RFC 2606) : ne relèvent aucun mail ──
+example.com
+example.net
+example.org

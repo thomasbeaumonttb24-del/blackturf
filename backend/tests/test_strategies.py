@@ -25,6 +25,9 @@ async def _expert_headers(client: AsyncClient, db: AsyncSession) -> dict:
         hashed_password=_hash("Expert123!"),
         plan="expert",
         is_admin=False,
+        # Sans adresse confirmée, la connexion est refusée (403) : un compte qui
+        # se connecte pour de vrai est un compte confirmé.
+        email_verified=True,
     )
     db.add(expert)
     await db.commit()

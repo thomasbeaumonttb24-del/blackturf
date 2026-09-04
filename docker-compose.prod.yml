@@ -150,6 +150,16 @@ services:
       - STRIPE_PRICE_PRO_ANNUAL=${STRIPE_PRICE_PRO_ANNUAL}
       - RESEND_API_KEY=${RESEND_API_KEY}
       - ADMIN_EMAIL=${ADMIN_EMAIL}
+      # Controle de l'adresse a l'inscription (services/adresse_email.py). Les
+      # variables de ce fichier sont enumerees une a une : une valeur posee dans
+      # .env sans ligne ici n'atteint JAMAIS le conteneur (cf. le cas
+      # ACCESS_TOKEN_EXPIRE_MINUTES ci-dessus).
+      # - BT_CONTROLE_DNS=0 desactive l'interrogation MX (depannage uniquement :
+      #   les boites jetables et les fautes de frappe restent refusees).
+      # - BT_DOMAINES_JETABLES_EXTRA liste des domaines a refuser en plus de
+      #   backend/services/data/domaines_jetables.txt, separes par des virgules.
+      - BT_CONTROLE_DNS=${BT_CONTROLE_DNS:-1}
+      - BT_DOMAINES_JETABLES_EXTRA=${BT_DOMAINES_JETABLES_EXTRA:-}
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
       - INDEXNOW_KEY=${INDEXNOW_KEY:-}
       - META_ACCESS_TOKEN=${META_ACCESS_TOKEN:-}

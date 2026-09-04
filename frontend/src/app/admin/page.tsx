@@ -558,6 +558,29 @@ export default function AdminPage() {
       mutateUsers();
     } catch { /* noop */ }
   }
+  async function supprimerCompte(uid: string, email: string) {
+    // Confirmation par recopie de l'adresse : un « OK » réflexe ne doit pas
+    // suffire à effacer un compte, et la ligne d'à côté a le même bouton.
+    const saisie = window.prompt(
+      `SUPPRESSION DÉFINITIVE de ${email}\n\n` +
+      "Seront effacés : le compte, ses paris, portefeuilles, stratégies et alertes.\n" +
+      "Sera conservé : l'historique d'abonnement (pièce comptable), détaché du compte.\n\n" +
+      "Recopiez l'adresse e-mail pour confirmer :", "");
+    if (saisie == null) return;
+    if (saisie.trim().toLowerCase() !== email.toLowerCase()) {
+      toast.error("Adresse non conforme — suppression annulée.");
+      return;
+    }
+    try {
+      const res = await adminApi.deleteUser(uid);
+      const n = (res.data?.supprime ?? {}) as Record<string, number>;
+      toast.success(`${email} supprimé — ${n.paris ?? 0} pari(s), ${n.portefeuilles ?? 0} portefeuille(s).`);
+      mutateUsers();
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || "Suppression impossible.");
+    }
+  }
   async function exportUsers() {
     try {
       const res = await adminApi.exportUsers();
@@ -1391,6 +1414,11 @@ export default function AdminPage() {
                         className="rounded px-2 py-1 text-[10px] font-semibold border border-border text-muted-foreground hover:border-brand-gold/50 hover:text-brand-gold-dark transition-colors">
                         💰 Ajuster
                       </button>
+                      <button
+                        onClick={() => supprimerCompte(u.user_id, u.email)}
+                        className="rounded px-2 py-1 text-[10px] font-semibold border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors">
+                        🗑 Supprimer
+                      </button>
                     </div>
                   </div>
                 );
@@ -1494,6 +1522,12 @@ export default function AdminPage() {
                           className="rounded-md border border-border px-2 py-1 text-[10px] font-semibold text-muted-foreground transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark"
                           title="Créditer / débiter le portefeuille">
                           💰 Ajuster
+                        </button>
+                        <button
+                          onClick={() => supprimerCompte(u.user_id, u.email)}
+                          className="rounded-md border border-destructive/40 px-2 py-1 text-[10px] font-semibold text-destructive transition-colors hover:bg-destructive/10"
+                          title="Supprimer définitivement le compte">
+                          🗑 Supprimer
                         </button>
                       </div>
                     </td>

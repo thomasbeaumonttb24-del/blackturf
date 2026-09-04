@@ -9,9 +9,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import Image from "next/image";
-import { Loader2 } from "lucide-react";
+import { Loader2, MailWarning } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { authApi } from "@/lib/api";
 
 const schema = z.object({
   email: z.string().email("E-mail invalide"),
@@ -22,6 +23,11 @@ type FormData = z.infer<typeof schema>;
 
 function LoginContent() {
   const [loading, setLoading] = useState(false);
+  // Mot de passe bon, mais adresse jamais confirmée : c'est le seul refus qui se
+  // répare depuis cet écran — celui dont le lien a expiré n'a plus de session
+  // pour le redemander ailleurs.
+  const [aConfirmer, setAConfirmer] = useState<string | null>(null);
+  const [renvoi, setRenvoi] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
@@ -35,15 +41,36 @@ function LoginContent() {
 
   async function onSubmit(data: FormData) {
     setLoading(true);
+    setAConfirmer(null);
     try {
       await login(data.email, data.password);
       toast.success("Bienvenue sur BlackTurf !");
       router.push(redirect);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(msg || "Identifiants incorrects");
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      // L'API renvoie un objet {code, message} pour ce cas précis, une chaîne partout ailleurs.
+      const objet = typeof detail === "object" && detail !== null
+        ? (detail as { code?: string; message?: string })
+        : null;
+      if (objet?.code === "email_non_confirme") {
+        setAConfirmer(data.email);
+      }
+      toast.error(objet?.message || (typeof detail === "string" ? detail : "Identifiants incorrects"));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function renvoyerLien() {
+    if (!aConfirmer) return;
+    setRenvoi(true);
+    try {
+      await authApi.resendVerification(aConfirmer);
+      toast.success("Lien renvoyé. Pensez à regarder dans les indésirables.");
+    } catch {
+      toast.error("Envoi impossible pour le moment. Réessayez dans une minute.");
+    } finally {
+      setRenvoi(false);
     }
   }
 
@@ -67,6 +94,30 @@ function LoginContent() {
 
         {/* Card */}
         <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-xl shadow-black/[0.06]">
+          {aConfirmer && (
+            <div className="mb-5 rounded-lg border border-amber-300 bg-amber-50 p-4">
+              <div className="flex gap-3">
+                <MailWarning className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-amber-900">Adresse e-mail à confirmer</p>
+                  <p className="text-amber-800 mt-1">
+                    Ouvrez le lien envoyé à {aConfirmer} pour activer votre compte. Sans
+                    lui, la connexion reste fermée.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={renvoyerLien}
+                    disabled={renvoi}
+                  >
+                    {renvoi ? <Loader2 className="h-4 w-4 animate-spin" /> : "Renvoyer le lien"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1.5">E-mail</label>

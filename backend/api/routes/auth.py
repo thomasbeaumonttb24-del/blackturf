@@ -14,7 +14,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 import httpx
 
 from api.config import get_settings
@@ -134,6 +134,25 @@ class RegisterRequest(BaseModel):
         if v.isalpha() or v.isdigit():
             raise ValueError("Mot de passe trop faible : mélangez lettres et chiffres")
         return v
+
+
+class RegisterResponse(BaseModel):
+    """L'inscription n'ouvre plus de session : elle envoie un lien.
+
+    Tant que ce lien n'est pas ouvert, le compte existe mais ne sert à rien —
+    c'est ce qui rend une adresse inventée sans intérêt.
+    """
+    ok: bool = True
+    verification_requise: bool = True
+    email: EmailStr
+    message: str
+
+
+class ResendVerificationRequest(BaseModel):
+    # Le renvoi doit marcher DEPUIS L'ÉCRAN DE CONNEXION, où il n'y a par
+    # définition pas de session : c'est là qu'atterrit celui dont le lien a
+    # expiré. L'adresse est donc acceptée dans le corps, sans jeton.
+    email: Optional[EmailStr] = None
 
 
 class TokenResponse(BaseModel):
@@ -284,17 +303,101 @@ async def require_verified_email(user: User = Depends(get_current_user)) -> User
 # ─────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────
-@router.post("/register", response_model=TokenResponse)
-async def register(body: RegisterRequest, response: Response,
+MESSAGE_NON_CONFIRME = (
+    "Votre adresse e-mail n'est pas encore confirmée. Ouvrez le lien que nous vous "
+    "avons envoyé — ou demandez-en un nouveau ci-dessous."
+)
+
+
+def _html_verification(user: User, lien: str) -> str:
+    return f"""
+    <div style="font-family:sans-serif;max-width:500px;margin:auto;">
+      <h2 style="color:#F59E0B;">🏇 Bienvenue sur BlackTurf, {user.prenom or 'parieur'} !</h2>
+      <p>Confirmez votre adresse e-mail pour activer votre compte :</p>
+      <p><a href="{lien}" style="background:#F59E0B;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Confirmer mon adresse</a></p>
+      <p style="color:#666;font-size:12px;">Lien valable 24 heures. Sans confirmation, le compte reste inactif.</p>
+      <p style="color:#666;font-size:12px;">Si vous n'êtes pas à l'origine de cette inscription, ignorez ce message : le compte ne s'ouvrira pas.</p>
+      <hr style="border-color:#333;"/>
+      <p style="color:#666;font-size:11px;">⚠️ Le jeu peut créer une dépendance — joueurs-info-service.fr — 09 74 75 13 13</p>
+    </div>
+    """
+
+
+async def _envoyer_lien_verification(user: User) -> bool:
+    """Pose un jeton à usage unique (24 h) et envoie le lien. False si l'envoi a échoué.
+
+    Un seul endroit pour ce mail : l'inscription et le renvoi partageaient deux
+    copies du même HTML, qui avaient déjà divergé.
+    """
+    import redis.asyncio as aioredis
+    from services.alerts import send_email
+
+    token = secrets.token_urlsafe(32)
+    try:
+        r = aioredis.from_url(settings.redis_url)
+        try:
+            await r.setex(f"email_verify:{token}", 86400, user.user_id)
+        finally:
+            await r.aclose()
+        lien = f"{settings.frontend_url}/verifier-email?token={token}"
+        await send_email(
+            to=user.email,
+            subject="BlackTurf — Confirmez votre adresse e-mail",
+            html=_html_verification(user, lien),
+        )
+        log.info("auth.verification.envoyee", user_id=user.user_id)
+        return True
+    except Exception as e:
+        # L'inscription n'est PAS annulée pour autant : le compte existe, et le
+        # bouton « renvoyer » de l'écran de connexion rattrape une panne d'envoi.
+        log.warning("auth.verification.envoi_echoue", user_id=user.user_id, error=str(e))
+        return False
+
+
+@router.post("/register", response_model=RegisterResponse)
+async def register(body: RegisterRequest,
                    db: AsyncSession = Depends(get_db),
                    _rl: None = Depends(rate_limit_auth)):
-    result = await db.execute(select(User).where(User.email == body.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email déjà utilisé")
+    """Crée le compte et envoie le lien — SANS ouvrir de session.
+
+    Auparavant l'inscription connectait immédiatement : une adresse jetable, ou
+    inexistante, donnait un compte utilisable sur-le-champ et la confirmation
+    n'était plus jamais réclamée. Désormais l'adresse est contrôlée avant
+    l'écriture (cf. services/adresse_email), et le compte ne s'ouvre qu'au clic
+    sur le lien reçu — donc uniquement si la boîte existe et appartient bien à
+    la personne qui s'inscrit.
+    """
+    from services.adresse_email import AdresseRefusee, controler
+    from services.email_verification import email_confirme
+
+    try:
+        email = await controler(body.email)
+    except AdresseRefusee as refus:
+        log.info("auth.register.adresse_refusee", motif=refus.motif, domaine=body.email.split("@")[-1])
+        raise HTTPException(status_code=422, detail=refus.message)
+
+    existant = (await db.execute(
+        select(User).where(func.lower(User.email) == email)
+    )).scalar_one_or_none()
+
+    if existant is not None:
+        # Un compte jamais confirmé ne prouve RIEN : celui qui l'a ouvert n'a
+        # pas montré qu'il relevait cette boîte. Le laisser réserver l'adresse
+        # interdirait au véritable titulaire de s'inscrire un jour. On réécrit
+        # donc la tentative en attente, et le lien repart — vers la vraie boîte.
+        if email_confirme(existant) or existant.google_id:
+            raise HTTPException(status_code=400, detail="Email déjà utilisé")
+        existant.hashed_password = _hash(body.password)
+        existant.nom = body.nom or existant.nom
+        existant.prenom = body.prenom or existant.prenom
+        await db.commit()
+        await _envoyer_lien_verification(existant)
+        log.info("auth.register.reprise_non_confirme", user_id=existant.user_id)
+        return _reponse_verification(email)
 
     user = User(
         user_id=str(uuid.uuid4()),
-        email=body.email,
+        email=email,
         hashed_password=_hash(body.password),
         nom=body.nom,
         prenom=body.prenom,
@@ -305,32 +408,16 @@ async def register(body: RegisterRequest, response: Response,
     await db.refresh(user)
     log.info("auth.register", user_id=user.user_id, email=user.email)
 
-    # Send verification email (non-blocking)
-    try:
-        import redis.asyncio as aioredis
-        from services.alerts import send_email
-        token = secrets.token_urlsafe(32)
-        r = aioredis.from_url(settings.redis_url)
-        await r.setex(f"email_verify:{token}", 86400, user.user_id)
-        await r.aclose()
-        verify_url = f"{settings.frontend_url}/verifier-email?token={token}"
-        html = f"""
-        <div style="font-family:sans-serif;max-width:500px;margin:auto;">
-          <h2 style="color:#F59E0B;">🏇 Bienvenue sur BlackTurf, {user.prenom or 'parieur'} !</h2>
-          <p>Confirmez votre adresse email pour activer toutes les fonctionnalités :</p>
-          <p><a href="{verify_url}" style="background:#F59E0B;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Vérifier mon email</a></p>
-          <p style="color:#666;font-size:12px;">Lien valable 24 heures.</p>
-          <hr style="border-color:#333;"/>
-          <p style="color:#666;font-size:11px;">⚠️ Le jeu peut créer une dépendance — joueurs-info-service.fr — 09 74 75 13 13</p>
-        </div>
-        """
-        await send_email(to=user.email, subject="BlackTurf — Vérifiez votre adresse email", html=html)
-    except Exception as e:
-        log.warning("auth.register.verify_email_failed", error=str(e))
+    await _envoyer_lien_verification(user)
+    return _reponse_verification(email)
 
-    tokens = create_tokens(user.user_id, user.plan)
-    _set_auth_cookies(response, tokens)
-    return tokens
+
+def _reponse_verification(email: str) -> RegisterResponse:
+    return RegisterResponse(
+        email=email,
+        message=f"Compte créé. Ouvrez le lien envoyé à {email} pour l'activer "
+                "(pensez aux indésirables). Le lien est valable 24 heures.",
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -340,12 +427,30 @@ async def login(
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(rate_limit_auth),
 ):
-    result = await db.execute(select(User).where(User.email == form.username))
+    from services.adresse_email import normaliser
+    from services.email_verification import email_confirme
+
+    # Comparaison insensible à la casse : « Jean@Gmail.com » et « jean@gmail.com »
+    # sont la même boîte. Sans cela, une majuscule à la saisie renvoyait
+    # « identifiants incorrects » sur un compte pourtant existant.
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == normaliser(form.username))
+    )
     user = result.scalar_one_or_none()
     if not user or not user.hashed_password or not _verify(form.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Compte désactivé")
+    # Mot de passe bon, mais adresse jamais confirmée : la session n'est pas
+    # ouverte. C'est ce qui rend une adresse inventée sans valeur — le compte
+    # existe et ne servira jamais. Les comptes antérieurs à la règle restent
+    # dispensés (cf. services/email_verification).
+    if not email_confirme(user):
+        log.info("auth.login.refuse_non_confirme", user_id=user.user_id)
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "email_non_confirme", "message": MESSAGE_NON_CONFIRME},
+        )
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     log.info("auth.login", user_id=user.user_id)
@@ -590,41 +695,64 @@ async def update_me(
 
 @router.post("/resend-verification")
 async def resend_verification(
-    user: User = Depends(get_current_user),
+    body: Optional[ResendVerificationRequest] = None,
+    jeton: Optional[str] = Depends(_access_token),
     db: AsyncSession = Depends(get_db),
-    # Un bouton « Renvoyer » est désormais affiché à tout compte non confirmé :
-    # sans quota, il devient un robinet à e-mails (quota Resend, et une adresse
-    # de tiers saisie par erreur se ferait matraquer).
+    # Sans quota, ce bouton devient un robinet à e-mails : quota Resend brûlé, et
+    # l'adresse d'un tiers saisie par erreur se ferait matraquer.
     _rl: None = Depends(rate_limit_auth),
 ):
-    """Renvoie l'email de vérification."""
-    if user.email_verified:
-        return {"ok": True}
-    import redis.asyncio as aioredis
-    from services.alerts import send_email
-    token = secrets.token_urlsafe(32)
-    r = aioredis.from_url(settings.redis_url)
-    try:
-        await r.setex(f"email_verify:{token}", 86400, user.user_id)
-    finally:
-        await r.aclose()
-    verify_url = f"{settings.frontend_url}/verifier-email?token={token}"
-    html = f"""
-    <div style="font-family:sans-serif;max-width:500px;margin:auto;">
-      <h2 style="color:#F59E0B;">🏇 BlackTurf — Vérification de votre email</h2>
-      <p>Cliquez sur le lien ci-dessous pour confirmer votre adresse email :</p>
-      <p><a href="{verify_url}" style="background:#F59E0B;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Vérifier mon email</a></p>
-      <hr style="border-color:#333;"/>
-      <p style="color:#666;font-size:11px;">⚠️ Le jeu peut créer une dépendance — joueurs-info-service.fr — 09 74 75 13 13</p>
-    </div>
+    """Renvoie le lien de confirmation, avec ou sans session ouverte.
+
+    Il faut qu'il marche DEPUIS L'ÉCRAN DE CONNEXION : celui dont le lien a
+    expiré ne peut plus se connecter, donc plus rien demander depuis son profil.
+    La réponse est toujours la même, que l'adresse existe ou non — sinon la route
+    devient un annuaire des comptes BlackTurf.
     """
-    await send_email(to=user.email, subject="BlackTurf — Vérifiez votre adresse email", html=html)
+    user: Optional[User] = None
+    if body is not None and body.email:
+        from services.adresse_email import normaliser
+        user = (await db.execute(
+            select(User).where(func.lower(User.email) == normaliser(body.email))
+        )).scalar_one_or_none()
+    elif jeton:
+        try:
+            payload = jwt.decode(jeton, settings.secret_key, algorithms=[settings.jwt_algorithm])
+            user = (await db.execute(
+                select(User).where(User.user_id == payload.get("sub"))
+            )).scalar_one_or_none()
+        except JWTError:
+            user = None
+
+    if user is not None and not user.email_verified and await _renvoi_autorise(user):
+        await _envoyer_lien_verification(user)
     return {"ok": True}
 
 
+async def _renvoi_autorise(user: User) -> bool:
+    """Un lien par minute et par compte, au plus.
+
+    Le quota par IP ne protège pas la boîte visée : dix machines suffisaient à
+    inonder l'adresse d'un tiers saisie par erreur. Panne Redis → on laisse
+    passer, le quota par IP tient encore la porte.
+    """
+    from db.redis_client import get_redis
+    try:
+        r = await get_redis()
+        return bool(await r.set(f"verif_renvoi:{user.user_id}", "1", ex=60, nx=True))
+    except Exception:
+        return True
+
+
 @router.get("/verify-email")
-async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
-    """Vérifie l'email avec le token reçu par email."""
+async def verify_email(token: str, response: Response, db: AsyncSession = Depends(get_db)):
+    """Confirme l'adresse, puis OUVRE la session.
+
+    L'inscription ne connecte plus : si ce clic ne connectait pas non plus, le
+    nouvel inscrit devrait ressaisir son mot de passe pour rien. Le jeton est à
+    usage unique et n'a pu être lu que dans la boîte visée — la preuve vaut bien
+    une saisie de mot de passe.
+    """
     import redis.asyncio as aioredis
     r = aioredis.from_url(settings.redis_url)
     try:
@@ -641,9 +769,12 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
     user.email_verified = True
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     log.info("auth.email_verified", user_id=user.user_id)
-    return {"ok": True, "message": "Email vérifié avec succès"}
+    if user.is_active:
+        _set_auth_cookies(response, create_tokens(user.user_id, user.plan))
+    return {"ok": True, "message": "Adresse e-mail confirmée"}
 
 
 @router.post("/forgot-password")
@@ -726,6 +857,11 @@ async def reset_password(
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
     user.hashed_password = pwd_ctx.hash(new_password)
+    # Ce jeton n'a pu être lu que dans la boîte : l'adresse est donc prouvée, au
+    # même titre que par le lien de confirmation. Sans cela, celui dont le lien
+    # de confirmation a expiré changerait son mot de passe et resterait quand
+    # même à la porte, sans comprendre pourquoi.
+    user.email_verified = True
     await db.commit()
     log.info("auth.reset_password", user_id=user.user_id)
     return {"ok": True}

@@ -3,16 +3,17 @@ export const dynamic = "force-dynamic";
 
 import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import Image from "next/image";
-import { Loader2, Check } from "lucide-react";
+import { Loader2, Check, MailCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { champMotDePasse, MOT_DE_PASSE_AIDE, messageErreurApi } from "@/lib/motdepasse";
+import { authApi } from "@/lib/api";
 
 const schema = z.object({
   prenom: z.string().min(1, "Prénom requis"),
@@ -32,8 +33,12 @@ const PERKS = [
 
 function InscriptionContent() {
   const [loading, setLoading] = useState(false);
+  // Adresse à laquelle le lien vient de partir. Tant qu'elle est posée, on
+  // affiche l'écran d'attente à la place du formulaire : l'inscription ne
+  // connecte plus, elle envoie un lien.
+  const [enAttente, setEnAttente] = useState<string | null>(null);
+  const [renvoi, setRenvoi] = useState(false);
   const { register: registerAuth } = useAuth();
-  const router = useRouter();
   const params = useSearchParams();
   const plan = params.get("plan") || "free";
 
@@ -46,18 +51,26 @@ function InscriptionContent() {
   async function onSubmit(data: FormData) {
     setLoading(true);
     try {
-      await registerAuth(data);
-      toast.success("Compte créé ! Bienvenue sur BlackTurf 🏇");
-      if (plan !== "free") {
-        router.push(`/tarifs?plan=${plan}`);
-      } else {
-        router.push("/programme");
-      }
+      const res = await registerAuth(data);
+      setEnAttente(res.email);
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       toast.error(messageErreurApi(detail) || "Erreur lors de la création du compte");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function renvoyerLien() {
+    if (!enAttente) return;
+    setRenvoi(true);
+    try {
+      await authApi.resendVerification(enAttente);
+      toast.success("Lien renvoyé. Pensez à regarder dans les indésirables.");
+    } catch {
+      toast.error("Envoi impossible pour le moment. Réessayez dans une minute.");
+    } finally {
+      setRenvoi(false);
     }
   }
 
