@@ -413,3 +413,86 @@ async def latest_prediction_run_id(session, course_id: str) -> Optional[str]:
         except Exception:
             pass
         return None
+
+
+# ─────────────────────────────────────────────────────────────
+# 4. LE PLAN RÉELLEMENT PUBLIÉ — définition unique
+# ─────────────────────────────────────────────────────────────
+# Un plan est ré-émis à CHAQUE mouvement de cote : ~33 snapshots pré-course par
+# course en production (117 lignes pour la seule 04092026R5C4). Prendre « une »
+# ligne de règlement au hasard — ou pire, la MEILLEURE — ne décrit donc pas le
+# conseil qui était affiché au moment du départ.
+#
+# Constat du 2026-09-04 sur 04092026R5C4, profil agressif :
+#   snapshots de 07:14 à 13:43 → Couplé Gagnant gagnant, 10 € → 1 286 €
+#   snapshots de 14:05 à 15:08 → plan perdant,           10 € →     0 €
+# `/stats/meilleurs-plans-jour` triait sur `net DESC` et renvoyait 1 286 € pendant
+# que la fiche course publique affichait « Risqué −10 € ». Le visuel Instagram
+# aurait publié un gain qui n'a jamais été conseillé — sur une publication qu'on
+# ne peut plus corriger.
+#
+# La règle est donc unique et vit ICI : le DERNIER conseil émis avant le départ
+# fait foi. C'est déjà celle de `record_profil_runs` (profil_run_log est upserté :
+# le dernier prono pré-départ écrase le précédent), celle de
+# `ml.bet_plan_performance.compute_forward_performance` et celle du thermostat de
+# `ml.bet_performance`. Vérifié le 2026-09-04 sur la journée entière : le dernier
+# snapshot pré-course et `profil_run_log.resultat` donnent le même net sur 153/153
+# (course × profil) — les deux vues du site ne peuvent pas se contredire.
+#
+# TROIS FILTRES, et chacun a coûté quelque chose :
+#   `origin = 'profil_run'` — `bet_plan_snapshots` contient AUSSI les plans des
+#       utilisateurs (269 snapshots pré-course de 1 à 50 € en prod). Le visuel
+#       public doit montrer le plan du SITE à la mise de référence, jamais le plan
+#       personnel de quelqu'un.
+#   `is_pre_course` — 80 snapshots utilisateurs ont été émis APRÈS le départ.
+#       Publier l'un d'eux serait publier un pari passé après l'arrivée.
+#   `statut = 'settled'` sur le DERNIER snapshot — et pas « le dernier snapshot
+#       qui se trouve être réglé » : retomber sur un snapshot plus ancien parce que
+#       le rapport Multi du dernier tarde, c'est exactement le bug qu'on corrige.
+#       Un plan pas encore définitif sort du visuel, il n'y entre pas de travers.
+#
+# ROW_NUMBER() et pas `DISTINCT ON` : portable SQLite (tests) et PostgreSQL, même
+# convention que `bet_plan_performance` / `clv_monitor`. C'est aussi pour cela
+# qu'on ne part pas de la vue `bet_plan_settlement_actuel` (migration 0038) : elle
+# n'existe pas sous SQLite, et surtout elle ne déduplique QUE les règlements d'un
+# même snapshot — pas les ré-émissions d'un même conseil, qui sont le vrai piège.
+#
+# Attend le paramètre `:jjmmaaaa` (jour PMU, 8 premiers caractères du course_id).
+# Expose la CTE `plan_publie` : une ligne par (course_id, profil).
+CTE_PLAN_PUBLIE_DU_JOUR = """
+dernier_plan_du_jour AS (
+    SELECT plan_snapshot_id, course_id, profil, emitted_at
+    FROM (
+        SELECT s.plan_snapshot_id, s.course_id, s.profil, s.emitted_at,
+               ROW_NUMBER() OVER (
+                   PARTITION BY s.course_id, s.profil
+                   ORDER BY s.emitted_at DESC, s.plan_snapshot_id DESC
+               ) AS rn_plan
+        FROM bet_plan_snapshots s
+        WHERE s.is_pre_course = true
+          AND s.origin = 'profil_run'
+          AND substring(s.course_id, 1, 8) = :jjmmaaaa
+    ) q
+    WHERE rn_plan = 1
+),
+dernier_reglement_du_jour AS (
+    SELECT plan_snapshot_id, montant_mise, montant_retour, net, nb_paris, nb_gagnes
+    FROM (
+        SELECT t.plan_snapshot_id, t.montant_mise, t.montant_retour, t.net,
+               t.nb_paris, t.nb_gagnes, t.statut,
+               ROW_NUMBER() OVER (
+                   PARTITION BY t.plan_snapshot_id
+                   ORDER BY t.settled_at DESC, t.settlement_id DESC
+               ) AS rn
+        FROM bet_plan_settlements t
+        JOIN dernier_plan_du_jour d ON d.plan_snapshot_id = t.plan_snapshot_id
+    ) q
+    WHERE rn = 1 AND statut = 'settled'
+),
+plan_publie AS (
+    SELECT d.course_id, d.profil, d.emitted_at,
+           r.montant_mise, r.montant_retour, r.net, r.nb_paris, r.nb_gagnes
+    FROM dernier_plan_du_jour d
+    JOIN dernier_reglement_du_jour r ON r.plan_snapshot_id = d.plan_snapshot_id
+)
+"""

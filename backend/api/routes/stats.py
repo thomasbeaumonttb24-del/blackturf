@@ -1866,9 +1866,15 @@ async def stats_meilleurs_plans_jour(
     type « nos gains » serait faux : on parle de `mise` et de `retour` d'un plan, jamais
     de bénéfice réalisé.
 
-    On part de `bet_plan_settlement_actuel` et JAMAIS de `bet_plan_settlements` : la
-    seconde est append-only et sommer ses lignes compte plusieurs fois le même plan
-    (45 points d'écart de ROI constatés le 2026-08-23).
+    LE PLAN MONTRÉ EST LE DERNIER ÉMIS AVANT LE DÉPART, jamais le meilleur de la
+    journée. Un plan est ré-émis à chaque mouvement de cote (~33 fois par course), et
+    trier ces ré-émissions sur `net DESC` remontait un conseil PÉRIMÉ : le 2026-09-04,
+    04092026R5C4 sortait à 10 € → 1 286 € (snapshots de 07:14 à 13:43) alors que le
+    plan effectivement conseillé au départ perdait, et que la fiche course publique
+    affichait « Risqué −10 € ». La règle de sélection est unique et vit dans
+    `services.bet_plan_snapshots.CTE_PLAN_PUBLIE_DU_JOUR` — voir son commentaire pour
+    les trois filtres (plan du site, pré-course, règlement définitif) et pour la
+    vérification qui prouve qu'elle donne exactement ce qu'affiche la fiche course.
 
     LE JOUR EST CELUI DU PMU, lu dans les 8 premiers caractères de `course_id`
     (JJMMAAAA) — surtout pas `date_heure`. Une course courue à 22 h 50 UTC tombe après
@@ -1878,6 +1884,7 @@ async def stats_meilleurs_plans_jour(
     # Le PMU écrit le jour en JJMMAAAA en tête du `course_id`. On le construit ici une
     # seule fois, et les DEUX requêtes s'en servent : elles doivent parler du même jour,
     # sans quoi le nombre de courses annoncé ne serait pas celui des plans montrés.
+    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE_DU_JOUR
     from services.temps_courses import jour_courses
 
     if jour:
@@ -1888,19 +1895,21 @@ async def stats_meilleurs_plans_jour(
     else:
         jjmmaaaa = jour_courses().strftime("%d%m%Y")
 
+    # `c.hippodrome_nom` et SURTOUT PAS `reunions → hippodromes` : `reunions` ne
+    # compte que quinze lignes recyclées d'une journée à l'autre, et son
+    # `hippodrome_id` désigne donc la mauvaise piste. Mesuré le 2026-09-04 : 36 des
+    # 52 courses du jour recevaient un faux hippodrome par cette jointure (Lyon-
+    # Parilly annoncé « Nancy-Brabois », Duindigt annoncé « Toulouse La Cépière »),
+    # et 04092026R3C3 — annoncé au mauvais hippodrome — figure dans le top du jour.
     lignes = await db.execute(
-        text("""
-        SELECT s.course_id,
-               COALESCE(h.nom, c.hippodrome_nom, '') AS hippodrome,
-               s.montant_mise, s.montant_retour, s.net, s.nb_gagnes, s.nb_paris,
-               c.date_heure
-        FROM bet_plan_settlement_actuel s
-        JOIN courses c ON c.course_id = s.course_id
-        LEFT JOIN reunions r ON r.reunion_id = c.reunion_id
-        LEFT JOIN hippodromes h ON h.hippodrome_id = r.hippodrome_id
-        WHERE substring(s.course_id, 1, 8) = :jjmmaaaa
-          AND s.net > 0
-        ORDER BY s.net DESC
+        text("WITH " + CTE_PLAN_PUBLIE_DU_JOUR + """
+        SELECT p.course_id, p.profil,
+               COALESCE(c.hippodrome_nom, '') AS hippodrome,
+               p.montant_mise, p.montant_retour, p.net, p.nb_gagnes, p.nb_paris
+        FROM plan_publie p
+        JOIN courses c ON c.course_id = p.course_id
+        WHERE p.net > 0
+        ORDER BY p.net DESC
         LIMIT 20
     """),
         {"jjmmaaaa": jjmmaaaa},
@@ -1916,6 +1925,9 @@ async def stats_meilleurs_plans_jour(
         vus.add(r["course_id"])
         plans.append({
             "course_id": r["course_id"],
+            # `profil` est exposé pour que le chiffre reste VÉRIFIABLE : c'est la clé
+            # qui permet de retrouver la même ligne sur la fiche course publique.
+            "profil": r["profil"],
             "hippodrome": (r["hippodrome"] or "").replace("HIPPODROME DE ", "").replace("HIPPODROME DU ", "").title(),
             "code": (r["course_id"][8:] if len(r["course_id"]) > 8 else r["course_id"]),
             "mise": round(float(r["montant_mise"] or 0), 2),
