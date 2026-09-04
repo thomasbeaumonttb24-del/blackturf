@@ -83,20 +83,16 @@ async def _seed_course_with_predictions(db: AsyncSession) -> tuple[str, str]:
     return "R99C1", part.participation_id
 
 
-async def _make_standard_headers(client: AsyncClient) -> dict:
-    """Crée un user standard et retourne headers."""
-    from api.routes.auth import _hash
-    from db.models import User
+async def _make_standard_headers(inscrire) -> dict:
+    """Crée un user standard et retourne headers.
+
+    L'inscription seule n'ouvre plus de session (adresse à confirmer) : la
+    fixture `inscrire` rejoue le parcours complet.
+    """
     import uuid
 
-    # Register then set plan
-    resp = await client.post("/api/v1/auth/register", json={
-        "email": f"std_{uuid.uuid4().hex[:6]}@blackturf.fr",
-        "password": "TestPass12!",
-    })
-    assert resp.status_code == 200
-    token = resp.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return await inscrire(email=f"std_{uuid.uuid4().hex[:6]}@blackturf.fr",
+                          password="TestPass12!")
 
 
 # ─────────────────────────────────────────────
@@ -108,12 +104,12 @@ async def test_get_predictions_requires_auth(client: AsyncClient, db: AsyncSessi
     assert resp.status_code == 401
 
 
-async def test_get_predictions_free_preview_quota(client: AsyncClient, db: AsyncSession):
+async def test_get_predictions_free_preview_quota(client: AsyncClient, db: AsyncSession, inscrire):
     await _seed_course_with_predictions(db)
     # Free user : la fiche prédictions est en PREVIEW gratuit borné par un quota
     # journalier (funnel freemium, Redis). Sans Redis (env test) le quota fail-open →
     # accès autorisé. Le hard-gate pro reste sur /predict (POST) et /value-bets.
-    headers = await _make_standard_headers(client)
+    headers = await _make_standard_headers(inscrire)
     resp = await client.get("/api/v1/courses/R99C1/predictions", headers=headers)
     assert resp.status_code == 200
 
@@ -140,9 +136,9 @@ async def test_get_predictions_no_predictions_yet(client: AsyncClient, db: Async
     assert resp.status_code in (401, 403, 404)
 
 
-async def test_trigger_prediction_requires_pro(client: AsyncClient, db: AsyncSession):
+async def test_trigger_prediction_requires_pro(client: AsyncClient, db: AsyncSession, inscrire):
     await _seed_course_with_predictions(db)
-    headers = await _make_standard_headers(client)
+    headers = await _make_standard_headers(inscrire)
     resp = await client.post("/api/v1/courses/R99C1/predict", headers=headers)
     # Free user → 403
     assert resp.status_code == 403
@@ -156,8 +152,8 @@ async def test_value_bets_requires_auth(client: AsyncClient):
     assert resp.status_code == 401
 
 
-async def test_value_bets_requires_paid_plan(client: AsyncClient, db: AsyncSession):
-    headers = await _make_standard_headers(client)
+async def test_value_bets_requires_paid_plan(client: AsyncClient, db: AsyncSession, inscrire):
+    headers = await _make_standard_headers(inscrire)
     resp = await client.get("/api/v1/value-bets", headers=headers)
     assert resp.status_code == 403
 

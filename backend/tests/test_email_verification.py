@@ -1,9 +1,14 @@
-"""L'adresse e-mail doit être confirmée pour ce qui coûte de l'argent.
+"""Aucune session sans adresse confirmée.
 
-Le mail de confirmation partait déjà à l'inscription, mais `email_verified`
-n'était lu nulle part : une adresse inexistante donnait un compte complet, donc
-un essai Stripe de plus et des rebonds qui abîment la délivrabilité de tous les
-envois. Ces tests fixent la règle ET la dispense accordée aux anciens comptes.
+Le mail de confirmation partait déjà à l'inscription, mais rien ne l'exigeait :
+une adresse inexistante — ou jetable — donnait un compte complet, donc un essai
+Stripe de plus et des rebonds qui abîment la délivrabilité de tous les envois.
+Le compte ne s'ouvre désormais qu'au clic sur le lien reçu.
+
+Ces tests fixent les trois pièces : le mur à la connexion, la dispense accordée
+aux comptes antérieurs à la règle, et la deuxième ligne de défense sur ce qui
+coûte de l'argent — les sessions ouvertes avant la mise en service vivent encore
+jusqu'à 7 jours.
 """
 import uuid
 from datetime import timedelta
@@ -82,46 +87,158 @@ async def _inscrire(client: AsyncClient, email: str) -> None:
     assert resp.status_code == 200, resp.text
 
 
-async def test_le_checkout_stripe_exige_une_adresse_confirmee(client: AsyncClient):
-    """Sans cela, l'essai gratuit se multiplie : une adresse bidon par compte."""
-    await _inscrire(client, "checkout-non-verifie@blackturf.fr")
+async def _connexion(client: AsyncClient, email: str):
+    return await client.post("/api/v1/auth/login",
+                             data={"username": email, "password": "MotDePasse123"})
+
+
+def _entetes(user: User) -> dict[str, str]:
+    """Session ouverte pour un compte donné, sans passer par /login.
+
+    Sert à rejouer le seul cas où une adresse non confirmée dispose encore d'un
+    jeton : celles ouvertes AVANT la mise en service de la règle, valables
+    jusqu'à expiration.
+    """
+    from api.routes.auth import create_tokens
+    return {"Authorization": f"Bearer {create_tokens(user.user_id, user.plan).access_token}"}
+
+
+async def test_la_connexion_est_refusee_tant_que_l_adresse_n_est_pas_confirmee(
+    client: AsyncClient
+):
+    """Le mur est à l'entrée : sans cela, une adresse inventée donnait un compte
+    pleinement utilisable et la confirmation n'était jamais réclamée."""
+    await _inscrire(client, "pas-confirme@blackturf.fr")
+
+    resp = await _connexion(client, "pas-confirme@blackturf.fr")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "email_non_confirme"
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+
+async def test_la_connexion_passe_une_fois_l_adresse_confirmee(
+    client: AsyncClient, db: AsyncSession, confirmer_adresse
+):
+    await _inscrire(client, "confirme@blackturf.fr")
+    await confirmer_adresse("confirme@blackturf.fr")
+
+    resp = await _connexion(client, "confirme@blackturf.fr")
+
+    assert resp.status_code == 200
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+
+async def test_le_lien_de_confirmation_ouvre_directement_la_session(
+    client: AsyncClient, db: AsyncSession
+):
+    """Le clic dans la boîte prouve déjà la possession de l'adresse : redemander
+    le mot de passe juste après ne protégerait rien et perdrait l'inscrit."""
+    await _inscrire(client, "lien-connecte@blackturf.fr")
+    user = (await db.execute(
+        select(User).where(User.email == "lien-connecte@blackturf.fr")
+    )).scalar_one()
+
+    # Le jeton vit dans Redis (mocké) : on rejoue ce que la route y lit.
+    from unittest.mock import AsyncMock, patch
+    faux_redis = AsyncMock()
+    faux_redis.get = AsyncMock(return_value=user.user_id.encode())
+    faux_redis.delete = AsyncMock(return_value=1)
+    with patch("redis.asyncio.from_url", return_value=faux_redis):
+        resp = await client.get("/api/v1/auth/verify-email?token=peu-importe")
+
+    assert resp.status_code == 200
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
+    await db.refresh(user)
+    assert user.email_verified is True
+
+
+async def test_un_mot_de_passe_reinitialise_vaut_preuve_de_l_adresse(
+    client: AsyncClient, db: AsyncSession
+):
+    """Le jeton de réinitialisation n'a pu être lu que dans la boîte visée.
+
+    Sans cette équivalence, celui dont le lien de confirmation a expiré changeait
+    son mot de passe et restait quand même à la porte.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    await _inscrire(client, "reset-vaut-preuve@blackturf.fr")
+    user = (await db.execute(
+        select(User).where(User.email == "reset-vaut-preuve@blackturf.fr")
+    )).scalar_one()
+
+    faux_redis = AsyncMock()
+    faux_redis.get = AsyncMock(return_value=user.user_id.encode())
+    with patch("redis.asyncio.from_url", return_value=faux_redis):
+        resp = await client.post("/api/v1/auth/reset-password", json={
+            "token": "peu-importe", "password": "NouveauMotDePasse123",
+        })
+    assert resp.status_code == 200
+
+    await db.refresh(user)
+    assert user.email_verified is True
+    connexion = await client.post("/api/v1/auth/login", data={
+        "username": "reset-vaut-preuve@blackturf.fr", "password": "NouveauMotDePasse123",
+    })
+    assert connexion.status_code == 200
+
+
+async def test_un_compte_anterieur_a_la_regle_se_connecte_toujours(
+    client: AsyncClient, db: AsyncSession
+):
+    """Dont un abonné payant : lui fermer la porte a posteriori serait une
+    régression, pas une sécurité."""
+    ancien = _user(email="ancien-abonne@blackturf.fr", plan="expert",
+                   created_at=VERIFICATION_OBLIGATOIRE_DEPUIS - timedelta(days=30))
+    db.add(ancien)
+    await db.commit()
+
+    resp = await _connexion(client, "ancien-abonne@blackturf.fr")
+
+    assert resp.status_code == 200
+
+
+async def test_le_checkout_stripe_exige_une_adresse_confirmee(
+    client: AsyncClient, db: AsyncSession
+):
+    """Deuxième ligne de défense : une session ouverte avant la règle vit encore
+    jusqu'à 7 jours, et l'essai gratuit se multiplierait, une adresse bidon par
+    compte."""
+    user = _user(email="checkout-non-verifie@blackturf.fr")
+    db.add(user)
+    await db.commit()
 
     resp = await client.post("/api/v1/stripe/checkout",
-                             json={"plan": "standard", "periodicite": "monthly"})
+                             json={"plan": "standard", "periodicite": "monthly"},
+                             headers=_entetes(user))
 
     assert resp.status_code == 403
     assert "onfirmez votre adresse" in resp.json()["detail"]
 
 
-async def test_l_assistant_exige_une_adresse_confirmee(client: AsyncClient):
+async def test_l_assistant_exige_une_adresse_confirmee(
+    client: AsyncClient, db: AsyncSession
+):
     """Chaque échange consomme des jetons facturés."""
-    await _inscrire(client, "assistant-non-verifie@blackturf.fr")
+    user = _user(email="assistant-non-verifie@blackturf.fr")
+    db.add(user)
+    await db.commit()
 
     resp = await client.post("/api/v1/assistant/chat",
-                             json={"messages": [{"role": "user", "content": "salut"}]})
+                             json={"messages": [{"role": "user", "content": "salut"}]},
+                             headers=_entetes(user))
 
     assert resp.status_code == 403
     assert "onfirmez votre adresse" in resp.json()["detail"]
-
-
-async def test_le_reste_du_produit_reste_accessible(client: AsyncClient):
-    """On ne bloque QUE ce qui coûte : un nouvel inscrit doit pouvoir visiter le
-    site et voir son profil, sinon la confirmation devient un mur à l'entrée."""
-    await _inscrire(client, "libre@blackturf.fr")
-
-    assert (await client.get("/api/v1/auth/me")).status_code == 200
-    assert (await client.get("/api/v1/programme")).status_code == 200
 
 
 async def test_une_fois_l_adresse_confirmee_le_checkout_repasse(
-    client: AsyncClient, db: AsyncSession
+    client: AsyncClient, db: AsyncSession, confirmer_adresse
 ):
     await _inscrire(client, "confirme-ensuite@blackturf.fr")
-    user = (await db.execute(
-        select(User).where(User.email == "confirme-ensuite@blackturf.fr")
-    )).scalar_one()
-    user.email_verified = True
-    await db.commit()
+    await confirmer_adresse("confirme-ensuite@blackturf.fr")
+    assert (await _connexion(client, "confirme-ensuite@blackturf.fr")).status_code == 200
 
     resp = await client.post("/api/v1/stripe/checkout",
                              json={"plan": "standard", "periodicite": "monthly"})

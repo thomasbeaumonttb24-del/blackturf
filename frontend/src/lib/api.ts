@@ -87,9 +87,21 @@ if (typeof window !== "undefined") {
 }
 
 // API helpers
+export type InscriptionEnAttente = {
+  ok: boolean;
+  verification_requise: boolean;
+  email: string;
+  message: string;
+};
+
 export const authApi = {
+  // L'inscription n'ouvre plus de session : elle envoie un lien de confirmation.
   register: (data: { email: string; password: string; nom?: string; prenom?: string }) =>
-    api.post("/auth/register", data),
+    api.post<InscriptionEnAttente>("/auth/register", data),
+  // Renvoi du lien SANS session : celui dont le lien a expiré ne peut plus se
+  // connecter, donc plus rien demander depuis son profil.
+  resendVerification: (email?: string) =>
+    api.post("/auth/resend-verification", email ? { email } : {}),
   login: (email: string, password: string) =>
     api.post("/auth/login", new URLSearchParams({ username: email, password }), {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

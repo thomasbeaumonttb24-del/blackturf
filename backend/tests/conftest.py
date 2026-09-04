@@ -16,6 +16,10 @@ os.environ.setdefault("DATABASE_URL_SYNC", "sqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-change-in-production-must-be-64-chars-min-ok")
 os.environ.setdefault("ENVIRONMENT", "test")
+# Le contrôle DNS de l'adresse (services/adresse_email) sort de la machine : il
+# rendrait la suite dépendante d'un résolveur et de la zone MX de blackturf.fr.
+# Les tests qui portent SUR ce contrôle le rallument eux-mêmes (monkeypatch).
+os.environ.setdefault("BT_CONTROLE_DNS", "0")
 
 from db.database import Base, get_db  # noqa: E402
 from api.main import app              # noqa: E402
@@ -161,17 +165,49 @@ async def client(db):
 
 
 @pytest_asyncio.fixture
-async def auth_headers(client):
-    """Crée un utilisateur et retourne les headers JWT."""
-    resp = await client.post("/api/v1/auth/register", json={
-        "email": "test@blackturf.fr",
-        "password": "TestPassword123!",
-        "nom": "Test",
-        "prenom": "User",
-    })
-    assert resp.status_code == 200, f"register failed: {resp.text}"
-    token = resp.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+async def confirmer_adresse(db):
+    """Confirme l'adresse d'un compte, comme le ferait le clic sur le lien reçu.
+
+    L'inscription n'ouvre plus de session : sans cette étape, aucun compte de
+    test ne peut se connecter (cf. services/email_verification).
+    """
+    from sqlalchemy import select
+    from db.models import User
+
+    async def _confirmer(email: str) -> None:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        user.email_verified = True
+        await db.commit()
+
+    return _confirmer
+
+
+@pytest_asyncio.fixture
+async def inscrire(client, confirmer_adresse):
+    """Parcours complet d'un nouvel inscrit : inscription, confirmation, connexion.
+
+    Renvoie les en-têtes JWT. Les tests qui ont juste besoin d'un compte utilisable
+    passent par là plutôt que de rejouer les trois appels.
+    """
+    async def _inscrire(email: str = "test@blackturf.fr",
+                        password: str = "TestPassword123!", **champs) -> dict[str, str]:
+        resp = await client.post("/api/v1/auth/register",
+                                 json={"email": email, "password": password, **champs})
+        assert resp.status_code == 200, f"register failed: {resp.text}"
+        await confirmer_adresse(email)
+        login = await client.post("/api/v1/auth/login",
+                                  data={"username": email, "password": password})
+        assert login.status_code == 200, f"login failed: {login.text}"
+        return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    return _inscrire
+
+
+@pytest_asyncio.fixture
+async def auth_headers(inscrire):
+    """Compte de test confirmé + en-têtes JWT."""
+    return await inscrire(email="test@blackturf.fr", password="TestPassword123!",
+                          nom="Test", prenom="User")
 
 
 @pytest_asyncio.fixture
@@ -187,6 +223,9 @@ async def admin_headers(client, db):
         hashed_password=_hash("AdminPass123!"),
         plan="expert",
         is_admin=True,
+        # Une adresse non confirmée ne peut plus se connecter : l'admin de test
+        # doit donc l'être, comme l'est le vrai compte admin.
+        email_verified=True,
     )
     db.add(admin)
     await db.commit()

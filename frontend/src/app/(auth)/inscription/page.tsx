@@ -3,21 +3,22 @@ export const dynamic = "force-dynamic";
 
 import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import Image from "next/image";
-import { Loader2, Check } from "lucide-react";
+import { Loader2, Check, MailCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { authApi } from "@/lib/api";
 
 const schema = z.object({
   prenom: z.string().min(1, "Prénom requis"),
   nom: z.string().optional(),
   email: z.string().email("E-mail invalide"),
-  password: z.string().min(8, "8 caractères minimum"),
+  password: z.string().min(10, "10 caractères minimum"),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -31,8 +32,12 @@ const PERKS = [
 
 function InscriptionContent() {
   const [loading, setLoading] = useState(false);
+  // Adresse à laquelle le lien vient de partir. Tant qu'elle est posée, on
+  // affiche l'écran d'attente à la place du formulaire : l'inscription ne
+  // connecte plus, elle envoie un lien.
+  const [enAttente, setEnAttente] = useState<string | null>(null);
+  const [renvoi, setRenvoi] = useState(false);
   const { register: registerAuth } = useAuth();
-  const router = useRouter();
   const params = useSearchParams();
   const plan = params.get("plan") || "free";
 
@@ -45,13 +50,8 @@ function InscriptionContent() {
   async function onSubmit(data: FormData) {
     setLoading(true);
     try {
-      await registerAuth(data);
-      toast.success("Compte créé ! Bienvenue sur BlackTurf 🏇");
-      if (plan !== "free") {
-        router.push(`/tarifs?plan=${plan}`);
-      } else {
-        router.push("/programme");
-      }
+      const res = await registerAuth(data);
+      setEnAttente(res.email);
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       let msg: string | undefined;
@@ -63,6 +63,19 @@ function InscriptionContent() {
       toast.error(msg || "Erreur lors de la création du compte");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function renvoyerLien() {
+    if (!enAttente) return;
+    setRenvoi(true);
+    try {
+      await authApi.resendVerification(enAttente);
+      toast.success("Lien renvoyé. Pensez à regarder dans les indésirables.");
+    } catch {
+      toast.error("Envoi impossible pour le moment. Réessayez dans une minute.");
+    } finally {
+      setRenvoi(false);
     }
   }
 
@@ -105,6 +118,46 @@ function InscriptionContent() {
             </Link>
           </div>
 
+          {enAttente ? (
+            <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl text-center">
+              <div className="h-12 w-12 rounded-full bg-brand-gold/15 flex items-center justify-center mx-auto mb-4">
+                <MailCheck className="h-6 w-6 text-brand-gold" />
+              </div>
+              <h2 className="text-xl font-bold mb-2">Vérifiez votre boîte mail</h2>
+              <p className="text-sm text-muted-foreground">
+                Un lien de confirmation vient de partir à{" "}
+                <span className="font-medium text-foreground">{enAttente}</span>. Ouvrez-le
+                pour activer votre compte — il est valable 24 heures.
+              </p>
+              <p className="text-xs text-muted-foreground mt-3">
+                Rien reçu au bout de deux minutes ? Regardez dans les indésirables.
+              </p>
+              {plan !== "free" && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Votre offre {plan} vous sera proposée dès votre première connexion.
+                </p>
+              )}
+
+              <Button
+                variant="outline"
+                className="w-full mt-6"
+                onClick={renvoyerLien}
+                disabled={renvoi}
+              >
+                {renvoi ? <Loader2 className="h-4 w-4 animate-spin" /> : "Renvoyer le lien"}
+              </Button>
+              <p className="text-xs text-muted-foreground mt-4">
+                Adresse erronée ?{" "}
+                <button
+                  type="button"
+                  onClick={() => setEnAttente(null)}
+                  className="text-brand-gold hover:underline"
+                >
+                  Recommencer l&apos;inscription
+                </button>
+              </p>
+            </div>
+          ) : (
           <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl">
             <h2 className="text-xl font-bold mb-1">Créer un compte</h2>
             <p className="text-sm text-muted-foreground mb-6">
@@ -183,6 +236,7 @@ function InscriptionContent() {
               ⚠️ Interdit aux mineurs. Le jeu peut créer une dépendance.
             </p>
           </div>
+          )}
         </div>
       </div>
     </div>

@@ -6,16 +6,21 @@ from httpx import AsyncClient
 pytestmark = pytest.mark.asyncio
 
 
-async def test_register_success(client: AsyncClient):
+async def test_register_cree_le_compte_sans_ouvrir_de_session(client: AsyncClient):
+    """L'inscription envoie un lien ; elle ne connecte plus.
+
+    C'est ce qui retire tout intérêt à une adresse inventée : le compte existe,
+    mais reste inutilisable tant que personne n'a relevé la boîte.
+    """
     resp = await client.post("/api/v1/auth/register", json={
         "email": "new@blackturf.fr",
         "password": "TestPass12!",
     })
     assert resp.status_code == 200
     data = resp.json()
-    assert "access_token" in data
-    assert "refresh_token" in data
-    assert data["plan"] == "free"
+    assert data["verification_requise"] is True
+    assert "access_token" not in data and "refresh_token" not in data
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
 
 
 async def test_register_duplicate_email(client: AsyncClient, auth_headers):
@@ -111,9 +116,24 @@ async def test_reset_password_invalid_token(client: AsyncClient):
     assert resp.status_code == 400
 
 
-async def test_resend_verification_requires_auth(client: AsyncClient):
-    resp = await client.post("/api/v1/auth/resend-verification")
-    assert resp.status_code == 401
+async def test_resend_verification_marche_sans_session(client: AsyncClient):
+    """Celui dont le lien a expiré ne peut plus se connecter : le renvoi doit donc
+    être atteignable depuis l'écran de connexion, sans jeton."""
+    await client.post("/api/v1/auth/register", json={
+        "email": "lien-expire@blackturf.fr", "password": "TestPass12!",
+    })
+    resp = await client.post("/api/v1/auth/resend-verification",
+                             json={"email": "lien-expire@blackturf.fr"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+async def test_resend_verification_ne_dit_pas_si_le_compte_existe(client: AsyncClient):
+    """Sinon la route devient un annuaire des comptes BlackTurf."""
+    resp = await client.post("/api/v1/auth/resend-verification",
+                             json={"email": "jamais-inscrit@blackturf.fr"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
 
 
 async def test_resend_verification_authenticated(client: AsyncClient, auth_headers):
@@ -127,26 +147,17 @@ async def test_verify_email_invalid_token(client: AsyncClient):
     assert resp.status_code == 400
 
 
-async def test_register_new_user_plan_is_free(client: AsyncClient):
+async def test_register_new_user_plan_is_free(client: AsyncClient, inscrire):
     """Nouveaux inscrits → plan free par défaut."""
-    resp = await client.post("/api/v1/auth/register", json={
-        "email": "newuser2@blackturf.fr",
-        "password": "TestPass12!",
-        "prenom": "Jean",
-        "nom": "Dupont",
-    })
-    assert resp.status_code == 200
-    assert resp.json()["plan"] == "free"
+    headers = await inscrire(email="newuser2@blackturf.fr", password="TestPass12!",
+                             prenom="Jean", nom="Dupont")
+    me = await client.get("/api/v1/auth/me", headers=headers)
+    assert me.json()["plan"] == "free"
 
 
-async def test_profil_risque_defaut_equilibre(client: AsyncClient):
-    resp = await client.post("/api/v1/auth/register", json={
-        "email": "newuser3@blackturf.fr",
-        "password": "TestPass12!",
-    })
-    assert resp.status_code == 200
-    token = resp.json()["access_token"]
-    me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+async def test_profil_risque_defaut_equilibre(client: AsyncClient, inscrire):
+    headers = await inscrire(email="newuser3@blackturf.fr", password="TestPass12!")
+    me = await client.get("/api/v1/auth/me", headers=headers)
     assert me.json()["profil_risque"] in ("equilibre", None, "")  # Default
 
 
