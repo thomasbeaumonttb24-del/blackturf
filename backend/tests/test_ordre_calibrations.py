@@ -94,6 +94,29 @@ def test_une_seule_application_de_chaque_calibration_top1():
     assert src.count("apply_calibration(probas_top1, cotes_pmu") == 1
 
 
+# ── La netteté vient après tout le reste ────────────────────────────────────
+
+def test_la_nettete_est_la_derniere_correction_de_la_chaine():
+    """Elle corrige ce qui est SERVI, blend marché compris.
+
+    C'est le pendant exact de la règle du dessus : une correction s'applique là où
+    elle a été ajustée. `ml.sharpness_calibration` s'ajuste sur `proba_top1`, la
+    valeur écrite en base et mesurée par `data_quality.calibration_par_bande` — donc
+    après le mélange avec le marché, et avant l'écriture.
+    """
+    src = _source()
+    blend = _pos("blend = np.where(", src)
+    nettete = _pos("_sh_appliquer(probas_top1", src)
+    ecriture = _pos("proba_t1 = float(probas_top1[i])", src)
+    assert blend < nettete < ecriture
+
+
+def test_une_seule_application_de_la_nettete():
+    """Une puissance appliquée deux fois, c'est un exposant au carré — et un
+    exposant qui n'a jamais été validé."""
+    assert _source().count("_sh_appliquer(") == 1
+
+
 # ── Ce que coûte réellement le décalage de domaine ──────────────────────────
 
 def _courses_simulees(n_courses=800, n_partants=10, seed=11):

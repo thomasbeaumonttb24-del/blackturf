@@ -182,6 +182,48 @@ async def _etat_alpha(session: AsyncSession) -> dict:
     }
 
 
+async def _etat_nettete(session: AsyncSession) -> dict:
+    """NETTETÉ — la probabilité servie est-elle trop concentrée sur les premiers ?
+
+    Dernière correction de la chaîne : p ∝ p^exposant, Σ=1. Elle ne change AUCUN
+    classement (une puissance conserve l'ordre) ; elle change les valeurs, donc la
+    cote juste et l'espérance. Neutre (1,0) tant que la mesure ne conclut pas.
+    """
+    from ml.sharpness_calibration import EXPOSANT_NEUTRE, MIN_COURSES
+
+    donnees, maj = None, None
+    try:
+        r = (await session.execute(text(
+            "SELECT data, updated_at FROM sharpness_calibration WHERE id = 1"))).first()
+        if r and r[0]:
+            donnees = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+            maj = r[1]
+    except Exception:
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+    if not donnees:
+        return {"mesure_disponible": False, "exposant": EXPOSANT_NEUTRE,
+                "appris": False, "min_courses": MIN_COURSES,
+                "pourquoi": "netteté jamais ajustée sur les arrivées — la "
+                            "distribution du modèle est servie telle quelle"}
+    return {
+        "mesure_disponible": True,
+        "exposant": donnees.get("exposant"),
+        "appris": bool(donnees.get("retenu")),
+        "residuel": donnees.get("residuel"),
+        "gain_logv": donnees.get("gain_logv"),
+        "ecart_bande_haute_en_place": donnees.get("ecart_bande_haute_en_place"),
+        "ecart_bande_haute_candidat": donnees.get("ecart_bande_haute_candidat"),
+        "n_bande_haute": donnees.get("n_bande_haute"),
+        "n_courses": donnees.get("n_courses"),
+        "min_courses": MIN_COURSES,
+        "raison": donnees.get("raison"),
+        "mis_a_jour_le": maj.isoformat() if hasattr(maj, "isoformat") else maj,
+    }
+
+
 async def _etat_plans(session: AsyncSession) -> dict:
     """Ce que l'apprentissage des PLANS a réellement sous la main.
 
@@ -278,6 +320,7 @@ async def etat_outils_apprentissage(session: AsyncSession) -> dict:
         "correcteur_contextuel": await _etat_meta_learner(),
         "modele_arrivee": await _etat_harville(session),
         "alpha_marche": await _etat_alpha(session),
+        "nettete_probas": await _etat_nettete(session),
         "temperature": await _etat_temperature(session),
         "plans": await _etat_plans(session),
         "gates_types": await _gates_actives(session),

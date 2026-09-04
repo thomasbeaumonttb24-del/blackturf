@@ -32,11 +32,43 @@ log = structlog.get_logger()
 
 ELO_INITIAL = 1500.0
 
+# Nb de deltas ELO conservés PAR CHEVAL pour les features de dynamique de carrière.
+# 12 et pas 10 : `career_momentum` compare la moyenne des 6 dernières courses à celle
+# des 6 PRÉCÉDENTES, donc il lui en faut douze. Avec dix, la branche « assez
+# d'historique » n'était jamais atteinte, le terme ancien retombait sur le récent, et
+# la feature valait 0,0 pour TOUS les partants de TOUTES les courses — variance nulle
+# par construction, depuis toujours. C'est l'une des 20 features que `feature_health`
+# compte comme mortes.
+ELO_DELTAS_PAR_CHEVAL = 12
+
 # Les chevaux portent un ELO PAR DISCIPLINE (plat / trot / obstacle). Toute
 # comparaison « ce cheval vs le champ » doit rester dans la même colonne, sinon on
 # soustrait deux échelles différentes. Ces deux constantes sont la source unique de
 # la correspondance discipline → colonne ELO.
 _IDX_ELO_DISC = {"plat": 3, "trot": 4, "obstacle": 5}
+
+
+def momentum_carriere(delta_elos) -> float:
+    """Tendance longue : ELO gagné sur les 6 dernières courses vs les 6 précédentes.
+
+    IL FAUT DOUZE DELTAS, et c'est toute la raison d'être de `ELO_DELTAS_PAR_CHEVAL`.
+    Le chargeur en gardait dix : la branche « assez d'historique » n'était jamais
+    atteinte, le terme ancien retombait sur le récent, et la feature valait
+    exactement 0,0 pour TOUS les partants de TOUTES les courses — variance nulle par
+    construction, depuis l'origine. Elle figurait à ce titre parmi les 20 features
+    mortes comptées par `feature_health`.
+
+    En dessous de douze sorties, on rend 0,0 : le vecteur doit garder la même forme
+    d'une course à l'autre. Mais ne rien savoir d'une carrière n'est pas « une
+    carrière plate » — c'est pour ça que ce cas doit rester rare, et il l'est
+    désormais (il ne concerne plus que les chevaux réellement peu courus).
+    """
+    deltas = [d for d in (delta_elos or []) if isinstance(d, (int, float))]
+    if len(deltas) < 12:
+        return 0.0
+    recent_6 = float(np.mean(deltas[:6]))
+    ancien_6 = float(np.mean(deltas[6:12]))
+    return float(np.clip((recent_6 - ancien_6) / 10, -1, 1))
 
 
 def _cle_discipline(discipline) -> str:
@@ -1664,24 +1696,40 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             #  15 commentaire_course)
             hist_by_cheval[cid].append(row[1:])
 
-    # 3. ELO history (max 10 par cheval) — POINT-IN-TIME : uniquement les deltas ELO
-    # des courses ANTÉRIEURES à celle-ci (anti-fuite : sinon delta_elo_5/velocity voient
-    # les variations ELO des courses futures du cheval). Pour une course à venir, tout
+    # 3. ELO history — POINT-IN-TIME : uniquement les deltas ELO des courses
+    # ANTÉRIEURES à celle-ci (anti-fuite : sinon delta_elo_5/velocity voient les
+    # variations ELO des courses futures du cheval). Pour une course à venir, tout
     # son historique est antérieur → comportement correct.
+    #
+    # LE PLAFOND EST PAR CHEVAL, ET IL DOIT L'ÊTRE. La requête d'avant demandait
+    # `ORDER BY cheval_id, date_course DESC LIMIT 200` : un `LIMIT` global sur un
+    # tri par cheval sert les PREMIERS chevaux de l'ordre des identifiants jusqu'à
+    # épuisement du quota, et rend zéro ligne aux suivants. Une carrière tient
+    # couramment 40 lignes : passé le cinquième cheval, le reste du champ n'avait
+    # plus d'historique ELO du tout, toujours les mêmes (l'ordre des UUID ne bouge
+    # pas). Les features qui en dépendent — delta_elo_5courses, velocity_elo,
+    # elo_trend_30j, bounce_score, career_momentum — lisaient donc un 0 « neutre »
+    # sur la plus grande partie du champ, sans que rien ne le signale : elles
+    # gardaient de la variance grâce aux chevaux servis, donc `feature_health` ne
+    # pouvait pas les voir mourir.
+    #
+    # `ROW_NUMBER()` numérote les courses de CHAQUE cheval : le plafond s'applique
+    # par cheval, et le coût reste borné (12 × nb de partants).
     elo_r = await session.execute(text("""
-        SELECT cheval_id, delta_elo, date_course
-        FROM elo_historique
-        WHERE cheval_id = ANY(:cids)
-          AND date_course < (SELECT date_heure FROM courses WHERE course_id = :cid)
+        SELECT cheval_id, delta_elo, date_course FROM (
+            SELECT cheval_id, delta_elo, date_course,
+                   ROW_NUMBER() OVER (PARTITION BY cheval_id
+                                      ORDER BY date_course DESC) AS rang
+            FROM elo_historique
+            WHERE cheval_id = ANY(:cids)
+              AND date_course < (SELECT date_heure FROM courses WHERE course_id = :cid)
+        ) h
+        WHERE h.rang <= :n
         ORDER BY cheval_id, date_course DESC
-        LIMIT 200
-    """), {"cids": cheval_ids, "cid": course_id})
+    """), {"cids": cheval_ids, "cid": course_id, "n": ELO_DELTAS_PAR_CHEVAL})
     elo_by_cheval: dict = {}
     for row in elo_r.fetchall():
-        if row[0] not in elo_by_cheval:
-            elo_by_cheval[row[0]] = []
-        if len(elo_by_cheval[row[0]]) < 10:
-            elo_by_cheval[row[0]].append(row[1])
+        elo_by_cheval.setdefault(row[0], []).append(row[1])
 
     # 4. Cotes historique (last 45 min, pour mouvement)
     cotes_hist_r = await session.execute(text("""
@@ -2048,12 +2096,23 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             """), {"hippo": f"%{course_hippo}%", "dist": int(course_dist or 2000)})
             zone_acc: dict = {}  # zone -> [top3, n]
             tot_top3 = tot_n = 0
+            # `historique_courses.corde` est une COLONNE TEXTE : selon ce que publie
+            # le PMU, elle peut porter un numéro de stalle (« 7 », exploitable) ou un
+            # sens de rail (« CORDE_GAUCHE », inexploitable ici). Les deux cas étaient
+            # avalés par le même `continue` muet — et `draw_bias_score` sort constant
+            # à 0 sans que rien ne dise si la donnée manque ou si elle est d'un autre
+            # type. On compte donc les deux, et on le dit : c'est la seule façon que
+            # la prochaine feature morte n'attende pas un audit manuel.
+            n_illisibles = n_lignes = 0
             for corde_val, n, top3 in draw_r.fetchall():
+                n_lignes += 1
                 try:
                     z = corde_zone(int(corde_val))
                 except (TypeError, ValueError):
+                    n_illisibles += 1
                     continue
                 if z == "inconnu":
+                    n_illisibles += 1
                     continue
                 a = zone_acc.setdefault(z, [0, 0])
                 a[0] += int(top3 or 0)
@@ -2065,6 +2124,15 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
                 for z, (t3, n) in zone_acc.items():
                     if n >= 30:
                         draw_bias_by_zone[z] = float(np.clip((t3 / n) - base_rate, -0.3, 0.3))
+            if not draw_bias_by_zone:
+                log.info(
+                    "features.draw_bias_indisponible",
+                    hippodrome=str(course_hippo)[:40],
+                    n_valeurs_corde=n_lignes, n_illisibles=n_illisibles, n_sorties=tot_n,
+                    raison=("aucune valeur de corde en base" if not n_lignes
+                            else "valeurs de corde non numériques" if n_illisibles == n_lignes
+                            else "échantillon insuffisant"),
+                )
     except Exception as e:  # noqa: BLE001
         log.warning("features.draw_bias_failed", err=str(e)[:120])
 
@@ -2967,12 +3035,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_trainer = {"trainer_return_bonus": float(trainer_return_bonus)}
 
     # ── CC. Career trajectory ─────────────────────────────────────────────────
-    # Tendance long terme: ELO en progression sur 6 dernières courses vs 6 précédentes
-    career_momentum = 0.0
-    if len(delta_elos) >= 6:
-        recent_6 = float(np.mean(delta_elos[:6]))
-        older_6 = float(np.mean(delta_elos[6:12])) if len(delta_elos) >= 12 else recent_6
-        career_momentum = float(np.clip((recent_6 - older_6) / 10, -1, 1))
+    career_momentum = momentum_carriere(delta_elos)
 
     # Ratio victoires jeune vs carrière total — cheval en montée de forme?
     recent_wins = sum(1 for p in musique_positions[:5] if p == 1)

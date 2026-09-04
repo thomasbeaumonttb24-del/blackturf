@@ -196,6 +196,204 @@ def _fenetre_enjeux(date_heure, *, maintenant=None) -> bool:
     return -ENJEUX_APRES_MIN <= minutes <= ENJEUX_AVANT_MIN
 
 
+# ── Files d'enrichissement : elles doivent AVANCER ───────────────────────────
+# Quatre cycles piochaient « les N premiers » d'un `SELECT` SANS `ORDER BY`, sur la
+# table ENTIÈRE, et sans garder trace d'un échec :
+#
+#     stmt = select(Cheval.nom).where(Cheval.running_style.is_(None))
+#     chevaux_sans_style = [r[0] for r in result.fetchall()[:15]]
+#
+# Une file pareille ne progresse que par les SUCCÈS. PostgreSQL rend les lignes dans
+# un ordre stable tant que la table ne bouge pas : les quinze mêmes chevaux sont donc
+# redemandés à chaque cycle, indéfiniment, si le scrape échoue pour eux. Et il échoue
+# structurellement — France Galop couvre le PLAT ET L'OBSTACLE (cf. l'en-tête de
+# `sources/france_galop`), alors que la requête ne filtre aucune discipline : les
+# trotteurs, moitié des partants français, occupent la tête de file pour toujours.
+# Même défaut sur les stats Turfoo, dont le commentaire annonce « Jockeys du jour »
+# au-dessus d'un `SELECT DISTINCT` sur TOUS les jockeys jamais enregistrés.
+#
+# Le cycle Letrot, lui, était écrit juste : il joint aux courses À VENIR de sa
+# discipline. C'est ce modèle qu'on reprend ici. Deux propriétés en découlent :
+#   - la population est celle dont on a BESOIN (les acteurs des prochaines courses,
+#     ceux dont on calcule les features), pas la table entière ;
+#   - elle TOURNE toute seule avec le calendrier : un cheval qu'on n'arrive jamais à
+#     lire sort de la file après sa course, au lieu de la boucher.
+# Le plafond passe en `LIMIT` SQL : découper en Python ramenait la table entière.
+
+# Disciplines de trot : France Galop ne les connaît pas (c'est LeTrot).
+DISCIPLINES_TROT = ("Attelé", "Monté")
+
+
+def _requete_chevaux_sans_style(limite: int = 15):
+    """Chevaux ENGAGÉS dans une course de galop à venir, dont on ignore le style.
+
+    `GROUP BY` plutôt que `DISTINCT` : un cheval engagé deux fois ne doit compter
+    qu'une, et PostgreSQL REFUSE un `SELECT DISTINCT` trié sur une colonne absente
+    de la liste sélectionnée. Le tri par `MIN(date_heure)` sert le plus imminent
+    d'abord — c'est celui dont on aura besoin en premier.
+    """
+    from sqlalchemy import func, select as sa_select
+    from db.models import Cheval, Course, Participation
+
+    return (
+        sa_select(Cheval.nom)
+        .join(Participation, Participation.cheval_id == Cheval.cheval_id)
+        .join(Course, Course.course_id == Participation.course_id)
+        .where(
+            Cheval.running_style.is_(None),
+            Course.statut == "a_venir",
+            Course.discipline.notin_(DISCIPLINES_TROT),
+        )
+        .group_by(Cheval.cheval_id, Cheval.nom)
+        .order_by(func.min(Course.date_heure))
+        .limit(limite)
+    )
+
+
+def _requete_chevaux_sans_pedigree(limite: int = 20, *, etrangers: bool = False):
+    """Chevaux engagés à venir dont la généalogie manque.
+
+    `etrangers=False` → France Galop (chevaux nés en France) ;
+    `etrangers=True`  → Racing Post (les autres). Les deux files se partagent le
+    travail sans se marcher dessus, comme avant — mais sur les partants du moment.
+    """
+    from sqlalchemy import func, select as sa_select
+    from db.models import Cheval, Course, Participation
+
+    filtre_pays = (Cheval.pays_naissance != "FR") if etrangers else (Cheval.pays_naissance == "FR")
+    return (
+        sa_select(Cheval.cheval_id, Cheval.nom, Cheval.racing_post_url)
+        .join(Participation, Participation.cheval_id == Cheval.cheval_id)
+        .join(Course, Course.course_id == Participation.course_id)
+        .where(Cheval.pere.is_(None), filtre_pays, Course.statut == "a_venir")
+        .group_by(Cheval.cheval_id, Cheval.nom, Cheval.racing_post_url)
+        .order_by(func.min(Course.date_heure))
+        .limit(limite)
+    )
+
+
+def _requete_jockeys_a_rafraichir(saison: int, limite: int = 30):
+    """Jockeys ENGAGÉS dans une course à venir, ceux SANS stats de saison d'abord."""
+    from db.models import Jockey, StatsJockey, Participation
+
+    return _requete_acteurs_a_rafraichir(
+        cle=Jockey.jockey_id, nom=Jockey.nom, lien=Participation.jockey_id,
+        stats_modele=StatsJockey, stats_cle=StatsJockey.jockey_id,
+        stats_saison=StatsJockey.saison, saison=saison, limite=limite,
+    )
+
+
+def _requete_entraineurs_a_rafraichir(saison: int, limite: int = 20):
+    """Entraîneurs ENGAGÉS dans une course à venir, ceux SANS stats de saison d'abord."""
+    from db.models import Entraineur, StatsEntraineur, Participation
+
+    return _requete_acteurs_a_rafraichir(
+        cle=Entraineur.entraineur_id, nom=Entraineur.nom,
+        lien=Participation.entraineur_id, stats_modele=StatsEntraineur,
+        stats_cle=StatsEntraineur.entraineur_id, stats_saison=StatsEntraineur.saison,
+        saison=saison, limite=limite,
+    )
+
+
+def _requete_acteurs_a_rafraichir(*, cle, nom, lien, stats_modele, stats_cle,
+                                  stats_saison, saison: int, limite: int):
+    """Acteurs des courses à venir, les DÉPOURVUS de stats de saison en tête.
+
+    Le tri compte autant que le filtre : sans lui, un plafond de 30 rescrapait
+    éternellement les mêmes acteurs déjà connus pendant que les autres restaient
+    vides — la file tournait sans jamais rien remplir.
+    """
+    from sqlalchemy import func, select as sa_select
+    from db.models import Course, Participation
+
+    return (
+        sa_select(cle, nom)
+        .join(Participation, lien == cle)
+        .join(Course, Course.course_id == Participation.course_id)
+        .outerjoin(stats_modele, (stats_cle == cle) & (stats_saison == saison))
+        .where(Course.statut == "a_venir")
+        # `GROUP BY` et non `DISTINCT` : PostgreSQL refuse un `SELECT DISTINCT` trié
+        # sur des colonnes absentes de la liste sélectionnée, et il faut bien trier
+        # sur des grandeurs qu'on ne veut pas rendre. `COUNT(stats) = 0` en premier :
+        # ceux qui n'ont RIEN passent devant.
+        .group_by(cle, nom)
+        .order_by(func.count(stats_cle), func.min(Course.date_heure))
+        .limit(limite)
+    )
+
+
+# Correspondance clé RENDUE PAR LE SCRAPE → colonne de stats. Les trois tableaux
+# détaillés ne portent pas le même nom des deux côtés (`stats_par_*` côté scrape,
+# `taux_par_*` en base) : la traduction se fait ici, et nulle part ailleurs.
+_CLES_STATS_ACTEUR = {
+    "victoires_saison": "victoires_saison",
+    "courses_saison": "courses_saison",
+    "taux_victoire_global": "taux_victoire_global",
+    "taux_place_global": "taux_place_global",
+    "roi_global": "roi_global",
+    "montes_30j": "montes_30j",
+    "stats_par_distance": "taux_par_distance",
+    "stats_par_hippodrome": "taux_par_hippodrome",
+    "stats_par_terrain": "taux_par_terrain",
+}
+
+
+def _fiche_letrot(reponse) -> dict:
+    """La fiche cheval de LeTrot, extraite de sa réponse — ELLE EST IMBRIQUÉE.
+
+    `LetrotScraper.get_fiche_cheval` rend `{"search_results": [...], "fiche": {...}}`.
+    Le cycle lisait `meilleur_temps` sur le dictionnaire EXTÉRIEUR, où cette clé n'a
+    jamais existé : `update_vals` restait vide à tous les coups. Ce cycle ouvrait
+    25 pages toutes les dix minutes pour n'écrire jamais rien, et
+    `meilleur_temps_all` est resté NULL depuis l'origine — alors que la fiche course
+    l'affiche.
+    """
+    return (reponse or {}).get("fiche") or {}
+
+
+def _colonnes_stats_utiles(stats: dict | None, modele) -> dict:
+    """Colonnes RÉELLEMENT rapportées par un scrape de stats d'acteur.
+
+    UN SCRAPE MUET NE DOIT RIEN ÉCRASER. `TurfooScraper.get_stats_jockey` rend un
+    dict de clés à None quand la page se charge mais que les sélecteurs ne trouvent
+    rien (403, mur de cookies, balisage changé). Ce dict est NON VIDE : le
+    `if not stats: continue` ne l'arrêtait pas, et l'upsert écrivait 0.0 par-dessus
+    le taux calculé sur NOS arrivées par `db_writer.compute_and_save_acteur_stats`
+    — le correctif de juin 2026, remis à plat toutes les trente minutes.
+
+    Et la traduction des clés était fausse : le scrape rend `taux_victoire_global`,
+    l'upsert lisait `taux_victoire`. Cette clé n'existe dans aucun retour, donc la
+    colonne recevait 0.0 MÊME QUAND TURFOO RÉPONDAIT PARFAITEMENT.
+
+    None, 0 et {} signifient « je n'ai pas su lire », jamais « ce jockey n'a jamais
+    gagné » : ils ne sont pas écrits. Le filtre sur les colonnes du modèle évite au
+    passage d'écrire une colonne qui n'existe pas (un entraîneur n'a ni `montes_30j`
+    ni `taux_par_terrain`).
+
+    CHANGEMENT DE COMPORTEMENT ASSUMÉ sur `roi_global`. Le garde-fou de juin 2026 lisait
+    `stats.get("roi")` là où le scrape rend `roi_global` : il n'a donc JAMAIS pu se
+    déclencher, et le ROI calculé sur nos propres règlements n'a jamais été touché —
+    par accident. Le voici branché comme son commentaire l'annonçait : un ROI
+    réellement publié par Turfoo remplace le nôtre, un ROI absent ou nul ne remplace
+    rien.
+    """
+    if not isinstance(stats, dict):
+        return {}
+    colonnes_modele = set(modele.__table__.columns.keys())
+    out: dict = {}
+    for cle_scrape, colonne in _CLES_STATS_ACTEUR.items():
+        if colonne not in colonnes_modele:
+            continue
+        v = stats.get(cle_scrape)
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)) and v:
+            out[colonne] = float(v) if colonne.startswith(("taux_", "roi")) else int(v)
+        elif isinstance(v, dict) and v:
+            out[colonne] = v
+    return out
+
+
 def _is_deadlock(exc: Exception) -> bool:
     """Vrai si l'exception est un deadlock PostgreSQL (transitoire, à rejouer)."""
     s = (str(getattr(exc, "orig", "")) + " " + str(exc)).lower()
@@ -635,14 +833,17 @@ class BlackTurfOrchestrator:
                 chevaux = result.fetchall()[:25]  # max 25/cycle
 
                 for nom, cheval_id in chevaux:
-                    fiche = await scraper.get_fiche_cheval(nom)
+                    fiche = _fiche_letrot(await scraper.get_fiche_cheval(nom))
                     if not fiche:
                         continue
                     update_vals = {}
                     if fiche.get("meilleur_temps"):
                         update_vals["meilleur_temps_all"] = fiche["meilleur_temps"]
-                    if fiche.get("record_hippodrome"):
-                        update_vals["record_hippodrome_actuel"] = fiche["record_hippodrome"]
+                    # `record_hippodrome` n'est produit NULLE PART par le scraper —
+                    # ni au niveau fiche, ni au niveau recherche. On ne prétend donc
+                    # plus le lire : `record_hippodrome_actuel` restera NULL tant
+                    # que personne ne l'aura scrapé, et c'est dit ici plutôt que
+                    # déguisé en `if` qui ne peut pas être vrai.
                     if update_vals:
                         from sqlalchemy import update as sa_update
                         await session.execute(
@@ -673,81 +874,54 @@ class BlackTurfOrchestrator:
             scraper = TurfooScraper(page)
 
             async with AsyncSessionLocal() as session:
-                from sqlalchemy import select as sa_select
-                from db.models import Jockey, Entraineur, StatsJockey, StatsEntraineur, gen_uuid
+                from db.models import StatsJockey, StatsEntraineur, gen_uuid
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
                 from datetime import datetime as dt
 
                 saison = dt.now().year
 
-                # Le ROI scrape n'ECRASE le ROI calcule que s'il vaut vraiment
-                # quelque chose. Turfoo ne le publie pas (et 403 depuis le VPS) :
-                # `stats.get("roi", 0.0)` ecrivait donc 0.0 par-dessus le ROI
-                # calcule sur nos propres reglements, remettant la feature a plat.
-                def _maj_roi(stats: dict, colonnes: dict) -> dict:
-                    roi = stats.get("roi")
-                    if isinstance(roi, (int, float)) and roi:
-                        colonnes["roi_global"] = float(roi)
-                    return colonnes
+                # Un scrape muet n'écrase rien, et les clés sont traduites une
+                # seule fois : cf. `_colonnes_stats_utiles`. Le correctif du ROI de
+                # juin 2026 valait pour TOUTES les colonnes ; il n'avait été appliqué
+                # qu'à lui, et les autres continuaient d'écrire 0,0 par-dessus les
+                # taux calculés sur nos propres arrivées.
 
-                # Jockeys du jour
-                result = await session.execute(
-                    sa_select(Jockey.jockey_id, Jockey.nom).distinct()
-                )
-                jockeys = result.fetchall()[:30]
+                # Jockeys du jour — pour de bon. La requête d'avant portait sur
+                # TOUS les jockeys jamais enregistrés, sans ordre, et n'en gardait
+                # que les 30 premiers : les mêmes à chaque cycle, pendant que les
+                # autres restaient sans stats (cf. `_requete_acteurs_a_rafraichir`).
+                result = await session.execute(_requete_jockeys_a_rafraichir(saison, 30))
+                jockeys = result.fetchall()
 
                 for jockey_id, nom in jockeys:
                     stats = await scraper.get_stats_jockey(nom)
-                    if not stats:
-                        continue
+                    colonnes = _colonnes_stats_utiles(stats, StatsJockey)
+                    if not colonnes:
+                        continue          # rien de lisible : on ne touche pas la ligne
                     stmt = pg_insert(StatsJockey).values(
-                        stat_id=gen_uuid(),
-                        jockey_id=jockey_id,
-                        saison=saison,
-                        victoires_saison=stats.get("victoires_saison", 0),
-                        taux_victoire_global=stats.get("taux_victoire", 0.0),
-                        taux_place_global=stats.get("taux_place", 0.0),
-                        taux_par_distance=stats.get("stats_par_distance"),
-                        taux_par_hippodrome=stats.get("stats_par_hippodrome"),
-                        taux_par_terrain=stats.get("stats_par_terrain"),
-                        **_maj_roi(stats, {}),
+                        stat_id=gen_uuid(), jockey_id=jockey_id, saison=saison,
+                        **colonnes,
                     ).on_conflict_do_update(
                         constraint="stats_jockeys_jockey_id_saison_key",
-                        set_=_maj_roi(stats, {
-                            "victoires_saison": stats.get("victoires_saison", 0),
-                            "taux_victoire_global": stats.get("taux_victoire", 0.0),
-                            "updated_at": datetime.now(),
-                        }),
+                        set_={**colonnes, "updated_at": datetime.now()},
                     )
                     await session.execute(stmt)
 
-                # Entraîneurs du jour
-                result = await session.execute(
-                    sa_select(Entraineur.entraineur_id, Entraineur.nom).distinct()
-                )
-                entraineurs = result.fetchall()[:20]
+                # Entraîneurs du jour — même correction que pour les jockeys.
+                result = await session.execute(_requete_entraineurs_a_rafraichir(saison, 20))
+                entraineurs = result.fetchall()
 
                 for entraineur_id, nom in entraineurs:
                     stats = await scraper.get_stats_entraineur(nom)
-                    if not stats:
+                    colonnes = _colonnes_stats_utiles(stats, StatsEntraineur)
+                    if not colonnes:
                         continue
                     stmt = pg_insert(StatsEntraineur).values(
-                        stat_id=gen_uuid(),
-                        entraineur_id=entraineur_id,
-                        saison=saison,
-                        victoires_saison=stats.get("victoires_saison", 0),
-                        taux_victoire_global=stats.get("taux_victoire", 0.0),
-                        taux_place_global=stats.get("taux_place", 0.0),
-                        taux_par_distance=stats.get("stats_par_distance"),
-                        taux_par_hippodrome=stats.get("stats_par_hippodrome"),
-                        **_maj_roi(stats, {}),
+                        stat_id=gen_uuid(), entraineur_id=entraineur_id, saison=saison,
+                        **colonnes,
                     ).on_conflict_do_update(
                         constraint="stats_entraineurs_entraineur_id_saison_key",
-                        set_=_maj_roi(stats, {
-                            "victoires_saison": stats.get("victoires_saison", 0),
-                            "taux_victoire_global": stats.get("taux_victoire", 0.0),
-                            "updated_at": datetime.now(),
-                        }),
+                        set_={**colonnes, "updated_at": datetime.now()},
                     )
                     await session.execute(stmt)
 
@@ -932,25 +1106,23 @@ class BlackTurfOrchestrator:
                 for susp in suspensions:
                     await save_suspension(session, susp)
 
-                # 3. Généalogie des chevaux sans généalogie
-                from sqlalchemy import select as sa_select
-                from db.models import Cheval
-                stmt = sa_select(Cheval.nom).where(
-                    Cheval.pere.is_(None),
-                    Cheval.pays_naissance == "FR",
-                )
-                result = await session.execute(stmt)
-                chevaux_sans_pedigree = [r[0] for r in result.fetchall()[:20]]  # max 20/cycle
+                # 3. Généalogie des chevaux ENGAGÉS et sans généalogie (cf.
+                #    `_requete_chevaux_sans_pedigree` : la file doit avancer).
+                result = await session.execute(_requete_chevaux_sans_pedigree(20))
+                chevaux_sans_pedigree = [r[1] for r in result.fetchall()]
 
                 for nom in chevaux_sans_pedigree:
                     gen = await fg.get_genealogie(nom)
                     if gen:
                         await save_genealogie(session, gen)
 
-                # 4. Running style pour les chevaux du jour sans style défini
-                stmt = sa_select(Cheval.nom).where(Cheval.running_style.is_(None))
-                result = await session.execute(stmt)
-                chevaux_sans_style = [r[0] for r in result.fetchall()[:15]]
+                # 4. Running style des chevaux engagés en GALOP sans style défini.
+                #    Le filtre de discipline n'est pas un détail : demander un
+                #    trotteur à France Galop ne peut pas aboutir, et sans ordre ni
+                #    trace d'échec ces chevaux-là bloquaient la file pour toujours
+                #    (cf. `_requete_chevaux_sans_style`).
+                result = await session.execute(_requete_chevaux_sans_style(15))
+                chevaux_sans_style = [r[0] for r in result.fetchall()]
 
                 for nom in chevaux_sans_style:
                     rs = await fg.get_running_style(nom)
@@ -1040,15 +1212,11 @@ class BlackTurfOrchestrator:
             scraper = RacingPostScraper(page)
 
             async with AsyncSessionLocal() as session:
-                # Chevaux sans généalogie et d'origine étrangère (non FR)
-                from sqlalchemy import select as sa_select
-                from db.models import Cheval
-                stmt = sa_select(Cheval.cheval_id, Cheval.nom, Cheval.racing_post_url).where(
-                    Cheval.pere.is_(None),
-                    Cheval.pays_naissance != "FR",
-                )
-                result = await session.execute(stmt)
-                chevaux = result.fetchall()[:30]  # max 30/jour
+                # Chevaux ENGAGÉS, sans généalogie et d'origine étrangère (non FR).
+                # Même correction de file que côté France Galop.
+                result = await session.execute(
+                    _requete_chevaux_sans_pedigree(30, etrangers=True))
+                chevaux = result.fetchall()
 
                 for cheval_id, nom, rp_url in chevaux:
                     gen = await scraper.get_genealogie(nom)

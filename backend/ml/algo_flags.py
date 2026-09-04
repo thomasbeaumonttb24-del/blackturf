@@ -199,6 +199,19 @@ class AlgoFlags:
     # Marge exigée quand le gate est actif. 0.0 = il suffit d'égaler la cote.
     market_gate_margin: float = field(default_factory=lambda: _env_float("BT_MARKET_GATE_MARGIN", 0.0))
 
+    # ── Netteté de la distribution servie (2026-09-04) ───────────────────────
+    # Applique l'exposant appris par `ml.sharpness_calibration` en toute fin de
+    # chaîne : p ∝ p^exposant, Σ=1. Il corrige la sur-concentration de la proba sur
+    # le haut du classement — la bande 0,40-0,50 annonçait 44,3 % pour 36,4 %
+    # réalisés, pendant que toute la masse sous 0,40 était sous-estimée de 0,0013
+    # sur 46 497 partants.
+    # ACTIF PAR DÉFAUT, et pourtant sans effet tant que rien n'est prouvé :
+    # l'exposant vaut 1,0 (identité EXACTE) jusqu'à ce qu'un ajustement tienne hors
+    # échantillon. Le couper sert à revenir à la distribution d'avant sans attendre
+    # le recalcul nocturne : BT_SHARPNESS_CALIBRATION=0.
+    sharpness_calibration: bool = field(
+        default_factory=lambda: _env_bool("BT_SHARPNESS_CALIBRATION", True))
+
     def as_dict(self) -> dict:
         return {
             "train_prerace_only": self.train_prerace_only,
@@ -222,6 +235,7 @@ class AlgoFlags:
             "ranker_blend_weight": self.ranker_blend_weight,
             "market_gate": self.market_gate,
             "market_gate_margin": self.market_gate_margin,
+            "sharpness_calibration": self.sharpness_calibration,
         }
 
 

@@ -89,3 +89,48 @@ async def test_un_ecart_enorme_sur_trop_peu_de_monde_reste_non_concluant(db):
     haute = next(b for b in out["bandes"] if b["bande"] == "0.70-1.00")
     assert haute["n"] == 25 and haute["ecart"] > 0.3
     assert haute["concluant"] is False
+
+
+@pytest.mark.asyncio
+async def test_sans_correction_en_service_rien_n_est_promis(db):
+    """Pas d'exposant de netteté appliqué → pas de sous-fenêtre, et surtout pas de
+    table manquante qui ferait échouer la mesure entière."""
+    await _seed(db, n_par_bande=[(0.45, 0.36, 400)])
+    out = await dq.calibration_par_bande(db)
+    assert out["correction_nettete_depuis"] is None
+    assert "bandes_depuis_correction" not in out
+
+
+@pytest.mark.asyncio
+async def test_la_mesure_isole_ce_qui_a_ete_servi_APRES_la_correction(db):
+    """Une fenêtre de 90 jours regarde surtout le passé.
+
+    Sans distinguer les pronostics produits APRÈS la mise en service d'une
+    correction, l'alerte se répète des semaines durant sur un défaut déjà corrigé —
+    et personne ne peut dire si le correctif a pris.
+    """
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    await _seed(db, n_par_bande=[(0.45, 0.36, 400)])
+    # Correction mise en service APRÈS les pronostics ci-dessus (produits à J-1).
+    await db.execute(text("""
+        CREATE TABLE IF NOT EXISTS sharpness_calibration (
+            id INTEGER PRIMARY KEY, data TEXT NOT NULL, updated_at TIMESTAMP)
+    """))
+    hier = datetime.now(timezone.utc) - timedelta(hours=2)
+    await db.execute(
+        text("INSERT INTO sharpness_calibration (id, data) VALUES (1, :d)"),
+        {"d": json.dumps({"exposant": 0.85, "retenu": True,
+                          "applique_depuis": hier.isoformat()})})
+    await db.commit()
+
+    out = await dq.calibration_par_bande(db)
+    assert out["correction_nettete_depuis"] is not None
+    # Aucun pronostic n'a encore été servi sous la correction : on le dit, on ne
+    # prétend pas que l'écart mesuré la juge.
+    assert out["n_depuis_correction"] == 0
+    assert out["bandes_depuis_correction"] == []
+    # La mesure de fond, elle, continue de rapporter la dérive historique.
+    bande = next(b for b in out["bandes"] if b["bande"] == "0.40-0.50")
+    assert bande["ecart"] == pytest.approx(0.09, abs=0.005)
