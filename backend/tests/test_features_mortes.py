@@ -167,3 +167,70 @@ async def test_une_source_qui_tombe_alerte_toujours(db):
 
     out = await dq.sante_features(db)
     assert out["n_nouvelles_mortes"] >= dq.SEUIL_HAUSSE_FEATURES_MORTES
+
+
+# ── 4. Une feature qui NAÎT n'est pas une feature qui MEURT ───────────────────
+
+def _echantillon(n_recent, n_ancien, *, clefs_recentes=(), clefs_toujours=(),
+                 clefs_mortes=()):
+    """Vecteurs de features du PLUS RÉCENT au plus ancien, comme la requête les rend."""
+    import random
+    rng = random.Random(3)
+    lignes = []
+    for i in range(n_recent + n_ancien):
+        recent = i < n_recent
+        ligne = {k: rng.random() for k in clefs_toujours}
+        ligne.update({k: 0.0 for k in clefs_mortes})
+        if recent:
+            ligne.update({k: rng.random() for k in clefs_recentes})
+        lignes.append(ligne)
+    return lignes
+
+
+def test_une_feature_ajoutee_hier_n_est_pas_declaree_morte():
+    """`presse_rang_moyen`, `presse_score_borda` et `presse_nb_sources` ont été
+    ajoutées le 2026-09-01 — trois jours avant l'alerte, et le compte de features est
+    passé de 208 à 211 dans le même temps. Absentes de 95 % d'une fenêtre de 45 jours,
+    elles étaient comptées mortes le jour même de leur naissance."""
+    data = _echantillon(3000, 9000, clefs_recentes=["presse_rang_moyen"],
+                        clefs_toujours=["cote_pmu", "elo_global"])
+    out = fh.analyser_features(data)
+    assert "presse_rang_moyen" not in out["dead"]
+    assert out["nouvelles"] == ["presse_rang_moyen"]
+
+
+def test_une_feature_reellement_morte_reste_morte():
+    data = _echantillon(3000, 9000, clefs_toujours=["cote_pmu"],
+                        clefs_mortes=["commentaire_signal"])
+    out = fh.analyser_features(data)
+    assert "commentaire_signal" in out["dead"]
+    assert out["nouvelles"] == []
+
+
+def test_une_feature_qui_vient_de_mourir_est_bien_vue():
+    """Le cas qui compte : vivante hier, constante depuis. C'est la signature d'une
+    source qui tombe, et le verdict porte sur la tranche récente pour l'attraper."""
+    data = _echantillon(3000, 9000, clefs_toujours=["cote_pmu"])
+    for i, ligne in enumerate(data):
+        ligne["taux_en_tete"] = 0.0 if i < 3000 else (i % 7) / 10.0
+    out = fh.analyser_features(data)
+    assert "taux_en_tete" in out["dead"]
+
+
+def test_le_verdict_ne_juge_pas_sur_une_poignee_de_lignes():
+    """Plancher de la tranche récente : sous ce volume, une feature rare passerait
+    pour morte par le seul effet du hasard."""
+    data = _echantillon(50, 9000, clefs_toujours=["cote_pmu"])
+    out = fh.analyser_features(data)
+    assert out["n_rows_recent"] >= fh.MIN_LIGNES_RECENTES
+
+
+def test_les_statistiques_de_la_fenetre_entiere_restent_publiees():
+    """Le verdict change, la mesure ne se perd pas : les instantanés déjà en base et
+    les lectures existantes gardent `null_rate` et `var` sur la fenêtre complète."""
+    data = _echantillon(3000, 9000, clefs_recentes=["presse_rang_moyen"],
+                        clefs_toujours=["cote_pmu"])
+    stats = fh.analyser_features(data)["stats"]["presse_rang_moyen"]
+    assert stats["null_rate"] > 0.5              # absente de la majorité de la fenêtre
+    assert stats["null_rate_recent"] == 0.0      # mais servie aujourd'hui
+    assert stats["nouvelle"] is True and stats["dead"] is False

@@ -91,11 +91,41 @@ def test_un_scraper_muet_n_ecrase_pas_le_roi_calcule():
     """Turfoo ne publie pas de ROI (et renvoie 403 depuis le VPS) : le code posait
     quand même `roi_global = stats.get("roi", 0.0)`, donc 0.0 par-dessus le ROI
     calculé sur nos propres règlements. La feature serait retombée à plat au
-    prochain passage du scraper, sans le moindre signal."""
+    prochain passage du scraper, sans le moindre signal.
+
+    La garde vit désormais dans `_colonnes_stats_utiles`, et elle vaut pour TOUTES
+    les colonnes — pas seulement le ROI, qui n'était que le premier cas repéré.
+    """
+    from db.models import StatsJockey
+    from scraper.orchestrator import _colonnes_stats_utiles
+
     source = inspect.getsource(
         __import__("scraper.orchestrator", fromlist=["x"])
     )
     assert 'roi_global=stats.get("roi", 0.0)' not in source, (
         "un ROI absent ne doit jamais devenir un ROI de 0")
     assert '"roi_global": stats.get("roi", 0.0)' not in source
-    assert "_maj_roi" in source, "l'écriture du ROI doit rester conditionnelle"
+
+    # Le scrape muet : des clés présentes, toutes vides. Rien ne doit être écrit.
+    muet = {"roi_global": None, "taux_victoire_global": None, "victoires_saison": 0}
+    assert _colonnes_stats_utiles(muet, StatsJockey) == {}
+    # Un ROI réellement publié, lui, passe.
+    assert _colonnes_stats_utiles({"roi_global": -0.18}, StatsJockey) == {
+        "roi_global": -0.18}
+
+
+def test_la_garde_lisait_une_cle_qui_n_existait_pas():
+    """Le garde-fou de juin 2026 lisait `stats.get("roi")` là où `TurfooScraper`
+    rend `roi_global` : il n'a donc jamais pu se déclencher. Le ROI calculé sur nos
+    règlements n'a survécu que PAR ACCIDENT — et les autres colonnes, elles,
+    lisaient `taux_victoire` pour une donnée nommée `taux_victoire_global`, donc
+    écrivaient 0,0 même quand Turfoo répondait parfaitement."""
+    from scraper.sources.turfoo import TurfooScraper
+
+    js = inspect.getsource(TurfooScraper.get_stats_jockey)
+    assert "roi_global:" in js and "taux_victoire_global:" in js, (
+        "noms rendus par le scrape — ce sont EUX que l'écriture doit lire")
+
+    orch = inspect.getsource(__import__("scraper.orchestrator", fromlist=["x"]))
+    assert 'stats.get("taux_victoire")' not in orch
+    assert 'stats.get("taux_place")' not in orch

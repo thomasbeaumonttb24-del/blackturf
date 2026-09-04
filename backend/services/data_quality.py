@@ -672,6 +672,11 @@ async def sante_features(session: AsyncSession) -> dict:
         "raisons_connues": classees["raisons"],
         # Entrées du registre dont la feature revit : la cause inscrite n'est plus vraie.
         "registre_perime": registre_perime(mortes),
+        # Features NÉES récemment : absentes du passé parce qu'elles n'existaient pas.
+        # Elles étaient comptées mortes — et même « devenues mortes », l'anomalie
+        # critical réservée à la chute d'une source (cf. ml.feature_health).
+        "nouvelles_features": list(actuel.get("nouvelles") or [])[:20],
+        "n_nouvelles_features": len(actuel.get("nouvelles") or []),
         "nouvelles_mortes": nouvelles_inexpliquees[:20],
         "n_nouvelles_mortes": len(nouvelles_inexpliquees),
     }

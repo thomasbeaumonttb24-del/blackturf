@@ -38,6 +38,13 @@ NULL_RATE_DEAD = 0.95      # ≥95% de valeurs manquantes/NULL → morte
 DISTINCT_DEAD = 1          # ≤1 valeur distincte (présente) → constante
 VAR_EPS = 1e-9            # variance sous ce seuil = constante numérique
 SAMPLE_LIMIT = 40000      # plafond de lignes échantillonnées (mémoire bornée)
+# Part la plus RÉCENTE de l'échantillon sur laquelle le verdict est rendu (cf.
+# `analyser_features`). 25 % de 45 jours ≈ 11 jours : assez pour qu'une feature
+# vivante montre sa variance, assez court pour ne pas juger le présent sur le passé.
+PART_RECENTE = 0.25
+# Plancher de lignes de la tranche récente : sous ce volume, une absence de variance
+# ne prouve rien (une feature rare comme `jument_pleine` serait déclarée morte).
+MIN_LIGNES_RECENTES = 2000
 # Clés non-features (méta) à ignorer dans le scan.
 _META_KEYS = {
     "participation_id", "course_id", "numero", "cheval_id", "position",
@@ -100,35 +107,11 @@ def registre_perime(mortes) -> list[str]:
     return sorted(set(SANS_SOURCE) - set(mortes or []))
 
 
-async def compute_feature_health(session: AsyncSession, jours: int = 45) -> dict:
-    """Scanne les features_ml pré-départ des `jours` derniers jours. Retourne un dict
-    {n_rows, n_features, dead: [...], stats: {feat: {null_rate, distinct, var}}}."""
-    rows = (await session.execute(text("""
-        SELECT fm.features
-        FROM features_ml fm
-        JOIN participations pa ON pa.participation_id = fm.participation_id
-        JOIN courses c ON c.course_id = pa.course_id
-        WHERE c.date_heure IS NOT NULL
-          AND fm.computed_at < c.date_heure
-          AND c.date_heure >= now() - make_interval(days => :j)
-        ORDER BY c.date_heure DESC
-        LIMIT :lim
-    """), {"j": int(jours), "lim": SAMPLE_LIMIT})).fetchall()
-
-    data = [(f if isinstance(f, dict) else json.loads(f)) for (f,) in rows]
+def _mesurer(data, keys) -> dict:
+    """Par feature : taux d'absence, nb de valeurs distinctes, variance. Fonction PURE."""
     n = len(data)
-    if n < 200:
-        return {"n_rows": n, "insufficient": True}
-
-    # Inventaire des clés numériques.
-    keys: set[str] = set()
-    for d in data:
-        keys.update(d.keys())
-    keys -= _META_KEYS
-
-    stats: dict[str, dict] = {}
-    dead: list[str] = []
-    for k in sorted(keys):
+    out: dict[str, dict] = {}
+    for k in keys:
         present = 0
         seen: set = set()
         s = s2 = 0.0
@@ -145,29 +128,120 @@ async def compute_feature_health(session: AsyncSession, jours: int = 45) -> dict
             else:
                 s += v
                 s2 += v * v
-        null_rate = round(1.0 - present / n, 4)
-        distinct = len(seen)
         var = None
         if numeric and present > 1:
             mean = s / present
             var = max(0.0, s2 / present - mean * mean)
-        is_dead = (
-            null_rate >= NULL_RATE_DEAD
-            or distinct <= DISTINCT_DEAD
-            or (var is not None and var < VAR_EPS)
+        out[k] = {
+            "null_rate": round(1.0 - present / n, 4) if n else 1.0,
+            "distinct": len(seen),
+            "var": var,
+        }
+    return out
+
+
+def analyser_features(data: list[dict], jours: int | None = None) -> dict:
+    """Verdict de santé sur un échantillon de vecteurs de features, du PLUS RÉCENT
+    au plus ancien. Fonction PURE — c'est elle que les tests exercent.
+
+    LE VERDICT PORTE SUR LA TRANCHE RÉCENTE, ET C'EST TOUT L'ENJEU. Mesurer le taux
+    d'absence sur 45 jours confond deux situations opposées :
+
+        une feature MORTE      absente/constante partout, y compris hier ;
+        une feature NEUVE      absente du passé pour la seule raison qu'elle
+                               n'existait pas encore.
+
+    Les deux donnent null_rate ≈ 1. `presse_rang_moyen`, `presse_score_borda` et
+    `presse_nb_sources` ont été ajoutées le 2026-09-01 — trois jours avant l'alerte,
+    et le compte de features est passé de 208 à 211 dans le même temps. Sur une
+    fenêtre de 45 jours elles étaient absentes de 95 % des lignes : comptées mortes
+    le jour même de leur naissance, et pire, comptées comme des features qui
+    VIENNENT DE MOURIR — ce qui déclenche l'anomalie `critical` réservée à la chute
+    d'une source. Une supervision qui accuse un correctif d'être une panne n'est pas
+    une supervision.
+
+    On juge donc sur ce qui est servi AUJOURD'HUI, et on nomme à part ce qui vient
+    d'apparaître (présent récemment, absent avant). Les statistiques de la fenêtre
+    entière restent publiées : elles servent la comparaison, pas le verdict.
+    """
+    n = len(data)
+    keys: set[str] = set()
+    for d in data:
+        keys.update(d.keys())
+    keys -= _META_KEYS
+    keys_triees = sorted(keys)
+
+    # Tranche récente : assez large pour que l'absence de variance signifie quelque
+    # chose, assez courte pour ne pas traîner le passé. `data` est trié du plus
+    # récent au plus ancien (ORDER BY date_heure DESC).
+    n_recent = min(n, max(MIN_LIGNES_RECENTES, int(n * PART_RECENTE)))
+    recentes, anciennes = data[:n_recent], data[n_recent:]
+
+    stats_fenetre = _mesurer(data, keys_triees)
+    stats_recent = _mesurer(recentes, keys_triees)
+    stats_ancien = _mesurer(anciennes, keys_triees) if anciennes else {}
+
+    stats: dict[str, dict] = {}
+    dead: list[str] = []
+    nouvelles: list[str] = []
+    for k in keys_triees:
+        rec, fen = stats_recent[k], stats_fenetre[k]
+        anc = stats_ancien.get(k)
+        # NEUVE : servie maintenant, inconnue avant. Ce n'est pas une panne, c'est
+        # une naissance — et il ne reste rien à en dire tant que le passé n'a pas
+        # rattrapé son retard.
+        est_nouvelle = bool(
+            anc is not None
+            and rec["null_rate"] < 0.5
+            and anc["null_rate"] >= NULL_RATE_DEAD
+        )
+        est_morte = (not est_nouvelle) and (
+            rec["null_rate"] >= NULL_RATE_DEAD
+            or rec["distinct"] <= DISTINCT_DEAD
+            or (rec["var"] is not None and rec["var"] < VAR_EPS)
         )
         stats[k] = {
-            "null_rate": null_rate,
-            "distinct": distinct,
-            "var": (round(var, 9) if var is not None else None),
-            "dead": is_dead,
+            # `null_rate` / `var` restent ceux de la FENÊTRE (compatibilité des
+            # instantanés déjà en base et des lectures existantes).
+            "null_rate": fen["null_rate"],
+            "distinct": fen["distinct"],
+            "var": (round(fen["var"], 9) if fen["var"] is not None else None),
+            "null_rate_recent": rec["null_rate"],
+            "distinct_recent": rec["distinct"],
+            "var_recent": (round(rec["var"], 9) if rec["var"] is not None else None),
+            "nouvelle": est_nouvelle,
+            "dead": est_morte,
         }
-        if is_dead:
+        if est_morte:
             dead.append(k)
+        elif est_nouvelle:
+            nouvelles.append(k)
 
-    snap = {"n_rows": n, "n_features": len(keys), "n_dead": len(dead),
-            "dead": dead, "stats": stats, "jours": jours}
-    return snap
+    return {"n_rows": n, "n_rows_recent": n_recent, "n_features": len(keys),
+            "n_dead": len(dead), "dead": dead,
+            "nouvelles": nouvelles, "n_nouvelles": len(nouvelles),
+            "stats": stats, "jours": jours}
+
+
+async def compute_feature_health(session: AsyncSession, jours: int = 45) -> dict:
+    """Scanne les features_ml pré-départ des `jours` derniers jours. Retourne un dict
+    {n_rows, n_features, dead: [...], stats: {feat: {null_rate, distinct, var}}}."""
+    rows = (await session.execute(text("""
+        SELECT fm.features
+        FROM features_ml fm
+        JOIN participations pa ON pa.participation_id = fm.participation_id
+        JOIN courses c ON c.course_id = pa.course_id
+        WHERE c.date_heure IS NOT NULL
+          AND fm.computed_at < c.date_heure
+          AND c.date_heure >= now() - make_interval(days => :j)
+        ORDER BY c.date_heure DESC
+        LIMIT :lim
+    """), {"j": int(jours), "lim": SAMPLE_LIMIT})).fetchall()
+
+    data = [(f if isinstance(f, dict) else json.loads(f)) for (f,) in rows]
+    if len(data) < 200:
+        return {"n_rows": len(data), "insufficient": True}
+    return analyser_features(data, jours=jours)
 
 
 async def persist_feature_health(session: AsyncSession, snap: dict) -> None:
