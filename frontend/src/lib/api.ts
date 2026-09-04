@@ -217,6 +217,11 @@ export const adminApi = {
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
   adjustBankroll: (id: string, montant: number, note?: string) =>
     api.post(`/users/${id}/bankroll-adjust`, { montant, note }, { baseURL: `${API_URL}/admin/api` }),
+  // Suppression définitive : le compte et ce qui n'appartient qu'à lui. L'API
+  // refuse le compte de l'admin lui-même, un autre admin, et tout abonnement
+  // encore vivant côté Stripe.
+  deleteUser: (id: string) =>
+    api.delete(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
   exportUsers: () =>
     api.get("/users-export", { baseURL: `${API_URL}/admin/api`, responseType: "blob" }),
   models: () => api.get("/models", { baseURL: `${API_URL}/admin/api` }),
