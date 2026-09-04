@@ -295,8 +295,11 @@ async def _headers_for_plan(client: AsyncClient, db: AsyncSession, plan: str) ->
     from db.models import User
 
     email = f"{plan}-{uuid.uuid4().hex[:8]}@blackturf.fr"
+    # `email_verified` : sans adresse confirmée, la connexion est refusée (403) —
+    # un compte qui se connecte pour de vrai est un compte confirmé.
     db.add(User(user_id=str(uuid.uuid4()), email=email,
-                hashed_password=_hash("TestPassword123!"), plan=plan))
+                hashed_password=_hash("TestPassword123!"), plan=plan,
+                email_verified=True))
     await db.commit()
     resp = await client.post("/api/v1/auth/login",
                              data={"username": email, "password": "TestPassword123!"})

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, createElement, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
-import { authApi, refreshSession } from "@/lib/api";
+import { authApi, refreshSession, type InscriptionEnAttente } from "@/lib/api";
 import {
   AuthUser,
   getStoredUser,
@@ -17,7 +17,12 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<AuthUser>;
-  register: (data: { email: string; password: string; nom?: string; prenom?: string }) => Promise<AuthUser>;
+  /**
+   * Crée le compte et déclenche l'envoi du lien de confirmation. Ne connecte
+   * PAS : tant que l'adresse n'est pas confirmée, il n'y a pas de session à
+   * ouvrir — c'est ce qui retire tout intérêt à une adresse inventée.
+   */
+  register: (data: { email: string; password: string; nom?: string; prenom?: string }) => Promise<InscriptionEnAttente>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -116,17 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(
     async (data: { email: string; password: string; nom?: string; prenom?: string }) => {
-      await authApi.register(data);
-      try {
-        const meRes = await authApi.me();
-        storeUser(meRes.data);
-        setUser(meRes.data);
-        return meRes.data;
-      } catch (e) {
-        clearAuth();
-        setUser(null);
-        throw e;
-      }
+      const res = await authApi.register(data);
+      return res.data;
     },
     []
   );

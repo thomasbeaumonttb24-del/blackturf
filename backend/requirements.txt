@@ -43,6 +43,9 @@ joblib==1.4.2
 pydantic==2.13.4
 pydantic-settings==2.15.0
 email-validator==2.1.1
+# Contrôle MX à l'inscription (services/adresse_email.py) : un domaine qui ne
+# relève pas de courrier est refusé avant la création du compte.
+dnspython==2.6.1
 
 # Paiements
 stripe==9.11.0

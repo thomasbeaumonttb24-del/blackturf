@@ -87,9 +87,21 @@ if (typeof window !== "undefined") {
 }
 
 // API helpers
+export type InscriptionEnAttente = {
+  ok: boolean;
+  verification_requise: boolean;
+  email: string;
+  message: string;
+};
+
 export const authApi = {
+  // L'inscription n'ouvre plus de session : elle envoie un lien de confirmation.
   register: (data: { email: string; password: string; nom?: string; prenom?: string }) =>
-    api.post("/auth/register", data),
+    api.post<InscriptionEnAttente>("/auth/register", data),
+  // Renvoi du lien SANS session : celui dont le lien a expiré ne peut plus se
+  // connecter, donc plus rien demander depuis son profil.
+  resendVerification: (email?: string) =>
+    api.post("/auth/resend-verification", email ? { email } : {}),
   login: (email: string, password: string) =>
     api.post("/auth/login", new URLSearchParams({ username: email, password }), {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -205,6 +217,11 @@ export const adminApi = {
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
   adjustBankroll: (id: string, montant: number, note?: string) =>
     api.post(`/users/${id}/bankroll-adjust`, { montant, note }, { baseURL: `${API_URL}/admin/api` }),
+  // Suppression définitive : le compte et ce qui n'appartient qu'à lui. L'API
+  // refuse le compte de l'admin lui-même, un autre admin, et tout abonnement
+  // encore vivant côté Stripe.
+  deleteUser: (id: string) =>
+    api.delete(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
   exportUsers: () =>
     api.get("/users-export", { baseURL: `${API_URL}/admin/api`, responseType: "blob" }),
   models: () => api.get("/models", { baseURL: `${API_URL}/admin/api` }),
