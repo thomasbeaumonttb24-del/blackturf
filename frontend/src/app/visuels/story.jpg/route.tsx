@@ -2,14 +2,18 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
 import { jourParis, jourLong } from "@/lib/seo";
-import { photoDuJour, photoEnDataUri } from "@/lib/mosaique";
-import { Story, STORY_L, STORY_H, PHOTO_H, type DonneesStory, type PlanStory } from "@/lib/story";
+import { photoDuJour, photoEnDataUri, imageEnDataUri } from "@/lib/mosaique";
+import {
+  Story, STORY_L, STORY_H, PHOTO_H, type DonneesStory, type MeilleurPlan,
+} from "@/lib/story";
 
-// Les règlements du jour bougent encore pendant l'après-midi (un rapport Multi publié en
-// différé ajoute un plan gagnant) : dix minutes de cache, pas un quart d'heure.
+// Les règlements du jour bougent encore pendant l'après-midi (un rapport Multi publié
+// en différé ajoute un plan gagnant) : dix minutes de cache, pas un quart d'heure.
 export const revalidate = 600;
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+
+const PHOTO_L = STORY_L;
 
 /**
  * Polices EMBARQUÉES : Satori n'a pas de navigateur derrière lui et retomberait sur une
@@ -34,33 +38,72 @@ async function polices() {
 
 async function donneesStory(): Promise<DonneesStory> {
   const jour = jourParis();
-  let plans: PlanStory[] = [];
+  let pctTop3: number | null = null;
+  let pctTop1: number | null = null;
+  let hasardTop3: number | null = null;
+  let nbTop3 = 0;
+  let nbTop1 = 0;
+  let nbAnalysees = 0;
+  let nbPartants = 0;
+  let nbHippodromes = 0;
   let nbPlans = 0;
   let nbPlansGagnants = 0;
   let totalRetour = 0;
+  let meilleur: MeilleurPlan | null = null;
   try {
     const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
     if (res.ok) {
       const d = await res.json();
-      plans = (d.plans ?? []).map((p: Record<string, unknown>) => ({
-        hippodrome: String(p.hippodrome ?? ""),
-        code: String(p.code ?? ""),
-        retour: Number(p.retour ?? 0),
-      }));
+      const p = (d.plans ?? [])[0];
+      if (p) {
+        meilleur = {
+          hippodrome: String(p.hippodrome ?? ""),
+          code: String(p.code ?? ""),
+          mise: Number(p.mise ?? 0),
+          retour: Number(p.retour ?? 0),
+          net: Number(p.net ?? 0),
+          typePari: p.type_pari ? String(p.type_pari) : null,
+        };
+      }
+      nbHippodromes = Number(d.nb_hippodromes ?? 0);
       nbPlans = Number(d.nb_plans ?? 0);
       nbPlansGagnants = Number(d.nb_plans_gagnants ?? 0);
       totalRetour = Number(d.total_retour ?? 0);
+      const a = d.analyse ?? {};
+      nbAnalysees = Number(a.nb_courses_analysees ?? 0);
+      nbTop3 = Number(a.nb_top3 ?? 0);
+      nbTop1 = Number(a.nb_top1 ?? 0);
+      nbPartants = Number(a.nb_partants ?? 0);
+      // `null` reste `null` : une journée pas encore analysée doit se TAIRE, pas
+      // afficher 0 % — un « 0 % » se lit comme un échec, pas comme une absence.
+      pctTop3 = a.pct_top3 === null || a.pct_top3 === undefined ? null : Number(a.pct_top3);
+      pctTop1 = a.pct_top1 === null || a.pct_top1 === undefined ? null : Number(a.pct_top1);
+      hasardTop3 =
+        a.hasard_top3 === null || a.hasard_top3 === undefined ? null : Number(a.hasard_top3);
     }
   } catch {
     // Un visuel sans données reste publiable ; un visuel qui plante, non.
   }
+  const [photo, horse] = await Promise.all([
+    photoEnDataUri(photoDuJour(jour), { largeur: PHOTO_L, hauteur: PHOTO_H, luminosite: 1.04 }),
+    imageEnDataUri("logo-horse.png", { largeur: 200 }),
+  ]);
   return {
     jourLong: jourLong(jour),
+    pctTop3,
+    nbTop3,
+    nbAnalysees,
+    hasardTop3,
+    pctTop1,
+    nbTop1,
+    nbPartants,
+    nbHippodromes,
+    meilleur,
+    totalRetour,
     nbPlans,
     nbPlansGagnants,
-    totalRetour,
-    plans,
-    photo: await photoEnDataUri(photoDuJour(jour), { largeur: STORY_L, hauteur: PHOTO_H, luminosite: 1.06 }),
+    photo,
+    horse,
   };
 }
 

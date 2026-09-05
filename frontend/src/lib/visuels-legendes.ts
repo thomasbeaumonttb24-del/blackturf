@@ -41,6 +41,12 @@ interface BilanJour {
   totalRetour: number;
   nbPlans: number;
   nbPlansGagnants: number;
+  pctTop3: number | null;
+  nbTop3: number;
+  nbAnalysees: number;
+  hasardTop3: number | null;
+  meilleur: { hippodrome: string; code: string; mise: number; retour: number; net: number;
+              typePari: string | null } | null;
 }
 
 /**
@@ -56,10 +62,27 @@ async function bilanDuJour(): Promise<BilanJour | null> {
     const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
     if (!res.ok) return null;
     const d = await res.json();
+    const a = d.analyse ?? {};
+    const p = (d.plans ?? [])[0];
+    const nombre = (v: unknown) => (v === null || v === undefined ? null : Number(v));
     return {
       totalRetour: Number(d.total_retour ?? 0),
       nbPlans: Number(d.nb_plans ?? 0),
       nbPlansGagnants: Number(d.nb_plans_gagnants ?? 0),
+      pctTop3: nombre(a.pct_top3),
+      nbTop3: Number(a.nb_top3 ?? 0),
+      nbAnalysees: Number(a.nb_courses_analysees ?? 0),
+      hasardTop3: nombre(a.hasard_top3),
+      meilleur: p
+        ? {
+            hippodrome: String(p.hippodrome ?? ""),
+            code: String(p.code ?? ""),
+            mise: Number(p.mise ?? 0),
+            retour: Number(p.retour ?? 0),
+            net: Number(p.net ?? 0),
+            typePari: p.type_pari ? String(p.type_pari) : null,
+          }
+        : null,
     };
   } catch {
     return null;
@@ -71,6 +94,9 @@ const euro = (n: number) =>
     minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
     maximumFractionDigits: 2,
   });
+
+const pct = (n: number) =>
+  n.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 async function quinteDuJour(jour: string): Promise<SeoCourse | null> {
   const prog = await fetchProgramme(jour);
@@ -138,14 +164,35 @@ export async function publicationsDuJour(): Promise<Publication[]> {
   const bilan = await bilanDuJour();
   const legendeStory = bilan
     ? [
-        `Bilan du jour — ${jourLong(jour)}.`,
+        `Performance du jour — ${jourLong(jour)}.`,
         "",
-        `Les plans de mise calculés avant chaque départ ont rendu ${euro(bilan.totalRetour)} €, ` +
-          "réglés aux rapports officiels du PMU.",
-        `${bilan.nbPlansGagnants} plans gagnants sur les ${bilan.nbPlans} calculés aujourd'hui.`,
+        ...(bilan.pctTop3 !== null
+          ? [
+              `${pct(bilan.pctTop3)} % des courses où le gagnant était dans notre Top 3 ` +
+                `(${bilan.nbTop3} sur ${bilan.nbAnalysees} analysées` +
+                (bilan.hasardTop3 !== null
+                  ? ` ; un tirage au sort en trouverait ${pct(bilan.hasardTop3)} %).`
+                  : ")."),
+              "",
+            ]
+          : []),
+        ...(bilan.meilleur
+          ? [
+              "Meilleur plan de la journée : " +
+                [bilan.meilleur.typePari, bilan.meilleur.hippodrome, bilan.meilleur.code]
+                  .filter(Boolean)
+                  .join(" · ") +
+                ` — ${euro(bilan.meilleur.mise)} € misés, ${euro(bilan.meilleur.retour)} € rendus.`,
+              "",
+            ]
+          : []),
+        `Au total, les plans du jour ont rendu ${euro(bilan.totalRetour)} €, réglés aux ` +
+          "rapports officiels du PMU : " +
+          `${bilan.nbPlansGagnants} plans gagnants sur les ${bilan.nbPlans} calculés.`,
         "",
-        `Le détail course par course, gagnants comme perdants : ${SITE}/programme`,
+        `Chiffres recalculés en direct sur le site : ${SITE}`,
         "",
+        "Les résultats passés ne préjugent pas des résultats futurs.",
         MENTION_LEGALE,
         "",
         HASHTAGS,
@@ -174,7 +221,7 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       // backend ne connaît que « matin » et « soir »). Elle se publie à la main depuis
       // /studio, une fois la journée courue.
       cle: "story",
-      titre: "Story du soir — bilan de la journée",
+      titre: "Story du soir — performance de la journée",
       image: `${SITE}/visuels/story.jpg`,
       fichier: `blackturf-story-${jour}.jpg`,
       legende: legendeStory,

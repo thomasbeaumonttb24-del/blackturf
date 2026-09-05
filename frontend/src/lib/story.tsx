@@ -1,340 +1,540 @@
-import { Adresse, COULEURS, DateDuJour, Eyebrow } from "@/lib/mosaique";
+import { COULEURS } from "@/lib/mosaique";
 import { MENTION_LEGALE } from "@/lib/visuels";
 
 /**
- * Story du soir — 1080 × 1920, le bilan de la journée.
+ * Story du soir — 1080 × 1920, la performance de la journée.
  *
- * ─────────────────────────── LA GÉOMÉTRIE ───────────────────────────
+ * ─────────────────────────── CE QU'ELLE DIT, ET DANS QUEL ORDRE ───────────────────────────
  *
- * Une story Instagram est recouverte par l'interface de l'application : environ 250 px
- * en haut (avatar, barre de progression) et 250 px en bas (champ « Envoyer un message »,
- * boutons). Tout ce qui compte tient donc entre y = 250 et y = 1670, et le bas de
- * l'image est volontairement vide — un chiffre posé à 1800 px serait masqué par le
- * clavier chez la moitié des lecteurs.
+ * Le chiffre de tête est la QUALITÉ DE CLASSEMENT, pas un gain : la part des courses
+ * où le gagnant réel figurait dans le Top 3 prédit. C'est le seul chiffre que le site
+ * puisse défendre sur la durée, et il est publié avec les deux choses sans lesquelles
+ * il ne veut rien dire : son dénominateur (« 38 courses sur 51 ») et le repère du
+ * hasard, CALCULÉ sur le champ réel de chaque course. « 74,5 % » seul ne dit pas au
+ * lecteur ce qu'il bat.
+ *
+ * Viennent ensuite l'argent : le meilleur plan du jour, puis le TOTAL rendu par tous
+ * les plans.
  *
  * ─────────────────────────── LE VOCABULAIRE, QUI N'EST PAS DÉCORATIF ───────────────────────────
  *
- * Le montant affiché est ce que les plans ont RENDU, réglé aux rapports officiels du
- * PMU. Ce n'est ni un bénéfice, ni de l'argent encaissé par qui que ce soit : la mise
- * n'est pas affichée sur ce visuel (choix produit tranché le 2026-09-05), donc le
- * chiffre ne peut pas être présenté comme un gain net. « Rendu par les plans » est
- * exact ; « gagné », « nos gains » ou « bénéfice » seraient faux.
+ * Ces montants sont ceux de PLANS calculés et réglés aux rapports officiels du PMU,
+ * pas d'argent encaissé par quiconque. « Misé » et « rendu » sont exacts ; « gagné »,
+ * « nos gains » ou « bénéfice » ne le seraient pas.
  *
- * Le NOMBRE DE PLANS DU JOUR est affiché à côté du nombre de plans gagnants, et ce
- * n'est pas un détail : sans lui, « 29 plans gagnants » se lirait comme si tous les
- * plans avaient gagné. Avec « sur les 153 du jour », le lecteur voit la proportion
- * réelle sans qu'aucune mise ne soit publiée.
+ * La mise TOTALE de la journée n'est pas affichée (arbitrage produit du 2026-09-05).
+ * Le garde-fou est le dénominateur : le nombre de plans gagnants sort toujours avec le
+ * nombre total de plans calculés, sans quoi « 21 plans gagnants » se lirait comme si
+ * tous les plans avaient gagné.
+ *
+ * LE PROFIL N'EST JAMAIS AFFICHÉ. Le plus gros gain d'une journée vient presque
+ * toujours du profil le plus risqué : le nommer reviendrait à mettre ce profil en
+ * avant à chaque publication.
+ *
+ * ─────────────────────────── LA GÉOMÉTRIE ───────────────────────────
+ *
+ * L'interface d'Instagram recouvre ~250 px en haut et ~250 px en bas d'une story. La
+ * photo occupe le haut (elle peut être partiellement masquée, c'est du décor) et TOUT
+ * le texte, mention légale comprise, tient au-dessus de y = 1700.
  */
 
 export const STORY_L = 1080;
 export const STORY_H = 1920;
 
-/** Hauteur de la bande photo, fondue vers l'ivoire sur son dernier tiers. */
-export const PHOTO_H = 860;
-/** La carte blanche chevauche la photo : c'est ce chevauchement qui tient la page. */
-const CARTE_X = 60;
-const CARTE_Y = 530;
-const CARTE_L = STORY_L - CARTE_X * 2;
-const CARTE_H = 820;
-const BANDE_Y = CARTE_Y + CARTE_H; // 1350
-/**
- * Le socle en encre commence à 1350 et non plus à 1430 : la mention légale se posait
- * sinon à 1690, c'est-à-dire SOUS le champ « Envoyer un message » d'Instagram. Une
- * mention de jeu responsable masquée par l'interface ne vaut pas mieux qu'une mention
- * absente — c'est même exactement ce que les plateformes sanctionnent.
- */
-const BANDE_CONTENU_Y = BANDE_Y + 44;
+/** Bande photo. Volontairement courte : la story porte surtout du texte. */
+export const PHOTO_H = 380;
+const MARGE = 64;
+const UTILE = STORY_L - MARGE * 2;
 
-export interface PlanStory {
+/** Vert du gain : celui de `lib/visuels` est calé pour un fond sombre, illisible ici. */
+const VERT = "#177A4C";
+
+export interface MeilleurPlan {
   hippodrome: string;
   code: string;
+  mise: number;
   retour: number;
+  net: number;
+  typePari: string | null;
 }
 
 export interface DonneesStory {
   jourLong: string;
+  /** Qualité de classement du jour. `null` = pas encore mesurable : on se tait. */
+  pctTop3: number | null;
+  nbTop3: number;
+  nbAnalysees: number;
+  hasardTop3: number | null;
+  pctTop1: number | null;
+  nbTop1: number;
+  nbPartants: number;
+  nbHippodromes: number;
+  meilleur: MeilleurPlan | null;
+  totalRetour: number;
   nbPlans: number;
   nbPlansGagnants: number;
-  totalRetour: number;
-  plans: PlanStory[];
   photo: string | null;
+  horse: string | null;
 }
 
-/** Montants : les centimes ne s'affichent que s'il y en a. Même règle que la mosaïque. */
+/**
+ * Montants : les centimes ne s'affichent que s'il y en a. Même règle que la mosaïque.
+ *
+ * L'espace des milliers est REMPLACÉ par une espace ordinaire. `Intl` produit une
+ * espace fine insécable (U+202F) que les fontes embarquées ne portent pas : Satori la
+ * rend à chasse nulle et « 1 040,30 € » sortait « 1040,30 € ». Sur un visuel dont le
+ * seul contenu est un nombre, quatre chiffres collés se lisent mal.
+ */
 const euro = (n: number) =>
-  n.toLocaleString("fr-FR", {
-    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
-    maximumFractionDigits: 2,
-  });
+  n
+    .toLocaleString("fr-FR", {
+      minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+      maximumFractionDigits: 2,
+    })
+    .replace(/[  ]/g, " ");
 
-/** Une ligne de podium : la course, puis ce que son plan a rendu. */
-function LigneCourte({ p, rang }: { p: PlanStory; rang: number }) {
+/** Pourcentages à la française : virgule décimale, jamais de point. */
+const pct = (n: number) =>
+  n.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** Surtitre doré encadré de deux filets — le motif qui rythme toute la page. */
+function Surtitre({ children, largeur = UTILE }: { children: string; largeur?: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", width: largeur }}>
+      <div style={{ display: "flex", flex: 1, height: 1, background: COULEURS.ligne }} />
+      <span
+        style={{
+          fontFamily: "Inter",
+          fontWeight: 600,
+          fontSize: 23,
+          letterSpacing: 4,
+          color: COULEURS.or,
+          margin: "0 22px",
+        }}
+      >
+        {children}
+      </span>
+      <div style={{ display: "flex", flex: 1, height: 1, background: COULEURS.ligne }} />
+    </div>
+  );
+}
+
+/** Une colonne du bandeau de chiffres. */
+function Chiffre({
+  valeur,
+  unite,
+  legende,
+}: {
+  valeur: string;
+  unite?: string;
+  legende: string[];
+}) {
   return (
     <div
       style={{
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
-        justifyContent: "space-between",
-        width: "100%",
-        marginTop: 18,
+        width: 300,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "baseline" }}>
         <span
           style={{
-            display: "flex",
-            width: 38,
-            height: 38,
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 8,
-            background: rang === 1 ? COULEURS.orVif : COULEURS.ivoire,
-            color: rang === 1 ? "#1B1405" : COULEURS.encreDouce,
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 21,
+            fontSize: 60,
+            color: COULEURS.encre,
+            letterSpacing: -2,
           }}
         >
-          {rang}
+          {valeur}
+        </span>
+        {unite ? (
+          <span
+            style={{
+              fontFamily: "Grotesk",
+              fontWeight: 700,
+              fontSize: 28,
+              color: COULEURS.or,
+              marginLeft: 6,
+            }}
+          >
+            {unite}
+          </span>
+        ) : null}
+      </div>
+      {legende.map((l, i) => (
+        <span
+          key={i}
+          style={{
+            fontFamily: "Inter",
+            fontSize: 24,
+            lineHeight: 1.3,
+            color: COULEURS.encreDouce,
+            marginTop: i === 0 ? 8 : 0,
+          }}
+        >
+          {l}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function Story({ d }: { d: DonneesStory }) {
+  const m = d.meilleur;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        width: STORY_L,
+        height: STORY_H,
+        background: COULEURS.ivoire,
+      }}
+    >
+      {/* Filet doré en tête : il ferme le haut de l'image quand la story est vue en
+          plein écran, sinon la photo semble déborder de l'écran. */}
+      <div
+        style={{
+          display: "flex",
+          width: STORY_L,
+          height: 6,
+          background: "linear-gradient(90deg, #C8901F 0%, #E0A63C 50%, #C8901F 100%)",
+        }}
+      />
+
+      <div style={{ display: "flex", width: STORY_L, height: PHOTO_H }}>
+        {d.photo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={d.photo} alt="" width={STORY_L} height={PHOTO_H} style={{ objectFit: "cover" }} />
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          width: STORY_L,
+          height: 6,
+          background: "linear-gradient(90deg, #C8901F 0%, #E0A63C 50%, #C8901F 100%)",
+        }}
+      />
+
+      {/* ══════════ La marque ══════════ */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 120,
+          height: 120,
+          borderRadius: 60,
+          border: `3px solid ${COULEURS.or}`,
+          marginTop: 28,
+        }}
+      >
+        {d.horse ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={d.horse} alt="" width={92} height={58} />
+        ) : null}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 10 }}>
+        <span
+          style={{
+            fontFamily: "Grotesk",
+            fontWeight: 700,
+            fontSize: 30,
+            letterSpacing: 2,
+            color: COULEURS.encre,
+          }}
+        >
+          BLACK
         </span>
         <span
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
             fontSize: 30,
-            color: COULEURS.encre,
-            marginLeft: 16,
-            letterSpacing: -0.6,
+            letterSpacing: 2,
+            color: COULEURS.or,
           }}
         >
-          {p.hippodrome} · {p.code}
+          TURF
         </span>
+      </div>
+
+      {/* ══════════ Le jour ══════════
+          Il était en surtitre à 23 px, à la taille d'une étiquette. Une publication de
+          résultats dont on ne lit pas le jour ne prouve rien — c'est même la première
+          chose qu'on lui reproche. Il prend donc la taille d'un titre. */}
+      <div style={{ display: "flex", marginTop: 20 }}>
+        <Surtitre>PERFORMANCE DU JOUR</Surtitre>
       </div>
       <span
         style={{
           fontFamily: "Grotesk",
           fontWeight: 700,
-          fontSize: 36,
-          color: COULEURS.or,
-          letterSpacing: -1,
+          fontSize: 54,
+          letterSpacing: -1.4,
+          color: COULEURS.encre,
+          marginTop: 10,
         }}
       >
-        {euro(p.retour)} €
+        {d.jourLong}
       </span>
-    </div>
-  );
-}
 
-export function Story({ d }: { d: DonneesStory }) {
-  const podium = d.plans.slice(0, 3);
-  return (
-    <div
-      style={{
-        display: "flex",
-        position: "relative",
-        width: STORY_L,
-        height: STORY_H,
-        background: COULEURS.ivoire,
-      }}
-    >
-      {d.photo && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={d.photo}
-          alt=""
-          width={STORY_L}
-          height={PHOTO_H}
-          style={{ position: "absolute", left: 0, top: 0, objectFit: "cover" }}
-        />
-      )}
-      {/* Fondu : la photo doit s'éteindre AVANT la carte, sinon le blanc se découpe
-          dessus comme un autocollant. */}
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: STORY_L,
-          height: PHOTO_H,
-          display: "flex",
-          background:
-            "linear-gradient(180deg, rgba(245,242,234,0.06) 0%, rgba(245,242,234,0.00) 40%, rgba(245,242,234,0.42) 76%, rgba(245,242,234,0.92) 94%, #F5F2EA 100%)",
-        }}
-      />
-
-      {/* La marque, posée dans le haut de la photo — sous la zone masquée par
-          l'interface d'Instagram, jamais dedans. */}
-      <div
-        style={{
-          position: "absolute",
-          left: CARTE_X,
-          top: 268,
-          display: "flex",
-          alignItems: "center",
-          padding: "18px 30px",
-          borderRadius: 18,
-          background: "rgba(21,24,29,0.72)",
-        }}
-      >
-        <div style={{ display: "flex", width: 10, height: 40, background: COULEURS.orVif }} />
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 40,
-            color: COULEURS.surSombre,
-            marginLeft: 16,
-            letterSpacing: -1,
-          }}
-        >
-          BlackTurf
-        </span>
-      </div>
-
-      {/* ══════════ La carte : la date, le montant rendu, le podium ══════════ */}
-      <div
-        style={{
-          position: "absolute",
-          left: CARTE_X,
-          top: CARTE_Y,
-          width: CARTE_L,
-          height: CARTE_H,
-          display: "flex",
-          flexDirection: "column",
-          background: COULEURS.blanc,
-          borderRadius: 30,
-          padding: "50px 56px",
-          border: `1px solid ${COULEURS.ligne}`,
-        }}
-      >
-        <DateDuJour jour={d.jourLong} />
-
-        <div style={{ display: "flex", marginTop: 34 }}>
-          <Eyebrow>CE QUE LES PLANS ONT RENDU</Eyebrow>
-        </div>
-
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 176,
-            lineHeight: 1,
-            color: COULEURS.or,
-            letterSpacing: -7,
-            marginTop: 14,
-          }}
-        >
-          {euro(d.totalRetour)} €
-        </span>
-
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 27,
-            lineHeight: 1.45,
-            color: COULEURS.encreDouce,
-            marginTop: 18,
-          }}
-        >
-          {d.nbPlansGagnants} plans gagnants sur les {d.nbPlans} calculés aujourd&apos;hui,
-          réglés aux rapports officiels du PMU.
-        </span>
-
-        <div
-          style={{ display: "flex", width: "100%", height: 1, background: COULEURS.ligne, marginTop: 34 }}
-        />
-
-        <div style={{ display: "flex", marginTop: 26 }}>
+      {/* ══════════ La qualité de classement ══════════ */}
+      {d.pctTop3 !== null ? (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 18 }}>
+          <div style={{ display: "flex", alignItems: "baseline" }}>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 132,
+                lineHeight: 1,
+                color: COULEURS.encre,
+                letterSpacing: -6,
+              }}
+            >
+              {pct(d.pctTop3)}
+            </span>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 56,
+                color: COULEURS.or,
+                marginLeft: 6,
+              }}
+            >
+              %
+            </span>
+          </div>
+          <span
+            style={{
+              fontFamily: "Grotesk",
+              fontWeight: 700,
+              fontSize: 44,
+              lineHeight: 1.2,
+              color: COULEURS.encre,
+              letterSpacing: -1,
+              marginTop: 6,
+            }}
+          >
+            des courses où le gagnant
+          </span>
+          <span
+            style={{
+              fontFamily: "Grotesk",
+              fontWeight: 700,
+              fontSize: 44,
+              lineHeight: 1.2,
+              color: COULEURS.encre,
+              letterSpacing: -1,
+            }}
+          >
+            était dans notre Top 3
+          </span>
+          {/* Dénominateur ET repère du hasard, toujours : un pourcentage sans eux ne se
+              vérifie pas et ne dit pas ce qu'il bat. */}
           <span
             style={{
               fontFamily: "Inter",
-              fontWeight: 600,
-              fontSize: 22,
-              letterSpacing: 2.8,
-              color: COULEURS.encreTenue,
+              fontSize: 26,
+              color: COULEURS.encreDouce,
+              marginTop: 16,
             }}
           >
-            LES TROIS QUI ONT LE PLUS RENDU
+            {d.nbTop3} courses sur {d.nbAnalysees} analysées
+            {d.hasardTop3 !== null
+              ? ` · un tirage au sort en trouverait ${pct(d.hasardTop3)} %`
+              : ""}
           </span>
         </div>
+      ) : null}
 
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 6 }}>
-          {podium.map((p, i) => (
-            <LigneCourte key={`${p.code}-${i}`} p={p} rang={i + 1} />
-          ))}
-        </div>
-      </div>
-
-      {/* ══════════ Socle en encre : où aller, et la mention légale ══════════ */}
+      {/* ══════════ Le volume de la journée ══════════ */}
       <div
         style={{
-          position: "absolute",
-          left: 0,
-          top: BANDE_Y,
-          width: STORY_L,
-          height: STORY_H - BANDE_Y,
           display: "flex",
-          background: COULEURS.encre,
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: BANDE_Y - 3,
-          width: STORY_L,
-          height: 6,
-          display: "flex",
-          background: "linear-gradient(90deg, #C8901F 0%, #E0A63C 50%, #C8901F 100%)",
-        }}
-      />
-
-      {/* Tout le socle est UNE colonne, mention légale comprise : posée en absolu, elle
-          se retrouvait fatalement dans la zone que l'interface d'Instagram recouvre dès
-          qu'un bloc au-dessus changeait de hauteur. Ici elle suit le flux et remonte
-          d'elle-même. */}
-      <div
-        style={{
-          position: "absolute",
-          left: CARTE_X,
-          top: BANDE_CONTENU_Y,
-          width: CARTE_L,
-          display: "flex",
-          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          width: UTILE,
+          marginTop: 26,
         }}
       >
-        <Eyebrow ton="sombre">LE DÉTAIL EST EN LIGNE</Eyebrow>
+        <Chiffre
+          valeur={d.pctTop1 !== null ? pct(d.pctTop1) : "—"}
+          unite={d.pctTop1 !== null ? "%" : undefined}
+          legende={["notre favori a gagné", `${d.nbTop1} courses sur ${d.nbAnalysees}`]}
+        />
+        <div style={{ display: "flex", width: 1, height: 86, background: COULEURS.ligne }} />
+        <Chiffre
+          valeur={d.nbPartants.toLocaleString("fr-FR")}
+          legende={["partants analysés", "dans la journée"]}
+        />
+        <div style={{ display: "flex", width: 1, height: 86, background: COULEURS.ligne }} />
+        <Chiffre
+          valeur={String(d.nbHippodromes)}
+          legende={["hippodromes", "couverts"]}
+        />
+      </div>
+
+      {/* ══════════ Le meilleur plan ══════════ */}
+      {m ? (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 28 }}>
+          <Surtitre largeur={640}>MEILLEUR GAIN DE LA JOURNÉE</Surtitre>
+          <div style={{ display: "flex", alignItems: "baseline", marginTop: 14 }}>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 52,
+                color: COULEURS.encreTenue,
+                letterSpacing: -1.4,
+              }}
+            >
+              {euro(m.mise)} €
+            </span>
+            <span style={{ fontFamily: "Inter", fontSize: 40, color: COULEURS.or, margin: "0 20px" }}>
+              →
+            </span>
+            <span
+              style={{
+                fontFamily: "Grotesk",
+                fontWeight: 700,
+                fontSize: 78,
+                color: VERT,
+                letterSpacing: -3,
+              }}
+            >
+              {euro(m.retour)} €
+            </span>
+          </div>
+          <span
+            style={{
+              fontFamily: "Inter",
+              fontSize: 26,
+              color: COULEURS.encreDouce,
+              marginTop: 10,
+            }}
+          >
+            {[m.typePari, m.hippodrome, `${euro(m.net)} € net`].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+      ) : null}
+
+      {/* ══════════ Le total de la journée ══════════
+          Une seule ligne : c'est un chiffre de contexte, pas le sujet de la story. Le
+          nombre de plans gagnants ne sort JAMAIS sans le nombre total calculé. */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          width: UTILE,
+          marginTop: 22,
+          paddingTop: 18,
+          borderTop: `1px solid ${COULEURS.ligne}`,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline" }}>
+          <span style={{ fontFamily: "Inter", fontSize: 27, color: COULEURS.encreDouce }}>
+            Total rendu par les plans du jour
+          </span>
+          <span
+            style={{
+              fontFamily: "Grotesk",
+              fontWeight: 700,
+              fontSize: 46,
+              color: COULEURS.or,
+              letterSpacing: -1.6,
+              marginLeft: 18,
+            }}
+          >
+            {euro(d.totalRetour)} €
+          </span>
+        </div>
+        <span
+          style={{
+            fontFamily: "Inter",
+            fontSize: 24,
+            color: COULEURS.encreTenue,
+            marginTop: 6,
+          }}
+        >
+          {d.nbPlansGagnants} plans gagnants sur les {d.nbPlans} calculés
+        </span>
+      </div>
+
+      {/* ══════════ Où aller ══════════ */}
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 20 }}>
         <span
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
             fontSize: 42,
-            lineHeight: 1.15,
-            color: COULEURS.surSombre,
-            marginTop: 14,
-            letterSpacing: -1.2,
+            color: COULEURS.encre,
+            letterSpacing: -1,
           }}
         >
-          Chaque plan du jour, course par course — les perdants aussi.
+          Ne pariez plus&nbsp;
         </span>
-        <div style={{ display: "flex", marginTop: 22 }}>
-          <Adresse ton="sombre" />
-        </div>
-        {/* La mention de jeu responsable est portée par le visuel lui-même : une image
-            circule hors de sa légende, et c'est l'image qu'on retrouve republiée. */}
         <span
           style={{
-            display: "flex",
-            marginTop: 20,
-            fontFamily: "Inter",
-            fontSize: 20,
-            lineHeight: 1.45,
-            color: COULEURS.surSombreTenu,
+            fontFamily: "Grotesk",
+            fontWeight: 700,
+            fontSize: 42,
+            color: COULEURS.or,
+            letterSpacing: -1,
           }}
         >
-          {MENTION_LEGALE}
+          au hasard.
         </span>
       </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "20px 42px",
+          borderRadius: 46,
+          background: COULEURS.encre,
+          marginTop: 14,
+        }}
+      >
+        {/* Adresse RACINE, sans chemin. Une story se regarde, elle ne se clique pas :
+            un lecteur qui doit retaper « blackturf.fr/track-record » de mémoire ne
+            tape rien du tout. */}
+        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 40, color: COULEURS.surSombre }}>
+          black
+        </span>
+        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 40, color: COULEURS.orVif }}>
+          turf.fr
+        </span>
+      </div>
+
+      {/* La mention de jeu responsable est portée par l'IMAGE, pas seulement par la
+          légende : une image circule hors de sa légende, et c'est l'image qu'on
+          retrouve republiée. Elle reste au-dessus de la zone que l'interface
+          d'Instagram recouvre. */}
+      <span
+        style={{
+          display: "flex",
+          width: UTILE - 60,
+          textAlign: "center",
+          fontFamily: "Inter",
+          fontSize: 19,
+          lineHeight: 1.4,
+          color: COULEURS.encreTenue,
+          marginTop: 14,
+        }}
+      >
+        Les résultats passés ne préjugent pas des résultats futurs. {MENTION_LEGALE}
+      </span>
     </div>
   );
 }

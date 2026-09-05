@@ -176,6 +176,32 @@ export async function photoEnDataUri(
   }
 }
 
+/**
+ * Une image du dossier public, telle quelle, en data URI PNG.
+ *
+ * Distincte de `photoEnDataUri` : ici on ne recadre RIEN et on garde la transparence
+ * (le cheval du logo se pose sur l'ivoire, un aplat blanc derrière lui ferait une
+ * vignette). Le fichier source fait 493 × 310 : on ne l'agrandit jamais au-delà, sinon
+ * le contour bave — c'est la seule chose qu'on remarque sur un logo.
+ */
+export async function imageEnDataUri(
+  fichier: string,
+  { largeur = 400 } = {},
+): Promise<string | null> {
+  try {
+    const chemin = path.join(process.cwd(), "public", "img", fichier);
+    const brut = await fs.readFile(chemin);
+    const { default: sharp } = await import("sharp");
+    const png = await sharp(brut)
+      .resize(largeur, null, { fit: "inside", withoutEnlargement: true })
+      .png()
+      .toBuffer();
+    return `data:image/png;base64,${png.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 export interface PlanJour {
   hippodrome: string;
   code: string;
