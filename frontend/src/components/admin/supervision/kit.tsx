@@ -1,86 +1,51 @@
 "use client";
 
 /**
- * Briques partagées de la supervision IA.
+ * Briques de la supervision IA.
  *
- * Règle de cette page : rien n'est affiché qui ne soit mesuré. Une valeur
- * absente s'affiche « — », jamais 0 ; un segment sous le seuil de fiabilité
- * porte un badge « échantillon insuffisant » et son chiffre reste grisé.
+ * Ce fichier ne définit plus sa propre apparence : il ADAPTE le kit commun de
+ * l'administration (`components/admin/ui.tsx`) aux noms qu'emploient les six
+ * onglets. Avant la refonte il peignait ses propres surfaces — `bg-white`,
+ * `text-gray-900`, `border-gray-100` — pendant que le back-office peignait les
+ * siennes avec les jetons du thème. Deux pages du même outil, deux blancs
+ * légèrement différents, deux gris de texte, deux échelles de titres.
+ *
+ * Règle de la page, inchangée : rien n'est affiché qui ne soit mesuré. Une
+ * valeur absente s'affiche « — », jamais 0 ; un segment sous le seuil de
+ * fiabilité porte un badge « échantillon insuffisant » et son chiffre reste
+ * grisé.
  */
 
 import * as React from "react";
-import { Info } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  BarrePolarite, Note as NoteUI, Panneau, Tuile, Vide,
+  eur, nf, num, pct, signedEur, signedPct, tone,
+} from "../ui";
 
-// ─── formats ─────────────────────────────────────────────────
-// Espace fine insécable : règle typographique française devant % et €, et
-// surtout garantie qu'une étiquette de graphique ne se coupe jamais en
-// « −8 » / « % » sur deux lignes faute de place.
-const NB = " ";
-export const nf = new Intl.NumberFormat("fr-FR");
-
-export function eur(v: number | null | undefined, digits = 0): string {
-  if (v == null || !isFinite(v)) return "—";
-  return `${v < 0 ? "−" : ""}${new Intl.NumberFormat("fr-FR", {
-    minimumFractionDigits: digits, maximumFractionDigits: digits,
-  }).format(Math.abs(v))}${NB}€`;
-}
-
-export function signedEur(v: number | null | undefined, digits = 0): string {
-  if (v == null || !isFinite(v)) return "—";
-  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${new Intl.NumberFormat("fr-FR", {
-    minimumFractionDigits: digits, maximumFractionDigits: digits,
-  }).format(Math.abs(v))}${NB}€`;
-}
-
-export function pct(v: number | null | undefined, digits = 1): string {
-  if (v == null || !isFinite(v)) return "—";
-  return `${nfd(v, digits)}${NB}%`;
-}
-
-export function signedPct(v: number | null | undefined, digits = 1): string {
-  if (v == null || !isFinite(v)) return "—";
-  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${nfd(Math.abs(v), digits)}${NB}%`;
-}
-
-function nfd(v: number, digits: number) {
-  return new Intl.NumberFormat("fr-FR", {
-    minimumFractionDigits: digits, maximumFractionDigits: digits,
-  }).format(v);
-}
-
-export function num(v: number | null | undefined): string {
-  return v == null || !isFinite(v) ? "—" : nf.format(v);
-}
-
-/** Couleur de polarité — vert au-dessus de zéro, rouge en dessous, gris à zéro. */
-export function tone(v: number | null | undefined): string {
-  if (v == null || !isFinite(v) || v === 0) return "text-gray-600";
-  return v > 0 ? "text-emerald-700" : "text-red-700";
-}
-
-export const DIVERGING_POS = "#059669";
-export const DIVERGING_NEG = "#EF4444";
+export { eur, nf, num, pct, signedEur, signedPct, tone };
+export { DIVERGING_NEG, DIVERGING_POS } from "../ui";
 
 // ─── verdict ─────────────────────────────────────────────────
 const VERDICTS: Record<string, { label: string; cls: string; aide: string }> = {
   rentable: {
     label: "Rentable",
-    cls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    cls: "border-emerald-200 bg-emerald-50 text-emerald-700",
     aide: "Assez de gagnants ET intervalle de confiance entièrement au-dessus de 0.",
   },
   perdant: {
     label: "Perdant",
-    cls: "bg-red-50 text-red-700 border-red-200",
+    cls: "border-red-200 bg-red-50 text-red-700",
     aide: "Assez de gagnants ET intervalle de confiance entièrement en dessous de 0.",
   },
   neutre: {
     label: "Non tranché",
-    cls: "bg-gray-100 text-gray-600 border-gray-200",
+    cls: "border-border bg-muted text-muted-foreground",
     aide: "Assez de gagnants, mais l'intervalle de confiance contient encore 0.",
   },
   insuffisant: {
     label: "Échantillon insuffisant",
-    cls: "bg-amber-50 text-amber-700 border-amber-200",
+    cls: "border-amber-200 bg-amber-50 text-amber-800",
     aide: "Moins de 150 paris gagnants : aucun verdict ne serait honnête à cette échelle.",
   },
 };
@@ -90,16 +55,23 @@ export function VerdictBadge({ verdict, className = "" }: { verdict?: string; cl
   return (
     <span
       title={v.aide}
-      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold ${v.cls} ${className}`}
+      className={cn(
+        "inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+        v.cls,
+        className,
+      )}
     >
       {v.label}
     </span>
   );
 }
 
-// ─── tuiles ──────────────────────────────────────────────────
+// ─── adaptateurs ─────────────────────────────────────────────
+
+/** Tuile de chiffre. `valueClass` reste accepté : plusieurs onglets colorent la
+ *  valeur eux-mêmes selon un seuil métier, pas selon un simple signe. */
 export function StatTile({
-  label, value, sub, hint, valueClass = "text-gray-900", icon, footer,
+  label, value, sub, hint, valueClass, icon, footer,
 }: {
   label: string;
   value: React.ReactNode;
@@ -110,24 +82,14 @@ export function StatTile({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-3.5 shadow-sm sm:p-4">
-      <div className="flex items-center gap-1.5">
-        {icon}
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
-          {label}
-        </span>
-        {hint && (
-          <span title={hint} className="cursor-help text-gray-300">
-            <Info className="h-3 w-3" />
-          </span>
-        )}
-      </div>
-      <div className={`mt-1.5 text-xl font-bold tabular-nums sm:text-2xl ${valueClass}`}>
-        {value}
-      </div>
-      {sub && <div className="mt-0.5 text-[11px] text-gray-600">{sub}</div>}
-      {footer && <div className="mt-2">{footer}</div>}
-    </div>
+    <Tuile
+      label={label}
+      valeur={<span className={valueClass}>{value}</span>}
+      sub={sub}
+      aide={hint}
+      icone={icon}
+      pied={footer}
+    />
   );
 }
 
@@ -141,53 +103,21 @@ export function Section({
   className?: string;
 }) {
   return (
-    <section className={`rounded-xl border border-gray-100 bg-white shadow-sm ${className}`}>
-      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-gray-50 px-4 py-3">
-        <div className="min-w-0">
-          <h3 className="text-sm font-bold text-gray-900">{title}</h3>
-          {desc && <p className="mt-0.5 text-[11px] leading-relaxed text-gray-600">{desc}</p>}
-        </div>
-        {right && <div className="shrink-0">{right}</div>}
-      </header>
-      <div className="p-4">{children}</div>
-    </section>
+    <Panneau titre={title} desc={desc} actions={right} className={className}>
+      {children}
+    </Panneau>
   );
 }
 
 export function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-gray-200 px-6 text-center text-xs text-gray-600">
-      {children}
-    </div>
-  );
+  return <Vide>{children}</Vide>;
 }
 
 export function Note({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-gray-600">
-      <Info className="mt-px h-3 w-3 shrink-0" />
-      <span>{children}</span>
-    </p>
-  );
+  return <NoteUI>{children}</NoteUI>;
 }
 
 /** Barre horizontale de polarité, pour lire un ROI sans lire le chiffre. */
 export function PolarityBar({ value, max }: { value: number | null; max: number }) {
-  if (value == null || !isFinite(value) || max <= 0) {
-    return <div className="h-1.5 w-full rounded-full bg-gray-100" />;
-  }
-  const frac = Math.min(Math.abs(value) / max, 1) * 50;
-  return (
-    <div className="relative h-1.5 w-full rounded-full bg-gray-100">
-      <div className="absolute inset-y-0 left-1/2 w-px bg-gray-300" />
-      <div
-        className="absolute inset-y-0 rounded-full"
-        style={{
-          left: value >= 0 ? "50%" : `${50 - frac}%`,
-          width: `${frac}%`,
-          background: value >= 0 ? DIVERGING_POS : DIVERGING_NEG,
-        }}
-      />
-    </div>
-  );
+  return <BarrePolarite value={value} max={max} />;
 }

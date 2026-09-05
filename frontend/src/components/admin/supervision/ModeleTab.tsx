@@ -31,11 +31,11 @@ interface ConvergencePayload {
 const MIN_OBS_BIN = 30;
 
 function delta(v: number | null | undefined, digits = 4, higherIsBetter = true) {
-  if (v == null || !isFinite(v)) return <span className="text-gray-600">—</span>;
+  if (v == null || !isFinite(v)) return <span className="text-muted-foreground">—</span>;
   const good = higherIsBetter ? v > 0 : v < 0;
   const Icon = v > 0 ? TrendingUp : TrendingDown;
   return (
-    <span className={`inline-flex items-center gap-0.5 ${v === 0 ? "text-gray-600" : good ? "text-emerald-700" : "text-red-700"}`}>
+    <span className={`inline-flex items-center gap-0.5 ${v === 0 ? "text-muted-foreground" : good ? "text-emerald-700" : "text-red-700"}`}>
       <Icon className="h-3 w-3" />
       {v > 0 ? "+" : "−"}{Math.abs(v).toFixed(digits)}
     </span>
@@ -64,9 +64,9 @@ export default function ModeleTab({
           label="Version active"
           value={active ? `v${active.version}` : "—"}
           sub={active?.date ? new Date(active.date).toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "medium", timeStyle: "short" }) : "—"}
-          icon={<Cpu className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<Cpu className="h-3.5 w-3.5 text-muted-foreground/40" />}
           footer={
-            <span className="text-[10px] text-gray-600">
+            <span className="text-[11px] text-muted-foreground">
               {num(algo.total_versions)} versions entraînées au total
             </span>
           }
@@ -100,7 +100,7 @@ export default function ModeleTab({
       <Section
         title="Trajectoire de l'AUC, version après version"
         desc="Les deux courbes sont dans la même unité. Un écart qui se creuse entre l'AUC d'entraînement et l'AUC walk-forward signale du surapprentissage."
-        right={<span className="text-[10px] text-gray-600">{versions.length} dernières versions</span>}
+        right={<span className="text-[11px] text-muted-foreground">{versions.length} dernières versions</span>}
       >
         {versions.length < 2 ? (
           <Empty>Moins de deux versions non synthétiques enregistrées.</Empty>
@@ -113,7 +113,7 @@ export default function ModeleTab({
                 minTickGap={26} tickFormatter={(v) => `v${v}`}
               />
               <YAxis domain={[0.6, 0.9]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={44} tickFormatter={(v) => v.toFixed(2)} />
-              <ReferenceLine y={0.5} stroke="#EF4444" strokeDasharray="3 3" label={{ value: "hasard", fontSize: 9, fill: "#EF4444" }} />
+              <ReferenceLine y={0.5} stroke="#EF4444" strokeDasharray="3 3" label={{ value: "hasard", fontSize: 10, fill: "#EF4444", position: "insideTopLeft" }} />
               <Tooltip
                 labelFormatter={(l) => `Version ${l}`}
                 content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} labelFormatter={(l) => `Version v${l}`} />}
@@ -203,7 +203,7 @@ export default function ModeleTab({
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="semaine" tick={axisTick} axisLine={axisLine} tickLine={tickLine} />
                 <YAxis domain={[0, 0.4]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={44} tickFormatter={(v) => v.toFixed(2)} />
-                <ReferenceLine y={0.18} stroke="#10B981" strokeDasharray="4 4" label={{ value: "cible 0,18", fontSize: 9, fill: "#10B981", position: "right" }} />
+                <ReferenceLine y={0.18} stroke="#10B981" strokeDasharray="4 4" label={{ value: "cible 0,18", fontSize: 10, fill: "#10B981", position: "insideTopRight" }} />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} />} />
                 <Line type="monotone" dataKey="brier" name="Erreur Brier" stroke="#3B82F6" strokeWidth={2.5} dot={{ r: 2.5 }} connectNulls isAnimationActive={false} />
               </LineChart>
@@ -218,7 +218,7 @@ export default function ModeleTab({
           title="Les probabilités annoncées sont-elles justes ?"
           desc="Pour chaque tranche de probabilité annoncée, la fréquence réellement observée. Une calibration parfaite aligne les deux colonnes."
           right={
-            <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+            <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
               {calib.verdict} · {num(calib.n_obs)} observations
             </span>
           }
@@ -236,24 +236,24 @@ export default function ModeleTab({
               const solide = b.n >= MIN_OBS_BIN;
               return (
                 <div key={i} className={`flex items-center gap-3 text-[11px] ${solide ? "" : "opacity-55"}`}>
-                  <span className="w-16 shrink-0 tabular-nums text-gray-600">
+                  <span className="w-16 shrink-0 tabular-nums text-muted-foreground">
                     {Math.round(b.lo * 100)}–{Math.round(b.hi * 100)} %
                   </span>
                   <div className="flex-1">
                     <div className="flex items-center gap-1.5">
                       <div className="h-2 rounded-full bg-blue-500" style={{ width: `${b.proba_moy * 100}%`, minWidth: 2 }} />
-                      <span className="text-[10px] text-gray-600">annoncé {pct(b.proba_moy * 100, 0)}</span>
+                      <span className="text-[11px] text-muted-foreground">annoncé {pct(b.proba_moy * 100, 0)}</span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
                       <div className="h-2 rounded-full bg-amber-500" style={{ width: `${b.freq_reelle * 100}%`, minWidth: 2 }} />
-                      <span className="text-[10px] text-gray-600">réel {pct(b.freq_reelle * 100, 0)}</span>
+                      <span className="text-[11px] text-muted-foreground">réel {pct(b.freq_reelle * 100, 0)}</span>
                     </div>
                   </div>
-                  <span className={`w-16 shrink-0 text-right font-mono font-bold tabular-nums ${!solide || Math.abs(ecart) < 3 ? "text-gray-600" : ecart > 0 ? "text-emerald-700" : "text-red-700"}`}>
+                  <span className={`w-16 shrink-0 text-right font-mono font-bold tabular-nums ${!solide || Math.abs(ecart) < 3 ? "text-muted-foreground" : ecart > 0 ? "text-emerald-700" : "text-red-700"}`}>
                     {signedPct(ecart, 0)}
                   </span>
                   <span
-                    className="w-20 shrink-0 text-right tabular-nums text-gray-300"
+                    className="w-20 shrink-0 text-right tabular-nums text-muted-foreground/40"
                     title={solide ? `${b.n} observations` : `${b.n} observations — sous ${MIN_OBS_BIN}, l'écart n'est pas interprétable`}
                   >
                     {num(b.n)}{!solide && <span className="ml-1 text-amber-700">·peu</span>}
@@ -273,10 +273,10 @@ export default function ModeleTab({
 
       {/* Tableau des versions */}
       <Section title="Historique des versions" desc="Les 60 dernières versions non synthétiques, de la plus récente à la plus ancienne.">
-        <div className="-mx-4 max-h-[420px] overflow-auto px-4">
+        <div role="region" tabIndex={0} aria-label="Tableau de données, défilement" className="-mx-4 max-h-[26rem] overflow-auto overscroll-contain px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:-mx-5 sm:px-5">
           <table className="w-full min-w-[640px] text-xs">
-            <thead className="sticky top-0 bg-white">
-              <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
+            <thead className="sticky top-0 bg-card">
+              <tr className="border-b border-border/70 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="py-2 pr-3 text-left font-semibold">Version</th>
                 <th className="px-2 py-2 text-left font-semibold">Date</th>
                 <th className="px-2 py-2 text-right font-semibold">AUC</th>
@@ -289,25 +289,25 @@ export default function ModeleTab({
             </thead>
             <tbody>
               {[...versions].reverse().map((v) => (
-                <tr key={v.version} className={`border-b border-gray-50 ${v.actif ? "bg-emerald-50/50" : ""}`}>
-                  <td className="py-2 pr-3 font-mono font-semibold text-gray-800">v{v.version}</td>
-                  <td className="px-2 py-2 text-gray-600">
+                <tr key={v.version} className={`border-b border-border/50 ${v.actif ? "bg-emerald-50/50" : ""}`}>
+                  <td className="py-2 pr-3 font-mono font-semibold text-foreground">v{v.version}</td>
+                  <td className="px-2 py-2 text-muted-foreground">
                     {v.date ? new Date(v.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
                   </td>
-                  <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-700">{v.auc_roc?.toFixed(4) ?? "—"}</td>
-                  <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-700">{v.walk_forward_auc?.toFixed(4) ?? "—"}</td>
-                  <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-700">{v.brier?.toFixed(4) ?? "—"}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{v.precision_top3 != null ? pct(v.precision_top3) : "—"}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{num(v.courses_train)}</td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">{v.auc_roc?.toFixed(4) ?? "—"}</td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">{v.walk_forward_auc?.toFixed(4) ?? "—"}</td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">{v.brier?.toFixed(4) ?? "—"}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{v.precision_top3 != null ? pct(v.precision_top3) : "—"}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{num(v.courses_train)}</td>
                   <td className="py-2 pl-2">
                     {v.actif ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                         <GitBranch className="h-3 w-3" /> active
                       </span>
                     ) : v.rollback ? (
-                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">rollback</span>
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">rollback</span>
                     ) : (
-                      <span className="text-[10px] text-gray-300">archivée</span>
+                      <span className="text-[11px] text-muted-foreground/40">archivée</span>
                     )}
                   </td>
                 </tr>

@@ -168,7 +168,7 @@ function BadgeEtape({ e, perimee }: { e: EtapeApprentissage; perimee: boolean })
     return (
       <span
         title="Aucun succès depuis plus de 48 h. Ce que cette étape produit — courbe de calibration, poids, décisions — décrit un état du monde qui n'existe plus."
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700"
+        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
       >
         <XCircle className="h-3 w-3" /> Périmé
       </span>
@@ -176,7 +176,7 @@ function BadgeEtape({ e, perimee }: { e: EtapeApprentissage; perimee: boolean })
   }
   if (e.last_status === "ok") {
     return (
-      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
         <CheckCircle2 className="h-3 w-3" /> À jour
       </span>
     );
@@ -184,7 +184,7 @@ function BadgeEtape({ e, perimee }: { e: EtapeApprentissage; perimee: boolean })
   return (
     <span
       title={e.last_error ?? undefined}
-      className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
     >
       <AlertTriangle className="h-3 w-3" /> Dernière tentative en échec
     </span>
@@ -235,7 +235,7 @@ export default function OutilsApprentissage({
             celui-ci meurt — un manque de mémoire suffit — les suivants sautent sans
             rien dire. Ce qu'ils produisent (courbes de calibration, poids, décisions
             par type de pari) décrit alors un état du monde qui n'existe plus.
-            <div className="mt-1 font-mono text-[10px]">
+            <div className="mt-1 font-mono text-[11px]">
               {data.etapes_perimees.map(nomEtape).join(" · ")}
             </div>
           </div>
@@ -248,7 +248,7 @@ export default function OutilsApprentissage({
           label="Correcteur contextuel"
           hint="Ajuste la probabilité selon la discipline, le terrain, l'hippodrome, l'heure. Il n'est mis en service que s'il fait MIEUX que ne rien corriger, sur des courses qu'il n'a pas vues."
           value={corr.actif ? "En service" : "Inactif"}
-          valueClass={corr.actif ? "text-emerald-700" : "text-gray-500"}
+          valueClass={corr.actif ? "text-emerald-700" : "text-muted-foreground"}
           sub={
             corr.mesure_disponible ? (
               <>
@@ -273,14 +273,14 @@ export default function OutilsApprentissage({
           label="Modèle d'arrivée"
           hint="Les probabilités de placé se déduisent des probabilités de victoire. Sans correction, le placé du favori est surestimé et celui des outsiders sous-estimé — tout le catalogue combiné en dépend."
           value={arrivee.corrige ? "Corrigé" : "Non corrigé"}
-          valueClass={arrivee.corrige ? "text-emerald-700" : "text-gray-500"}
+          valueClass={arrivee.corrige ? "text-emerald-700" : "text-muted-foreground"}
           sub={
             exposants.length >= 3
               ? `exposants ${exposants.slice(0, 3).map((x) => x.toFixed(2)).join(" · ")}`
               : "—"
           }
           footer={
-            <span className="text-[11px] text-gray-600">
+            <span className="text-[11px] text-muted-foreground">
               {arrivee.mesure_disponible
                 ? `mesuré sur ${num(arrivee.n_courses)} courses`
                 : `en attente — ${num(arrivee.min_courses)} courses nécessaires`}
@@ -291,10 +291,10 @@ export default function OutilsApprentissage({
           label="Confiance au modèle"
           hint="La probabilité servie mélange le modèle et le marché. Ce coefficient dit quelle part revient au modèle sur un favori. Il était posé à la main ; il est désormais ajusté sur les arrivées réelles, et seulement s'il améliore la vraisemblance SANS dégrader le classement."
           value={alpha?.alpha_max != null ? alpha.alpha_max.toFixed(2) : "—"}
-          valueClass={alpha?.appris ? "text-emerald-700" : "text-gray-900"}
+          valueClass={alpha?.appris ? "text-emerald-700" : "text-foreground"}
           sub={alpha?.appris ? "ajusté sur les arrivées" : "valeur réglée à la main"}
           footer={
-            <span className="text-[11px] text-gray-600">
+            <span className="text-[11px] text-muted-foreground">
               {alpha?.mesure_disponible
                 ? (alpha.appris
                     ? `+${(alpha.gain_logv ?? 0).toFixed(4)} de vraisemblance, classement ${(alpha.gain_rang ?? 0) >= 0 ? "préservé" : "dégradé"}`
@@ -307,10 +307,10 @@ export default function OutilsApprentissage({
           label="Netteté des probabilités"
           hint="La probabilité servie est-elle trop concentrée sur les premiers du classement ? Cet exposant l'aplatit ou la resserre sur TOUTE la course (somme préservée, ordre inchangé). 1,00 = servie telle quelle. Il n'est retenu que s'il améliore la vraisemblance hors échantillon SANS dégrader la calibration de la queue."
           value={nettete?.exposant != null ? nettete.exposant.toFixed(2) : "1,00"}
-          valueClass={nettete?.appris ? "text-emerald-700" : "text-gray-900"}
+          valueClass={nettete?.appris ? "text-emerald-700" : "text-foreground"}
           sub={nettete?.appris ? "ajustée sur les arrivées" : "distribution servie telle quelle"}
           footer={
-            <span className="text-[11px] text-gray-600">
+            <span className="text-[11px] text-muted-foreground">
               {nettete?.mesure_disponible
                 ? (nettete.appris
                     ? `écart de la queue ${signedPct((nettete.ecart_bande_haute_en_place ?? 0) * 100)} → ${signedPct((nettete.ecart_bande_haute_candidat ?? 0) * 100)} sur ${num(nettete.n_bande_haute)} partants`
@@ -327,10 +327,10 @@ export default function OutilsApprentissage({
           valueClass={
             temp.temperature != null && temp.temperature > 1.5
               ? "text-red-700"
-              : "text-gray-900"
+              : "text-foreground"
           }
           footer={
-            <span className="text-[11px] text-gray-600">{temp.lecture}</span>
+            <span className="text-[11px] text-muted-foreground">{temp.lecture}</span>
           }
         />
         <StatTile
@@ -355,7 +355,7 @@ export default function OutilsApprentissage({
         title="Étapes d'apprentissage"
         desc="Date du dernier SUCCÈS de chaque étape. Un échec ne l'efface pas : c'est l'écart entre les deux qui rend une panne visible."
         right={
-          <span className="text-[10px] text-gray-500">
+          <span className="text-[11px] text-muted-foreground">
             périmé au-delà de {data.seuil_perime_heures ?? 48} h
           </span>
         }
@@ -366,10 +366,10 @@ export default function OutilsApprentissage({
             première nuit qui suit le déploiement.
           </Empty>
         ) : (
-          <div className="overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Tableau de données, défilement horizontal" className="-mx-4 overflow-x-auto overscroll-x-contain px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:-mx-5 sm:px-5">
             <table className="w-full min-w-[560px] text-left text-[11px]">
-              <thead className="text-gray-500">
-                <tr className="border-b border-gray-100">
+              <thead className="text-muted-foreground">
+                <tr className="border-b border-border/70">
                   <th className="py-2 pr-3 font-semibold">Étape</th>
                   <th className="py-2 pr-3 font-semibold">Dernier succès</th>
                   <th className="py-2 pr-3 font-semibold">Observations</th>
@@ -382,18 +382,18 @@ export default function OutilsApprentissage({
                   return (
                     <tr
                       key={e.step}
-                      className={`border-b border-gray-50 ${perimee ? "bg-red-50/40" : ""}`}
+                      className={`border-b border-border/50 ${perimee ? "bg-red-50/40" : ""}`}
                     >
-                      <td className="py-2 pr-3 font-medium text-gray-900">
+                      <td className="py-2 pr-3 font-medium text-foreground">
                         {nomEtape(e.step)}
                       </td>
-                      <td className="py-2 pr-3 tabular-nums text-gray-700">
+                      <td className="py-2 pr-3 tabular-nums text-foreground">
                         <span className="inline-flex items-center gap-1">
-                          <Clock className="h-3 w-3 text-gray-400" />
+                          <Clock className="h-3 w-3 text-muted-foreground/60" />
                           {ageLisible(e.age_heures)}
                         </span>
                       </td>
-                      <td className="py-2 pr-3 tabular-nums text-gray-700">
+                      <td className="py-2 pr-3 tabular-nums text-foreground">
                         {e.n_obs != null ? num(e.n_obs) : "—"}
                       </td>
                       <td className="py-2">
@@ -420,7 +420,7 @@ export default function OutilsApprentissage({
         desc="Ce que l'apprentissage a suspendu, réduit, ou laissé actif — et sur quelle mesure."
         right={
           gates.mesure_disponible ? (
-            <span className="text-[10px] text-gray-500">
+            <span className="text-[11px] text-muted-foreground">
               {num(gates.n_suspendus)} suspendu(s) · {num(gates.n_reduits)} réduit(s)
             </span>
           ) : null
@@ -432,10 +432,10 @@ export default function OutilsApprentissage({
             conviction pleine tant que rien n'a été mesuré.
           </Empty>
         ) : (
-          <div className="overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Tableau de données, défilement horizontal" className="-mx-4 overflow-x-auto overscroll-x-contain px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:-mx-5 sm:px-5">
             <table className="w-full min-w-[620px] text-left text-[11px]">
-              <thead className="text-gray-500">
-                <tr className="border-b border-gray-100">
+              <thead className="text-muted-foreground">
+                <tr className="border-b border-border/70">
                   <th className="py-2 pr-3 font-semibold">Type</th>
                   <th className="py-2 pr-3 font-semibold">Décision</th>
                   <th className="py-2 pr-3 font-semibold">Conviction</th>
@@ -445,11 +445,11 @@ export default function OutilsApprentissage({
               </thead>
               <tbody>
                 {gates.gates.map((g) => (
-                  <tr key={g.type} className="border-b border-gray-50 align-top">
-                    <td className="py-2 pr-3 font-medium text-gray-900">{g.type}</td>
+                  <tr key={g.type} className="border-b border-border/50 align-top">
+                    <td className="py-2 pr-3 font-medium text-foreground">{g.type}</td>
                     <td className="py-2 pr-3">
                       <span
-                        className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                        className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                           g.statut === "suspended"
                             ? "border-red-200 bg-red-50 text-red-700"
                             : g.statut === "reduced"
@@ -464,18 +464,18 @@ export default function OutilsApprentissage({
                             : "Actif"}
                       </span>
                     </td>
-                    <td className="py-2 pr-3 tabular-nums text-gray-700">
+                    <td className="py-2 pr-3 tabular-nums text-foreground">
                       ×{facteur(g.facteur)}
                     </td>
                     <td className={`py-2 pr-3 tabular-nums ${tone(g.roi_pct ?? null)}`}>
                       {pct(g.roi_pct)}
                       {g.n_paris != null && (
-                        <span className="ml-1.5 text-gray-400">
+                        <span className="ml-1.5 text-muted-foreground/60">
                           {" "}sur {num(g.n_paris)} paris
                         </span>
                       )}
                     </td>
-                    <td className="max-w-[280px] py-2 text-[10px] leading-relaxed text-gray-600">
+                    <td className="max-w-[280px] py-2 text-[11px] leading-relaxed text-muted-foreground">
                       {g.raison ?? "—"}
                     </td>
                   </tr>
@@ -496,7 +496,7 @@ export default function OutilsApprentissage({
             a appris sur des exemples d'une autre nature que ceux qu'il reçoit
             aujourd'hui ; il est donc neutralisé jusqu'au prochain ré-entraînement,
             plutôt que d'appliquer une correction qui ne veut plus rien dire.
-            <div className="mt-1 font-mono text-[10px]">
+            <div className="mt-1 font-mono text-[11px]">
               trouvé : {corr.contrat} · attendu : {corr.contrat_attendu}
             </div>
           </div>

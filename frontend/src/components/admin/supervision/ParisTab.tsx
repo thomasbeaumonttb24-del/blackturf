@@ -116,13 +116,13 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
           label="Paris réglés"
           value={num(g.n_paris)}
           sub={`${num(g.n_courses)} courses · ${num(g.n_gagnants)} gagnants`}
-          icon={<Target className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<Target className="h-3.5 w-3.5 text-muted-foreground/40" />}
         />
         <StatTile
           label="Engagé"
           value={eur(g.mise)}
           sub={`mise moyenne ${eur(g.mise_moyenne, 2)}`}
-          icon={<Coins className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<Coins className="h-3.5 w-3.5 text-muted-foreground/40" />}
         />
         <StatTile
           label="Résultat net réel"
@@ -155,7 +155,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
         title="Rendement par type de pari"
         desc="ROI winsorisé à 50× la mise, sur les conseils réglés. Un type sous 150 gagnants est affiché mais jamais tranché."
         right={
-          <span className="text-[10px] text-gray-600">
+          <span className="text-[11px] text-muted-foreground">
             {types.length} types joués · fenêtre {data.fenetre_jours ?? "complète"}
             {data.fenetre_jours ? " j" : ""}
           </span>
@@ -202,7 +202,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
             </BarChart>
           </ResponsiveContainer>
         )}
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-gray-600">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-sm" style={{ background: DIVERGING_POS }} />
             gain
@@ -212,7 +212,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
             perte
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm bg-gray-400 opacity-40" />
+            <span className="h-2.5 w-2.5 rounded-sm bg-muted-foreground/40" />
             barre pâle = moins de 150 gagnants, chiffre non concluant
           </span>
         </div>
@@ -227,8 +227,8 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
           <div className="space-y-2.5">
             {miseChart.map((m, i) => (
               <div key={m.type} className="flex items-center gap-3 text-xs">
-                <span className="w-28 shrink-0 truncate font-medium text-gray-700">{m.type}</span>
-                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                <span className="w-28 shrink-0 truncate font-medium text-foreground">{m.type}</span>
+                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
                   {/* Une part de mise est une GRANDEUR, pas une identité : une
                       seule teinte qui s'éclaircit, jamais un arc-en-ciel qui
                       suggérerait des catégories différentes. */}
@@ -240,7 +240,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                     }}
                   />
                 </div>
-                <span className="w-12 shrink-0 text-right tabular-nums text-gray-600">
+                <span className="w-12 shrink-0 text-right tabular-nums text-muted-foreground">
                   {pct(m.part, 0)}
                 </span>
                 <span className="w-16 shrink-0 text-right font-mono font-bold tabular-nums">
@@ -262,7 +262,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
             <select
               value={actif?.type ?? ""}
               onChange={(e) => setSelected(e.target.value)}
-              className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700"
+              className="min-h-[2.25rem] rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-foreground"
             >
               {types.map((t) => (
                 <option key={t.type} value={t.type}>{t.type}</option>
@@ -301,25 +301,25 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
           )}
           {actif && (
             <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
-              <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-600">ROI brut</div>
+              <div className="rounded-lg bg-muted/40 p-2">
+                <div className="text-muted-foreground">ROI brut</div>
                 <div className={`font-bold tabular-nums ${tone(actif.roi_brut_pct)}`}>
                   {signedPct(actif.roi_brut_pct)}
                 </div>
               </div>
-              <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-600">ROI winsorisé</div>
+              <div className="rounded-lg bg-muted/40 p-2">
+                <div className="text-muted-foreground">ROI winsorisé</div>
                 <div className={`font-bold tabular-nums ${tone(actif.roi_pct)}`}>
                   {signedPct(actif.roi_pct)}
                 </div>
               </div>
-              <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-600">Plus gros gain</div>
-                <div className="font-bold tabular-nums text-gray-700">{eur(actif.gain_max)}</div>
+              <div className="rounded-lg bg-muted/40 p-2">
+                <div className="text-muted-foreground">Plus gros gain</div>
+                <div className="font-bold tabular-nums text-foreground">{eur(actif.gain_max)}</div>
               </div>
-              <div className="rounded-lg bg-gray-50 p-2">
-                <div className="text-gray-600">Gagnants</div>
-                <div className="font-bold tabular-nums text-gray-700">
+              <div className="rounded-lg bg-muted/40 p-2">
+                <div className="text-muted-foreground">Gagnants</div>
+                <div className="font-bold tabular-nums text-foreground">
                   {num(actif.n_gagnants)} / {num(actif.n_gagnants_requis ?? 150)} requis
                 </div>
               </div>
@@ -366,7 +366,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
               sub={`${num(actif.n_gagnants)} gagnants sur ${num(actif.n_paris)} paris`}
             />
           </div>
-          <p className="mt-3 rounded-lg bg-gray-50 p-3 text-[11px] leading-relaxed text-gray-600">
+          <p className="mt-3 rounded-lg bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground">
             {actif.reference.quand_le_jouer}
           </p>
           <Note>
@@ -429,10 +429,10 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
         title="Détail par type"
         desc="Cliquez une ligne pour l'analyser au-dessus."
       >
-        <div className="-mx-4 overflow-x-auto px-4">
+        <div role="region" tabIndex={0} aria-label="Tableau de données, défilement horizontal" className="-mx-4 overflow-x-auto overscroll-x-contain px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:-mx-5 sm:px-5">
           <table className="w-full min-w-[820px] text-xs">
             <thead>
-              <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
+              <tr className="border-b border-border/70 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="py-2 pr-3 text-left font-semibold">Type</th>
                 <th className="px-2 py-2 text-right font-semibold">Paris</th>
                 <th className="px-2 py-2 text-right font-semibold">Gagnants</th>
@@ -451,19 +451,19 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                 <tr
                   key={t.type}
                   onClick={() => setSelected(t.type)}
-                  className={`cursor-pointer border-b border-gray-50 transition-colors hover:bg-amber-50/40 ${
+                  className={`cursor-pointer border-b border-border/50 transition-colors hover:bg-amber-50/40 ${
                     actif?.type === t.type ? "bg-amber-50/60" : ""
                   }`}
                 >
-                  <td className="py-2 pr-3 font-medium text-gray-800">{t.type}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{num(t.n_paris)}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{num(t.n_gagnants)}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{pct(t.hit_rate)}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">{eur(t.mise)}</td>
+                  <td className="py-2 pr-3 font-medium text-foreground">{t.type}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{num(t.n_paris)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{num(t.n_gagnants)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{pct(t.hit_rate)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{eur(t.mise)}</td>
                   <td className={`px-2 py-2 text-right font-mono font-bold tabular-nums ${tone(t.net)}`}>
                     {signedEur(t.net)}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600">
+                  <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
                     {signedPct(t.roi_brut_pct)}
                   </td>
                   <td className={`px-2 py-2 text-right font-mono font-bold tabular-nums ${tone(t.roi_pct)}`}>
@@ -472,7 +472,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
                   <td className="px-2 py-2">
                     <PolarityBar value={t.roi_pct ?? null} max={ROI_MAX_BAR} />
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-[10px] text-gray-600">
+                  <td className="px-2 py-2 text-right tabular-nums text-[11px] text-muted-foreground">
                     {t.ic90_roi_pct
                       ? `${signedPct(t.ic90_roi_pct[0], 0)} → ${signedPct(t.ic90_roi_pct[1], 0)}`
                       : "—"}
@@ -510,10 +510,10 @@ function MatriceProfil({ data }: { data: ParisPayload }) {
       title="Croisement profil × type de pari"
       desc="Le même type de pari ne rend pas la même chose selon le profil qui le sélectionne — c'est là que se voit ce que le moteur de mise apporte (ou coûte)."
     >
-      <div className="-mx-4 overflow-x-auto px-4">
+      <div role="region" tabIndex={0} aria-label="Tableau de données, défilement horizontal" className="-mx-4 overflow-x-auto overscroll-x-contain px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:-mx-5 sm:px-5">
         <table className="w-full min-w-[640px] text-xs">
           <thead>
-            <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
+            <tr className="border-b border-border/70 text-[11px] uppercase tracking-wide text-muted-foreground">
               <th className="py-2 pr-3 text-left font-semibold">Profil</th>
               {typesM.map((t) => (
                 <th key={t} className="px-2 py-2 text-right font-semibold">{t}</th>
@@ -522,22 +522,22 @@ function MatriceProfil({ data }: { data: ParisPayload }) {
           </thead>
           <tbody>
             {profils.map((p) => (
-              <tr key={p} className="border-b border-gray-50">
-                <td className="py-2.5 pr-3 font-semibold text-gray-800">{p}</td>
+              <tr key={p} className="border-b border-border/50">
+                <td className="py-2.5 pr-3 font-semibold text-foreground">{p}</td>
                 {typesM.map((t) => {
                   const c = key(p, t);
                   if (!c) {
-                    return <td key={t} className="px-2 py-2.5 text-right text-gray-300">—</td>;
+                    return <td key={t} className="px-2 py-2.5 text-right text-muted-foreground/40">—</td>;
                   }
                   // Sous le seuil de gagnants, la cellule reste en gris : la
                   // couleur est un verdict, et il n'y en a pas à ce volume.
                   const solide = c.n_gagnants >= MIN_GAGNANTS_CELLULE;
                   return (
                     <td key={t} className="px-2 py-2.5 text-right">
-                      <div className={`font-mono text-xs font-bold tabular-nums ${solide ? tone(c.roi_pct) : "text-gray-600"}`}>
+                      <div className={`font-mono text-xs font-bold tabular-nums ${solide ? tone(c.roi_pct) : "text-muted-foreground"}`}>
                         {signedPct(c.roi_pct, 0)}
                       </div>
-                      <div className="text-[10px] tabular-nums text-gray-600">
+                      <div className="text-[11px] tabular-nums text-muted-foreground">
                         {num(c.n_paris)} paris · {num(c.n_gagnants)} gagn.
                       </div>
                     </td>

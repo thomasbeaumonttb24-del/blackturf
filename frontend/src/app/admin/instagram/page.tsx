@@ -1,17 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import useSWR from "swr";
-import { toast } from "sonner";
-import {
-  Instagram, Loader2, CheckCircle2, AlertTriangle, RefreshCw, Trash2, ExternalLink,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useRequireAuth } from "@/hooks/useAuth";
-import { adminApi } from "@/lib/api";
-import { formatDateTime } from "@/lib/utils";
-
 /**
  * Dépôt du jeton Instagram.
  *
@@ -19,7 +7,25 @@ import { formatDateTime } from "@/lib/utils";
  * chat, ni par un historique de shell, et l'exploitant n'a pas à savoir se connecter en
  * SSH pour faire vivre son produit. Le jeton part d'ici vers le serveur sur une connexion
  * chiffrée, et n'en ressort jamais — l'API ne renvoie que son état.
+ *
+ * Refonte visuelle : la page utilisait les `Card` du site public, donc un troisième
+ * langage visuel dans une console qui en avait déjà deux. Elle emprunte maintenant les
+ * mêmes panneaux que le reste de l'administration, et la mode d'emploi passe en trois
+ * étapes numérotées au lieu d'une liste à puces où le lien Meta se perdait.
  */
+
+import { useState } from "react";
+import Link from "next/link";
+import { toast } from "sonner";
+import {
+  AlertTriangle, ArrowLeft, CheckCircle2, ExternalLink, Instagram, Loader2,
+  RefreshCw, Trash2,
+} from "lucide-react";
+import useSWR from "swr";
+import { Button } from "@/components/ui/button";
+import { adminApi } from "@/lib/api";
+import { cn, formatDateTime } from "@/lib/utils";
+import { EnTetePage, Encart, GrilleTuiles, Panneau, Squelette, Tuile } from "@/components/admin/ui";
 
 interface EtatJeton {
   configure: boolean;
@@ -34,31 +40,19 @@ interface EtatJeton {
 const LIEN_META =
   "https://developers.facebook.com/apps/1798925871293047/use_cases/customize/API-Setup/?product_route=instagram-business&use_case_enum=INSTAGRAM_BUSINESS&selected_tab=API-Setup";
 
+/** En dessous, le renouvellement automatique n'a plus beaucoup de marge : un
+ *  échec deux nuits de suite et la publication s'arrête sans prévenir. */
+const SEUIL_ALERTE_JOURS = 10;
+
 export default function AdminInstagramPage() {
-  const { user, loading } = useRequireAuth();
   const [jeton, setJeton] = useState("");
   const [envoi, setEnvoi] = useState(false);
   const [action, setAction] = useState<null | "renouveler" | "tester">(null);
 
   const { data: etat, mutate } = useSWR<EtatJeton>(
-    user?.is_admin ? "/admin/integrations/instagram" : null,
+    "/admin/integrations/instagram",
     () => adminApi.integrationInstagram().then((r) => r.data),
   );
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-brand-gold-dark" />
-      </div>
-    );
-  }
-  if (!user?.is_admin) {
-    return (
-      <div className="mx-auto max-w-2xl px-4 py-16 text-center text-sm text-muted-foreground">
-        Accès réservé à l&apos;administration.
-      </div>
-    );
-  }
 
   async function deposer(e: React.FormEvent) {
     e.preventDefault();
@@ -109,7 +103,7 @@ export default function AdminInstagramPage() {
   }
 
   async function retirer() {
-    if (!confirm("Retirer le jeton ? La publication automatique s'arrêtera.")) return;
+    if (!window.confirm("Retirer le jeton ? La publication automatique s'arrêtera.")) return;
     try {
       await adminApi.supprimerJetonInstagram();
       toast.success("Jeton retiré.");
@@ -119,174 +113,164 @@ export default function AdminInstagramPage() {
     }
   }
 
-  const alerte =
-    etat?.configure && typeof etat.jours_restants === "number" && etat.jours_restants < 10;
+  const alerte = etat?.configure
+    && typeof etat.jours_restants === "number"
+    && etat.jours_restants < SEUIL_ALERTE_JOURS;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <div className="mb-8 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-100 to-white ring-1 ring-amber-200">
-          <Instagram className="h-5 w-5 text-brand-gold-dark" aria-hidden="true" />
-        </span>
-        <div>
-          <h1 className="font-display text-2xl font-bold text-gray-900">Publication Instagram</h1>
-          <p className="text-sm text-muted-foreground">
-            Le jeton vit sur le serveur et se renouvelle tout seul. Il n&apos;est jamais
-            réaffiché.
-          </p>
-        </div>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-4 sm:space-y-5">
+      <Link
+        href="/admin/systeme"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Système · Intégrations
+      </Link>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">État de la connexion</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!etat ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          ) : etat.configure ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> Jeton enregistré
-              </div>
-              <dl className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-                <div>
-                  <dt className="text-muted-foreground">Compte</dt>
-                  <dd className="font-mono text-[13px]">{etat.compte_id ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Expire le</dt>
-                  <dd className={alerte ? "font-semibold text-red-700" : ""}>
-                    {etat.expire_at ? formatDateTime(etat.expire_at) : "—"}
-                    {typeof etat.jours_restants === "number" && (
-                      <span className="ml-1 text-muted-foreground">
-                        ({etat.jours_restants} j)
-                      </span>
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Dernier renouvellement</dt>
-                  <dd>
-                    {etat.dernier_renouvellement_at
-                      ? formatDateTime(etat.dernier_renouvellement_at)
-                      : "aucun"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Déposé le</dt>
-                  <dd>{etat.depose_le ? formatDateTime(etat.depose_le) : "—"}</dd>
-                </div>
-              </dl>
+      <EnTetePage
+        titre="Publication Instagram"
+        icone={<Instagram className="h-4 w-4" />}
+        desc="Le jeton vit sur le serveur et se renouvelle tout seul. Il n'est jamais réaffiché — l'API ne renvoie que son état."
+      />
 
-              {etat.derniere_erreur && (
-                <p className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-800">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span>
-                    Dernière erreur : {etat.derniere_erreur}
-                  </span>
-                </p>
-              )}
-
-              <div className="flex flex-wrap gap-2 pt-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => lancer("tester")}
-                  disabled={action !== null}
-                >
-                  {action === "tester" ? (
-                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                  ) : null}
-                  Tester la connexion
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => lancer("renouveler")}
-                  disabled={action !== null}
-                >
-                  {action === "renouveler" ? (
-                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                  Renouveler maintenant
-                </Button>
-                <Button variant="outline" size="sm" onClick={retirer}>
-                  <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Retirer
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <p className="flex items-center gap-2 text-sm text-amber-800">
-              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-              Aucun jeton enregistré — la publication automatique est à l&apos;arrêt.
+      <Panneau
+        titre="État de la connexion"
+        ton={etat?.configure ? (alerte ? "attention" : "ok") : "attention"}
+      >
+        {!etat ? (
+          <Squelette lignes={3} />
+        ) : !etat.configure ? (
+          <Encart ton="attention" icone={<AlertTriangle className="h-4 w-4" />}>
+            Aucun jeton enregistré — la publication automatique est à l&apos;arrêt.
+          </Encart>
+        ) : (
+          <div className="space-y-4">
+            <p className="flex items-center gap-2 text-[13px] font-semibold text-emerald-700">
+              <CheckCircle2 className="h-4 w-4" aria-hidden /> Jeton enregistré
             </p>
-          )}
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {etat?.configure ? "Remplacer le jeton" : "Déposer le jeton"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol className="mb-5 space-y-2 text-sm text-muted-foreground">
-            <li>
-              <strong className="text-foreground">1.</strong> Ouvrez la{" "}
+            <GrilleTuiles colonnes={4}>
+              <Tuile
+                label="Compte"
+                valeur={<span className="font-mono text-base">{etat.compte_id ?? "—"}</span>}
+              />
+              <Tuile
+                label="Expire le"
+                valeur={
+                  <span className="text-base">
+                    {etat.expire_at ? formatDateTime(etat.expire_at) : "—"}
+                  </span>
+                }
+                sub={typeof etat.jours_restants === "number" ? `dans ${etat.jours_restants} jour(s)` : undefined}
+                ton={alerte ? "alerte" : "neutre"}
+              />
+              <Tuile
+                label="Dernier renouvellement"
+                valeur={
+                  <span className="text-base">
+                    {etat.dernier_renouvellement_at ? formatDateTime(etat.dernier_renouvellement_at) : "aucun"}
+                  </span>
+                }
+              />
+              <Tuile
+                label="Déposé le"
+                valeur={<span className="text-base">{etat.depose_le ? formatDateTime(etat.depose_le) : "—"}</span>}
+              />
+            </GrilleTuiles>
+
+            {etat.derniere_erreur && (
+              <Encart ton="alerte" icone={<AlertTriangle className="h-4 w-4" />}>
+                Dernière erreur : {etat.derniere_erreur}
+              </Encart>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => lancer("tester")} disabled={action !== null} className="min-h-[2.75rem]">
+                {action === "tester" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Tester la connexion
+              </Button>
+              <Button variant="outline" onClick={() => lancer("renouveler")} disabled={action !== null} className="min-h-[2.75rem]">
+                {action === "renouveler"
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <RefreshCw className="h-4 w-4" aria-hidden />}
+                Renouveler maintenant
+              </Button>
+              <Button variant="outline" onClick={retirer} className="min-h-[2.75rem] text-destructive hover:text-destructive">
+                <Trash2 className="h-4 w-4" aria-hidden /> Retirer
+              </Button>
+            </div>
+          </div>
+        )}
+      </Panneau>
+
+      <Panneau titre={etat?.configure ? "Remplacer le jeton" : "Déposer le jeton"}>
+        <ol className="mb-5 space-y-3">
+          {[
+            <>
+              Ouvrez la{" "}
               <a
                 href={LIEN_META}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-medium text-brand-gold-dark hover:underline"
+                className="inline-flex items-center gap-1 font-semibold text-brand-gold-dark underline-offset-2 hover:underline"
               >
                 configuration Instagram de l&apos;app
-                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                <ExternalLink className="h-3 w-3" aria-hidden />
               </a>
               .
-            </li>
-            <li>
-              <strong className="text-foreground">2.</strong> Section « Générez des tokens
-              d&apos;accès », à côté de <code>blackturf.fr</code> : cliquez{" "}
-              <strong className="text-foreground">Générer un token</strong>, puis copiez-le.
-            </li>
-            <li>
-              <strong className="text-foreground">3.</strong> Collez-le ci-dessous. Il part
-              directement sur le serveur et n&apos;est plus jamais affiché.
-            </li>
-          </ol>
-
-          <form onSubmit={deposer} className="space-y-3">
-            <label htmlFor="jeton" className="sr-only">
-              Jeton d&apos;accès Instagram
-            </label>
-            <textarea
-              id="jeton"
-              value={jeton}
-              onChange={(e) => setJeton(e.target.value)}
-              rows={3}
-              spellCheck={false}
-              autoComplete="off"
-              placeholder="Collez ici le jeton généré par Meta…"
-              className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[13px] outline-none focus:ring-2 focus:ring-ring"
-            />
-            <div className="flex items-center gap-3">
-              <Button type="submit" variant="brand" disabled={envoi || jeton.trim().length < 50}>
-                {envoi ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Enregistrer le jeton
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Vérifié auprès d&apos;Instagram avant d&apos;être enregistré.
+            </>,
+            <>
+              Section « Générez des tokens d&apos;accès », à côté de{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">blackturf.fr</code> :
+              cliquez <b className="font-semibold text-foreground">Générer un token</b>, puis copiez-le.
+            </>,
+            <>
+              Collez-le ci-dessous. Il part directement sur le serveur et n&apos;est plus jamais
+              affiché.
+            </>,
+          ].map((texte, i) => (
+            <li key={i} className="flex gap-3 text-[13px] leading-relaxed text-muted-foreground">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-foreground">
+                {i + 1}
               </span>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+              <span className="min-w-0 pt-0.5">{texte}</span>
+            </li>
+          ))}
+        </ol>
 
-      <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
+        <form onSubmit={deposer} className="space-y-3">
+          <label htmlFor="jeton" className="block text-[13px] font-semibold">
+            Jeton d&apos;accès Instagram
+          </label>
+          <textarea
+            id="jeton"
+            value={jeton}
+            onChange={(e) => setJeton(e.target.value)}
+            rows={3}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="Collez ici le jeton généré par Meta…"
+            className={cn(
+              "w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 font-mono text-base outline-none focus:ring-2 focus:ring-ring sm:text-[13px]",
+            )}
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="submit"
+              variant="brand"
+              disabled={envoi || jeton.trim().length < 50}
+              className="min-h-[2.75rem]"
+            >
+              {envoi ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Enregistrer le jeton
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Vérifié auprès d&apos;Instagram avant d&apos;être enregistré.
+            </span>
+          </div>
+        </form>
+      </Panneau>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">
         Le jeton se renouvelle automatiquement chaque nuit dès qu&apos;il approche de son
         échéance — un jeton Instagram expire au bout de 60 jours, et sans ce renouvellement
         la publication s&apos;arrêterait sans prévenir. Enregistrer un jeton n&apos;active

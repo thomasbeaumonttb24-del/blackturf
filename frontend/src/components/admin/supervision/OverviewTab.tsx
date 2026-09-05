@@ -104,14 +104,14 @@ export default function OverviewTab({
           label="Conseils réglés"
           value={num(g?.n_paris)}
           sub={`${num(g?.n_courses)} courses couvertes`}
-          icon={<Layers className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<Layers className="h-3.5 w-3.5 text-muted-foreground/40" />}
         />
         <StatTile
           label="Capital réel"
           value={signedEur(r?.net_total)}
           valueClass={tone(r?.net_total)}
           sub={`${eur(r?.mise_totale)} engagés · ${signedEur(r?.net_total_winsor)} plafonné`}
-          icon={<CircleDollarSign className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<CircleDollarSign className="h-3.5 w-3.5 text-muted-foreground/40" />}
           hint="Gains réellement encaissés, sans plafond — le ROI winsorisé de la tuile voisine coupe les rapports extrêmes pour rendre un verdict."
         />
         <StatTile
@@ -125,14 +125,14 @@ export default function OverviewTab({
           label="Modèle actif"
           value={algo?.active ? `v${algo.active.version}` : "—"}
           sub={`AUC walk-forward ${algo?.active?.walk_forward_auc?.toFixed(4) ?? "—"}`}
-          icon={<Brain className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<Brain className="h-3.5 w-3.5 text-muted-foreground/40" />}
         />
         <StatTile
           label="Pire perte cumulée"
           value={eur(r?.drawdown_max)}
           valueClass="text-red-700"
           sub={`${num(r?.serie_perdante_max_jours)} jours perdants d'affilée`}
-          icon={<ShieldAlert className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<ShieldAlert className="h-3.5 w-3.5 text-muted-foreground/40" />}
         />
       </div>
 
@@ -146,7 +146,7 @@ export default function OverviewTab({
         ) : (
           <ul className="space-y-2.5">
             {phrases.map((p, i) => (
-              <li key={i} className="flex items-start gap-2 text-[13px] leading-relaxed text-gray-700">
+              <li key={i} className="flex items-start gap-2 text-[13px] leading-relaxed text-foreground">
                 <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
                 <span>{p}</span>
               </li>
@@ -162,7 +162,7 @@ export default function OverviewTab({
           title="Capital cumulé"
           desc="Résultat net additionné jour après jour sur les conseils réellement émis, gains réels sans plafond."
           right={
-            <button onClick={() => onGoTo("rentabilite")} className="flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-700">
+            <button onClick={() => onGoTo("rentabilite")} className="inline-flex min-h-[2.25rem] items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-brand-gold-dark transition-colors hover:bg-brand-gold-light">
               Détail <ArrowUpRight className="h-3 w-3" />
             </button>
           }
@@ -194,7 +194,7 @@ export default function OverviewTab({
           title="Par famille de pari"
           desc="Regroupement PMU : les variantes d'un même pari partagent règle et prélèvement."
           right={
-            <button onClick={() => onGoTo("paris")} className="flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-700">
+            <button onClick={() => onGoTo("paris")} className="inline-flex min-h-[2.25rem] items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-brand-gold-dark transition-colors hover:bg-brand-gold-light">
               Détail <ArrowUpRight className="h-3 w-3" />
             </button>
           }
@@ -206,14 +206,14 @@ export default function OverviewTab({
               {familles.map((f) => (
                 <div key={f.famille}>
                   <div className="flex items-baseline justify-between text-xs">
-                    <span className="font-medium text-gray-700">{f.famille}</span>
+                    <span className="font-medium text-foreground">{f.famille}</span>
                     <span className={`font-mono font-bold tabular-nums ${tone(f.roi_pct)}`}>
                       {signedPct(f.roi_pct)}
                     </span>
                   </div>
                   <div className="mt-1 flex items-center gap-2">
-                    <div className="relative h-2 flex-1 rounded-full bg-gray-100">
-                      <div className="absolute inset-y-0 left-1/2 w-px bg-gray-300" />
+                    <div className="relative h-2 flex-1 rounded-full bg-muted">
+                      <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
                       <div
                         className="absolute inset-y-0 rounded-full"
                         style={{
@@ -223,7 +223,7 @@ export default function OverviewTab({
                         }}
                       />
                     </div>
-                    <span className="w-24 shrink-0 text-right text-[10px] tabular-nums text-gray-600">
+                    <span className="w-24 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
                       {num(f.n_paris)} paris · {pct(f.part_mise_pct, 0)}
                     </span>
                   </div>
@@ -246,14 +246,14 @@ export default function OverviewTab({
               <a
                 key={i}
                 href={`/courses/${v.course_id}`}
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] transition-colors hover:bg-amber-50/60"
+                className="flex min-h-[2.25rem] items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] transition-colors hover:bg-brand-gold-light"
               >
-                <span className="w-10 shrink-0 tabular-nums text-gray-600">
+                <span className="w-10 shrink-0 tabular-nums text-muted-foreground">
                   {v.date ? new Date(v.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit" }) : "—"}
                 </span>
-                <span className="w-12 shrink-0 font-mono font-semibold text-gray-700">{v.code ?? "—"}</span>
-                <span className="flex-1 truncate text-gray-600">{v.hippodrome}</span>
-                <span className="shrink-0 text-[10px] text-gray-600">{v.profil}</span>
+                <span className="w-12 shrink-0 font-mono font-semibold text-foreground">{v.code ?? "—"}</span>
+                <span className="flex-1 truncate text-muted-foreground">{v.hippodrome}</span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">{v.profil}</span>
                 <span className="w-16 shrink-0 text-right font-mono font-bold tabular-nums text-emerald-700">
                   {signedEur(v.net, 2)}
                 </span>

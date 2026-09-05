@@ -85,7 +85,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
           label="Jours positifs"
           value={pct(r.taux_jours_positifs_pct)}
           sub={`${num(r.jours_positifs)} / ${num(r.n_jours)} jours · ${num(r.jours_positifs_winsor)} plafonné`}
-          icon={<CalendarDays className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<CalendarDays className="h-3.5 w-3.5 text-muted-foreground/40" />}
           hint="Compté sur les gains réels : un jour où un gros rapport est tombé est un jour gagnant, même si le plafond le ramènerait sous zéro."
         />
         <StatTile
@@ -93,7 +93,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
           value={eur(r.drawdown_max)}
           valueClass="text-red-700"
           sub={`depuis le plus haut · ${eur(r.drawdown_max_winsor)} plafonné`}
-          icon={<TrendingDown className="h-3.5 w-3.5 text-gray-300" />}
+          icon={<TrendingDown className="h-3.5 w-3.5 text-muted-foreground/40" />}
           hint="Drawdown maximum : ce qu'un suiveur aurait vu fondre au pire moment, gains réels compris."
         />
         <StatTile
@@ -202,7 +202,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
               <CartesianGrid {...GRID} />
               <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
               <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${v} %`} width={48} />
-              <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" label={{ value: "équilibre", fontSize: 9, fill: "#4B5563", position: "right" }} />
+              <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" label={{ value: "équilibre", fontSize: 10, fill: "#4B5563", position: "insideTopRight" }} />
               <Tooltip content={<ChartTooltip valueFormatter={(v) => signedPct(v)} />} />
               <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
               <Line

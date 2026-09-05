@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import AdminShell from "@/components/admin/shell/AdminShell";
 
 /**
- * Console d'administration : `noindex`, et un titre à elle.
+ * Console d'administration : `noindex`, un titre à elle, et depuis la refonte
+ * une coquille commune — navigation, garde d'accès, gabarit de page.
  *
  * Les trois pages `/admin`, `/admin/algorithme` et `/admin/instagram` s'annonçaient
  * « index, follow » sous le titre de la page d'accueil — elles héritaient du réglage du
@@ -22,5 +24,5 @@ export const metadata: Metadata = {
 };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return <AdminShell>{children}</AdminShell>;
 }

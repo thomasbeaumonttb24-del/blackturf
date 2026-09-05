@@ -71,13 +71,13 @@ function TemperatureGauge({ temp }: { temp?: number | null }) {
   const color = t < 0.85 ? "#3B82F6" : t > 1.2 ? "#EF4444" : "#10B981";
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between text-[10px] text-gray-600">
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         <span>0,5 — probas plus tranchées</span>
         <span className="font-mono text-sm font-bold" style={{ color }}>{t.toFixed(4)}</span>
         <span>2,0 — probas plus prudentes</span>
       </div>
-      <div className="relative h-2.5 overflow-hidden rounded-full bg-gray-100">
-        <div className="absolute inset-y-0 left-1/3 w-px bg-gray-300" />
+      <div className="relative h-2.5 overflow-hidden rounded-full bg-muted">
+        <div className="absolute inset-y-0 left-1/3 w-px bg-border" />
         <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pctPos}%`, backgroundColor: color }} />
       </div>
     </div>
@@ -145,22 +145,22 @@ export default function ApprentissageTab({
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
           <div className="mb-3 flex items-center gap-2">
             <Thermometer className="h-4 w-4 text-amber-700" />
-            <span className="text-sm font-bold text-gray-900">Température de calibration</span>
+            <span className="text-sm font-bold text-foreground">Température de calibration</span>
           </div>
           <TemperatureGauge temp={temperature ?? 1.0} />
-          <div className="mt-2 flex justify-between text-[11px] text-gray-600">
+          <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
             <span>{num(nRaces)} courses analysées</span>
             <span>Brier EMA {typeof brierEma === "number" ? brierEma.toFixed(3) : "—"}</span>
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-bold text-gray-900">Corrections appliquées à l&apos;inférence</div>
+        <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+          <div className="mb-3 text-sm font-bold text-foreground">Corrections appliquées à l&apos;inférence</div>
           {!calibration ? (
-            <p className="text-[11px] text-gray-600">État de calibration indisponible.</p>
+            <p className="text-[11px] text-muted-foreground">État de calibration indisponible.</p>
           ) : (
             <div className="space-y-2 text-[11px]">
               {[
@@ -169,10 +169,10 @@ export default function ApprentissageTab({
                 { k: "Tilt des poids de features", actif: calibration.feature_weight_tilt?.actif, detail: `${num(calibration.feature_weight_tilt?.courses_apprises)} / ${num(calibration.feature_weight_tilt?.courses_requises)} courses` },
               ].map((c) => (
                 <div key={c.k} className="flex items-center justify-between gap-2">
-                  <span className="truncate text-gray-600">{c.k}</span>
+                  <span className="truncate text-muted-foreground">{c.k}</span>
                   <span className="flex shrink-0 items-center gap-2">
-                    <span className="text-[10px] text-gray-600">{c.detail}</span>
-                    <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${c.actif ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-gray-50 text-gray-600"}`}>
+                    <span className="text-[11px] text-muted-foreground">{c.detail}</span>
+                    <span className={`rounded-full border px-1.5 py-0.5 text-[11px] font-semibold ${c.actif ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted/40 text-muted-foreground"}`}>
                       {c.actif ? "active" : "en attente"}
                     </span>
                   </span>
@@ -189,7 +189,7 @@ export default function ApprentissageTab({
           title="Le filtre de conviction bat-il le marché ?"
           desc="Mesuré sur des courses jamais vues à l'entraînement : taux de réussite des paris à forte conviction contre le taux obtenu en jouant tout."
           right={
-            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${learning.edge.edge_ok ? "border-emerald-200 bg-emerald-50 text-emerald-700" : learning.edge.enough_filt === false ? "border-amber-200 bg-amber-50 text-amber-700" : "border-red-200 bg-red-50 text-red-700"}`}>
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${learning.edge.edge_ok ? "border-emerald-200 bg-emerald-50 text-emerald-700" : learning.edge.enough_filt === false ? "border-amber-200 bg-amber-50 text-amber-700" : "border-red-200 bg-red-50 text-red-700"}`}>
               {learning.edge.edge_ok ? "avantage confirmé" : learning.edge.enough_filt === false ? "échantillon insuffisant" : "avantage à surveiller"}
             </span>
           }
@@ -199,7 +199,7 @@ export default function ApprentissageTab({
             // colorer en vert ferait passer pour un résultat ce que la ligne
             // d'avertissement juste dessous qualifie de bruit.
             const solide = learning.edge.enough_filt !== false;
-            const gris = "text-gray-600";
+            const gris = "text-muted-foreground";
             return (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <StatTile label="Réussite filtrée" value={pct((learning.edge.win_filtre ?? 0) * 100)}
@@ -238,10 +238,10 @@ export default function ApprentissageTab({
               if (!p) return null;
               const labels: Record<string, string> = { conservateur: "Prudent", equilibre: "Modéré", agressif: "Risqué" };
               return (
-                <div key={pk} className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
+                <div key={pk} className="rounded-xl border border-border/70 bg-card p-3 shadow-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-bold text-gray-900">{labels[pk]}</span>
-                    <span className="text-[10px] text-gray-600">{num(p.n_runs)} conseils réglés</span>
+                    <span className="text-sm font-bold text-foreground">{labels[pk]}</span>
+                    <span className="text-[11px] text-muted-foreground">{num(p.n_runs)} conseils réglés</span>
                   </div>
                   {p.roi_global != null && (
                     <div className={`mt-0.5 text-lg font-bold tabular-nums ${tone(p.roi_global)}`}>
@@ -250,10 +250,10 @@ export default function ApprentissageTab({
                   )}
                   <div className="mt-2 space-y-1">
                     {Object.entries(p.type_weights || {}).slice(0, 6).map(([t, w]) => (
-                      <div key={t} className="flex items-center gap-2 text-[10px]">
-                        <span className="w-24 shrink-0 truncate text-gray-600">{t}</span>
-                        <div className="relative h-1.5 flex-1 rounded-full bg-gray-100">
-                          <div className="absolute inset-y-0 left-1/2 w-px bg-gray-300" />
+                      <div key={t} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-24 shrink-0 truncate text-muted-foreground">{t}</span>
+                        <div className="relative h-1.5 flex-1 rounded-full bg-muted">
+                          <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
                           <div
                             className="absolute inset-y-0 rounded-full"
                             style={{
@@ -282,27 +282,35 @@ export default function ApprentissageTab({
           title="Rendement réel par signal qualitatif"
           desc="Chaque signal détecté par l'analyse (forme, driver, terrain…) confronté au résultat encaissé. Seuls les signaux à 30 conseils minimum sont affichés."
         >
-          <div className="space-y-1.5">
+          {/* Le nom du signal passe AU-DESSUS de sa barre sous 640 px. En une
+              seule ligne, « Driver en réussite hippodrome » dans 160 px fixes,
+              plus la barre, plus deux colonnes de chiffres, débordaient de
+              l'écran : la mesure sortait du cadre. */}
+          <div className="space-y-3 sm:space-y-1.5">
             {learning!.signaux.map((s: { signal: string; n: number; win_rate: number; roi: number }) => (
-              <div key={s.signal} className="flex items-center gap-3 text-[11px]">
-                <span className="w-40 shrink-0 truncate font-medium text-gray-700">{s.signal}</span>
-                <div className="relative h-2 flex-1 rounded-full bg-gray-100">
-                  <div className="absolute inset-y-0 left-1/2 w-px bg-gray-300" />
-                  <div
-                    className="absolute inset-y-0 rounded-full"
-                    style={{
-                      left: s.roi >= 0 ? "50%" : `${50 - Math.min(Math.abs(s.roi) * 100, 50)}%`,
-                      width: `${Math.min(Math.abs(s.roi) * 100, 50)}%`,
-                      background: s.roi >= 0 ? DIVERGING_POS : DIVERGING_NEG,
-                    }}
-                  />
+              <div key={s.signal} className="text-[11px] sm:flex sm:items-center sm:gap-3">
+                <span className="block font-medium text-foreground sm:w-40 sm:shrink-0 sm:truncate">
+                  {s.signal}
+                </span>
+                <div className="mt-1 flex items-center gap-2 sm:mt-0 sm:flex-1 sm:gap-3">
+                  <div className="relative h-2 flex-1 rounded-full bg-muted">
+                    <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+                    <div
+                      className="absolute inset-y-0 rounded-full"
+                      style={{
+                        left: s.roi >= 0 ? "50%" : `${50 - Math.min(Math.abs(s.roi) * 100, 50)}%`,
+                        width: `${Math.min(Math.abs(s.roi) * 100, 50)}%`,
+                        background: s.roi >= 0 ? DIVERGING_POS : DIVERGING_NEG,
+                      }}
+                    />
+                  </div>
+                  <span className={`w-12 shrink-0 text-right font-mono font-bold tabular-nums sm:w-14 ${tone(s.roi)}`}>
+                    {signedPct(s.roi * 100, 0)}
+                  </span>
+                  <span className="w-20 shrink-0 text-right tabular-nums text-muted-foreground sm:w-24">
+                    {pct(s.win_rate * 100, 0)} · {num(s.n)}
+                  </span>
                 </div>
-                <span className={`w-14 shrink-0 text-right font-mono font-bold tabular-nums ${tone(s.roi)}`}>
-                  {signedPct(s.roi * 100, 0)}
-                </span>
-                <span className="w-24 shrink-0 text-right tabular-nums text-gray-600">
-                  {pct(s.win_rate * 100, 0)} · {num(s.n)}
-                </span>
               </div>
             ))}
           </div>
@@ -320,7 +328,7 @@ export default function ApprentissageTab({
                 <button
                   key={n}
                   onClick={() => setHistLimit(n)}
-                  className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${histLimit === n ? "bg-gray-900 text-white" : "text-gray-600 hover:text-gray-700"}`}
+                  className={`inline-flex min-h-[2.25rem] min-w-[2.25rem] items-center justify-center rounded-lg px-2 text-[11px] font-semibold transition-colors ${histLimit === n ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                 >
                   {n}
                 </button>
@@ -336,8 +344,8 @@ export default function ApprentissageTab({
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="date" hide />
                 <YAxis domain={[0, 0.5]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={40} tickFormatter={(v) => v.toFixed(2)} />
-                <ReferenceLine y={0.25} stroke="#EF4444" strokeDasharray="4 4" label={{ value: "seuil critique 0,25", fontSize: 9, fill: "#EF4444", position: "insideTopLeft" }} />
-                <ReferenceLine y={0.18} stroke="#10B981" strokeDasharray="4 4" label={{ value: "cible 0,18", fontSize: 9, fill: "#10B981", position: "insideBottomLeft" }} />
+                <ReferenceLine y={0.25} stroke="#EF4444" strokeDasharray="4 4" label={{ value: "seuil critique 0,25", fontSize: 10, fill: "#EF4444", position: "insideTopLeft" }} />
+                <ReferenceLine y={0.18} stroke="#10B981" strokeDasharray="4 4" label={{ value: "cible 0,18", fontSize: 10, fill: "#10B981", position: "insideBottomLeft" }} />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => v.toFixed(4)} />} />
                 <Line
                   type="monotone" dataKey="brier" name="Brier" stroke="#3B82F6" strokeWidth={1.5}
@@ -391,10 +399,10 @@ export default function ApprentissageTab({
               </ResponsiveContainer>
               <div className="mt-2 space-y-0.5">
                 {drifts.map((f) => (
-                  <div key={f.groupe} className="flex items-center gap-2 text-[10px] text-gray-600">
+                  <div key={f.groupe} className="flex items-center gap-2 text-[11px] text-muted-foreground">
                     <span className="w-28 shrink-0 truncate">{f.groupe}</span>
                     <span className="tabular-nums">
-                      poids <b className="text-gray-700">{f.poids_actuel.toFixed(3)}</b> · défaut {f.poids_défaut.toFixed(2)}
+                      poids <b className="text-foreground">{f.poids_actuel.toFixed(3)}</b> · défaut {f.poids_défaut.toFixed(2)}
                       {f.poids_actuel >= 1.98 && <span className="ml-1 text-amber-700">· plafond 2,00 atteint</span>}
                     </span>
                   </div>
@@ -418,7 +426,7 @@ export default function ApprentissageTab({
           biasRows.length > 0 ? (
             <button
               onClick={() => setShowBiasAll((v) => !v)}
-              className="flex items-center gap-1 text-[11px] font-medium text-gray-600 hover:text-gray-900"
+              className="inline-flex min-h-[2.25rem] items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               {showBiasAll ? <><ChevronUp className="h-3 w-3" />Réduire</> : <><ChevronDown className="h-3 w-3" />Tout voir</>}
             </button>
@@ -430,10 +438,10 @@ export default function ApprentissageTab({
         ) : biasRows.length === 0 ? (
           <Empty>Aucun biais détecté — il en faut au moins 5 courses par contexte.</Empty>
         ) : (
-          <div className="-mx-4 overflow-x-auto px-4">
+          <div role="region" tabIndex={0} aria-label="Tableau de données, défilement horizontal" className="-mx-4 overflow-x-auto overscroll-x-contain px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:-mx-5 sm:px-5">
             <table className="w-full min-w-[620px] text-xs">
               <thead>
-                <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
+                <tr className="border-b border-border/70 text-[11px] uppercase tracking-wide text-muted-foreground">
                   <th className="py-2 pr-3 text-left font-semibold">Contexte</th>
                   <th className="px-2 py-2 text-left font-semibold">Discipline</th>
                   <th className="px-2 py-2 text-left font-semibold">Terrain</th>
@@ -445,25 +453,25 @@ export default function ApprentissageTab({
               </thead>
               <tbody>
                 {biasRows.map((row, i) => (
-                  <tr key={i} className="border-b border-gray-50">
-                    <td className="max-w-[180px] truncate py-2 pr-3 font-medium text-gray-700" title={row.contexte}>
+                  <tr key={i} className="border-b border-border/50">
+                    <td className="max-w-[180px] truncate py-2 pr-3 font-medium text-foreground" title={row.contexte}>
                       {row.hippodrome ?? row.contexte}
                     </td>
-                    <td className="px-2 py-2 text-gray-600">{row.discipline ?? "—"}</td>
-                    <td className="px-2 py-2 text-gray-600">{row.terrain ?? "—"}</td>
-                    <td className="px-2 py-2 text-right tabular-nums text-gray-600">{num(row.nb_courses)}</td>
+                    <td className="px-2 py-2 text-muted-foreground">{row.discipline ?? "—"}</td>
+                    <td className="px-2 py-2 text-muted-foreground">{row.terrain ?? "—"}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{num(row.nb_courses)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-amber-700">{pct((row.taux_surprise ?? 0) * 100)}</td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-600">{row.brier_moyen?.toFixed(4) ?? "—"}</td>
+                    <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">{row.brier_moyen?.toFixed(4) ?? "—"}</td>
                     <td className="py-2 pl-2">
                       {!row.correction_factor ? (
-                        <span className="text-[10px] text-gray-600">aucune</span>
+                        <span className="text-[11px] text-muted-foreground">aucune</span>
                       ) : row.correction_appliquee ?? row.nb_courses >= (row.seuil_courses ?? 8) ? (
-                        <span className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700"
+                        <span className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700"
                           title="Confiance réduite de 0,05 sur ce contexte, appliquée à chaque pronostic">
                           confiance −0,05
                         </span>
                       ) : (
-                        <span className="whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600"
+                        <span className="whitespace-nowrap rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-semibold text-muted-foreground"
                           title={`Détectée, mais lue à l'inférence seulement à partir de ${row.seuil_courses ?? 8} courses`}>
                           en attente ({row.nb_courses}/{row.seuil_courses ?? 8})
                         </span>
@@ -493,10 +501,10 @@ export default function ApprentissageTab({
         ) : !history?.length ? (
           <Empty>Aucune course analysée.</Empty>
         ) : (
-          <div className="-mx-4 max-h-[420px] overflow-auto px-4">
+          <div role="region" tabIndex={0} aria-label="Tableau de données, défilement" className="-mx-4 max-h-[26rem] overflow-auto overscroll-contain px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:-mx-5 sm:px-5">
             <table className="w-full min-w-[620px] text-xs">
-              <thead className="sticky top-0 bg-white">
-                <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-600">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b border-border/70 text-[11px] uppercase tracking-wide text-muted-foreground">
                   <th className="py-2 pr-3 text-left font-semibold">Date</th>
                   <th className="px-2 py-2 text-left font-semibold">Hippodrome</th>
                   <th className="px-2 py-2 text-left font-semibold">Discipline</th>
@@ -508,24 +516,24 @@ export default function ApprentissageTab({
               </thead>
               <tbody>
                 {history.map((h, i) => (
-                  <tr key={h.log_id ?? i} className={`border-b border-gray-50 ${h.was_surprise ? "bg-red-50/40" : ""}`}>
-                    <td className="py-2 pr-3 font-mono text-gray-600">
+                  <tr key={h.log_id ?? i} className={`border-b border-border/50 ${h.was_surprise ? "bg-red-50/40" : ""}`}>
+                    <td className="py-2 pr-3 font-mono text-muted-foreground">
                       {h.analyzed_at ? format(new Date(h.analyzed_at), "dd/MM HH:mm") : "—"}
                     </td>
-                    <td className="px-2 py-2 font-medium text-gray-700">{h.hippodrome ?? "—"}</td>
-                    <td className="px-2 py-2 text-gray-600">{h.discipline ?? "—"}</td>
-                    <td className={`px-2 py-2 text-right font-mono tabular-nums ${(h.brier_score ?? 0) > 0.25 ? "text-red-700" : (h.brier_score ?? 0) < 0.18 ? "text-emerald-700" : "text-gray-700"}`}>
+                    <td className="px-2 py-2 font-medium text-foreground">{h.hippodrome ?? "—"}</td>
+                    <td className="px-2 py-2 text-muted-foreground">{h.discipline ?? "—"}</td>
+                    <td className={`px-2 py-2 text-right font-mono tabular-nums ${(h.brier_score ?? 0) > 0.25 ? "text-red-700" : (h.brier_score ?? 0) < 0.18 ? "text-emerald-700" : "text-foreground"}`}>
                       {h.brier_score?.toFixed(4) ?? "—"}
                     </td>
-                    <td className="px-2 py-2 text-right tabular-nums text-gray-600">
+                    <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
                       {h.nb_partants ?? "—"}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-gray-600">
+                    <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
                       {h.gagnant_proba_ia != null ? pct(h.gagnant_proba_ia * 100) : "—"}
                     </td>
                     <td className="px-2 py-2 text-right">
                       {h.gagnant_rang_predit == null ? "—" : hors3(h) ? (
-                        <span className="text-gray-600" title="Le gagnant réel n'était pas dans les 3 premiers du classement prédit">
+                        <span className="text-muted-foreground" title="Le gagnant réel n'était pas dans les 3 premiers du classement prédit">
                           hors top 3
                         </span>
                       ) : (
