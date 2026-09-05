@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Brain, Search, BarChart2 } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -312,23 +312,26 @@ export function Navbar() {
                             <Zap className="h-4 w-4" /> Passer Standard
                           </Link>
                         )}
+                        {/* Une seule porte vers l'administration.
+                            « Supervision IA » était une seconde entrée vers
+                            `/admin/algorithme` parce que la console n'avait
+                            aucune navigation interne : les trois écrans d'admin
+                            vivent hors du groupe `(main)`, donc sans la barre du
+                            site, et ce menu était le seul chemin vers eux.
+                            Depuis la refonte du 2026-09-05, `/admin` porte sa
+                            propre navigation permanente — garder le raccourci
+                            revenait à afficher deux entrées pour un seul outil,
+                            dont une qui saute par-dessus l'écran d'accueil.
+                            L'icône manquait par ailleurs sur « Admin », seul
+                            élément nu d'un menu où tout le reste en a une. */}
                         {user.is_admin && (
-                          <>
-                            <Link
-                              href="/admin"
-                              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                              onClick={() => setUserMenuOpen(false)}
-                            >
-                              Admin
-                            </Link>
-                            <Link
-                              href="/admin/algorithme"
-                              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                              onClick={() => setUserMenuOpen(false)}
-                            >
-                              <Brain className="h-4 w-4 text-blue-400" /> Supervision IA
-                            </Link>
-                          </>
+                          <Link
+                            href="/admin"
+                            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                            onClick={() => setUserMenuOpen(false)}
+                          >
+                            <Gauge className="h-4 w-4 text-brand-gold-dark" /> Administration
+                          </Link>
                         )}
                         <div className="my-1 h-px bg-gray-100" />
                         <button
