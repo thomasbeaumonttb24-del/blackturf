@@ -42,7 +42,7 @@ export const STORY_L = 1080;
 export const STORY_H = 1920;
 
 /** Bande photo. Volontairement courte : la story porte surtout du texte. */
-export const PHOTO_H = 380;
+export const PHOTO_H = 520;
 const MARGE = 64;
 const UTILE = STORY_L - MARGE * 2;
 
@@ -143,7 +143,7 @@ function Chiffre({
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 60,
+            fontSize: 54,
             color: COULEURS.encre,
             letterSpacing: -2,
           }}
@@ -228,16 +228,16 @@ export function Story({ d }: { d: DonneesStory }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          width: 120,
-          height: 120,
-          borderRadius: 60,
+          width: 104,
+          height: 104,
+          borderRadius: 52,
           border: `3px solid ${COULEURS.or}`,
           marginTop: 28,
         }}
       >
         {d.horse ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={d.horse} alt="" width={92} height={58} />
+          <img src={d.horse} alt="" width={80} height={50} />
         ) : null}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", marginTop: 10 }}>
@@ -245,7 +245,7 @@ export function Story({ d }: { d: DonneesStory }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 30,
+            fontSize: 27,
             letterSpacing: 2,
             color: COULEURS.encre,
           }}
@@ -256,7 +256,7 @@ export function Story({ d }: { d: DonneesStory }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 30,
+            fontSize: 27,
             letterSpacing: 2,
             color: COULEURS.or,
           }}
@@ -276,7 +276,7 @@ export function Story({ d }: { d: DonneesStory }) {
         style={{
           fontFamily: "Grotesk",
           fontWeight: 700,
-          fontSize: 54,
+          fontSize: 48,
           letterSpacing: -1.4,
           color: COULEURS.encre,
           marginTop: 10,
@@ -293,7 +293,7 @@ export function Story({ d }: { d: DonneesStory }) {
               style={{
                 fontFamily: "Grotesk",
                 fontWeight: 700,
-                fontSize: 132,
+                fontSize: 116,
                 lineHeight: 1,
                 color: COULEURS.encre,
                 letterSpacing: -6,
@@ -305,7 +305,7 @@ export function Story({ d }: { d: DonneesStory }) {
               style={{
                 fontFamily: "Grotesk",
                 fontWeight: 700,
-                fontSize: 56,
+                fontSize: 50,
                 color: COULEURS.or,
                 marginLeft: 6,
               }}
@@ -317,7 +317,7 @@ export function Story({ d }: { d: DonneesStory }) {
             style={{
               fontFamily: "Grotesk",
               fontWeight: 700,
-              fontSize: 44,
+              fontSize: 40,
               lineHeight: 1.2,
               color: COULEURS.encre,
               letterSpacing: -1,
@@ -330,7 +330,7 @@ export function Story({ d }: { d: DonneesStory }) {
             style={{
               fontFamily: "Grotesk",
               fontWeight: 700,
-              fontSize: 44,
+              fontSize: 40,
               lineHeight: 1.2,
               color: COULEURS.encre,
               letterSpacing: -1,
@@ -392,7 +392,7 @@ export function Story({ d }: { d: DonneesStory }) {
               style={{
                 fontFamily: "Grotesk",
                 fontWeight: 700,
-                fontSize: 52,
+                fontSize: 46,
                 color: COULEURS.encreTenue,
                 letterSpacing: -1.4,
               }}
@@ -406,7 +406,7 @@ export function Story({ d }: { d: DonneesStory }) {
               style={{
                 fontFamily: "Grotesk",
                 fontWeight: 700,
-                fontSize: 78,
+                fontSize: 70,
                 color: VERT,
                 letterSpacing: -3,
               }}
@@ -476,7 +476,7 @@ export function Story({ d }: { d: DonneesStory }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 42,
+            fontSize: 38,
             color: COULEURS.encre,
             letterSpacing: -1,
           }}
@@ -487,7 +487,7 @@ export function Story({ d }: { d: DonneesStory }) {
           style={{
             fontFamily: "Grotesk",
             fontWeight: 700,
-            fontSize: 42,
+            fontSize: 38,
             color: COULEURS.or,
             letterSpacing: -1,
           }}
@@ -500,7 +500,7 @@ export function Story({ d }: { d: DonneesStory }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "20px 42px",
+          padding: "18px 40px",
           borderRadius: 46,
           background: COULEURS.encre,
           marginTop: 14,
@@ -509,10 +509,10 @@ export function Story({ d }: { d: DonneesStory }) {
         {/* Adresse RACINE, sans chemin. Une story se regarde, elle ne se clique pas :
             un lecteur qui doit retaper « blackturf.fr/track-record » de mémoire ne
             tape rien du tout. */}
-        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 40, color: COULEURS.surSombre }}>
+        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 36, color: COULEURS.surSombre }}>
           black
         </span>
-        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 40, color: COULEURS.orVif }}>
+        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 36, color: COULEURS.orVif }}>
           turf.fr
         </span>
       </div>
@@ -527,7 +527,7 @@ export function Story({ d }: { d: DonneesStory }) {
           width: UTILE - 60,
           textAlign: "center",
           fontFamily: "Inter",
-          fontSize: 19,
+          fontSize: 18,
           lineHeight: 1.4,
           color: COULEURS.encreTenue,
           marginTop: 14,
