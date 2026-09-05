@@ -31,6 +31,13 @@ import redis.asyncio as aioredis
 log = structlog.get_logger()
 router = APIRouter()
 
+# Délai, après le départ d'une course, au-delà duquel on considère qu'elle aurait dû
+# être réglée. Les rapports Multi et Mini Multi sont publiés en DIFFÉRÉ de 5 à 10 min
+# après l'arrivée, et le règlement des plans suit : un total lu plus tôt bouge encore.
+# Sert à décider si la journée est finie (`journee_complete`), donc si le visuel du
+# soir peut être publié.
+MARGE_FIN_JOURNEE_MIN = 25
+
 
 async def _cache_get(redis: aioredis.Redis, key: str) -> Any | None:
     try:
@@ -2008,6 +2015,55 @@ async def stats_meilleurs_plans_jour(
     nb_analysees = int(a.get("nb") or 0)
     pct = lambda n: round(int(n or 0) / nb_analysees * 100, 1) if nb_analysees else None  # noqa: E731
 
+    # ── La journée est-elle FINIE, au sens « plus rien ne bougera » ? ────────
+    # Le visuel du soir ne doit pas se publier sur une demi-journée : à 11 h, un tiers
+    # des courses sont réglées et le total affiché serait démenti par la soirée.
+    #
+    # La condition n'est PAS « toutes les courses sont en 'termine' » : une course
+    # annulée par le PMU ne passe jamais dans cet état (cause racine du 2026-08-17,
+    # 159 courses éternellement 'a_venir'), et attendre son passage bloquerait la
+    # publication pour toujours. On demande trois choses, chacune nécessaire :
+    #
+    #   `courses_a_venir`   la dernière course est PARTIE depuis la marge ;
+    #   `courses_en_attente` aucune course dont le départ est passé depuis la marge
+    #                       n'est encore sans résultat ni annulation ;
+    #   `plans_non_regles`  aucun plan pré-course d'une course DONT LE RÉSULTAT EXISTE
+    #                       n'attend encore son règlement définitif — c'est là que
+    #                       vivent les rapports Multi publiés en différé, qui font
+    #                       bouger le total dix minutes après l'arrivée.
+    #
+    # La marge de 25 min couvre ce différé. La borne est calculée EN PYTHON et passée
+    # en paramètre : `now()` n'existe pas sous SQLite, et cette requête est testée.
+    limite = datetime.now(timezone.utc) - timedelta(minutes=MARGE_FIN_JOURNEE_MIN)
+    fin = await db.execute(
+        text("""
+        SELECT
+          (SELECT COUNT(*) FROM courses c
+             WHERE substring(c.course_id, 1, 8) = :jjmmaaaa
+               AND c.date_heure >= :limite)                        AS courses_a_venir,
+          (SELECT COUNT(*) FROM courses c
+             WHERE substring(c.course_id, 1, 8) = :jjmmaaaa
+               AND c.date_heure < :limite
+               AND c.statut NOT IN ('termine', 'annule', 'sans_resultat'))
+                                                                   AS courses_en_attente,
+          (SELECT COUNT(*) FROM bet_plan_snapshots s
+             JOIN resultats r ON r.course_id = s.course_id
+             WHERE substring(s.course_id, 1, 8) = :jjmmaaaa
+               AND s.is_pre_course = true AND s.origin = 'profil_run'
+               AND NOT EXISTS (
+                   SELECT 1 FROM bet_plan_settlements t
+                   WHERE t.plan_snapshot_id = s.plan_snapshot_id
+                     AND t.statut = 'settled'))                    AS plans_non_regles
+    """),
+        {"jjmmaaaa": jjmmaaaa, "limite": limite},
+    )
+    f = fin.mappings().first() or {}
+    restes = {
+        "courses_a_venir": int(f.get("courses_a_venir") or 0),
+        "courses_en_attente": int(f.get("courses_en_attente") or 0),
+        "plans_non_regles": int(f.get("plans_non_regles") or 0),
+    }
+
     # ── Totaux de la journée, sur les MÊMES plans publiés ────────────────────
     # `total_mise` est renvoyé À CÔTÉ de `total_retour`, et ce n'est pas décoratif :
     # un retour sans sa mise ne dit pas si la journée a gagné ou perdu (le 2026-09-04 :
@@ -2038,6 +2094,12 @@ async def stats_meilleurs_plans_jour(
         "nb_courses": int(v.get("nb_courses") or 0),
         "nb_reunions": int(v.get("nb_reunions") or 0),
         "nb_hippodromes": int(v.get("nb_hippodromes") or 0),
+        # RÈGLE DE PUBLICATION : le visuel du soir ne se publie qu'une fois la journée
+        # entièrement courue ET réglée. `reste_a_venir` dit CE QU'ON ATTEND encore —
+        # un drapeau qui reste faux sans expliquer pourquoi est indébogable un soir de
+        # publication.
+        "journee_complete": not any(restes.values()) and int(v.get("nb_courses") or 0) > 0,
+        "reste_a_venir": restes,
         "nb_plans": int(t.get("nb_plans") or 0),
         "nb_plans_gagnants": int(t.get("nb_plans_gagnants") or 0),
         "total_mise": total_mise,

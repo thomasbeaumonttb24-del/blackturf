@@ -321,3 +321,101 @@ async def test_les_hippodromes_du_jour_sont_comptes_sur_la_course(db, client):
     await db.commit()
 
     assert (await _corps(client))["nb_hippodromes"] == 2
+
+
+# ── RÈGLE DE PUBLICATION : après le dernier règlement, jamais avant ──────────
+# À 11 h du matin, un tiers des courses sont réglées : un total publié là serait
+# démenti par la soirée. La journée est « complète » quand la dernière course est
+# partie depuis la marge, qu'aucune course courue n'attend son arrivée, et qu'aucun
+# plan d'une course arrivée n'attend son règlement définitif.
+
+def _resultat(db, course_id: str):
+    from db.models import Resultat
+    db.add(Resultat(course_id=course_id, classement=[{"numero": 1, "position": 1}]))
+
+
+@pytest.mark.asyncio
+async def test_la_journee_n_est_pas_complete_tant_qu_une_course_n_est_pas_partie(db, client):
+    _course(db, "04092026R5C4")
+    # Une course du même jour dont le départ est encore devant nous.
+    from db.models import Course
+    db.add(Course(course_id="04092026R9C9", reunion_id="9", numero=9, nom="Prix Z",
+                  date_heure=datetime.now(timezone.utc) + timedelta(hours=3),
+                  hippodrome_nom="H", discipline="Plat", distance=2000,
+                  nb_partants=10, statut="a_venir"))
+    _emission(db, "04092026R5C4", "d", retour=49.0, emitted_at=DEPART - timedelta(minutes=20))
+    _resultat(db, "04092026R5C4")
+    await db.commit()
+
+    corps = await _corps(client)
+    assert corps["journee_complete"] is False
+    assert corps["reste_a_venir"]["courses_a_venir"] == 1
+
+
+@pytest.mark.asyncio
+async def test_une_course_courue_sans_arrivee_bloque_la_publication(db, client):
+    _course(db, "04092026R5C4")
+    from db.models import Course
+    db.add(Course(course_id="04092026R9C9", reunion_id="9", numero=9, nom="Prix Z",
+                  date_heure=datetime.now(timezone.utc) - timedelta(hours=2),
+                  hippodrome_nom="H", discipline="Plat", distance=2000,
+                  nb_partants=10, statut="a_venir"))
+    _emission(db, "04092026R5C4", "d", retour=49.0, emitted_at=DEPART - timedelta(minutes=20))
+    _resultat(db, "04092026R5C4")
+    await db.commit()
+
+    corps = await _corps(client)
+    assert corps["journee_complete"] is False
+    assert corps["reste_a_venir"]["courses_en_attente"] == 1
+
+
+@pytest.mark.asyncio
+async def test_une_course_annulee_ne_bloque_pas_la_publication_pour_toujours(db, client):
+    """Cause racine du 2026-08-17 : une course annulée par le PMU ne passe JAMAIS en
+    'termine'. Exiger ce statut aurait empêché toute publication, sans fin."""
+    _course(db, "04092026R5C4")
+    from db.models import Course
+    db.add(Course(course_id="04092026R9C9", reunion_id="9", numero=9, nom="Prix Z",
+                  date_heure=DEPART, hippodrome_nom="H", discipline="Plat",
+                  distance=2000, nb_partants=10, statut="annule"))
+    _emission(db, "04092026R5C4", "d", retour=49.0, emitted_at=DEPART - timedelta(minutes=20))
+    _resultat(db, "04092026R5C4")
+    await db.commit()
+
+    assert (await _corps(client))["journee_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_un_plan_pas_encore_regle_bloque_la_publication(db, client):
+    """Le rapport Multi est publié en différé : le total bouge encore après l'arrivée."""
+    _course(db, "04092026R5C4")
+    _emission(db, "04092026R5C4", "d", retour=49.0, emitted_at=DEPART - timedelta(minutes=20))
+    _emission(db, "04092026R5C4", "attente", retour=0.0, profil="conservateur",
+              statut="partial", emitted_at=DEPART - timedelta(minutes=18))
+    _resultat(db, "04092026R5C4")
+    await db.commit()
+
+    corps = await _corps(client)
+    assert corps["journee_complete"] is False
+    assert corps["reste_a_venir"]["plans_non_regles"] == 1
+
+
+@pytest.mark.asyncio
+async def test_journee_courue_et_reglee_est_publiable(db, client):
+    _course(db, "04092026R5C4")
+    _emission(db, "04092026R5C4", "d", retour=49.0, emitted_at=DEPART - timedelta(minutes=20))
+    _resultat(db, "04092026R5C4")
+    await db.commit()
+
+    corps = await _corps(client)
+    assert corps["journee_complete"] is True
+    assert corps["reste_a_venir"] == {
+        "courses_a_venir": 0, "courses_en_attente": 0, "plans_non_regles": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_une_journee_vide_n_est_jamais_declaree_complete(db, client):
+    """Sans aucune course, les trois compteurs valent 0 : sans garde, la journée
+    serait déclarée « complète » et le visuel publiable sur du néant."""
+    assert (await _corps(client))["journee_complete"] is False
