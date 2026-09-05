@@ -85,7 +85,12 @@ async function donneesStory(): Promise<DonneesStory> {
     // Un visuel sans données reste publiable ; un visuel qui plante, non.
   }
   const [photo, horse] = await Promise.all([
-    photoEnDataUri(photoDuJour(jour), { largeur: PHOTO_L, hauteur: PHOTO_H, luminosite: 1.04 }),
+    photoEnDataUri(photoDuJour(jour), {
+      largeur: PHOTO_L, hauteur: PHOTO_H, luminosite: 1.04,
+      // 0,82 : la fenêtre part du bas, on ne perd que du ciel. La détection de sujet
+      // de `sharp` centrait le cheval et lui coupait les jambes.
+      ancrage: 0.82,
+    }),
     imageEnDataUri("logo-horse.png", { largeur: 200 }),
   ]);
   return {

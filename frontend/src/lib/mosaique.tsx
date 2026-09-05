@@ -70,14 +70,19 @@ export const COULEURS = {
  *
  * Ce sont des PHOTOS, pas des images fabriquées : une marque qui vend de la rigueur ne
  * s'illustre pas avec un cheval qui n'existe pas. Les cinq premières sont celles du
- * site ; les trente autres viennent de Pexels (licence Pexels : usage commercial libre,
+ * site ; les vingt-sept autres viennent de Pexels (licence Pexels : usage commercial libre,
  * sans attribution obligatoire, modification autorisée), et la provenance de chaque
  * fichier est journalisée dans `public/img/course/SOURCES.txt` — une image dont on ne
  * sait plus d'où elle vient est une image qu'on ne peut plus défendre.
  *
  * Moitié galop, moitié attelé : le PMU français trotte plus qu'il ne galope, et
- * illustrer trente-cinq publications avec des pur-sang lancés au galop décrirait un
+ * illustrer trente-deux publications avec des pur-sang lancés au galop décrirait un
  * programme qui n'est pas celui du site.
+ *
+ * TROIS PHOTOS EN PORTRAIT ONT ÉTÉ RETIRÉES (galop-duo, galop-soleil, galop-poussiere,
+ * rapports 0,67 à 0,80). Une source verticale posée dans une bande large ne peut pas
+ * être recadrée sans perdre son sujet : sur la story, les deux chevaux de galop-duo
+ * sortaient décapités. Toute photo ajoutée ici doit être en PAYSAGE.
  */
 const PHOTOS = [
   "showcase.webp", // peloton en pleine course
@@ -93,11 +98,9 @@ const PHOTOS = [
   "course/attele-soleil.jpg",
   "course/galop-musselburgh.jpg",
   "course/attele-sulky.jpg",
-  "course/galop-duo.jpg",
   "course/attele-normandie.jpg",
   "course/galop-lutte.jpg",
   "course/attele-herbe.jpg",
-  "course/galop-soleil.jpg",
   "course/attele-tribunes.jpg",
   "course/galop-piste-claire.jpg",
   "course/attele-piste.jpg",
@@ -109,7 +112,6 @@ const PHOTOS = [
   "course/attele-couleurs.jpg",
   "course/galop-trois.jpg",
   "course/attele-foulee.jpg",
-  "course/galop-poussiere.jpg",
   "course/attele-groupe.jpg",
   "course/galop-shakopee.jpg",
   "course/attele-duel.jpg",
@@ -122,9 +124,9 @@ const PHOTOS = [
  *
  * L'index suit le NOMBRE DE JOURS écoulés depuis l'époque, pas le quantième du mois.
  * Avec le quantième, le 1er et le 31 tombaient sur la même image et le cycle se calait
- * sur la longueur du mois : sur un fonds de 35 photos, février n'en aurait montré que
- * 28 et jamais les sept dernières. Le compte de jours avance de un chaque jour et
- * ignore les mois, donc les 35 photos passent toutes, dans l'ordre, puis recommencent.
+ * sur la longueur du mois : sur un fonds de 32 photos, février n'en aurait montré que
+ * 28 et jamais les quatre dernières. Le compte de jours avance de un chaque jour et
+ * ignore les mois, donc les 32 photos passent toutes, dans l'ordre, puis recommencent.
  *
  * Déterministe et sans état : deux rendus du même jour donnent la même image, et le
  * visuel d'hier reste reproductible — indispensable quand une publication est mise en
@@ -152,21 +154,49 @@ export function photoDuJour(jour: string): string {
  * dans un cadre d'un autre rapport, le navigateur la recoupe une SECONDE fois, sans
  * détection cette fois — et un cheval cadré au centre par `sharp` ressort coupé au bord.
  * Chaque visuel demande donc exactement le format dans lequel il pose la photo :
- * 1800 × 900 pour le bandeau de la mosaïque, 1080 × 900 pour la story verticale.
+ * 1800 × 900 pour le bandeau de la mosaïque, 1080 × 620 pour la story verticale.
+ *
+ * `ancrage` (0 = haut, 1 = bas) REMPLACE la détection du sujet quand il est fourni, et
+ * c'est ce qui rend le cheval entier. La détection de `sharp` centre le sujet dans la
+ * fenêtre : elle coupe donc autant en bas qu'en haut, et ce qu'elle coupe en bas, ce
+ * sont les jambes — le cheval sortait posé sur un moignon. Sur une photo de course, ce
+ * qu'on peut perdre sans rien perdre est le ciel : la story ancre à 0,82. Vérifié sur
+ * les six rapports les plus serrés du fonds (1,25 à 1,72), cheval entier des sabots
+ * aux oreilles sur les six.
  *
  * En cas d'échec on renvoie null : la composition se contente alors de son fond ivoire.
  * Un visuel sans photo reste publiable, un visuel qui plante non.
  */
 export async function photoEnDataUri(
   fichier: string,
-  { largeur = 1800, hauteur = 900, luminosite = 1.18 } = {},
+  { largeur = 1800, hauteur = 900, luminosite = 1.18, ancrage }:
+    { largeur?: number; hauteur?: number; luminosite?: number; ancrage?: number } = {},
 ): Promise<string | null> {
   try {
     const chemin = path.join(process.cwd(), "public", "img", fichier);
     const brut = await fs.readFile(chemin);
     const { default: sharp } = await import("sharp");
-    const jpeg = await sharp(brut)
-      .resize(largeur, hauteur, { fit: "cover", position: "attention" })
+    const source = sharp(brut);
+
+    let cadre;
+    if (ancrage === undefined) {
+      cadre = source.resize(largeur, hauteur, { fit: "cover", position: "attention" });
+    } else {
+      // Mise à la largeur voulue, puis fenêtre découpée à la hauteur `ancrage`. On ne
+      // laisse pas `sharp` choisir : sa détection du sujet centre le cheval dans la
+      // fenêtre, donc elle coupe autant en bas qu'en haut — et ce qu'elle coupe en
+      // bas, ce sont les JAMBES. Or sur une photo de course, ce qu'on peut perdre
+      // sans rien perdre, c'est le ciel.
+      const meta = await source.metadata();
+      const h = Math.round((largeur * (meta.height ?? 1)) / (meta.width ?? 1));
+      const fenetre = Math.min(hauteur, h);
+      const top = Math.max(0, Math.round((h - fenetre) * Math.min(1, Math.max(0, ancrage))));
+      cadre = source
+        .resize(largeur, h)
+        .extract({ left: 0, top, width: largeur, height: fenetre });
+    }
+
+    const jpeg = await cadre
       .modulate({ brightness: luminosite, saturation: 1.02 })
       .jpeg({ quality: 82 })
       .toBuffer();

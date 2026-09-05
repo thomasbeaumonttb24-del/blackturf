@@ -3,15 +3,12 @@ galop-skyline.jpg|https://www.pexels.com/photo/27305789/
 galop-foule.jpg|https://www.pexels.com/photo/15466766/
 galop-stalles.jpg|https://www.pexels.com/photo/6818590/
 galop-musselburgh.jpg|https://www.pexels.com/photo/34665171/
-galop-duo.jpg|https://www.pexels.com/photo/27981630/
 galop-lutte.jpg|https://www.pexels.com/photo/34665170/
-galop-soleil.jpg|https://www.pexels.com/photo/28560390/
 galop-piste-claire.jpg|https://www.pexels.com/photo/11341149/
 galop-vitesse.jpg|https://www.pexels.com/photo/13055808/
 galop-mouvement.jpg|https://www.pexels.com/photo/17651070/
 galop-face-a-face.jpg|https://www.pexels.com/photo/12904776/
 galop-trois.jpg|https://www.pexels.com/photo/12995066/
-galop-poussiere.jpg|https://www.pexels.com/photo/38136804/
 galop-shakopee.jpg|https://www.pexels.com/photo/13066405/
 galop-noir-et-blanc.jpg|https://www.pexels.com/photo/29062693/
 attele-sable.jpg|https://www.pexels.com/photo/29741150/
