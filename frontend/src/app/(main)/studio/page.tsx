@@ -17,6 +17,9 @@ export const metadata: Metadata = {
 const QUAND: Record<string, string> = {
   matin: "À publier vers 9 h, une fois le support connu.",
   soir: "À publier dès les rapports publiés, généralement 15 à 30 min après la course.",
+  story:
+    "Story verticale, à publier en fin de journée une fois les dernières courses réglées. " +
+    "Elle n'est pas publiée automatiquement : à télécharger et à poster à la main.",
 };
 
 export default async function StudioPage() {
@@ -52,7 +55,7 @@ export default async function StudioPage() {
                   alt={v.titre}
                   width={320}
                   height={320}
-                  className="w-full rounded-xl border border-amber-100 bg-brand-dark"
+                  className="h-auto w-full rounded-xl border border-amber-100 bg-brand-dark"
                 />
                 <a
                   href={v.image}
@@ -76,17 +79,24 @@ export default async function StudioPage() {
         <Section title="Avant de publier">
           <ul className="space-y-2 text-sm leading-relaxed text-brand-charcoal">
             <li>
-              Les visuels ne portent <strong>aucun pronostic et aucun chiffre de gain</strong>.
-              Une image circule hors de son contexte : elle ne doit jamais pouvoir se lire comme
-              une promesse.
+              Les visuels ne portent <strong>aucun pronostic</strong>. Une image circule hors de
+              son contexte : elle ne doit jamais pouvoir se lire comme une promesse.
+            </li>
+            <li>
+              Les montants affichés sont ceux de <strong>plans calculés et réglés aux rapports
+              officiels du PMU</strong>, pas de l&apos;argent encaissé. Le mot juste est
+              « rendu », jamais « gagné » ni « bénéfice ». Ne réécrivez pas une légende pour y
+              mettre l&apos;un de ces deux mots.
             </li>
             <li>
               La mention de jeu responsable est déjà dans chaque légende et sur chaque visuel.
               Ne la retirez pas : les plateformes sanctionnent son absence avant l&apos;ANJ.
             </li>
             <li>
-              Le format est un carré 1080 × 1080, qui passe en fil Instagram, en aperçu Facebook
-              et sur X sans recadrage.
+              Les posts du matin et du soir sont des carrés 1080 × 1080, qui passent en fil
+              Instagram, en aperçu Facebook et sur X sans recadrage. La story est un
+              1080 × 1920 : son contenu tient volontairement loin des bords haut et bas, que
+              l&apos;interface d&apos;Instagram recouvre.
             </li>
           </ul>
         </Section>

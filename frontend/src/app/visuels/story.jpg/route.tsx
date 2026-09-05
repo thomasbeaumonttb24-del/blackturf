@@ -1,24 +1,19 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
-import { jourParis, jourLong, jourCourt } from "@/lib/seo";
-import {
-  Tuile, TUILE_L, TUILE_H, photoDuJour, photoEnDataUri,
-  type DonneesMosaique, type PlanJour,
-} from "@/lib/mosaique";
+import { jourParis, jourLong } from "@/lib/seo";
+import { photoDuJour, photoEnDataUri } from "@/lib/mosaique";
+import { Story, STORY_L, STORY_H, PHOTO_H, type DonneesStory, type PlanStory } from "@/lib/story";
 
-// Les données du jour ne bougent plus une fois les courses courues ; un quart d'heure de
-// cache suffit et évite de recomposer un plan de 3104 × 2700 à chaque appel.
-export const revalidate = 900;
+// Les règlements du jour bougent encore pendant l'après-midi (un rapport Multi publié en
+// différé ajoute un plan gagnant) : dix minutes de cache, pas un quart d'heure.
+export const revalidate = 600;
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
 
 /**
- * Les polices sont EMBARQUÉES, pas référencées.
- *
- * Satori n'a pas de navigateur derrière lui : sans fichier de police fourni, il retombe
- * sur une fonte générique qui écrase toute la direction typographique. Les quatre
- * fichiers vivent donc dans le dépôt, et sont lus au rendu.
+ * Polices EMBARQUÉES : Satori n'a pas de navigateur derrière lui et retomberait sur une
+ * fonte générique, ce qui écraserait toute la direction typographique.
  */
 async function polices() {
   const dossier = path.join(process.cwd(), "src", "assets", "fonts");
@@ -37,12 +32,12 @@ async function polices() {
   ];
 }
 
-async function donnees(): Promise<DonneesMosaique> {
+async function donneesStory(): Promise<DonneesStory> {
   const jour = jourParis();
-  let plans: PlanJour[] = [];
-  let nbCourses = 0;
-  let nbReunions = 0;
+  let plans: PlanStory[] = [];
   let nbPlans = 0;
+  let nbPlansGagnants = 0;
+  let totalRetour = 0;
   try {
     const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
     if (res.ok) {
@@ -50,40 +45,31 @@ async function donnees(): Promise<DonneesMosaique> {
       plans = (d.plans ?? []).map((p: Record<string, unknown>) => ({
         hippodrome: String(p.hippodrome ?? ""),
         code: String(p.code ?? ""),
-        mise: Number(p.mise ?? 0),
         retour: Number(p.retour ?? 0),
       }));
-      nbCourses = Number(d.nb_courses ?? 0);
-      nbReunions = Number(d.nb_reunions ?? 0);
       nbPlans = Number(d.nb_plans ?? 0);
+      nbPlansGagnants = Number(d.nb_plans_gagnants ?? 0);
+      totalRetour = Number(d.total_retour ?? 0);
     }
   } catch {
     // Un visuel sans données reste publiable ; un visuel qui plante, non.
   }
   return {
     jourLong: jourLong(jour),
-    jourCourt: jourCourt(jour),
-    nbCourses,
-    nbReunions,
     nbPlans,
+    nbPlansGagnants,
+    totalRetour,
     plans,
-    photo: await photoEnDataUri(photoDuJour(jour)),
+    photo: await photoEnDataUri(photoDuJour(jour), { largeur: STORY_L, hauteur: PHOTO_H, luminosite: 1.06 }),
   };
 }
 
-/** `tuile` s'écrit « r-c » : 0-0 en haut à gauche, 1-2 en bas à droite. */
-export async function GET(_req: Request, ctx: { params: Promise<{ tuile: string }> }) {
-  const { tuile } = await ctx.params;
-  const m = /^([01])-([012])$/.exec(tuile.replace(/\.jpg$/, ""));
-  if (!m) return new Response("Tuile inconnue", { status: 404 });
+export async function GET() {
+  const d = await donneesStory();
 
-  const rangee = Number(m[1]);
-  const colonne = Number(m[2]);
-  const d = await donnees();
-
-  const rendu = new ImageResponse(<Tuile d={d} rangee={rangee} colonne={colonne} />, {
-    width: TUILE_L,
-    height: TUILE_H,
+  const rendu = new ImageResponse(<Story d={d} />, {
+    width: STORY_L,
+    height: STORY_H,
     fonts: await polices(),
   });
 
@@ -93,7 +79,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ tuile: string 
     const { default: sharp } = await import("sharp");
     const jpeg = await sharp(png).flatten({ background: "#F5F2EA" }).jpeg({ quality: 92 }).toBuffer();
     return new Response(new Uint8Array(jpeg), {
-      headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=900" },
+      headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=600" },
     });
   } catch {
     return new Response(new Uint8Array(png), {

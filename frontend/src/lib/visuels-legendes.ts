@@ -2,6 +2,7 @@ import {
   fetchProgramme,
   fetchResultats,
   jourParis,
+  jourLong,
   heureParis,
   titleCase,
   disciplineLabel,
@@ -25,7 +26,7 @@ const SITE = "https://blackturf.fr";
  * responsable y est systématique.
  */
 export interface Publication {
-  cle: "matin" | "soir";
+  cle: "matin" | "soir" | "story";
   titre: string;
   image: string;
   fichier: string;
@@ -33,6 +34,43 @@ export interface Publication {
   /** false = données pas encore disponibles : ne rien publier. */
   pret: boolean;
 }
+
+const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+
+interface BilanJour {
+  totalRetour: number;
+  nbPlans: number;
+  nbPlansGagnants: number;
+}
+
+/**
+ * Le bilan chiffré de la journée, pour la story du soir.
+ *
+ * `total_retour` est ce que les plans ont RENDU, réglé aux vrais rapports PMU. Ce n'est
+ * ni un bénéfice ni de l'argent encaissé : la légende dit « rendu », jamais « gagné ».
+ * Le nombre total de plans accompagne toujours le nombre de gagnants — « 29 plans
+ * gagnants » tout seul se lirait comme si tous avaient gagné.
+ */
+async function bilanDuJour(): Promise<BilanJour | null> {
+  try {
+    const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return {
+      totalRetour: Number(d.total_retour ?? 0),
+      nbPlans: Number(d.nb_plans ?? 0),
+      nbPlansGagnants: Number(d.nb_plans_gagnants ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const euro = (n: number) =>
+  n.toLocaleString("fr-FR", {
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
 
 async function quinteDuJour(jour: string): Promise<SeoCourse | null> {
   const prog = await fetchProgramme(jour);
@@ -97,6 +135,23 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       ].join("\n")
     : "L'arrivée n'est pas encore publiée. Cette légende se remplit seule dès que le PMU publie les rapports.";
 
+  const bilan = await bilanDuJour();
+  const legendeStory = bilan
+    ? [
+        `Bilan du jour — ${jourLong(jour)}.`,
+        "",
+        `Les plans de mise calculés avant chaque départ ont rendu ${euro(bilan.totalRetour)} €, ` +
+          "réglés aux rapports officiels du PMU.",
+        `${bilan.nbPlansGagnants} plans gagnants sur les ${bilan.nbPlans} calculés aujourd'hui.`,
+        "",
+        `Le détail course par course, gagnants comme perdants : ${SITE}/programme`,
+        "",
+        MENTION_LEGALE,
+        "",
+        HASHTAGS,
+      ].join("\n")
+    : "Le bilan du jour n'est pas encore réglé. Cette légende se remplit seule dès que les rapports du PMU sont publiés.";
+
   return [
     {
       cle: "matin",
@@ -113,6 +168,19 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       fichier: `blackturf-arrivee-${jour}.jpg`,
       legende: legendeSoir,
       pret: classement.length > 0,
+    },
+    {
+      // Story verticale : elle n'entre PAS dans la publication automatique (le job du
+      // backend ne connaît que « matin » et « soir »). Elle se publie à la main depuis
+      // /studio, une fois la journée courue.
+      cle: "story",
+      titre: "Story du soir — bilan de la journée",
+      image: `${SITE}/visuels/story.jpg`,
+      fichier: `blackturf-story-${jour}.jpg`,
+      legende: legendeStory,
+      // Rien à publier tant qu'aucun plan n'est réglé : une story annonçant 0 € rendu
+      // le matin dirait le contraire de ce qu'elle veut dire.
+      pret: Boolean(bilan && bilan.nbPlans > 0),
     },
   ];
 }

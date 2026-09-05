@@ -68,10 +68,16 @@ export const COULEURS = {
 /**
  * Photos de course, tournantes.
  *
- * Ce sont les photos du site, pas des images fabriquées : une marque qui vend de la
- * rigueur ne s'illustre pas avec un cheval qui n'existe pas. Le choix suit le quantième,
- * donc change à chaque série — publier la même image tous les jours lasserait en trois
- * jours.
+ * Ce sont des PHOTOS, pas des images fabriquées : une marque qui vend de la rigueur ne
+ * s'illustre pas avec un cheval qui n'existe pas. Les cinq premières sont celles du
+ * site ; les trente autres viennent de Pexels (licence Pexels : usage commercial libre,
+ * sans attribution obligatoire, modification autorisée), et la provenance de chaque
+ * fichier est journalisée dans `public/img/course/SOURCES.txt` — une image dont on ne
+ * sait plus d'où elle vient est une image qu'on ne peut plus défendre.
+ *
+ * Moitié galop, moitié attelé : le PMU français trotte plus qu'il ne galope, et
+ * illustrer trente-cinq publications avec des pur-sang lancés au galop décrirait un
+ * programme qui n'est pas celui du site.
  */
 const PHOTOS = [
   "showcase.webp", // peloton en pleine course
@@ -79,11 +85,55 @@ const PHOTOS = [
   "hero-1600.webp", // départ, portes numérotées
   "value.jpg", // piste au soleil couchant
   "cta.jpg", // arrivée devant le public
+  "course/galop-skyline.jpg",
+  "course/attele-sable.jpg",
+  "course/galop-foule.jpg",
+  "course/attele-action.jpg",
+  "course/galop-stalles.jpg",
+  "course/attele-soleil.jpg",
+  "course/galop-musselburgh.jpg",
+  "course/attele-sulky.jpg",
+  "course/galop-duo.jpg",
+  "course/attele-normandie.jpg",
+  "course/galop-lutte.jpg",
+  "course/attele-herbe.jpg",
+  "course/galop-soleil.jpg",
+  "course/attele-tribunes.jpg",
+  "course/galop-piste-claire.jpg",
+  "course/attele-piste.jpg",
+  "course/galop-vitesse.jpg",
+  "course/attele-driver.jpg",
+  "course/galop-mouvement.jpg",
+  "course/attele-peloton.jpg",
+  "course/galop-face-a-face.jpg",
+  "course/attele-couleurs.jpg",
+  "course/galop-trois.jpg",
+  "course/attele-foulee.jpg",
+  "course/galop-poussiere.jpg",
+  "course/attele-groupe.jpg",
+  "course/galop-shakopee.jpg",
+  "course/attele-duel.jpg",
+  "course/galop-noir-et-blanc.jpg",
+  "course/attele-noir-et-blanc.jpg",
 ] as const;
 
+/**
+ * La photo du jour — une par jour, sans répétition avant un tour complet du fonds.
+ *
+ * L'index suit le NOMBRE DE JOURS écoulés depuis l'époque, pas le quantième du mois.
+ * Avec le quantième, le 1er et le 31 tombaient sur la même image et le cycle se calait
+ * sur la longueur du mois : sur un fonds de 35 photos, février n'en aurait montré que
+ * 28 et jamais les sept dernières. Le compte de jours avance de un chaque jour et
+ * ignore les mois, donc les 35 photos passent toutes, dans l'ordre, puis recommencent.
+ *
+ * Déterministe et sans état : deux rendus du même jour donnent la même image, et le
+ * visuel d'hier reste reproductible — indispensable quand une publication est mise en
+ * cause après coup.
+ */
 export function photoDuJour(jour: string): string {
-  const n = Number(jour.slice(8, 10)) || 1;
-  return PHOTOS[n % PHOTOS.length];
+  const jours = Math.floor(Date.parse(`${jour}T00:00:00Z`) / 86_400_000);
+  if (!Number.isFinite(jours)) return PHOTOS[0];
+  return PHOTOS[((jours % PHOTOS.length) + PHOTOS.length) % PHOTOS.length];
 }
 
 /**
@@ -97,17 +147,27 @@ export function photoDuJour(jour: string): string {
  * Elle est éclaircie, pas assombrie : dans cette composition c'est le texte qui se pose
  * sur des cartes blanches, la photo n'a donc pas à disparaître pour rester lisible.
  *
+ * LES DIMENSIONS SONT UN PARAMÈTRE, et pas par confort. Le recadrage avec détection du
+ * sujet se fait ICI, aux dimensions demandées ; si l'appelant affiche ensuite l'image
+ * dans un cadre d'un autre rapport, le navigateur la recoupe une SECONDE fois, sans
+ * détection cette fois — et un cheval cadré au centre par `sharp` ressort coupé au bord.
+ * Chaque visuel demande donc exactement le format dans lequel il pose la photo :
+ * 1800 × 900 pour le bandeau de la mosaïque, 1080 × 900 pour la story verticale.
+ *
  * En cas d'échec on renvoie null : la composition se contente alors de son fond ivoire.
  * Un visuel sans photo reste publiable, un visuel qui plante non.
  */
-export async function photoEnDataUri(fichier: string): Promise<string | null> {
+export async function photoEnDataUri(
+  fichier: string,
+  { largeur = 1800, hauteur = 900, luminosite = 1.18 } = {},
+): Promise<string | null> {
   try {
     const chemin = path.join(process.cwd(), "public", "img", fichier);
     const brut = await fs.readFile(chemin);
     const { default: sharp } = await import("sharp");
     const jpeg = await sharp(brut)
-      .resize(1800, 900, { fit: "cover", position: "attention" })
-      .modulate({ brightness: 1.18, saturation: 1.02 })
+      .resize(largeur, hauteur, { fit: "cover", position: "attention" })
+      .modulate({ brightness: luminosite, saturation: 1.02 })
       .jpeg({ quality: 82 })
       .toBuffer();
     return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
@@ -127,6 +187,10 @@ export interface DonneesMosaique {
   jourLong: string;
   jourCourt: string;
   nbCourses: number;
+  /** Nombre de PLANS publiés (courses × profils), pas de courses : la tuile qui
+   *  porte les montants annonçait « les 66 plans du jour » en comptant les courses,
+   *  alors que chaque course en produit un par profil. */
+  nbPlans: number;
   nbReunions: number;
   plans: PlanJour[];
   photo: string | null;
@@ -161,6 +225,52 @@ export function Eyebrow({ children, ton = "or" }: { children: string; ton?: "or"
     >
       {children}
     </span>
+  );
+}
+
+/**
+ * La date de la journée présentée.
+ *
+ * Elle était posée en surtitre à 24 px, à la taille d'une étiquette : sur une vignette
+ * de fil vue au pouce, elle disparaissait, et une publication de résultats dont on ne
+ * lit pas le jour ne prouve plus rien — c'est même la première chose qu'on lui
+ * reproche. Elle passe donc en Grotesk 46, sur une barre dorée qui la détache du reste
+ * de la carte : elle se lit avant le titre, ce qui est l'ordre juste.
+ */
+export function DateDuJour({
+  jour,
+  ton = "clair",
+  taille = "grand",
+}: {
+  jour: string;
+  ton?: "clair" | "sombre";
+  taille?: "grand" | "moyen";
+}) {
+  const px = taille === "grand" ? 46 : 34;
+  return (
+    <div style={{ display: "flex", alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          width: taille === "grand" ? 8 : 6,
+          height: px + 6,
+          borderRadius: 4,
+          background: COULEURS.orVif,
+        }}
+      />
+      <span
+        style={{
+          fontFamily: "Grotesk",
+          fontWeight: 700,
+          fontSize: px,
+          letterSpacing: -0.4,
+          color: ton === "sombre" ? COULEURS.orVif : COULEURS.or,
+          marginLeft: taille === "grand" ? 20 : 15,
+        }}
+      >
+        {jour}
+      </span>
+    </div>
   );
 }
 
@@ -483,8 +593,8 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           </span>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 72 }}>
-          <Eyebrow>{d.jourLong.toUpperCase()}</Eyebrow>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 64 }}>
+          <DateDuJour jour={d.jourLong} />
           <span
             style={{
               fontFamily: "Grotesk",
@@ -492,7 +602,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
               fontSize: 74,
               lineHeight: 1.08,
               color: COULEURS.encre,
-              marginTop: 22,
+              marginTop: 26,
               letterSpacing: -2.5,
             }}
           >
@@ -569,10 +679,15 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           sur blanc : c'est ce qui distingue un plan réglé aux rapports d'une promesse. */}
       <Carte x={col(1) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
         <Eyebrow>LE MEILLEUR PLAN DU JOUR</Eyebrow>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 92 }}>
+        {/* La date sur la tuile qui porte les MONTANTS, pas seulement sur celle de la
+            marque : c'est ici qu'on demandera « de quel jour parlez-vous ». */}
+        <div style={{ display: "flex", marginTop: 16 }}>
+          <DateDuJour jour={d.jourLong} taille="moyen" />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 62 }}>
           {p1 ? <LignePlan p={p1} rang={1} /> : null}
         </div>
-        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 104 }} />
+        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 76 }} />
         <span
           style={{
             fontFamily: "Inter",
@@ -582,7 +697,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
             marginTop: 34,
           }}
         >
-          Calculé avant le départ, réglé aux rapports officiels du PMU. Les {d.nbCourses} plans
+          Calculé avant le départ, réglé aux rapports officiels du PMU. Les {d.nbPlans} plans
           du jour sont publiés — les perdants aussi.
         </span>
         <div style={{ display: "flex", marginTop: 54 }}>
@@ -593,7 +708,10 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
       {/* ═══════════ (0,2) — les deux suivants ═══════════ */}
       <Carte x={col(2) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
         <Eyebrow>ET LES DEUX SUIVANTS</Eyebrow>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 44 }}>
+        <div style={{ display: "flex", marginTop: 16 }}>
+          <DateDuJour jour={d.jourLong} taille="moyen" />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 30 }}>
           {p2 ? <LignePlan p={p2} rang={2} /> : null}
         </div>
         <div style={{ display: "flex", flexDirection: "column", marginTop: 44 }}>
