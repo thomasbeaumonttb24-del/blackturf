@@ -476,10 +476,10 @@ dernier_plan_du_jour AS (
     WHERE rn_plan = 1
 ),
 dernier_reglement_du_jour AS (
-    SELECT plan_snapshot_id, montant_mise, montant_retour, net, nb_paris, nb_gagnes
+    SELECT plan_snapshot_id, montant_mise, montant_retour, net, nb_paris, nb_gagnes, bilan
     FROM (
         SELECT t.plan_snapshot_id, t.montant_mise, t.montant_retour, t.net,
-               t.nb_paris, t.nb_gagnes, t.statut,
+               t.nb_paris, t.nb_gagnes, t.statut, t.bilan,
                ROW_NUMBER() OVER (
                    PARTITION BY t.plan_snapshot_id
                    ORDER BY t.settled_at DESC, t.settlement_id DESC
@@ -491,7 +491,7 @@ dernier_reglement_du_jour AS (
 ),
 plan_publie AS (
     SELECT d.course_id, d.profil, d.emitted_at,
-           r.montant_mise, r.montant_retour, r.net, r.nb_paris, r.nb_gagnes
+           r.montant_mise, r.montant_retour, r.net, r.nb_paris, r.nb_gagnes, r.bilan
     FROM dernier_plan_du_jour d
     JOIN dernier_reglement_du_jour r ON r.plan_snapshot_id = d.plan_snapshot_id
 )

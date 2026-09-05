@@ -33,7 +33,19 @@ MOSAIQUE = RACINE / "frontend" / "src" / "lib" / "mosaique.tsx"
 # Mots interdits DANS LE TEXTE AFFICHÉ. Ils restent autorisés dans les commentaires,
 # qui expliquent précisément pourquoi ils sont interdits — un test qui interdirait
 # d'en parler empêcherait d'écrire la raison.
-INTERDITS = ("gagné", "gagnés", "gains", "bénéfice", "bénéfices", "empoché")
+#
+# « gagné » N'EST PAS dans cette liste, et c'est délibéré : « notre favori a gagné
+# 14 courses sur 51 » parle d'un CHEVAL qui gagne une course, pas d'argent encaissé,
+# et c'est la formulation juste. Ce qui est interdit, c'est le vocabulaire de
+# l'ENCAISSEMENT — plus, en dessous, « gagné » collé à un montant, qui est la vraie
+# faute qu'on cherche à empêcher.
+INTERDITS = ("gains", "bénéfice", "bénéfices", "empoché", "empochés",
+             "encaissé", "encaissés", "profit", "profits")
+
+# « 236 € gagnés », « gagné 236 € » : un verbe d'encaissement collé à un montant.
+_ARGENT_GAGNE = re.compile(
+    r"(gagn\w*[^.]{0,20}(€|euro)|(€|euro)[^.]{0,20}gagn\w*)", re.I,
+)
 
 
 def _sans_commentaires(source: str) -> str:
@@ -43,7 +55,11 @@ def _sans_commentaires(source: str) -> str:
 
 def _mots_interdits(source: str) -> list[str]:
     texte = _sans_commentaires(source).lower()
-    return [m for m in INTERDITS if re.search(rf"\b{m}\b", texte)]
+    fautes = [m for m in INTERDITS if re.search(rf"\b{m}\b", texte)]
+    trouve = _ARGENT_GAGNE.search(texte)
+    if trouve:
+        fautes.append(f"« gagné » collé à un montant : {trouve.group(0)[:60]}")
+    return fautes
 
 
 def test_la_story_ne_parle_jamais_de_gains():

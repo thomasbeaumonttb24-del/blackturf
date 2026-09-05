@@ -42,7 +42,7 @@ def _course(db, course_id: str, *, hippodrome: str = "HIPPODROME DU LION D ANGER
 def _emission(db, course_id: str, suffixe: str, *, retour: float, emitted_at,
               profil: str = "agressif", mise: float = 10.0,
               origin: str = "profil_run", pre_course: bool = True,
-              statut: str = "settled"):
+              statut: str = "settled", bilan: dict | None = None):
     """Une émission de plan et son règlement. `retour` = ce que rend le plan."""
     sid = f"bp-{course_id}-{suffixe}"
     db.add(BetPlanSnapshot(
@@ -54,7 +54,7 @@ def _emission(db, course_id: str, suffixe: str, *, retour: float, emitted_at,
     ))
     db.add(BetPlanSettlement(
         settlement_id=f"st-{sid}", plan_snapshot_id=sid, course_id=course_id,
-        bilan={"paris": []}, montant_mise=mise, montant_retour=retour,
+        bilan=bilan or {"paris": []}, montant_mise=mise, montant_retour=retour,
         net=retour - mise, roi=(retour - mise) / mise * 100, nb_paris=1,
         nb_gagnes=1 if retour > 0 else 0, statut=statut,
         settled_at=DEPART + timedelta(hours=1),
@@ -224,3 +224,100 @@ async def test_un_jour_sans_plan_reste_publiable(db, client):
     assert corps["total_retour"] == 0
     assert corps["total_mise"] == 0
     assert corps["plans"] == []
+
+
+# ── Ce que l'ANALYSE de la journée a valu ────────────────────────────────────
+# Le chiffre de tête de la story n'est pas un gain, c'est la qualité de classement :
+# la part des courses où le gagnant réel figurait dans le Top 3 prédit. Il est publié
+# avec son dénominateur ET le repère du hasard, sans quoi « 74,5 % » ne dit pas au
+# lecteur ce qu'il bat.
+
+def _analyse(db, course_id: str, *, rang_gagnant: int | None, nb_partants: int,
+             prediction_avant_depart: bool = True):
+    """Une course analysée : la ligne de journal + la prédiction qui la rend éligible."""
+    from db.models import Participation, Prediction, RaceLearningLog
+
+    pid = f"pa-{course_id}"
+    db.add(Participation(participation_id=pid, course_id=course_id,
+                         cheval_id=f"ch-{course_id}", numero=1, cote_pmu=3.0))
+    db.add(Prediction(
+        prediction_id=f"pr-{course_id}", participation_id=pid, course_id=course_id,
+        proba_top1=0.3, proba_top3=0.6, rang_predit=1,
+        # La garde anti-backfill est la SEULE chose qui empêche une prédiction écrite
+        # après l'arrivée d'entrer dans le taux de réussite publié.
+        created_at=DEPART - timedelta(hours=2) if prediction_avant_depart
+        else DEPART + timedelta(hours=2),
+    ))
+    db.add(RaceLearningLog(log_id=f"rl-{course_id}", course_id=course_id,
+                           gagnant_rang_predit=rang_gagnant, nb_partants=nb_partants))
+
+
+@pytest.mark.asyncio
+async def test_le_taux_top3_du_jour_sort_avec_son_denominateur_et_le_hasard(db, client):
+    """Quatre courses de 10 partants : gagnant au rang 1, 3, 5 et jamais classé."""
+    for i, rang in enumerate((1, 3, 5, None), start=1):
+        cid = f"04092026R9C{i}"
+        _course(db, cid)
+        _analyse(db, cid, rang_gagnant=rang, nb_partants=10)
+    await db.commit()
+
+    a = (await _corps(client))["analyse"]
+    assert a["nb_courses_analysees"] == 4
+    assert a["nb_top3"] == 2 and a["pct_top3"] == 50.0
+    assert a["nb_top1"] == 1 and a["pct_top1"] == 25.0
+    assert a["nb_partants"] == 40
+    # 3 chevaux tirés au hasard sur 10 partants = 30 %. Calculé sur le champ réel,
+    # jamais posé à la main : c'est ce que le 50 % doit battre pour valoir quelque chose.
+    assert a["hasard_top3"] == 30.0
+
+
+@pytest.mark.asyncio
+async def test_une_prediction_ecrite_apres_le_depart_n_entre_pas_dans_le_taux(db, client):
+    """Sans cette garde, un backfill ferait monter le taux publié sans rien prédire."""
+    _course(db, "04092026R9C1")
+    _analyse(db, "04092026R9C1", rang_gagnant=1, nb_partants=10)
+    _course(db, "04092026R9C2")
+    _analyse(db, "04092026R9C2", rang_gagnant=1, nb_partants=10,
+             prediction_avant_depart=False)
+    await db.commit()
+
+    a = (await _corps(client))["analyse"]
+    assert a["nb_courses_analysees"] == 1, "la course prédite après le départ est exclue"
+
+
+@pytest.mark.asyncio
+async def test_une_journee_sans_analyse_se_tait_au_lieu_d_afficher_zero(db, client):
+    """`null`, pas `0` : un « 0 % » se lit comme un échec, pas comme une absence."""
+    a = (await _corps(client))["analyse"]
+    assert a["nb_courses_analysees"] == 0
+    assert a["pct_top3"] is None and a["pct_top1"] is None
+
+
+@pytest.mark.asyncio
+async def test_le_type_du_pari_gagnant_accompagne_le_montant(db, client):
+    """Un montant sans son type de pari n'est pas vérifiable sur la fiche course.
+    On prend le pari au plus gros GAIN, pas le premier de la liste : un plan à deux
+    tickets peut en avoir un perdant devant."""
+    _course(db, "04092026R5C7")
+    _emission(db, "04092026R5C7", "d", retour=236.0,
+              emitted_at=DEPART - timedelta(minutes=20),
+              bilan={"paris": [
+                  {"type": "Simple Placé", "gain": 12.0, "statut": "gagne"},
+                  {"type": "Couplé Gagnant", "gain": 224.0, "statut": "gagne"},
+              ]})
+    await db.commit()
+
+    plans = await _plans(client)
+    assert plans[0]["type_pari"] == "Couplé Gagnant"
+
+
+@pytest.mark.asyncio
+async def test_les_hippodromes_du_jour_sont_comptes_sur_la_course(db, client):
+    """Jamais par la jointure `reunions` : elle recycle quinze lignes d'un jour à
+    l'autre et annoncerait un nombre d'hippodromes faux."""
+    _course(db, "04092026R1C1", hippodrome="HIPPODROME DE PARIS-VINCENNES")
+    _course(db, "04092026R3C1", hippodrome="HIPPODROME DE LYON-PARILLY")
+    _course(db, "04092026R3C2", hippodrome="HIPPODROME DE LYON-PARILLY")
+    await db.commit()
+
+    assert (await _corps(client))["nb_hippodromes"] == 2

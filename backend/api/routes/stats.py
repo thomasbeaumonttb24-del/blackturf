@@ -1905,7 +1905,8 @@ async def stats_meilleurs_plans_jour(
         text("WITH " + CTE_PLAN_PUBLIE_DU_JOUR + """
         SELECT p.course_id, p.profil,
                COALESCE(c.hippodrome_nom, '') AS hippodrome,
-               p.montant_mise, p.montant_retour, p.net, p.nb_gagnes, p.nb_paris
+               p.montant_mise, p.montant_retour, p.net, p.nb_gagnes, p.nb_paris,
+               p.bilan
         FROM plan_publie p
         JOIN courses c ON c.course_id = p.course_id
         WHERE p.net > 0
@@ -1914,6 +1915,23 @@ async def stats_meilleurs_plans_jour(
     """),
         {"jjmmaaaa": jjmmaaaa},
     )
+
+    def _type_gagnant(bilan) -> Optional[str]:
+        """Le type du pari qui a RAPPORTÉ le plus dans ce plan.
+
+        Le visuel annonce « Couplé Gagnant » à côté du montant : sans cette ligne, le
+        lecteur ne sait pas de quel pari on parle, et un chiffre sans son pari n'est
+        pas vérifiable sur la fiche course. On prend le pari au plus gros gain, pas le
+        premier de la liste — un plan à deux tickets peut en avoir un perdant devant.
+
+        asyncpg décode déjà le JSONB ; aiosqlite (tests) renvoie une chaîne pour une
+        requête texte brute. Même précédent que `bet_plan_performance`.
+        """
+        d = bilan if isinstance(bilan, dict) else (json.loads(bilan) if bilan else {})
+        gagnants = [p for p in (d.get("paris") or []) if (p.get("gain") or 0) > 0]
+        if not gagnants:
+            return None
+        return max(gagnants, key=lambda p: float(p.get("gain") or 0)).get("type")
 
     vus: set[str] = set()
     plans: list[dict] = []
@@ -1935,20 +1953,60 @@ async def stats_meilleurs_plans_jour(
             "net": round(float(r["net"] or 0), 2),
             "nb_gagnes": int(r["nb_gagnes"] or 0),
             "nb_paris": int(r["nb_paris"] or 0),
+            "type_pari": _type_gagnant(r["bilan"]),
         })
         if len(plans) >= 3:
             break
 
     volume = await db.execute(
         text("""
-        SELECT COUNT(DISTINCT c.course_id) AS nb_courses,
-               COUNT(DISTINCT c.reunion_id) AS nb_reunions
+        SELECT COUNT(DISTINCT c.course_id)      AS nb_courses,
+               COUNT(DISTINCT c.reunion_id)     AS nb_reunions,
+               -- `hippodrome_nom` de la COURSE, jamais la jointure par la réunion :
+               -- `reunions` recycle quinze lignes d'un jour à l'autre (cf. plus haut).
+               COUNT(DISTINCT c.hippodrome_nom) AS nb_hippodromes
         FROM courses c
         WHERE substring(c.course_id, 1, 8) = :jjmmaaaa
     """),
         {"jjmmaaaa": jjmmaaaa},
     )
     v = volume.mappings().first() or {}
+
+    # ── Ce que l'analyse a valu SUR CETTE JOURNÉE ────────────────────────────
+    # Mêmes définitions que `/stats/track-record`, restreintes au jour PMU :
+    #  - la garde anti-backfill (`p.created_at < c.date_heure`) est OBLIGATOIRE, sinon
+    #    une prédiction écrite après l'arrivée entrerait dans le taux de réussite ;
+    #  - le repère « hasard » est CALCULÉ sur le champ réel de chaque course (3 chevaux
+    #    sur nb_partants), jamais posé à la main : sans lui « 74,5 % » ne dit pas au
+    #    lecteur ce qu'il bat, et c'est cette phrase-là qui fait la publication.
+    # CAST(... AS REAL) et pas `::numeric` : la requête doit tourner sous SQLite (tests).
+    analyse = await db.execute(
+        text("""
+        SELECT COUNT(*)                                                  AS nb,
+               COUNT(*) FILTER (WHERE r.gagnant_rang_predit = 1)         AS top1,
+               COUNT(*) FILTER (WHERE r.gagnant_rang_predit IS NOT NULL
+                                  AND r.gagnant_rang_predit <= 3)        AS top3,
+               -- `LEAST` n'existe pas sous SQLite : le cas « moins de 3 partants »
+               -- se traite en CASE, sinon le hasard sortirait au-dessus de 100 %.
+               AVG(CASE WHEN r.nb_partants >= 3
+                        THEN 3.0 / CAST(r.nb_partants AS REAL)
+                        WHEN r.nb_partants > 0 THEN 1.0 END)             AS hasard3,
+               SUM(COALESCE(r.nb_partants, 0))                           AS partants
+        FROM race_learning_log r
+        WHERE substring(r.course_id, 1, 8) = :jjmmaaaa
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              JOIN courses c ON c.course_id = p.course_id
+              WHERE p.course_id = r.course_id
+                AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+          )
+    """),
+        {"jjmmaaaa": jjmmaaaa},
+    )
+    a = analyse.mappings().first() or {}
+    nb_analysees = int(a.get("nb") or 0)
+    pct = lambda n: round(int(n or 0) / nb_analysees * 100, 1) if nb_analysees else None  # noqa: E731
 
     # ── Totaux de la journée, sur les MÊMES plans publiés ────────────────────
     # `total_mise` est renvoyé À CÔTÉ de `total_retour`, et ce n'est pas décoratif :
@@ -1979,9 +2037,23 @@ async def stats_meilleurs_plans_jour(
         "plans": plans,
         "nb_courses": int(v.get("nb_courses") or 0),
         "nb_reunions": int(v.get("nb_reunions") or 0),
+        "nb_hippodromes": int(v.get("nb_hippodromes") or 0),
         "nb_plans": int(t.get("nb_plans") or 0),
         "nb_plans_gagnants": int(t.get("nb_plans_gagnants") or 0),
         "total_mise": total_mise,
         "total_retour": total_retour,
         "total_net": round(total_retour - total_mise, 2),
+        # Ce que l'ANALYSE a valu ce jour-là. `nb_analysees` est le dénominateur de
+        # `top1` et `top3` : il est renvoyé pour que le pourcentage ne puisse jamais
+        # être publié sans dire sur combien de courses il porte.
+        "analyse": {
+            "nb_courses_analysees": nb_analysees,
+            "nb_top1": int(a.get("top1") or 0),
+            "nb_top3": int(a.get("top3") or 0),
+            "pct_top1": pct(a.get("top1")),
+            "pct_top3": pct(a.get("top3")),
+            "hasard_top3": (round(float(a["hasard3"]) * 100, 1)
+                            if a.get("hasard3") is not None else None),
+            "nb_partants": int(a.get("partants") or 0),
+        },
     }
