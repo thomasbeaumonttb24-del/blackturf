@@ -12,6 +12,7 @@
  * depuis une page rafraîchit aussi la pastille de la barre.
  */
 
+import * as React from "react";
 import useSWR from "swr";
 import { adminApi, statsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -103,42 +104,122 @@ export interface CompteurAlertes {
   scrapersKo: number;
   incidentsPaiement: number;
   essaisSansCarte: number;
-  /** Total porté par la barre de navigation, toutes rubriques confondues. */
+  /** Incidents JAMAIS VUS, par destination de la navigation. */
+  nouveaux: Record<string, number>;
+  /** Total non vu, toutes rubriques confondues. */
   total: number;
+  /** À appeler quand l'écran d'une destination est réellement affiché. */
+  marquerVu: (href: string) => void;
 }
 
 /**
- * Ce qui mérite qu'on quitte la page qu'on regarde.
+ * Une clé décrit UN incident, pas une de ses occurrences.
  *
- * Compté en INCIDENTS, pas en lignes : un seul échec de paiement écrit deux
- * mouvements à quelques secondes d'écart (le statut Stripe `past_due`, puis
- * `paiement_echoue`). Compter les lignes annoncerait deux échecs pour un.
+ * C'est ce qui permet à une pastille de ne pas revenir à chaque battement :
+ * une exception qui se répète garde son `id`, un scraper qui reste en panne
+ * garde son couple source+statut. Ce qui produit une clé neuve, c'est un
+ * incident neuf — ou un incident qui change de nature (`ok_but_empty` qui
+ * devient `erreur`), et là il mérite bien de resonner.
+ */
+function clesIncidents(
+  href: string,
+  erreurs?: { errors: SystemError[] },
+  scrapers?: ScraperStatus,
+  abos?: AbonnementsData,
+): string[] {
+  if (href === "/admin/systeme") {
+    return [
+      ...(erreurs?.errors ?? []).filter((e) => !e.resolved).map((e, i) => `err:${e.id ?? `${e.source}:${e.message.slice(0, 60)}:${i}`}`),
+      ...Object.entries(scrapers ?? {})
+        .filter(([, s]) => !scraperSain(s.statut))
+        .map(([source, s]) => `scr:${source}:${s.statut}`),
+    ];
+  }
+  if (href === "/admin/abonnements") {
+    return incidentsPaiement(abos).uniques.map((m) => `pay:${m.email ?? "?"}:${m.created_at}`);
+  }
+  return [];
+}
+
+const CLE_VUS = "bt.admin.incidents-vus";
+/** Un acquittement ne sert plus à rien passé la fenêtre des incidents (7 j) ;
+ *  borner la liste évite qu'elle grossisse indéfiniment dans le stockage. */
+const MAX_VUS = 300;
+
+function lireVus(): Record<string, string[]> {
+  try {
+    const brut = window.localStorage.getItem(CLE_VUS);
+    return brut ? (JSON.parse(brut) as Record<string, string[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Ce qui mérite qu'on quitte la page qu'on regarde — et seulement tant qu'on
+ * ne l'a pas encore regardé.
+ *
+ * Avant, la pastille comptait un ÉTAT : un paiement échoué il y a huit heures
+ * reste dans la fenêtre de sept jours, donc la pastille restait allumée après
+ * lecture, indéfiniment. Une alerte qui ne s'éteint jamais cesse d'être lue —
+ * c'est le mécanisme même de la lassitude aux alarmes.
+ *
+ * Elle compte désormais ce qui est NOUVEAU depuis la dernière fois que l'écran
+ * a été ouvert. L'état, lui, ne disparaît nulle part : le bloc « Ce qui demande
+ * une action » du Pilotage et les écrans eux-mêmes continuent de tout montrer.
+ * La pastille dit « viens voir », la page dit « voilà où on en est ».
+ *
+ * Les incidents restent comptés en INCIDENTS, pas en lignes : un seul échec de
+ * paiement écrit deux mouvements à quelques secondes d'écart (le statut Stripe
+ * `past_due`, puis `paiement_echoue`). Compter les lignes annoncerait deux
+ * échecs pour un.
  */
 export function useAlertes(): CompteurAlertes {
   const { data: erreurs } = useErreurs();
   const { data: scrapers } = useScrapers();
   const { data: abos } = useAbonnements();
 
+  // `null` tant que le stockage n'a pas été lu : côté serveur et au premier
+  // rendu, on ne connaît pas les acquittements. Afficher une pastille pleine
+  // puis la voir s'éteindre serait un clignotement à chaque navigation.
+  const [vus, setVus] = React.useState<Record<string, string[]> | null>(null);
+  React.useEffect(() => { setVus(lireVus()); }, []);
+
   const erreursOuvertes = (erreurs?.errors ?? []).filter((e) => !e.resolved).length;
   const scrapersKo = Object.values(scrapers ?? {}).filter((s) => !scraperSain(s.statut)).length;
-
-  const echecs = (abos?.mouvements ?? [])
-    .filter((m) => MOUVEMENTS_ECHEC.has(m.type)
-      && Date.now() - new Date(m.created_at).getTime() < 7 * 86_400_000)
-    .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
-  const incidentsPaiement = echecs.filter((m, i) => !echecs.slice(0, i).some(
-    (p) => p.email === m.email
-      && Math.abs(+new Date(p.created_at) - +new Date(m.created_at)) < 5 * 60_000,
-  )).length;
-
+  const nbIncidentsPaiement = incidentsPaiement(abos).uniques.length;
   const essaisSansCarte = abos?.resume.en_essai_sans_carte ?? 0;
+
+  const marquerVu = React.useCallback((href: string) => {
+    const cles = clesIncidents(href, erreurs, scrapers, abos);
+    setVus((precedent) => {
+      const base = precedent ?? lireVus();
+      const deja = base[href] ?? [];
+      const inconnues = cles.filter((c) => !deja.includes(c));
+      if (inconnues.length === 0) return base;
+      const suivant = { ...base, [href]: [...deja, ...inconnues].slice(-MAX_VUS) };
+      try { window.localStorage.setItem(CLE_VUS, JSON.stringify(suivant)); } catch { /* stockage refusé */ }
+      return suivant;
+    });
+  }, [erreurs, scrapers, abos]);
+
+  const nouveaux: Record<string, number> = {};
+  for (const href of ["/admin/systeme", "/admin/abonnements"]) {
+    const cles = clesIncidents(href, erreurs, scrapers, abos);
+    const deja = vus?.[href] ?? [];
+    // Tant que le stockage n'est pas lu, on n'annonce rien : mieux vaut une
+    // pastille qui arrive avec un temps de retard qu'une qui s'allume à tort.
+    nouveaux[href] = vus === null ? 0 : cles.filter((c) => !deja.includes(c)).length;
+  }
 
   return {
     erreursOuvertes,
     scrapersKo,
-    incidentsPaiement,
+    incidentsPaiement: nbIncidentsPaiement,
     essaisSansCarte,
-    total: erreursOuvertes + scrapersKo + incidentsPaiement,
+    nouveaux,
+    total: Object.values(nouveaux).reduce((s, n) => s + n, 0),
+    marquerVu,
   };
 }
 

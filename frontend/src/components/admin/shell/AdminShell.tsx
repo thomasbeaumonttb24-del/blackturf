@@ -55,11 +55,16 @@ function estActif(pathname: string, d: Destination) {
   return pathname.startsWith(d.href) || (d.prefixe ?? []).some((p) => pathname.startsWith(p));
 }
 
-/** Nombre d'incidents porté par une entrée de navigation. */
+/**
+ * Nombre d'incidents JAMAIS VUS porté par une entrée de navigation.
+ *
+ * Pas le nombre d'incidents ouverts : un paiement échoué il y a huit heures
+ * reste dans la fenêtre de sept jours, donc l'ancienne pastille restait allumée
+ * après lecture, pour toujours. Une pastille qui ne s'éteint jamais finit par
+ * ne plus rien vouloir dire.
+ */
 function badgeDe(href: string, a: ReturnType<typeof useAlertes>): number {
-  if (href === "/admin/systeme") return a.erreursOuvertes + a.scrapersKo;
-  if (href === "/admin/abonnements") return a.incidentsPaiement;
-  return 0;
+  return a.nouveaux[href] ?? 0;
 }
 
 function Pastille({ n, actif }: { n: number; actif: boolean }) {
@@ -86,6 +91,15 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const { estAdmin, chargement } = useEstAdmin();
   const alertes = useAlertes();
   const courante = DESTINATIONS.find((d) => estActif(pathname, d));
+
+  // Ouvrir l'écran vaut lecture. L'effet se rejoue quand les données changent,
+  // donc un incident qui arrive pendant qu'on regarde l'écran est acquitté sans
+  // jamais allumer la pastille — c'est voulu : on est déjà devant.
+  const { marquerVu } = alertes;
+  const hrefCourant = courante?.href;
+  React.useEffect(() => {
+    if (hrefCourant) marquerVu(hrefCourant);
+  }, [hrefCourant, marquerVu]);
 
   if (chargement) {
     return (
