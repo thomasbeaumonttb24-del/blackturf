@@ -42,8 +42,9 @@ export default async function StudioPage() {
 
             {!v.pret && (
               <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Les données ne sont pas encore disponibles. Le visuel se régénère seul :
-                rechargez cette page plus tard.
+                {v.attente ??
+                  "Les données ne sont pas encore disponibles."}{" "}
+                Le visuel se régénère seul : rechargez cette page plus tard.
               </p>
             )}
 

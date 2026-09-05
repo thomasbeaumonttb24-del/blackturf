@@ -33,6 +33,8 @@ export interface Publication {
   legende: string;
   /** false = données pas encore disponibles : ne rien publier. */
   pret: boolean;
+  /** Pourquoi ce n'est pas encore publiable. Affiché tel quel dans /studio. */
+  attente?: string;
 }
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
@@ -47,6 +49,9 @@ interface BilanJour {
   hasardTop3: number | null;
   meilleur: { hippodrome: string; code: string; mise: number; retour: number; net: number;
               typePari: string | null } | null;
+  /** Journée entièrement courue ET réglée : condition de publication. */
+  journeeComplete: boolean;
+  resteAVenir: { coursesAVenir: number; coursesEnAttente: number; plansNonRegles: number };
 }
 
 /**
@@ -73,6 +78,12 @@ async function bilanDuJour(): Promise<BilanJour | null> {
       nbTop3: Number(a.nb_top3 ?? 0),
       nbAnalysees: Number(a.nb_courses_analysees ?? 0),
       hasardTop3: nombre(a.hasard_top3),
+      journeeComplete: Boolean(d.journee_complete),
+      resteAVenir: {
+        coursesAVenir: Number(d.reste_a_venir?.courses_a_venir ?? 0),
+        coursesEnAttente: Number(d.reste_a_venir?.courses_en_attente ?? 0),
+        plansNonRegles: Number(d.reste_a_venir?.plans_non_regles ?? 0),
+      },
       meilleur: p
         ? {
             hippodrome: String(p.hippodrome ?? ""),
@@ -225,9 +236,43 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       image: `${SITE}/visuels/story.jpg`,
       fichier: `blackturf-story-${jour}.jpg`,
       legende: legendeStory,
-      // Rien à publier tant qu'aucun plan n'est réglé : une story annonçant 0 € rendu
-      // le matin dirait le contraire de ce qu'elle veut dire.
-      pret: Boolean(bilan && bilan.nbPlans > 0),
+      // RÈGLE DE PUBLICATION : après le DERNIER RÈGLEMENT de la journée, jamais avant.
+      // « Au moins un plan réglé » ne suffisait pas : à 11 h du matin un tiers des
+      // courses sont réglées, et le total publié aurait été démenti par la soirée.
+      pret: Boolean(bilan && bilan.nbPlans > 0 && bilan.journeeComplete),
+      attente: bilan ? attenteStory(bilan) : undefined,
     },
   ];
+}
+
+/**
+ * Ce qu'on attend encore avant de pouvoir publier la story — en clair.
+ *
+ * Un drapeau « pas prêt » sans motif est indébogable un soir de publication : on ne
+ * sait pas s'il faut attendre dix minutes ou aller regarder un scraper.
+ */
+function attenteStory(b: BilanJour): string | undefined {
+  if (b.nbPlans === 0) return "Aucun plan de la journée n'est encore réglé.";
+  if (b.journeeComplete) return undefined;
+  const r = b.resteAVenir;
+  const morceaux: string[] = [];
+  if (r.coursesAVenir > 0) {
+    morceaux.push(
+      r.coursesAVenir === 1 ? "1 course pas encore partie" : `${r.coursesAVenir} courses pas encore parties`,
+    );
+  }
+  if (r.coursesEnAttente > 0) {
+    morceaux.push(
+      r.coursesEnAttente === 1
+        ? "1 course courue sans arrivée publiée"
+        : `${r.coursesEnAttente} courses courues sans arrivée publiée`,
+    );
+  }
+  if (r.plansNonRegles > 0) {
+    morceaux.push(
+      r.plansNonRegles === 1 ? "1 plan pas encore réglé" : `${r.plansNonRegles} plans pas encore réglés`,
+    );
+  }
+  if (!morceaux.length) return undefined;
+  return `La journée n'est pas terminée : ${morceaux.join(", ")}. Les chiffres bougeront encore.`;
 }
