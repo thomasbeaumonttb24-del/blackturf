@@ -1950,6 +1950,26 @@ async def stats_meilleurs_plans_jour(
     )
     v = volume.mappings().first() or {}
 
+    # ── Totaux de la journée, sur les MÊMES plans publiés ────────────────────
+    # `total_mise` est renvoyé À CÔTÉ de `total_retour`, et ce n'est pas décoratif :
+    # un retour sans sa mise ne dit pas si la journée a gagné ou perdu (le 2026-09-04 :
+    # 1 530 € misés pour 1 171 € rendus, donc une journée à −359 €). L'API sert donc
+    # toujours les deux et laisse le visuel décider de ce qu'il montre ; l'inverse —
+    # une API qui ne saurait plus dire la mise — rendrait le chiffre invérifiable.
+    tot = await db.execute(
+        text("WITH " + CTE_PLAN_PUBLIE_DU_JOUR + """
+        SELECT COUNT(*)                                        AS nb_plans,
+               COUNT(*) FILTER (WHERE p.net > 0)               AS nb_plans_gagnants,
+               COALESCE(SUM(p.montant_mise), 0)                AS total_mise,
+               COALESCE(SUM(p.montant_retour), 0)              AS total_retour
+        FROM plan_publie p
+    """),
+        {"jjmmaaaa": jjmmaaaa},
+    )
+    t = tot.mappings().first() or {}
+    total_mise = round(float(t.get("total_mise") or 0), 2)
+    total_retour = round(float(t.get("total_retour") or 0), 2)
+
     # `jour` est renvoyé tel qu'il a été RÉSOLU, jamais tel qu'il a été demandé : le
     # visuel affiche cette date, et une date d'affichage qui ne serait pas celle des
     # chiffres est le pire défaut possible sur une publication qu'on ne peut plus
@@ -1959,4 +1979,9 @@ async def stats_meilleurs_plans_jour(
         "plans": plans,
         "nb_courses": int(v.get("nb_courses") or 0),
         "nb_reunions": int(v.get("nb_reunions") or 0),
+        "nb_plans": int(t.get("nb_plans") or 0),
+        "nb_plans_gagnants": int(t.get("nb_plans_gagnants") or 0),
+        "total_mise": total_mise,
+        "total_retour": total_retour,
+        "total_net": round(total_retour - total_mise, 2),
     }

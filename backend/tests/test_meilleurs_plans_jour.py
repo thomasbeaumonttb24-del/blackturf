@@ -61,10 +61,14 @@ def _emission(db, course_id: str, suffixe: str, *, retour: float, emitted_at,
     ))
 
 
-async def _plans(client) -> list[dict]:
+async def _corps(client) -> dict:
     r = await client.get(f"/api/v1/stats/meilleurs-plans-jour?jour={JOUR}")
     assert r.status_code == 200, r.text
-    return r.json()["plans"]
+    return r.json()
+
+
+async def _plans(client) -> list[dict]:
+    return (await _corps(client))["plans"]
 
 
 @pytest.mark.asyncio
@@ -176,3 +180,47 @@ async def test_l_hippodrome_vient_de_la_course_pas_de_la_reunion(db, client):
     plans = await _plans(client)
     assert len(plans) == 1
     assert plans[0]["hippodrome"] == "Lyon-Parilly"
+
+
+@pytest.mark.asyncio
+async def test_les_totaux_du_jour_portent_sur_les_plans_publies(db, client):
+    """Le bilan du soir compte les MÊMES plans que le podium — pas les ré-émissions.
+
+    Deux courses, deux profils chacune, quatre ré-émissions par conseil : la story
+    doit voir 4 plans, pas 16, et un total de retour de 49 + 0 + 236 + 0 = 285 €.
+    """
+    for course_id in ("04092026R5C4", "04092026R5C7"):
+        _course(db, course_id)
+    attendu = {
+        ("04092026R5C4", "conservateur"): 49.0,
+        ("04092026R5C4", "agressif"): 0.0,
+        ("04092026R5C7", "conservateur"): 0.0,
+        ("04092026R5C7", "agressif"): 236.0,
+    }
+    for (course_id, profil), retour in attendu.items():
+        for k in range(4):
+            # Les trois premières ré-émissions annoncent un gros gain périmé.
+            _emission(db, course_id, f"{profil}-{k}", profil=profil,
+                      retour=1286.0 if k < 3 else retour,
+                      emitted_at=DEPART - timedelta(hours=6) + timedelta(hours=k))
+    await db.commit()
+
+    corps = await _corps(client)
+    assert corps["nb_plans"] == 4, "quatre conseils, pas seize ré-émissions"
+    assert corps["nb_plans_gagnants"] == 2
+    assert corps["total_retour"] == 285.0
+    # La mise reste servie par l'API même si le visuel ne l'affiche pas : sans elle,
+    # personne ne peut dire si la journée a gagné ou perdu.
+    assert corps["total_mise"] == 40.0
+    assert corps["total_net"] == 245.0
+
+
+@pytest.mark.asyncio
+async def test_un_jour_sans_plan_reste_publiable(db, client):
+    """Aucun plan réglé : totaux à zéro, pas d'erreur. Un visuel qui plante ne se
+    publie pas, et c'est le matin qu'on le découvrirait."""
+    corps = await _corps(client)
+    assert corps["nb_plans"] == 0
+    assert corps["total_retour"] == 0
+    assert corps["total_mise"] == 0
+    assert corps["plans"] == []
