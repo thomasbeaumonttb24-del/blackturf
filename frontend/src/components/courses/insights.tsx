@@ -620,7 +620,28 @@ export function EnjeuxParChevalCard({ courseId, courseTerminee, poolTotalEur }: 
     );
   }
   if (!charge) return null;
-  if (!data?.disponible || (data.par_cheval?.length ?? 0) === 0) return null;
+  // Le PMU ne publie `combinaisons` que sur une PARTIE de son offre. Mesuré sur
+  // 7 jours : 100 % des courses de 11 h-12 h sont couvertes, 29 % de celles de
+  // 21 h, aucune après 23 h. Les réunions nocturnes d'Amérique du Sud et
+  // plusieurs réunions de province n'ont pas de masse détaillée du tout.
+  // Masquer la carte dans ce cas donnait l'impression que la rubrique avait été
+  // SUPPRIMÉE du site (signalé le 2026-09-06 après une soirée entière sans la
+  // voir). On dit donc pourquoi elle est vide, sans jamais estimer l'argent
+  // depuis les cotes — cf. le prélèvement implicite mesuré à −11,9 %/+47 %.
+  if (!data?.disponible || (data.par_cheval?.length ?? 0) === 0) {
+    return (
+      <Card title="L'argent, cheval par cheval" icon={Coins}>
+        <p className="text-xs leading-5 text-muted-foreground">
+          {courseTerminee
+            ? "Le PMU n'a pas publié le détail des enjeux sur cette course."
+            : "Le PMU n'a pas encore publié le détail des enjeux sur cette course : quand il le fait, les montants apparaissent dans les heures qui précèdent le départ."}{" "}
+          C&apos;est le cas de beaucoup de réunions de soirée et de certaines
+          réunions étrangères. Nous n&apos;estimons jamais ces montants à partir
+          des cotes.
+        </p>
+      </Card>
+    );
+  }
 
   return <EnjeuxParChevalVue data={data} poolTotalEur={poolTotalEur} />;
 }
