@@ -1034,7 +1034,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           de jeu responsable qu'on ne peut pas lire ne vaut pas mieux qu'une absente. */}
       {[0, 1].map((r) => (
         <div
-          key={`voile-`}
+          key={"voile-" + r}
           style={{
             position: "absolute", left: 0, top: r * TUILE_H + TUILE_H - 210,
             width: PLAN_L, height: 210, display: "flex",
