@@ -1204,6 +1204,57 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
         </div>
       ))}
 
+      {/* ═══════════ Le bilan de la semaine, sur les TROIS tuiles sombres ═══════════
+          POURQUOI ICI AUSSI, ET PAS SEULEMENT SUR LA RANGÉE HAUTE.
+          L'ordre de publication est imposé par la grille d'Instagram : la rangée
+          sombre part la PREMIÈRE (1-2, puis 1-1, puis 1-0). Sans ce bandeau, les
+          trois premiers dimanches publieraient des tuiles de marque sans le moindre
+          chiffre — alors que la publication du dimanche EST le bilan de la semaine.
+          Chaque tuile porte donc sa période et ses trois chiffres, et se tient seule
+          dans le fil. */}
+      {[0, 1, 2].map((c) => (
+        <div
+          key={`semaine-bas-${c}`}
+          style={{
+            position: "absolute",
+            left: col(c) + MARGE,
+            top: BANDEAU - 132,
+            width: utile,
+            display: "flex",
+            flexDirection: "column",
+            paddingTop: 26,
+            borderTop: `1px solid ${COULEURS.ligneSombre}`,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "Inter", fontWeight: 600, fontSize: 22, letterSpacing: 2.6,
+              color: COULEURS.orVif,
+            }}
+          >
+            {`LA SEMAINE — ${s.periode}`.toUpperCase()}
+          </span>
+          <span
+            style={{
+              fontFamily: "Inter", fontSize: 24, lineHeight: 1.5,
+              color: COULEURS.surSombreDoux, marginTop: 10,
+            }}
+          >
+            {[
+              s.pctTop3 !== null
+                ? `${pourcent(s.pctTop3)} % de gagnants dans notre Top 3 sur ${s.nbAnalysees} courses`
+                : null,
+              s.meilleur
+                ? `meilleur plan ${euro(s.meilleur.mise)} € → ${euro(s.meilleur.retour)} €`
+                : null,
+              `${s.nbPlansGagnants} plans gagnants sur ${s.nbPlans}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        </div>
+      ))}
+
       {/* ═══════════ Bandeau légal continu, sur les trois colonnes ═══════════
           Il traverse les trois vignettes basses, ce qui renforce l'effet « une seule
           image », et referme la composition. */}
