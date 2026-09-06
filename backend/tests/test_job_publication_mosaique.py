@@ -234,7 +234,10 @@ def test_la_tuile_n_est_pas_choisie_par_le_job():
     source = exiger(RACINE / "backend" / "services" / "jobs.py")
     debut = source.index("async def job_publication_mosaique")
     corps = source[debut:source.index("async def job_renouveler_jetons", debut)]
-    assert "/visuels/mosaique/" not in corps, (
-        "le job ne doit pas fabriquer l'URL d'une tuile : elle vient de l'API"
+    import re
+    urls = re.findall(r"/visuels/mosaique/[^\"'}\s]*", corps)
+    assert urls == ["/visuels/mosaique/legendes.json"], (
+        "la seule URL de mosaïque que le job compose est celle de la légende ; "
+        f"l'URL de la tuile doit venir de l'API. Trouvé : {urls}"
     )
     assert 'legende["image"]' in corps
