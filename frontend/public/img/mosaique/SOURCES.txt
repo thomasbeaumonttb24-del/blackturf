@@ -1,0 +1,9 @@
+fichier|source
+galop-foule.jpg|https://www.pexels.com/photo/15466766/
+attele-sable.jpg|https://www.pexels.com/photo/29741150/
+galop-stalles.jpg|https://www.pexels.com/photo/6818590/
+attele-tribunes.jpg|https://www.pexels.com/photo/29423227/
+galop-piste-claire.jpg|https://www.pexels.com/photo/11341149/
+attele-peloton.jpg|https://www.pexels.com/photo/15595116/
+galop-shakopee.jpg|https://www.pexels.com/photo/13066405/
+attele-groupe.jpg|https://www.pexels.com/photo/13060104/

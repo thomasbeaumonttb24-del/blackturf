@@ -151,9 +151,30 @@ export function photoDuJour(jour: string): string {
  * L'index suit donc le NUMÉRO DE CYCLE, pas la date : toutes les semaines d'un même
  * cycle donnent la même image, et le cycle suivant en prend une autre.
  */
+/**
+ * Fonds DÉDIÉ à la mosaïque, en haute résolution.
+ *
+ * L'image d'ensemble fait 3104 × 2700 et la photo la couvre entièrement. Le fonds
+ * quotidien est en 1800 px de large : l'y étirer revient à un agrandissement de 1,7×,
+ * et le flou se voit sur une image qui reste six semaines en tête du profil. Ces
+ * huit-là font 3400 px. Huit suffisent : un cycle dure six semaines.
+ *
+ * Toutes en PAYSAGE, comme le fonds quotidien — même raison, la même règle.
+ */
+const PHOTOS_MOSAIQUE = [
+  "mosaique/galop-foule.jpg",
+  "mosaique/attele-sable.jpg",
+  "mosaique/galop-stalles.jpg",
+  "mosaique/attele-tribunes.jpg",
+  "mosaique/galop-piste-claire.jpg",
+  "mosaique/attele-peloton.jpg",
+  "mosaique/galop-shakopee.jpg",
+  "mosaique/attele-groupe.jpg",
+] as const;
+
 export function photoDuCycle(cycle: number): string {
   const i = Math.trunc(cycle);
-  return PHOTOS[((i % PHOTOS.length) + PHOTOS.length) % PHOTOS.length];
+  return PHOTOS_MOSAIQUE[((i % PHOTOS_MOSAIQUE.length) + PHOTOS_MOSAIQUE.length) % PHOTOS_MOSAIQUE.length];
 }
 
 /**
@@ -981,7 +1002,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
       <div
         style={{
           position: "absolute", left: 0, top: 0, width: PLAN_L, height: PLAN_H,
-          display: "flex", background: "rgba(12,14,18,0.42)",
+          display: "flex", background: "rgba(12,14,18,0.34)",
         }}
       />
 
