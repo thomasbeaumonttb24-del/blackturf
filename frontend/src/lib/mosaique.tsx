@@ -755,7 +755,9 @@ function CarteSemaine({
             rectangle plus clair autour du médaillon. */}
         {horse ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={horse} alt="BlackTurf" width={168} height={94} />
+          // 600 × 590 une fois rogné : le médaillon est CARRÉ. Lui imposer un rapport
+          // large l'écrasait — le cercle du logo sortait en ellipse.
+          <img src={horse} alt="BlackTurf" width={122} height={120} />
         ) : (
           <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 30, color: COULEURS.encre }}>
             BlackTurf
