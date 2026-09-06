@@ -813,15 +813,15 @@ function CarteSemaine({
       <div style={{ display: "flex", alignItems: "baseline", marginTop: 14 }}>
         <span
           style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 100, lineHeight: 1,
-            color: COULEURS.encre, letterSpacing: -4.2,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 92, lineHeight: 1,
+            color: COULEURS.encre, letterSpacing: -3.8,
           }}
         >
           {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
         </span>
         <span
           style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 42,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38,
             color: COULEURS.or, marginLeft: 5,
           }}
         >
@@ -830,15 +830,15 @@ function CarteSemaine({
       </div>
       <span
         style={{
-          fontFamily: "Grotesk", fontWeight: 700, fontSize: 29, lineHeight: 1.2,
-          color: COULEURS.encre, letterSpacing: -0.8, marginTop: 6,
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 27, lineHeight: 1.25,
+          color: COULEURS.encre, letterSpacing: -0.8, marginTop: 8,
         }}
       >
         des courses où le gagnant
       </span>
       <span
         style={{
-          fontFamily: "Grotesk", fontWeight: 700, fontSize: 29, lineHeight: 1.2,
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 27, lineHeight: 1.25,
           color: COULEURS.encre, letterSpacing: -0.8,
         }}
       >
@@ -889,7 +889,7 @@ function CarteSemaine({
           <div style={{ display: "flex", alignItems: "baseline" }}>
             <span
               style={{
-                fontFamily: "Grotesk", fontWeight: 700, fontSize: 35,
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 31,
                 color: COULEURS.encreTenue, letterSpacing: -1,
               }}
             >
@@ -900,7 +900,7 @@ function CarteSemaine({
             </span>
             <span
               style={{
-                fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 48,
                 color: VERT_GAIN, letterSpacing: -2.2,
               }}
             >
@@ -1062,9 +1062,9 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   // la photo se réduit à un liseré et la mosaïque n'est plus reconnaissable — or c'est
   // le raccord d'une vignette à l'autre qui fait tout l'intérêt de la série.
   const CARTE_L = 808;
-  const CARTE_H = 1038;
+  const CARTE_H = 1104;
   const CARTE_X = Math.round((VISIBLE_L - CARTE_L) / 2); // 102
-  const CARTE_Y = 168;
+  const CARTE_Y = 140;
 
   const s = d.semaine;
 
