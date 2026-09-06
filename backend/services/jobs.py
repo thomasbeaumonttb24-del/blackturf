@@ -582,16 +582,27 @@ def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
-    # Publications sociales — 09:15 (le support du Quinté+ est connu) et 20:45 (les
-    # rapports du Quinté+ sont publiés). Sans INSTAGRAM_PUBLICATION_ACTIVE=1, ces deux
-    # jobs tournent en simulation et ne publient rien.
-    scheduler.add_job(
-        job_publication_matin,
-        CronTrigger(hour=9, minute=15, timezone="Europe/Paris"),
-        id="publication_matin",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
+    # ─────────────────────────────────────────────────────────────────────────
+    # PLUS AUCUNE PUBLICATION QUOTIDIENNE DANS LE FIL. Décision du 2026-09-06.
+    #
+    # `publication_matin` (09:15, « Quinté+ du jour ») et `publication_soir` (20:45,
+    # « arrivée et rapports ») ne sont plus planifiés. Le fil ne reçoit désormais
+    # qu'UNE publication par semaine, le dimanche : le bilan hebdomadaire, une tuile
+    # de la mosaïque à la fois.
+    #
+    # Comment on l'a découvert, et pourquoi ce n'est pas un simple changement d'avis :
+    # ces deux jobs existaient depuis toujours mais tournaient en SIMULATION, faute
+    # d'interrupteur. En ouvrant `INSTAGRAM_PUBLICATION_ACTIVE` le 2026-09-06 pour la
+    # story, on les a déverrouillés aussi — un interrupteur unique pour trois canaux —
+    # et le post « Quinté+ du jour » est parti dans le fil le matin même, sans que
+    # personne ne l'ait demandé. Les retirer d'ici est la seule façon d'empêcher qu'un
+    # futur usage de cet interrupteur les réveille.
+    #
+    # Les fonctions `job_publication_matin` / `job_publication_soir` restent en place :
+    # elles sont appelables à la main pour un cas ponctuel. Ce qui disparaît, c'est
+    # leur déclenchement AUTOMATIQUE.
+    # ─────────────────────────────────────────────────────────────────────────
+
     # Story de bilan — TOUTES LES DEMI-HEURES de 22 h à 10 h, Paris.
     #
     # Pas un horaire fixe, et ce n'est pas de la prudence : le moment où une journée
@@ -610,14 +621,6 @@ def start_scheduler() -> None:
         # publierait à une heure imprévisible.
         misfire_grace_time=600,
     )
-    scheduler.add_job(
-        job_publication_soir,
-        CronTrigger(hour=20, minute=45, timezone="Europe/Paris"),
-        id="publication_soir",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
-
     # Renouvellement des jetons d'integration — 04:20 Paris, tous les jours. Le job ne
     # renouvelle qu'a l'approche de l'echeance ; passer tous les jours sert a absorber
     # plusieurs echecs consecutifs avant que le jeton n'expire pour de bon.
