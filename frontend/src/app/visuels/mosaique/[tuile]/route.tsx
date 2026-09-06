@@ -3,7 +3,7 @@ import path from "node:path";
 import { ImageResponse } from "next/og";
 import { jourParis, jourLong, jourCourt, periodeCourte } from "@/lib/seo";
 import {
-  Tuile, TUILE_L, TUILE_H, photoDuCycle, photoEnDataUri,
+  Tuile, TUILE_L, TUILE_H, PLAN_L, PLAN_H, photoDuCycle, photoEnDataUri, imageEnDataUri,
   type DonneesMosaique, type SemaineMosaique,
 } from "@/lib/mosaique";
 
@@ -101,10 +101,11 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
     nbPlans: s.nbPlans,
     nbReunions: s.nbHippodromes,
     plans: [],
-    // LA PHOTO SUIT LE CYCLE, PAS LA DATE. Elle traverse toute la rangée haute :
-    // les trois tuiles du haut sont publiées à trois dimanches d'écart et doivent
-    // montrer la MÊME image, sinon les raccords ne tombent pas.
-    photo: await photoEnDataUri(photoDuCycle(cycle)),
+    // LA PHOTO SUIT LE CYCLE, PAS LA DATE : les six tuiles sont publiées à six
+    // dimanches d'écart et doivent montrer la MÊME image, sinon les raccords ne
+    // tombent pas. Elle couvre TOUT le plan (3104 × 2700), pas une bande.
+    photo: await photoEnDataUri(photoDuCycle(cycle), { largeur: PLAN_L, hauteur: PLAN_H, luminosite: 1.0 }),
+    horse: await imageEnDataUri("logo-horse.png", { largeur: 160 }),
   };
 }
 

@@ -299,6 +299,9 @@ export interface DonneesMosaique {
   nbReunions: number;
   plans: PlanJour[];
   photo: string | null;
+  /** Le cheval du logo, en data URI. Recomposer le lockup en code plutôt que de
+   *  tirer le PNG de 160 × 87 : à cette taille il baverait. */
+  horse: string | null;
 }
 
 /**
@@ -598,46 +601,65 @@ export function Carte({
  * cartes, qui fait voir une seule image.
  */
 /** Vert du gain. Assez profond pour tenir sur blanc, assez clair pour tenir sur encre. */
-const VERT_GAIN = "#1E8A57";
+/** Vert du gain, calé pour un fond sombre. */
+const VERT_GAIN = "#43C88A";
+
+/** Les six tuiles, dans l'ORDRE DE PUBLICATION (à l'envers de l'ordre de lecture). */
+const ORDRE_TUILES = ["1-2", "1-1", "1-0", "0-2", "0-1", "0-0"] as const;
 
 /** Surtitre doré encadré de deux filets — le motif qui rythme la carte. */
-function Surtitre({ children, couleur, filet }: { children: string; couleur: string; filet: string }) {
+function Surtitre({ children }: { children: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
-      <div style={{ display: "flex", flex: 1, height: 1, background: filet }} />
+      <div style={{ display: "flex", flex: 1, height: 1, background: "rgba(224,166,60,0.34)" }} />
       <span
         style={{
-          fontFamily: "Inter", fontWeight: 600, fontSize: 22, letterSpacing: 3.4,
-          color: couleur, margin: "0 20px",
+          fontFamily: "Inter", fontWeight: 600, fontSize: 21, letterSpacing: 3.2,
+          color: COULEURS.orVif, margin: "0 18px",
         }}
       >
         {children}
       </span>
-      <div style={{ display: "flex", flex: 1, height: 1, background: filet }} />
+      <div style={{ display: "flex", flex: 1, height: 1, background: "rgba(224,166,60,0.34)" }} />
     </div>
   );
 }
 
-/** Une colonne du bloc argent : surtitre, montant, précision. */
-function ColonneChiffre({
-  titre, enfants, precision, accent, doux, largeur,
-}: {
-  titre: string; enfants: React.ReactNode; precision: string; accent: string;
-  doux: string; largeur: number;
-}) {
+/** Une colonne du bandeau de volume : un nombre, deux lignes de légende. */
+function Chiffre({ valeur, unite, legende }: { valeur: string; unite?: string; legende: string[] }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", width: largeur }}>
-      <span
-        style={{
-          fontFamily: "Inter", fontWeight: 600, fontSize: 20, letterSpacing: 2.4, color: accent,
-        }}
-      >
-        {titre}
-      </span>
-      <div style={{ display: "flex", alignItems: "baseline", marginTop: 12 }}>{enfants}</div>
-      <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.4, color: doux, marginTop: 8 }}>
-        {precision}
-      </span>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 258 }}>
+      <div style={{ display: "flex", alignItems: "baseline" }}>
+        <span
+          style={{
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 46,
+            color: COULEURS.surSombre, letterSpacing: -1.6,
+          }}
+        >
+          {valeur}
+        </span>
+        {unite ? (
+          <span
+            style={{
+              fontFamily: "Grotesk", fontWeight: 700, fontSize: 24,
+              color: COULEURS.orVif, marginLeft: 4,
+            }}
+          >
+            {unite}
+          </span>
+        ) : null}
+      </div>
+      {legende.map((l, i) => (
+        <span
+          key={i}
+          style={{
+            fontFamily: "Inter", fontSize: 20, lineHeight: 1.3,
+            color: COULEURS.surSombreDoux, marginTop: i === 0 ? 6 : 0,
+          }}
+        >
+          {l}
+        </span>
+      ))}
     </div>
   );
 }
@@ -645,237 +667,291 @@ function ColonneChiffre({
 /**
  * Une carte de bilan hebdomadaire — le contenu d'UNE tuile, et d'une seule semaine.
  *
- * Les six cartes ont la même structure et des chiffres différents : chacune est
- * publiée un dimanche et parle de SA semaine. C'est cette régularité qui rend l'image
- * finale lisible — six blocs de même dessin, six périodes datées — là où six mises en
- * page différentes auraient donné un patchwork.
+ * Elle reprend, en 4:5, le dessin de la story quotidienne : logo, période, taux de
+ * Top 3 en tête, bandeau de volume, l'argent, l'adresse et le renvoi vers la bio.
+ * Une même marque ne doit pas parler deux langues visuelles selon le format.
  *
- * LA HIÉRARCHIE EST VOULUE, dans cet ordre : la période, puis la qualité de
- * classement, puis l'argent. Le chiffre de tête n'est pas un gain — c'est le seul que
- * le site puisse défendre dans la durée, et il n'est jamais publié sans son
- * dénominateur ni sans le repère du hasard : « 65,1 % » seul ne dit pas au lecteur ce
- * qu'il bat, et c'est cette comparaison qui fait la publication.
+ * LA HIÉRARCHIE EST VOULUE : la période, puis la qualité de CLASSEMENT, puis
+ * l'argent. Le chiffre de tête n'est pas un gain — c'est le seul que le site puisse
+ * défendre dans la durée, et il n'est jamais publié sans son dénominateur ni sans le
+ * repère du hasard : « 65,1 % » seul ne dit pas au lecteur ce qu'il bat.
  *
- * L'ARGENT TIENT SUR UNE SEULE RANGÉE, en deux colonnes. Empilé, il allongeait la
- * carte de deux cents pixels et laissait un trou avant l'adresse ; côte à côte, il
- * occupe la largeur disponible et la carte respire.
- *
- * `ton` : clair sur la photo (rangée haute), sombre sur l'encre (rangée basse). Deux
- * registres pour un seul dessin ; c'est la CONTINUITÉ du fond, pas l'uniformité des
- * cartes, qui fait voir une seule image.
+ * FOND SOMBRE TRANSLUCIDE sur les SIX cartes, et pas trois blanches puis trois
+ * noires : la photo passe derrière toutes, ce qui est précisément ce qui fait voir
+ * une seule image au lieu de six vignettes.
  */
 function CarteSemaine({
-  s, rang, total, ton,
+  s, rang, total, horse,
 }: {
-  s: SemaineMosaique; rang: number; total: number; ton: "clair" | "sombre";
+  s: SemaineMosaique; rang: number; total: number; horse: string | null;
 }) {
-  const sombre = ton === "sombre";
-  const fond = sombre ? "#1C2027" : COULEURS.blanc;
-  const bord = sombre ? "#2E343D" : COULEURS.ligne;
-  const titre = sombre ? COULEURS.surSombre : COULEURS.encre;
-  const doux = sombre ? COULEURS.surSombreDoux : COULEURS.encreDouce;
-  const tenu = sombre ? COULEURS.surSombreTenu : COULEURS.encreTenue;
-  const accent = sombre ? COULEURS.orVif : COULEURS.or;
-  const COL = 344;
-
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
+        alignItems: "center",
         width: "100%",
         height: "100%",
-        background: fond,
-        borderRadius: 28,
-        padding: "52px 56px",
-        border: `1px solid ${bord}`,
+        // Verre sombre : la photo reste lisible derrière, le texte reste lisible devant.
+        background: "rgba(17,20,25,0.88)",
+        borderRadius: 30,
+        padding: "44px 48px",
+        border: "1px solid rgba(224,166,60,0.30)",
       }}
     >
-      {/* ── La marque, et le rang dans la série ────────────────────────────
-          « SEMAINE 3 / 6 » dit au lecteur qu'il regarde une série qui se construit,
-          et à nous où en est le remplissage de la mosaïque. */}
+      {/* ── La marque, et le rang dans la série ──────────────────────────── */}
       <div
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}
       >
         <div style={{ display: "flex", alignItems: "center" }}>
-          <div style={{ display: "flex", width: 11, height: 36, background: COULEURS.orVif }} />
-          <span
+          <div
             style={{
-              fontFamily: "Grotesk", fontWeight: 700, fontSize: 36,
-              color: titre, marginLeft: 15, letterSpacing: -1,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 62, height: 62, borderRadius: 31,
+              border: `2px solid ${COULEURS.orVif}`,
             }}
           >
-            BlackTurf
-          </span>
+            {horse ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={horse} alt="" width={42} height={26} />
+            ) : null}
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", marginLeft: 14 }}>
+            <span
+              style={{
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 27,
+                letterSpacing: 1.6, color: COULEURS.surSombre,
+              }}
+            >
+              BLACK
+            </span>
+            <span
+              style={{
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 27,
+                letterSpacing: 1.6, color: COULEURS.orVif,
+              }}
+            >
+              TURF
+            </span>
+          </div>
         </div>
         <span
           style={{
-            fontFamily: "Inter", fontWeight: 600, fontSize: 21, letterSpacing: 2.6, color: accent,
+            fontFamily: "Inter", fontWeight: 600, fontSize: 20, letterSpacing: 2.4,
+            color: COULEURS.orVif,
           }}
         >
           SEMAINE {rang} / {total}
         </span>
       </div>
 
-      {/* ── La période, en surtitre encadré : c'est l'ancre de la tuile ──── */}
-      <div style={{ display: "flex", marginTop: 34 }}>
-        <Surtitre couleur={accent} filet={bord}>
-          {s.periode.toUpperCase()}
-        </Surtitre>
+      {/* ── La période ──────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", marginTop: 24 }}>
+        <Surtitre>PERFORMANCE DE LA SEMAINE</Surtitre>
       </div>
+      <span
+        style={{
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 38,
+          color: COULEURS.surSombre, letterSpacing: -1, marginTop: 12,
+        }}
+      >
+        {s.periode}
+      </span>
 
       {/* ── Le chiffre de tête ─────────────────────────────────────────── */}
-      <div
-        style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", marginTop: 30 }}
-      >
-        <div style={{ display: "flex", alignItems: "baseline" }}>
-          <span
-            style={{
-              fontFamily: "Grotesk", fontWeight: 700, fontSize: 138, lineHeight: 1,
-              color: titre, letterSpacing: -6,
-            }}
-          >
-            {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
-          </span>
-          <span
-            style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 56, color: accent, marginLeft: 6 }}
-          >
-            %
-          </span>
-        </div>
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 18 }}>
         <span
           style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
-            color: titre, letterSpacing: -1, marginTop: 10,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 116, lineHeight: 1,
+            color: COULEURS.surSombre, letterSpacing: -5,
           }}
         >
-          des courses où le gagnant
+          {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
         </span>
         <span
           style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
-            color: titre, letterSpacing: -1,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 48,
+            color: COULEURS.orVif, marginLeft: 5,
           }}
         >
-          était dans notre Top 3
-        </span>
-        <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.4, color: doux, marginTop: 16 }}>
-          {s.nbTop3} sur {s.nbAnalysees} courses analysées
-          {s.hasardTop3 !== null ? ` · le hasard : ${pourcent(s.hasardTop3)} %` : ""}
+          %
         </span>
       </div>
-
-      <div style={{ display: "flex", width: "100%", height: 1, background: bord, marginTop: 34 }} />
-
-      {/* ── L'argent, sur une rangée : meilleur plan | total rendu ───────── */}
-      <div
-        style={{ display: "flex", justifyContent: "space-between", width: "100%", marginTop: 30 }}
+      <span
+        style={{
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 33, lineHeight: 1.2,
+          color: COULEURS.surSombre, letterSpacing: -0.8, marginTop: 6,
+        }}
       >
-        <ColonneChiffre
-          titre="MEILLEUR PLAN"
-          accent={accent}
-          doux={doux}
-          largeur={COL}
-          precision={
-            s.meilleur
-              ? [s.meilleur.typePari, s.meilleur.hippodrome].filter(Boolean).join(" · ")
-              : "aucun plan gagnant"
-          }
-          enfants={
-            s.meilleur ? (
-              <div style={{ display: "flex", alignItems: "baseline" }}>
-                <span
-                  style={{
-                    fontFamily: "Grotesk", fontWeight: 700, fontSize: 34,
-                    color: tenu, letterSpacing: -1,
-                  }}
-                >
-                  {euro(s.meilleur.mise)} €
-                </span>
-                <span style={{ fontFamily: "Inter", fontSize: 26, color: accent, margin: "0 12px" }}>
-                  →
-                </span>
-                <span
-                  style={{
-                    fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
-                    color: VERT_GAIN, letterSpacing: -1.8,
-                  }}
-                >
-                  {euro(s.meilleur.retour)} €
-                </span>
-              </div>
-            ) : (
-              <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 44, color: tenu }}>—</span>
-            )
-          }
+        des courses où le gagnant
+      </span>
+      <span
+        style={{
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 33, lineHeight: 1.2,
+          color: COULEURS.surSombre, letterSpacing: -0.8,
+        }}
+      >
+        était dans notre Top 3
+      </span>
+      <span
+        style={{
+          fontFamily: "Inter", fontSize: 21, lineHeight: 1.4,
+          color: COULEURS.surSombreDoux, marginTop: 12,
+        }}
+      >
+        {s.nbTop3} sur {s.nbAnalysees} courses analysées
+        {s.hasardTop3 !== null ? ` · le hasard : ${pourcent(s.hasardTop3)} %` : ""}
+      </span>
+
+      {/* ── Le volume de la semaine ─────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: "100%", marginTop: 22,
+        }}
+      >
+        <Chiffre
+          valeur={s.pctTop1 !== null ? pourcent(s.pctTop1) : "—"}
+          unite={s.pctTop1 !== null ? "%" : undefined}
+          legende={["notre favori a gagné"]}
         />
-        <ColonneChiffre
-          titre="TOTAL RENDU"
-          accent={accent}
-          doux={doux}
-          largeur={COL}
-          // Le nombre de plans GAGNANTS ne sort jamais sans le nombre TOTAL calculé :
-          // sans dénominateur, la phrase se lirait comme si tous avaient gagné.
-          precision={`${s.nbPlansGagnants} plans gagnants sur ${s.nbPlans}`}
-          enfants={
+        <div style={{ display: "flex", width: 1, height: 62, background: "rgba(232,228,218,0.16)" }} />
+        <Chiffre valeur={s.nbPartants.toLocaleString("fr-FR").replace(/[  ]/g, " ")}
+                 legende={["partants analysés"]} />
+        <div style={{ display: "flex", width: 1, height: 62, background: "rgba(232,228,218,0.16)" }} />
+        <Chiffre valeur={String(s.nbHippodromes)} legende={["hippodromes couverts"]} />
+      </div>
+
+      <div
+        style={{
+          display: "flex", width: "100%", height: 1,
+          background: "rgba(232,228,218,0.16)", marginTop: 22,
+        }}
+      />
+
+      {/* ── L'argent : le meilleur gain, puis le total ──────────────────── */}
+      <div style={{ display: "flex", marginTop: 20 }}>
+        <Surtitre>MEILLEUR GAIN DE LA SEMAINE</Surtitre>
+      </div>
+      {s.meilleur ? (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "baseline" }}>
             <span
               style={{
-                fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
-                color: titre, letterSpacing: -1.8,
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 40,
+                color: COULEURS.surSombreTenu, letterSpacing: -1,
               }}
             >
-              {euro(s.totalRetour)} €
+              {euro(s.meilleur.mise)} €
             </span>
-          }
-        />
-      </div>
-
-      {/* L'adresse pousse au bas de la carte : chaque tuile est vue SEULE dans le
-          fil, et sans elle cinq publications sur six ne disent pas où aller.
-
-          Le filet au-dessus n'est pas décoratif : sans lui, l'adresse se lisait comme
-          une troisième ligne de la colonne « meilleur plan », juste sous l'hippodrome.
-          Il ferme la carte et rend l'adresse à la carte entière. */}
-      <div style={{ display: "flex", marginTop: "auto", width: "100%", flexDirection: "column" }}>
-        <div style={{ display: "flex", width: "100%", height: 1, background: bord }} />
-        <div style={{ display: "flex", marginTop: 24 }}>
-          <Adresse ton={sombre ? "sombre" : "clair"} />
+            <span style={{ fontFamily: "Inter", fontSize: 30, color: COULEURS.orVif, margin: "0 16px" }}>
+              →
+            </span>
+            <span
+              style={{
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 62,
+                color: VERT_GAIN, letterSpacing: -2.2,
+              }}
+            >
+              {euro(s.meilleur.retour)} €
+            </span>
+          </div>
+          <span
+            style={{
+              fontFamily: "Inter", fontSize: 21, color: COULEURS.surSombreDoux, marginTop: 6,
+            }}
+          >
+            {[s.meilleur.typePari, s.meilleur.hippodrome, s.meilleur.code]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
         </div>
+      ) : (
+        <span
+          style={{ fontFamily: "Inter", fontSize: 21, color: COULEURS.surSombreDoux, marginTop: 12 }}
+        >
+          Aucun plan gagnant cette semaine.
+        </span>
+      )}
+
+      {/* Le nombre de plans GAGNANTS ne sort jamais sans le nombre TOTAL calculé :
+          sans dénominateur, la phrase se lirait comme si tous avaient gagné. */}
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 18 }}>
+        <span style={{ fontFamily: "Inter", fontSize: 22, color: COULEURS.surSombreDoux }}>
+          Total rendu par les plans
+        </span>
+        <span
+          style={{
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38,
+            color: COULEURS.orVif, letterSpacing: -1.4, marginLeft: 14,
+          }}
+        >
+          {euro(s.totalRetour)} €
+        </span>
+      </div>
+      <span
+        style={{ fontFamily: "Inter", fontSize: 20, color: COULEURS.surSombreTenu, marginTop: 4 }}
+      >
+        {s.nbPlansGagnants} plans gagnants sur les {s.nbPlans} calculés · {s.nbCourses} courses
+      </span>
+
+      {/* ── Où aller ───────────────────────────────────────────────────────
+          L'API de Meta ne sait pas poser de sticker de lien : une publication
+          automatique sort forcément sans bouton cliquable. Le seul chemin qui reste
+          est le lien de profil — encore faut-il le DIRE, sinon l'adresse écrite dans
+          la pastille ne se retape pas. */}
+      <div
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "14px 34px", borderRadius: 40, background: COULEURS.orVif,
+          marginTop: "auto",
+        }}
+      >
+        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 30, color: "#1B1405" }}>
+          blackturf.fr
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", marginTop: 10 }}>
+        <span style={{ fontFamily: "Inter", fontSize: 21, color: COULEURS.orVif }}>↑</span>
+        <span
+          style={{
+            fontFamily: "Inter", fontWeight: 600, fontSize: 21,
+            color: COULEURS.surSombreDoux, marginLeft: 8,
+          }}
+        >
+          Lien direct dans la bio
+        </span>
       </div>
     </div>
   );
 }
+
 /**
  * Le plan d'ensemble : SIX BILANS DE SEMAINE qui forment une seule image.
  *
  * Chaque tuile est publiée un dimanche et porte les chiffres de sa semaine. Au bout
- * de six dimanches, la grille du profil montre l'image entière — six cartes de même
- * dessin, six périodes différentes, sur un fond continu.
+ * de six dimanches, la grille du profil montre l'image entière.
  *
- * CE QUI FAIT L'UNITÉ, ce n'est pas le contenu des cartes (il change chaque semaine)
- * mais le FOND, qui les traverse : la photo sur la rangée haute, l'encre sur la
- * rangée basse, et la règle dorée qui court d'un bord à l'autre entre les deux. Ces
- * trois éléments sont dessinés dans l'espace du plan, pas dans celui d'une tuile —
- * c'est la seule façon d'obtenir des raccords exacts.
+ * CE QUI FAIT L'UNITÉ : une SEULE photo, sur toute la surface du plan — pas une
+ * bande en haut et un aplat en bas. Les six cartes de verre sombre flottent dessus,
+ * et c'est le paysage continu derrière elles qui recolle les six vignettes. Une
+ * rangée noire aurait coupé l'image en deux, ce qui est exactement le défaut qu'une
+ * mosaïque doit éviter.
  *
- * LA PHOTO EST FIXÉE PAR CYCLE (`photoDuCycle`) et non par jour : les trois tuiles
- * du haut sont publiées à trois dimanches d'écart et doivent montrer la même image,
- * sinon les raccords ne tombent jamais juste.
+ * LA PHOTO EST FIXÉE PAR CYCLE (`photoDuCycle`) et non par jour : les tuiles sont
+ * publiées à six dimanches d'écart et doivent montrer la même image, sinon les
+ * raccords ne tombent jamais juste.
  */
 export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   const col = (c: number) => DEBORD + c * VISIBLE_L;
-  const bas = TUILE_H;
-  const BANDEAU = PLAN_H - 132;
 
-  // Les cartes laissent de la respiration autour d'elles : sans cette marge, la
-  // rangée haute se lirait comme trois vignettes collées, pas comme une image.
-  const CARTE_X = 56;
+  // Les cartes laissent de la photo visible autour d'elles : sans cette respiration,
+  // la mosaïque se lirait comme six vignettes collées, pas comme une image.
+  const CARTE_X = 52;
   const CARTE_L = VISIBLE_L - CARTE_X * 2;
-  // Hauteur calée sur le CONTENU réel de la carte (~760 px) : au-dessus, un trou
-  // s'ouvre avant l'adresse ; en dessous, l'adresse colle aux chiffres. Les six
-  // cartes partagent la même hauteur, sinon les raccords de la mosaïque sautent.
-  const CARTE_Y = 208;
-  const CARTE_H = 838;
+  const CARTE_Y = 96;
+  const CARTE_H = 1090;
 
   const s = d.semaine;
 
@@ -886,7 +962,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
         position: "relative",
         width: PLAN_L,
         height: PLAN_H,
-        background: COULEURS.ivoire,
+        background: COULEURS.encre,
       }}
     >
       {d.photo && (
@@ -895,41 +971,24 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           src={d.photo}
           alt=""
           width={PLAN_L}
-          height={TUILE_H}
+          height={PLAN_H}
           style={{ position: "absolute", left: 0, top: 0, objectFit: "cover" }}
         />
       )}
-      {/* Fondu vers l'ivoire : sans lui la photo se couperait net à la jointure et la
-          mosaïque se lirait en deux morceaux. */}
+      {/* Voile sombre : la photo doit rester une photo, pas devenir une texture — mais
+          sans lui, les cartes de verre n'auraient aucun contraste sur les parties
+          claires du ciel ou de la piste. */}
       <div
         style={{
-          position: "absolute", left: 0, top: 0, width: PLAN_L, height: TUILE_H, display: "flex",
-          background:
-            "linear-gradient(180deg, rgba(245,242,234,0.10) 0%, rgba(245,242,234,0.00) 34%, rgba(245,242,234,0.34) 74%, rgba(245,242,234,0.90) 93%, #F5F2EA 100%)",
-        }}
-      />
-      {/* Rangée basse en encre, sur TOUTE la largeur du plan, débords compris. Un
-          aplat qui s'arrêterait à la largeur visible d'une colonne laisserait une
-          bande claire de 34 px sur le bord de chaque tuile vue seule dans le fil. */}
-      <div
-        style={{
-          position: "absolute", left: 0, top: bas, width: PLAN_L, height: TUILE_H,
-          display: "flex", background: COULEURS.encre,
-        }}
-      />
-      {/* La règle dorée à cheval sur les deux rangées : le raccord qui prouve à l'œil
-          que les six vignettes n'en font qu'une. */}
-      <div
-        style={{
-          position: "absolute", left: 0, top: bas - 3, width: PLAN_L, height: 6, display: "flex",
-          background: "linear-gradient(90deg, #C8901F 0%, #E0A63C 50%, #C8901F 100%)",
+          position: "absolute", left: 0, top: 0, width: PLAN_L, height: PLAN_H,
+          display: "flex", background: "rgba(12,14,18,0.42)",
         }}
       />
 
       {/* ═══════════ Les six bilans ═══════════
-          `rang` suit l'ORDRE DE PUBLICATION, pas l'ordre de lecture : Instagram
-          empile de la plus récente à la plus ancienne, en haut à gauche. La première
-          publiée (semaine 1) se retrouve donc en bas à droite. */}
+          `rang` suit l'ORDRE DE PUBLICATION, pas l'ordre de lecture : Instagram empile
+          de la plus récente à la plus ancienne, en haut à gauche. La première publiée
+          (semaine 1) se retrouve donc en bas à droite. */}
       {ORDRE_TUILES.map((cle, i) => {
         const [r, c] = cle.split("-").map(Number);
         return (
@@ -944,59 +1003,45 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
               display: "flex",
             }}
           >
-            <CarteSemaine s={s} rang={i + 1} total={ORDRE_TUILES.length} ton={r === 0 ? "clair" : "sombre"} />
+            <CarteSemaine s={s} rang={i + 1} total={ORDRE_TUILES.length} horse={d.horse} />
           </div>
         );
       })}
 
-      {/* ═══════════ Mention légale, sur chaque colonne des DEUX rangées ═══════════
+      {/* ═══════════ Mention légale, sur chaque tuile ═══════════
           Chaque tuile est publiée séparément : la mention se répète, elle ne se
-          découpe pas. En haut elle se pose dans le fondu, où le fond est déjà ivoire. */}
-      {[0, 1, 2].map((c) => (
-        <div
-          key={`legal-haut-${c}`}
-          style={{
-            position: "absolute", left: col(c) + MARGE_LEGALE, top: TUILE_H - 128,
-            width: VISIBLE_L - MARGE_LEGALE * 2, display: "flex",
-          }}
-        >
-          <span style={{ fontFamily: "Inter", fontSize: 22, lineHeight: 1.45, color: COULEURS.encreTenue }}>
-            Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
-            risques : endettement, isolement, dépendance. 09 74 75 13 13. Interdit aux mineurs.
-          </span>
-        </div>
-      ))}
-      <div
-        style={{
-          position: "absolute", left: 0, top: BANDEAU, width: PLAN_L, height: 1,
-          display: "flex", background: COULEURS.ligneSombre,
-        }}
-      />
-      {[0, 1, 2].map((c) => (
-        <div
-          key={`legal-bas-${c}`}
-          style={{
-            position: "absolute", left: col(c) + MARGE_LEGALE, top: BANDEAU + 34,
-            width: VISIBLE_L - MARGE_LEGALE * 2, display: "flex",
-          }}
-        >
-          <span style={{ fontFamily: "Inter", fontSize: 22, lineHeight: 1.45, color: COULEURS.surSombreTenu }}>
-            Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
-            risques : endettement, isolement, dépendance. 09 74 75 13 13. Interdit aux mineurs.
-          </span>
-        </div>
-      ))}
+          découpe pas. */}
+      {[0, 1].map((r) =>
+        [0, 1, 2].map((c) => (
+          <div
+            key={`legal-${r}-${c}`}
+            style={{
+              position: "absolute",
+              left: col(c) + MARGE_LEGALE,
+              top: r * TUILE_H + TUILE_H - 128,
+              width: VISIBLE_L - MARGE_LEGALE * 2,
+              display: "flex",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "Inter", fontSize: 21, lineHeight: 1.4,
+                color: "rgba(232,228,218,0.62)",
+              }}
+            >
+              Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
+              risques : endettement, isolement, dépendance. 09 74 75 13 13. Interdit aux mineurs.
+            </span>
+          </div>
+        )),
+      )}
     </div>
   );
 }
 
-/** Marge des mentions légales, plus large que celle des cartes : elles courent d'un
- *  bord à l'autre de la colonne visible, pas dans une carte. */
-const MARGE_LEGALE = 76;
-
-/** Les six tuiles, dans l'ORDRE DE PUBLICATION (à l'envers de l'ordre de lecture). */
-const ORDRE_TUILES = ["1-2", "1-1", "1-0", "0-2", "0-1", "0-0"] as const;
-/** Enveloppe d'une tuile : une fenêtre 1080 × 1350 ouverte sur le plan d'ensemble. */
+/** Marge des mentions légales : elles courent d'un bord à l'autre de la colonne
+ *  visible, pas dans une carte. */
+const MARGE_LEGALE = 72;
 export function Tuile({ d, rangee, colonne }: { d: DonneesMosaique; rangee: number; colonne: number }) {
   return (
     <div
