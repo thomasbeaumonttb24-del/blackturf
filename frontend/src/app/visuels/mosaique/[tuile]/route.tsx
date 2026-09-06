@@ -39,7 +39,7 @@ async function polices() {
 
 async function donnees(semaine: string | null): Promise<DonneesMosaique> {
   const vide: SemaineMosaique = {
-    periode: "", nbCourses: 0, nbHippodromes: 0, nbPlans: 0, nbPlansGagnants: 0,
+    periode: "", numero: 1, position: 0, nbCourses: 0, nbHippodromes: 0, nbPlans: 0, nbPlansGagnants: 0,
     totalRetour: 0, pctTop3: null, nbTop3: 0, nbAnalysees: 0, hasardTop3: null,
     pctTop1: null, nbPartants: 0, meilleur: null, meilleureJournee: null,
   };
@@ -58,6 +58,8 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
       cycle = Number(d.cycle ?? 0);
       s = {
         periode: periodeCourte(String(d.debut), String(d.fin)),
+        numero: Number(d.semaine_index ?? 0) + 1,
+        position: Number(d.rang_dans_le_cycle ?? 1) - 1,
         nbCourses: Number(d.nb_courses ?? 0),
         nbHippodromes: Number(d.nb_hippodromes ?? 0),
         nbPlans: Number(d.nb_plans ?? 0),

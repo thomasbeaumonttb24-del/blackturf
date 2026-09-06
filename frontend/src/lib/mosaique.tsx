@@ -170,7 +170,7 @@ const PHOTOS_MOSAIQUE = [
   "mosaique/attele-sable.jpg",
   "mosaique/galop-piste-claire.jpg",
   "mosaique/galop-foule.jpg",
-  "mosaique/galop-piste-claire.jpg",
+  "mosaique/galop-stalles.jpg",
   "mosaique/attele-peloton.jpg",
   "mosaique/galop-shakopee.jpg",
   "mosaique/attele-groupe.jpg",
@@ -307,6 +307,12 @@ export interface PlanJour {
 export interface SemaineMosaique {
   /** « du 30 août au 5 septembre » — porté par chaque tuile. */
   periode: string;
+  /** Numéro de la semaine dans la série, à partir de 1. Il ne se remet jamais à
+   *  zéro : deux publications ne doivent pas porter le même numéro. */
+  numero: number;
+  /** Place de cette semaine dans le cycle de six (0 à 5). Sert à numéroter les
+   *  AUTRES tuiles du plan d'ensemble : chacune porte la semaine qui lui revient. */
+  position: number;
   nbCourses: number;
   nbHippodromes: number;
   nbPlans: number;
@@ -721,9 +727,9 @@ function Chiffre({ valeur, unite, legende }: { valeur: string; unite?: string; l
  * une seule image au lieu de six vignettes.
  */
 function CarteSemaine({
-  s, rang, total, horse,
+  s, rang, horse,
 }: {
-  s: SemaineMosaique; rang: number; total: number; horse: string | null;
+  s: SemaineMosaique; rang: number; horse: string | null;
 }) {
   return (
     <div
@@ -755,13 +761,16 @@ function CarteSemaine({
             BlackTurf
           </span>
         )}
+        {/* Le numéro COURT sans fin : « semaine 12 » et pas « semaine 6 / 6 » remis à
+            zéro tous les six dimanches. Le lecteur voit une série qui dure, et deux
+            publications ne peuvent pas porter le même numéro. */}
         <span
           style={{
             fontFamily: "Inter", fontWeight: 600, fontSize: 20, letterSpacing: 2.4,
             color: COULEURS.or,
           }}
         >
-          SEMAINE {rang} / {total}
+          SEMAINE {rang}
         </span>
       </div>
 
@@ -1028,7 +1037,9 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
               display: "flex",
             }}
           >
-            <CarteSemaine s={s} rang={i + 1} total={ORDRE_TUILES.length} horse={d.horse} />
+            {/* Chaque tuile porte SA semaine : celle qui occupe la place courante reçoit
+                le numéro du jour, les autres sont décalées d'autant de dimanches. */}
+            <CarteSemaine s={s} rang={s.numero - (s.position - i)} horse={d.horse} />
           </div>
         );
       })}
