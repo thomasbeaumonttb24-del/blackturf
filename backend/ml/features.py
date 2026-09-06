@@ -257,6 +257,66 @@ def get_terrain_famille(terrain: Optional[str]) -> str:
     return "inconnu"
 
 
+# ── Appariement des deux libellés d'hippodrome ───────────────────────────────
+# `courses.hippodrome_nom` porte le libellé long du programme (« HIPPODROME DE SAN
+# ISIDRO ARG ») ; `historique_courses.hippodrome` porte le libellé court des
+# performances (« SAN ISIDRO »). On cherche donc le COURT dans le LONG, en MOTS
+# ENTIERS — sans les espaces de garde, « MONS » matcherait « SIMONSTOWN ».
+SQL_DRAW_BIAS = """
+    SELECT h.corde,
+           COUNT(*) AS n,
+           COUNT(*) FILTER (WHERE h.position_arrivee <= 3) AS top3
+    FROM historique_courses h
+    WHERE h.corde IS NOT NULL
+      AND h.position_arrivee IS NOT NULL
+      AND h.distance IS NOT NULL AND ABS(h.distance - :dist) <= 400
+      AND :hippo LIKE '% ' || UPPER(h.hippodrome) || ' %'
+    GROUP BY h.corde
+"""
+
+
+def cle_hippodrome(nom) -> str:
+    """Libellé long encadré d'espaces, prêt pour un appariement en mots entiers."""
+    return f" {str(nom or '').upper()} "
+
+
+def traits_recul(distance_hcp, recul_min, recul_mean, recul_max, distance_course) -> dict:
+    """Traits de recul en trot à handicap de distance. Fonction PURE.
+
+    LE RECUL EST UN ÉCART, PAS UNE DISTANCE. `handicapDistance` du PMU vaut 2 950,
+    pas 25 : c'est la distance que court le cheval. Le lire tel quel donnait
+    `recul_metres` ≈ la distance de la course, un `distance_reelle_ratio` saturé à
+    son plafond de 1,5 sur tous les partants concernés (2 valeurs distinctes en
+    11 jours : 1,0 et 1,5), et surtout un `recul_premiere_ligne` MORT : la condition
+    « recul nul alors que d'autres sont reculés » ne pouvait jamais être vraie,
+    puisque le PMU sert la distance à TOUS les partants d'une course ou à aucun.
+    Constant à 0 sur les 6 534 vecteurs des 11 derniers jours.
+
+    Mesuré le 2026-09-06 sur 60 jours : 1 623 courses publient `handicapDistance`,
+    et 362 seulement ont un écart entre partants. On ramène donc tout à la PREMIÈRE
+    LIGNE du jour, et un champ aligné rend des traits neutres — pas de recul inventé.
+    """
+    hcp = float(distance_hcp) if distance_hcp else 0.0
+    r_min, r_mean, r_max = float(recul_min or 0.0), float(recul_mean or 0.0), float(recul_max or 0.0)
+    dist = int(distance_course or 0)
+    etale = r_max > r_min > 0.0          # le champ est-il réparti sur plusieurs lignes ?
+    recul_m = (hcp - r_min) if (etale and hcp > 0.0) else 0.0
+    # Recul relatif au champ : >0 = plus reculé que la moyenne (meilleur cheval mais
+    # plus de terrain). Normalisé sur ±50 m. Centré sur 0 si le champ est aligné.
+    ecart_moyen = (r_mean - r_min) if etale else 0.0
+    recul_vs_champ = (float(np.clip((recul_m - ecart_moyen) / 50.0, -1.0, 2.0))
+                      if ecart_moyen > 0 else 0.0)
+    ratio = float((dist + recul_m) / dist) if dist > 0 else 1.0
+    return {
+        "recul_metres": recul_m,
+        "recul_vs_champ": recul_vs_champ,
+        "est_recule": 1.0 if recul_m > 0.0 else 0.0,
+        # Sur la première ligne alors que d'autres sont reculés = avantage tactique.
+        "recul_premiere_ligne": 1.0 if (etale and recul_m == 0.0) else 0.0,
+        "distance_reelle_ratio": float(np.clip(ratio, 1.0, 1.5)),
+    }
+
+
 def corde_zone(num: Optional[int]) -> str:
     """Zone de corde (numéro de départ) : intérieure 1-4 / milieu 5-8 / extérieure 9+."""
     if num is None or num <= 0:
@@ -648,8 +708,15 @@ async def compute_features_for_participation(
     penetro = penetro_row.scalar()
     penetrometre_coef = float(penetro) if penetro else None
 
+    # PAS DE CLÉ DYNAMIQUE. `f"pref_terrain_{terrain_cat}"` fabriquait trois colonnes
+    # — `pref_terrain_bon`, `_souple`, `_lourd` — dont une seule était servie par
+    # partant, selon le terrain DU JOUR, et qui portaient toutes exactement la valeur
+    # de `pref_terrain_actuel`. Zéro information ajoutée, et une conséquence :
+    # `pref_terrain_lourd` n'apparaissait que sur 224 vecteurs sur 6 534 (3,4 %), donc
+    # au-dessus du seuil d'absence, donc déclarée « morte sans cause établie » à
+    # chaque passage de la supervision. Le terrain du jour est déjà porté, et sans
+    # trou, par `terrain_code`.
     feat_terrain = {
-        f"pref_terrain_{terrain_cat}": pref_terrain,
         "nb_courses_terrain": len(terrain_hist),
         "pref_terrain_actuel": pref_terrain,
         "terrain_code": {"bon": 0, "souple": 1, "lourd": 2}.get(terrain_cat, 0),
@@ -2083,17 +2150,21 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         _is_trot = "trot" in _disc_l or "attelé" in _disc_l or "monté" in _disc_l
         course_hippo = partants_raw[0][27]
         if not _is_trot and course_hippo and course_dist:
-            draw_r = await session.execute(text("""
-                SELECT h.corde,
-                       COUNT(*) AS n,
-                       COUNT(*) FILTER (WHERE h.position_arrivee <= 3) AS top3
-                FROM historique_courses h
-                WHERE h.hippodrome ILIKE :hippo
-                  AND h.corde IS NOT NULL
-                  AND h.position_arrivee IS NOT NULL
-                  AND h.distance IS NOT NULL AND ABS(h.distance - :dist) <= 400
-                GROUP BY h.corde
-            """), {"hippo": f"%{course_hippo}%", "dist": int(course_dist or 2000)})
+            # APPARIEMENT DES DEUX NOMS D'HIPPODROME, DANS CE SENS-LÀ.
+            # `courses.hippodrome_nom` porte le libellé long du programme
+            # (« HIPPODROME DE SAN ISIDRO ARG ») ; `historique_courses.hippodrome`
+            # porte le libellé court des performances (« SAN ISIDRO »). Le
+            # `ILIKE '%' || long || '%'` d'origine cherchait donc le LONG dans le
+            # COURT : il ne pouvait matcher pour aucun hippodrome, et les 83 311
+            # lignes de corde de la table n'ont jamais servi (mesuré 2026-09-06 :
+            # 1 896 journalisations `draw_bias_indisponible` en 30 h, toutes avec
+            # « aucune valeur de corde en base »).
+            # On cherche donc le COURT dans le LONG, et en MOTS ENTIERS : sans les
+            # espaces de garde, « MONS » matcherait « SIMONSTOWN ».
+            draw_r = await session.execute(
+                text(SQL_DRAW_BIAS),
+                {"hippo": cle_hippodrome(course_hippo),
+                 "dist": int(course_dist or 2000)})
             zone_acc: dict = {}  # zone -> [top3, n]
             tot_top3 = tot_n = 0
             # `historique_courses.corde` est une COLONNE TEXTE : selon ce que publie
@@ -2140,18 +2211,40 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     #     dernières colonnes : …, handicap_distance (r[-3]), deferre_detail (r[-2]),
     #     valeur_handicap (r[-1]). (Référencées par index négatif → si on en rajoute,
     #     mettre à jour ces offsets.)
+    # `handicapDistance` du PMU n'est PAS un recul : c'est la DISTANCE que court le
+    # cheval (2 950 m, pas 25 m). Mesuré le 2026-09-06 sur 60 jours : 1 623 courses
+    # la publient, et 362 seulement ont un écart entre partants — dans les autres,
+    # tout le monde a la distance de la course. Le recul réel est donc l'écart à la
+    # PREMIÈRE LIGNE du jour, d'où `recul_min`.
     field_recul = [int(r[-3]) for r in partants_raw if r[-3] is not None and int(r[-3]) > 0]
     recul_mean = float(np.mean(field_recul)) if field_recul else 0.0
     recul_max = float(max(field_recul)) if field_recul else 0.0
+    recul_min = float(min(field_recul)) if field_recul else 0.0
     field_valeur = [int(r[-1]) for r in partants_raw if r[-1] is not None and int(r[-1]) > 0]
     valeur_mean = float(np.mean(field_valeur)) if field_valeur else 0.0
     valeur_max = float(max(field_valeur)) if field_valeur else 0.0
 
+    # Stalle RÉELLE du jour, par numéro de programme. Elle n'est pas dans le grand
+    # SELECT parce que les dernières colonnes y sont référencées par index négatif
+    # (cf. #18) : une colonne ajoutée à la fin décalerait silencieusement recul et
+    # valeur de handicap. Une requête d'une ligne coûte moins qu'un décalage muet.
+    corde_by_numero: dict = {}
+    try:
+        for _num, _cor in (await session.execute(text("""
+            SELECT numero, numero_corde FROM participations
+            WHERE course_id = :cid AND numero_corde IS NOT NULL
+        """), {"cid": course_id})).fetchall():
+            corde_by_numero[int(_num)] = int(_cor)
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.corde_load_failed", err=str(e)[:120])
+
     return {
         "partants": partants_raw,
         "draw_bias_by_zone": draw_bias_by_zone,
+        "corde_by_numero": corde_by_numero,
         "recul_mean": recul_mean,
         "recul_max": recul_max,
+        "recul_min": recul_min,
         "valeur_mean": valeur_mean,
         "valeur_max": valeur_max,
         "hist_by_cheval": hist_by_cheval,
@@ -2523,7 +2616,9 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     if meteo_row:
         humidite_piste = float(np.clip((float(meteo_row[0] or 0) * 0.3 + (float(meteo_row[1] or 50) - 50) * 0.01), 0.0, 1.0))
     pen_coef = float(penetrometre_coef) if penetrometre_coef else {"bon": 3.0, "souple": 5.0, "lourd": 7.5}.get(terrain_cat, 4.0)
-    feat_terrain = {f"pref_terrain_{terrain_cat}": pref_terrain, "nb_courses_terrain": len(terrain_hist),
+    # Cf. plus haut : pas de clé dynamique par terrain, c'est `pref_terrain_actuel`
+    # qui porte la valeur et `terrain_code` qui porte le terrain du jour.
+    feat_terrain = {"nb_courses_terrain": len(terrain_hist),
                     "pref_terrain_actuel": pref_terrain, "terrain_code": {"bon": 0, "souple": 1, "lourd": 2}.get(terrain_cat, 0),
                     "humidite_piste": humidite_piste, "penetrometre_coef": pen_coef}
 
@@ -2951,23 +3046,21 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # handicap_distance scrapé (PMU) + stocké (migration 0015), jamais exploité jusqu'ici.
     # 0/None = ligne de base (autostart, non-reculé, ou plat/obstacle). Toujours fourni
     # mais ~0 hors trot → neutre, pas de bruit.
-    recul_m = float(handicap_distance_raw) if handicap_distance_raw else 0.0
-    _recul_mean = float(batch.get("recul_mean", 0.0))
-    _recul_max = float(batch.get("recul_max", 0.0))
-    # Recul relatif au champ : >0 = plus reculé que la moyenne (meilleur cheval mais
-    # plus de terrain). Normalisé sur ±50m. Centré sur 0 si champ non reculé.
-    recul_vs_champ = float(np.clip((recul_m - _recul_mean) / 50.0, -1.0, 2.0)) if _recul_mean > 0 else 0.0
-    # Est-il sur la première ligne (0) alors que d'autres sont reculés ? = avantage tactique.
-    en_premiere_ligne = 1.0 if (recul_m == 0.0 and _recul_max > 0.0) else 0.0
-    # Ratio de terrain réel à couvrir vs la distance nominale de la course.
-    distance_reelle_ratio = float((dist_int + recul_m) / dist_int) if dist_int > 0 else 1.0
-    feat_recul = {
-        "recul_metres": recul_m,
-        "recul_vs_champ": recul_vs_champ,
-        "est_recule": 1.0 if recul_m > 0.0 else 0.0,
-        "recul_premiere_ligne": en_premiere_ligne,
-        "distance_reelle_ratio": float(np.clip(distance_reelle_ratio, 1.0, 1.5)),
-    }
+    # LE RECUL EST UN ÉCART, PAS UNE DISTANCE. `handicapDistance` vaut 2 950, pas 25 :
+    # le lire tel quel donnait `recul_metres` ≈ la distance de la course, un
+    # `distance_reelle_ratio` saturé à son plafond de 1,5 sur TOUS les partants qui
+    # l'ont (2 valeurs distinctes en 11 jours : 1,0 et 1,5), et surtout un
+    # `recul_premiere_ligne` mort : la condition « recul == 0 alors que d'autres sont
+    # reculés » ne pouvait jamais être vraie, puisque le PMU sert la distance à TOUS
+    # les partants de la course ou à AUCUN. Constant à 0 sur 6 534 vecteurs.
+    # On ramène donc tout à la première ligne du jour.
+    feat_recul = traits_recul(
+        handicap_distance_raw,
+        recul_min=batch.get("recul_min", 0.0),
+        recul_mean=batch.get("recul_mean", 0.0),
+        recul_max=batch.get("recul_max", 0.0),
+        distance_course=dist_int,
+    )
 
     # ── GG-ter. Valeur de handicap (#10) — note officielle du handicapeur ──────
     # En course à handicap, le handicapeur attribue une « valeur » (note de qualité) ;
@@ -3017,9 +3110,16 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # de corde du numéro du jour. Plat/obstacle seulement ; trot/zone inconnue/échantillon
     # insuffisant → 0.0 neutre. Le sens du rail (courses.corde "int"/"ext") sert juste
     # de flag de cohérence, plus de barème en dur.
+    # La zone se lit sur la STALLE (`participations.numero_corde`, PMU `placeCorde`),
+    # jamais sur le numéro de programme : en plat le numéro suit le poids ou l'ordre
+    # d'engagement, la stalle est tirée au sort. Les indexer l'un par l'autre
+    # revenait à chercher le biais de la stalle 3 sous le dossard 3.
+    # Pas de stalle connue → 0.0 neutre, jamais un numéro de repli : une valeur
+    # fausse est pire qu'une valeur absente (le modèle apprend le repli).
     draw_bias = 0.0
-    if not _is_trot_allure and numero:
-        _zone_jour = corde_zone(int(numero))
+    _corde_jour = (batch.get("corde_by_numero") or {}).get(int(numero)) if numero else None
+    if not _is_trot_allure and _corde_jour:
+        _zone_jour = corde_zone(int(_corde_jour))
         draw_bias = float(batch.get("draw_bias_by_zone", {}).get(_zone_jour, 0.0))
 
     feat_draw = {"draw_bias_score": float(np.clip(draw_bias, -1, 1))}

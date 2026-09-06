@@ -403,6 +403,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             jockey_id=jockey_id or None,
             entraineur_id=entraineur_id or None,
             numero=partant.numero,
+            numero_corde=partant.numero_corde,
             poids_porte=partant.poids,
             decharge=partant.decharge,
             valeur_indice=partant.valeur_indice,
@@ -429,34 +430,8 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             non_partant=bool(partant.non_partant),
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
-            set_={
-                "cote_pmu": cote_pmu_v,
-                # cote_geny N'EST PAS fournie par la source PMU (seul geny.py la lit,
-                # et le daemon GenyBet l'ecrit hors Docker). L'inclure inconditionnellement
-                # revenait a reecrire NULL par-dessus la cote du daemon a CHAQUE re-scrape :
-                # la colonne n'a jamais rien retenu (0 valeur non nulle depuis 2025-09,
-                # ~250 ecrasements/jour) alors que l'historique cotes_bookmakers, lui, se
-                # remplissait. Ecriture CONDITIONNELLE : on ne denormalise que ce qu'on a.
-                **({"cote_geny": cote_geny_v} if cote_geny_v is not None else {}),
-                "rang_pronostic_pmu": partant.rang_pronostic_pmu,
-                # le mouvement de cote évolue → réactualisé à chaque cycle
-                "cote_reference": cote_ref_v,
-                "cote_pmu_datetime": partant.cote_pmu_datetime,
-                "mouvement_cote_pct": partant.mouvement_cote_pct,
-                "tendance_cote": _t(partant.tendance_cote, 2),
-                "tendance_force": partant.tendance_force,
-                "est_favori_pmu": partant.est_favori,
-                "avis_entraineur": _t(partant.avis_entraineur, 20),
-                "nb_places_second": partant.nb_places_second,
-                "nb_places_troisieme": partant.nb_places_troisieme,
-                "handicap_distance": partant.handicap_distance,
-                "valeur_handicap": partant.valeur_handicap,
-                "indicateur_inedit": partant.indicateur_inedit,
-                "jument_pleine": partant.jument_pleine,
-                # Statut non-partant réactualisé à chaque scrape (forfait de dernière minute).
-                "non_partant": bool(partant.non_partant),
-                "updated_at": datetime.now(),
-            },
+            set_=champs_reecrits_participation(
+                partant, cote_pmu_v, cote_geny_v, cote_ref_v),
         ).returning(Participation.participation_id)
 
         result = await session.execute(stmt)
@@ -522,6 +497,83 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
     return scratch_course
 
 
+# La course PRÉCÉDENTE, c'est celle d'AVANT — pas la plus récente connue.
+SQL_EQUIPEMENT_PRECEDENT = """
+    SELECT e.deferre, e.oeilleres
+    FROM equipements e
+    JOIN participations p ON e.participation_id = p.participation_id
+    JOIN courses c ON p.course_id = c.course_id
+    WHERE p.cheval_id = :cheval_id
+      AND p.course_id <> :course_id
+      AND c.date_heure < (SELECT c2.date_heure FROM courses c2
+                          WHERE c2.course_id = :course_id)
+    ORDER BY c.date_heure DESC
+    LIMIT 1
+"""
+
+
+async def equipement_precedent(session: AsyncSession, cheval_id: str, course_id: str):
+    """Dernier équipement connu du cheval AVANT cette course, ou None."""
+    from sqlalchemy import text
+    return (await session.execute(
+        text(SQL_EQUIPEMENT_PRECEDENT),
+        {"cheval_id": cheval_id, "course_id": course_id})).fetchone()
+
+
+def champs_reecrits_participation(partant, cote_pmu_v, cote_geny_v, cote_ref_v) -> dict:
+    """Colonnes réécrites au RE-scrape d'un partant déjà connu. Fonction PURE.
+
+    ON N'ÉCRASE JAMAIS UNE VALEUR CONNUE PAR UN NULL. Le PMU cesse de publier
+    `dernierRapportDirect` dès que la course n'est plus au pari ; le re-scrape
+    suivant repassait alors NULL par-dessus la cote déjà enregistrée. Le 05/09/2026,
+    la dernière passe de la journée a effacé 295 cotes sur 743 — couverture PMU
+    tombée à 60,3 % — alors que `cotes_historique` les avait toujours. Ce n'est pas
+    qu'une alerte de supervision : `participations.cote_pmu` est la cote que lisent
+    les features, le règlement et le CLV.
+
+    C'est EXACTEMENT le défaut déjà corrigé pour `cote_geny`, cette fois sur la
+    source PRINCIPALE — et personne ne l'avait vu, parce qu'un effacement ne
+    ressemble à rien : la ligne existe, elle est simplement vide.
+
+    Les champs du bloc `rapports` (cote, son horodatage, la référence, le mouvement,
+    la tendance, le favori) meurent ENSEMBLE et sont donc préservés ENSEMBLE : garder
+    une cote sans savoir de quand elle date vaudrait à peine mieux que la perdre.
+    """
+    champs: dict = {
+        "rang_pronostic_pmu": partant.rang_pronostic_pmu,
+        "avis_entraineur": _t(partant.avis_entraineur, 20),
+        "nb_places_second": partant.nb_places_second,
+        "nb_places_troisieme": partant.nb_places_troisieme,
+        "handicap_distance": partant.handicap_distance,
+        "valeur_handicap": partant.valeur_handicap,
+        "indicateur_inedit": partant.indicateur_inedit,
+        "jument_pleine": partant.jument_pleine,
+        # Statut non-partant réactualisé à chaque scrape (forfait de dernière minute).
+        "non_partant": bool(partant.non_partant),
+        "updated_at": datetime.now(),
+    }
+    if cote_pmu_v is not None:
+        champs.update({
+            "cote_pmu": cote_pmu_v,
+            "cote_pmu_datetime": partant.cote_pmu_datetime,
+            "cote_reference": cote_ref_v,
+            "mouvement_cote_pct": partant.mouvement_cote_pct,
+            "tendance_cote": _t(partant.tendance_cote, 2),
+            "tendance_force": partant.tendance_force,
+            "est_favori_pmu": partant.est_favori,
+        })
+    # cote_geny N'EST PAS fournie par la source PMU (seul geny.py la lit, et le
+    # daemon GenyBet l'ecrit hors Docker) : l'inclure inconditionnellement revenait
+    # a reecrire NULL par-dessus la cote du daemon a CHAQUE re-scrape.
+    if cote_geny_v is not None:
+        champs["cote_geny"] = cote_geny_v
+    # Même règle pour la stalle : elle ne change pas d'un scrape à l'autre, mais
+    # elle disparaît du flux une fois la course retirée du programme.
+    if partant.numero_corde is not None:
+        champs["numero_corde"] = partant.numero_corde
+    return champs
+
+
 async def _save_equipement(
     session: AsyncSession,
     participation_id: str,
@@ -529,19 +581,22 @@ async def _save_equipement(
     course_id: str,
     partant: PartantScrape,
 ) -> None:
-    """Sauvegarde l'équipement et détecte les changements."""
-    # Chercher équipement de la course précédente
-    from sqlalchemy import text
-    prev = await session.execute(text("""
-        SELECT e.deferre, e.oeilleres
-        FROM equipements e
-        JOIN participations p ON e.participation_id = p.participation_id
-        JOIN courses c ON p.course_id = c.course_id
-        WHERE p.cheval_id = :cheval_id
-        ORDER BY c.date_heure DESC
-        LIMIT 1
-    """), {"cheval_id": cheval_id})
-    prev_row = prev.fetchone()
+    """Sauvegarde l'équipement et détecte les changements.
+
+    LA COURSE PRÉCÉDENTE, C'EST CELLE D'AVANT — pas la plus récente connue. La
+    requête d'origine prenait le dernier équipement du cheval par `date_heure DESC`
+    sans exclure la course en cours : dès la deuxième passe du scraper, la ligne la
+    plus récente était CELLE QU'ON VIENT D'ÉCRIRE. Le cheval était donc comparé à
+    lui-même, `oeilleres_change` retombait à False, et l'upsert écrasait le True du
+    premier passage. Seule une course scrapée exactement une fois gardait son
+    signal : `oeilleres_change` est passé de ~1 070/mois en avril à 8 en septembre
+    (mesuré le 2026-09-06), et `nouvelles_oeilleres` sortait constante à 0 sur les
+    6 534 vecteurs de features des 11 derniers jours — apprise comme du bruit.
+
+    Le tri par date suffisait tant que le scraper ne repassait pas ; c'est la montée
+    en fréquence qui a tué le signal, sans rien casser de visible.
+    """
+    prev_row = await equipement_precedent(session, cheval_id, course_id)
 
     deferre_change = False
     oeilleres_change = False

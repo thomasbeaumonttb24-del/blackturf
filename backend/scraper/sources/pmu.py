@@ -100,6 +100,21 @@ def _commentaire_texte(v):
     return None
 
 
+def _corde_int(v):
+    """Stalle de départ PMU en entier, ou None.
+
+    Défensif comme le reste du parseur : le PMU envoie 0 (ou rien) quand la
+    discipline n'a pas de corde — le trot, soit la moitié des partants français.
+    Écrire 0 laisserait croire à une stalle « zéro » et fabriquerait une zone de
+    corde qui n'existe pas ; on préfère l'absence, qui se lit comme telle.
+    """
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
 def _extract_commentaire(course_obj: dict, moi: dict | None):
     """Déroulé / trip note d'une course passée. Cherche d'abord au niveau du partant
     (commentaire spécifique au cheval, le plus utile), puis au niveau course. None si
@@ -900,6 +915,12 @@ class PmuScraper(BaseScraper):
                 poids=_first_poids(p),
                 decharge=p.get("handicapPoids"),
                 musique=p.get("musique"),
+                # Stalle de départ (plat / obstacle). Publiée par l'API sur le
+                # participant du jour et jamais lue jusqu'ici : `draw_bias_score`
+                # se rabattait sur le numéro de programme, qui ne dit rien de la
+                # position au départ (relevé 2026-09-06 : `placeCorde` présent sur
+                # 99 partants sur 136 le 05/09, absent en trot — sans corde).
+                numero_corde=_corde_int(p.get("placeCorde")),
                 nb_victoires=p.get("nombreVictoires"),
                 nb_places=p.get("nombrePlaces"),
                 nb_courses=p.get("nombreCourses"),
