@@ -1,5 +1,5 @@
 import { jourParis, jourLong } from "@/lib/seo";
-import { MENTION_LEGALE, HASHTAGS } from "@/lib/visuels";
+import { MENTION_LEGALE, HASHTAGS, jourDemande } from "@/lib/visuels";
 
 export const revalidate = 900;
 
@@ -54,9 +54,11 @@ const ligne = (p: PlanJour) =>
  * soit le jour, alors que les images, elles, affichaient les vrais chiffres. Une légende
  * qui contredit son image sur des montants est bien pire que pas de montants du tout.
  */
-async function plansDuJour(): Promise<PlanJour[]> {
+async function plansDuJour(jour: string): Promise<PlanJour[]> {
   try {
-    const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
+    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, {
+      next: { revalidate: 600 },
+    });
     if (!res.ok) return [];
     const d = await res.json();
     return (d.plans ?? []).map((p: Record<string, unknown>) => ({
@@ -70,10 +72,17 @@ async function plansDuJour(): Promise<PlanJour[]> {
   }
 }
 
-export async function GET() {
-  const jour = jourParis();
-  const pied = `\n\n${MENTION_LEGALE}\n\n${HASHTAGS}`;
-  const [p1, p2, p3] = await plansDuJour();
+export async function GET(req: Request) {
+  // `?jour=` : les légendes doivent parler du MÊME jour que les tuiles, qui
+  // l'acceptent désormais. Deux visuels du 5 avec des légendes du 6 seraient pires
+  // que pas de légendes.
+  const jour = jourDemande(req.url, jourParis());
+  const pied = `
+
+${MENTION_LEGALE}
+
+${HASHTAGS}`;
+  const [p1, p2, p3] = await plansDuJour(jour);
 
   const tuiles = [
     {

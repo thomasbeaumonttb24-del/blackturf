@@ -45,3 +45,30 @@ export const HASHTAGS = [
   "#pronostics",
   "#hippisme",
 ].join(" ");
+
+/**
+ * La journée demandée par un visuel, ou celle du jour.
+ *
+ * `?jour=AAAA-MM-JJ` N'EST PAS UN CONFORT. Les visuels de bilan se publient le
+ * LENDEMAIN MATIN : les dernières courses du programme sont sud-américaines et se
+ * courent jusqu'à 23 h 30, réglées une vingtaine de minutes plus tard — et le
+ * rattrapage nocturne en règle encore au petit matin (165 plans le 2026-09-06 à
+ * 04 h 19). Une route qui rend toujours « aujourd'hui » perd donc définitivement le
+ * visuel de la veille au premier passage de minuit : le 2026-09-05 n'était déjà plus
+ * récupérable au réveil.
+ *
+ * Une valeur mal formée est IGNORÉE au profit du jour courant, jamais rejetée : un
+ * visuel qui renvoie 422 ne se publie pas, un visuel du mauvais jour se voit.
+ */
+export function jourDemande(url: string, defaut: string): string {
+  try {
+    const brut = new URL(url).searchParams.get("jour");
+    if (!brut || !/^\d{4}-\d{2}-\d{2}$/.test(brut)) return defaut;
+    // Contrôle de validité réel : « 2026-02-31 » passe la forme mais n'existe pas.
+    const d = new Date(`${brut}T12:00:00Z`);
+    if (Number.isNaN(d.getTime())) return defaut;
+    return d.toISOString().slice(0, 10) === brut ? brut : defaut;
+  } catch {
+    return defaut;
+  }
+}

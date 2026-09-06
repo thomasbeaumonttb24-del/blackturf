@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
 import { jourParis, jourLong, jourCourt } from "@/lib/seo";
+import { jourDemande } from "@/lib/visuels";
 import {
   Tuile, TUILE_L, TUILE_H, photoDuJour, photoEnDataUri,
   type DonneesMosaique, type PlanJour,
@@ -37,14 +38,15 @@ async function polices() {
   ];
 }
 
-async function donnees(): Promise<DonneesMosaique> {
-  const jour = jourParis();
+async function donnees(jour: string): Promise<DonneesMosaique> {
   let plans: PlanJour[] = [];
   let nbCourses = 0;
   let nbReunions = 0;
   let nbPlans = 0;
   try {
-    const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
+    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, {
+      next: { revalidate: 600 },
+    });
     if (res.ok) {
       const d = await res.json();
       plans = (d.plans ?? []).map((p: Record<string, unknown>) => ({
@@ -72,14 +74,17 @@ async function donnees(): Promise<DonneesMosaique> {
 }
 
 /** `tuile` s'écrit « r-c » : 0-0 en haut à gauche, 1-2 en bas à droite. */
-export async function GET(_req: Request, ctx: { params: Promise<{ tuile: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ tuile: string }> }) {
   const { tuile } = await ctx.params;
   const m = /^([01])-([012])$/.exec(tuile.replace(/\.jpg$/, ""));
   if (!m) return new Response("Tuile inconnue", { status: 404 });
 
   const rangee = Number(m[1]);
   const colonne = Number(m[2]);
-  const d = await donnees();
+  // `?jour=` : la mosaïque se publie le LENDEMAIN matin — c'est écrit dans la
+  // docstring de l'endpoint depuis le 2026-08-23, mais aucun consommateur ne passait
+  // le paramètre, et les six tuiles rendaient donc toujours le jour courant.
+  const d = await donnees(jourDemande(req.url, jourParis()));
 
   const rendu = new ImageResponse(<Tuile d={d} rangee={rangee} colonne={colonne} />, {
     width: TUILE_L,

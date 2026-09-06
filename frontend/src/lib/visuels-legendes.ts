@@ -62,9 +62,11 @@ interface BilanJour {
  * Le nombre total de plans accompagne toujours le nombre de gagnants — « 29 plans
  * gagnants » tout seul se lirait comme si tous avaient gagné.
  */
-async function bilanDuJour(): Promise<BilanJour | null> {
+async function bilanDuJour(jour: string): Promise<BilanJour | null> {
   try {
-    const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
+    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, {
+      next: { revalidate: 600 },
+    });
     if (!res.ok) return null;
     const d = await res.json();
     const a = d.analyse ?? {};
@@ -172,10 +174,25 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       ].join("\n")
     : "L'arrivée n'est pas encore publiée. Cette légende se remplit seule dès que le PMU publie les rapports.";
 
-  const bilan = await bilanDuJour();
+  // LA STORY DE BILAN PARLE DE LA DERNIÈRE JOURNÉE FINIE, pas forcément d'aujourd'hui.
+  // Elle se publie le lendemain matin : à 9 h, la journée en cours n'a rien réglé, et
+  // c'est celle d'hier qu'on veut sous la main. Le 2026-09-05 l'a montré — les 165
+  // derniers plans n'ont été réglés qu'à 04 h 19, donc la story n'est devenue
+  // publiable qu'au petit matin, à une heure où la route ne rendait déjà plus ce
+  // jour-là.
+  const veille = jourParis(-1);
+  let jourStory = jour;
+  let bilan = await bilanDuJour(jour);
+  if (!bilan?.journeeComplete) {
+    const hier = await bilanDuJour(veille);
+    if (hier?.journeeComplete && hier.nbPlans > 0) {
+      jourStory = veille;
+      bilan = hier;
+    }
+  }
   const legendeStory = bilan
     ? [
-        `Performance du jour — ${jourLong(jour)}.`,
+        `Performance du jour — ${jourLong(jourStory)}.`,
         "",
         ...(bilan.pctTop3 !== null
           ? [
@@ -232,9 +249,9 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       // backend ne connaît que « matin » et « soir »). Elle se publie à la main depuis
       // /studio, une fois la journée courue.
       cle: "story",
-      titre: "Story du soir — performance de la journée",
-      image: `${SITE}/visuels/story.jpg`,
-      fichier: `blackturf-story-${jour}.jpg`,
+      titre: `Story du soir — performance du ${jourLong(jourStory)}`,
+      image: `${SITE}/visuels/story.jpg?jour=${jourStory}`,
+      fichier: `blackturf-story-${jourStory}.jpg`,
       legende: legendeStory,
       // RÈGLE DE PUBLICATION : après le DERNIER RÈGLEMENT de la journée, jamais avant.
       // « Au moins un plan réglé » ne suffisait pas : à 11 h du matin un tiers des

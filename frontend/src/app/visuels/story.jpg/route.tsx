@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
 import { jourParis, jourLong } from "@/lib/seo";
+import { jourDemande } from "@/lib/visuels";
 import { photoDuJour, photoEnDataUri, imageEnDataUri } from "@/lib/mosaique";
 import {
   Story, STORY_L, STORY_H, PHOTO_H, type DonneesStory, type MeilleurPlan,
@@ -36,8 +37,7 @@ async function polices() {
   ];
 }
 
-async function donneesStory(): Promise<DonneesStory> {
-  const jour = jourParis();
+async function donneesStory(jour: string): Promise<DonneesStory> {
   let pctTop3: number | null = null;
   let pctTop1: number | null = null;
   let hasardTop3: number | null = null;
@@ -51,7 +51,9 @@ async function donneesStory(): Promise<DonneesStory> {
   let totalRetour = 0;
   let meilleur: MeilleurPlan | null = null;
   try {
-    const res = await fetch(`${API}/stats/meilleurs-plans-jour`, { next: { revalidate: 600 } });
+    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, {
+      next: { revalidate: 600 },
+    });
     if (res.ok) {
       const d = await res.json();
       const p = (d.plans ?? [])[0];
@@ -112,8 +114,12 @@ async function donneesStory(): Promise<DonneesStory> {
   };
 }
 
-export async function GET() {
-  const d = await donneesStory();
+export async function GET(req: Request) {
+  // `?jour=AAAA-MM-JJ` : la story de bilan se publie le lendemain matin, quand la
+  // journée est enfin réglée. Sans ce paramètre, le visuel de la veille disparaît au
+  // premier passage de minuit — constaté sur le 2026-09-05, plus récupérable au réveil.
+  const jour = jourDemande(req.url, jourParis());
+  const d = await donneesStory(jour);
 
   const rendu = new ImageResponse(<Story d={d} />, {
     width: STORY_L,
