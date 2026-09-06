@@ -457,9 +457,13 @@ async def latest_prediction_run_id(session, course_id: str) -> Optional[str]:
 # n'existe pas sous SQLite, et surtout elle ne déduplique QUE les règlements d'un
 # même snapshot — pas les ré-émissions d'un même conseil, qui sont le vrai piège.
 #
-# Attend le paramètre `:jjmmaaaa` (jour PMU, 8 premiers caractères du course_id).
+# Attend le paramètre `:jours` — une LISTE de jours PMU (JJMMAAAA, les 8 premiers
+# caractères du course_id), en bindparam `expanding`. Une liste et pas une seule
+# valeur : le bilan de la semaine agrège sept journées, et `course_id` commence par
+# JJMMAAAA — un format qui ne se trie pas, donc sur lequel aucune plage ne fonctionne.
+# Un `IN` explicite est la seule façon exacte de désigner un intervalle de dates ici.
 # Expose la CTE `plan_publie` : une ligne par (course_id, profil).
-CTE_PLAN_PUBLIE_DU_JOUR = """
+CTE_PLAN_PUBLIE = """
 dernier_plan_du_jour AS (
     SELECT plan_snapshot_id, course_id, profil, emitted_at
     FROM (
@@ -471,7 +475,7 @@ dernier_plan_du_jour AS (
         FROM bet_plan_snapshots s
         WHERE s.is_pre_course = true
           AND s.origin = 'profil_run'
-          AND substring(s.course_id, 1, 8) = :jjmmaaaa
+          AND substring(s.course_id, 1, 8) IN :jours
     ) q
     WHERE rn_plan = 1
 ),

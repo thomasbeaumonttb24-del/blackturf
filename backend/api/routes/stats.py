@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import bindparam, select, func, text
 
 from api.model_metrics import real_model_metrics, plausible_auc
 from api.profil_backtest import backtest_profils
@@ -1879,7 +1879,7 @@ async def stats_meilleurs_plans_jour(
     04092026R5C4 sortait à 10 € → 1 286 € (snapshots de 07:14 à 13:43) alors que le
     plan effectivement conseillé au départ perdait, et que la fiche course publique
     affichait « Risqué −10 € ». La règle de sélection est unique et vit dans
-    `services.bet_plan_snapshots.CTE_PLAN_PUBLIE_DU_JOUR` — voir son commentaire pour
+    `services.bet_plan_snapshots.CTE_PLAN_PUBLIE` — voir son commentaire pour
     les trois filtres (plan du site, pré-course, règlement définitif) et pour la
     vérification qui prouve qu'elle donne exactement ce qu'affiche la fiche course.
 
@@ -1891,7 +1891,7 @@ async def stats_meilleurs_plans_jour(
     # Le PMU écrit le jour en JJMMAAAA en tête du `course_id`. On le construit ici une
     # seule fois, et les DEUX requêtes s'en servent : elles doivent parler du même jour,
     # sans quoi le nombre de courses annoncé ne serait pas celui des plans montrés.
-    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE_DU_JOUR
+    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE
     from services.temps_courses import jour_courses
 
     if jour:
@@ -1909,7 +1909,7 @@ async def stats_meilleurs_plans_jour(
     # Parilly annoncé « Nancy-Brabois », Duindigt annoncé « Toulouse La Cépière »),
     # et 04092026R3C3 — annoncé au mauvais hippodrome — figure dans le top du jour.
     lignes = await db.execute(
-        text("WITH " + CTE_PLAN_PUBLIE_DU_JOUR + """
+        text("WITH " + CTE_PLAN_PUBLIE + """
         SELECT p.course_id, p.profil,
                COALESCE(c.hippodrome_nom, '') AS hippodrome,
                p.montant_mise, p.montant_retour, p.net, p.nb_gagnes, p.nb_paris,
@@ -1919,8 +1919,8 @@ async def stats_meilleurs_plans_jour(
         WHERE p.net > 0
         ORDER BY p.net DESC
         LIMIT 20
-    """),
-        {"jjmmaaaa": jjmmaaaa},
+    """).bindparams(bindparam("jours", expanding=True)),
+        {"jours": [jjmmaaaa]},
     )
 
     def _type_gagnant(bilan) -> Optional[str]:
@@ -2071,14 +2071,14 @@ async def stats_meilleurs_plans_jour(
     # toujours les deux et laisse le visuel décider de ce qu'il montre ; l'inverse —
     # une API qui ne saurait plus dire la mise — rendrait le chiffre invérifiable.
     tot = await db.execute(
-        text("WITH " + CTE_PLAN_PUBLIE_DU_JOUR + """
+        text("WITH " + CTE_PLAN_PUBLIE + """
         SELECT COUNT(*)                                        AS nb_plans,
                COUNT(*) FILTER (WHERE p.net > 0)               AS nb_plans_gagnants,
                COALESCE(SUM(p.montant_mise), 0)                AS total_mise,
                COALESCE(SUM(p.montant_retour), 0)              AS total_retour
         FROM plan_publie p
-    """),
-        {"jjmmaaaa": jjmmaaaa},
+    """).bindparams(bindparam("jours", expanding=True)),
+        {"jours": [jjmmaaaa]},
     )
     t = tot.mappings().first() or {}
     total_mise = round(float(t.get("total_mise") or 0), 2)
@@ -2117,5 +2117,201 @@ async def stats_meilleurs_plans_jour(
             "hasard_top3": (round(float(a["hasard3"]) * 100, 1)
                             if a.get("hasard3") is not None else None),
             "nb_partants": int(a.get("partants") or 0),
+        },
+    }
+
+
+# Nombre de semaines que compte la mosaïque du profil : six tuiles, six publications,
+# six dimanches. Au septième, l'image est complète et un nouveau cycle commence.
+SEMAINES_PAR_MOSAIQUE = 6
+
+# Ordre de publication des tuiles. À L'ENVERS de l'ordre de lecture, et ce n'est pas
+# une coquetterie : Instagram empile les publications de la plus récente à la plus
+# ancienne, en haut à gauche. Publier dans l'ordre de lecture donnerait l'image
+# retournée. La dernière publiée — celle qui explique la marque — se retrouve en tête
+# du profil, ce qui est exactement là où elle doit être.
+ORDRE_TUILES = ("1-2", "1-1", "1-0", "0-2", "0-1", "0-0")
+
+
+def _samedi_precedent(jour: date) -> date:
+    """Le dernier samedi RÉVOLU à cette date (le jour même s'il est samedi).
+
+    Le bilan se publie le dimanche matin et porte sur la semaine qui vient de se
+    terminer : elle s'achève donc au samedi. `weekday()` : lundi = 0, samedi = 5.
+    """
+    return jour - timedelta(days=(jour.weekday() - 5) % 7)
+
+
+@router.get("/stats/bilan-semaine")
+async def stats_bilan_semaine(
+    fin: Optional[str] = Query(
+        None,
+        description="Dernier jour de la semaine (un samedi), AAAA-MM-JJ. "
+                    "Par defaut : le dernier samedi revolu.",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Le bilan d'une SEMAINE de courses, pour la publication du dimanche.
+
+    LA SEMAINE VA DU DIMANCHE AU SAMEDI, sept jours, et se publie le dimanche matin
+    qui suit. Sept et pas huit : un « samedi au samedi » inclusif compterait deux fois
+    les samedis d'une semaine sur l'autre, et le total de six publications ne serait
+    plus celui de six semaines de courses.
+
+    Mêmes définitions que le bilan quotidien, agrégées sur les sept jours : le plan
+    publié est le DERNIER conseil émis avant chaque départ (`CTE_PLAN_PUBLIE`), et le
+    taux de Top 3 porte sur les courses réellement analysées avant le départ.
+
+    ATTENTION AU VOCABULAIRE — `total_retour` est ce que les plans ont RENDU, réglé
+    aux rapports officiels du PMU. Ce n'est ni un bénéfice ni de l'argent encaissé.
+    `total_mise` est servi à côté : un retour sans sa mise ne dit pas si la semaine a
+    gagné ou perdu, et le chiffre deviendrait invérifiable.
+    """
+    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE
+    from services.temps_courses import jour_courses
+
+    if fin:
+        try:
+            samedi = date.fromisoformat(fin)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="fin attendu au format AAAA-MM-JJ")
+    else:
+        samedi = _samedi_precedent(jour_courses())
+
+    debut = samedi - timedelta(days=6)
+    jours = [(debut + timedelta(days=i)).strftime("%d%m%Y") for i in range(7)]
+
+    # ── L'argent de la semaine, plan publié par plan publié ──────────────────
+    lignes = await db.execute(
+        text("WITH " + CTE_PLAN_PUBLIE + """
+        SELECT p.course_id, p.profil, COALESCE(c.hippodrome_nom, '') AS hippodrome,
+               p.montant_mise, p.montant_retour, p.net, p.nb_paris, p.nb_gagnes, p.bilan
+        FROM plan_publie p
+        JOIN courses c ON c.course_id = p.course_id
+    """).bindparams(bindparam("jours", expanding=True)),
+        {"jours": jours},
+    )
+
+    total_mise = total_retour = 0.0
+    nb_plans = nb_gagnants = 0
+    meilleur: Optional[dict] = None
+    # Retour par JOUR : sert à situer la meilleure journée de la semaine.
+    retour_par_jour: dict[str, float] = {}
+    for r in lignes.mappings():
+        total_mise += float(r["montant_mise"] or 0)
+        total_retour += float(r["montant_retour"] or 0)
+        nb_plans += 1
+        net = float(r["net"] or 0)
+        if net > 0:
+            nb_gagnants += 1
+        j = r["course_id"][:8]
+        retour_par_jour[j] = retour_par_jour.get(j, 0.0) + float(r["montant_retour"] or 0)
+        if meilleur is None or net > meilleur["net"]:
+            d = r["bilan"] if isinstance(r["bilan"], dict) else (
+                json.loads(r["bilan"]) if r["bilan"] else {})
+            gagnants = [x for x in (d.get("paris") or []) if (x.get("gain") or 0) > 0]
+            meilleur = {
+                "course_id": r["course_id"],
+                "code": r["course_id"][8:] or r["course_id"],
+                "hippodrome": (r["hippodrome"] or "").replace("HIPPODROME DE ", "")
+                                                    .replace("HIPPODROME DU ", "").title(),
+                "mise": round(float(r["montant_mise"] or 0), 2),
+                "retour": round(float(r["montant_retour"] or 0), 2),
+                "net": round(net, 2),
+                "type_pari": (max(gagnants, key=lambda x: float(x.get("gain") or 0)).get("type")
+                              if gagnants else None),
+            }
+
+    # ── Ce que l'analyse a valu, jour par jour puis sur la semaine ───────────
+    analyse = await db.execute(
+        text("""
+        SELECT substring(r.course_id, 1, 8)                              AS jour,
+               COUNT(*)                                                  AS nb,
+               COUNT(*) FILTER (WHERE r.gagnant_rang_predit = 1)         AS top1,
+               COUNT(*) FILTER (WHERE r.gagnant_rang_predit IS NOT NULL
+                                  AND r.gagnant_rang_predit <= 3)        AS top3,
+               AVG(CASE WHEN r.nb_partants >= 3
+                        THEN 3.0 / CAST(r.nb_partants AS REAL)
+                        WHEN r.nb_partants > 0 THEN 1.0 END)             AS hasard3,
+               SUM(COALESCE(r.nb_partants, 0))                           AS partants
+        FROM race_learning_log r
+        WHERE substring(r.course_id, 1, 8) IN :jours
+          AND EXISTS (
+              SELECT 1 FROM prediction_evaluation p
+              JOIN courses c ON c.course_id = p.course_id
+              WHERE p.course_id = r.course_id
+                AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
+                AND p.created_at < c.date_heure
+          )
+        GROUP BY 1
+    """).bindparams(bindparam("jours", expanding=True)),
+        {"jours": jours},
+    )
+    par_jour = {r["jour"]: dict(r) for r in analyse.mappings()}
+    nb_analysees = sum(int(v["nb"] or 0) for v in par_jour.values())
+    nb_top3 = sum(int(v["top3"] or 0) for v in par_jour.values())
+    nb_top1 = sum(int(v["top1"] or 0) for v in par_jour.values())
+    nb_partants = sum(int(v["partants"] or 0) for v in par_jour.values())
+    # Hasard PONDÉRÉ par le nombre de courses de chaque jour : une journée de
+    # 3 courses ne pèse pas comme une journée de 60 dans le repère de la semaine.
+    hasard = [float(v["hasard3"]) * int(v["nb"] or 0) for v in par_jour.values()
+              if v["hasard3"] is not None]
+    hasard_top3 = round(sum(hasard) / nb_analysees * 100, 1) if nb_analysees and hasard else None
+
+    def _iso(jjmmaaaa: str) -> str:
+        return f"{jjmmaaaa[4:]}-{jjmmaaaa[2:4]}-{jjmmaaaa[:2]}"
+
+    # LA MEILLEURE JOURNÉE DE L'ALGORITHME est celle du meilleur TAUX DE TOP 3, pas
+    # celle du plus gros retour : le taux mesure ce que le modèle sait faire, le
+    # retour mesure surtout la cote d'un cheval. Sur un visuel qui parle de la qualité
+    # de l'analyse, c'est le taux qui a un sens.
+    #
+    # Seuil de 5 courses, sinon une journée à « 1 sur 1 » sortirait à 100 % et serait
+    # sacrée meilleure journée de la semaine — le genre de chiffre qu'on ne peut plus
+    # défendre une fois publié.
+    eligibles = [(j, v) for j, v in par_jour.items() if int(v["nb"] or 0) >= 5]
+    meilleure_journee = None
+    if eligibles:
+        j, v = max(eligibles, key=lambda kv: int(kv[1]["top3"] or 0) / int(kv[1]["nb"]))
+        meilleure_journee = {
+            "jour": _iso(j),
+            "nb_courses": int(v["nb"]),
+            "nb_top3": int(v["top3"] or 0),
+            "pct_top3": round(int(v["top3"] or 0) / int(v["nb"]) * 100, 1),
+            "retour": round(retour_par_jour.get(j, 0.0), 2),
+        }
+
+    volume = await db.execute(
+        text("""
+        SELECT COUNT(DISTINCT c.course_id)      AS nb_courses,
+               COUNT(DISTINCT c.hippodrome_nom) AS nb_hippodromes
+        FROM courses c
+        WHERE substring(c.course_id, 1, 8) IN :jours
+    """).bindparams(bindparam("jours", expanding=True)),
+        {"jours": jours},
+    )
+    v = volume.mappings().first() or {}
+
+    return {
+        "debut": debut.isoformat(),
+        "fin": samedi.isoformat(),
+        "nb_courses": int(v.get("nb_courses") or 0),
+        "nb_hippodromes": int(v.get("nb_hippodromes") or 0),
+        "nb_plans": nb_plans,
+        "nb_plans_gagnants": nb_gagnants,
+        "total_mise": round(total_mise, 2),
+        "total_retour": round(total_retour, 2),
+        "total_net": round(total_retour - total_mise, 2),
+        "meilleur_plan": meilleur,
+        "meilleure_journee": meilleure_journee,
+        "analyse": {
+            "nb_courses_analysees": nb_analysees,
+            "nb_top3": nb_top3,
+            "nb_top1": nb_top1,
+            "pct_top3": round(nb_top3 / nb_analysees * 100, 1) if nb_analysees else None,
+            "pct_top1": round(nb_top1 / nb_analysees * 100, 1) if nb_analysees else None,
+            "hasard_top3": hasard_top3,
+            "nb_partants": nb_partants,
         },
     }
