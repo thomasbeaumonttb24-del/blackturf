@@ -585,21 +585,221 @@ export function Carte({
  * façon d'obtenir des raccords exacts. Un bloc posé « au fil du texte » se décalerait
  * d'une tuile à l'autre, et la mosaïque ne tomberait plus juste.
  */
+/**
+ * Une carte de bilan hebdomadaire — le contenu d'UNE tuile, et d'une seule semaine.
+ *
+ * Les six cartes sont identiques dans leur structure et différentes dans leurs
+ * chiffres : chacune est publiée un dimanche différent et parle de SA semaine. C'est
+ * ce qui rend l'image finale lisible — six blocs de même forme, six périodes datées —
+ * là où six mises en page différentes auraient donné un patchwork.
+ *
+ * `ton` : clair sur la photo (rangée haute), sombre sur l'encre (rangée basse). Deux
+ * registres pour un seul dessin ; c'est la CONTINUITÉ du fond, pas l'uniformité des
+ * cartes, qui fait voir une seule image.
+ */
+function CarteSemaine({
+  s, rang, total, ton,
+}: {
+  s: SemaineMosaique; rang: number; total: number; ton: "clair" | "sombre";
+}) {
+  const sombre = ton === "sombre";
+  const fond = sombre ? "#1B1F26" : COULEURS.blanc;
+  const bord = sombre ? COULEURS.ligneSombre : COULEURS.ligne;
+  const titre = sombre ? COULEURS.surSombre : COULEURS.encre;
+  const doux = sombre ? COULEURS.surSombreDoux : COULEURS.encreDouce;
+  const tenu = sombre ? COULEURS.surSombreTenu : COULEURS.encreTenue;
+  const accent = sombre ? COULEURS.orVif : COULEURS.or;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        height: "100%",
+        background: fond,
+        borderRadius: 26,
+        padding: "48px 54px",
+        border: `1px solid ${bord}`,
+      }}
+    >
+      {/* ── Marque + rang dans le cycle ────────────────────────────────────
+          « SEMAINE 3 / 6 » dit au lecteur qu'il regarde une série, et à nous où en
+          est le remplissage de la mosaïque. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", width: 10, height: 34, background: COULEURS.orVif }} />
+          <span
+            style={{
+              fontFamily: "Grotesk", fontWeight: 700, fontSize: 34,
+              color: titre, marginLeft: 14, letterSpacing: -0.8,
+            }}
+          >
+            BlackTurf
+          </span>
+        </div>
+        <span
+          style={{
+            fontFamily: "Inter", fontWeight: 600, fontSize: 21,
+            letterSpacing: 2.6, color: accent,
+          }}
+        >
+          SEMAINE {rang} / {total}
+        </span>
+      </div>
+
+      {/* ── La période, en titre. Six tuiles datées = six semaines lisibles ── */}
+      <div style={{ display: "flex", alignItems: "center", marginTop: 26 }}>
+        <div style={{ display: "flex", width: 7, height: 44, borderRadius: 4, background: COULEURS.orVif }} />
+        <span
+          style={{
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 40,
+            color: accent, marginLeft: 16, letterSpacing: -0.6,
+          }}
+        >
+          {s.periode}
+        </span>
+      </div>
+
+      {/* ── Le chiffre de tête : la QUALITÉ DE CLASSEMENT ──────────────────
+          Pas un gain. C'est le seul chiffre que le site puisse défendre dans la
+          durée, et il n'est jamais publié sans son dénominateur ni sans le repère
+          du hasard — « 65,1 % » seul ne dit pas au lecteur ce qu'il bat. */}
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 30 }}>
+        <span
+          style={{
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 122, lineHeight: 1,
+            color: titre, letterSpacing: -5,
+          }}
+        >
+          {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
+        </span>
+        <span
+          style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 50, color: accent, marginLeft: 6 }}
+        >
+          %
+        </span>
+      </div>
+      <span
+        style={{
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 36, lineHeight: 1.2,
+          color: titre, letterSpacing: -1, marginTop: 8,
+        }}
+      >
+        des courses où le gagnant
+      </span>
+      <span
+        style={{
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 36, lineHeight: 1.2,
+          color: titre, letterSpacing: -1,
+        }}
+      >
+        était dans notre Top 3
+      </span>
+      <span style={{ fontFamily: "Inter", fontSize: 24, lineHeight: 1.45, color: doux, marginTop: 14 }}>
+        {s.nbTop3} courses sur {s.nbAnalysees} analysées
+        {s.hasardTop3 !== null ? ` · un tirage au sort en trouverait ${pourcent(s.hasardTop3)} %` : ""}
+      </span>
+
+      <div style={{ display: "flex", width: "100%", height: 1, background: bord, marginTop: 30 }} />
+
+      {/* ── Le meilleur plan de la semaine ─────────────────────────────── */}
+      <span
+        style={{
+          fontFamily: "Inter", fontWeight: 600, fontSize: 21, letterSpacing: 2.6,
+          color: accent, marginTop: 26,
+        }}
+      >
+        MEILLEUR PLAN DE LA SEMAINE
+      </span>
+      {s.meilleur ? (
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 10 }}>
+          <div style={{ display: "flex", alignItems: "baseline" }}>
+            <span
+              style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 42, color: tenu, letterSpacing: -1.2 }}
+            >
+              {euro(s.meilleur.mise)} €
+            </span>
+            <span style={{ fontFamily: "Inter", fontSize: 32, color: accent, margin: "0 16px" }}>→</span>
+            <span
+              style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 60, color: VERT_GAIN, letterSpacing: -2 }}
+            >
+              {euro(s.meilleur.retour)} €
+            </span>
+          </div>
+          <span style={{ fontFamily: "Inter", fontSize: 24, color: doux, marginTop: 6 }}>
+            {[s.meilleur.typePari, s.meilleur.hippodrome, s.meilleur.code].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+      ) : (
+        <span style={{ fontFamily: "Inter", fontSize: 24, color: doux, marginTop: 10 }}>
+          Aucun plan gagnant cette semaine.
+        </span>
+      )}
+
+      {/* ── Le total rendu ─────────────────────────────────────────────────
+          Le nombre de plans GAGNANTS ne sort jamais sans le nombre TOTAL calculé :
+          sans dénominateur, la phrase se lirait comme si tous avaient gagné. */}
+      <span
+        style={{
+          fontFamily: "Inter", fontWeight: 600, fontSize: 21, letterSpacing: 2.6,
+          color: accent, marginTop: 24,
+        }}
+      >
+        TOTAL RENDU PAR LES PLANS
+      </span>
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 6 }}>
+        <span
+          style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 52, color: titre, letterSpacing: -1.8 }}
+        >
+          {euro(s.totalRetour)} €
+        </span>
+        <span style={{ fontFamily: "Inter", fontSize: 24, color: doux, marginLeft: 16 }}>
+          {s.nbPlansGagnants} gagnants sur {s.nbPlans}
+        </span>
+      </div>
+
+      {/* L'adresse pousse au bas de la carte : chaque tuile est vue SEULE dans le
+          fil, et sans elle cinq publications sur six ne disent pas où aller. */}
+      <div style={{ display: "flex", marginTop: "auto" }}>
+        <Adresse ton={sombre ? "sombre" : "clair"} />
+      </div>
+    </div>
+  );
+}
+
+/** Vert du gain : celui du fond sombre serait illisible sur blanc, et l'inverse. */
+const VERT_GAIN = "#177A4C";
+
+/**
+ * Le plan d'ensemble : SIX BILANS DE SEMAINE qui forment une seule image.
+ *
+ * Chaque tuile est publiée un dimanche et porte les chiffres de sa semaine. Au bout
+ * de six dimanches, la grille du profil montre l'image entière — six cartes de même
+ * dessin, six périodes différentes, sur un fond continu.
+ *
+ * CE QUI FAIT L'UNITÉ, ce n'est pas le contenu des cartes (il change chaque semaine)
+ * mais le FOND, qui les traverse : la photo sur la rangée haute, l'encre sur la
+ * rangée basse, et la règle dorée qui court d'un bord à l'autre entre les deux. Ces
+ * trois éléments sont dessinés dans l'espace du plan, pas dans celui d'une tuile —
+ * c'est la seule façon d'obtenir des raccords exacts.
+ *
+ * LA PHOTO EST FIXÉE PAR CYCLE (`photoDuCycle`) et non par jour : les trois tuiles
+ * du haut sont publiées à trois dimanches d'écart et doivent montrer la même image,
+ * sinon les raccords ne tombent jamais juste.
+ */
 export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   const col = (c: number) => DEBORD + c * VISIBLE_L;
-  const MARGE = 76;
-  const utile = VISIBLE_L - MARGE * 2;
   const bas = TUILE_H;
-  const BANDEAU = PLAN_H - 168;
+  const BANDEAU = PLAN_H - 132;
 
-  // Les cartes laissent volontairement de la photo visible autour d'elles : sans cette
-  // respiration, la rangée haute se lirait comme trois vignettes séparées.
+  // Les cartes laissent de la respiration autour d'elles : sans cette marge, la
+  // rangée haute se lirait comme trois vignettes collées, pas comme une image.
   const CARTE_X = 56;
   const CARTE_L = VISIBLE_L - CARTE_X * 2;
-  const CARTE_Y = 150;
-  const CARTE_H = 968;
+  const CARTE_Y = 132;
+  const CARTE_H = 1010;
 
-  // publiée ce dimanche-là.
   const s = d.semaine;
 
   return (
@@ -612,7 +812,6 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
         background: COULEURS.ivoire,
       }}
     >
-      {/* ── La photo de course occupe toute la rangée haute, en pleine lumière ── */}
       {d.photo && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -623,677 +822,103 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           style={{ position: "absolute", left: 0, top: 0, objectFit: "cover" }}
         />
       )}
-      {/* Fondu vers l'ivoire : sans lui, la photo se couperait net à la jointure des deux
-          rangées et la mosaïque se lirait en deux morceaux. */}
+      {/* Fondu vers l'ivoire : sans lui la photo se couperait net à la jointure et la
+          mosaïque se lirait en deux morceaux. */}
       <div
         style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: PLAN_L,
-          height: TUILE_H,
-          display: "flex",
+          position: "absolute", left: 0, top: 0, width: PLAN_L, height: TUILE_H, display: "flex",
           background:
-            "linear-gradient(180deg, rgba(245,242,234,0.10) 0%, rgba(245,242,234,0.00) 32%, rgba(245,242,234,0.30) 72%, rgba(245,242,234,0.88) 92%, #F5F2EA 100%)",
+            "linear-gradient(180deg, rgba(245,242,234,0.10) 0%, rgba(245,242,234,0.00) 34%, rgba(245,242,234,0.34) 74%, rgba(245,242,234,0.90) 93%, #F5F2EA 100%)",
         }}
       />
-      {/* ═══════════ Rangée basse : encre pleine, d'un bord à l'autre ═══════════
-          Elle était ivoire, et se lisait comme une page de texte blanche posée sous une
-          photo — deux images, pas une. En encre elle devient le socle de la composition :
-          la photo claire au-dessus, la ligne dorée entre les deux, l'argumentaire dans le
-          sombre.
-
-          La bande couvre TOUTE la largeur du plan, débords compris. Un aplat qui
-          s'arrêterait à la largeur visible d'une colonne serait invisible sur la grille,
-          mais laisserait une bande claire de 34 px sur le côté de chaque tuile vue seule
-          dans le fil — et une bande sombre parasite sur le bord de sa voisine. */}
+      {/* Rangée basse en encre, sur TOUTE la largeur du plan, débords compris. Un
+          aplat qui s'arrêterait à la largeur visible d'une colonne laisserait une
+          bande claire de 34 px sur le bord de chaque tuile vue seule dans le fil. */}
       <div
         style={{
-          position: "absolute",
-          left: 0,
-          top: bas,
-          width: PLAN_L,
-          height: TUILE_H,
-          display: "flex",
-          background: COULEURS.encre,
+          position: "absolute", left: 0, top: bas, width: PLAN_L, height: TUILE_H,
+          display: "flex", background: COULEURS.encre,
         }}
       />
-
-      {/* Règle dorée à cheval sur les deux rangées : le raccord qui prouve à l'œil que les
-          six vignettes n'en font qu'une. Elle était en dégradé, s'éteignant sur les bords —
-          invisible depuis que la rangée basse est en encre, où c'est justement le contraste
-          qui la porte. Pleine, d'un bord à l'autre, elle traverse les trois tuiles. */}
+      {/* La règle dorée à cheval sur les deux rangées : le raccord qui prouve à l'œil
+          que les six vignettes n'en font qu'une. */}
       <div
         style={{
-          position: "absolute",
-          left: 0,
-          top: bas - 3,
-          width: PLAN_L,
-          height: 6,
-          display: "flex",
+          position: "absolute", left: 0, top: bas - 3, width: PLAN_L, height: 6, display: "flex",
           background: "linear-gradient(90deg, #C8901F 0%, #E0A63C 50%, #C8901F 100%)",
         }}
       />
 
-      {/* ═══════════ (0,0) — la marque, ce qu'elle fait, le volume du jour ═══════════
-          Publiée en DERNIER, donc en tête du profil et en tête du fil : c'est la tuile qui
-          doit expliquer BlackTurf à quelqu'un qui n'en a jamais entendu parler. La date
-          passe en surtitre, la promesse prend la place du titre. */}
-      <Carte x={col(0) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
-        <div
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}
-        >
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <div style={{ display: "flex", width: 14, height: 46, background: COULEURS.orVif }} />
-            <span
-              style={{
-                fontFamily: "Grotesk",
-                fontWeight: 700,
-                fontSize: 46,
-                color: COULEURS.encre,
-                marginLeft: 18,
-                letterSpacing: -1,
-              }}
-            >
-              BlackTurf
-            </span>
-          </div>
-          <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: COULEURS.or }}>
-            blackturf.fr
-          </span>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 64 }}>
-          <DateDuJour jour={d.semaine.periode} />
-          <span
-            style={{
-              fontFamily: "Grotesk",
-              fontWeight: 700,
-              fontSize: 74,
-              lineHeight: 1.08,
-              color: COULEURS.encre,
-              marginTop: 26,
-              letterSpacing: -2.5,
-            }}
-          >
-            Chaque course de la semaine, passée au calcul.
-          </span>
-          <span
-            style={{
-              fontFamily: "Grotesk",
-              fontWeight: 700,
-              fontSize: 74,
-              lineHeight: 1.08,
-              color: COULEURS.or,
-              letterSpacing: -2.5,
-            }}
-          >
-            Pas au feeling.
-          </span>
-        </div>
-
-        <div style={{ display: "flex", width: 120, height: 4, background: COULEURS.orVif, marginTop: 52 }} />
-
-        <div style={{ display: "flex", marginTop: 48 }}>
-          <div style={{ display: "flex", flexDirection: "column", width: 380 }}>
-            <span
-              style={{
-                fontFamily: "Grotesk",
-                fontWeight: 700,
-                fontSize: 104,
-                lineHeight: 1,
-                color: COULEURS.encre,
-                letterSpacing: -5,
-              }}
-            >
-              {d.semaine.nbCourses}
-            </span>
-            <span style={{ fontFamily: "Inter", fontSize: 26, color: COULEURS.encreDouce, marginTop: 10 }}>
-              courses analysées
-            </span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <span
-              style={{
-                fontFamily: "Grotesk",
-                fontWeight: 700,
-                fontSize: 104,
-                lineHeight: 1,
-                color: COULEURS.encre,
-                letterSpacing: -5,
-              }}
-            >
-              {d.semaine.nbHippodromes}
-            </span>
-            <span style={{ fontFamily: "Inter", fontSize: 26, color: COULEURS.encreDouce, marginTop: 10 }}>
-              hippodromes couverts
-            </span>
-          </div>
-        </div>
-
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 26,
-            lineHeight: 1.5,
-            color: COULEURS.encreDouce,
-            marginTop: 52,
-          }}
-        >
-          Arrivées et rapports officiels, course par course, en accès libre.
-        </span>
-      </Carte>
-
-      {/* ═══════════ (0,1) — le meilleur plan du jour ═══════════
-          La preuve. Misé, puis rendu, dans cet ordre, avec « le plan a rendu » écrit noir
-          sur blanc : c'est ce qui distingue un plan réglé aux rapports d'une promesse. */}
-      <Carte x={col(1) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
-        <Eyebrow>LE MEILLEUR PLAN DE LA SEMAINE</Eyebrow>
-        {/* La période sur la tuile qui porte les MONTANTS, pas seulement sur celle de
-            la marque : c'est ici qu'on demandera « de quelle semaine parlez-vous »,
-            et les six tuiles de la mosaïque parlent de six semaines différentes. */}
-        <div style={{ display: "flex", marginTop: 16 }}>
-          <DateDuJour jour={d.semaine.periode} taille="moyen" />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 62 }}>
-          {s.meilleur ? (
-            <LignePlan
-              p={{
-                hippodrome: s.meilleur.hippodrome,
-                code: s.meilleur.code,
-                mise: s.meilleur.mise,
-                retour: s.meilleur.retour,
-              }}
-              rang={1}
-            />
-          ) : null}
-        </div>
-        <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 76 }} />
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 26,
-            lineHeight: 1.5,
-            color: COULEURS.encreDouce,
-            marginTop: 34,
-          }}
-        >
-          {s.meilleur?.typePari ? `${s.meilleur.typePari}, calculé` : "Calculé"} avant le
-          départ et réglé aux rapports officiels du PMU. Les {s.nbPlans} plans de la
-          semaine sont publiés — les perdants aussi.
-        </span>
-        <div style={{ display: "flex", marginTop: 54 }}>
-          <Adresse />
-        </div>
-      </Carte>
-
-      {/* ═══════════ (0,2) — ce que l'analyse a valu ═══════════
-          Le chiffre qui tient dans la durée n'est pas un gain, c'est la qualité de
-          CLASSEMENT. Il est publié avec son dénominateur et avec le repère du hasard,
-          calculé sur le champ réel de chaque course : « 65,1 % » seul ne dit pas au
-          lecteur ce qu'il bat, et c'est cette comparaison qui fait la publication. */}
-      <Carte x={col(2) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
-        <Eyebrow>CE QUE L&apos;ANALYSE A VALU</Eyebrow>
-        <div style={{ display: "flex", marginTop: 16 }}>
-          <DateDuJour jour={d.semaine.periode} taille="moyen" />
-        </div>
-
-        <div style={{ display: "flex", alignItems: "baseline", marginTop: 54 }}>
-          <span
-            style={{
-              fontFamily: "Grotesk", fontWeight: 700, fontSize: 132, lineHeight: 1,
-              color: COULEURS.encre, letterSpacing: -5,
-            }}
-          >
-            {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
-          </span>
-          <span
-            style={{
-              fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
-              color: COULEURS.or, marginLeft: 6,
-            }}
-          >
-            %
-          </span>
-        </div>
-        <span
-          style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
-            color: COULEURS.encre, letterSpacing: -1, marginTop: 10,
-          }}
-        >
-          des courses où le gagnant
-        </span>
-        <span
-          style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
-            color: COULEURS.encre, letterSpacing: -1,
-          }}
-        >
-          était dans notre Top 3
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter", fontSize: 25, lineHeight: 1.5,
-            color: COULEURS.encreDouce, marginTop: 18,
-          }}
-        >
-          {s.nbTop3} courses sur {s.nbAnalysees} analysées
-          {s.hasardTop3 !== null
-            ? ` · un tirage au sort en trouverait ${pourcent(s.hasardTop3)} %`
-            : ""}
-        </span>
-
-        {s.meilleureJournee ? (
-          <span
-            style={{
-              fontFamily: "Inter", fontSize: 25, lineHeight: 1.5,
-              color: COULEURS.encreDouce, marginTop: 26,
-            }}
-          >
-            Meilleure journée : {s.meilleureJournee.jourLong}, {" "}
-            {pourcent(s.meilleureJournee.pctTop3)} % sur {s.meilleureJournee.nbCourses} courses.
-          </span>
-        ) : null}
-
-        <div style={{ display: "flex", marginTop: 30 }}>
-          <Adresse />
-        </div>
-      </Carte>
-
-      {/* ═══════════ (1,0) — ce que fait le site ═══════════
-          Cinq lignes, verbe en tête : ce n'est pas une liste de fonctions, c'est la liste
-          du travail que l'abonné ne fait plus lui-même. */}
-      <div
-        style={{ position: "absolute", left: col(0) + MARGE, top: bas + 112, width: utile, display: "flex" }}
-      >
-        <Eyebrow ton="sombre">CE QUE BLACKTURF FAIT, CHAQUE JOUR</Eyebrow>
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          left: col(0) + MARGE,
-          top: bas + 224,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <Atout
-          titre="Il lit le programme pour vous"
-          texte="80 critères par cheval, une probabilité calculée pour chaque partant, publiée avant le départ."
-        />
-        <Atout
-          titre="Il calcule sur VOTRE mise"
-          texte="Vous entrez votre budget, le plan de jeu se construit dessus. Aucun ticket type imposé."
-        />
-        <Atout
-          titre="Il compare les cotes"
-          texte="PMU et principaux opérateurs côte à côte : on voit où la cote décroche."
-        />
-        <Atout
-          titre="Il publie son bilan"
-          texte="Chaque plan est réglé aux rapports réels du PMU. Les journées rouges restent en ligne."
-        />
-        <Atout
-          titre="Il répond à vos questions"
-          texte="Une course, un partant, un type de pari : la réponse s'appuie sur vos données."
-        />
-      </div>
-      <div style={{ position: "absolute", left: col(0) + MARGE, top: bas + 1092, display: "flex" }}>
-        <Adresse ton="sombre" />
-      </div>
-
-      {/* ═══════════ (1,1) — l'argument que personne d'autre ne tient ═══════════
-          Fond sombre : c'est la tuile qui doit être crue. Elle annonce le prélèvement avant
-          de dire quoi que ce soit d'autre — c'est ce qui rend crédible tout le reste. */}
-      <div
-        style={{ position: "absolute", left: col(1) + MARGE, top: bas + 112, width: utile, display: "flex" }}
-      >
-        <Eyebrow ton="sombre">CE QU&apos;ON NE VOUS DIRA PAS AILLEURS</Eyebrow>
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 214,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Espace fine insécable entre le nombre et le signe : « 20 % » se coupait en fin
-            de ligne, le pourcentage se retrouvant seul sur la ligne suivante. */}
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 80,
-            lineHeight: 1.1,
-            color: COULEURS.surSombre,
-            letterSpacing: -2.5,
-          }}
-        >
-          Le PMU prélève environ
-        </span>
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 80,
-            lineHeight: 1.1,
-            color: COULEURS.orVif,
-            letterSpacing: -2.5,
-          }}
-        >
-          20&#8239;% des enjeux.
-        </span>
-
-        <div
-          style={{ display: "flex", width: 96, height: 3, background: COULEURS.ligneSombre, marginTop: 50 }}
-        />
-
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 29,
-            lineHeight: 1.55,
-            color: COULEURS.surSombreDoux,
-            marginTop: 44,
-          }}
-        >
-          Personne ne peut promettre un gain régulier là-dessus. Qui vous le promet vous ment,
-          ou ne sait pas compter.
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 29,
-            lineHeight: 1.55,
-            color: COULEURS.surSombreDoux,
-            marginTop: 32,
-          }}
-        >
-          Ce qui se mesure, en revanche, c&apos;est l&apos;écart entre la probabilité réelle
-          d&apos;un cheval et celle qu&apos;implique sa cote.
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 29,
-            lineHeight: 1.55,
-            color: COULEURS.surSombre,
-            marginTop: 32,
-          }}
-        >
-          C&apos;est ce que BlackTurf calcule, course par course — et ce qu&apos;il publie
-          ensuite, résultat en main.
-        </span>
-      </div>
-      {/* La phrase qui doit rester en tête. C'est l'argument commercial du service, et le
-          seul qu'un concurrent ne peut pas copier sans montrer ses propres chiffres. */}
-      <div
-        style={{
-          position: "absolute",
-          left: col(1) + MARGE,
-          top: bas + 896,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div style={{ display: "flex", width: 96, height: 3, background: COULEURS.ligneSombre }} />
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 40,
-            lineHeight: 1.25,
-            color: COULEURS.orVif,
-            letterSpacing: -1,
-            marginTop: 32,
-          }}
-        >
-          Le seul service de pronostics qui publie aussi ses pertes.
-        </span>
-      </div>
-      <div style={{ position: "absolute", left: col(1) + MARGE, top: bas + 1092, display: "flex" }}>
-        <Adresse ton="sombre" />
-      </div>
-
-      {/* ═══════════ (1,2) — la conversion ═══════════
-          L'ordre compte : la promesse, puis le prix, puis l'adresse. Le bloc noir ferme la
-          composition dans l'angle bas-droit : c'est le seul aplat doré de tout le plan, et
-          il tombe sur le dernier bloc que l'œil rencontre. */}
-      <div
-        style={{ position: "absolute", left: col(2) + MARGE, top: bas + 112, width: utile, display: "flex" }}
-      >
-        <Eyebrow ton="sombre">COMMENCER</Eyebrow>
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          left: col(2) + MARGE,
-          top: bas + 210,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 100,
-            lineHeight: 1.04,
-            color: COULEURS.surSombre,
-            letterSpacing: -3.5,
-          }}
-        >
-          7 jours offerts
-        </span>
-        <span
-          style={{
-            fontFamily: "Inter",
-            fontSize: 28,
-            lineHeight: 1.5,
-            color: COULEURS.surSombreDoux,
-            marginTop: 26,
-          }}
-        >
-          Vous créez un compte, vous entrez votre budget : le plan du jour se calcule dessus.
-          Résiliable à tout moment.
-        </span>
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          left: col(2) + MARGE,
-          top: bas + 452,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {[
-          ["Découverte", "0 €", "programme, cotes, arrivées"],
-          ["Standard", "12 €/mois", "prédictions et plan de mise"],
-          ["Expert", "19 €/mois", "paris de valeur en temps réel"],
-        ].map(([nom, prix, quoi]) => (
+      {/* ═══════════ Les six bilans ═══════════
+          `rang` suit l'ORDRE DE PUBLICATION, pas l'ordre de lecture : Instagram
+          empile de la plus récente à la plus ancienne, en haut à gauche. La première
+          publiée (semaine 1) se retrouve donc en bas à droite. */}
+      {ORDRE_TUILES.map((cle, i) => {
+        const [r, c] = cle.split("-").map(Number);
+        return (
           <div
-            key={nom}
+            key={cle}
             style={{
+              position: "absolute",
+              left: col(c) + CARTE_X,
+              top: r * TUILE_H + CARTE_Y,
+              width: CARTE_L,
+              height: CARTE_H,
               display: "flex",
-              flexDirection: "column",
-              paddingTop: 22,
-              paddingBottom: 22,
-              borderTop: `1px solid ${COULEURS.ligneSombre}`,
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
-              <span
-                style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 34, color: COULEURS.surSombre }}
-              >
-                {nom}
-              </span>
-              <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 34, color: COULEURS.orVif }}>
-                {prix}
-              </span>
-            </div>
-            <span style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.surSombreDoux, marginTop: 4 }}>
-              {quoi}
-            </span>
+            <CarteSemaine s={s} rang={i + 1} total={ORDRE_TUILES.length} ton={r === 0 ? "clair" : "sombre"} />
           </div>
-        ))}
-      </div>
+        );
+      })}
 
-      <div
-        style={{
-          position: "absolute",
-          left: col(2) + MARGE,
-          top: bas + 872,
-          width: utile,
-          display: "flex",
-          flexDirection: "column",
-          padding: "40px 46px",
-          borderRadius: 22,
-          background: COULEURS.orVif,
-        }}
-      >
-        <span style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 25, color: "#4A3504" }}>
-          Le programme du jour est déjà en ligne
-        </span>
-        <span
-          style={{
-            fontFamily: "Grotesk",
-            fontWeight: 700,
-            fontSize: 70,
-            color: "#1B1405",
-            marginTop: 8,
-            letterSpacing: -2,
-          }}
-        >
-          blackturf.fr
-        </span>
-      </div>
-
-      {/* ═══════════ Mention de jeu responsable, rangée HAUTE ═══════════
-          Elle n'existait que dans la rangée basse : les trois tuiles du haut partaient donc
-          sans mention alors qu'elles sont publiées séparément, et que dans le fil personne
-          ne voit jamais les six ensemble. Chaque colonne porte la mention entière, à
-          l'identique — un bandeau légal se répète, il ne se découpe pas. Elle se pose dans
-          le fondu de la photo, où le fond est déjà presque ivoire. */}
+      {/* ═══════════ Mention légale, sur chaque colonne des DEUX rangées ═══════════
+          Chaque tuile est publiée séparément : la mention se répète, elle ne se
+          découpe pas. En haut elle se pose dans le fondu, où le fond est déjà ivoire. */}
       {[0, 1, 2].map((c) => (
         <div
           key={`legal-haut-${c}`}
           style={{
-            position: "absolute",
-            left: col(c) + MARGE,
-            top: TUILE_H - 118,
-            width: utile,
-            display: "flex",
+            position: "absolute", left: col(c) + MARGE_LEGALE, top: TUILE_H - 128,
+            width: VISIBLE_L - MARGE_LEGALE * 2, display: "flex",
           }}
         >
-          {/* Espaces insécables dans le numéro d'aide : il se coupait en fin de ligne, le
-              dernier « 13 » se retrouvant seul sur la ligne suivante. */}
-          <span style={{ fontFamily: "Inter", fontSize: 22, lineHeight: 1.45, color: COULEURS.encreDouce }}>
-            Jouer comporte des risques : endettement, isolement, dépendance.
-            09&#160;74&#160;75&#160;13&#160;13, appel non surtaxé. Interdit aux mineurs.
+          <span style={{ fontFamily: "Inter", fontSize: 22, lineHeight: 1.45, color: COULEURS.encreTenue }}>
+            Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
+            risques : endettement, isolement, dépendance. 09 74 75 13 13. Interdit aux mineurs.
           </span>
         </div>
       ))}
-
-      {/* ═══════════ Le bilan de la semaine, sur les TROIS tuiles sombres ═══════════
-          POURQUOI ICI AUSSI, ET PAS SEULEMENT SUR LA RANGÉE HAUTE.
-          L'ordre de publication est imposé par la grille d'Instagram : la rangée
-          sombre part la PREMIÈRE (1-2, puis 1-1, puis 1-0). Sans ce bandeau, les
-          trois premiers dimanches publieraient des tuiles de marque sans le moindre
-          chiffre — alors que la publication du dimanche EST le bilan de la semaine.
-          Chaque tuile porte donc sa période et ses trois chiffres, et se tient seule
-          dans le fil. */}
-      {[0, 1, 2].map((c) => (
-        <div
-          key={`semaine-bas-${c}`}
-          style={{
-            position: "absolute",
-            left: col(c) + MARGE,
-            top: BANDEAU - 132,
-            width: utile,
-            display: "flex",
-            flexDirection: "column",
-            paddingTop: 26,
-            borderTop: `1px solid ${COULEURS.ligneSombre}`,
-          }}
-        >
-          <span
-            style={{
-              fontFamily: "Inter", fontWeight: 600, fontSize: 22, letterSpacing: 2.6,
-              color: COULEURS.orVif,
-            }}
-          >
-            {`LA SEMAINE — ${s.periode}`.toUpperCase()}
-          </span>
-          <span
-            style={{
-              fontFamily: "Inter", fontSize: 24, lineHeight: 1.5,
-              color: COULEURS.surSombreDoux, marginTop: 10,
-            }}
-          >
-            {[
-              s.pctTop3 !== null
-                ? `${pourcent(s.pctTop3)} % de gagnants dans notre Top 3 sur ${s.nbAnalysees} courses`
-                : null,
-              s.meilleur
-                ? `meilleur plan ${euro(s.meilleur.mise)} € → ${euro(s.meilleur.retour)} €`
-                : null,
-              `${s.nbPlansGagnants} plans gagnants sur ${s.nbPlans}`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        </div>
-      ))}
-
-      {/* ═══════════ Bandeau légal continu, sur les trois colonnes ═══════════
-          Il traverse les trois vignettes basses, ce qui renforce l'effet « une seule
-          image », et referme la composition. */}
       <div
         style={{
-          position: "absolute",
-          left: 0,
-          top: BANDEAU,
-          width: PLAN_L,
-          height: 1,
-          display: "flex",
-          background: COULEURS.ligneSombre,
+          position: "absolute", left: 0, top: BANDEAU, width: PLAN_L, height: 1,
+          display: "flex", background: COULEURS.ligneSombre,
         }}
       />
-      <div
-        style={{ position: "absolute", left: col(0) + MARGE, top: BANDEAU + 46, width: utile, display: "flex" }}
-      >
-        <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.45, color: COULEURS.surSombreTenu }}>
-          Jouer comporte des risques : endettement, isolement, dépendance.
-        </span>
-      </div>
-      <div
-        style={{ position: "absolute", left: col(1) + MARGE, top: BANDEAU + 46, width: utile, display: "flex" }}
-      >
-        <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.45, color: COULEURS.surSombreTenu }}>
-          Pour être aidé : 09 74 75 13 13, appel non surtaxé. Interdit aux mineurs.
-        </span>
-      </div>
-      <div
-        style={{ position: "absolute", left: col(2) + MARGE, top: BANDEAU + 46, width: utile, display: "flex" }}
-      >
-        <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.45, color: COULEURS.surSombreTenu }}>
-          BlackTurf est un outil d&apos;aide à la décision, pas une garantie de gain.
-        </span>
-      </div>
+      {[0, 1, 2].map((c) => (
+        <div
+          key={`legal-bas-${c}`}
+          style={{
+            position: "absolute", left: col(c) + MARGE_LEGALE, top: BANDEAU + 34,
+            width: VISIBLE_L - MARGE_LEGALE * 2, display: "flex",
+          }}
+        >
+          <span style={{ fontFamily: "Inter", fontSize: 22, lineHeight: 1.45, color: COULEURS.surSombreTenu }}>
+            Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
+            risques : endettement, isolement, dépendance. 09 74 75 13 13. Interdit aux mineurs.
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
 
+/** Marge des mentions légales, plus large que celle des cartes : elles courent d'un
+ *  bord à l'autre de la colonne visible, pas dans une carte. */
+const MARGE_LEGALE = 76;
+
+/** Les six tuiles, dans l'ORDRE DE PUBLICATION (à l'envers de l'ordre de lecture). */
+const ORDRE_TUILES = ["1-2", "1-1", "1-0", "0-2", "0-1", "0-0"] as const;
 /** Enveloppe d'une tuile : une fenêtre 1080 × 1350 ouverte sur le plan d'ensemble. */
 export function Tuile({ d, rangee, colonne }: { d: DonneesMosaique; rangee: number; colonne: number }) {
   return (
