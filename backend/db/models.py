@@ -1303,7 +1303,8 @@ class EnjeuxCourseHistorique(Base):
     # national répond 204 — toute l'offre de soirée, et des réunions entières).
     # Les deux ne se comparent PAS : sur 06092026R8C4, 42 658 € au national pour
     # 8 119 € en ligne. NULL = relevé antérieur au 2026-09-06, donc "total".
-    perimetre: Mapped[str | None] = mapped_column(String(10))
+    # 20 et non 10 : « international » fait 13 caractères (cf. migration 0048).
+    perimetre: Mapped[str | None] = mapped_column(String(20))
     # Paris à plusieurs chevaux : {"COUPLE_GAGNANT": [[[3, 5], 141284], ...]}.
     # Le simple gagnant ne pèse qu'un tiers de l'argent d'une course.
     combines: Mapped[dict | None] = mapped_column(JSON)
