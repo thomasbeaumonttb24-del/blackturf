@@ -110,11 +110,12 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
     nbPlans: s.nbPlans,
     nbReunions: s.nbHippodromes,
     plans: [],
-    // Le fond de la mosaïque est une TEXTURE, pas une scène : flou léger, contraste
-    // rabattu, luminosité relevée. Sans ça, les six tuiles héritent des écarts de
-    // lumière de la photo et ne se ressemblent plus d'une case à l'autre.
+    // Le fond reste NET : c'est ce qui permet de voir, d'une vignette à la suivante,
+    // qu'un cheval ou une lice continue au-delà du bord — donc de reconnaître une
+    // seule image. Assombri un peu, saturé un peu : la carte est blanche, il lui faut
+    // un fond sombre, et les casaques colorées font les points de repère.
     photo: await photoEnDataUri(photoDuCycle(cycle), {
-      largeur: PLAN_L, hauteur: PLAN_H, luminosite: 1.16, contraste: 0.62, flou: 14,
+      largeur: PLAN_L, hauteur: PLAN_H, luminosite: 0.92, saturation: 1.14,
     }),
     // Le VRAI logo, rogné de sa marge blanche. `logo.png` du dossier public ne fait
     // que 160 × 87 : le médaillon y occupe 70 px et baverait. Celui-ci est la source

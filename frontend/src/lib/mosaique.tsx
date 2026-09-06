@@ -161,19 +161,24 @@ export function photoDuJour(jour: string): string {
  *
  * Toutes en PAYSAGE, comme le fonds quotidien — même raison, la même règle.
  */
-// Ordre choisi À L'ŒIL sur les fonds RÉELLEMENT TRAITÉS (flou + contraste rabattu),
-// pas sur les originaux : ce qui compte est l'homogénéité de la luminosité une fois
-// la photo devenue texture. `attele-tribunes` ouvre le cycle — ciel, herbe, sable en
-// trois bandes calmes, sans creux d'ombre d'un côté et zone brûlée de l'autre.
+// Fonds de mosaïque : SOMBRES, NETS, avec des couleurs franches.
+//
+// Les cartes sont blanches : il leur faut un fond sombre pour ressortir. Et il doit
+// rester NET — c'est la seule façon de voir, d'une vignette à l'autre, qu'un cheval
+// ou une lice continue au-delà du bord. Une texture floue ne se recolle pas à l'œil,
+// et c'est pourtant tout l'intérêt d'une mosaïque.
+//
+// Les courses de NUIT réunissent les deux : fond sombre par nature, casaques
+// colorées qui donnent les points de repère.
 const PHOTOS_MOSAIQUE = [
-  "mosaique/attele-tribunes.jpg",
-  "mosaique/attele-sable.jpg",
-  "mosaique/galop-piste-claire.jpg",
-  "mosaique/galop-foule.jpg",
+  "mosaique/nuit-duel.jpg",
+  "mosaique/nuit-arrivee.jpg",
   "mosaique/galop-stalles.jpg",
+  "mosaique/attele-groupe.jpg",
+  "mosaique/galop-foule.jpg",
   "mosaique/attele-peloton.jpg",
   "mosaique/galop-shakopee.jpg",
-  "mosaique/attele-groupe.jpg",
+  "mosaique/attele-tribunes.jpg",
 ] as const;
 
 export function photoDuCycle(cycle: number): string {
@@ -212,9 +217,9 @@ export function photoDuCycle(cycle: number): string {
  */
 export async function photoEnDataUri(
   fichier: string,
-  { largeur = 1800, hauteur = 900, luminosite = 1.18, ancrage, flou, contraste }:
-    { largeur?: number; hauteur?: number; luminosite?: number; ancrage?: number;
-      flou?: number; contraste?: number } = {},
+  { largeur = 1800, hauteur = 900, luminosite = 1.18, saturation = 1.02, ancrage, flou, contraste }:
+    { largeur?: number; hauteur?: number; luminosite?: number; saturation?: number;
+      ancrage?: number; flou?: number; contraste?: number } = {},
 ): Promise<string | null> {
   try {
     const chemin = path.join(process.cwd(), "public", "img", fichier);
@@ -246,7 +251,7 @@ export async function photoEnDataUri(
     // tuiles, elle donne six vignettes qui ne se ressemblent pas. Un flou léger et un
     // contraste rabattu la transforment en TEXTURE homogène : elle reste une photo de
     // course, elle cesse d'être une scène qui concurrence les cartes.
-    let travail = cadre.modulate({ brightness: luminosite, saturation: 1.02 });
+    let travail = cadre.modulate({ brightness: luminosite, saturation });
     if (contraste !== undefined) {
       // `linear(a, b)` : sortie = a × entrée + b. a < 1 rabat le contraste, b relève
       // le point noir — c'est ce couple qui supprime les trous d'ombre.
@@ -981,10 +986,13 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
 
   // Les cartes laissent de la photo visible autour d'elles : sans cette respiration,
   // la mosaïque se lirait comme six vignettes collées, pas comme une image.
-  const CARTE_X = 52;
+  // Marges généreuses AUTOUR des cartes : c'est la photo laissée visible entre les
+  // vignettes qui rend le raccord lisible. Trop de carte, et la mosaïque cesse de se
+  // voir — on ne regarde plus que six encarts blancs.
+  const CARTE_X = 74;
   const CARTE_L = VISIBLE_L - CARTE_X * 2;
-  const CARTE_Y = 96;
-  const CARTE_H = 1090;
+  const CARTE_Y = 132;
+  const CARTE_H = 1022;
 
   const s = d.semaine;
 
@@ -1014,10 +1022,9 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
       <div
         style={{
           position: "absolute", left: 0, top: 0, width: PLAN_L, height: PLAN_H,
-          // Voile IVOIRE et non sombre : les cartes sont claires, un voile noir les
-          // ferait flotter sur un trou. Il éclaircit la photo juste assez pour que le
-          // blanc des cartes ne paraisse pas sale, sans la transformer en texture.
-          display: "flex", background: "rgba(245,242,234,0.30)",
+          // Voile SOMBRE et léger : il assied les blancs de la carte sans effacer les
+          // couleurs des casaques, qui sont les points de repère de la mosaïque.
+          display: "flex", background: "rgba(10,12,16,0.28)",
         }}
       />
 
@@ -1055,7 +1062,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           style={{
             position: "absolute", left: 0, top: r * TUILE_H + TUILE_H - 210,
             width: PLAN_L, height: 210, display: "flex",
-            background: "linear-gradient(180deg, rgba(245,242,234,0) 0%, rgba(245,242,234,0.88) 55%, rgba(245,242,234,0.97) 100%)",
+            background: "linear-gradient(180deg, rgba(10,12,16,0) 0%, rgba(10,12,16,0.72) 55%, rgba(10,12,16,0.88) 100%)",
           }}
         />
       ))}
@@ -1078,7 +1085,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
             <span
               style={{
                 fontFamily: "Inter", fontSize: 21, lineHeight: 1.4,
-                color: COULEURS.encreTenue,
+                color: "rgba(232,228,218,0.72)",
               }}
             >
               Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
