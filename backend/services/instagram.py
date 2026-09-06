@@ -165,9 +165,34 @@ async def _attendre_conteneur(
     return False, f"conteneur toujours pas prêt après {int(essais * pause)} s"
 
 
-async def publier_image(url_image: str, legende: str) -> ResultatPublication:
+async def publier_story(url_image: str) -> ResultatPublication:
+    """
+    Publie une STORY (24 h, hors du fil) sur le compte Instagram configuré.
+
+    Même mécanique en deux temps que le fil ; une seule chose change, et c'est ce qui
+    manquait : `media_type=STORIES` à la création du conteneur. Sans lui, l'API crée
+    un post de fil — c'est le blocage qui a empêché toute publication de story
+    jusqu'au 2026-09-06.
+
+    AUCUNE LÉGENDE N'EST ENVOYÉE : une story n'en affiche pas, et la documentation de
+    Meta ne définit pas le comportement de `caption` pour ce type. Envoyer un champ
+    dont on ne sait pas ce qu'il devient sur une publication de marque, c'est deux
+    fois trop de risque pour zéro bénéfice.
+
+    Vérifié dans la documentation Meta le 2026-09-06 : `POST /{ig_id}/media` avec
+    `media_type=STORIES` + `image_url`, puis `media_publish`, et cette voie existe
+    aussi bien sur `graph.instagram.com` (notre hôte) que sur `graph.facebook.com`.
+    """
+    return await publier_image(url_image, "", media_type="STORIES")
+
+
+async def publier_image(
+    url_image: str, legende: str, media_type: Optional[str] = None,
+) -> ResultatPublication:
     """
     Publie une image sur le compte Instagram configuré.
+
+    `media_type` : None pour le fil (comportement d'origine), "STORIES" pour une story.
 
     Best-effort : ne lève jamais. Le poste est appelé depuis un job programmé, et une
     exception non rattrapée y arrêterait les tâches suivantes.
@@ -194,10 +219,14 @@ async def publier_image(url_image: str, legende: str) -> ResultatPublication:
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
-            conteneur = await client.post(
-                f"{_base()}/{compte}/media",
-                data={"image_url": url_image, "caption": legende, "access_token": jeton},
-            )
+            # `caption` n'est envoyé QUE pour le fil : une story n'affiche pas de
+            # légende, et Meta ne définit pas ce qu'il fait du champ dans ce cas.
+            corps = {"image_url": url_image, "access_token": jeton}
+            if media_type:
+                corps["media_type"] = media_type
+            else:
+                corps["caption"] = legende
+            conteneur = await client.post(f"{_base()}/{compte}/media", data=corps)
             if conteneur.status_code != 200:
                 log.warning(
                     "instagram.conteneur.refuse",

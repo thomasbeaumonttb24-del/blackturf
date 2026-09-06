@@ -27,7 +27,7 @@ class _Reponse:
         return self._payload
 
 
-def _client(appels, reponses, statuts=None):
+def _client(appels, reponses, statuts=None, corps=None):
     """
     Double du client httpx.
 
@@ -50,6 +50,8 @@ def _client(appels, reponses, statuts=None):
 
         async def post(self, url, data=None):
             appels.append(url)
+            if corps is not None:
+                corps.append(data or {})
             return reponses.pop(0)
 
         async def get(self, url, params=None):
@@ -303,3 +305,65 @@ async def test_le_jeton_reel_en_base_est_inatteignable_sous_pytest(monkeypatch):
     res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
     assert res.publie is False
     assert "jeton" in (res.raison or "")
+
+
+# ── Stories ─────────────────────────────────────────────────────────────────
+# Une story n'est pas un post de fil : c'est le MÊME endpoint, avec
+# `media_type=STORIES` à la création du conteneur. Sans ce champ, l'API crée un post
+# de fil — c'est ce qui a empêché toute publication de story jusqu'au 2026-09-06,
+# et le défaut est invisible côté code : l'appel réussit, il publie simplement au
+# mauvais endroit.
+
+async def test_une_story_declare_son_type_a_la_creation_du_conteneur(monkeypatch):
+    _configurer(monkeypatch, actif=True)
+    appels: list[str] = []
+    corps: list[dict] = []
+    reponses = [_Reponse(200, {"id": "conteneur-s"}), _Reponse(200, {"id": "media-s"})]
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client(appels, reponses, corps=corps))
+
+    res = await instagram.publier_story("https://blackturf.fr/visuels/story.jpg?jour=2026-09-05")
+
+    assert res.publie is True and res.media_id == "media-s"
+    assert corps[0]["media_type"] == "STORIES", "sans ce champ, Meta publie dans le FIL"
+    assert corps[0]["image_url"].endswith("jour=2026-09-05")
+
+
+async def test_une_story_ne_transporte_aucune_legende(monkeypatch):
+    """Une story n'affiche pas de légende, et Meta ne documente pas ce qu'il fait du
+    champ dans ce cas. Envoyer sur une publication de marque un champ dont on ignore
+    le devenir, c'est deux fois trop de risque pour zéro bénéfice."""
+    _configurer(monkeypatch, actif=True)
+    corps: list[dict] = []
+    reponses = [_Reponse(200, {"id": "c"}), _Reponse(200, {"id": "m"})]
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client([], reponses, corps=corps))
+
+    await instagram.publier_story("https://blackturf.fr/visuels/story.jpg")
+
+    assert "caption" not in corps[0]
+
+
+async def test_le_fil_garde_sa_legende_et_ne_declare_pas_de_type(monkeypatch):
+    """Garde de non-régression : l'ajout des stories ne doit rien changer au fil."""
+    _configurer(monkeypatch, actif=True)
+    corps: list[dict] = []
+    reponses = [_Reponse(200, {"id": "c"}), _Reponse(200, {"id": "m"})]
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client([], reponses, corps=corps))
+
+    await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert corps[0]["caption"] == "Bonjour"
+    assert "media_type" not in corps[0]
+
+
+async def test_une_story_ne_part_pas_non_plus_sans_interrupteur(monkeypatch):
+    """Le garde-fou central vaut aussi pour les stories : la nouvelle voie ne doit pas
+    contourner l'interrupteur."""
+    _configurer(monkeypatch, actif=False)
+    appels: list[str] = []
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client(appels, []))
+
+    res = await instagram.publier_story("https://blackturf.fr/visuels/story.jpg")
+
+    assert res.publie is False
+    assert "simulation" in (res.raison or "")
+    assert appels == []

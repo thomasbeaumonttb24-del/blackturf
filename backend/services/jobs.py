@@ -592,6 +592,24 @@ def start_scheduler() -> None:
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    # Story de bilan — TOUTES LES DEMI-HEURES de 22 h à 10 h, Paris.
+    #
+    # Pas un horaire fixe, et ce n'est pas de la prudence : le moment où une journée
+    # devient publiable varie de plusieurs heures. Les dernières courses se courent
+    # jusqu'à 23 h 30, et le rattrapage nocturne règle encore au petit matin — le
+    # 2026-09-06, les 165 derniers plans du 5 n'ont été réglés qu'à 04 h 19. Le job
+    # repasse donc et publie la première journée qui remplit la condition ; l'unicité
+    # (jour, canal) en base garantit qu'il n'y en aura qu'une.
+    scheduler.add_job(
+        job_publication_story,
+        CronTrigger(hour="22,23,0-9", minute="0,30", timezone="Europe/Paris"),
+        id="publication_story",
+        replace_existing=True,
+        # Pas de rattrapage tardif : si le conteneur était à l'arrêt, le passage
+        # suivant est à trente minutes. Rejouer un passage manqué n'apporte rien et
+        # publierait à une heure imprévisible.
+        misfire_grace_time=600,
+    )
     scheduler.add_job(
         job_publication_soir,
         CronTrigger(hour=20, minute=45, timezone="Europe/Paris"),
@@ -730,6 +748,125 @@ async def job_publication_matin() -> None:
 
 async def job_publication_soir() -> None:
     await job_publication_reseaux("soir")
+
+
+# Canal de la story de bilan dans `publications_sociales`.
+CANAL_STORY = "story_performance"
+
+
+async def job_publication_story() -> None:
+    """
+    Publie la story de bilan de la dernière journée COURUE ET RÉGLÉE — une par jour.
+
+    POURQUOI CE JOB REPASSE au lieu de tourner une fois le soir : le moment où une
+    journée devient publiable n'a pas d'heure fixe. Les dernières courses du programme
+    sont sud-américaines et se courent jusqu'à 23 h 30 ; surtout, les rapports Multi
+    sont publiés en différé et le rattrapage nocturne règle encore au petit matin — le
+    2026-09-06, les 165 derniers plans du 5 n'ont été réglés qu'à 04 h 19. Un job à
+    23 h aurait publié un total faux, ou rien du tout.
+
+    Il repasse donc toutes les demi-heures sur une fenêtre de nuit et publie la
+    PREMIÈRE journée qui remplit la condition. `journee_complete` est lue sur l'API,
+    pas recalculée ici : deux définitions de « la journée est finie » finiraient par
+    diverger, et c'est celle qui décide de la publication qui aurait tort.
+
+    L'IDEMPOTENCE EST EN BASE, pas dans ce code. `publications_sociales` porte une
+    unicité (jour, canal) : deux passages, deux conteneurs, ou un redéploiement en
+    pleine nuit ne peuvent pas produire deux stories du même jour.
+    """
+    import uuid as _uuid
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    import httpx
+    from sqlalchemy import text as _text
+
+    from api.config import get_settings
+    from db.database import AsyncSessionLocal
+    from services.instagram import publier_story, publication_active, quota_restant
+    from services.temps_courses import jour_courses
+
+    # L'image doit être servie par une URL PUBLIQUE en https : Meta va la chercher
+    # lui-même, il ne reçoit aucun fichier. Un nom de service interne ne marcherait pas.
+    base = (get_settings().frontend_url or "https://blackturf.fr").rstrip("/")
+    # L'API, elle, se lit en interne. `Host` explicite : en production le middleware
+    # TrustedHost refuse tout hôte inconnu (« Invalid host header »).
+    API_INTERNE = "http://api:8000/api/v1/stats/meilleurs-plans-jour"
+
+    # Aujourd'hui d'abord, la veille ensuite : au petit matin c'est la veille qui vient
+    # de devenir publiable, mais en fin de soirée ce peut être le jour courant.
+    candidats = [jour_courses().isoformat(), (jour_courses() - _td(days=1)).isoformat()]
+
+    async with AsyncSessionLocal() as session:
+        # ON NE REVIENT JAMAIS EN ARRIÈRE. Sans cette borne, le passage qui suit la
+        # publication du jour J sautait J (déjà publié) et publiait J−1 : une story
+        # d'avant-hier surgissant à 5 h du matin, puis une autre la nuit suivante.
+        # Le défaut a été trouvé par le test d'idempotence, pas en production.
+        dernier = (await session.execute(_text(
+            "SELECT MAX(jour) FROM publications_sociales "
+            "WHERE canal = :c AND publie_at IS NOT NULL"
+        ), {"c": CANAL_STORY})).scalar()
+
+        for jour in candidats:
+            if dernier and jour <= dernier:
+                continue  # ce jour-là, ou un plus récent, est déjà parti
+
+            deja = (await session.execute(_text(
+                "SELECT publie_at FROM publications_sociales "
+                "WHERE jour = :j AND canal = :c"
+            ), {"j": jour, "c": CANAL_STORY})).first()
+            if deja and deja[0] is not None:
+                continue  # déjà publiée : on ne repasse jamais dessus
+
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    r = await client.get(API_INTERNE, params={"jour": jour},
+                                         headers={"Host": "api.blackturf.fr"})
+                    r.raise_for_status()
+                    d = r.json()
+            except Exception as e:  # noqa: BLE001
+                log.warning("jobs.story.bilan_indisponible", jour=jour, err=str(e)[:160])
+                continue
+
+            if not d.get("journee_complete") or not int(d.get("nb_plans") or 0):
+                log.info("jobs.story.pas_encore", jour=jour,
+                         reste=d.get("reste_a_venir"), nb_plans=d.get("nb_plans"))
+                continue
+
+            url = f"{base}/visuels/story.jpg?jour={jour}"
+            resultat = await publier_story(url)
+
+            # La ligne est écrite QUE ÇA MARCHE OU NON : un échec sans trace se répète
+            # en silence, et personne ne saurait qu'un jeton a expiré.
+            await session.execute(_text("""
+                INSERT INTO publications_sociales
+                    (publication_id, jour, canal, media_id, publie_at,
+                     derniere_tentative_at, nb_tentatives, derniere_raison)
+                VALUES (:id, :j, :c, :m, :p, :maintenant, 1, :r)
+                ON CONFLICT (jour, canal) DO UPDATE SET
+                    media_id = COALESCE(EXCLUDED.media_id, publications_sociales.media_id),
+                    publie_at = COALESCE(publications_sociales.publie_at, EXCLUDED.publie_at),
+                    derniere_tentative_at = :maintenant,
+                    nb_tentatives = publications_sociales.nb_tentatives + 1,
+                    derniere_raison = EXCLUDED.derniere_raison
+            """), {
+                "id": str(_uuid.uuid4()), "j": jour, "c": CANAL_STORY,
+                "maintenant": _dt.now(_tz.utc),
+                "m": resultat.media_id,
+                "p": _dt.now(_tz.utc) if resultat.publie else None,
+                "r": (resultat.raison or "")[:300] or None,
+            })
+            await session.commit()
+
+            log.info(
+                "jobs.story.publication",
+                jour=jour, actif=publication_active(), publie=bool(resultat),
+                media_id=resultat.media_id, raison=resultat.raison, url=url,
+                quota_restant=await quota_restant() if publication_active() else None,
+            )
+            # Une seule story par passage : deux d'un coup noieraient la plus récente.
+            return
+
+    log.info("jobs.story.rien_a_publier", candidats=candidats)
 
 
 async def job_renouveler_jetons() -> None:

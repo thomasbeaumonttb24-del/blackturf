@@ -1504,3 +1504,35 @@ class JetonIntegration(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PublicationSociale(Base):
+    """Journal des publications sociales — la mémoire qui empêche le doublon.
+
+    Le job de story repasse toutes les demi-heures, parce que le moment où la journée
+    devient publiable n'a pas d'heure fixe (le 2026-09-06, les derniers plans du 5 ont
+    été réglés à 04 h 19). Sans mémoire persistante, chaque passage republierait — et
+    un simple redéploiement suffirait à recommencer.
+
+    L'unicité (jour, canal) est portée par la BASE, pas par le code : c'est la seule
+    garantie qui survit à deux conteneurs qui tourneraient en même temps.
+    """
+    __tablename__ = "publications_sociales"
+
+    publication_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    # Jour PMU illustré, au format AAAA-MM-JJ.
+    jour: Mapped[str] = mapped_column(String(10), nullable=False)
+    canal: Mapped[str] = mapped_column(String(30), nullable=False)
+    media_id: Mapped[str | None] = mapped_column(String(64))
+    # NULL tant que rien n'est parti : le job peut donc retenter au passage suivant.
+    publie_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    derniere_tentative_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    nb_tentatives: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    derniere_raison: Mapped[str | None] = mapped_column(String(300))
+
+    __table_args__ = (
+        UniqueConstraint("jour", "canal", name="uq_publication_jour_canal"),
+        Index("ix_publications_sociales_canal_jour", "canal", "jour"),
+    )
