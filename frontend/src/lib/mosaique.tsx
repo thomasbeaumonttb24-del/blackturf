@@ -161,11 +161,15 @@ export function photoDuJour(jour: string): string {
  *
  * Toutes en PAYSAGE, comme le fonds quotidien — même raison, la même règle.
  */
+// Ordre choisi À L'ŒIL sur les fonds RÉELLEMENT TRAITÉS (flou + contraste rabattu),
+// pas sur les originaux : ce qui compte est l'homogénéité de la luminosité une fois
+// la photo devenue texture. `attele-tribunes` ouvre le cycle — ciel, herbe, sable en
+// trois bandes calmes, sans creux d'ombre d'un côté et zone brûlée de l'autre.
 const PHOTOS_MOSAIQUE = [
-  "mosaique/galop-foule.jpg",
-  "mosaique/attele-sable.jpg",
-  "mosaique/galop-stalles.jpg",
   "mosaique/attele-tribunes.jpg",
+  "mosaique/attele-sable.jpg",
+  "mosaique/galop-piste-claire.jpg",
+  "mosaique/galop-foule.jpg",
   "mosaique/galop-piste-claire.jpg",
   "mosaique/attele-peloton.jpg",
   "mosaique/galop-shakopee.jpg",
@@ -208,8 +212,9 @@ export function photoDuCycle(cycle: number): string {
  */
 export async function photoEnDataUri(
   fichier: string,
-  { largeur = 1800, hauteur = 900, luminosite = 1.18, ancrage }:
-    { largeur?: number; hauteur?: number; luminosite?: number; ancrage?: number } = {},
+  { largeur = 1800, hauteur = 900, luminosite = 1.18, ancrage, flou, contraste }:
+    { largeur?: number; hauteur?: number; luminosite?: number; ancrage?: number;
+      flou?: number; contraste?: number } = {},
 ): Promise<string | null> {
   try {
     const chemin = path.join(process.cwd(), "public", "img", fichier);
@@ -235,10 +240,20 @@ export async function photoEnDataUri(
         .extract({ left: 0, top, width: largeur, height: fenetre });
     }
 
-    const jpeg = await cadre
-      .modulate({ brightness: luminosite, saturation: 1.02 })
-      .jpeg({ quality: 82 })
-      .toBuffer();
+    // `flou` + `contraste` servent au FOND de la mosaïque, pas aux bandeaux.
+    // Une photo de course a des écarts de luminosité énormes d'un bord à l'autre —
+    // sous-bois sombre d'un côté, piste au soleil de l'autre. Étalée sur les six
+    // tuiles, elle donne six vignettes qui ne se ressemblent pas. Un flou léger et un
+    // contraste rabattu la transforment en TEXTURE homogène : elle reste une photo de
+    // course, elle cesse d'être une scène qui concurrence les cartes.
+    let travail = cadre.modulate({ brightness: luminosite, saturation: 1.02 });
+    if (contraste !== undefined) {
+      // `linear(a, b)` : sortie = a × entrée + b. a < 1 rabat le contraste, b relève
+      // le point noir — c'est ce couple qui supprime les trous d'ombre.
+      travail = travail.linear(contraste, 255 * (1 - contraste) * 0.62);
+    }
+    if (flou) travail = travail.blur(flou);
+    const jpeg = await travail.jpeg({ quality: 84 }).toBuffer();
     return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
   } catch {
     return null;
@@ -255,13 +270,17 @@ export async function photoEnDataUri(
  */
 export async function imageEnDataUri(
   fichier: string,
-  { largeur = 400 } = {},
+  { largeur = 400, rogner = false }: { largeur?: number; rogner?: boolean } = {},
 ): Promise<string | null> {
   try {
     const chemin = path.join(process.cwd(), "public", "img", fichier);
     const brut = await fs.readFile(chemin);
     const { default: sharp } = await import("sharp");
-    const png = await sharp(brut)
+    // `rogner` : le logo de marque est livré avec une large marge blanche autour du
+    // médaillon. Sans ce rognage, il occupe le tiers de la place pour un dixième de
+    // présence — et il faut le redimensionner à l'aveugle pour compenser.
+    const source = rogner ? sharp(brut).trim() : sharp(brut);
+    const png = await source
       .resize(largeur, null, { fit: "inside", withoutEnlargement: true })
       .png()
       .toBuffer();
@@ -715,7 +734,7 @@ function CarteSemaine({
         width: "100%",
         height: "100%",
         // Verre sombre : la photo reste lisible derrière, le texte reste lisible devant.
-        background: COULEURS.ivoire,
+        background: COULEURS.blanc,
         borderRadius: 30,
         padding: "44px 48px",
         border: `1px solid ${COULEURS.ligne}`,
@@ -725,38 +744,17 @@ function CarteSemaine({
       <div
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}
       >
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <div
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 62, height: 62, borderRadius: 31,
-              border: `2px solid ${COULEURS.or}`,
-            }}
-          >
-            {horse ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={horse} alt="" width={42} height={26} />
-            ) : null}
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", marginLeft: 14 }}>
-            <span
-              style={{
-                fontFamily: "Grotesk", fontWeight: 700, fontSize: 27,
-                letterSpacing: 1.6, color: COULEURS.encre,
-              }}
-            >
-              BLACK
-            </span>
-            <span
-              style={{
-                fontFamily: "Grotesk", fontWeight: 700, fontSize: 27,
-                letterSpacing: 1.6, color: COULEURS.or,
-              }}
-            >
-              TURF
-            </span>
-          </div>
-        </div>
+        {/* LE VRAI LOGO, tel quel. Il est livré sur fond BLANC : c'est pour lui que la
+            carte est blanche et non ivoire — sur l'ivoire, son fond ressortirait en
+            rectangle plus clair autour du médaillon. */}
+        {horse ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={horse} alt="BlackTurf" width={168} height={94} />
+        ) : (
+          <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 30, color: COULEURS.encre }}>
+            BlackTurf
+          </span>
+        )}
         <span
           style={{
             fontFamily: "Inter", fontWeight: 600, fontSize: 20, letterSpacing: 2.4,

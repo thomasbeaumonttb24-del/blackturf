@@ -104,8 +104,16 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
     // LA PHOTO SUIT LE CYCLE, PAS LA DATE : les six tuiles sont publiées à six
     // dimanches d'écart et doivent montrer la MÊME image, sinon les raccords ne
     // tombent pas. Elle couvre TOUT le plan (3104 × 2700), pas une bande.
-    photo: await photoEnDataUri(photoDuCycle(cycle), { largeur: PLAN_L, hauteur: PLAN_H, luminosite: 1.0 }),
-    horse: await imageEnDataUri("logo-horse.png", { largeur: 160 }),
+    // Le fond de la mosaïque est une TEXTURE, pas une scène : flou léger, contraste
+    // rabattu, luminosité relevée. Sans ça, les six tuiles héritent des écarts de
+    // lumière de la photo et ne se ressemblent plus d'une case à l'autre.
+    photo: await photoEnDataUri(photoDuCycle(cycle), {
+      largeur: PLAN_L, hauteur: PLAN_H, luminosite: 1.16, contraste: 0.62, flou: 14,
+    }),
+    // Le VRAI logo, rogné de sa marge blanche. `logo.png` du dossier public ne fait
+    // que 160 × 87 : le médaillon y occupe 70 px et baverait. Celui-ci est la source
+    // haute définition.
+    horse: await imageEnDataUri("logo-blackturf.png", { largeur: 360, rogner: true }),
   };
 }
 
