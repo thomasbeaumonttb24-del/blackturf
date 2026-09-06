@@ -111,7 +111,7 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
     // seule image. Assombri un peu, saturé un peu : la carte est blanche, il lui faut
     // un fond sombre, et les casaques colorées font les points de repère.
     photo: await photoEnDataUri(photoDuCycle(cycle), {
-      largeur: PLAN_L, hauteur: PLAN_H, luminosite: 0.92, saturation: 1.14,
+      largeur: PLAN_L, hauteur: PLAN_H, luminosite: 1.02, saturation: 1.16,
     }),
     // Le VRAI logo, rogné de sa marge blanche. `logo.png` du dossier public ne fait
     // que 160 × 87 : le médaillon y occupe 70 px et baverait. Celui-ci est la source

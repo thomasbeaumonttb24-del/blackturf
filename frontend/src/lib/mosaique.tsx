@@ -171,14 +171,16 @@ export function photoDuJour(jour: string): string {
 // Les courses de NUIT réunissent les deux : fond sombre par nature, casaques
 // colorées qui donnent les points de repère.
 const PHOTOS_MOSAIQUE = [
+  "mosaique/galop-stalles.jpg",
+  "mosaique/galop-piste-claire.jpg",
+  "mosaique/galop-foule.jpg",
+  "mosaique/attele-groupe.jpg",
+  "mosaique/galop-shakopee.jpg",
+  "mosaique/attele-peloton.jpg",
+  "mosaique/attele-tribunes.jpg",
+  "mosaique/attele-sable.jpg",
   "mosaique/nuit-duel.jpg",
   "mosaique/nuit-arrivee.jpg",
-  "mosaique/galop-stalles.jpg",
-  "mosaique/attele-groupe.jpg",
-  "mosaique/galop-foule.jpg",
-  "mosaique/attele-peloton.jpg",
-  "mosaique/galop-shakopee.jpg",
-  "mosaique/attele-tribunes.jpg",
 ] as const;
 
 export function photoDuCycle(cycle: number): string {
@@ -747,7 +749,7 @@ function CarteSemaine({
         // Verre sombre : la photo reste lisible derrière, le texte reste lisible devant.
         background: COULEURS.blanc,
         borderRadius: 30,
-        padding: "44px 48px",
+        padding: "34px 38px",
         border: `1px solid ${COULEURS.ligne}`,
       }}
     >
@@ -762,7 +764,7 @@ function CarteSemaine({
           // eslint-disable-next-line @next/next/no-img-element
           // 600 × 590 une fois rogné : le médaillon est CARRÉ. Lui imposer un rapport
           // large l'écrasait — le cercle du logo sortait en ellipse.
-          <img src={horse} alt="BlackTurf" width={122} height={120} />
+          <img src={horse} alt="BlackTurf" width={106} height={104} />
         ) : (
           <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 30, color: COULEURS.encre }}>
             BlackTurf
@@ -773,7 +775,7 @@ function CarteSemaine({
             publications ne peuvent pas porter le même numéro. */}
         <span
           style={{
-            fontFamily: "Inter", fontWeight: 600, fontSize: 20, letterSpacing: 2.4,
+            fontFamily: "Inter", fontWeight: 600, fontSize: 19, letterSpacing: 2.2,
             color: COULEURS.or,
           }}
         >
@@ -782,31 +784,31 @@ function CarteSemaine({
       </div>
 
       {/* ── La période ──────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", marginTop: 24 }}>
+      <div style={{ display: "flex", marginTop: 18 }}>
         <Surtitre>PERFORMANCE DE LA SEMAINE</Surtitre>
       </div>
       <span
         style={{
-          fontFamily: "Grotesk", fontWeight: 700, fontSize: 38,
-          color: COULEURS.encre, letterSpacing: -1, marginTop: 12,
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 34,
+          color: COULEURS.encre, letterSpacing: -1, marginTop: 10,
         }}
       >
         {s.periode}
       </span>
 
       {/* ── Le chiffre de tête ─────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "baseline", marginTop: 18 }}>
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 14 }}>
         <span
           style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 116, lineHeight: 1,
-            color: COULEURS.encre, letterSpacing: -5,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 100, lineHeight: 1,
+            color: COULEURS.encre, letterSpacing: -4.2,
           }}
         >
           {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
         </span>
         <span
           style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 48,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 42,
             color: COULEURS.or, marginLeft: 5,
           }}
         >
@@ -815,7 +817,7 @@ function CarteSemaine({
       </div>
       <span
         style={{
-          fontFamily: "Grotesk", fontWeight: 700, fontSize: 33, lineHeight: 1.2,
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 29, lineHeight: 1.2,
           color: COULEURS.encre, letterSpacing: -0.8, marginTop: 6,
         }}
       >
@@ -823,7 +825,7 @@ function CarteSemaine({
       </span>
       <span
         style={{
-          fontFamily: "Grotesk", fontWeight: 700, fontSize: 33, lineHeight: 1.2,
+          fontFamily: "Grotesk", fontWeight: 700, fontSize: 29, lineHeight: 1.2,
           color: COULEURS.encre, letterSpacing: -0.8,
         }}
       >
@@ -831,8 +833,8 @@ function CarteSemaine({
       </span>
       <span
         style={{
-          fontFamily: "Inter", fontSize: 21, lineHeight: 1.4,
-          color: COULEURS.encreDouce, marginTop: 12,
+          fontFamily: "Inter", fontSize: 20, lineHeight: 1.4,
+          color: COULEURS.encreDouce, marginTop: 10,
         }}
       >
         {s.nbTop3} sur {s.nbAnalysees} courses analysées
@@ -843,7 +845,7 @@ function CarteSemaine({
       <div
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
-          width: "100%", marginTop: 22,
+          width: "100%", marginTop: 16,
         }}
       >
         <Chiffre
@@ -851,7 +853,7 @@ function CarteSemaine({
           unite={s.pctTop1 !== null ? "%" : undefined}
           legende={["notre favori a gagné"]}
         />
-        <div style={{ display: "flex", width: 1, height: 62, background: COULEURS.ligne }} />
+        <div style={{ display: "flex", width: 1, height: 54, background: COULEURS.ligne }} />
         <Chiffre valeur={s.nbPartants.toLocaleString("fr-FR").replace(/[  ]/g, " ")}
                  legende={["partants analysés"]} />
         <div style={{ display: "flex", width: 1, height: 62, background: COULEURS.ligne }} />
@@ -861,31 +863,31 @@ function CarteSemaine({
       <div
         style={{
           display: "flex", width: "100%", height: 1,
-          background: COULEURS.ligne, marginTop: 22,
+          background: COULEURS.ligne, marginTop: 16,
         }}
       />
 
       {/* ── L'argent : le meilleur gain, puis le total ──────────────────── */}
-      <div style={{ display: "flex", marginTop: 20 }}>
+      <div style={{ display: "flex", marginTop: 14 }}>
         <Surtitre>MEILLEUR GAIN DE LA SEMAINE</Surtitre>
       </div>
       {s.meilleur ? (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 10 }}>
           <div style={{ display: "flex", alignItems: "baseline" }}>
             <span
               style={{
-                fontFamily: "Grotesk", fontWeight: 700, fontSize: 40,
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 35,
                 color: COULEURS.encreTenue, letterSpacing: -1,
               }}
             >
               {euro(s.meilleur.mise)} €
             </span>
-            <span style={{ fontFamily: "Inter", fontSize: 30, color: COULEURS.or, margin: "0 16px" }}>
+            <span style={{ fontFamily: "Inter", fontSize: 26, color: COULEURS.or, margin: "0 14px" }}>
               →
             </span>
             <span
               style={{
-                fontFamily: "Grotesk", fontWeight: 700, fontSize: 62,
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
                 color: VERT_GAIN, letterSpacing: -2.2,
               }}
             >
@@ -894,7 +896,7 @@ function CarteSemaine({
           </div>
           <span
             style={{
-              fontFamily: "Inter", fontSize: 21, color: COULEURS.encreDouce, marginTop: 6,
+              fontFamily: "Inter", fontSize: 19, color: COULEURS.encreDouce, marginTop: 6,
             }}
           >
             {[s.meilleur.typePari, s.meilleur.hippodrome, s.meilleur.code]
@@ -904,7 +906,7 @@ function CarteSemaine({
         </div>
       ) : (
         <span
-          style={{ fontFamily: "Inter", fontSize: 21, color: COULEURS.encreDouce, marginTop: 12 }}
+          style={{ fontFamily: "Inter", fontSize: 19, color: COULEURS.encreDouce, marginTop: 10 }}
         >
           Aucun plan gagnant cette semaine.
         </span>
@@ -912,21 +914,21 @@ function CarteSemaine({
 
       {/* Le nombre de plans GAGNANTS ne sort jamais sans le nombre TOTAL calculé :
           sans dénominateur, la phrase se lirait comme si tous avaient gagné. */}
-      <div style={{ display: "flex", alignItems: "baseline", marginTop: 18 }}>
-        <span style={{ fontFamily: "Inter", fontSize: 22, color: COULEURS.encreDouce }}>
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 14 }}>
+        <span style={{ fontFamily: "Inter", fontSize: 20, color: COULEURS.encreDouce }}>
           Total rendu par les plans
         </span>
         <span
           style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38,
-            color: COULEURS.or, letterSpacing: -1.4, marginLeft: 14,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 34,
+            color: COULEURS.or, letterSpacing: -1.4, marginLeft: 12,
           }}
         >
           {euro(s.totalRetour)} €
         </span>
       </div>
       <span
-        style={{ fontFamily: "Inter", fontSize: 20, color: COULEURS.encreTenue, marginTop: 4 }}
+        style={{ fontFamily: "Inter", fontSize: 18, color: COULEURS.encreTenue, marginTop: 4 }}
       >
         {s.nbPlansGagnants} plans gagnants sur les {s.nbPlans} calculés · {s.nbCourses} courses
       </span>
@@ -939,22 +941,22 @@ function CarteSemaine({
       <div
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "16px 38px", borderRadius: 40, background: COULEURS.encre,
+          padding: "13px 32px", borderRadius: 40, background: COULEURS.encre,
           marginTop: "auto",
         }}
       >
-        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 30, color: COULEURS.surSombre }}>
+        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 26, color: COULEURS.surSombre }}>
           black
         </span>
-        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 30, color: COULEURS.orVif }}>
+        <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 26, color: COULEURS.orVif }}>
           turf.fr
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", marginTop: 10 }}>
-        <span style={{ fontFamily: "Inter", fontSize: 21, color: COULEURS.or }}>↑</span>
+      <div style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
+        <span style={{ fontFamily: "Inter", fontSize: 19, color: COULEURS.or }}>↑</span>
         <span
           style={{
-            fontFamily: "Inter", fontWeight: 600, fontSize: 21,
+            fontFamily: "Inter", fontWeight: 600, fontSize: 19,
             color: COULEURS.encreDouce, marginLeft: 8,
           }}
         >
@@ -968,9 +970,9 @@ function CarteSemaine({
           continu d'un bout à l'autre. */}
       <span
         style={{
-          display: "flex", width: "100%", textAlign: "center", marginTop: 18,
-          paddingTop: 14, borderTop: `1px solid `,
-          fontFamily: "Inter", fontSize: 17, lineHeight: 1.4, color: COULEURS.encreTenue,
+          display: "flex", width: "100%", textAlign: "center", marginTop: 12,
+          paddingTop: 10, borderTop: `1px solid `,
+          fontFamily: "Inter", fontSize: 15, lineHeight: 1.35, color: COULEURS.encreTenue,
         }}
       >
         Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
@@ -1004,10 +1006,13 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   // Marges généreuses AUTOUR des cartes : c'est la photo laissée visible entre les
   // vignettes qui rend le raccord lisible. Trop de carte, et la mosaïque cesse de se
   // voir — on ne regarde plus que six encarts blancs.
-  const CARTE_X = 74;
-  const CARTE_L = VISIBLE_L - CARTE_X * 2;
-  const CARTE_Y = 132;
-  const CARTE_H = 1110;
+  // La carte tient sur ~60 % de la surface visible de la tuile, et non 80 % : au-delà,
+  // la photo se réduit à un liseré et la mosaïque n'est plus reconnaissable — or c'est
+  // le raccord d'une vignette à l'autre qui fait tout l'intérêt de la série.
+  const CARTE_L = 808;
+  const CARTE_H = 1038;
+  const CARTE_X = Math.round((VISIBLE_L - CARTE_L) / 2); // 102
+  const CARTE_Y = 168;
 
   const s = d.semaine;
 
@@ -1039,7 +1044,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           position: "absolute", left: 0, top: 0, width: PLAN_L, height: PLAN_H,
           // Voile SOMBRE et léger : il assied les blancs de la carte sans effacer les
           // couleurs des casaques, qui sont les points de repère de la mosaïque.
-          display: "flex", background: "rgba(10,12,16,0.28)",
+          display: "flex", background: "rgba(10,12,16,0.12)",
         }}
       />
 
