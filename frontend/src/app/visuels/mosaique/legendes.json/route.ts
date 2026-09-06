@@ -114,13 +114,26 @@ export async function GET(req: Request) {
     );
   }
 
+  // Le podium, comme sur le visuel : la légende et l'image doivent dire la même
+  // chose. Une course n'y figure qu'une fois — le dédoublonnage est fait par l'API.
+  const podium = (Array.isArray(d.meilleurs_plans) ? d.meilleurs_plans : []) as Record<
+    string,
+    unknown
+  >[];
   if (m) {
     lignes.push(
       "Meilleur plan de la semaine : " +
         [m.type_pari, m.hippodrome, m.code].filter(Boolean).join(" · ") +
         ` — ${euro(Number(m.mise))} € misés, ${euro(Number(m.retour))} € rendus.`,
-      "",
     );
+    for (const p of podium.slice(1, 3)) {
+      lignes.push(
+        "Puis " +
+          [p.type_pari, p.hippodrome, p.code].filter(Boolean).join(" · ") +
+          ` — ${euro(Number(p.mise))} € misés, ${euro(Number(p.retour))} € rendus.`,
+      );
+    }
+    lignes.push("");
   }
 
   if (mj) {

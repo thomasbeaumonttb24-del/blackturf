@@ -621,6 +621,22 @@ def start_scheduler() -> None:
         # publierait à une heure imprévisible.
         misfire_grace_time=600,
     )
+    # Tuile hebdomadaire de la mosaïque — LE DIMANCHE, toutes les demi-heures de 8 h à
+    # 13 h, Paris. Même raison que la story : la semaine se termine le samedi soir mais
+    # le rattrapage nocturne règle encore au petit matin. Le job attend que le samedi
+    # soit déclaré complet, puis publie ; l'unicité (jour, canal) en base garantit
+    # qu'une semaine ne part qu'une fois, quel que soit le nombre de passages.
+    #
+    # UNE TUILE PUBLIÉE NE SE DÉPLACE PAS : c'est la seule automatisation du projet
+    # dont une erreur reste visible six semaines sur la grille du profil.
+    scheduler.add_job(
+        job_publication_mosaique,
+        CronTrigger(day_of_week="sun", hour="8-13", minute="0,30",
+                    timezone="Europe/Paris"),
+        id="publication_mosaique",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
     # Renouvellement des jetons d'integration — 04:20 Paris, tous les jours. Le job ne
     # renouvelle qu'a l'approche de l'echeance ; passer tous les jours sert a absorber
     # plusieurs echecs consecutifs avant que le jeton n'expire pour de bon.
@@ -755,6 +771,10 @@ async def job_publication_soir() -> None:
 
 # Canal de la story de bilan dans `publications_sociales`.
 CANAL_STORY = "story_performance"
+# Canal de la tuile hebdomadaire. Le `jour` porté par la ligne est le SAMEDI de fin
+# de semaine, pas le dimanche de publication : c'est la semaine qui est unique, et
+# c'est elle qui ne doit pas partir deux fois.
+CANAL_MOSAIQUE = "mosaique_hebdo"
 
 
 async def job_publication_story() -> None:
@@ -870,6 +890,119 @@ async def job_publication_story() -> None:
             return
 
     log.info("jobs.story.rien_a_publier", candidats=candidats)
+
+
+async def job_publication_mosaique() -> None:
+    """
+    Publie, le dimanche matin, LA tuile hebdomadaire de la mosaïque du profil.
+
+    Six dimanches, six tuiles, une seule image sur la grille. La tuile qui revient à
+    la semaine écoulée est décidée par `/stats/bilan-semaine` (`tuile`), JAMAIS ici :
+    deux calculs parallèles finiraient par nommer deux tuiles différentes, la mosaïque
+    se remplirait deux fois au même endroit et laisserait un trou ailleurs — et une
+    tuile publiée ne se déplace pas.
+
+    LE JOB REPASSE, comme celui de la story, et pour la même raison : la semaine se
+    termine le samedi soir, mais les rapports Multi sont publiés en différé et le
+    rattrapage nocturne règle encore au petit matin. Publier à heure fixe reviendrait
+    à publier un total faux un dimanche sur deux. Il attend donc que le SAMEDI soit
+    déclaré complet par l'API, puis publie.
+
+    L'IDEMPOTENCE EST EN BASE : `publications_sociales` porte une unicité
+    (jour, canal), avec pour `jour` le samedi de fin de semaine. Deux passages, deux
+    conteneurs ou un redéploiement dans la matinée ne peuvent pas produire deux
+    publications de la même semaine.
+    """
+    import uuid as _uuid
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    import httpx
+    from sqlalchemy import text as _text
+
+    from api.config import get_settings
+    from db.database import AsyncSessionLocal
+    from services.instagram import publier_image, publication_active, quota_restant
+    from services.temps_courses import jour_courses
+
+    base = (get_settings().frontend_url or "https://blackturf.fr").rstrip("/")
+    API_JOUR = "http://api:8000/api/v1/stats/meilleurs-plans-jour"
+    ENTETE = {"Host": "api.blackturf.fr"}
+
+    # Le samedi qui vient de s'écouler. `jour_courses()` donne la journée de courses
+    # au sens de Paris — `date.today()` en UTC désigne encore la veille jusqu'à 2 h.
+    aujourdhui = jour_courses()
+    samedi = aujourdhui - _td(days=(aujourdhui.weekday() - 5) % 7)
+    if samedi == aujourdhui:  # on est samedi : la semaine n'est pas finie
+        samedi = aujourdhui - _td(days=7)
+    jour = samedi.isoformat()
+
+    async with AsyncSessionLocal() as session:
+        deja = (await session.execute(_text(
+            "SELECT publie_at FROM publications_sociales "
+            "WHERE jour = :j AND canal = :c"
+        ), {"j": jour, "c": CANAL_MOSAIQUE})).first()
+        if deja and deja[0] is not None:
+            log.info("jobs.mosaique.deja_publiee", jour=jour)
+            return
+
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                # 1. Le samedi est-il réglé ? Tant qu'il reste des plans en attente,
+                #    le total de la semaine est incomplet — donc faux.
+                r = await client.get(API_JOUR, params={"jour": jour}, headers=ENTETE)
+                r.raise_for_status()
+                samedi_bilan = r.json()
+                if not samedi_bilan.get("journee_complete"):
+                    log.info("jobs.mosaique.samedi_pas_regle", jour=jour,
+                             reste=samedi_bilan.get("reste_a_venir"))
+                    return
+
+                # 2. La légende et l'URL de l'image viennent du FRONT, qui les tient
+                #    déjà pour la page /studio. Deux rédactions de la même légende
+                #    finiraient par diverger, et c'est celle qui part qui aurait tort.
+                r = await client.get(f"{base}/visuels/mosaique/legendes.json",
+                                     params={"semaine": jour})
+                r.raise_for_status()
+                legende = r.json()
+        except Exception as e:  # noqa: BLE001
+            log.warning("jobs.mosaique.bilan_indisponible", jour=jour, err=str(e)[:160])
+            return
+
+        if not legende.get("pret") or not legende.get("image"):
+            log.info("jobs.mosaique.pas_pret", jour=jour, attente=legende.get("attente"))
+            return
+
+        resultat = await publier_image(str(legende["image"]), str(legende.get("legende") or ""))
+
+        # Écrit que ça marche ou non : un échec sans trace se répète en silence.
+        await session.execute(_text("""
+            INSERT INTO publications_sociales
+                (publication_id, jour, canal, media_id, publie_at,
+                 derniere_tentative_at, nb_tentatives, derniere_raison)
+            VALUES (:id, :j, :c, :m, :p, :maintenant, 1, :r)
+            ON CONFLICT (jour, canal) DO UPDATE SET
+                media_id = COALESCE(EXCLUDED.media_id, publications_sociales.media_id),
+                publie_at = COALESCE(publications_sociales.publie_at, EXCLUDED.publie_at),
+                derniere_tentative_at = :maintenant,
+                nb_tentatives = publications_sociales.nb_tentatives + 1,
+                derniere_raison = EXCLUDED.derniere_raison
+        """), {
+            "id": str(_uuid.uuid4()), "j": jour, "c": CANAL_MOSAIQUE,
+            "maintenant": _dt.now(_tz.utc),
+            "m": resultat.media_id,
+            "p": _dt.now(_tz.utc) if resultat.publie else None,
+            "r": (resultat.raison or "")[:300] or None,
+        })
+        await session.commit()
+
+        log.info(
+            "jobs.mosaique.publication",
+            jour=jour, tuile=legende.get("tuile"), rang=legende.get("rang"),
+            cycle=legende.get("cycle"), actif=publication_active(),
+            publie=resultat.publie, media_id=resultat.media_id,
+            raison=resultat.raison, url=legende.get("image"),
+            quota_restant=await quota_restant() if publication_active() else None,
+        )
 
 
 async def job_renouveler_jetons() -> None:
