@@ -696,9 +696,9 @@ function CarteSemaine({
       >
         était dans notre Top 3
       </span>
-      <span style={{ fontFamily: "Inter", fontSize: 24, lineHeight: 1.45, color: doux, marginTop: 14 }}>
-        {s.nbTop3} courses sur {s.nbAnalysees} analysées
-        {s.hasardTop3 !== null ? ` · un tirage au sort en trouverait ${pourcent(s.hasardTop3)} %` : ""}
+      <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.45, color: doux, marginTop: 14 }}>
+        {s.nbTop3} sur {s.nbAnalysees} courses analysées
+        {s.hasardTop3 !== null ? ` · le hasard en trouverait ${pourcent(s.hasardTop3)} %` : ""}
       </span>
 
       <div style={{ display: "flex", width: "100%", height: 1, background: bord, marginTop: 30 }} />
@@ -797,8 +797,8 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   // rangée haute se lirait comme trois vignettes collées, pas comme une image.
   const CARTE_X = 56;
   const CARTE_L = VISIBLE_L - CARTE_X * 2;
-  const CARTE_Y = 132;
-  const CARTE_H = 1010;
+  const CARTE_Y = 150;
+  const CARTE_H = 900;
 
   const s = d.semaine;
 
