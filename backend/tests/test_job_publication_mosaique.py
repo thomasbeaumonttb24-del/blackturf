@@ -212,3 +212,29 @@ async def test_un_samedi_publie_la_semaine_d_avant(db, monkeypatch):
     assert lignes[0]["jour"] == "2026-09-05", (
         f"la semaine close est celle du samedi précédent, reçu : {lignes[0]['jour']}"
     )
+
+
+def test_le_job_est_planifie_le_dimanche_matin_et_repasse():
+    """Une heure fixe le dimanche publierait un total faux une semaine sur deux : le
+    rattrapage nocturne règle encore les derniers plans du samedi au petit matin."""
+    from tests._descripteurs_deploiement import RACINE, exiger
+    source = exiger(RACINE / "backend" / "services" / "jobs.py")
+    assert 'id="publication_mosaique"' in source
+    assert 'day_of_week="sun"' in source, "la tuile ne part que le dimanche"
+    assert 'hour="8-13", minute="0,30"' in source, (
+        "le job doit repasser toutes les demi-heures jusqu'à ce que le samedi soit réglé"
+    )
+
+
+def test_la_tuile_n_est_pas_choisie_par_le_job():
+    """Deux calculs parallèles de la tuile finiraient par en nommer deux différentes,
+    et la mosaïque se remplirait deux fois au même endroit. Le job lit `image` tel
+    quel ; il ne construit jamais d'URL de tuile."""
+    from tests._descripteurs_deploiement import RACINE, exiger
+    source = exiger(RACINE / "backend" / "services" / "jobs.py")
+    debut = source.index("async def job_publication_mosaique")
+    corps = source[debut:source.index("async def job_renouveler_jetons", debut)]
+    assert "/visuels/mosaique/" not in corps, (
+        "le job ne doit pas fabriquer l'URL d'une tuile : elle vient de l'API"
+    )
+    assert 'legende["image"]' in corps
