@@ -597,18 +597,86 @@ export function Carte({
  * registres pour un seul dessin ; c'est la CONTINUITÉ du fond, pas l'uniformité des
  * cartes, qui fait voir une seule image.
  */
+/** Vert du gain. Assez profond pour tenir sur blanc, assez clair pour tenir sur encre. */
+const VERT_GAIN = "#1E8A57";
+
+/** Surtitre doré encadré de deux filets — le motif qui rythme la carte. */
+function Surtitre({ children, couleur, filet }: { children: string; couleur: string; filet: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
+      <div style={{ display: "flex", flex: 1, height: 1, background: filet }} />
+      <span
+        style={{
+          fontFamily: "Inter", fontWeight: 600, fontSize: 22, letterSpacing: 3.4,
+          color: couleur, margin: "0 20px",
+        }}
+      >
+        {children}
+      </span>
+      <div style={{ display: "flex", flex: 1, height: 1, background: filet }} />
+    </div>
+  );
+}
+
+/** Une colonne du bloc argent : surtitre, montant, précision. */
+function ColonneChiffre({
+  titre, enfants, precision, accent, doux, largeur,
+}: {
+  titre: string; enfants: React.ReactNode; precision: string; accent: string;
+  doux: string; largeur: number;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", width: largeur }}>
+      <span
+        style={{
+          fontFamily: "Inter", fontWeight: 600, fontSize: 20, letterSpacing: 2.4, color: accent,
+        }}
+      >
+        {titre}
+      </span>
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 12 }}>{enfants}</div>
+      <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.4, color: doux, marginTop: 8 }}>
+        {precision}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Une carte de bilan hebdomadaire — le contenu d'UNE tuile, et d'une seule semaine.
+ *
+ * Les six cartes ont la même structure et des chiffres différents : chacune est
+ * publiée un dimanche et parle de SA semaine. C'est cette régularité qui rend l'image
+ * finale lisible — six blocs de même dessin, six périodes datées — là où six mises en
+ * page différentes auraient donné un patchwork.
+ *
+ * LA HIÉRARCHIE EST VOULUE, dans cet ordre : la période, puis la qualité de
+ * classement, puis l'argent. Le chiffre de tête n'est pas un gain — c'est le seul que
+ * le site puisse défendre dans la durée, et il n'est jamais publié sans son
+ * dénominateur ni sans le repère du hasard : « 65,1 % » seul ne dit pas au lecteur ce
+ * qu'il bat, et c'est cette comparaison qui fait la publication.
+ *
+ * L'ARGENT TIENT SUR UNE SEULE RANGÉE, en deux colonnes. Empilé, il allongeait la
+ * carte de deux cents pixels et laissait un trou avant l'adresse ; côte à côte, il
+ * occupe la largeur disponible et la carte respire.
+ *
+ * `ton` : clair sur la photo (rangée haute), sombre sur l'encre (rangée basse). Deux
+ * registres pour un seul dessin ; c'est la CONTINUITÉ du fond, pas l'uniformité des
+ * cartes, qui fait voir une seule image.
+ */
 function CarteSemaine({
   s, rang, total, ton,
 }: {
   s: SemaineMosaique; rang: number; total: number; ton: "clair" | "sombre";
 }) {
   const sombre = ton === "sombre";
-  const fond = sombre ? "#1B1F26" : COULEURS.blanc;
-  const bord = sombre ? COULEURS.ligneSombre : COULEURS.ligne;
+  const fond = sombre ? "#1C2027" : COULEURS.blanc;
+  const bord = sombre ? "#2E343D" : COULEURS.ligne;
   const titre = sombre ? COULEURS.surSombre : COULEURS.encre;
   const doux = sombre ? COULEURS.surSombreDoux : COULEURS.encreDouce;
   const tenu = sombre ? COULEURS.surSombreTenu : COULEURS.encreTenue;
   const accent = sombre ? COULEURS.orVif : COULEURS.or;
+  const COL = 344;
 
   return (
     <div
@@ -618,21 +686,23 @@ function CarteSemaine({
         width: "100%",
         height: "100%",
         background: fond,
-        borderRadius: 26,
-        padding: "48px 54px",
+        borderRadius: 28,
+        padding: "52px 56px",
         border: `1px solid ${bord}`,
       }}
     >
-      {/* ── Marque + rang dans le cycle ────────────────────────────────────
-          « SEMAINE 3 / 6 » dit au lecteur qu'il regarde une série, et à nous où en
-          est le remplissage de la mosaïque. */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+      {/* ── La marque, et le rang dans la série ────────────────────────────
+          « SEMAINE 3 / 6 » dit au lecteur qu'il regarde une série qui se construit,
+          et à nous où en est le remplissage de la mosaïque. */}
+      <div
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}
+      >
         <div style={{ display: "flex", alignItems: "center" }}>
-          <div style={{ display: "flex", width: 10, height: 34, background: COULEURS.orVif }} />
+          <div style={{ display: "flex", width: 11, height: 36, background: COULEURS.orVif }} />
           <span
             style={{
-              fontFamily: "Grotesk", fontWeight: 700, fontSize: 34,
-              color: titre, marginLeft: 14, letterSpacing: -0.8,
+              fontFamily: "Grotesk", fontWeight: 700, fontSize: 36,
+              color: titre, marginLeft: 15, letterSpacing: -1,
             }}
           >
             BlackTurf
@@ -640,123 +710,124 @@ function CarteSemaine({
         </div>
         <span
           style={{
-            fontFamily: "Inter", fontWeight: 600, fontSize: 21,
-            letterSpacing: 2.6, color: accent,
+            fontFamily: "Inter", fontWeight: 600, fontSize: 21, letterSpacing: 2.6, color: accent,
           }}
         >
           SEMAINE {rang} / {total}
         </span>
       </div>
 
-      {/* ── La période, en titre. Six tuiles datées = six semaines lisibles ── */}
-      <div style={{ display: "flex", alignItems: "center", marginTop: 26 }}>
-        <div style={{ display: "flex", width: 7, height: 44, borderRadius: 4, background: COULEURS.orVif }} />
-        <span
-          style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 40,
-            color: accent, marginLeft: 16, letterSpacing: -0.6,
-          }}
-        >
-          {s.periode}
-        </span>
+      {/* ── La période, en surtitre encadré : c'est l'ancre de la tuile ──── */}
+      <div style={{ display: "flex", marginTop: 34 }}>
+        <Surtitre couleur={accent} filet={bord}>
+          {s.periode.toUpperCase()}
+        </Surtitre>
       </div>
 
-      {/* ── Le chiffre de tête : la QUALITÉ DE CLASSEMENT ──────────────────
-          Pas un gain. C'est le seul chiffre que le site puisse défendre dans la
-          durée, et il n'est jamais publié sans son dénominateur ni sans le repère
-          du hasard — « 65,1 % » seul ne dit pas au lecteur ce qu'il bat. */}
-      <div style={{ display: "flex", alignItems: "baseline", marginTop: 30 }}>
-        <span
-          style={{
-            fontFamily: "Grotesk", fontWeight: 700, fontSize: 122, lineHeight: 1,
-            color: titre, letterSpacing: -5,
-          }}
-        >
-          {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
-        </span>
-        <span
-          style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 50, color: accent, marginLeft: 6 }}
-        >
-          %
-        </span>
-      </div>
-      <span
-        style={{
-          fontFamily: "Grotesk", fontWeight: 700, fontSize: 36, lineHeight: 1.2,
-          color: titre, letterSpacing: -1, marginTop: 8,
-        }}
+      {/* ── Le chiffre de tête ─────────────────────────────────────────── */}
+      <div
+        style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", marginTop: 30 }}
       >
-        des courses où le gagnant
-      </span>
-      <span
-        style={{
-          fontFamily: "Grotesk", fontWeight: 700, fontSize: 36, lineHeight: 1.2,
-          color: titre, letterSpacing: -1,
-        }}
-      >
-        était dans notre Top 3
-      </span>
-      <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.45, color: doux, marginTop: 14 }}>
-        {s.nbTop3} sur {s.nbAnalysees} courses analysées
-        {s.hasardTop3 !== null ? ` · le hasard en trouverait ${pourcent(s.hasardTop3)} %` : ""}
-      </span>
-
-      <div style={{ display: "flex", width: "100%", height: 1, background: bord, marginTop: 30 }} />
-
-      {/* ── Le meilleur plan de la semaine ─────────────────────────────── */}
-      <span
-        style={{
-          fontFamily: "Inter", fontWeight: 600, fontSize: 21, letterSpacing: 2.6,
-          color: accent, marginTop: 26,
-        }}
-      >
-        MEILLEUR PLAN DE LA SEMAINE
-      </span>
-      {s.meilleur ? (
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 10 }}>
-          <div style={{ display: "flex", alignItems: "baseline" }}>
-            <span
-              style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 42, color: tenu, letterSpacing: -1.2 }}
-            >
-              {euro(s.meilleur.mise)} €
-            </span>
-            <span style={{ fontFamily: "Inter", fontSize: 32, color: accent, margin: "0 16px" }}>→</span>
-            <span
-              style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 60, color: VERT_GAIN, letterSpacing: -2 }}
-            >
-              {euro(s.meilleur.retour)} €
-            </span>
-          </div>
-          <span style={{ fontFamily: "Inter", fontSize: 24, color: doux, marginTop: 6 }}>
-            {[s.meilleur.typePari, s.meilleur.hippodrome, s.meilleur.code].filter(Boolean).join(" · ")}
+        <div style={{ display: "flex", alignItems: "baseline" }}>
+          <span
+            style={{
+              fontFamily: "Grotesk", fontWeight: 700, fontSize: 138, lineHeight: 1,
+              color: titre, letterSpacing: -6,
+            }}
+          >
+            {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
+          </span>
+          <span
+            style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 56, color: accent, marginLeft: 6 }}
+          >
+            %
           </span>
         </div>
-      ) : (
-        <span style={{ fontFamily: "Inter", fontSize: 24, color: doux, marginTop: 10 }}>
-          Aucun plan gagnant cette semaine.
-        </span>
-      )}
-
-      {/* ── Le total rendu ─────────────────────────────────────────────────
-          Le nombre de plans GAGNANTS ne sort jamais sans le nombre TOTAL calculé :
-          sans dénominateur, la phrase se lirait comme si tous avaient gagné. */}
-      <span
-        style={{
-          fontFamily: "Inter", fontWeight: 600, fontSize: 21, letterSpacing: 2.6,
-          color: accent, marginTop: 24,
-        }}
-      >
-        TOTAL RENDU PAR LES PLANS
-      </span>
-      <div style={{ display: "flex", alignItems: "baseline", marginTop: 6 }}>
         <span
-          style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 52, color: titre, letterSpacing: -1.8 }}
+          style={{
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
+            color: titre, letterSpacing: -1, marginTop: 10,
+          }}
         >
-          {euro(s.totalRetour)} €
+          des courses où le gagnant
         </span>
-        <span style={{ fontFamily: "Inter", fontSize: 24, color: doux, marginLeft: 16 }}>
-          {s.nbPlansGagnants} gagnants sur {s.nbPlans}
+        <span
+          style={{
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
+            color: titre, letterSpacing: -1,
+          }}
+        >
+          était dans notre Top 3
         </span>
+        <span style={{ fontFamily: "Inter", fontSize: 23, lineHeight: 1.4, color: doux, marginTop: 16 }}>
+          {s.nbTop3} sur {s.nbAnalysees} courses analysées
+          {s.hasardTop3 !== null ? ` · le hasard : ${pourcent(s.hasardTop3)} %` : ""}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", width: "100%", height: 1, background: bord, marginTop: 34 }} />
+
+      {/* ── L'argent, sur une rangée : meilleur plan | total rendu ───────── */}
+      <div
+        style={{ display: "flex", justifyContent: "space-between", width: "100%", marginTop: 30 }}
+      >
+        <ColonneChiffre
+          titre="MEILLEUR PLAN"
+          accent={accent}
+          doux={doux}
+          largeur={COL}
+          precision={
+            s.meilleur
+              ? [s.meilleur.typePari, s.meilleur.hippodrome].filter(Boolean).join(" · ")
+              : "aucun plan gagnant"
+          }
+          enfants={
+            s.meilleur ? (
+              <div style={{ display: "flex", alignItems: "baseline" }}>
+                <span
+                  style={{
+                    fontFamily: "Grotesk", fontWeight: 700, fontSize: 34,
+                    color: tenu, letterSpacing: -1,
+                  }}
+                >
+                  {euro(s.meilleur.mise)} €
+                </span>
+                <span style={{ fontFamily: "Inter", fontSize: 26, color: accent, margin: "0 12px" }}>
+                  →
+                </span>
+                <span
+                  style={{
+                    fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
+                    color: VERT_GAIN, letterSpacing: -1.8,
+                  }}
+                >
+                  {euro(s.meilleur.retour)} €
+                </span>
+              </div>
+            ) : (
+              <span style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 44, color: tenu }}>—</span>
+            )
+          }
+        />
+        <ColonneChiffre
+          titre="TOTAL RENDU"
+          accent={accent}
+          doux={doux}
+          largeur={COL}
+          // Le nombre de plans GAGNANTS ne sort jamais sans le nombre TOTAL calculé :
+          // sans dénominateur, la phrase se lirait comme si tous avaient gagné.
+          precision={`${s.nbPlansGagnants} plans gagnants sur ${s.nbPlans}`}
+          enfants={
+            <span
+              style={{
+                fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
+                color: titre, letterSpacing: -1.8,
+              }}
+            >
+              {euro(s.totalRetour)} €
+            </span>
+          }
+        />
       </div>
 
       {/* L'adresse pousse au bas de la carte : chaque tuile est vue SEULE dans le
@@ -767,10 +838,6 @@ function CarteSemaine({
     </div>
   );
 }
-
-/** Vert du gain : celui du fond sombre serait illisible sur blanc, et l'inverse. */
-const VERT_GAIN = "#177A4C";
-
 /**
  * Le plan d'ensemble : SIX BILANS DE SEMAINE qui forment une seule image.
  *
