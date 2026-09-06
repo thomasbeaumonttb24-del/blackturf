@@ -864,8 +864,11 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   // rangée haute se lirait comme trois vignettes collées, pas comme une image.
   const CARTE_X = 56;
   const CARTE_L = VISIBLE_L - CARTE_X * 2;
-  const CARTE_Y = 190;
-  const CARTE_H = 748;
+  // Hauteur calée sur le CONTENU réel de la carte (~760 px) : au-dessus, un trou
+  // s'ouvre avant l'adresse ; en dessous, l'adresse colle aux chiffres. Les six
+  // cartes partagent la même hauteur, sinon les raccords de la mosaïque sautent.
+  const CARTE_Y = 224;
+  const CARTE_H = 786;
 
   const s = d.semaine;
 
