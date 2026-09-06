@@ -33,6 +33,8 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ml.feature_health import SOURCE_PAR_FEATURE as _SOURCE_PAR_FEATURE
+
 log = structlog.get_logger(module="data_quality")
 
 # Colonne de cote par source. `zeturf` alimente `cote_unibet` et `oddschecker`
@@ -651,10 +653,19 @@ async def sante_features(session: AsyncSession) -> dict:
     n_features = int(actuel.get("n_features") or 0)
 
     from ml.feature_health import classer_mortes, registre_perime
-    classees = classer_mortes(mortes)
+    # Une source coupée exprès (`SCRAPER_DISABLED_SOURCES`) n'est pas une panne : la
+    # couverture des cotes le savait déjà (`silent_disabled`), la santé des features
+    # l'ignorait et criait chaque heure sur huit features dont on a décidé de ne plus
+    # collecter la donnée. Même source de vérité pour les deux mesures.
+    _eteintes = _sources_en_sommeil()
+    classees = classer_mortes(mortes, sources_desactivees=_eteintes)
     # Une feature documentée qui « meurt » à nouveau n'apprend rien : elle était déjà
     # morte, et sa cause est connue. Le saut brutal ne doit désigner que l'inattendu.
     nouvelles_inexpliquees = [f for f in nouvelles if f in set(classees["inexpliquees"])]
+    _sources_mortes = sorted({
+        src for f in classees["documentees"]
+        if (src := _SOURCE_PAR_FEATURE.get(f)) and src in _eteintes
+    })
     return {
         "disponible": True,
         # `_as_dt` : aiosqlite (tests) rend un TEXTE là où asyncpg rend un datetime.
@@ -670,6 +681,10 @@ async def sante_features(session: AsyncSession) -> dict:
         "mortes_inexpliquees": classees["inexpliquees"][:40],
         "n_mortes_inexpliquees": len(classees["inexpliquees"]),
         "raisons_connues": classees["raisons"],
+        # Sources en sommeil qui expliquent une partie du compte : elles doivent
+        # rester LISIBLES, sinon « rallumer france_galop » ne se relie jamais à
+        # « six features reviennent ».
+        "sources_desactivees_en_cause": _sources_mortes,
         # Entrées du registre dont la feature revit : la cause inscrite n'est plus vraie.
         "registre_perime": registre_perime(mortes),
         # Features NÉES récemment : absentes du passé parce qu'elles n'existaient pas.
@@ -795,10 +810,22 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
     # un défaut déjà corrigé — et personne ne saurait dire si la correction a pris.
     corrige_depuis = await _correction_nettete_depuis(session)
 
+    # Dernier EXAMEN de l'exposant, retenu ou non. Une dérive qu'un correcteur
+    # examine chaque nuit et écarte faute de preuve n'est pas la même chose qu'une
+    # dérive que personne ne regarde — et l'alerte disait la même phrase dans les
+    # deux cas, 145 fois de suite.
+    examen = None
+    try:
+        from ml.sharpness_calibration import charger_dernier_examen
+        examen = await charger_dernier_examen(session)
+    except Exception as e:                                       # noqa: BLE001
+        log.info("data_quality.examen_nettete_indisponible", err=str(e)[:140])
+
     resultat = {
         "disponible": True, "fenetre_jours": jours, "n": len(lignes),
         "bandes": _bandes(lignes),
         "correction_nettete_depuis": (corrige_depuis.isoformat() if corrige_depuis else None),
+        "dernier_examen_nettete": examen,
     }
     if corrige_depuis:
         depuis_correction = [l for l in lignes if l[2] and l[2] >= corrige_depuis]
@@ -849,6 +876,27 @@ async def _correction_nettete_depuis(session: AsyncSession) -> datetime | None:
         return None
     data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
     return _as_dt(data.get("applique_depuis"))
+
+
+def _suffixe_examen_nettete(examen) -> str:
+    """Ce que le correcteur de netteté a décidé la dernière fois qu'il a regardé.
+
+    Sans cette phrase, l'anomalie de calibration se lit comme un défaut abandonné.
+    Elle est en réalité mesurée chaque nuit par `ml.sharpness_calibration`, qui
+    refuse de corriger tant qu'un exposant ne tient pas hors échantillon — un refus
+    est une décision, pas une absence de supervision.
+    """
+    if not isinstance(examen, dict) or not examen.get("examine_le"):
+        return ""
+    _jour = str(examen["examine_le"])[:10]
+    if examen.get("retenu"):
+        return (f" ; correcteur de netteté : exposant {examen.get('exposant')} "
+                f"mis en service le {_jour}")
+    _cand = examen.get("exposant_candidat")
+    _cand_txt = f"candidat {_cand} écarté" if _cand is not None else "aucun candidat"
+    return (f" ; correcteur de netteté examiné le {_jour} : {_cand_txt} "
+            f"({examen.get('raison') or 'sans conclusion'}) — l'exposant en service "
+            f"reste {examen.get('exposant_en_place', 1.0)}")
 
 
 async def rapport_qualite(session: AsyncSession) -> dict:
@@ -932,8 +980,11 @@ async def rapport_qualite(session: AsyncSession) -> dict:
                             f"établie ({', '.join(features['mortes_inexpliquees'][:8])}"
                             f"{'…' if features['n_mortes_inexpliquees'] > 8 else ''}) — "
                             "elles n'apportent rien au modèle, qui ne les apprend plus, "
-                            f"et {features['n_mortes_documentees']} autres sont "
-                            "documentées comme dépourvues de source"),
+                            f"et {features['n_mortes_documentees']} autres ont une cause "
+                            "établie" + (
+                                f" (dont les sources en sommeil "
+                                f"{', '.join(features['sources_desactivees_en_cause'])})"
+                                if features.get("sources_desactivees_en_cause") else "")),
             })
         if features.get("registre_perime"):
             # Le registre des causes établies affirme « cette donnée n'existe pas ». Si
@@ -953,10 +1004,10 @@ async def rapport_qualite(session: AsyncSession) -> dict:
     _depuis_corr = {b["bande"]: b for b in (calibration.get("bandes_depuis_correction") or [])}
     for bande in (calibration.get("bandes") or []):
         if bande["concluant"] and abs(bande["ecart"]) >= SEUIL_ECART_CALIBRATION:
-            _suite = ""
+            _suite = _suffixe_examen_nettete(calibration.get("dernier_examen_nettete"))
             _recent = _depuis_corr.get(bande["bande"])
             if _recent:
-                _suite = (f" ; depuis la correction de netteté, l'écart est de "
+                _suite += (f" ; depuis la correction de netteté, l'écart est de "
                           f"{_recent['ecart']:+.1%} sur {_recent['n']} partants"
                           f"{'' if _recent['concluant'] else ' (pas encore concluant)'}")
             anomalies.append({

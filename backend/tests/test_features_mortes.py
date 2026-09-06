@@ -88,7 +88,35 @@ def test_le_registre_separe_ce_qui_est_explique_de_ce_qui_ne_l_est_pas():
     ])
     assert out["documentees"] == ["commentaire_signal", "dyn_finit_fort"]
     assert out["inexpliquees"] == ["career_momentum", "draw_bias_score"]
-    assert "API PMU" in out["raisons"]["commentaire_signal"]
+    # La cause dit OÙ la donnée manque, pas seulement qu'elle manque : le
+    # commentaire est absent de /performances-detaillees, pas de l'API entière.
+    assert "performances-detaillees" in out["raisons"]["commentaire_signal"]
+
+
+def test_une_source_eteinte_expres_n_est_pas_une_feature_inexpliquee():
+    """Couper une source est une DÉCISION ; la supervision ne doit pas la répéter.
+
+    `couverture_sources` le savait déjà pour les cotes (`silent_disabled`) et la
+    santé des features l'ignorait : huit features remontaient chaque heure comme
+    « mortes sans cause établie » alors que leur source était dans
+    `SCRAPER_DISABLED_SOURCES`.
+    """
+    mortes = ["running_style_code", "steam_move_betclic", "career_momentum"]
+    out = fh.classer_mortes(mortes, sources_desactivees={"france_galop", "betclic"})
+    assert out["inexpliquees"] == ["career_momentum"]
+    assert "france_galop" in out["raisons"]["running_style_code"]
+
+
+def test_rallumer_la_source_remet_la_feature_dans_l_inexplique():
+    """Le contraire d'une liste figée : la cause se dément toute seule.
+
+    C'est la propriété qui distingue « nommer la source » de « inscrire un nom dans
+    un registre » — sans elle, rallumer france_galop laisserait ses features
+    silencieusement exemptées d'alerte pour toujours.
+    """
+    out = fh.classer_mortes(["running_style_code"], sources_desactivees=set())
+    assert out["inexpliquees"] == ["running_style_code"]
+    assert out["documentees"] == []
 
 
 def test_le_registre_signale_ses_propres_entrees_perimees():

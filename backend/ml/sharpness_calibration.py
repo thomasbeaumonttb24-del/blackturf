@@ -332,12 +332,25 @@ async def calculer_et_persister(session: AsyncSession) -> dict:
     if len(courses) < MIN_COURSES:
         log.warning("sharpness.cold_start_preserve", n_courses=len(courses),
                     min_courses=MIN_COURSES, exposant=exposant, depuis=depuis)
+        await _tracer_examen(session, {
+            "status": "skipped_insufficient_data", "retenu": False,
+            "exposant_en_place": exposant, "n_courses": len(courses),
+            "raison": "échantillon trop court",
+        })
         return {"status": "skipped_insufficient_data", "n_courses": len(courses),
                 "exposant": exposant}
 
     verdict = ajuster_exposant(courses, exposant_en_place=exposant)
     if not verdict["retenu"]:
         log.info("sharpness.valeur_conservee", **verdict)
+        # ON TRACE LE REFUS, PAS SEULEMENT L'ACCEPTATION. Sans cette ligne, la
+        # table reste VIDE tant qu'aucun exposant ne tient — et rien, dans l'état
+        # persistant, ne distingue « le correcteur a examiné et écarté » de « le
+        # correcteur n'a jamais tourné ». C'est exactement ce qui s'est produit :
+        # l'alerte `calibration_derive` répétait 145 fois une dérive pendant que le
+        # job nocturne l'examinait chaque nuit et refusait, à raison, de corriger.
+        # L'état persistant doit faire foi contre les journaux.
+        await _tracer_examen(session, {"status": "valeur_conservee", **verdict})
         return {"status": "valeur_conservee", **verdict}
 
     donnees = dict(verdict)
@@ -350,8 +363,49 @@ async def calculer_et_persister(session: AsyncSession) -> dict:
                                        updated_at = EXCLUDED.updated_at
     """), {"data": json.dumps(donnees)})
     _cache = donnees
+    await _tracer_examen(session, {"status": "ok", **verdict})
     log.info("sharpness.ajuste", **verdict)
     return {"status": "ok", **donnees}
+
+
+# Ligne 1 = l'exposant EN SERVICE (écrite seulement quand un ajustement tient, pour
+# que sa date de mise en service reste celle du dernier vrai changement).
+# Ligne 2 = le dernier EXAMEN, écrit à chaque passage, retenu ou non. Les deux ne
+# doivent pas partager la même ligne : l'un est une décision, l'autre une mesure.
+_ID_EXAMEN = 2
+
+
+async def _tracer_examen(session: AsyncSession, verdict: dict) -> None:
+    """Enregistre le dernier examen de l'exposant. Ne touche jamais l'exposant servi."""
+    donnees = dict(verdict)
+    donnees["examine_le"] = datetime.now(timezone.utc).isoformat()
+    try:
+        await session.execute(text("""
+            INSERT INTO sharpness_calibration (id, data, updated_at)
+            VALUES (:id, :data, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data,
+                                           updated_at = EXCLUDED.updated_at
+        """), {"id": _ID_EXAMEN, "data": json.dumps(donnees)})
+    except Exception as e:                                       # noqa: BLE001
+        # Une trace de supervision ne doit jamais faire échouer la calibration.
+        log.warning("sharpness.trace_examen_ignoree", err=str(e)[:140])
+
+
+async def charger_dernier_examen(session: AsyncSession) -> dict | None:
+    """Dernier examen de l'exposant (retenu ou écarté), ou None s'il n'a jamais tourné."""
+    try:
+        r = (await session.execute(text(
+            "SELECT data FROM sharpness_calibration WHERE id = :id"),
+            {"id": _ID_EXAMEN})).first()
+    except Exception:                                            # noqa: BLE001
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return None
+    if not r or not r[0]:
+        return None
+    return r[0] if isinstance(r[0], dict) else json.loads(r[0])
 
 
 async def charger_exposant(session: AsyncSession) -> dict:

@@ -63,14 +63,26 @@ _META_KEYS = {
 # ce que l'alerte montre. Le registre est audité en retour : `sante_features` signale
 # toute entrée dont la feature a retrouvé de la variance (source revenue, ou cause
 # mal établie) — un registre qui pourrit se voit.
+# CORRECTION DU 2026-09-06 — une cause « vérifiée » qui ne l'était qu'à moitié.
+# Les quatre features de commentaire portaient « commentaire_course absent de l'API
+# PMU ». C'est faux tel quel : le champ est absent de /performances-detaillees, le
+# SEUL endpoint qu'on interroge pour l'historique d'un cheval (clés relevées le
+# 2026-09-06 : corde, distanceAvecPrecedent, distanceParcourue, itsHim, nomCheval,
+# nomJockey, numPmu, oeillere, place, poidsJockey, reductionKilometrique — pas de
+# commentaire). Mais /participants, lui, le publie une fois la course courue :
+# 79 partants sur 136 le 05/09, 135 sur 163 le 04/09. La donnée existe donc, elle
+# n'est simplement pas lue au bon endroit — ce qui n'est pas la même dette, et ce
+# que la formulation d'origine faisait passer pour une impasse définitive.
+# La règle du registre est « une cause VÉRIFIÉE » : on écrit donc ce qui est vrai.
+_COMMENTAIRE = ("commentaire_course jamais écrit : /performances-detaillees ne "
+                "publie pas de commentaire ; /participants le publie APRÈS la "
+                "course et n'est pas relu pour l'historique (vérifié 2026-09-06)")
+
 SANS_SOURCE: dict[str, str] = {
-    # Le PMU ne publie AUCUN commentaire de course : ni au niveau course, ni au
-    # niveau participant de /performances-detaillees (clés relevées le 2026-08-31,
-    # 0 occurrence). Les quatre features de déroulé lisent donc une colonne vide.
-    "commentaire_signal": "commentaire_course absent de l'API PMU (vérifié 2026-08-31)",
-    "commentaire_malchance_recente": "commentaire_course absent de l'API PMU (vérifié 2026-08-31)",
-    "commentaire_gagne_facile": "commentaire_course absent de l'API PMU (vérifié 2026-08-31)",
-    "nb_commentaires_lus": "commentaire_course absent de l'API PMU (vérifié 2026-08-31)",
+    "commentaire_signal": _COMMENTAIRE,
+    "commentaire_malchance_recente": _COMMENTAIRE,
+    "commentaire_gagne_facile": _COMMENTAIRE,
+    "nb_commentaires_lus": _COMMENTAIRE,
     # `acceleration_label` se déduit des temps de passage. `temps_passage` n'a ni
     # source ni écrivain dans tout le code (vérifié 2026-08-31) : la colonne est vide
     # depuis l'origine, et les trois taux de dynamique valent donc 0 partout.
@@ -78,22 +90,79 @@ SANS_SOURCE: dict[str, str] = {
     "dyn_taux_accelere": "acceleration_label sans source (temps_passage jamais écrit, vérifié 2026-08-31)",
     "dyn_taux_faiblit": "acceleration_label sans source (temps_passage jamais écrit, vérifié 2026-08-31)",
     "dyn_finit_fort": "acceleration_label sans source (temps_passage jamais écrit, vérifié 2026-08-31)",
+    # `participations.retard_gains` : 0 valeur non nulle sur toute la base (vérifié
+    # 2026-09-06). Le champ n'existe pas dans la réponse /participants du PMU — la
+    # liste complète de ses clés a été relevée le même jour — et aucune autre source
+    # ne l'écrit : `PartantScrape.retard_gains` reste à None dans tous les parseurs.
+    "retard_gains": "aucun champ retard de gains dans l'API PMU (vérifié 2026-09-06)",
+}
+
+# ── Features dont la donnée vient d'une source de scraping DÉSACTIVÉE ────────
+# Ce n'est pas une panne, c'est une décision : `SCRAPER_DISABLED_SOURCES` liste les
+# sources qu'on a explicitement mises en sommeil (racing_post, turfoo, france_galop,
+# zeturf, geny, betclic, winamax, unibet en production le 2026-09-06). Huit features
+# en dépendaient et remontaient chaque heure comme « mortes sans cause établie ».
+#
+# `services.data_quality.couverture_sources` traitait déjà ce cas pour les COTES
+# (statut `silent_disabled`) : une source coupée exprès n'est pas une alerte. La
+# santé des features ignorait la même information et criait sur la même décision.
+#
+# Cette table n'est pas un second registre d'exceptions : elle NOMME LA SOURCE, et
+# le classement se refait à chaque lecture. Rallumer `france_galop` remet aussitôt
+# ses six features dans le lot inexpliqué si elles restent constantes — ce qu'une
+# liste figée de noms ne saurait pas faire.
+SOURCE_PAR_FEATURE: dict[str, str] = {
+    # `chevaux.running_style` / `taux_en_tete` : 0 valeur sur 56 149 chevaux.
+    # Écrites par `sources/france_galop.py` (galop) uniquement.
+    "running_style_code": "france_galop",
+    "taux_en_tete": "france_galop",
+    "nb_meneurs_course": "france_galop",
+    "pace_conflict_score": "france_galop",
+    "running_style_terrain_fit": "france_galop",
+    # `chevaux.prix_vente_yearling` : 0 valeur. France Galop ET Racing Post l'écrivent ;
+    # on nomme celle qui couvre le plus, les deux étant en sommeil.
+    "prix_vente_log": "racing_post",
+    # `participations.rang_pronostic_geny` : 0 valeur. Écrit par le seul cycle geny,
+    # et la source est en sommeil depuis que ses cotes se sont révélées fausses
+    # (plafond à 9,9, décalage d'un cheval — audit du 2026-08-27).
+    "rang_pronostic_geny": "geny",
+    # `participations.cote_betclic` : 0 valeur.
+    "steam_move_betclic": "betclic",
 }
 
 
-def classer_mortes(mortes) -> dict:
+def _cause_source_eteinte(feature: str, sources_desactivees) -> str | None:
+    """Cause « la source est coupée exprès », ou None si elle tourne (ou inconnue)."""
+    src = SOURCE_PAR_FEATURE.get(feature)
+    if src and src in (sources_desactivees or ()):
+        return f"source '{src}' désactivée (SCRAPER_DISABLED_SOURCES)"
+    return None
+
+
+def classer_mortes(mortes, sources_desactivees=None) -> dict:
     """Range une liste de features mortes en « cause établie » / « inexpliquée ».
 
-    Fonction PURE (pas de base) : `services.data_quality` l'applique aux instantanés
-    DÉJÀ persistés, donc le classement vaut immédiatement, sans attendre un nouveau
-    calcul nocturne.
+    Fonction PURE (pas de base, et pas d'environnement non plus : la liste des
+    sources en sommeil est PASSÉE par l'appelant, qui la lit déjà pour la couverture
+    des cotes). `services.data_quality` l'applique aux instantanés DÉJÀ persistés,
+    donc le classement vaut immédiatement, sans attendre un nouveau calcul nocturne.
+
+    Deux causes établies, et elles ne se valent pas :
+      - `SANS_SOURCE` : la donnée n'existe pas, personne ne peut la produire ;
+      - source en sommeil : la donnée existe, on a choisi de ne pas la collecter.
+    La seconde se dément toute seule le jour où la source est rallumée.
     """
     mortes = sorted(set(mortes or []))
-    documentees = [f for f in mortes if f in SANS_SOURCE]
+    raisons: dict[str, str] = {}
+    for f in mortes:
+        cause = SANS_SOURCE.get(f) or _cause_source_eteinte(f, sources_desactivees)
+        if cause:
+            raisons[f] = cause
+    documentees = [f for f in mortes if f in raisons]
     return {
         "documentees": documentees,
-        "inexpliquees": [f for f in mortes if f not in SANS_SOURCE],
-        "raisons": {f: SANS_SOURCE[f] for f in documentees},
+        "inexpliquees": [f for f in mortes if f not in raisons],
+        "raisons": raisons,
     }
 
 

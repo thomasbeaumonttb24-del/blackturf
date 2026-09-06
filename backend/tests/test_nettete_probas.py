@@ -176,3 +176,30 @@ async def test_l_exposant_persiste_est_relu_et_mis_en_cache(db):
     # L'inférence lit un cache mémoire, sans base : c'est ce chemin qui sert.
     assert sc.exposant_en_cache() == 0.86
     sc._cache = None
+
+
+@pytest.mark.asyncio
+async def test_un_examen_sans_conclusion_laisse_quand_meme_une_trace(db):
+    """UN REFUS EST UNE DÉCISION, PAS UNE ABSENCE DE SUPERVISION.
+
+    Tant que rien n'était retenu, la table restait VIDE : rien, dans l'état
+    persistant, ne distinguait « le correcteur a examiné et écarté » de « le
+    correcteur n'a jamais tourné ». Pendant ce temps l'anomalie `calibration_derive`
+    répétait 145 fois la même dérive, sans jamais dire qu'elle était examinée chaque
+    nuit. On trace donc l'examen sur une ligne à part — l'exposant EN SERVICE, lui,
+    ne bouge toujours pas.
+    """
+    out = await sc.calculer_et_persister(db)
+    assert out["status"] == "skipped_insufficient_data"
+
+    examen = await sc.charger_dernier_examen(db)
+    assert examen is not None
+    assert examen["retenu"] is False
+    assert examen["examine_le"]
+
+    # La ligne de l'exposant servi n'a pas été écrite : on n'a rien mis en service.
+    servi = (await db.execute(
+        text("SELECT data FROM sharpness_calibration WHERE id = 1"))).first()
+    assert servi is None
+    assert sc.exposant_en_cache() == sc.EXPOSANT_NEUTRE
+    sc._cache = None

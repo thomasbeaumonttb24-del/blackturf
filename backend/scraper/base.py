@@ -165,6 +165,11 @@ class PartantScrape:
     valeur_indice: Optional[int] = None
     retard_gains: Optional[int] = None
     rang_pronostic_pmu: Optional[int] = None
+    # Numéro de STALLE au départ (PMU `placeCorde`). À ne pas confondre avec
+    # `numero`, qui est le numéro de programme : en plat les deux n'ont aucune
+    # raison de coïncider (le numéro suit le poids ou l'ordre d'engagement, la
+    # stalle est tirée au sort). `courses.corde`, elle, ne dit que le SENS du rail.
+    numero_corde: Optional[int] = None
     # Généalogie + carrière + dynamique (API PMU participants)
     pere: Optional[str] = None
     mere: Optional[str] = None
