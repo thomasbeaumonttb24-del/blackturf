@@ -961,6 +961,21 @@ function CarteSemaine({
           Lien direct dans la bio
         </span>
       </div>
+
+      {/* La mention légale vit DANS la carte, pas sur la photo. Posée dessus, elle
+          imposait un voile sombre au pied de chaque vignette — et ces deux bandeaux
+          coupaient l'image d'ensemble en deux au niveau du raccord. Ici, le fond reste
+          continu d'un bout à l'autre. */}
+      <span
+        style={{
+          display: "flex", width: "100%", textAlign: "center", marginTop: 18,
+          paddingTop: 14, borderTop: `1px solid `,
+          fontFamily: "Inter", fontSize: 17, lineHeight: 1.4, color: COULEURS.encreTenue,
+        }}
+      >
+        Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
+        risques : endettement, isolement, dépendance. 09 74 75 13 13. Interdit aux mineurs.
+      </span>
     </div>
   );
 }
@@ -992,7 +1007,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   const CARTE_X = 74;
   const CARTE_L = VISIBLE_L - CARTE_X * 2;
   const CARTE_Y = 132;
-  const CARTE_H = 1022;
+  const CARTE_H = 1110;
 
   const s = d.semaine;
 
@@ -1053,54 +1068,10 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
         );
       })}
 
-      {/* Fondu sombre au pied de chaque tuile : la mention légale se posait sur la
-          photo nue et devenait illisible dès que le fond y était clair. Une mention
-          de jeu responsable qu'on ne peut pas lire ne vaut pas mieux qu'une absente. */}
-      {[0, 1].map((r) => (
-        <div
-          key={"voile-" + r}
-          style={{
-            position: "absolute", left: 0, top: r * TUILE_H + TUILE_H - 210,
-            width: PLAN_L, height: 210, display: "flex",
-            background: "linear-gradient(180deg, rgba(10,12,16,0) 0%, rgba(10,12,16,0.72) 55%, rgba(10,12,16,0.88) 100%)",
-          }}
-        />
-      ))}
-
-      {/* ═══════════ Mention légale, sur chaque tuile ═══════════
-          Chaque tuile est publiée séparément : la mention se répète, elle ne se
-          découpe pas. */}
-      {[0, 1].map((r) =>
-        [0, 1, 2].map((c) => (
-          <div
-            key={`legal-${r}-${c}`}
-            style={{
-              position: "absolute",
-              left: col(c) + MARGE_LEGALE,
-              top: r * TUILE_H + TUILE_H - 128,
-              width: VISIBLE_L - MARGE_LEGALE * 2,
-              display: "flex",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "Inter", fontSize: 21, lineHeight: 1.4,
-                color: "rgba(232,228,218,0.72)",
-              }}
-            >
-              Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des
-              risques : endettement, isolement, dépendance. 09 74 75 13 13. Interdit aux mineurs.
-            </span>
-          </div>
-        )),
-      )}
     </div>
   );
 }
 
-/** Marge des mentions légales : elles courent d'un bord à l'autre de la colonne
- *  visible, pas dans une carte. */
-const MARGE_LEGALE = 72;
 export function Tuile({ d, rangee, colonne }: { d: DonneesMosaique; rangee: number; colonne: number }) {
   return (
     <div
