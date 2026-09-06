@@ -354,7 +354,7 @@ interface EnjeuxResp {
    *  en ligne seule. Le PMU ne publie le national que sur une partie de son
    *  offre ; ailleurs, l'en ligne est tout ce qui existe. Les deux ne se
    *  comparent pas, l'étiquette de la carte doit donc le dire. */
-  perimetre?: "total" | "internet";
+  perimetre?: "total" | "internet" | "international";
   /** Masse par formule (simple, couplé, trio, mini multi…), du plus gros au
    *  plus petit. Le simple gagnant ne pèse qu'une fraction de la course. */
   masses_formules_eur?: Record<string, number> | null;
@@ -398,6 +398,12 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
   // entre chevaux reste l'information utile — mais présenter ces montants comme
   // « l'argent misé sur la course » serait faux, donc chaque total le précise.
   const enLigne = data.perimetre === "internet";
+  // Masse COMMUNE avec le pays organisateur (Hong Kong, Grande-Bretagne…) : les
+  // mises françaises rejoignent le pool local. Ce sont les plus gros montants du
+  // site — 3,8 M€ de simple gagnant sur une course de Happy Valley — et les
+  // faire passer pour la masse française serait aussi faux que l'inverse.
+  const international = data.perimetre === "international";
+  const suffixeMasse = enLigne ? " · en ligne" : international ? " · international" : "";
 
   // « Toutes formules » ne compte pas une masse mais un ENGAGEMENT : le même
   // couplé est porté en entier par ses deux chevaux, donc la colonne ne
@@ -465,10 +471,10 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
         data.flux_fenetre_eur ? "sm:grid-cols-3" : "",
       )}>
         <div className="bg-stone-50/80">
-          <BlocMasse label={enLigne ? "Simple gagnant · en ligne" : "Simple gagnant"} valeur={`${nf(data.masse_gagnant_eur ?? 0)} €`} />
+          <BlocMasse label={`Simple gagnant${suffixeMasse}`} valeur={`${nf(data.masse_gagnant_eur ?? 0)} €`} />
         </div>
         <div className="bg-stone-50/80">
-          <BlocMasse label={enLigne ? "Simple placé · en ligne" : "Simple placé"} valeur={`${nf(data.masse_place_eur ?? 0)} €`} />
+          <BlocMasse label={`Simple placé${suffixeMasse}`} valeur={`${nf(data.masse_place_eur ?? 0)} €`} />
         </div>
         {data.flux_fenetre_eur != null && data.fenetre_min != null && data.flux_fenetre_eur > 0 ? (
           <div className="col-span-2 bg-stone-50/80 sm:col-span-1">
@@ -484,7 +490,7 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
           // 231 554 € sur 721 000 € mesurés le 05/09.
           <div className="col-span-2 bg-stone-50/80 sm:col-span-1">
             <BlocMasse
-              label={enLigne ? "Toutes formules · en ligne" : "Toutes formules"}
+              label={`Toutes formules${suffixeMasse}`}
               valeur={`${nf(data.masse_toutes_formules_eur)} €`}
             />
           </div>
@@ -689,7 +695,9 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
         className="mt-3 cursor-help text-[10.5px] leading-4 text-muted-foreground"
         title="Gagnant et placé sont deux masses indépendantes : une part ne se compare qu'à celles de la même formule."
       >
-        {enLigne
+        {international
+          ? "Montants réellement misés, pas une estimation tirée des cotes. Cette course est jouée en masse commune avec le pays organisateur : les mises françaises rejoignent le pool local, et les totaux ci-dessus sont ceux du monde entier."
+          : enLigne
           ? "Montants réellement misés en ligne au PMU, pas une estimation tirée des cotes. Le PMU ne publie pas la masse des guichets sur cette course : les totaux sont donc plus petits que l'argent réellement en jeu, mais la répartition entre chevaux reste celle du marché."
           : "Montants réellement misés au PMU, pas une estimation tirée des cotes."}
       </p>

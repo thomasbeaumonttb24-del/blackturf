@@ -107,7 +107,8 @@ def test_combines_separes_des_simples():
 
 
 def test_payload_vide_ne_casse_pas():
-    assert parser_enjeux(None, None) == {"simples": {}, "combines": {}, "masses": {}}
+    assert parser_enjeux(None, None) == {"simples": {}, "combines": {}, "masses": {},
+                                         "international": False}
 
 
 # ── Analyse des mouvements ───────────────────────────────────────────────────
@@ -649,3 +650,75 @@ async def test_endpoint_sert_l_argent_toutes_formules(client, db, admin_headers)
     assert data["masses_formules_eur"]["MINI_MULTI"] == pytest.approx(79_210.22)
     # Toutes formules confondues, la course pèse bien plus que son simple gagnant.
     assert data["masse_toutes_formules_eur"] > data["masse_gagnant_eur"] * 5
+
+
+# ── Masse commune internationale ─────────────────────────────────────────────
+
+def test_types_internationaux_sont_des_simples():
+    """`SIMPLE_GAGNANT_INTERNATIONAL` est un simple gagnant, pas un pari inconnu.
+
+    Sans retirer le suffixe, le bloc tombait dans les combinés, `simples`
+    restait vide, et la course entière était classée « sans enjeux publiés » :
+    982 courses dans ce cas au 2026-09-07, dont 535 à Hong Kong — et ce sont
+    les plus grosses masses de la base (3 804 651 € de simple gagnant sur
+    15072026R6C9, contre 2 117 € pour le couplé en ligne du même départ).
+    """
+    vue = parser_enjeux(
+        _combi({"SIMPLE_GAGNANT_INTERNATIONAL": [([11], 97_000), ([3], 42_000)],
+                "E_COUPLE_GAGNANT": [([3, 11], 2_117)]}),
+        _masse(SIMPLE_GAGNANT_INTERNATIONAL=380_465_099),
+        nb_partants=12,
+    )
+    sg = vue["simples"]["SIMPLE_GAGNANT"]
+    assert sg["par_cheval"] == {11: 97_000, 3: 42_000}
+    assert sg["masse_centimes"] == 380_465_099, "la masse internationale doit rejoindre sa liste"
+    assert vue["international"] is True
+    assert vue["combines"]["COUPLE_GAGNANT"] == [{"combinaison": [3, 11], "centimes": 2_117}]
+
+
+@pytest.mark.asyncio
+async def test_fetch_etiquette_le_perimetre_international(monkeypatch):
+    """L'appel a beau n'aboutir qu'en `specialisation=INTERNET`, l'argent lu est
+    celui du pool mondial : l'étiquette doit le dire, sinon on présente 3,8 M€
+    de masse commune comme « la masse jouée en ligne »."""
+    import httpx as _httpx
+
+    from services import pmu_enjeux as pe
+
+    class _Reponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200 if payload is not None else 204
+            self.content = b"x" if payload is not None else b""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def aclose(self):
+            return None
+
+        async def get(self, url, params=None):
+            if not (params or {}).get("specialisation"):
+                return _Reponse(None)
+            if url.endswith("combinaisons"):
+                return _Reponse(_combi({"SIMPLE_GAGNANT_INTERNATIONAL": [([11], 97_000)]}))
+            return _Reponse(_masse(SIMPLE_GAGNANT_INTERNATIONAL=380_465_099))
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _Client)
+
+    vue = await pe.fetch_enjeux("15072026R6C9", nb_partants=12)
+    assert vue["perimetre"] == pe.PERIMETRE_INTERNATIONAL
+    assert vue["perimetre"] != pe.PERIMETRE_INTERNET

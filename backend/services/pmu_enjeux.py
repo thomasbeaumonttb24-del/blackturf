@@ -75,19 +75,39 @@ TYPES_SIMPLES = ("SIMPLE_GAGNANT", "SIMPLE_PLACE")
 # 8 119 € comme « l'argent misé sur la course ».
 PERIMETRE_TOTAL = "total"
 PERIMETRE_INTERNET = "internet"
+# Masse COMMUNE avec le pays organisateur (Hong Kong, Grande-Bretagne, Irlande,
+# États-Unis…) : le PMU verse les mises françaises dans le pool local, et publie
+# les types suffixés `_INTERNATIONAL`. Ce n'est ni le pool français ni la masse
+# en ligne — c'est l'argent du monde entier sur cette course, et il est ÉNORME :
+# 3 804 651 € de simple gagnant sur 15072026R6C9 (Happy Valley), contre 2 117 €
+# pour le couplé en ligne de la même course.
+PERIMETRE_INTERNATIONAL = "international"
 
 _PARAMS_INTERNET = {"specialisation": "INTERNET"}
 
+# Suffixe des paris versés dans une masse commune internationale.
+_SUFFIXE_INTERNATIONAL = "_INTERNATIONAL"
+
 
 def _normaliser_type(t: str) -> str:
-    """`E_SIMPLE_GAGNANT` → `SIMPLE_GAGNANT`.
+    """`E_SIMPLE_GAGNANT` et `SIMPLE_GAGNANT_INTERNATIONAL` → `SIMPLE_GAGNANT`.
 
-    Le préfixe `E_` ne désigne pas un autre pari, seulement le périmètre en
-    ligne du MÊME pari. Le reste du code (et la base) ne connaît que les noms
-    nus ; le périmètre voyage à côté, jamais dans le nom du type.
+    Ni le préfixe `E_` (périmètre en ligne) ni le suffixe `_INTERNATIONAL`
+    (masse commune avec le pays organisateur) ne désignent un AUTRE pari : c'est
+    le même simple gagnant, compté sur un autre périmètre. Le reste du code et
+    la base ne connaissent que les noms nus ; le périmètre voyage à côté.
+
+    Ne pas retirer le suffixe coûtait cher : `SIMPLE_GAGNANT_INTERNATIONAL`
+    tombait dans les paris combinés, `simples` restait vide, et la course
+    entière était classée « sans enjeux publiés ». 982 courses dans ce cas au
+    2026-09-07, dont 535 à Hong Kong — les plus grosses masses de la base.
     """
     t = (t or "").upper()
-    return t[2:] if t.startswith("E_") else t
+    if t.startswith("E_"):
+        t = t[2:]
+    if t.endswith(_SUFFIXE_INTERNATIONAL):
+        t = t[: -len(_SUFFIXE_INTERNATIONAL)]
+    return t
 
 
 def _epoch_ms_to_iso(v) -> str | None:
@@ -152,11 +172,15 @@ def parser_enjeux(
 
     simples: dict[str, dict] = {}
     combines: dict[str, list] = {}
+    # Vrai dès qu'un SIMPLE lu vient d'une masse commune internationale : c'est
+    # le périmètre de la course, et l'appelant doit le savoir pour l'étiqueter.
+    simples_internationaux = False
 
     for bloc in blocs:
         if not isinstance(bloc, dict):
             continue
-        type_pari = _normaliser_type(str(bloc.get("pariType") or ""))
+        type_brut = str(bloc.get("pariType") or "").upper()
+        type_pari = _normaliser_type(type_brut)
         liste = bloc.get("listeCombinaisons") or []
         if not type_pari or not isinstance(liste, list):
             continue
@@ -199,6 +223,8 @@ def parser_enjeux(
             # arrondis à l'euro) : on ne le fait pas passer pour de l'argent caché.
             autres = reste if tronque else 0
 
+            if type_brut.endswith(_SUFFIXE_INTERNATIONAL):
+                simples_internationaux = True
             simples[type_pari] = {
                 "par_cheval": par_cheval,
                 "masse_centimes": masse,
@@ -227,7 +253,8 @@ def parser_enjeux(
         if isinstance(v, (int, float)) and v > 0:
             toutes_masses[t] = int(v)
 
-    return {"simples": simples, "combines": combines, "masses": toutes_masses}
+    return {"simples": simples, "combines": combines, "masses": toutes_masses,
+            "international": simples_internationaux}
 
 
 def agreger_par_cheval(vue: dict | None) -> dict[int, dict]:
@@ -342,5 +369,8 @@ async def fetch_enjeux(course_id: str, *, nb_partants: int | None = None,
     vue = parser_enjeux(combinaisons, masse, nb_partants=nb_partants)
     if not vue.get("simples"):
         return None
-    vue["perimetre"] = perimetre
+    # Une masse commune internationale prime sur l'étiquette de l'appel : la
+    # course a beau n'avoir répondu qu'en `specialisation=INTERNET`, l'argent
+    # lu est celui du pool mondial, pas celui des seuls parieurs en ligne.
+    vue["perimetre"] = PERIMETRE_INTERNATIONAL if vue.get("international") else perimetre
     return vue
