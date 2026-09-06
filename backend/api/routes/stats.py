@@ -2132,6 +2132,11 @@ SEMAINES_PAR_MOSAIQUE = 6
 # du profil, ce qui est exactement là où elle doit être.
 ORDRE_TUILES = ("1-2", "1-1", "1-0", "0-2", "0-1", "0-0")
 
+# Samedi de référence : la fin de la PREMIÈRE semaine publiée. Tout le découpage en
+# cycles se compte à partir de là. Le déplacer décalerait toutes les tuiles et
+# casserait une mosaïque en cours de remplissage — il ne se touche pas.
+ANCRAGE_MOSAIQUE = date(2026, 9, 5)
+
 
 def _samedi_precedent(jour: date) -> date:
     """Le dernier samedi RÉVOLU à cette date (le jour même s'il est samedi).
@@ -2181,6 +2186,14 @@ async def stats_bilan_semaine(
 
     debut = samedi - timedelta(days=6)
     jours = [(debut + timedelta(days=i)).strftime("%d%m%Y") for i in range(7)]
+
+    # Quelle tuile de la mosaïque cette semaine occupe-t-elle ? Le calcul vit ICI et
+    # nulle part ailleurs : le job de publication, la route qui compose l'image et la
+    # page /studio doivent nommer LA MÊME tuile, sinon la mosaïque se remplit deux fois
+    # au même endroit et laisse un trou ailleurs — irrattrapable une fois publié.
+    index = (samedi - ANCRAGE_MOSAIQUE).days // 7
+    cycle = index // SEMAINES_PAR_MOSAIQUE
+    tuile = ORDRE_TUILES[index % SEMAINES_PAR_MOSAIQUE]
 
     # ── L'argent de la semaine, plan publié par plan publié ──────────────────
     lignes = await db.execute(
@@ -2296,6 +2309,11 @@ async def stats_bilan_semaine(
     return {
         "debut": debut.isoformat(),
         "fin": samedi.isoformat(),
+        "semaine_index": index,
+        "cycle": cycle,
+        "tuile": tuile,
+        "rang_dans_le_cycle": index % SEMAINES_PAR_MOSAIQUE + 1,
+        "semaines_par_mosaique": SEMAINES_PAR_MOSAIQUE,
         "nb_courses": int(v.get("nb_courses") or 0),
         "nb_hippodromes": int(v.get("nb_hippodromes") or 0),
         "nb_plans": nb_plans,

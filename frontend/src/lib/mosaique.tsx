@@ -139,6 +139,24 @@ export function photoDuJour(jour: string): string {
 }
 
 /**
+ * La photo de la MOSAÏQUE — la même pendant tout un cycle de six semaines.
+ *
+ * ELLE NE PEUT PAS TOURNER, et ce n'est pas un choix esthétique. La photo traverse
+ * toute la rangée haute du plan d'ensemble : les tuiles (0,0), (0,1) et (0,2) en
+ * montrent trois fenêtres qui doivent se raccorder au pixel. Or ces trois tuiles sont
+ * publiées à trois dimanches d'écart. Avec la rotation quotidienne, chacune porterait
+ * une photo différente et la mosaïque ne tomberait jamais juste — le défaut le plus
+ * visible qui soit, et impossible à corriger une fois les six publiées.
+ *
+ * L'index suit donc le NUMÉRO DE CYCLE, pas la date : toutes les semaines d'un même
+ * cycle donnent la même image, et le cycle suivant en prend une autre.
+ */
+export function photoDuCycle(cycle: number): string {
+  const i = Math.trunc(cycle);
+  return PHOTOS[((i % PHOTOS.length) + PHOTOS.length) % PHOTOS.length];
+}
+
+/**
  * Charge une photo du dossier public et la renvoie en data URI JPEG, au format voulu.
  *
  * Deux raisons de passer par une conversion :
@@ -239,9 +257,40 @@ export interface PlanJour {
   retour: number;
 }
 
+/**
+ * Le bilan d'UNE SEMAINE — l'unité de la mosaïque.
+ *
+ * Chaque tuile est publiée un dimanche différent et porte les chiffres de SA semaine.
+ * La mosaïque terminée est donc une chronique de six semaines, chacune datée sur sa
+ * tuile : sans cette date, six blocs de chiffres côte à côte seraient illisibles.
+ */
+export interface SemaineMosaique {
+  /** « du 30 août au 5 septembre » — porté par chaque tuile. */
+  periode: string;
+  nbCourses: number;
+  nbHippodromes: number;
+  nbPlans: number;
+  nbPlansGagnants: number;
+  totalRetour: number;
+  pctTop3: number | null;
+  nbTop3: number;
+  nbAnalysees: number;
+  hasardTop3: number | null;
+  pctTop1: number | null;
+  nbPartants: number;
+  meilleur: {
+    hippodrome: string; code: string; mise: number; retour: number; net: number;
+    typePari: string | null;
+  } | null;
+  meilleureJournee: {
+    jourLong: string; nbCourses: number; nbTop3: number; pctTop3: number;
+  } | null;
+}
+
 export interface DonneesMosaique {
   jourLong: string;
   jourCourt: string;
+  semaine: SemaineMosaique;
   nbCourses: number;
   /** Nombre de PLANS publiés (courses × profils), pas de courses : la tuile qui
    *  porte les montants annonçait « les 66 plans du jour » en comptant les courses,
@@ -263,6 +312,10 @@ const euro = (n: number) =>
     minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
     maximumFractionDigits: 2,
   });
+
+/** Pourcentages à la française : virgule décimale, jamais de point. */
+const pourcent = (n: number) =>
+  n.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /* ────────────────────────────── Fragments de composition ────────────────────────────── */
 
@@ -546,7 +599,8 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   const CARTE_Y = 150;
   const CARTE_H = 968;
 
-  const [p1, p2, p3] = d.plans;
+  // publiée ce dimanche-là.
+  const s = d.semaine;
 
   return (
     <div
@@ -650,7 +704,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", marginTop: 64 }}>
-          <DateDuJour jour={d.jourLong} />
+          <DateDuJour jour={d.semaine.periode} />
           <span
             style={{
               fontFamily: "Grotesk",
@@ -662,7 +716,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
               letterSpacing: -2.5,
             }}
           >
-            Le programme du jour, passé au calcul.
+            Chaque course de la semaine, passée au calcul.
           </span>
           <span
             style={{
@@ -692,7 +746,7 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
                 letterSpacing: -5,
               }}
             >
-              {d.nbCourses}
+              {d.semaine.nbCourses}
             </span>
             <span style={{ fontFamily: "Inter", fontSize: 26, color: COULEURS.encreDouce, marginTop: 10 }}>
               courses analysées
@@ -709,10 +763,10 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
                 letterSpacing: -5,
               }}
             >
-              {d.nbReunions}
+              {d.semaine.nbHippodromes}
             </span>
             <span style={{ fontFamily: "Inter", fontSize: 26, color: COULEURS.encreDouce, marginTop: 10 }}>
-              réunions PMU
+              hippodromes couverts
             </span>
           </div>
         </div>
@@ -734,14 +788,25 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
           La preuve. Misé, puis rendu, dans cet ordre, avec « le plan a rendu » écrit noir
           sur blanc : c'est ce qui distingue un plan réglé aux rapports d'une promesse. */}
       <Carte x={col(1) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
-        <Eyebrow>LE MEILLEUR PLAN DU JOUR</Eyebrow>
-        {/* La date sur la tuile qui porte les MONTANTS, pas seulement sur celle de la
-            marque : c'est ici qu'on demandera « de quel jour parlez-vous ». */}
+        <Eyebrow>LE MEILLEUR PLAN DE LA SEMAINE</Eyebrow>
+        {/* La période sur la tuile qui porte les MONTANTS, pas seulement sur celle de
+            la marque : c'est ici qu'on demandera « de quelle semaine parlez-vous »,
+            et les six tuiles de la mosaïque parlent de six semaines différentes. */}
         <div style={{ display: "flex", marginTop: 16 }}>
-          <DateDuJour jour={d.jourLong} taille="moyen" />
+          <DateDuJour jour={d.semaine.periode} taille="moyen" />
         </div>
         <div style={{ display: "flex", flexDirection: "column", marginTop: 62 }}>
-          {p1 ? <LignePlan p={p1} rang={1} /> : null}
+          {s.meilleur ? (
+            <LignePlan
+              p={{
+                hippodrome: s.meilleur.hippodrome,
+                code: s.meilleur.code,
+                mise: s.meilleur.mise,
+                retour: s.meilleur.retour,
+              }}
+              rang={1}
+            />
+          ) : null}
         </div>
         <div style={{ display: "flex", width: 72, height: 3, background: COULEURS.ligne, marginTop: 76 }} />
         <span
@@ -753,38 +818,84 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
             marginTop: 34,
           }}
         >
-          Calculé avant le départ, réglé aux rapports officiels du PMU. Les {d.nbPlans} plans
-          du jour sont publiés — les perdants aussi.
+          {s.meilleur?.typePari ? `${s.meilleur.typePari}, calculé` : "Calculé"} avant le
+          départ et réglé aux rapports officiels du PMU. Les {s.nbPlans} plans de la
+          semaine sont publiés — les perdants aussi.
         </span>
         <div style={{ display: "flex", marginTop: 54 }}>
           <Adresse />
         </div>
       </Carte>
 
-      {/* ═══════════ (0,2) — les deux suivants ═══════════ */}
+      {/* ═══════════ (0,2) — ce que l'analyse a valu ═══════════
+          Le chiffre qui tient dans la durée n'est pas un gain, c'est la qualité de
+          CLASSEMENT. Il est publié avec son dénominateur et avec le repère du hasard,
+          calculé sur le champ réel de chaque course : « 65,1 % » seul ne dit pas au
+          lecteur ce qu'il bat, et c'est cette comparaison qui fait la publication. */}
       <Carte x={col(2) + CARTE_X} y={CARTE_Y} l={CARTE_L} h={CARTE_H}>
-        <Eyebrow>ET LES DEUX SUIVANTS</Eyebrow>
+        <Eyebrow>CE QUE L&apos;ANALYSE A VALU</Eyebrow>
         <div style={{ display: "flex", marginTop: 16 }}>
-          <DateDuJour jour={d.jourLong} taille="moyen" />
+          <DateDuJour jour={d.semaine.periode} taille="moyen" />
         </div>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 30 }}>
-          {p2 ? <LignePlan p={p2} rang={2} /> : null}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", marginTop: 44 }}>
-          {p3 ? <LignePlan p={p3} rang={3} /> : null}
+
+        <div style={{ display: "flex", alignItems: "baseline", marginTop: 54 }}>
+          <span
+            style={{
+              fontFamily: "Grotesk", fontWeight: 700, fontSize: 132, lineHeight: 1,
+              color: COULEURS.encre, letterSpacing: -5,
+            }}
+          >
+            {s.pctTop3 !== null ? pourcent(s.pctTop3) : "—"}
+          </span>
+          <span
+            style={{
+              fontFamily: "Grotesk", fontWeight: 700, fontSize: 54,
+              color: COULEURS.or, marginLeft: 6,
+            }}
+          >
+            %
+          </span>
         </div>
         <span
           style={{
-            fontFamily: "Inter",
-            fontSize: 26,
-            lineHeight: 1.5,
-            color: COULEURS.encreDouce,
-            marginTop: 44,
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
+            color: COULEURS.encre, letterSpacing: -1, marginTop: 10,
           }}
         >
-          Trois plans sur les {d.nbCourses} courses du jour. Le reste est en ligne, gagnants
-          comme perdants.
+          des courses où le gagnant
         </span>
+        <span
+          style={{
+            fontFamily: "Grotesk", fontWeight: 700, fontSize: 38, lineHeight: 1.2,
+            color: COULEURS.encre, letterSpacing: -1,
+          }}
+        >
+          était dans notre Top 3
+        </span>
+        <span
+          style={{
+            fontFamily: "Inter", fontSize: 25, lineHeight: 1.5,
+            color: COULEURS.encreDouce, marginTop: 18,
+          }}
+        >
+          {s.nbTop3} courses sur {s.nbAnalysees} analysées
+          {s.hasardTop3 !== null
+            ? ` · un tirage au sort en trouverait ${pourcent(s.hasardTop3)} %`
+            : ""}
+        </span>
+
+        {s.meilleureJournee ? (
+          <span
+            style={{
+              fontFamily: "Inter", fontSize: 25, lineHeight: 1.5,
+              color: COULEURS.encreDouce, marginTop: 26,
+            }}
+          >
+            Meilleure journée : {s.meilleureJournee.jourLong}, {" "}
+            {pourcent(s.meilleureJournee.pctTop3)} % sur {s.meilleureJournee.nbCourses} courses.
+          </span>
+        ) : null}
+
         <div style={{ display: "flex", marginTop: 30 }}>
           <Adresse />
         </div>
