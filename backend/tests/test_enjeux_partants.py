@@ -107,7 +107,7 @@ def test_combines_separes_des_simples():
 
 
 def test_payload_vide_ne_casse_pas():
-    assert parser_enjeux(None, None) == {"simples": {}, "combines": {}}
+    assert parser_enjeux(None, None) == {"simples": {}, "combines": {}, "masses": {}}
 
 
 # ── Analyse des mouvements ───────────────────────────────────────────────────
@@ -385,3 +385,267 @@ async def test_endpoint_enjeux_course_sans_releve(client, db, admin_headers):
     assert resp.status_code == 200
     assert resp.json() == {"course_id": "26082026R7C1", "disponible": False,
                            "par_cheval": [], "alertes": []}
+
+
+# ── Périmètre : masse nationale vs masse jouée en ligne ──────────────────────
+#
+# Le PMU répond 204 au national sur toute son offre de soirée et sur des
+# réunions entières (mesuré le 2026-09-06 : aucune course après 23 h couverte,
+# 8 % à 22 h, Rambouillet 0/9, Saratoga 0/10). `?specialisation=INTERNET` sert
+# alors les mêmes courses, types préfixés `E_`, mais sur la SEULE masse en
+# ligne — 8 119 € contre 42 658 € au national sur 06092026R8C4. Ces tests
+# protègent les deux moitiés : le repli existe, et il ne se fait jamais passer
+# pour le national.
+
+def test_types_internet_normalises():
+    """`E_SIMPLE_GAGNANT` est le MÊME pari que `SIMPLE_GAGNANT`, vu en ligne.
+
+    Sans normalisation, le bloc part dans `combines` (« pari inconnu ») et la
+    masse `E_SIMPLE_GAGNANT` ne rejoint jamais sa liste : la course a des
+    enjeux et la carte reste vide.
+    """
+    vue = parser_enjeux(
+        _combi({"E_SIMPLE_GAGNANT": [([1], 20833), ([2], 13800)]}),
+        _masse(E_SIMPLE_GAGNANT=34633),
+        nb_partants=6,
+    )
+    sg = vue["simples"]["SIMPLE_GAGNANT"]
+    assert sg["par_cheval"] == {1: 20833, 2: 13800}
+    assert sg["masse_centimes"] == 34633
+    assert "E_SIMPLE_GAGNANT" not in vue["combines"], "le préfixe ne crée pas un pari fantôme"
+
+
+@pytest.mark.asyncio
+async def test_fetch_replie_sur_internet_quand_le_national_est_vide(monkeypatch):
+    """204 au national ⇒ on redemande en ligne, et on DIT que c'est en ligne."""
+    import httpx as _httpx
+
+    from services import pmu_enjeux as pe
+
+    appels: list[str] = []
+
+    class _Reponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200 if payload is not None else 204
+            self.content = b"x" if payload is not None else b""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def aclose(self):
+            # `fetch_enjeux` ferme lui-même le client qu'il a ouvert : le double
+            # doit porter la même surface qu'`httpx.AsyncClient`, sinon il teste
+            # une API qui n'existe pas.
+            return None
+
+        async def get(self, url, params=None):
+            spec = (params or {}).get("specialisation")
+            appels.append(f"{url.rsplit('/', 1)[-1]}:{spec or 'national'}")
+            if not spec:
+                return _Reponse(None)  # 204 : le national ne publie rien ici
+            if url.endswith("combinaisons"):
+                return _Reponse(_combi({"E_SIMPLE_GAGNANT": [([3], 9000), ([7], 4000)]}))
+            return _Reponse(_masse(E_SIMPLE_GAGNANT=13000))
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _Client)
+
+    vue = await pe.fetch_enjeux("06092026R8C7", nb_partants=8)
+    assert vue is not None, "le repli en ligne doit produire une vue"
+    assert vue["perimetre"] == pe.PERIMETRE_INTERNET
+    assert vue["simples"]["SIMPLE_GAGNANT"]["par_cheval"] == {3: 9000, 7: 4000}
+    assert appels[0] == "combinaisons:national", "le national est TOUJOURS tenté en premier"
+
+
+@pytest.mark.asyncio
+async def test_fetch_ne_replie_pas_quand_le_national_repond(monkeypatch):
+    """La masse en ligne ne doit jamais remplacer une masse nationale existante :
+    elle vaut ~19 % de celle-ci, et l'écart se lirait comme une fuite d'argent."""
+    import httpx as _httpx
+
+    from services import pmu_enjeux as pe
+
+    appels: list[str] = []
+
+    class _Reponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200
+            self.content = b"x"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def aclose(self):
+            # `fetch_enjeux` ferme lui-même le client qu'il a ouvert : le double
+            # doit porter la même surface qu'`httpx.AsyncClient`, sinon il teste
+            # une API qui n'existe pas.
+            return None
+
+        async def get(self, url, params=None):
+            appels.append((params or {}).get("specialisation") or "national")
+            if url.endswith("combinaisons"):
+                return _Reponse(_combi({"SIMPLE_GAGNANT": [([1], 4_265_784)]}))
+            return _Reponse(_masse(SIMPLE_GAGNANT=4_265_784))
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _Client)
+
+    vue = await pe.fetch_enjeux("06092026R8C4", nb_partants=10)
+    assert vue["perimetre"] == pe.PERIMETRE_TOTAL
+    assert "INTERNET" not in appels, "aucun appel en ligne quand le national a répondu"
+
+
+@pytest.mark.asyncio
+async def test_endpoint_ne_melange_jamais_deux_perimetres(client, db, admin_headers):
+    """Une série qui passe de l'en-ligne au national ferait bondir la masse de
+    8 119 € à 42 658 € : tous les chevaux paraîtraient recevoir un afflux au même
+    instant. Seul le périmètre du dernier relevé est servi."""
+    import uuid
+
+    from db.models import Course, EnjeuxCourseHistorique, Hippodrome, Reunion
+
+    hippo = Hippodrome(hippodrome_id=str(uuid.uuid4()), nom="Perim Test", code="PER")
+    db.add(hippo)
+    db.add(Reunion(reunion_id="RP-1", date=datetime(2026, 9, 6).date(),
+                   hippodrome_id=hippo.hippodrome_id, hippodrome_nom="Perim Test", numero=9))
+    db.add(Course(course_id="06092026R9C1", reunion_id="RP-1", numero=1,
+                  date_heure=datetime(2026, 9, 6, 15, 0, tzinfo=timezone.utc),
+                  hippodrome_nom="Perim Test", discipline="Plat", distance=1600,
+                  nb_partants=6, statut="termine"))
+    base = datetime(2026, 9, 6, 14, 0, tzinfo=timezone.utc)
+    for i, (perimetre, montant, masse) in enumerate([
+        ("internet", 811_900, 900_000),
+        ("total", 4_265_784, 4_400_000),
+    ]):
+        db.add(EnjeuxCourseHistorique(
+            id=str(uuid.uuid4()), course_id="06092026R9C1",
+            scraped_at=base + timedelta(minutes=10 * i),
+            enjeux={"SIMPLE_GAGNANT": {"4": montant}, "SIMPLE_PLACE": {}},
+            masse_gagnant_centimes=masse, masse_place_centimes=None,
+            autres_gagnant_centimes=0, autres_place_centimes=0, nb_autres=0,
+            perimetre=perimetre,
+        ))
+    await db.commit()
+
+    resp = await client.get("/api/v1/courses/06092026R9C1/enjeux", headers=admin_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["perimetre"] == "total", "le dernier relevé est national : c'est lui qui prime"
+    assert data["nb_releves"] == 1, "le relevé en ligne ne rejoint pas la série nationale"
+    assert data["alertes"] == [], "une bascule de périmètre n'est pas un afflux"
+
+
+# ── Toutes formules : l'argent qui dépend d'un cheval ────────────────────────
+#
+# Le simple gagnant ne pèse qu'une fraction de la course : 231 554 € sur
+# 721 000 € toutes formules, mesuré sur 05092026R1C1. Un cheval discret au
+# simple peut porter la moitié des couplés — c'est précisément le mouvement
+# qu'on veut voir.
+
+def test_agregation_compte_un_couple_pour_ses_deux_chevaux():
+    """Un couplé 3-5 de 1 412 € dépend du 3 ET du 5 : chacun le porte en entier.
+
+    La somme des colonnes dépasse donc la masse de la course. C'est voulu, et
+    c'est pour ça que ce total ne s'appelle jamais « l'argent misé ».
+    """
+    from services.pmu_enjeux import agreger_par_cheval
+
+    agg = agreger_par_cheval({
+        "simples": {"SIMPLE_GAGNANT": {"par_cheval": {3: 10_000, 5: 4_000}}},
+        "combines": {"COUPLE_GAGNANT": [{"combinaison": [3, 5], "centimes": 141_200}]},
+    })
+    assert agg[3]["simple_centimes"] == 10_000
+    assert agg[3]["combine_centimes"] == 141_200
+    assert agg[3]["engage_centimes"] == 151_200
+    assert agg[5]["engage_centimes"] == 145_200
+    assert agg[3]["detail"]["COUPLE_GAGNANT"] == agg[5]["detail"]["COUPLE_GAGNANT"]
+
+
+def test_agregation_un_cheval_repete_ne_compte_pas_double():
+    from services.pmu_enjeux import agreger_par_cheval
+
+    agg = agreger_par_cheval({
+        "simples": {},
+        "combines": {"TRIO": [{"combinaison": [4, 4, 9], "centimes": 6_000}]},
+    })
+    assert agg[4]["engage_centimes"] == 6_000
+
+
+def test_masses_portent_les_formules_sans_combinaisons():
+    """MINI_MULTI n'a pas de liste de combinaisons mais pesait 79 210 € : sans
+    les masses, l'argent de la course se résumait au simple gagnant."""
+    vue = parser_enjeux(
+        _combi({"SIMPLE_GAGNANT": [([1], 231_554)]}),
+        _masse(SIMPLE_GAGNANT=231_554, MINI_MULTI=7_921_022),
+        nb_partants=8,
+    )
+    assert vue["masses"]["MINI_MULTI"] == 7_921_022
+    assert "MINI_MULTI" not in vue["simples"], "une masse n'est pas une liste par cheval"
+
+
+@pytest.mark.asyncio
+async def test_endpoint_sert_l_argent_toutes_formules(client, db, admin_headers):
+    """La carte doit pouvoir dire « ce cheval porte 1 412 € de couplés », pas
+    seulement son simple gagnant."""
+    import uuid
+
+    from db.models import Course, EnjeuxCourseHistorique, Hippodrome, Reunion
+
+    hippo = Hippodrome(hippodrome_id=str(uuid.uuid4()), nom="Formules Test", code="FOR")
+    db.add(hippo)
+    db.add(Reunion(reunion_id="RF-1", date=datetime(2026, 9, 6).date(),
+                   hippodrome_id=hippo.hippodrome_id, hippodrome_nom="Formules Test", numero=12))
+    db.add(Course(course_id="06092026R12C1", reunion_id="RF-1", numero=1,
+                  date_heure=datetime(2026, 9, 6, 15, 0, tzinfo=timezone.utc),
+                  hippodrome_nom="Formules Test", discipline="Plat", distance=1600,
+                  nb_partants=6, statut="termine"))
+    db.add(EnjeuxCourseHistorique(
+        id=str(uuid.uuid4()), course_id="06092026R12C1",
+        scraped_at=datetime(2026, 9, 6, 14, 40, tzinfo=timezone.utc),
+        enjeux={"SIMPLE_GAGNANT": {"3": 1_000_000, "5": 400_000}, "SIMPLE_PLACE": {}},
+        masse_gagnant_centimes=1_400_000, masse_place_centimes=None,
+        autres_gagnant_centimes=0, autres_place_centimes=0, nb_autres=0,
+        perimetre="total", source="live",
+        combines={"COUPLE_GAGNANT": [[[3, 5], 141_200]]},
+        masses={"SIMPLE_GAGNANT": 1_400_000, "COUPLE_GAGNANT": 141_200,
+                "MINI_MULTI": 7_921_022},
+    ))
+    await db.commit()
+
+    resp = await client.get("/api/v1/courses/06092026R12C1/enjeux", headers=admin_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    tete = data["par_cheval"][0]
+    assert tete["numero"] == 3
+    assert tete["combine_eur"] == pytest.approx(1412.0)
+    assert tete["engage_eur"] == pytest.approx(11_412.0)
+    assert tete["detail_formules_eur"]["SIMPLE_GAGNANT"] == pytest.approx(10_000.0)
+    assert data["masses_formules_eur"]["MINI_MULTI"] == pytest.approx(79_210.22)
+    # Toutes formules confondues, la course pèse bien plus que son simple gagnant.
+    assert data["masse_toutes_formules_eur"] > data["masse_gagnant_eur"] * 5

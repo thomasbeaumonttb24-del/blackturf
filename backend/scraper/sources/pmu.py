@@ -816,21 +816,39 @@ class PmuScraper(BaseScraper):
 
         `get_pool_data` ne dit que combien est misé SUR LA COURSE ; ici on sait
         sur QUI. Retourne la vue de `services.pmu_enjeux.parser_enjeux`, ou None
-        si le PMU ne publie pas encore d'enjeux pour cette course.
+        si le PMU ne publie d'enjeux dans AUCUN des deux périmètres.
+
+        Deux périmètres, dans cet ordre : la masse nationale d'abord, et à défaut
+        la masse jouée en ligne (`?specialisation=INTERNET`). Le PMU répond 204
+        au national sur toute son offre de soirée et sur des réunions entières —
+        s'arrêter là privait ces courses d'enjeux, sans rien en dire. La vue
+        porte le périmètre retenu, qui est historisé avec le relevé : les deux
+        masses ne se comparent pas et ne doivent jamais se suivre dans une même
+        série.
         """
-        from services.pmu_enjeux import parser_enjeux
+        from services.pmu_enjeux import (PERIMETRE_INTERNET, PERIMETRE_TOTAL,
+                                         parser_enjeux)
 
         c_num = int(course_id.split("C")[-1]) if "C" in str(course_id) else 1
         d = jour_courses().strftime("%d%m%Y")
         base = f"{BASE}/programme/{d}/R{reunion_id}/C{c_num}"
 
+        perimetre = PERIMETRE_TOTAL
+        suffixe = ""
         combinaisons = await self._fetch_json(f"{base}/combinaisons")
         if not combinaisons:
+            perimetre = PERIMETRE_INTERNET
+            suffixe = "?specialisation=INTERNET"
+            combinaisons = await self._fetch_json(f"{base}/combinaisons{suffixe}")
+        if not combinaisons:
             return None
-        masse = await self._fetch_json(f"{base}/masse-enjeu")
+        masse = await self._fetch_json(f"{base}/masse-enjeu{suffixe}")
 
         vue = parser_enjeux(combinaisons, masse, nb_partants=nb_partants)
-        return vue if vue.get("simples") else None
+        if not vue.get("simples"):
+            return None
+        vue["perimetre"] = perimetre
+        return vue
 
     def _parse_partants(self, raw: list) -> list[PartantScrape]:
         partants = []

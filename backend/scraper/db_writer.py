@@ -19,6 +19,7 @@ from db.models import (
     PenetrometreLog, TempsPassage, PronosticPresse,
     AssociationJockeyEntraineur, StatsJockey, StatsEntraineur,
 )
+from services.pmu_enjeux import PERIMETRE_TOTAL
 from services.temps_courses import jour_courses
 from scraper.base import (
     CourseScrape, PartantScrape, ResultatScrape,
@@ -765,7 +766,8 @@ async def save_pool_pmu(session: AsyncSession, pool: PoolPMUScrape) -> None:
     )
 
 
-async def save_enjeux_course(session: AsyncSession, course_id: str, vue: dict) -> bool:
+async def save_enjeux_course(session: AsyncSession, course_id: str, vue: dict,
+                             *, scraped_at: datetime | None = None) -> bool:
     """Historise un relevé d'enjeux PAR CHEVAL (cf. services/pmu_enjeux.parser_enjeux).
 
     Retourne True si une ligne a été écrite, False si le relevé est IDENTIQUE au
@@ -784,6 +786,15 @@ async def save_enjeux_course(session: AsyncSession, course_id: str, vue: dict) -
         "SIMPLE_GAGNANT": {str(n): int(v) for n, v in (sg.get("par_cheval") or {}).items()},
         "SIMPLE_PLACE": {str(n): int(v) for n, v in (sp.get("par_cheval") or {}).items()},
     }
+    # Paris à plusieurs chevaux, stockés en listes plates `[[chevaux], centimes]` :
+    # le JSON pèse ~40 % de moins qu'avec des clés répétées, sur une timeseries
+    # qui prend un relevé toutes les 5 min pendant 4 h.
+    combines = {
+        t: [[[int(n) for n in (l.get("combinaison") or [])], int(l.get("centimes") or 0)]
+            for l in (lignes or [])]
+        for t, lignes in ((vue or {}).get("combines") or {}).items()
+    } or None
+    masses = {t: int(v) for t, v in ((vue or {}).get("masses") or {}).items()} or None
 
     dernier = (await session.execute(
         select(EnjeuxCourseHistorique)
@@ -791,13 +802,22 @@ async def save_enjeux_course(session: AsyncSession, course_id: str, vue: dict) -
         .order_by(EnjeuxCourseHistorique.scraped_at.desc())
         .limit(1)
     )).scalars().first()
+    # Le périmètre entre dans la comparaison : deux relevés identiques en montants
+    # mais lus sur des périmètres différents ne sont PAS le même relevé. Il ne peut
+    # d'ailleurs coïncider que sur une course sans un centime joué.
+    perimetre = (vue or {}).get("perimetre") or PERIMETRE_TOTAL
+    # Les combinaisons entrent dans la comparaison : l'argent peut bouger au
+    # couplé sans bouger d'un centime au simple gagnant. Ne comparer que les
+    # simples reviendrait à jeter ce mouvement en le prenant pour un doublon.
     if dernier is not None and dernier.enjeux == enjeux \
             and dernier.masse_gagnant_centimes == sg.get("masse_centimes") \
-            and dernier.masse_place_centimes == sp.get("masse_centimes"):
+            and dernier.masse_place_centimes == sp.get("masse_centimes") \
+            and (dernier.perimetre or PERIMETRE_TOTAL) == perimetre \
+            and dernier.combines == combines and dernier.masses == masses:
         return False
 
     maj = sg.get("maj_at") or sp.get("maj_at")
-    session.add(EnjeuxCourseHistorique(
+    ligne = EnjeuxCourseHistorique(
         id=gen_uuid(),
         course_id=course_id,
         maj_at=_parse_datetime(maj) if maj else None,
@@ -810,7 +830,17 @@ async def save_enjeux_course(session: AsyncSession, course_id: str, vue: dict) -
         # combien » ne doit pas se lire « aucun ».
         nb_autres=(max(sg.get("nb_autres") or 0, sp.get("nb_autres") or 0)
                    if (sg.get("nb_autres") is not None or sp.get("nb_autres") is not None) else None),
-    ))
+        perimetre=perimetre,
+        combines=combines,
+        masses=masses,
+        source=(vue or {}).get("source") or "live",
+    )
+    # Un relevé reconstitué après coup porte l'heure de la COURSE, pas celle du
+    # rattrapage : daté d'aujourd'hui, il ferait croire à un pari posé six mois
+    # après l'arrivée, et se glisserait dans les fenêtres d'analyse du jour.
+    if scraped_at is not None:
+        ligne.scraped_at = scraped_at
+    session.add(ligne)
     return True
 
 

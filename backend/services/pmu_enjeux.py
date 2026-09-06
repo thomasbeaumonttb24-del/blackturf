@@ -55,6 +55,40 @@ CAP_COMBINAISONS = 12
 # Types « simples » : une combinaison = un cheval.
 TYPES_SIMPLES = ("SIMPLE_GAGNANT", "SIMPLE_PLACE")
 
+# Deux périmètres d'enjeux, et le PMU ne sert PAS le même selon la course :
+#
+#   • `combinaisons` sans paramètre  → la masse NATIONALE (guichets + en ligne).
+#     C'est le périmètre par défaut, et le seul qu'on lisait jusqu'ici.
+#   • `combinaisons?specialisation=INTERNET` → la seule masse jouée EN LIGNE,
+#     types préfixés `E_` (`E_SIMPLE_GAGNANT`…).
+#
+# Mesuré le 2026-09-06 : l'appel par défaut répond **204 No Content** sur une
+# grande partie de l'offre — toutes les réunions de soirée (aucune course après
+# 23 h n'était couverte, 8 % à 22 h, 29 % à 21 h) et des réunions entières
+# (Rambouillet 0/9, Laval 0/8, Saratoga 0/10, Solvalla 0/9). Sur ces mêmes
+# courses, `?specialisation=INTERNET` répond 200 avec le détail par cheval.
+#
+# Les deux ne se confondent pas et ne s'additionnent pas : sur 06092026R8C4,
+# SIMPLE_GAGNANT valait 42 658 € au national contre 8 119 € en ligne (19 %). On
+# prend donc le national quand il existe, la masse en ligne SEULEMENT en repli,
+# et on transporte le périmètre jusqu'à l'affichage pour ne jamais présenter
+# 8 119 € comme « l'argent misé sur la course ».
+PERIMETRE_TOTAL = "total"
+PERIMETRE_INTERNET = "internet"
+
+_PARAMS_INTERNET = {"specialisation": "INTERNET"}
+
+
+def _normaliser_type(t: str) -> str:
+    """`E_SIMPLE_GAGNANT` → `SIMPLE_GAGNANT`.
+
+    Le préfixe `E_` ne désigne pas un autre pari, seulement le périmètre en
+    ligne du MÊME pari. Le reste du code (et la base) ne connaît que les noms
+    nus ; le périmètre voyage à côté, jamais dans le nom du type.
+    """
+    t = (t or "").upper()
+    return t[2:] if t.startswith("E_") else t
+
 
 def _epoch_ms_to_iso(v) -> str | None:
     if not isinstance(v, (int, float)) or v <= 0:
@@ -89,10 +123,17 @@ def parser_enjeux(
             "SIMPLE_PLACE": {...},
           },
           "combines": {"COUPLE_GAGNANT": [{"combinaison": [3, 5], "centimes": 141284}, ...]},
+          "masses": {"SIMPLE_GAGNANT": 23155391, "MINI_MULTI": 7921022, ...},
         }
 
     Tolère l'absence de l'un ou l'autre payload : la masse manquante retombe sur
     la somme des enjeux listés (exacte tant que la liste n'est pas tronquée).
+
+    `masses` porte TOUS les types cotés par le PMU, y compris ceux qui n'ont
+    aucune liste de combinaisons (`MINI_MULTI`, `MULTI`…). Sans eux, « l'argent
+    de la course » se résumait au simple gagnant : sur 05092026R1C1, 231 554 €
+    en simple gagnant pour 721 000 € toutes formules — les deux tiers de
+    l'argent étaient invisibles.
     """
     blocs: list = []
     if isinstance(combinaisons, dict):
@@ -105,7 +146,7 @@ def parser_enjeux(
     for it in items:
         if not isinstance(it, dict):
             continue
-        t = str(it.get("typePari") or "").upper()
+        t = _normaliser_type(str(it.get("typePari") or ""))
         if t:
             masses[t] = it
 
@@ -115,7 +156,7 @@ def parser_enjeux(
     for bloc in blocs:
         if not isinstance(bloc, dict):
             continue
-        type_pari = str(bloc.get("pariType") or "").upper()
+        type_pari = _normaliser_type(str(bloc.get("pariType") or ""))
         liste = bloc.get("listeCombinaisons") or []
         if not type_pari or not isinstance(liste, list):
             continue
@@ -180,11 +221,69 @@ def parser_enjeux(
             if lignes:
                 combines[type_pari] = lignes
 
-    return {"simples": simples, "combines": combines}
+    toutes_masses: dict[str, int] = {}
+    for t, it in masses.items():
+        v = it.get("totalEnjeu")
+        if isinstance(v, (int, float)) and v > 0:
+            toutes_masses[t] = int(v)
+
+    return {"simples": simples, "combines": combines, "masses": toutes_masses}
+
+
+def agreger_par_cheval(vue: dict | None) -> dict[int, dict]:
+    """Argent engagé SUR CHAQUE CHEVAL, toutes formules confondues.
+
+    Le simple gagnant ne représente qu'une fraction de l'argent d'une course :
+    sur 05092026R1C1, 231 554 € de simple gagnant pour 721 000 € toutes
+    formules. Un cheval peut être discret au simple et porter la moitié des
+    couplés — c'est exactement le mouvement qu'on cherche à voir.
+
+    Pour chaque cheval::
+
+        {5: {"detail": {"SIMPLE_GAGNANT": 1809300, "COUPLE_GAGNANT": 412000, ...},
+             "simple_centimes": 2551600,     # gagnant + placé
+             "combine_centimes": 998400,     # sa part des paris à plusieurs chevaux
+             "engage_centimes": 3550000}}    # tout l'argent dont le sort dépend de lui
+
+    Un couplé 3-5 de 1 412 € est compté ENTIER pour le 3 et ENTIER pour le 5 :
+    c'est bien la somme qui dépend de chacun d'eux. La somme des `engage_*` d'une
+    course dépasse donc la masse totale, et ce n'est pas une erreur — on ne
+    présente jamais ce total comme « l'argent de la course ».
+    """
+    par_cheval: dict[int, dict] = {}
+
+    def _ligne(n: int) -> dict:
+        return par_cheval.setdefault(
+            int(n), {"detail": {}, "simple_centimes": 0, "combine_centimes": 0, "engage_centimes": 0}
+        )
+
+    for type_pari, bloc in ((vue or {}).get("simples") or {}).items():
+        for n, centimes in (bloc.get("par_cheval") or {}).items():
+            l = _ligne(n)
+            l["detail"][type_pari] = l["detail"].get(type_pari, 0) + int(centimes)
+            l["simple_centimes"] += int(centimes)
+            l["engage_centimes"] += int(centimes)
+
+    for type_pari, lignes in ((vue or {}).get("combines") or {}).items():
+        for it in lignes or []:
+            centimes = int(it.get("centimes") or 0)
+            if centimes <= 0:
+                continue
+            # Un même cheval listé deux fois dans une combinaison (le PMU ne le
+            # fait pas, mais rien ne l'interdit dans le format) ne doit pas
+            # compter double.
+            for n in {int(x) for x in (it.get("combinaison") or [])}:
+                l = _ligne(n)
+                l["detail"][type_pari] = l["detail"].get(type_pari, 0) + centimes
+                l["combine_centimes"] += centimes
+                l["engage_centimes"] += centimes
+
+    return par_cheval
 
 
 async def fetch_enjeux(course_id: str, *, nb_partants: int | None = None,
-                       timeout: float = 4.0) -> dict | None:
+                       timeout: float = 4.0,
+                       client: "httpx.AsyncClient | None" = None) -> dict | None:
     """
     Lit les enjeux par cheval EN DIRECT chez le PMU pour une course.
 
@@ -198,19 +297,50 @@ async def fetch_enjeux(course_id: str, *, nb_partants: int | None = None,
     d, reunion, course = parsed
     base = f"{_BASE}/programme/{d}/R{reunion}/C{course}"
 
+    # Un appelant qui enchaîne des milliers de courses (le backfill) fournit son
+    # propre client : ouvrir une connexion TLS par course coûtait plus cher que
+    # la lecture elle-même.
+    ferme_client = client is None
+
     try:
-        async with httpx.AsyncClient(headers=_HEADERS, timeout=timeout, follow_redirects=True) as client:
-            r_comb = await client.get(f"{base}/combinaisons")
-            r_comb.raise_for_status()
-            combinaisons = r_comb.json() if r_comb.content else None
-            try:
-                r_masse = await client.get(f"{base}/masse-enjeu")
-                masse = r_masse.json() if (r_masse.status_code == 200 and r_masse.content) else None
-            except Exception:
-                masse = None  # la masse n'est qu'un affinage : la somme des listés suffit
+        if client is None:
+            client = httpx.AsyncClient(headers=_HEADERS, timeout=timeout, follow_redirects=True)
+        try:
+
+            async def _lire(params: dict | None) -> tuple[object | None, object | None]:
+                r_comb = await client.get(f"{base}/combinaisons", params=params)
+                r_comb.raise_for_status()
+                # 204 = « pas ce périmètre sur cette course », pas une panne :
+                # `.content` est vide et `.json()` léverait.
+                comb = r_comb.json() if r_comb.content else None
+                if not comb:
+                    return None, None
+                try:
+                    r_masse = await client.get(f"{base}/masse-enjeu", params=params)
+                    m = r_masse.json() if (r_masse.status_code == 200 and r_masse.content) else None
+                except Exception:
+                    m = None  # la masse n'est qu'un affinage : la somme des listés suffit
+                return comb, m
+
+            perimetre = PERIMETRE_TOTAL
+            combinaisons, masse = await _lire(None)
+            if not combinaisons:
+                # Repli en ligne. Il ne dégrade jamais un relevé national existant
+                # puisqu'on n'y vient que si le national est vide.
+                perimetre = PERIMETRE_INTERNET
+                combinaisons, masse = await _lire(_PARAMS_INTERNET)
+        finally:
+            if ferme_client:
+                await client.aclose()
     except Exception as e:
         log.warning("pmu_enjeux.fetch_failed", course_id=course_id, error=str(e)[:140])
         return None
 
+    if not combinaisons:
+        return None
+
     vue = parser_enjeux(combinaisons, masse, nb_partants=nb_partants)
-    return vue if vue.get("simples") else None
+    if not vue.get("simples"):
+        return None
+    vue["perimetre"] = perimetre
+    return vue

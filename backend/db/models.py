@@ -1298,6 +1298,20 @@ class EnjeuxCourseHistorique(Base):
     autres_gagnant_centimes: Mapped[int | None] = mapped_column(BigInteger)
     autres_place_centimes: Mapped[int | None] = mapped_column(BigInteger)
     nb_autres: Mapped[int | None] = mapped_column(Integer)
+    # Périmètre de la masse : "total" (masse nationale, guichets + en ligne) ou
+    # "internet" (masse jouée en ligne seule, servie par le PMU en repli quand le
+    # national répond 204 — toute l'offre de soirée, et des réunions entières).
+    # Les deux ne se comparent PAS : sur 06092026R8C4, 42 658 € au national pour
+    # 8 119 € en ligne. NULL = relevé antérieur au 2026-09-06, donc "total".
+    perimetre: Mapped[str | None] = mapped_column(String(10))
+    # Paris à plusieurs chevaux : {"COUPLE_GAGNANT": [[[3, 5], 141284], ...]}.
+    # Le simple gagnant ne pèse qu'un tiers de l'argent d'une course.
+    combines: Mapped[dict | None] = mapped_column(JSON)
+    # Masse par formule, y compris celles sans liste de combinaisons (MINI_MULTI…).
+    masses: Mapped[dict | None] = mapped_column(JSON)
+    # "live" (relevé pré-course, seul signal de marché valable) ou "backfill"
+    # (photo finale reconstituée : elle connaît l'issue, donc jamais une feature).
+    source: Mapped[str | None] = mapped_column(String(10))
 
     __table_args__ = (
         Index("ix_enjeux_course_time", "course_id", "scraped_at"),

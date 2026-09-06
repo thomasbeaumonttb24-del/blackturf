@@ -2402,7 +2402,7 @@ async def get_enjeux_par_cheval(
 
     from db.models import EnjeuxCourseHistorique
     from services.enjeux_analyse import analyser_enjeux
-    from services.pmu_enjeux import fetch_enjeux
+    from services.pmu_enjeux import PERIMETRE_TOTAL, agreger_par_cheval, fetch_enjeux
 
     course = (await db.execute(
         select(Course).where(Course.course_id == course_id)
@@ -2432,6 +2432,15 @@ async def get_enjeux_par_cheval(
                 continue
         return out
 
+    def _json_col(brut):
+        """asyncpg rend un dict, SQLite une chaîne : on accepte les deux."""
+        if isinstance(brut, str):
+            try:
+                return _json.loads(brut)
+            except ValueError:
+                return None
+        return brut
+
     snapshots = []
     for r in rows:
         enjeux = r.enjeux
@@ -2449,6 +2458,10 @@ async def get_enjeux_par_cheval(
             "autres_sg": r.autres_gagnant_centimes,
             "autres_sp": r.autres_place_centimes,
             "nb_autres": r.nb_autres,
+            # NULL = relevé antérieur au périmètre explicite : c'était le national.
+            "perimetre": r.perimetre or PERIMETRE_TOTAL,
+            "combines": _json_col(r.combines),
+            "masses": _json_col(r.masses),
         })
 
     # ── Relevé LIVE (cache court partagé) ────────────────────────────────────
@@ -2488,10 +2501,25 @@ async def get_enjeux_par_cheval(
                 "nb_autres": (max(sg_live.get("nb_autres") or 0, sp_live.get("nb_autres") or 0)
                               if (sg_live.get("nb_autres") is not None
                                   or sp_live.get("nb_autres") is not None) else None),
+                "perimetre": (vue or {}).get("perimetre") or PERIMETRE_TOTAL,
+                "combines": {
+                    t: [[list(l.get("combinaison") or []), int(l.get("centimes") or 0)]
+                        for l in (lignes or [])]
+                    for t, lignes in ((vue or {}).get("combines") or {}).items()
+                } or None,
+                "masses": (vue or {}).get("masses") or None,
             })
 
     if not snapshots:
         return {"course_id": course_id, "disponible": False, "par_cheval": [], "alertes": []}
+
+    # Une série ne mélange JAMAIS deux périmètres. Le PMU peut ouvrir la masse
+    # nationale d'une course dont on n'avait jusque-là que la masse en ligne :
+    # enchaîner les deux ferait bondir la masse de 8 119 € à 42 658 € (mesuré sur
+    # 06092026R8C4) et déclencherait un « afflux » sur tous les chevaux à la fois.
+    # On garde le périmètre du DERNIER relevé, qui est le plus complet disponible.
+    perimetre = snapshots[-1].get("perimetre") or PERIMETRE_TOTAL
+    snapshots = [s for s in snapshots if (s.get("perimetre") or PERIMETRE_TOTAL) == perimetre]
 
     noms = {
         part.numero: cheval.nom
@@ -2512,7 +2540,46 @@ async def get_enjeux_par_cheval(
     vue = analyser_enjeux(snapshots, noms=noms)
     if not vue:
         return {"course_id": course_id, "disponible": False, "par_cheval": [], "alertes": []}
-    return {"course_id": course_id, "disponible": True, **vue}
+
+    # ── Toutes formules : l'argent qui dépend de chaque cheval ───────────────
+    # Le simple gagnant ne pèse qu'une fraction de la course (231 554 € sur
+    # 721 000 € mesurés le 05/09). Un cheval discret au simple peut porter la
+    # moitié des couplés : sans ce calcul, ce mouvement-là ne se voyait nulle
+    # part. Un couplé 3-5 est compté entier pour le 3 ET pour le 5 — c'est bien
+    # la somme qui dépend de chacun ; la somme des colonnes dépasse donc la
+    # masse de la course, et n'est jamais présentée comme « l'argent misé ».
+    dernier = snapshots[-1]
+    engage = agreger_par_cheval({
+        "simples": {
+            "SIMPLE_GAGNANT": {"par_cheval": dernier.get("sg") or {}},
+            "SIMPLE_PLACE": {"par_cheval": dernier.get("sp") or {}},
+        },
+        "combines": {
+            t: [{"combinaison": c, "centimes": e} for c, e in (lignes or [])]
+            for t, lignes in (dernier.get("combines") or {}).items()
+        },
+    })
+    for ligne in vue.get("par_cheval") or []:
+        agg = engage.get(ligne.get("numero"))
+        if not agg:
+            continue
+        ligne["combine_eur"] = round(agg["combine_centimes"] / 100, 2)
+        ligne["engage_eur"] = round(agg["engage_centimes"] / 100, 2)
+        ligne["detail_formules_eur"] = {
+            t: round(c / 100, 2) for t, c in sorted(
+                agg["detail"].items(), key=lambda kv: -kv[1]) if c > 0
+        }
+
+    masses_eur = {t: round(int(c) / 100, 2)
+                  for t, c in sorted((dernier.get("masses") or {}).items(),
+                                     key=lambda kv: -int(kv[1]))}
+    return {
+        "course_id": course_id, "disponible": True, "perimetre": perimetre,
+        "masses_formules_eur": masses_eur or None,
+        "masse_toutes_formules_eur": (round(sum(masses_eur.values()), 2)
+                                      if masses_eur else None),
+        **vue,
+    }
 
 
 @router.get("/courses/{course_id}/temps-passage")

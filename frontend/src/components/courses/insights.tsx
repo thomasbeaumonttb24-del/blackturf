@@ -307,7 +307,39 @@ interface EnjeuxCheval {
   afflux: boolean;
   grosse_mise: boolean;
   entre_dans_classement: boolean;
+  /** Argent engagé sur ce cheval dans les paris à plusieurs (couplé, trio,
+   *  2 sur 4…). Un couplé 3-5 compte entier pour le 3 et pour le 5 : c'est bien
+   *  la somme dont le sort dépend de chacun. */
+  combine_eur?: number | null;
+  /** Simple + combiné : tout l'argent dont le sort dépend de ce cheval. */
+  engage_eur?: number | null;
+  /** Le même montant, formule par formule, du plus gros au plus petit. */
+  detail_formules_eur?: Record<string, number> | null;
 }
+
+/** Noms lisibles des formules PMU. Un tableau qui affiche `DEUX_SUR_QUATRE` en
+ *  capitales soulignées ne se lit pas — et c'est le nom que le parieur voit au
+ *  guichet qui compte. */
+const NOM_FORMULE: Record<string, string> = {
+  SIMPLE_GAGNANT: "Simple gagnant",
+  SIMPLE_PLACE: "Simple placé",
+  COUPLE_GAGNANT: "Couplé gagnant",
+  COUPLE_PLACE: "Couplé placé",
+  COUPLE_ORDRE: "Couplé ordre",
+  TRIO: "Trio",
+  TRIO_ORDRE: "Trio ordre",
+  TIERCE: "Tiercé",
+  QUARTE_PLUS: "Quarté+",
+  QUINTE_PLUS: "Quinté+",
+  DEUX_SUR_QUATRE: "2 sur 4",
+  MULTI: "Multi",
+  MINI_MULTI: "Mini Multi",
+  SUPER_QUATRE: "Super 4",
+  PICK5: "Pick 5",
+};
+
+const libelleFormule = (t: string) =>
+  NOM_FORMULE[t] ?? t.replace(/_/g, " ").toLowerCase();
 
 interface EnjeuxResp {
   disponible: boolean;
@@ -318,6 +350,15 @@ interface EnjeuxResp {
   fenetre_min?: number | null;
   flux_fenetre_eur?: number | null;
   nb_releves?: number;
+  /** "total" = masse nationale (guichets + en ligne), "internet" = masse jouée
+   *  en ligne seule. Le PMU ne publie le national que sur une partie de son
+   *  offre ; ailleurs, l'en ligne est tout ce qui existe. Les deux ne se
+   *  comparent pas, l'étiquette de la carte doit donc le dire. */
+  perimetre?: "total" | "internet";
+  /** Masse par formule (simple, couplé, trio, mini multi…), du plus gros au
+   *  plus petit. Le simple gagnant ne pèse qu'une fraction de la course. */
+  masses_formules_eur?: Record<string, number> | null;
+  masse_toutes_formules_eur?: number | null;
   par_cheval: EnjeuxCheval[];
   alertes: Array<{ numero: number; nom: string | null; type: string; delta_eur: number | null; delta_part_pts: number | null }>;
 }
@@ -328,6 +369,7 @@ interface EnjeuxResp {
 const TEINTES = {
   gagnant: { barre: "from-amber-300 to-amber-500", barreTete: "from-amber-400 to-amber-600" },
   place: { barre: "from-sky-300 to-sky-500", barreTete: "from-sky-400 to-sky-600" },
+  toutes: { barre: "from-violet-300 to-violet-500", barreTete: "from-violet-400 to-violet-600" },
 } as const;
 
 function BlocMasse({ label, valeur, accent }: { label: string; valeur: string; accent?: boolean }) {
@@ -350,9 +392,20 @@ const mediane = (xs: number[]) => {
 /** Vue pure : reçoit la donnée, ne charge rien. Séparée du chargement pour
  *  rester affichable en isolation (revue de rendu) et testable sans réseau. */
 export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; poolTotalEur?: number | null }) {
-  const [formule, setFormule] = useState<"gagnant" | "place">("gagnant");
+  const [formule, setFormule] = useState<"gagnant" | "place" | "toutes">("gagnant");
+  // Masse en ligne seule : les montants sont ~5 fois plus petits que la masse
+  // nationale (8 119 € contre 42 658 € sur une course mesurée). La RÉPARTITION
+  // entre chevaux reste l'information utile — mais présenter ces montants comme
+  // « l'argent misé sur la course » serait faux, donc chaque total le précise.
+  const enLigne = data.perimetre === "internet";
 
-  const cle = formule === "gagnant" ? "enjeu_gagnant_eur" : "enjeu_place_eur";
+  // « Toutes formules » ne compte pas une masse mais un ENGAGEMENT : le même
+  // couplé est porté en entier par ses deux chevaux, donc la colonne ne
+  // s'additionne pas en un total de course. Elle n'a par conséquent ni part de
+  // masse ni ligne « autres » — les afficher inventerait un dénominateur.
+  const toutesFormules = formule === "toutes";
+  const cle = toutesFormules ? "engage_eur"
+    : formule === "gagnant" ? "enjeu_gagnant_eur" : "enjeu_place_eur";
   const clePart = formule === "gagnant" ? "part_gagnant" : "part_place";
   const teinte = TEINTES[formule];
 
@@ -362,7 +415,8 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
   if (triees.length === 0) return null;
 
   const masse = (formule === "gagnant" ? data.masse_gagnant_eur : data.masse_place_eur) ?? 0;
-  const autres = (formule === "gagnant" ? data.autres?.gagnant_eur : data.autres?.place_eur) ?? 0;
+  const autres = toutesFormules ? 0
+    : (formule === "gagnant" ? data.autres?.gagnant_eur : data.autres?.place_eur) ?? 0;
   const max = Math.max(1, ...triees.map((l) => l[cle] ?? 0));
   const nbAutres = data.autres?.nb_chevaux ?? 0;
   const alerte = data.alertes?.[0];
@@ -411,10 +465,10 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
         data.flux_fenetre_eur ? "sm:grid-cols-3" : "",
       )}>
         <div className="bg-stone-50/80">
-          <BlocMasse label="Simple gagnant" valeur={`${nf(data.masse_gagnant_eur ?? 0)} €`} />
+          <BlocMasse label={enLigne ? "Simple gagnant · en ligne" : "Simple gagnant"} valeur={`${nf(data.masse_gagnant_eur ?? 0)} €`} />
         </div>
         <div className="bg-stone-50/80">
-          <BlocMasse label="Simple placé" valeur={`${nf(data.masse_place_eur ?? 0)} €`} />
+          <BlocMasse label={enLigne ? "Simple placé · en ligne" : "Simple placé"} valeur={`${nf(data.masse_place_eur ?? 0)} €`} />
         </div>
         {data.flux_fenetre_eur != null && data.fenetre_min != null && data.flux_fenetre_eur > 0 ? (
           <div className="col-span-2 bg-stone-50/80 sm:col-span-1">
@@ -422,6 +476,16 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
               label={`Entré en ${nf(data.fenetre_min, 0)} min`}
               valeur={`+${nf(data.flux_fenetre_eur)} €`}
               accent
+            />
+          </div>
+        ) : data.masse_toutes_formules_eur ? (
+          // La somme des masses de TOUTES les formules (simple, couplé, trio,
+          // mini multi…). Le simple gagnant seul en représentait un tiers :
+          // 231 554 € sur 721 000 € mesurés le 05/09.
+          <div className="col-span-2 bg-stone-50/80 sm:col-span-1">
+            <BlocMasse
+              label={enLigne ? "Toutes formules · en ligne" : "Toutes formules"}
+              valeur={`${nf(data.masse_toutes_formules_eur)} €`}
             />
           </div>
         ) : poolTotalEur ? (
@@ -437,7 +501,10 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex rounded-full bg-stone-100 p-1 text-[11.5px] font-semibold">
-          {([["gagnant", "Simple gagnant"], ["place", "Simple placé"]] as const).map(([v, label]) => (
+          {([["gagnant", "Simple gagnant"], ["place", "Simple placé"],
+             ...(data.par_cheval.some((l) => l.engage_eur != null)
+               ? ([["toutes", "Toutes formules"]] as const) : []),
+            ] as const).map(([v, label]) => (
             <button
               key={v}
               type="button"
@@ -463,9 +530,12 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
       <ul className="mt-1 divide-y divide-stone-100">
         {triees.map((l, rang) => {
           const montant = l[cle] ?? 0;
-          const part = l[clePart];
+          // Pas de part de masse en « toutes formules » : le même couplé est
+          // porté en entier par ses deux chevaux, il n'existe donc aucun
+          // dénominateur honnête. Afficher un pourcentage ici serait inventer.
+          const part = toutesFormules ? null : l[clePart];
           const tete = rang === 0;
-          const marque = marques.get(l.numero);
+          const marque = toutesFormules ? undefined : marques.get(l.numero);
           return (
             <li key={l.numero} className="-mx-1.5 rounded-xl px-1.5 py-3 transition-colors hover:bg-stone-50/70">
               <div className="flex items-center gap-2.5">
@@ -506,7 +576,13 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
                   </span>
                 ) : null}
 
-                <span className="w-[5.25rem] shrink-0 text-right text-[13px] font-bold tabular-nums text-slate-900">
+                <span
+                  className="w-[5.25rem] shrink-0 text-right text-[13px] font-bold tabular-nums text-slate-900"
+                  title={toutesFormules && l.detail_formules_eur
+                    ? Object.entries(l.detail_formules_eur)
+                        .map(([t, v]) => `${libelleFormule(t)} : ${nf(v)} €`).join("\n")
+                    : undefined}
+                >
                   {nf(montant)} €
                 </span>
                 {/* Sur mobile la part descend sous la barre : gardée ici, elle
@@ -575,6 +651,23 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
         )}
       </ul>
 
+      {/* Quelle FORMULE porte l'argent de la course. Un champ qui joue surtout
+          le couplé placé ne se lit pas comme un champ qui joue le simple
+          gagnant : le premier cherche la sécurité, le second la gagne. */}
+      {data.masses_formules_eur && Object.keys(data.masses_formules_eur).length > 1 && (
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {Object.entries(data.masses_formules_eur).slice(0, 8).map(([t, v]) => (
+            <span
+              key={t}
+              className="inline-flex items-baseline gap-1.5 rounded-full bg-stone-100 px-2.5 py-1 text-[10.5px] text-slate-600"
+            >
+              <span className="font-semibold text-slate-800">{libelleFormule(t)}</span>
+              <span className="tabular-nums">{nf(v)} €</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {alerte && data.fenetre_min != null && (
         <div className="mt-4 flex items-start gap-2.5 rounded-2xl bg-amber-50/80 px-3.5 py-3 ring-1 ring-amber-100">
           <Flame className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
@@ -596,7 +689,9 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
         className="mt-3 cursor-help text-[10.5px] leading-4 text-muted-foreground"
         title="Gagnant et placé sont deux masses indépendantes : une part ne se compare qu'à celles de la même formule."
       >
-        Montants réellement misés au PMU, pas une estimation tirée des cotes.
+        {enLigne
+          ? "Montants réellement misés en ligne au PMU, pas une estimation tirée des cotes. Le PMU ne publie pas la masse des guichets sur cette course : les totaux sont donc plus petits que l'argent réellement en jeu, mais la répartition entre chevaux reste celle du marché."
+          : "Montants réellement misés au PMU, pas une estimation tirée des cotes."}
       </p>
     </Card>
   );
