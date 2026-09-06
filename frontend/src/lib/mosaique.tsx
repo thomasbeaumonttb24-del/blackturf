@@ -831,9 +831,16 @@ function CarteSemaine({
       </div>
 
       {/* L'adresse pousse au bas de la carte : chaque tuile est vue SEULE dans le
-          fil, et sans elle cinq publications sur six ne disent pas où aller. */}
-      <div style={{ display: "flex", marginTop: "auto" }}>
-        <Adresse ton={sombre ? "sombre" : "clair"} />
+          fil, et sans elle cinq publications sur six ne disent pas où aller.
+
+          Le filet au-dessus n'est pas décoratif : sans lui, l'adresse se lisait comme
+          une troisième ligne de la colonne « meilleur plan », juste sous l'hippodrome.
+          Il ferme la carte et rend l'adresse à la carte entière. */}
+      <div style={{ display: "flex", marginTop: "auto", width: "100%", flexDirection: "column" }}>
+        <div style={{ display: "flex", width: "100%", height: 1, background: bord }} />
+        <div style={{ display: "flex", marginTop: 24 }}>
+          <Adresse ton={sombre ? "sombre" : "clair"} />
+        </div>
       </div>
     </div>
   );
@@ -867,8 +874,8 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
   // Hauteur calée sur le CONTENU réel de la carte (~760 px) : au-dessus, un trou
   // s'ouvre avant l'adresse ; en dessous, l'adresse colle aux chiffres. Les six
   // cartes partagent la même hauteur, sinon les raccords de la mosaïque sautent.
-  const CARTE_Y = 224;
-  const CARTE_H = 786;
+  const CARTE_Y = 208;
+  const CARTE_H = 838;
 
   const s = d.semaine;
 
