@@ -2208,7 +2208,10 @@ async def stats_bilan_semaine(
 
     total_mise = total_retour = 0.0
     nb_plans = nb_gagnants = 0
-    meilleur: Optional[dict] = None
+    # Tous les plans GAGNANTS de la semaine, pour en tirer le podium. On les garde
+    # tous plutôt que de suivre un seul maximum : le 2ᵉ et le 3ᵉ sont publiés eux
+    # aussi, et un maximum glissant ne sait pas dire qui vient juste derrière.
+    gagnants_semaine: list[dict] = []
     # Retour par JOUR : sert à situer la meilleure journée de la semaine.
     retour_par_jour: dict[str, float] = {}
     for r in lignes.mappings():
@@ -2220,11 +2223,11 @@ async def stats_bilan_semaine(
             nb_gagnants += 1
         j = r["course_id"][:8]
         retour_par_jour[j] = retour_par_jour.get(j, 0.0) + float(r["montant_retour"] or 0)
-        if meilleur is None or net > meilleur["net"]:
+        if net > 0:
             d = r["bilan"] if isinstance(r["bilan"], dict) else (
                 json.loads(r["bilan"]) if r["bilan"] else {})
-            gagnants = [x for x in (d.get("paris") or []) if (x.get("gain") or 0) > 0]
-            meilleur = {
+            paris_gagnants = [x for x in (d.get("paris") or []) if (x.get("gain") or 0) > 0]
+            gagnants_semaine.append({
                 "course_id": r["course_id"],
                 "code": r["course_id"][8:] or r["course_id"],
                 "hippodrome": (r["hippodrome"] or "").replace("HIPPODROME DE ", "")
@@ -2232,9 +2235,26 @@ async def stats_bilan_semaine(
                 "mise": round(float(r["montant_mise"] or 0), 2),
                 "retour": round(float(r["montant_retour"] or 0), 2),
                 "net": round(net, 2),
-                "type_pari": (max(gagnants, key=lambda x: float(x.get("gain") or 0)).get("type")
-                              if gagnants else None),
-            }
+                "type_pari": (max(paris_gagnants, key=lambda x: float(x.get("gain") or 0)).get("type")
+                              if paris_gagnants else None),
+            })
+
+    # ── Le podium de la semaine ─────────────────────────────────────────────
+    # UNE COURSE N'Y FIGURE QU'UNE FOIS. Trois profils tournent sur chaque course :
+    # sans ce dédoublonnage, le podium montrerait trois fois le même hippodrome et le
+    # même numéro de course, ce qui se lit comme une erreur d'affichage. Le profil,
+    # lui, ne sort jamais du back-office — il n'a pas à être publié.
+    gagnants_semaine.sort(key=lambda p: p["net"], reverse=True)
+    podium: list[dict] = []
+    vus: set[str] = set()
+    for p in gagnants_semaine:
+        if p["course_id"] in vus:
+            continue
+        vus.add(p["course_id"])
+        podium.append(p)
+        if len(podium) == 3:
+            break
+    meilleur = podium[0] if podium else None
 
     # ── Ce que l'analyse a valu, jour par jour puis sur la semaine ───────────
     analyse = await db.execute(
@@ -2322,6 +2342,9 @@ async def stats_bilan_semaine(
         "total_retour": round(total_retour, 2),
         "total_net": round(total_retour - total_mise, 2),
         "meilleur_plan": meilleur,
+        # Le podium complet — le premier y est répété, pour qu'un consommateur qui ne
+        # lit que cette clé n'ait pas à recoller deux champs.
+        "meilleurs_plans": podium,
         "meilleure_journee": meilleure_journee,
         "analyse": {
             "nb_courses_analysees": nb_analysees,

@@ -170,15 +170,22 @@ export function photoDuJour(jour: string): string {
 //
 // Les courses de NUIT réunissent les deux : fond sombre par nature, casaques
 // colorées qui donnent les points de repère.
+// LES QUATRE PREMIÈRES N'ONT JAMAIS SERVI. Les fonds déjà passés sur le compte
+// viennent après : une mosaïque qui reprend la photo des trois publications encore
+// visibles au-dessus d'elle ne se distingue pas de la précédente.
 const PHOTOS_MOSAIQUE = [
-  "mosaique/galop-stalles.jpg",
+  "mosaique/galop-vert-tribune.jpg",
+  "mosaique/galop-sable-couleurs.jpg",
+  "mosaique/galop-vert-lice.jpg",
+  "mosaique/galop-duel-violet.jpg",
   "mosaique/galop-piste-claire.jpg",
-  "mosaique/galop-foule.jpg",
   "mosaique/attele-groupe.jpg",
   "mosaique/galop-shakopee.jpg",
   "mosaique/attele-peloton.jpg",
   "mosaique/attele-tribunes.jpg",
   "mosaique/attele-sable.jpg",
+  "mosaique/galop-foule.jpg",
+  "mosaique/galop-stalles.jpg",
   "mosaique/nuit-duel.jpg",
   "mosaique/nuit-arrivee.jpg",
 ] as const;
@@ -335,6 +342,12 @@ export interface SemaineMosaique {
     hippodrome: string; code: string; mise: number; retour: number; net: number;
     typePari: string | null;
   } | null;
+  /** Le 2ᵉ et le 3ᵉ plan gagnant de la semaine, sous le premier et en plus petit.
+   *  Un seul gain se lit comme un coup de chance ; trois montrent une série. */
+  autresPlans: {
+    hippodrome: string; code: string; mise: number; retour: number;
+    typePari: string | null;
+  }[];
   meilleureJournee: {
     jourLong: string; nbCourses: number; nbTop3: number; pctTop3: number;
   } | null;
@@ -903,6 +916,45 @@ function CarteSemaine({
               .filter(Boolean)
               .join(" · ")}
           </span>
+
+          {/* Le 2ᵉ et le 3ᵉ, en plus petit et sur une ligne chacun. Un seul gain se
+              lit comme un coup de chance ; le podium montre une série — sans pour
+              autant disputer la vedette au premier, d'où la taille réduite.
+              Une course n'apparaît qu'une fois : le dédoublonnage est fait côté API,
+              sinon les trois profils d'une même course rempliraient le podium. */}
+          {s.autresPlans.slice(0, 2).map((p) => (
+            <div
+              key={`${p.code}-${p.retour}`}
+              style={{ display: "flex", alignItems: "baseline", marginTop: 9 }}
+            >
+              <span
+                style={{
+                  fontFamily: "Grotesk", fontWeight: 700, fontSize: 21,
+                  color: COULEURS.encreTenue, letterSpacing: -0.5,
+                }}
+              >
+                {euro(p.mise)} €
+              </span>
+              <span style={{ fontFamily: "Inter", fontSize: 17, color: COULEURS.or, margin: "0 8px" }}>
+                →
+              </span>
+              <span
+                style={{
+                  fontFamily: "Grotesk", fontWeight: 700, fontSize: 28,
+                  color: VERT_GAIN, letterSpacing: -1,
+                }}
+              >
+                {euro(p.retour)} €
+              </span>
+              <span
+                style={{
+                  fontFamily: "Inter", fontSize: 17, color: COULEURS.encreDouce, marginLeft: 12,
+                }}
+              >
+                {[p.typePari, p.hippodrome, p.code].filter(Boolean).join(" · ")}
+              </span>
+            </div>
+          ))}
         </div>
       ) : (
         <span

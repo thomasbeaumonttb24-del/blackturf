@@ -48,7 +48,7 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
   const vide: SemaineMosaique = {
     periode: "", numero: 1, position: 0, nbCourses: 0, nbHippodromes: 0, nbPlans: 0, nbPlansGagnants: 0,
     totalRetour: 0, pctTop3: null, nbTop3: 0, nbAnalysees: 0, hasardTop3: null,
-    pctTop1: null, nbPartants: 0, meilleur: null, meilleureJournee: null,
+    pctTop1: null, nbPartants: 0, meilleur: null, autresPlans: [], meilleureJournee: null,
   };
   let s = vide;
   let cycle = 0;
@@ -88,6 +88,17 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
               typePari: m.type_pari ? String(m.type_pari) : null,
             }
           : null,
+        // Le podium arrive déjà dédoublonné et trié par l'API ; on écarte seulement
+        // le premier, qui est affiché en grand juste au-dessus.
+        autresPlans: (Array.isArray(d.meilleurs_plans) ? d.meilleurs_plans : [])
+          .slice(1, 3)
+          .map((p: Record<string, unknown>) => ({
+            hippodrome: String(p.hippodrome ?? ""),
+            code: String(p.code ?? ""),
+            mise: Number(p.mise ?? 0),
+            retour: Number(p.retour ?? 0),
+            typePari: p.type_pari ? String(p.type_pari) : null,
+          })),
         meilleureJournee: mj
           ? {
               jourLong: jourCourt(String(mj.jour)),
