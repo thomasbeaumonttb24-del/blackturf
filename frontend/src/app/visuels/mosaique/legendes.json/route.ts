@@ -1,170 +1,181 @@
-import { jourParis, jourLong } from "@/lib/seo";
-import { MENTION_LEGALE, HASHTAGS, jourDemande } from "@/lib/visuels";
+import { jourParis, periodeCourte } from "@/lib/seo";
+import { MENTION_LEGALE, HASHTAGS } from "@/lib/visuels";
 
-export const revalidate = 900;
+/**
+ * La publication du DIMANCHE : une tuile de la mosaïque, et sa légende.
+ *
+ * UNE SEULE TUILE PAR SEMAINE. La mosaïque du profil se remplit en six dimanches ;
+ * au septième, l'image est complète et un nouveau cycle commence. C'est l'API qui dit
+ * quelle tuile revient à quelle semaine (`/stats/bilan-semaine` → `tuile`), et pas ce
+ * fichier : deux calculs parallèles finiraient par nommer deux tuiles différentes, et
+ * la mosaïque se remplirait deux fois au même endroit en laissant un trou ailleurs.
+ *
+ * L'ordre de publication est à L'ENVERS de l'ordre de lecture — Instagram empile de la
+ * plus récente à la plus ancienne, en haut à gauche.
+ *
+ * ATTENTION AU VOCABULAIRE — les montants sont ceux de PLANS calculés et réglés aux
+ * rapports officiels du PMU, pas d'argent encaissé. « Misé » et « rendu » sont exacts ;
+ * « gagné » ou « bénéfice » ne le seraient pas.
+ */
+export const revalidate = 600;
 
 const SITE = "https://blackturf.fr";
-
-/**
- * Les six tuiles, DANS LEUR ORDRE DE PUBLICATION.
- *
- * La grille d'un profil Instagram se remplit du plus récent en haut à gauche, puis vers
- * la droite. Pour que la mosaïque se reconstitue, il faut donc publier À L'ENVERS : la
- * tuile en bas à droite en premier, celle en haut à gauche en dernier. Publier dans
- * l'ordre de lecture donnerait une image en miroir, tête-bêche.
- *
- * Chaque tuile porte sa propre légende : dans le fil, un abonné ne verra jamais que la
- * tuile isolée, jamais la mosaïque. La dernière publiée — celle qui restera en tête du
- * profil — porte le message complet.
- *
- * ── CE QU'UNE LÉGENDE DOIT FAIRE ────────────────────────────────────────────────────
- *
- * Instagram coupe au bout d'environ 125 caractères : la première ligne est la seule
- * qu'on lit à coup sûr. Elle porte donc l'accroche, jamais un préambule. Vient ensuite
- * la substance, puis UN appel à l'action, puis le pied légal.
- *
- * Vocabulaire verrouillé : « misés » et « rendus par le plan ». Jamais « gagné », jamais
- * « bénéfice » — ce sont des plans calculés puis réglés aux rapports réels du PMU, pas
- * de l'argent encaissé. Et aucune promesse de gain, nulle part : le ROI mesuré est
- * négatif, l'argument de vente est la transparence, pas le rendement.
- */
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
 
-interface PlanJour {
-  hippodrome: string;
-  code: string;
-  mise: number;
-  retour: number;
-}
+/** Les six angles, dans l'ordre de PUBLICATION. Chacun tient seul dans le fil. */
+const ANGLES: Record<string, { titre: string; intro: string }> = {
+  "1-2": {
+    titre: "Vous entrez votre budget, le plan se calcule dessus",
+    intro:
+      "Pas un ticket type recopié pour tout le monde : un plan de jeu construit sur VOTRE mise, " +
+      "course par course, avant le départ.",
+  },
+  "1-1": {
+    titre: "Ce qu'on ne vous dira pas ailleurs",
+    intro:
+      "Les plans perdants sont publiés comme les autres. Un pronostiqueur qui ne montre que ses " +
+      "réussites ne montre rien.",
+  },
+  "1-0": {
+    titre: "Ce que BlackTurf fait, chaque jour",
+    intro:
+      "Chaque partant reçoit une probabilité calculée, chaque course un classement, chaque plan " +
+      "une mise — le tout figé avant le départ et réglé aux rapports officiels.",
+  },
+  "0-2": {
+    titre: "Ce que l'analyse a valu cette semaine",
+    intro:
+      "Le chiffre qui tient dans la durée n'est pas un gain : c'est la part des courses où le " +
+      "gagnant réel figurait dans notre Top 3 — comparée à ce que trouverait le hasard.",
+  },
+  "0-1": {
+    titre: "Le meilleur plan de la semaine",
+    intro:
+      "Calculé avant le départ, réglé au rapport officiel du PMU. Tous les autres sont en ligne, " +
+      "gagnants comme perdants.",
+  },
+  "0-0": {
+    titre: "Le programme, passé au calcul",
+    intro:
+      "Le programme PMU, les cotes et les rapports officiels sont en accès libre. Les prédictions, " +
+      "les paris de valeur et le plan de mise commencent à 12 €/mois, avec 7 jours d'essai offerts.",
+  },
+};
 
-/** Mêmes règles d'écriture que sur les visuels : centimes seulement s'il y en a. */
 const euro = (n: number) =>
-  n.toLocaleString("fr-FR", {
-    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
-    maximumFractionDigits: 2,
-  });
+  n
+    .toLocaleString("fr-FR", {
+      minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+      maximumFractionDigits: 2,
+    })
+    .replace(/[  ]/g, " ");
 
-const ligne = (p: PlanJour) =>
-  `${p.hippodrome} ${p.code} : ${euro(p.mise)} € misés, ${euro(p.retour)} € rendus par le plan.`;
-
-/**
- * Les plans du jour, lus sur la même source que les visuels.
- *
- * Ils étaient écrits en dur — les légendes annonçaient donc Vincennes et 883 € quel que
- * soit le jour, alors que les images, elles, affichaient les vrais chiffres. Une légende
- * qui contredit son image sur des montants est bien pire que pas de montants du tout.
- */
-async function plansDuJour(jour: string): Promise<PlanJour[]> {
-  try {
-    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, {
-      next: { revalidate: 600 },
-    });
-    if (!res.ok) return [];
-    const d = await res.json();
-    return (d.plans ?? []).map((p: Record<string, unknown>) => ({
-      hippodrome: String(p.hippodrome ?? ""),
-      code: String(p.code ?? ""),
-      mise: Number(p.mise ?? 0),
-      retour: Number(p.retour ?? 0),
-    }));
-  } catch {
-    return [];
-  }
-}
+const pct = (n: number) =>
+  n.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 export async function GET(req: Request) {
-  // `?jour=` : les légendes doivent parler du MÊME jour que les tuiles, qui
-  // l'acceptent désormais. Deux visuels du 5 avec des légendes du 6 seraient pires
-  // que pas de légendes.
-  const jour = jourDemande(req.url, jourParis());
-  const pied = `
+  const brut = new URL(req.url).searchParams.get("semaine");
+  const url = new URL(`${API}/stats/bilan-semaine`);
+  if (brut && /^\d{4}-\d{2}-\d{2}$/.test(brut)) url.searchParams.set("fin", brut);
 
-${MENTION_LEGALE}
+  let d: Record<string, unknown> | null = null;
+  try {
+    const res = await fetch(url.toString(), { next: { revalidate: 600 } });
+    if (res.ok) d = await res.json();
+  } catch {
+    d = null;
+  }
 
-${HASHTAGS}`;
-  const [p1, p2, p3] = await plansDuJour(jour);
+  if (!d) {
+    return Response.json(
+      { pret: false, attente: "Le bilan de la semaine n'est pas disponible." },
+      { headers: { "Cache-Control": "public, max-age=60" } },
+    );
+  }
 
-  const tuiles = [
-    {
-      tuile: "1-2",
-      image: `${SITE}/visuels/mosaique/1-2`,
-      legende:
-        `Vous entrez votre budget. Le plan du jour se calcule dessus.\n\n` +
-        `Pas un ticket type recopié pour tout le monde : un plan de jeu construit sur VOTRE ` +
-        `mise, course par course, avant le départ.\n\n` +
-        `Le programme PMU, les cotes et les rapports officiels sont en accès libre. ` +
-        `Les prédictions, les paris de valeur et le plan de mise commencent à 12 €/mois — ` +
-        `avec 7 jours d'essai offerts, résiliable à tout moment.\n\n` +
-        `${SITE}` + pied,
-    },
-    {
-      tuile: "1-1",
-      image: `${SITE}/visuels/mosaique/1-1`,
-      legende:
-        `Le PMU prélève environ 20 % des enjeux. Voilà ce que personne ne vous dira.\n\n` +
-        `Sur 100 € joués, environ 80 € repartent aux parieurs. Personne ne peut promettre ` +
-        `un gain régulier là-dessus, et quiconque vous le promet vous ment ou ne sait pas ` +
-        `compter.\n\n` +
-        `Ce qui se mesure, en revanche, c'est l'écart entre la probabilité réelle d'un ` +
-        `cheval et celle qu'implique sa cote. C'est ce que BlackTurf calcule, course par ` +
-        `course — et ce qu'il publie ensuite, résultat en main.\n\n` +
-        `Le seul service de pronostics qui publie aussi ses pertes.\n\n` +
-        `${SITE}` + pied,
-    },
-    {
-      tuile: "1-0",
-      image: `${SITE}/visuels/mosaique/1-0`,
-      legende:
-        `Le dépouillement du programme, fait pendant que vous dormez.\n\n` +
-        `• Il lit le programme pour vous — 80 critères par cheval, une probabilité pour ` +
-        `chaque partant, publiée avant le départ\n` +
-        `• Il calcule sur VOTRE mise — vous entrez votre budget, le plan se construit dessus\n` +
-        `• Il compare les cotes — PMU et principaux opérateurs côte à côte, pour voir où la ` +
-        `cote décroche\n` +
-        `• Il publie son bilan — chaque plan réglé aux rapports réels, journées rouges ` +
-        `comprises\n` +
-        `• Il répond à vos questions — une course, un partant, un type de pari\n\n` +
-        `7 jours d'essai offerts sur ${SITE}` + pied,
-    },
-    {
-      tuile: "0-2",
-      image: `${SITE}/visuels/mosaique/0-2`,
-      legende:
-        `Les deux autres plans qui ont tenu aujourd'hui.\n\n` +
-        [p2, p3].filter(Boolean).map((p) => ligne(p!)).join("\n") +
-        `\n\nTrois plans sur les courses du jour — et tous les autres sont en ligne eux ` +
-        `aussi, gagnants comme perdants. C'est le principe : on ne montre pas que les bons ` +
-        `jours.\n\n` +
-        `${SITE}` + pied,
-    },
-    {
-      tuile: "0-1",
-      image: `${SITE}/visuels/mosaique/0-1`,
-      legende:
-        (p1
-          ? `${euro(p1.mise)} € misés. ${euro(p1.retour)} € rendus par le plan. Calculé avant le départ.\n\n` +
-            `${p1.hippodrome} ${p1.code}. `
-          : `Le meilleur plan BlackTurf du jour.\n\n`) +
-        `Le plan a été construit avant que les chevaux entrent en ` +
-        `piste, puis réglé aux rapports officiels du PMU — pas rejoué après coup.\n\n` +
-        `C'est le meilleur plan de la journée, pas la journée. Les autres sont publiés ` +
-        `aussi, y compris ceux qui n'ont rien rendu.\n\n` +
-        `Tous les plans du jour sur ${SITE}` + pied,
-    },
-    {
-      tuile: "0-0",
-      image: `${SITE}/visuels/mosaique/0-0`,
-      legende:
-        `Le programme du jour, passé au calcul. Pas au feeling.\n\n` +
-        `Résultats PMU du ${jourLong(jour)} : toutes les courses de la journée analysées, ` +
-        `arrivées et rapports officiels en accès libre, course par course.\n\n` +
-        `Faites défiler le profil : les six publications forment une seule image.\n\n` +
-        `${SITE}` + pied,
-    },
-  ];
+  const a = (d.analyse ?? {}) as Record<string, number | null>;
+  const m = d.meilleur_plan as Record<string, unknown> | null;
+  const mj = d.meilleure_journee as Record<string, unknown> | null;
+  const tuile = String(d.tuile ?? "1-2");
+  const angle = ANGLES[tuile] ?? ANGLES["1-2"];
+  const periode = periodeCourte(String(d.debut), String(d.fin));
+  const semaine = String(d.fin);
+
+  const lignes: string[] = [`${angle.titre} — ${periode}.`, "", angle.intro, ""];
+
+  if (a.pct_top3 !== null && a.pct_top3 !== undefined) {
+    lignes.push(
+      `${pct(Number(a.pct_top3))} % des courses où le gagnant était dans notre Top 3 ` +
+        `(${a.nb_top3} sur ${a.nb_courses_analysees} analysées` +
+        (a.hasard_top3 !== null && a.hasard_top3 !== undefined
+          ? ` ; un tirage au sort en trouverait ${pct(Number(a.hasard_top3))} %).`
+          : ")."),
+      "",
+    );
+  }
+
+  // Le podium, comme sur le visuel : la légende et l'image doivent dire la même
+  // chose. Une course n'y figure qu'une fois — le dédoublonnage est fait par l'API.
+  const podium = (Array.isArray(d.meilleurs_plans) ? d.meilleurs_plans : []) as Record<
+    string,
+    unknown
+  >[];
+  if (m) {
+    lignes.push(
+      "Meilleur plan de la semaine : " +
+        [m.type_pari, m.hippodrome, m.code].filter(Boolean).join(" · ") +
+        ` — ${euro(Number(m.mise))} € misés, ${euro(Number(m.retour))} € rendus.`,
+    );
+    for (const p of podium.slice(1, 3)) {
+      lignes.push(
+        "Puis " +
+          [p.type_pari, p.hippodrome, p.code].filter(Boolean).join(" · ") +
+          ` — ${euro(Number(p.mise))} € misés, ${euro(Number(p.retour))} € rendus.`,
+      );
+    }
+    lignes.push("");
+  }
+
+  if (mj) {
+    lignes.push(
+      `Meilleure journée : ${pct(Number(mj.pct_top3))} % de Top 3 sur ` +
+        `${mj.nb_courses} courses.`,
+      "",
+    );
+  }
+
+  lignes.push(
+    // Le nombre de plans GAGNANTS ne sort jamais sans le nombre TOTAL calculé :
+    // sans dénominateur, la phrase se lirait comme si tous les plans avaient gagné.
+    `Au total, les plans de la semaine ont rendu ${euro(Number(d.total_retour ?? 0))} €, ` +
+      `réglés aux rapports officiels du PMU : ${d.nb_plans_gagnants} plans gagnants ` +
+      `sur les ${d.nb_plans} calculés, sur ${d.nb_courses} courses et ` +
+      `${d.nb_hippodromes} hippodromes.`,
+    "",
+    `Tous les résultats, course par course : ${SITE}`,
+    "",
+    "Les résultats passés ne préjugent pas des résultats futurs.",
+    MENTION_LEGALE,
+    "",
+    HASHTAGS,
+  );
 
   return Response.json(
-    { jour, ordre: "publication a l'envers : bas-droite d'abord, haut-gauche en dernier", tuiles },
-    { headers: { "Cache-Control": "public, max-age=900" } },
+    {
+      pret: Number(d.nb_plans ?? 0) > 0,
+      semaine: { debut: d.debut, fin: d.fin, periode },
+      // Rang dans le cycle : « 1re sur 6 ». C'est ce qui dit où on en est du
+      // remplissage de la mosaïque, et quand elle sera complète.
+      rang: d.rang_dans_le_cycle,
+      total: d.semaines_par_mosaique,
+      cycle: d.cycle,
+      tuile,
+      image: `${SITE}/visuels/mosaique/${tuile}?semaine=${semaine}`,
+      fichier: `blackturf-mosaique-${semaine}-${tuile}.jpg`,
+      legende: lignes.join("\n"),
+      // Aperçu de l'image entière une fois les six publiées.
+      apercu_mosaique: `${SITE}/visuels/mosaique/apercu?semaine=${semaine}`,
+    },
+    { headers: { "Cache-Control": "public, max-age=600" } },
   );
 }

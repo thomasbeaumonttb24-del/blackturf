@@ -3,23 +3,30 @@ import path from "node:path";
 import { ImageResponse } from "next/og";
 import { jourParis, jourLong, jourCourt, periodeCourte } from "@/lib/seo";
 import {
-  Tuile, TUILE_L, TUILE_H, PLAN_L, PLAN_H, photoDuCycle, photoEnDataUri, imageEnDataUri,
+  PlanEnsemble, PLAN_L, PLAN_H, photoDuCycle, photoEnDataUri, imageEnDataUri,
   type DonneesMosaique, type SemaineMosaique,
 } from "@/lib/mosaique";
 
-// Les données du jour ne bougent plus une fois les courses courues ; un quart d'heure de
-// cache suffit et évite de recomposer un plan de 3104 × 2700 à chaque appel.
-export const revalidate = 900;
+/**
+ * L'IMAGE ENTIÈRE, telle qu'elle apparaîtra sur la grille du profil au bout de six
+ * dimanches. Sert à VALIDER avant de publier la première tuile.
+ *
+ * Elle n'existe que pour être regardée : une mosaïque ne se juge pas tuile par tuile,
+ * elle se juge d'un bloc — et une fois les six publiées, plus rien ne se corrige.
+ *
+ * Ce que l'aperçu ne peut PAS montrer : les six tuiles porteront les chiffres de six
+ * semaines DIFFÉRENTES, alors qu'ici elles portent toutes ceux de la même. La
+ * composition, les raccords et la photo sont exacts ; seuls les nombres se répéteront
+ * d'une case à l'autre.
+ */
+export const revalidate = 600;
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
 
-/**
- * Les polices sont EMBARQUÉES, pas référencées.
- *
- * Satori n'a pas de navigateur derrière lui : sans fichier de police fourni, il retombe
- * sur une fonte générique qui écrase toute la direction typographique. Les quatre
- * fichiers vivent donc dans le dépôt, et sont lus au rendu.
- */
+// Le plan d'ensemble fait 3104 × 2700. On le sert réduit : c'est un aperçu qu'on
+// regarde sur un écran, pas un fichier à publier.
+const APERCU_L = 1200;
+
 async function polices() {
   const dossier = path.join(process.cwd(), "src", "assets", "fonts");
   const lire = (f: string) => fs.readFile(path.join(dossier, f));
@@ -103,7 +110,7 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
       };
     }
   } catch {
-    // Un visuel sans données reste publiable ; un visuel qui plante, non.
+    // Un aperçu sans données reste lisible ; un aperçu qui plante, non.
   }
   const jour = jourParis();
   return {
@@ -114,9 +121,6 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
     nbPlans: s.nbPlans,
     nbReunions: s.nbHippodromes,
     plans: [],
-    // LA PHOTO SUIT LE CYCLE, PAS LA DATE : les six tuiles sont publiées à six
-    // dimanches d'écart et doivent montrer la MÊME image, sinon les raccords ne
-    // tombent pas. Elle couvre TOUT le plan (3104 × 2700), pas une bande.
     // Le fond reste NET : c'est ce qui permet de voir, d'une vignette à la suivante,
     // qu'un cheval ou une lice continue au-delà du bord — donc de reconnaître une
     // seule image. Assombri un peu, saturé un peu : la carte est blanche, il lui faut
@@ -131,32 +135,25 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
   };
 }
 
-/** `tuile` s'écrit « r-c » : 0-0 en haut à gauche, 1-2 en bas à droite. */
-export async function GET(req: Request, ctx: { params: Promise<{ tuile: string }> }) {
-  const { tuile } = await ctx.params;
-  const m = /^([01])-([012])$/.exec(tuile.replace(/\.jpg$/, ""));
-  if (!m) return new Response("Tuile inconnue", { status: 404 });
-
-  const rangee = Number(m[1]);
-  const colonne = Number(m[2]);
-  // `?semaine=AAAA-MM-JJ` (un samedi) : la publication du dimanche porte sur la
-  // semaine ÉCOULÉE, et une tuile doit rester rendable après coup — sans quoi le
-  // visuel publié devient irrécupérable dès le dimanche suivant.
+export async function GET(req: Request) {
   const d = await donnees(new URL(req.url).searchParams.get("semaine"));
 
-  const rendu = new ImageResponse(<Tuile d={d} rangee={rangee} colonne={colonne} />, {
-    width: TUILE_L,
-    height: TUILE_H,
+  const rendu = new ImageResponse(<PlanEnsemble d={d} />, {
+    width: PLAN_L,
+    height: PLAN_H,
     fonts: await polices(),
   });
 
-  // L'API de publication Instagram n'accepte que du JPEG.
   const png = Buffer.from(await rendu.arrayBuffer());
   try {
     const { default: sharp } = await import("sharp");
-    const jpeg = await sharp(png).flatten({ background: "#F5F2EA" }).jpeg({ quality: 92 }).toBuffer();
+    const jpeg = await sharp(png)
+      .flatten({ background: "#F5F2EA" })
+      .resize(APERCU_L)
+      .jpeg({ quality: 88 })
+      .toBuffer();
     return new Response(new Uint8Array(jpeg), {
-      headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=900" },
+      headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=600" },
     });
   } catch {
     return new Response(new Uint8Array(png), {

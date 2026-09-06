@@ -1,0 +1,15 @@
+fichier|source
+galop-foule.jpg|https://www.pexels.com/photo/15466766/
+attele-sable.jpg|https://www.pexels.com/photo/29741150/
+galop-stalles.jpg|https://www.pexels.com/photo/6818590/
+attele-tribunes.jpg|https://www.pexels.com/photo/29423227/
+galop-piste-claire.jpg|https://www.pexels.com/photo/11341149/
+attele-peloton.jpg|https://www.pexels.com/photo/15595116/
+galop-shakopee.jpg|https://www.pexels.com/photo/13066405/
+attele-groupe.jpg|https://www.pexels.com/photo/13060104/
+nuit-duel.jpg|https://www.pexels.com/photo/29996420/
+nuit-arrivee.jpg|https://www.pexels.com/photo/29996421/
+galop-vert-tribune.jpg|https://www.pexels.com/photo/34665172/
+galop-vert-lice.jpg|https://www.pexels.com/photo/34665170/
+galop-sable-couleurs.jpg|https://www.pexels.com/photo/38136803/
+galop-duel-violet.jpg|https://www.pexels.com/photo/27981630/

@@ -695,3 +695,19 @@ export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
     return null;
   }
 }
+
+/**
+ * « 2026-08-30 » + « 2026-09-05 » → « du 30 août au 5 septembre ».
+ *
+ * Le mois du début est omis quand les deux dates le partagent : « du 1er au 7 mars »
+ * se lit mieux que « du 1er mars au 7 mars », et sur une tuile chaque ligne compte.
+ */
+export function periodeCourte(debut: string, fin: string): string {
+  const d = jourCourt(debut);
+  const f = jourCourt(fin);
+  const moisDebut = d.split(" ").slice(1).join(" ");
+  const moisFin = f.split(" ").slice(1).join(" ");
+  return moisDebut === moisFin
+    ? `du ${d.split(" ")[0]} au ${f}`
+    : `du ${d} au ${f}`;
+}
