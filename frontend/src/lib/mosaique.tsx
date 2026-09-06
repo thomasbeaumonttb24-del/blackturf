@@ -1029,6 +1029,20 @@ export function PlanEnsemble({ d }: { d: DonneesMosaique }) {
         );
       })}
 
+      {/* Fondu sombre au pied de chaque tuile : la mention légale se posait sur la
+          photo nue et devenait illisible dès que le fond y était clair. Une mention
+          de jeu responsable qu'on ne peut pas lire ne vaut pas mieux qu'une absente. */}
+      {[0, 1].map((r) => (
+        <div
+          key={`voile-`}
+          style={{
+            position: "absolute", left: 0, top: r * TUILE_H + TUILE_H - 210,
+            width: PLAN_L, height: 210, display: "flex",
+            background: "linear-gradient(180deg, rgba(12,14,18,0) 0%, rgba(12,14,18,0.80) 55%, rgba(12,14,18,0.92) 100%)",
+          }}
+        />
+      ))}
+
       {/* ═══════════ Mention légale, sur chaque tuile ═══════════
           Chaque tuile est publiée séparément : la mention se répète, elle ne se
           découpe pas. */}
