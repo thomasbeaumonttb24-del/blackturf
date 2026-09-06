@@ -521,6 +521,31 @@ export function Story({ d }: { d: DonneesStory }) {
         </span>
       </div>
 
+      {/* POURQUOI CETTE LIGNE, ET PAS UN BOUTON.
+          L'API de publication de contenu de Meta publie le MÉDIA, et rien d'autre :
+          aucun sticker n'y est exposé — ni lien, ni sondage, ni mention. Une story
+          publiée automatiquement sort donc forcément sans bouton cliquable, et c'est
+          une limite de l'API, pas un oubli. Les outils qui savent poser le sticker
+          passent par l'API privée d'Instagram, hors conditions d'utilisation : pas sur
+          un compte de marque.
+          Le chemin qui reste est celui de tout le monde — le lien de profil, déjà
+          renseigné sur `blackturf.fr` — encore faut-il le DIRE, sinon l'adresse écrite
+          dans la pastille ne se retape pas. */}
+      <div style={{ display: "flex", alignItems: "center", marginTop: 12 }}>
+        <span style={{ fontFamily: "Inter", fontSize: 25, color: COULEURS.or }}>↑</span>
+        <span
+          style={{
+            fontFamily: "Inter",
+            fontWeight: 600,
+            fontSize: 25,
+            color: COULEURS.encreDouce,
+            marginLeft: 10,
+          }}
+        >
+          Lien direct dans la bio
+        </span>
+      </div>
+
       {/* La mention de jeu responsable est portée par l'IMAGE, pas seulement par la
           légende : une image circule hors de sa légende, et c'est l'image qu'on
           retrouve republiée. Elle reste au-dessus de la zone que l'interface
