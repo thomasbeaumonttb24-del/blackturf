@@ -57,6 +57,10 @@ PAUSE_DEFAUT = 0.25
 
 
 async def _a_traiter(depuis: str, limite: int) -> list[tuple[str, int | None, datetime]]:
+    # asyncpg refuse une chaîne pour un paramètre `timestamptz` : il veut un
+    # objet date. Le convertir ici plutôt que dans le SQL garde l'erreur lisible
+    # quand l'argument est mal formé.
+    plancher = datetime.strptime(depuis, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(text("""
             SELECT c.course_id, c.nb_partants, c.date_heure
@@ -68,7 +72,7 @@ async def _a_traiter(depuis: str, limite: int) -> list[tuple[str, int | None, da
             GROUP BY c.course_id, c.nb_partants, c.date_heure
             ORDER BY c.date_heure DESC
             LIMIT :limite
-        """), {"depuis": depuis, "limite": limite})).all()
+        """), {"depuis": plancher, "limite": limite})).all()
     return [(r[0], r[1], r[2]) for r in rows]
 
 
