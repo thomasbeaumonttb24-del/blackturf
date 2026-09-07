@@ -136,6 +136,9 @@ async def test_fiche_sert_le_pari_du_cycle_meme_si_la_cote_live_ne_le_confirme_p
     liste = (await client.get("/api/v1/value-bets", headers=admin_headers)).json()
     ceux_de_la_course = [v for v in liste if v["course_id"] == "COH3C7"]
     assert [(v["participation_id"], v["niveau"], v["ev_max"]) for v in ceux_de_la_course] == [(part2, 3, 0.25)]
+    # Le dossard est ce que le parieur cherche en premier sur la carte : la liste
+    # doit le porter, comme le flux WS le faisait déjà.
+    assert ceux_de_la_course[0]["numero"] == 2
 
 
 async def test_delai_standard_identique_fiche_et_liste(client: AsyncClient, db: AsyncSession, admin_headers, inscrire):

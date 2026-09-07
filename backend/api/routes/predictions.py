@@ -141,6 +141,10 @@ class ValueBetOut(BaseModel):
     course_id: str
     participation_id: str
     nom_cheval: str
+    # Numéro de dossard : c'est ce que le parieur cherche sur la carte et tape
+    # sur son écran PMU ; le nom n'est qu'une confirmation. Absent jusqu'au
+    # 2026-09-07 alors que le flux WS l'envoyait déjà.
+    numero: Optional[int] = None
     hippodrome_nom: str
     date_heure: datetime
     ev_max: float
@@ -734,6 +738,7 @@ async def get_value_bets_live(
             course_id=vb.course_id,
             participation_id=vb.participation_id,
             nom_cheval=cheval.nom,
+            numero=part.numero,
             hippodrome_nom=course.hippodrome_nom,
             date_heure=course.date_heure,
             ev_max=round(vb.ev_max, 4),

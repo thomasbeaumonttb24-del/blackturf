@@ -26,6 +26,7 @@ from db.models import (
     BankrollEntry, Recommandation, PredictionEvaluation, RaceLearningLog,
 )
 from services.course_resolution import STATUTS_NON_COURUES
+from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
 import redis.asyncio as aioredis
 
 log = structlog.get_logger()
@@ -416,7 +417,11 @@ async def dashboard_summary(
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
         .join(Course, Course.course_id == ValueBet.course_id)
-        .where(ValueBet.actif == True, ValueBet.niveau >= 2)
+        # Mêmes filtres de visibilité que /value-bets (course ouverte, fenêtre
+        # 6 h) : la réponse est partagée entre utilisateurs, donc sans le délai
+        # Standard, qui dépend du plan. Avant, seul `actif` filtrait : un pari
+        # d'une course sans résultat pouvait rester en tête du tableau de bord.
+        .where(ValueBet.niveau >= 2, *_vb_filtres_sql(None))
         .order_by(ValueBet.ev_max.desc())
         .limit(3)
     )
@@ -424,6 +429,7 @@ async def dashboard_summary(
     top_vbs = [
         {
             "nom_cheval": cheval.nom,
+            "numero": part.numero,
             "hippodrome": course.hippodrome_nom,
             "discipline": course.discipline,
             "heure": course.date_heure.strftime("%H:%M") if course.date_heure else None,

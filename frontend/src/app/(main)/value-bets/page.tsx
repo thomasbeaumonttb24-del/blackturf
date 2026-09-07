@@ -42,6 +42,7 @@ const SORT_OPTIONS = [
 
 type VB = {
   vb_id: string; course_id: string; nom_cheval: string;
+  numero?: number | null;   // dossard — l'information que le parieur cherche en premier
   hippodrome_nom: string; date_heure: string; ev_max: number;
   niveau: number;
   cote_pmu: number | null;
@@ -165,7 +166,10 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           {/* Horse */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm truncate">{vb.nom_cheval}</span>
+              {vb.numero != null && (
+                <span className="font-black text-base leading-none tabular-nums text-slate-900 shrink-0">N°{vb.numero}</span>
+              )}
+              <span className="text-sm text-muted-foreground truncate">{vb.nom_cheval}</span>
               {isExpert && vb.spi_detected && (
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 shrink-0 gap-0.5">
                   <Zap className="w-2.5 h-2.5" aria-hidden="true" /> Afflux
@@ -260,7 +264,13 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
 
           {/* Horse */}
           <div className="mb-1">
-            <h3 className="font-bold text-sm truncate">{vb.nom_cheval}</h3>
+            {/* Le numéro d'abord, en gras : c'est lui qu'on joue. Le nom confirme. */}
+            <h3 className="flex items-baseline gap-2 min-w-0">
+              {vb.numero != null && (
+                <span className="font-black text-xl leading-none tabular-nums text-slate-900 shrink-0">N°{vb.numero}</span>
+              )}
+              <span className="text-sm text-muted-foreground truncate">{vb.nom_cheval}</span>
+            </h3>
             <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span>{vb.hippodrome_nom}</span>
               {vb.discipline && (

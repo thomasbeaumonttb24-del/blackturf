@@ -325,7 +325,7 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   topVbs.map((vb: {
-                    nom_cheval: string; hippodrome: string; discipline?: string;
+                    nom_cheval: string; numero?: number | null; hippodrome: string; discipline?: string;
                     heure?: string; ev: number; niveau: number; cote?: number; course_id: string;
                   }, i: number) => (
                     <Link
@@ -339,7 +339,11 @@ export default function DashboardPage() {
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-foreground text-sm truncate">{vb.nom_cheval}</span>
+                            {/* Le dossard en gras, le nom en confirmation : même règle que /value-bets. */}
+                            {vb.numero != null && (
+                              <span className="font-black text-base leading-none tabular-nums text-foreground shrink-0">N°{vb.numero}</span>
+                            )}
+                            <span className="text-sm text-muted-foreground truncate">{vb.nom_cheval}</span>
                             <StarRating n={vb.niveau} />
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
