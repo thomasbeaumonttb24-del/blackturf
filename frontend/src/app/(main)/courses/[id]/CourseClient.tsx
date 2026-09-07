@@ -115,6 +115,11 @@ interface Prediction {
   value_bet: { ev_max: number; niveau: number; meilleure_source: string } | null;
 }
 
+type ConfianceContexte = {
+  score: number; tranche_min: number; tranche_max: number | null;
+  n_courses: number; n1_gagne_pct: number; fenetre_jours: number;
+};
+
 interface CourseData {
   course_id: string;
   nom: string | null;
@@ -2709,8 +2714,8 @@ export default function CoursePage({
   // Métadonnées du calcul renvoyées par /predictions : sans elles, le tableau met
   // face à face une cote juste calculée à un instant T et une cote de marché d'un
   // autre instant, sans jamais le dire au lecteur.
-  const [predMeta, setPredMeta] = useState<{ calcule_a: string | null; cotes_figees: boolean; confiance: number | null }>(
-    { calcule_a: null, cotes_figees: false, confiance: null });
+  const [predMeta, setPredMeta] = useState<{ calcule_a: string | null; cotes_figees: boolean; confiance: number | null; confiance_contexte: ConfianceContexte | null }>(
+    { calcule_a: null, cotes_figees: false, confiance: null, confiance_contexte: null });
   const [loadingCourse, setLoadingCourse] = useState(!initialCourse);
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
@@ -2862,6 +2867,7 @@ export default function CoursePage({
           calcule_a: res.data.calcule_a ?? null,
           cotes_figees: Boolean(res.data.cotes_figees),
           confiance: res.data.confiance ?? null,
+          confiance_contexte: res.data.confiance_contexte ?? null,
         });
       })
       .catch(() => setPredictions(null))
@@ -2918,6 +2924,7 @@ export default function CoursePage({
               calcule_a: res.data.calcule_a ?? null,
               cotes_figees: Boolean(res.data.cotes_figees),
               confiance: res.data.confiance ?? null,
+              confiance_contexte: res.data.confiance_contexte ?? null,
             });
           })
           .finally(() => setLoadingPred(false));
@@ -3248,16 +3255,28 @@ export default function CoursePage({
               </div>
               {/* Confiance algo */}
               <div className="cx-fade" style={{ borderRadius: 18, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "16px 18px", animationDelay: ".12s" }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gray400 }}>Confiance algo</div>
+                {/* Ce score est un ACCORD (les 3 modèles entre eux, et avec le marché),
+                    pas une chance de gagner : un n°1 à 19 % peut porter 77/100 sans
+                    contradiction. On le dit, et on donne le seul fait vérifiable qui
+                    l'accompagne : le taux de réussite réel du n°1 à ce niveau d'accord. */}
+                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gray400 }}>Accord des modèles</div>
                 {confGlobal !== null ? (
                   <>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5 }}>
                       <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>{Math.round(confGlobal)}</span>
-                      <span style={{ fontSize: 11, color: CX.gray400 }}>/ 100 · sur son n°1</span>
+                      <span style={{ fontSize: 11, color: CX.gray400 }}>/ 100 · sur le n°{fav.numero}</span>
                     </div>
                     <div style={{ marginTop: 9, height: 6, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, Math.round(confGlobal)))}%`, borderRadius: 999, background: "linear-gradient(90deg,#F59E0B,#059669)", transformOrigin: "left", animation: "cxBarGrow .7s cubic-bezier(.16,1,.3,1) .3s both" }} />
                     </div>
+                    <div style={{ fontSize: 11, color: CX.gray400, marginTop: 7, lineHeight: 1.35 }}>
+                      Les 3 modèles et le marché convergent sur ce cheval. Ce n&apos;est pas sa chance de gagner ({Math.round(fav.proba_top1 * 100)}&nbsp;%).
+                    </div>
+                    {predMeta.confiance_contexte && (
+                      <div style={{ fontSize: 11, color: CX.gray500, marginTop: 5, lineHeight: 1.35 }}>
+                        À ce niveau d&apos;accord ({predMeta.confiance_contexte.tranche_min}{predMeta.confiance_contexte.tranche_max != null ? `–${predMeta.confiance_contexte.tranche_max}` : "+"}), le n°1 a gagné <b style={{ color: CX.ink2 }}>{Math.round(predMeta.confiance_contexte.n1_gagne_pct)}&nbsp;%</b> des {predMeta.confiance_contexte.n_courses} dernières courses ({predMeta.confiance_contexte.fenetre_jours}&nbsp;j).
+                      </div>
+                    )}
                   </>
                 ) : <p style={{ marginTop: 8, fontSize: 12, color: CX.gray400 }}>—</p>}
               </div>

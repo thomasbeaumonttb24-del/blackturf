@@ -443,8 +443,11 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
         {apercu?.analysee && (
           <div className="mt-1.5 hidden flex-wrap items-center gap-1.5 sm:flex">
             {apercu.confiance != null && (
-              <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 tabular-nums">
-                confiance {apercu.confiance}/100
+              <span
+                className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 tabular-nums"
+                title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
+              >
+                accord des modèles {apercu.confiance}/100
               </span>
             )}
             {apercu.accord_marche === false && (

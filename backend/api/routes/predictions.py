@@ -22,6 +22,8 @@ from services.cote_juste import cote_juste as _cote_juste
 from services.confiance_course import (
     confiance_course as _confiance_course,
     confiance_depuis_predictions as _confiance_depuis_predictions,
+    contexte_confiance as _contexte_confiance,
+    reussite_par_tranche as _reussite_par_tranche,
 )
 from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
 
@@ -134,6 +136,9 @@ class CoursePredictionsOut(BaseModel):
     # (`services.confiance_course`). Le front l'affiche, il ne la recalcule plus :
     # sa moyenne « des trois premiers » donnait 80 là où le programme disait 84.
     confiance: Optional[int] = None
+    # Ce que ce score VAUT, mesuré : « à ce niveau d'accord, le n°1 a gagné X %
+    # des N dernières courses ». None si rien de mesurable (cf. services).
+    confiance_contexte: Optional[dict] = None
 
 
 class ValueBetOut(BaseModel):
@@ -312,6 +317,8 @@ async def get_predictions(
             quota_restant=0,
         )
 
+    _conf = _confiance_depuis_predictions([p for p, _, _ in rows])
+    _conf_ctx = _contexte_confiance(_conf, await _reussite_par_tranche(db))
     return CoursePredictionsOut(
         course_id=course_id,
         statut=course.statut,
@@ -320,7 +327,8 @@ async def get_predictions(
         verrouille=False,
         quota_restant=quota_restant,
         calcule_a=min((p.created_at for p, _, _ in rows if p.created_at), default=None),
-        confiance=_confiance_depuis_predictions([p for p, _, _ in rows]),
+        confiance=_conf,
+        confiance_contexte=_conf_ctx,
         cotes_figees=fige,
     )
 
@@ -472,7 +480,8 @@ class ApercuAnalyseOut(BaseModel):
     disponible: bool = False       # une analyse existe en base pour cette course
     revele: bool = False           # True = course terminée → contenu complet
     nb_analyses: int = 0           # chevaux réellement notés par le modèle
-    confiance: Optional[int] = None        # confiance du modèle sur son n°1 (0-100)
+    confiance: Optional[int] = None        # accord des modèles sur son n°1 (0-100)
+    confiance_contexte: Optional[dict] = None  # taux de réussite réel du n°1 à ce niveau
     proba_top1: Optional[float] = None     # proba de victoire du n°1 du modèle
     accord_marche: Optional[bool] = None   # n°1 du modèle == favori des cotes ?
     bande_cote: Optional[str] = None       # tranche de cote du n°1 du modèle
@@ -528,6 +537,7 @@ async def get_apercu_analyse(
     base.nb_analyses = len(rows)
     # Même définition que la pastille du programme et la fiche abonné.
     base.confiance = _confiance_course(pred1.confidence_score)
+    base.confiance_contexte = _contexte_confiance(base.confiance, await _reussite_par_tranche(db))
     base.proba_top1 = round(pred1.proba_top1, 4) if pred1.proba_top1 is not None else None
     base.nb_ecartes = sum(1 for p, _, _ in rows if (p.proba_top1 or 0) < 0.03)
 

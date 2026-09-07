@@ -896,6 +896,7 @@ export interface ApercuAnalyse {
   revele: boolean;
   nb_analyses: number;
   confiance: number | null;
+  confiance_contexte?: { tranche_min: number; tranche_max: number | null; n_courses: number; n1_gagne_pct: number; fenetre_jours: number } | null;
   proba_top1: number | null;
   accord_marche: boolean | null;
   bande_cote: string | null;
@@ -1106,7 +1107,16 @@ export function ApercuAnalyseCard({
         <>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {apercu.confiance != null && (
-              <Tuile valeur={String(apercu.confiance)} unite="/ 100" libelle="confiance du modèle sur cette course" />
+              <Tuile
+                valeur={String(apercu.confiance)}
+                unite="/ 100"
+                libelle={
+                  "accord des 3 modèles sur son n°1 — pas sa chance de gagner"
+                  + (apercu.confiance_contexte
+                    ? ` · à ce niveau, le n°1 a gagné ${Math.round(apercu.confiance_contexte.n1_gagne_pct)} % des ${apercu.confiance_contexte.n_courses} dernières courses`
+                    : "")
+                }
+              />
             )}
             {apercu.proba_top1 != null && (
               <Tuile

@@ -85,6 +85,10 @@ async def test_confiance_identique_programme_apercu_et_fiche(client: AsyncClient
     fiche = await client.get("/api/v1/courses/COH1C7/predictions", headers=admin_headers)
     assert fiche.status_code == 200, fiche.text
     assert fiche.json()["confiance"] == 84, "la fiche doit servir la confiance du n°1, pas la moyenne (80)"
+    # Le fait mesuré qui accompagne le score : présent (dict) ou None, jamais
+    # absent ni inventé — en test (SQLite, pas de DISTINCT ON) il vaut None.
+    assert "confiance_contexte" in fiche.json()
+    assert fiche.json()["confiance_contexte"] is None or fiche.json()["confiance_contexte"]["n_courses"] >= 50
 
     apercu = await client.get("/api/v1/courses/COH1C7/apercu")
     assert apercu.status_code == 200

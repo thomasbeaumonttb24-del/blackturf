@@ -372,7 +372,9 @@ function Synthese({
         <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
           {pct(concentration)}
           <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">
-            des chances de victoire
+            des chances de victoire pour les 3 premiers
+            {/* Lecture : plus les 3 premiers pèsent, plus la course est jouée d'avance. */}
+            {concentration >= 0.6 ? " · course serrée" : concentration >= 0.45 ? " · course disputée" : " · course ouverte"}
           </span>
         </p>
       </div>
