@@ -832,10 +832,63 @@ async def get_adaptive_learning_state(
     Température, poids features, métriques EMA, alertes calibration.
     Inclut l'état du détecteur de drift (ADWIN + Page-Hinkley) et le statut des
     calibrations (isotonique + longshots) réellement appliquées à l'inférence.
+
+    L'état est RELU EN BASE à chaque appel. `get_adaptive_learning()` nu rendait
+    le singleton du process API, chargé une seule fois au démarrage
+    (`api/main.py`, lifespan) : c'est le worker RQ qui fait avancer cet état, à
+    chaque course analysée. Une API restée en service plusieurs jours servait donc
+    la température, le Brier lissé, les poids de features et le rapport de dérive
+    du dernier redémarrage, pendant que la page de supervision les rafraîchissait
+    toutes les 30 s — elle avait l'air en direct sans l'être.
+
+    Le même défaut avait déjà été diagnostiqué et corrigé pour le contrôle horaire
+    de dérive (cf. `services/jobs.job_drift_check`, « recharger l'état depuis la
+    DB à chaque exécution — pas un init une fois au boot ») ; cet endpoint n'avait
+    pas été traité.
+
+    La relecture se fait sur des instances DÉTACHÉES, pas via
+    `initialize_adaptive_learning()` : celui-ci recharge le singleton PARTAGÉ, donc
+    celui que `predict_course` consulte pour la température et les poids. Rafraîchir
+    l'inférence toutes les trente secondes parce qu'un admin regarde une page
+    changerait les probabilités servies aux abonnés — un effet de bord qu'une vue
+    de supervision n'a pas à provoquer. Lire est ici en lecture seule, au sens
+    fort.
+
+    Ce n'est pas un chemin chaud : un appel toutes les 30 s, deux lectures de
+    ligne unique. Le repli sur le singleton en mémoire est conservé — une lecture
+    impossible ne doit pas vider la page de supervision, seulement la faire
+    vieillir comme avant.
     """
-    from ml.adaptive_learning import TILT_MIN_RACES
+    from ml.adaptive_learning import AdaptiveLearning, TILT_MIN_RACES
+    from ml.drift_detector import DriftDetector
+
     al = get_adaptive_learning()
-    dd = get_drift_detector()
+    try:
+        _al_lu = AdaptiveLearning()
+        await _al_lu.load_state(db)
+        # `load_state` laisse l'instance à ses valeurs par défaut quand la table est
+        # vide. Un état neutre complet ne remplace jamais un état en mémoire qui,
+        # lui, a vu passer des courses : c'est exactement la confusion « valeur par
+        # défaut prise pour une mesure » que la page s'interdit.
+        if _al_lu.n_races_processed > 0:
+            al = _al_lu
+    except Exception as e:
+        await db.rollback()
+        log.warning("admin.al_state.rechargement_impossible", err=str(e)[:160])
+
+    try:
+        dd = get_drift_detector()
+    except RuntimeError:
+        # Le singleton n'existe que si le démarrage l'a initialisé. Sur un process
+        # où ça n'a pas eu lieu, une instance détachée vaut mieux qu'une 500.
+        dd = DriftDetector()
+    try:
+        _dd_lu = DriftDetector()
+        if await _dd_lu.load_state(db):
+            dd = _dd_lu
+    except Exception as e:
+        await db.rollback()
+        log.warning("admin.drift_state.rechargement_impossible", err=str(e)[:160])
 
     # ── Statut calibration isotonique (proba_top1 finale → fréquence réelle) ──
     isotonic = {"actif": False, "n_points": 0, "n_obs": 0, "updated_at": None}
