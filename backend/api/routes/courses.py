@@ -25,6 +25,7 @@ from db.models import (
 from db.models import User
 from services.course_resolution import STATUTS_NON_COURUES
 from services.temps_courses import jour_courses, PARIS
+from services.confiance_course import confiance_course as _confiance_course
 from ml.portfolio import BetPortfolioEngine
 from ml.adaptive_learning import get_adaptive_learning
 from ml.monte_carlo import MonteCarloSimulator
@@ -903,7 +904,8 @@ async def get_programme_apercu(
             "analysee": True,
             "nb_notes": agg["nb_notes"],
             "nb_ecartes": agg["nb_ecartes"],
-            "confiance": int(round(agg["confiance"])) if agg["confiance"] is not None else None,
+            # Même définition que la fiche course (`services.confiance_course`).
+            "confiance": _confiance_course(agg["confiance"]),
             "accord_marche": (bool(fav == top1) if (fav is not None and top1 is not None) else None),
         }
 

@@ -138,8 +138,8 @@ export const predictionsApi = {
     api.get(`/courses/${courseId}/predictions`, { params: { bankroll } }),
   trigger: (courseId: string, bankroll?: number) =>
     api.post(`/courses/${courseId}/predict`, null, { params: { bankroll } }),
-  valueBets: (niveauMin?: number) =>
-    api.get("/value-bets", { params: { niveau_min: niveauMin } }),
+  valueBets: (niveauMin?: number, limit = 100) =>
+    api.get("/value-bets", { params: { niveau_min: niveauMin, limit } }),
   valueBetsHistory: (limit = 50, offset = 0) =>
     api.get("/value-bets/historique", { params: { limit, offset } }),
   // Compteur agrégé public (bandeau Free) — jamais de détail individuel, juste un total.

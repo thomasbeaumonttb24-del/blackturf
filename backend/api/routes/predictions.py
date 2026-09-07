@@ -19,6 +19,11 @@ from db.models import (
     Cheval, Course, Resultat, User
 )
 from services.cote_juste import cote_juste as _cote_juste
+from services.confiance_course import (
+    confiance_course as _confiance_course,
+    confiance_depuis_predictions as _confiance_depuis_predictions,
+)
+from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -97,6 +102,22 @@ class PredictionOut(BaseModel):
     value_bet: Optional[dict]
 
 
+def _value_bet_out(vb: "ValueBet") -> dict:
+    """Projection d'un pari de valeur STOCKÉ vers la fiche course.
+
+    Mêmes champs, mêmes arrondis que `ValueBetOut` (page /value-bets) et que le
+    flux WS : les trois surfaces affichent la même espérance et le même niveau.
+    """
+    return {
+        "ev_max": round(vb.ev_max, 4),
+        "niveau": vb.niveau,
+        "meilleure_source": vb.meilleure_source,
+        "spi_detected": vb.spi_detected,
+        "spi_score": round(vb.spi_score, 3) if vb.spi_score else None,
+        "detecte_a": vb.detecte_a,
+    }
+
+
 class CoursePredictionsOut(BaseModel):
     course_id: str
     statut: str
@@ -108,6 +129,11 @@ class CoursePredictionsOut(BaseModel):
     # sache de quand datent les probabilités qu'il regarde.
     calcule_a: Optional[datetime] = None
     cotes_figees: bool = False
+    # Confiance du modèle sur la course (0-100) — calculée ICI, par la même
+    # fonction que la pastille du programme et l'aperçu public
+    # (`services.confiance_course`). Le front l'affiche, il ne la recalcule plus :
+    # sa moyenne « des trois premiers » donnait 80 là où le programme disait 84.
+    confiance: Optional[int] = None
 
 
 class ValueBetOut(BaseModel):
@@ -171,23 +197,31 @@ async def get_predictions(
         # Lancer la prédiction en background si pas encore faite
         raise HTTPException(status_code=404, detail="Prédictions non disponibles pour cette course")
 
-    # Charger les value bets associés
+    # ── Paris de valeur : la table `value_bets`, et RIEN d'autre ─────────────
+    # Jusqu'au 2026-09-07 cette route recalculait le pari à la cote du moment
+    # (avant le gel T-10) avec moins d'entrées que le cycle — ni historique de
+    # cotes, ni suspensions, ni signaux appris — et écartait le pari stocké dès
+    # que la cote live ne le confirmait plus. Résultat : un cheval ★★★ sur
+    # /value-bets pouvait manquer sur sa fiche, ou y figurer avec un autre niveau,
+    # et un abonné Standard voyait ici sans délai ce que la page dédiée lui
+    # servait 15 min plus tard. Une seule source (le cycle, toutes les 8 min) et
+    # une seule règle de visibilité (`services.valuebets_visibilite`) : la fiche,
+    # /value-bets, le flux WS et le compteur montrent désormais le même pari, au
+    # même niveau, à la même espérance.
+    from services.valuebets_visibilite import visible as _vb_visible
     vb_res = await db.execute(
         select(ValueBet)
-        .where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))
+        .where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712
     )
-    vbs_by_pid = {vb.participation_id: vb for vb in vb_res.scalars().all()}
+    vbs_by_pid = {vb.participation_id: vb
+                  for vb in vb_res.scalars().all()
+                  if _vb_visible(vb, user.plan)}
 
-    # ── EV LIVE (avant gel) ──────────────────────────────────────────────────
-    # Le value bet stocké est recalculé toutes les ~8 min par le cycle. Tant que le
-    # prono n'est PAS figé (> T-10 min), on RECALCULE l'EV/le niveau en direct sur la
-    # cote du marché → l'estimation de gain bouge avec les cotes (et change donc la
-    # sélection : un cheval dont la cote monte peut redevenir un value bet). Après le
-    # gel, on garde le value bet figé (cohérence avec le plan/bilan).
+    # Cote AFFICHÉE : live avant gel, dernière connue après. Le pari de valeur,
+    # lui, reste celui du cycle : son espérance est calculée sur la cote relevée au
+    # moment de la détection (`cote_figee` sur la prédiction), et le front le dit.
     fige = _is_prono_fige(course.date_heure)
     live_cotes: dict[int, float] = {}
-    cote_calib = None
-    ev_band_perf = None
     if not fige and course.statut in ("a_venir", "en_cours"):
         try:
             from services.pmu_cotes import fetch_live_cotes
@@ -195,70 +229,12 @@ async def get_predictions(
                           for c in await fetch_live_cotes(course_id) if c.get("cote")}
         except Exception:
             live_cotes = {}
-        try:
-            from ml.cote_calibration import load_cote_calibration
-            cote_calib = await load_cote_calibration(db)
-        except Exception:
-            cote_calib = None
-        try:
-            from ml.signal_performance import load_ev_band_performance
-            ev_band_perf = await load_ev_band_performance(db)
-        except Exception:
-            ev_band_perf = None
-
-    def _live_vb(pred, part):
-        """Recalcule le value bet à la cote LIVE (mêmes garde-fous que le cycle :
-        triangulation multi-sources + calibration par tranche de cote). None si le
-        cheval n'est plus un value bet à la cote actuelle."""
-        cote_live = live_cotes.get(part.numero)
-        if not cote_live or not pred.proba_top1:
-            return None
-        try:
-            from ml.valuebets import detect_value_bet
-            return detect_value_bet(
-                pred.proba_top1,
-                cote_pmu=cote_live,
-                cote_geny=part.cote_geny,
-                cote_bzh=part.cote_bzh,
-                cote_winamax=part.cote_winamax,
-                cote_betclic=part.cote_betclic,
-                cote_unibet=part.cote_unibet,
-                cote_betfair=part.cote_betfair_exchange,
-                non_partant=bool(part.non_partant),
-                cote_calib=cote_calib,
-                ev_band_perf=ev_band_perf,
-            )
-        except Exception:
-            return None
 
     predictions = []
     for pred, part, cheval in rows:
         vb = vbs_by_pid.get(part.participation_id)
-        # Cote affichée : live avant gel, figée (stockée) après.
         cote_aff = (live_cotes.get(part.numero) if not fige else None) or part.cote_pmu
-        # Value bet : recalcul live avant gel, sinon stocké.
-        vb_live = _live_vb(pred, part) if not fige else None
-        if vb_live:
-            value_bet = {
-                "ev_max": round(vb_live["ev_max"], 4),
-                "niveau": vb_live["niveau"],
-                "meilleure_source": vb_live["meilleure_source"],
-                "spi_detected": vb.spi_detected if vb else vb_live.get("spi_detected", False),
-                "spi_score": round(vb.spi_score, 3) if vb and vb.spi_score else None,
-                "live": True,
-            }
-        elif vb and fige:
-            value_bet = {
-                "ev_max": round(vb.ev_max, 4),
-                "niveau": vb.niveau,
-                "meilleure_source": vb.meilleure_source,
-                "spi_detected": vb.spi_detected,
-                "spi_score": round(vb.spi_score, 3) if vb.spi_score else None,
-            }
-        else:
-            # Avant gel sans value bet live = plus de valeur à la cote actuelle (ne pas
-            # servir l'ancien VB stocké, qui contredirait la cote affichée).
-            value_bet = None
+        value_bet = _value_bet_out(vb) if vb else None
         predictions.append(PredictionOut(
             prediction_id=pred.prediction_id,
             participation_id=part.participation_id,
@@ -339,6 +315,7 @@ async def get_predictions(
         verrouille=False,
         quota_restant=quota_restant,
         calcule_a=min((p.created_at for p, _, _ in rows if p.created_at), default=None),
+        confiance=_confiance_depuis_predictions([p for p, _, _ in rows]),
         cotes_figees=fige,
     )
 
@@ -544,7 +521,8 @@ async def get_apercu_analyse(
     pred1, part1, cheval1 = rows[0]
     base.disponible = True
     base.nb_analyses = len(rows)
-    base.confiance = int(round(pred1.confidence_score)) if pred1.confidence_score is not None else None
+    # Même définition que la pastille du programme et la fiche abonné.
+    base.confiance = _confiance_course(pred1.confidence_score)
     base.proba_top1 = round(pred1.proba_top1, 4) if pred1.proba_top1 is not None else None
     base.nb_ecartes = sum(1 for p, _, _ in rows if (p.proba_top1 or 0) < 0.03)
 
@@ -725,27 +703,19 @@ async def trigger_prediction(
 @router.get("/value-bets", response_model=list[ValueBetOut])
 async def get_value_bets_live(
     niveau_min: int = Query(default=1, ge=1, le=4),
-    limit: int = Query(default=20, le=100),
+    limit: int = Query(default=100, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_pro),
 ):
-    """Value bets actifs (en direct). Abonnés seulement."""
-    filters = [
-        ValueBet.actif == True,
-        ValueBet.niveau >= niveau_min,
-        Course.statut.in_(["a_venir", "en_cours"]),
-        # Garde-fou en plus de `actif` (cf. job_expire_stale_value_bets) : une course
-        # jamais passée à statut='termine' faute de résultat (piste étrangère non
-        # couverte PMU, panne scraper) restait "a_venir" indéfiniment et ses value
-        # bets s'affichaient toujours, parfois vieux de plusieurs mois (constaté
-        # 2026-08-17). Le job de nettoyage tourne toutes les 15 min ; ce filtre rend
-        # l'endpoint correct même entre deux exécutions.
-        Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
-    ]
-    # Standard plan: 15min delay on value bets (briefing §4.2)
-    if user.plan == "standard":
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
-        filters.append(ValueBet.detecte_a <= cutoff)
+    """Value bets actifs (en direct). Abonnés seulement.
+
+    Filtres de visibilité (actif, course ouverte, fenêtre 6 h après le départ,
+    délai Standard) portés par `services.valuebets_visibilite` — les mêmes que la
+    fiche course et le flux WS. `limit` vaut 100 par défaut : à 20, une journée
+    chargée (74 paris détectés le 2026-09-07) coupait la liste sans le dire, et
+    un pari visible sur sa fiche manquait ici.
+    """
+    filters = [ValueBet.niveau >= niveau_min, *_vb_filtres_sql(user.plan)]
 
     q = (
         select(ValueBet, Participation, Cheval, Course)
@@ -801,12 +771,8 @@ async def get_value_bets_compteur(
         select(func.count(ValueBet.vb_id))
         .select_from(ValueBet)
         .join(Course, Course.course_id == ValueBet.course_id)
-        .where(
-            ValueBet.actif == True,
-            ValueBet.niveau >= niveau_min,
-            Course.statut.in_(["a_venir", "en_cours"]),
-            Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
-        )
+        # Mêmes filtres que la liste (sans délai : aucun plan, et aucun détail servi).
+        .where(ValueBet.niveau >= niveau_min, *_vb_filtres_sql(None))
     )
     count = (await db.execute(q)).scalar_one()
     return {"count": int(count), "niveau_min": niveau_min}
@@ -1078,22 +1044,22 @@ async def get_course_analysis(
     if not rows:
         raise HTTPException(status_code=404, detail="Prédictions non disponibles pour cette course")
 
-    # VBs actifs
+    # Paris de valeur : ceux du cycle, filtrés par la même règle de visibilité que
+    # la fiche et /value-bets. L'analyse (couverture, coup à tenter, dutch) les
+    # recalculait à la cote live avec pour seule entrée la cote PMU : elle pouvait
+    # proposer un dutch sur deux chevaux qu'aucune autre page n'appelait paris de
+    # valeur.
+    from services.valuebets_visibilite import visible as _vb_visible
     vbs_r = await db.execute(
-        select(VBModel.participation_id, VBModel.ev_max, VBModel.niveau, VBModel.spi_detected, VBModel.spi_score)
-        .where(VBModel.course_id == course_id, VBModel.actif.is_(True))
+        select(VBModel).where(VBModel.course_id == course_id, VBModel.actif.is_(True))
     )
-    vb_map = {r[0]: {"ev_max": r[1], "niveau": r[2], "spi_detected": r[3], "spi_score": r[4]}
-              for r in vbs_r.fetchall()}
+    vb_map = {vb.participation_id: {"ev_max": vb.ev_max, "niveau": vb.niveau,
+                                    "spi_detected": vb.spi_detected, "spi_score": vb.spi_score}
+              for vb in vbs_r.scalars().all() if _vb_visible(vb, user.plan)}
 
-    # ── Cotes LIVE + recalcul EV avant le gel (T-10) ──
-    # Comme la fiche prédictions, l'analyse (coverage jackpot, coup à tenter, dutch)
-    # suit le marché en direct tant que le prono n'est pas figé → les estimations de
-    # gain bougent avec les cotes. Après le gel, on sert les cotes/VB figés.
+    # Cotes LIVE avant le gel (T-10) : seule la cote AFFICHÉE suit le marché.
     fige = _is_prono_fige(course.date_heure)
     live_cotes: dict[int, float] = {}
-    cote_calib = None
-    ev_band_perf = None
     if not fige and course.statut in ("a_venir", "en_cours"):
         try:
             from services.pmu_cotes import fetch_live_cotes
@@ -1101,16 +1067,6 @@ async def get_course_analysis(
                           for c in await fetch_live_cotes(course_id) if c.get("cote")}
         except Exception:
             live_cotes = {}
-        try:
-            from ml.cote_calibration import load_cote_calibration
-            cote_calib = await load_cote_calibration(db)
-        except Exception:
-            cote_calib = None
-        try:
-            from ml.signal_performance import load_ev_band_performance
-            ev_band_perf = await load_ev_band_performance(db)
-        except Exception:
-            ev_band_perf = None
 
     predictions = []
     features_by_pid = {}
@@ -1119,16 +1075,6 @@ async def get_course_analysis(
         cote_live = live_cotes.get(int(num)) if not fige else None
         cote_aff = cote_live or cote_pmu
         vb_aff = vb_map.get(pid)
-        if cote_live and p1:
-            # Recalcul EV/value-bet à la cote live (calibration par tranche de cote).
-            try:
-                from ml.valuebets import detect_value_bet
-                _vbl = detect_value_bet(float(p1), cote_pmu=cote_live, cote_calib=cote_calib, ev_band_perf=ev_band_perf)
-                vb_aff = ({"ev_max": _vbl["ev_max"], "niveau": _vbl["niveau"],
-                           "spi_detected": _vbl.get("spi_detected", False),
-                           "spi_score": _vbl.get("spi_score")} if _vbl else None)
-            except Exception:
-                pass
         predictions.append({
             "participation_id": pid,
             "numero": num,

@@ -342,11 +342,15 @@ export default function ValueBetsPage() {
 
   const { data: apiBets, isLoading } = useSWR(
     isPro ? ["/value-bets", niveauMin] : null,
-    () => predictionsApi.valueBets(niveauMin).then((r) => r.data),
+    () => predictionsApi.valueBets(niveauMin, 100).then((r) => r.data),
     { refreshInterval: 60_000 }
   );
 
-  const rawBets = (streamBets.length > 0 ? streamBets : apiBets ?? []) as VB[];
+  // Le flux WS ne connaît pas le filtre de niveau : il remplace la liste REST dès
+  // qu'il a parlé, et « ★★★ et plus » redevenait « tout » sans que rien ne le dise.
+  // Même filtre appliqué ici, quelle que soit la source.
+  const rawBets = ((streamBets.length > 0 ? streamBets : apiBets ?? []) as VB[])
+    .filter((v) => (v.niveau ?? 0) >= niveauMin);
 
   // Horodatage de fraîchreté : chaque nouvelle donnée (poll REST 60s ou message WS)
   // met à jour ce repère. Le backend garantit désormais (job_expire_stale_value_bets,

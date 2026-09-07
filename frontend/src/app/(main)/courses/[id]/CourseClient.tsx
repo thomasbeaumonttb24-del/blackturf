@@ -2709,8 +2709,8 @@ export default function CoursePage({
   // Métadonnées du calcul renvoyées par /predictions : sans elles, le tableau met
   // face à face une cote juste calculée à un instant T et une cote de marché d'un
   // autre instant, sans jamais le dire au lecteur.
-  const [predMeta, setPredMeta] = useState<{ calcule_a: string | null; cotes_figees: boolean }>(
-    { calcule_a: null, cotes_figees: false });
+  const [predMeta, setPredMeta] = useState<{ calcule_a: string | null; cotes_figees: boolean; confiance: number | null }>(
+    { calcule_a: null, cotes_figees: false, confiance: null });
   const [loadingCourse, setLoadingCourse] = useState(!initialCourse);
   const [loadingPred, setLoadingPred] = useState(false);
   const [triggeringPred, setTriggeringPred] = useState(false);
@@ -2861,6 +2861,7 @@ export default function CoursePage({
         setPredMeta({
           calcule_a: res.data.calcule_a ?? null,
           cotes_figees: Boolean(res.data.cotes_figees),
+          confiance: res.data.confiance ?? null,
         });
       })
       .catch(() => setPredictions(null))
@@ -2916,6 +2917,7 @@ export default function CoursePage({
             setPredMeta({
               calcule_a: res.data.calcule_a ?? null,
               cotes_figees: Boolean(res.data.cotes_figees),
+              confiance: res.data.confiance ?? null,
             });
           })
           .finally(() => setLoadingPred(false));
@@ -2949,13 +2951,25 @@ export default function CoursePage({
 
   const profil = user?.profil_risque || "equilibre";
 
-  // Confidence globale = mean des top3 confidence_score
-  const confGlobal = predictions
-    ? predictions.slice(0, 3).reduce((s, p) => s + (p.confidence_score || 0), 0) / 3
-    : null;
+  // Confiance du modèle sur la course = celle de son n°1, calculée PAR LE SERVEUR
+  // (`confiance` de /predictions, même fonction que la pastille du programme et
+  // l'aperçu public). La moyenne des trois premiers qu'on faisait ici donnait 80
+  // là où le programme affichait 84 pour la même course. Le repli sur le score
+  // du rang 1 ne sert que le temps d'un déploiement front/back décalé.
+  const confGlobal: number | null =
+    predMeta.confiance
+    ?? predictions?.find((p) => p.rang_predit === 1)?.confidence_score
+    ?? null;
 
-  // Top value bet
-  const topVB = predictions?.find((p) => p.value_bet && p.value_bet.niveau >= 3);
+  // Paris de valeur = ceux servis par /predictions, c'est-à-dire la table du cycle
+  // (les mêmes que /value-bets). La carte montre le MEILLEUR par espérance, quel
+  // que soit son niveau : avant, un ★★ était tu (« aucune valeur franche ») alors
+  // qu'il figurait sur la page dédiée. Le bandeau, lui, reste réservé aux ★★★+.
+  const vbPreds = (predictions ?? []).filter((p) => p.value_bet);
+  const topVB = vbPreds.length
+    ? vbPreds.reduce((a, b) => (b.value_bet!.ev_max > a.value_bet!.ev_max ? b : a))
+    : undefined;
+  const topVBFranc = topVB && topVB.value_bet!.niveau >= 3 ? topVB : undefined;
 
   const disc = discMask(course.discipline);
   const statutMeta = course.statut === "en_cours"
@@ -3222,9 +3236,14 @@ export default function CoursePage({
                       <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</span>
                       <span style={{ fontSize: 11, color: CX.gray400 }}>espérance · {etoiles(topVB.value_bet!.niveau)}</span>
                     </div>
+                    {/* L'espérance est celle du cycle, à la cote relevée à la détection :
+                        la cote affichée ailleurs sur la page peut avoir bougé depuis. */}
+                    {topVB.cote_figee ? (
+                      <div style={{ fontSize: 11, color: CX.gray400, marginTop: 7 }}>détecté à la cote {formatCote(topVB.cote_figee)}</div>
+                    ) : null}
                   </>
                 ) : (
-                  <p style={{ marginTop: 8, fontSize: 12, color: CX.gray400 }}>Aucune valeur franche sur cette course.</p>
+                  <p style={{ marginTop: 8, fontSize: 12, color: CX.gray400 }}>Aucun pari de valeur détecté sur cette course.</p>
                 )}
               </div>
               {/* Confiance algo */}
@@ -3234,7 +3253,7 @@ export default function CoursePage({
                   <>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5 }}>
                       <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>{Math.round(confGlobal)}</span>
-                      <span style={{ fontSize: 11, color: CX.gray400 }}>/ 100</span>
+                      <span style={{ fontSize: 11, color: CX.gray400 }}>/ 100 · sur son n°1</span>
                     </div>
                     <div style={{ marginTop: 9, height: 6, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, Math.round(confGlobal)))}%`, borderRadius: 999, background: "linear-gradient(90deg,#F59E0B,#059669)", transformOrigin: "left", animation: "cxBarGrow .7s cubic-bezier(.16,1,.3,1) .3s both" }} />
@@ -3258,11 +3277,11 @@ export default function CoursePage({
         })()}
 
         {/* Alerte pari de valeur (bandeau or) */}
-        {topVB && (
+        {topVBFranc && (
           <div style={{ display: "flex", alignItems: "center", gap: 9, borderRadius: 14, border: "1px solid rgba(245,158,11,.32)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)", padding: "11px 16px", marginBottom: 20, fontSize: 13, color: CX.gray600 }}>
             <Zap className="h-4 w-4 flex-shrink-0" style={{ color: CX.gold }} />
             <span>
-              <b style={{ color: CX.goldDeep }}>Pari de valeur exceptionnel</b> — N°{topVB.numero} {topVB.nom_cheval} · {etoiles(topVB.value_bet!.niveau)} · espérance <b style={{ color: CX.em }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</b> détectée par l&apos;algorithme.
+              <b style={{ color: CX.goldDeep }}>Pari de valeur exceptionnel</b> — N°{topVBFranc.numero} {topVBFranc.nom_cheval} · {etoiles(topVBFranc.value_bet!.niveau)} · espérance <b style={{ color: CX.em }}>+{Math.round(topVBFranc.value_bet!.ev_max * 100)}%</b> détectée par l&apos;algorithme.
             </span>
           </div>
         )}

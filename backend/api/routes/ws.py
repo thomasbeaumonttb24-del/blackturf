@@ -24,6 +24,7 @@ from api.config import get_settings
 from db.database import get_db, async_session_factory
 from db.models import Participation, CoteHistorique, ValueBet, Course, Cheval, User
 from db.redis_client import get_redis
+from services.valuebets_visibilite import filtres_sql as vb_filtres_sql
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -296,29 +297,18 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
 
     async def send_vbs():
         async with async_session_factory() as db:
-            filters = [
-                ValueBet.actif == True,
-                Course.statut.in_(["a_venir", "en_cours"]),
-                # cf. job_expire_stale_value_bets (jobs.py) : garde-fou contre les
-                # courses jamais passées à 'termine' faute de résultat (piste
-                # étrangère non couverte PMU, panne scraper) — sans lui, un value
-                # bet pouvait rester "actif" indéfiniment et sortir sur ce flux.
-                Course.date_heure >= datetime.now(timezone.utc) - timedelta(hours=6),
-            ]
-            # Même délai 15 min que GET /value-bets (briefing §4.2) : Standard voit
-            # les value bets décalés, Pro/Expert en direct. Sans ce flux WS aligné,
-            # un compte Standard aurait pu contourner le délai en passant par ici.
-            if plan == "standard":
-                cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
-                filters.append(ValueBet.detecte_a <= cutoff)
+            # Mêmes filtres que GET /value-bets et la fiche course (actif, course
+            # ouverte, fenêtre 6 h, délai Standard) : ce flux REMPLACE la liste REST
+            # côté navigateur dès qu'il a parlé, il doit donc en être la copie exacte
+            # — même plafond de 100 (à 20, il tronquait une journée chargée).
             q = (
                 select(ValueBet, Participation, Cheval, Course)
                 .join(Participation, Participation.participation_id == ValueBet.participation_id)
                 .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
                 .join(Course, Course.course_id == ValueBet.course_id)
-                .where(and_(*filters))
+                .where(and_(*vb_filtres_sql(plan)))
                 .order_by(desc(ValueBet.ev_max))
-                .limit(20)
+                .limit(100)
             )
             rows = (await db.execute(q)).all()
             vbs = [
