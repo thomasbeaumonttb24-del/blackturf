@@ -82,6 +82,8 @@ JOIN courses c ON c.course_id = p.course_id
 JOIN res r ON r.cheval_id = pa.cheval_id AND r.course_id = p.course_id
 WHERE p.rang_predit = 1 AND c.statut = 'termine'
   AND c.date_heure >= now() - interval '{FENETRE_JOURS} days'
+  -- borne pré-départ : une prédiction recalculée après l'arrivée ne prouve rien
+  AND p.created_at < c.date_heure
   AND NOT pa.non_partant AND r.position_arrivee < 99 AND p.confidence_score IS NOT NULL
 """
 
