@@ -75,8 +75,12 @@ async def _standard_headers(db: AsyncSession, inscrire) -> dict:
 # ── Confiance ─────────────────────────────────────────────────────────────────
 
 async def test_confiance_identique_programme_apercu_et_fiche(client: AsyncClient, db: AsyncSession, admin_headers):
-    from services.temps_courses import jour_courses
-    await _seed(db, "COH1C7", dans=timedelta(hours=2))
+    from services.temps_courses import PARIS
+    dans = timedelta(hours=2)
+    await _seed(db, "COH1C7", dans=dans)
+    # Le jour du programme est le jour civil À PARIS de la course, pas « aujourd'hui » :
+    # lancé après 22 h UTC, « dans 2 h » tombe déjà sur le lendemain parisien.
+    jour = (datetime.now(timezone.utc) + dans).astimezone(PARIS).date()
 
     fiche = await client.get("/api/v1/courses/COH1C7/predictions", headers=admin_headers)
     assert fiche.status_code == 200, fiche.text
@@ -86,7 +90,7 @@ async def test_confiance_identique_programme_apercu_et_fiche(client: AsyncClient
     assert apercu.status_code == 200
     assert apercu.json()["confiance"] == 84
 
-    programme = await client.get("/api/v1/programme/apercu", params={"jour": jour_courses().isoformat()})
+    programme = await client.get("/api/v1/programme/apercu", params={"jour": jour.isoformat()})
     assert programme.status_code == 200, programme.text
     assert programme.json()["courses"]["COH1C7"]["confiance"] == 84
 
