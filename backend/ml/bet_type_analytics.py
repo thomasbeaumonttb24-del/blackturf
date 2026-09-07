@@ -484,11 +484,36 @@ async def compute_profitability_timeline(
 
 
 async def compute_algo_evolution(session: AsyncSession, limit: int = 60) -> dict:
-    """Trajectoire du modèle : une ligne par version entraînée, dans l'ordre."""
+    """Trajectoire du modèle : une ligne par version entraînée, dans l'ordre.
+
+    `rank_delta_market` — le classement intra-course du modèle MOINS celui d'un
+    simple tri par cote PMU — était mesuré chaque nuit, écrit en base, et jamais
+    servi à la page : la supervision montrait AUC / Brier / walk-forward, c'est-à-dire
+    tout sauf le chiffre que le pipeline lui-même appelle « le seul qui dit si le
+    modèle mérite d'exister » (cf. ml/ranking_metrics.rank_auc_report).
+
+    `rank_source` accompagne OBLIGATOIREMENT le delta, parce que les valeurs
+    stockées ne décrivent pas le même objet selon les versions :
+
+      ``hold_out``     — le vrai modèle, sur les 20 % de courses récentes qu'il n'a
+                         pas vues. La mesure qui compte.
+      ``h2h``          — le même modèle sur l'échantillon restreint du duel
+                         champion/challenger.
+      ``walk_forward`` — un XGBoost jetable ré-entraîné par fold : il mesure le
+                         DATASET, pas le modèle. C'est ce que portaient TOUTES les
+                         versions antérieures à la migration 0045 (`rank_source`
+                         NULL), avec un delta flatteur d'environ +0,019 face au
+                         −0,035 de la première mesure honnête.
+
+    Tracer les deux dans la même courbe reviendrait à empiler deux unités. Le
+    champ est donc renvoyé tel quel, source comprise, et c'est l'affichage qui
+    sépare — jamais un `COALESCE` qui les confondrait.
+    """
     rows = (await session.execute(text("""
         SELECT version_num, created_at, auc_roc, brier_score, precision_top3,
                roi_simule, nb_courses_train, walk_forward_auc, walk_forward_variance,
-               est_actif, est_rollback
+               est_actif, est_rollback,
+               rank_auc, market_rank_auc, rank_delta_market, rank_source
         FROM model_versions
         WHERE est_synthetique = false
         ORDER BY version_num DESC
@@ -509,6 +534,14 @@ async def compute_algo_evolution(session: AsyncSession, limit: int = 60) -> dict
         "walk_forward_variance": round(float(r[8]), 5) if r[8] is not None else None,
         "actif": bool(r[9]),
         "rollback": bool(r[10]),
+        # Classement intra-course : le modèle, la cote, et l'écart entre les deux.
+        "rank_auc": round(float(r[11]), 4) if r[11] is not None else None,
+        "market_rank_auc": round(float(r[12]), 4) if r[12] is not None else None,
+        "rank_delta_market": round(float(r[13]), 4) if r[13] is not None else None,
+        # NULL = versions antérieures à la migration 0045, dont le delta vient du
+        # walk-forward. Jamais remplacé par une valeur par défaut : c'est
+        # précisément l'information qui empêche de comparer deux unités.
+        "rank_source": r[14],
     } for r in rows]
     versions.reverse()
 
@@ -532,6 +565,38 @@ async def compute_algo_evolution(session: AsyncSession, limit: int = 60) -> dict
             return round(a - b, 4) if a is not None and b is not None else None
         delta = {"auc_roc": _d("auc_roc"), "brier": _d("brier"),
                  "walk_forward_auc": _d("walk_forward_auc")}
+        # `rank_delta_market` n'entre PAS dans ce bloc : d'une version à l'autre il
+        # peut changer de source (walk_forward → hold_out), et la différence de
+        # deux mesures qui ne portent pas sur le même objet ne veut rien dire.
+        # Le verdict marché a son bloc à lui, ci-dessous, source comprise.
+
+    # ── Verdict marché de la version en service ────────────────────────────
+    # La question à laquelle la page ne répondait pas : le modèle apporte-t-il
+    # quelque chose que la cote ne dit pas déjà ? Négatif, le produit ferait mieux
+    # avec un simple tri par cote.
+    #
+    # `comparable` dit si le chiffre porte sur le modèle réellement déployé
+    # (`hold_out` / `h2h`) ou sur le XGBoost jetable du walk-forward. Un delta
+    # non comparable n'est pas promu en verdict — il est renvoyé, étiqueté, et
+    # l'affichage le grise.
+    verdict_marche = None
+    if active:
+        _src = active.get("rank_source")
+        _d_mkt = active.get("rank_delta_market")
+        verdict_marche = {
+            "delta": _d_mkt,
+            "rank_auc": active.get("rank_auc"),
+            "market_rank_auc": active.get("market_rank_auc"),
+            "source": _src,
+            "comparable": _src in ("hold_out", "h2h"),
+            # `None` quand la mesure manque : une absence n'est jamais un succès.
+            "bat_le_marche": (_d_mkt > 0) if _d_mkt is not None else None,
+            # Ce que mesure le delta stocké : le modèle NU. Le produit servi passe
+            # ensuite par le mélange avec le marché (cf. ml/blend_calibration), qui
+            # n'est pas jugé ici. Dit explicitement pour qu'un delta négatif ne soit
+            # pas lu comme « le produit est sous le marché ».
+            "porte_sur": "modele_nu",
+        }
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -539,6 +604,7 @@ async def compute_algo_evolution(session: AsyncSession, limit: int = 60) -> dict
         "active": active,
         "precedente": precedente,
         "delta_vs_precedente": delta,
+        "verdict_marche": verdict_marche,
         "cadence_30j": [{"jour": r[0].isoformat(), "n": r[1]} for r in cadence],
         "total_versions": (await session.execute(
             text("SELECT count(*) FROM model_versions WHERE est_synthetique = false")
