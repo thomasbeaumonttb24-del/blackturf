@@ -83,6 +83,15 @@ export const COULEURS = {
  * rapports 0,67 à 0,80). Une source verticale posée dans une bande large ne peut pas
  * être recadrée sans perdre son sujet : sur la story, les deux chevaux de galop-duo
  * sortaient décapités. Toute photo ajoutée ici doit être en PAYSAGE.
+ *
+ * DEUX PHOTOS EN NOIR ET BLANC ONT ÉTÉ RETIRÉES (galop-noir-et-blanc,
+ * attele-noir-et-blanc). Elles occupaient les index 30 et 31, donc elles tombaient
+ * DEUX JOURS DE SUITE : les stories du 6 et du 7 septembre 2026 sont parties en
+ * monochrome, alors que la charte du site est une photo couleur sous un bandeau
+ * ivoire. Rien dans le rendu ne désature — ces deux fichiers sont gris à la source
+ * (R = G = B exactement). Toute photo ajoutée ici doit être en PAYSAGE **et en
+ * COULEUR** ; le contrôle tient en une ligne : `sharp(f).stats()`, puis vérifier que
+ * les moyennes des trois canaux ne sont pas identiques.
  */
 const PHOTOS = [
   "showcase.webp", // peloton en pleine course
@@ -115,8 +124,6 @@ const PHOTOS = [
   "course/attele-groupe.jpg",
   "course/galop-shakopee.jpg",
   "course/attele-duel.jpg",
-  "course/galop-noir-et-blanc.jpg",
-  "course/attele-noir-et-blanc.jpg",
 ] as const;
 
 /**
