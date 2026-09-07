@@ -207,6 +207,20 @@ def compute_spi_v2(
     return False, None, "none"
 
 
+def _sans_sources_non_fiables(cotes: dict[str, Optional[float]]) -> dict[str, Optional[float]]:
+    """Retire les sources listées dans `SOURCES_COTES_NON_FIABLES` (services.data_quality).
+
+    Import local : `ml` ne doit pas dépendre de `services` au chargement du module
+    (les scripts de rejeu importent `ml.valuebets` seul). Si la liste est
+    introuvable, on ne retire rien — comportement d'avant, jamais une exception.
+    """
+    try:
+        from services.data_quality import SOURCES_COTES_NON_FIABLES as _nf
+    except Exception:
+        return cotes
+    return {s: (None if s in _nf else c) for s, c in cotes.items()}
+
+
 def detect_value_bet(
     proba_top1: float,
     cote_pmu: Optional[float] = None,
@@ -258,6 +272,13 @@ def detect_value_bet(
         "unibet":  cote_unibet,
         "betfair": cote_betfair,
     }
+    # Sources jugées NON FIABLES par `services.data_quality` : exclues de la
+    # détection, pas seulement de l'affichage. Mesuré le 2026-09-07 sur 3 jours de
+    # cotes : corrélation Geny/PMU de 0,15 sur les courses étrangères et 0,54 en
+    # France, un cheval sur trois à plus de 65 % d'écart. Sur 60 jours, 359 paris
+    # (17 %) n'existaient QUE par la cote Geny : rendement réel +0,6 % ± 12, soit
+    # rien — mais une espérance affichée calculée sur un prix qui n'existe pas.
+    cotes = _sans_sources_non_fiables(cotes)
 
     # ── Calibration par tranche de cote (apprise des résultats réels, nightly) ──
     # Corrige le biais favori-longshot AVANT le calcul d'EV : le modèle sous-estime

@@ -125,12 +125,14 @@ def test_detect_value_bet_no_cotes():
 
 
 def test_detect_picks_best_source():
-    # proba 0.33 : geny (cote 5.0) reste la meilleure source, mais l'EV affichée est
+    # proba 0.33 : unibet (cote 5.0) reste la meilleure source, mais l'EV affichée est
     # plafonnée à la médiane (×COTE_CEIL_FACTOR) → excédent ≈ +14%, sous le gate 0.25.
-    vb = detect_value_bet(proba_top1=0.33, cote_pmu=3.0, cote_geny=5.0, cote_bzh=2.5)
+    # (Geny ne peut plus jouer ce rôle : source non fiable, exclue de la détection —
+    # cf. test_valuebets_sources_non_fiables.)
+    vb = detect_value_bet(proba_top1=0.33, cote_pmu=3.0, cote_unibet=5.0, cote_bzh=2.5)
     assert vb is not None
-    assert vb["meilleure_source"] == "geny"
-    assert vb["ev_geny"] > vb["ev_pmu"]
+    assert vb["meilleure_source"] == "unibet"
+    assert vb["ev_unibet"] > vb["ev_pmu"]
 
 
 def test_detect_value_bet_inclut_spi_fields():
