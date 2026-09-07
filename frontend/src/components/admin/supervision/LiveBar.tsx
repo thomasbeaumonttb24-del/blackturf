@@ -76,7 +76,16 @@ export default function LiveBar({
   const k = pulse?.conseils_du_jour;
   const a = pulse?.apprentissage;
   const f = pulse?.fraicheur;
-  const sourcesEnRetard = (f?.sources ?? []).filter((s) => (s.age_min ?? 0) > 180).length;
+
+  // Le compteur portait sur l'ÂGE seul (« 9 sources > 3 h ») : il ne distinguait
+  // pas une source arrêtée depuis trois mois d'une source qui passe toutes les
+  // heures et ne ramène rien. Le serveur tranche désormais entre `silencieuse`
+  // (aucun passage sur 24 h) et `tourne_a_vide` (elle passe, elle ne rapporte
+  // rien) — le second cas étant invisible de toute mesure d'âge.
+  const sources = f?.sources ?? [];
+  const muettes = sources.filter((s) => s.statut === "silencieuse");
+  const aVide = sources.filter((s) => s.statut === "tourne_a_vide");
+  const enDefaut = [...aVide, ...muettes];
 
   return (
     <section
@@ -145,9 +154,26 @@ export default function LiveBar({
           value={age(f?.cotes_age_min)}
           valueClass={freshCls(f?.cotes_age_min)}
           sub={
-            sourcesEnRetard > 0
-              ? `${sourcesEnRetard} source${sourcesEnRetard > 1 ? "s" : ""} > 3 h`
-              : "toutes sources récentes"
+            enDefaut.length === 0 ? (
+              `${sources.length} source${sources.length > 1 ? "s" : ""} alimentent le système`
+            ) : (
+              // Nommées, pas comptées : « 9 sources en retard » n'a jamais dit
+              // lesquelles, donc n'a jamais rien fait corriger.
+              <span title={enDefaut.map((s) => s.source).join(", ")}>
+                {aVide.length > 0 && (
+                  <b className="text-red-700">
+                    {aVide.length} tourne{aVide.length > 1 ? "nt" : ""} à vide
+                  </b>
+                )}
+                {aVide.length > 0 && muettes.length > 0 && " · "}
+                {muettes.length > 0 && `${muettes.length} silencieuse${muettes.length > 1 ? "s" : ""}`}
+                {" : "}
+                <span className="break-words">
+                  {enDefaut.slice(0, 4).map((s) => s.source).join(", ")}
+                  {enDefaut.length > 4 && ` +${enDefaut.length - 4}`}
+                </span>
+              </span>
+            )
           }
         />
       </div>

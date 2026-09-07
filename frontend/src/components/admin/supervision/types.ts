@@ -181,6 +181,22 @@ export interface PulsePayload {
   };
   fraicheur: {
     cotes_age_min: number | null;
-    sources: Array<{ source: string; statut: string; age_min: number | null }>;
+    /** Fenêtre sur laquelle le volume ramené est mesuré. */
+    fenetre_volume_heures?: number;
+    sources: Array<{
+      source: string;
+      /**
+       * État DÉDUIT du couple (a-t-elle tourné, a-t-elle ramené quelque chose)
+       * sur la fenêtre. Le `statut` de la dernière ligne de `scrape_log` — le
+       * souvenir d'un run réussi — reste disponible sous `dernier_statut_run`,
+       * mais ne se fait plus passer pour un état.
+       */
+      statut: "alimentee" | "tourne_a_vide" | "silencieuse";
+      dernier_statut_run?: string | null;
+      age_min: number | null;
+      runs_24h?: number;
+      echecs_24h?: number;
+      volume_24h?: number;
+    }>;
   };
 }

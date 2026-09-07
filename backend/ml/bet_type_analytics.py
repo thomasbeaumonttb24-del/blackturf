@@ -661,13 +661,38 @@ async def compute_pulse(session: AsyncSession) -> dict:
         'SELECT max("time") FROM cotes_historique'
     ))).scalar()
 
+    # ── Fraîcheur des sources ────────────────────────────────────────────────
+    # Le `statut` de la dernière ligne de `scrape_log` n'est PAS un état : c'est le
+    # souvenir d'un succès. Servi tel quel, il affichait « ok » pour betfair
+    # (dernier passage le 06/06, 93 jours), france_galop et turfoo (79 j), zeturf
+    # (69 j), geny (20 j), betclic/unibet/winamax (7 j) — huit sources sur
+    # quatorze, toutes vertes.
+    #
+    # Le statut est donc DÉDUIT de deux faits mesurés sur une fenêtre de 24 h :
+    # la source a-t-elle tourné, et a-t-elle ramené quelque chose. Une source qui
+    # tourne à vide (le cas vécu par quatre scrapers en août 2026 : conteneurs
+    # sains, endpoints à 200, zéro donnée) est le cas qu'aucun statut de run ne
+    # peut signaler.
+    #
+    # La fenêtre est de 24 h et non du dernier run, parce que les cadences
+    # diffèrent et qu'un run vide isolé est normal : letrot a produit 768 partants
+    # sur la journée alors que son DERNIER passage en ramenait zéro. Juger sur la
+    # dernière ligne aurait créé une fausse alerte.
+    #
+    # Une seule passe sur la table (85 k lignes, pas d'index sur created_at) :
+    # l'appel est rafraîchi toutes les 15 s.
     scrapers = (await session.execute(text("""
-        SELECT source, statut, created_at
-        FROM (
-            SELECT source, statut, created_at,
-                   ROW_NUMBER() OVER (PARTITION BY source ORDER BY created_at DESC) rn
-            FROM scrape_log
-        ) s WHERE rn = 1
+        SELECT source,
+               max(created_at) AS dernier,
+               (array_agg(statut ORDER BY created_at DESC))[1] AS dernier_statut,
+               count(*) FILTER (WHERE created_at > now() - interval '24 hours') AS runs_24h,
+               count(*) FILTER (WHERE created_at > now() - interval '24 hours'
+                                  AND statut <> 'ok') AS echecs_24h,
+               COALESCE(sum(COALESCE(nb_courses, 0) + COALESCE(nb_partants, 0))
+                        FILTER (WHERE created_at > now() - interval '24 hours'), 0) AS volume_24h
+        FROM scrape_log
+        GROUP BY source
+        ORDER BY source
     """))).all()
 
     def _age_min(dt) -> Optional[float]:
@@ -676,6 +701,22 @@ async def compute_pulse(session: AsyncSession) -> dict:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return round((now - dt).total_seconds() / 60, 1)
+
+    def _statut_source(runs_24h: int, volume_24h: int) -> str:
+        """Trois états, tous déductibles de faits mesurés.
+
+        `silencieuse` — aucun passage sur 24 h. Ne dit pas « en panne » : une
+        source volontairement arrêtée est silencieuse elle aussi. Elle dit que
+        cette source n'alimente plus rien aujourd'hui, ce que « ok » niait.
+        `tourne_a_vide` — elle passe et ne ramène rien : le seul état qu'un statut
+        de run ne peut pas exprimer.
+        `alimentee` — elle passe et ramène.
+        """
+        if runs_24h == 0:
+            return "silencieuse"
+        if volume_24h <= 0:
+            return "tourne_a_vide"
+        return "alimentee"
 
     return {
         "server_time": now.isoformat(),
@@ -700,9 +741,19 @@ async def compute_pulse(session: AsyncSession) -> dict:
         },
         "fraicheur": {
             "cotes_age_min": _age_min(cotes),
+            "fenetre_volume_heures": 24,
             "sources": [{
-                "source": s[0], "statut": s[1],
-                "age_min": _age_min(s[2]),
+                "source": s[0],
+                # Statut DÉDUIT (voir `_statut_source`), plus le souvenir du
+                # dernier run conservé sous son vrai nom : rien n'est perdu, mais
+                # « le dernier passage s'est bien terminé » ne peut plus se faire
+                # passer pour « cette source alimente le système ».
+                "statut": _statut_source(int(s[3] or 0), int(s[5] or 0)),
+                "dernier_statut_run": s[2],
+                "age_min": _age_min(s[1]),
+                "runs_24h": int(s[3] or 0),
+                "echecs_24h": int(s[4] or 0),
+                "volume_24h": int(s[5] or 0),
             } for s in scrapers],
         },
     }
