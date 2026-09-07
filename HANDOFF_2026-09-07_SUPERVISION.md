@@ -69,10 +69,35 @@ Mesuré en continu depuis cette nuit par l'étape `avantage_marche_servi`
    existe. Attention : en l'état le produit est à parité (IC contient zéro), donc un gate
    strict « delta > 0 » bloquerait aussi. Le gate utile est plutôt « le delta ne
    RÉGRESSE pas », ou un plancher sur l'apport de la chaîne.
-3. **Faire remonter l'apport de la chaîne (+0,0146)**, c'est là qu'est la valeur prouvée.
-   Piste la plus directe : le post-traitement APRÈS mélange coûte du classement
-   (−0,0012 mesuré). La calibration longshot par tranche de cote est le suspect n°1 —
-   elle n'est pas monotone par construction, donc elle peut réordonner une course.
+3. **PISTE LA PLUS SOLIDE — le post-traitement après mélange détruit du classement.**
+   Décomposition appariée sur 4 274 courses (90 j), IC 95 % :
+
+   | Étape | Écart | IC 95 % | Concluant |
+   |---|---|---|---|
+   | modèle nu vs marché | −0,0168 | [−0,0224 ; −0,0111] | **oui, négatif** |
+   | apport du **mélange** (blend − brut) | **+0,0170** | [+0,0130 ; +0,0210] | **oui, positif** |
+   | mélange seul vs marché | +0,0003 | [−0,0028 ; +0,0033] | non (parité) |
+   | apport du **post-traitement** (servi − blend) | **−0,0024** | [−0,0044 ; −0,0004] | **oui, NÉGATIF** |
+   | produit servi vs marché | −0,0021 | [−0,0054 ; +0,0012] | non (parité) |
+
+   Autrement dit : le mélange amène le produit **exactement à parité** avec la cote, puis
+   le post-traitement lui reprend 0,0024. C'est le seul maillon prouvé destructeur de la
+   chaîne, et c'est là qu'il y a un gain à récupérer sans rien inventer.
+
+   **Suspects, par construction** : une correction qui dépend de la TRANCHE DE COTE du
+   partant n'est pas monotone et peut donc réordonner une course — `ml/longshot_calibration`
+   et `ml/cote_calibration` sont les deux seules dans ce cas. L'isotone, la température et
+   la netteté sont des transformations monotones globales : elles ne peuvent PAS changer un
+   classement intra-course, donc elles sont hors de cause.
+
+   Protocole : rejouer la chaîne en désactivant une correction à la fois, comparer en
+   apparié sur les mêmes courses (`ml/avantage_marche._ecart_apparie` fait déjà le calcul).
+   **Ne pas toucher à l'inférence sans cette mesure** : ces corrections existent pour
+   redresser l'EV des paris, pas le classement — les retirer améliorerait le classement et
+   pourrait dégrader les mises. Les deux effets doivent être mesurés ensemble.
+
+   Reproduire : `ml/avantage_marche.py` + le script de décomposition décrit ci-dessus
+   (mélange rejoué via `ml.blend_calibration.melange` sur `proba_top1_raw`).
 4. **`edge_monitor` ne peut plus rien conclure** : 4 paris retenus sur 42 245
    (`n_filt = 4`, `enough_filt = false`) — 25 le mois dernier. Le filtre de conviction est
    à recalibrer ou à déclarer hors service ; en l'état la gate ROI ne se prononcera jamais.
