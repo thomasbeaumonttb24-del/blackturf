@@ -51,11 +51,42 @@ export interface EtatRetrain {
   gel_suspect?: boolean;
 }
 
+/**
+ * Avantage du PRODUIT SERVI sur la cote, mesuré chaque nuit.
+ *
+ * À ne pas confondre avec `rank_delta_market` de l'onglet Modèle, qui juge le
+ * modèle NU sur son hold-out. Ici c'est la probabilité réellement affichée —
+ * calibrations et mélange avec le marché compris — qui est comparée à un simple
+ * tri par cote, course par course.
+ */
+export interface AvantageMarche {
+  mesure_disponible: boolean;
+  raison?: string | null;
+  fenetre_jours?: number;
+  n_courses?: number;
+  min_courses?: number;
+  rang_servi?: number | null;
+  rang_marche?: number | null;
+  rang_brut?: number | null;
+  delta_servi_vs_marche?: number | null;
+  ic95_servi_vs_marche?: [number, number] | null;
+  /** `null` quand l'intervalle contient zéro : non concluant, jamais un avantage. */
+  bat_le_marche?: boolean | null;
+  conclut?: boolean;
+  delta_brut_vs_marche?: number | null;
+  ic95_brut_vs_marche?: [number, number] | null;
+  apport_de_la_chaine?: number | null;
+  ic95_apport_de_la_chaine?: [number, number] | null;
+  apport_conclut?: boolean;
+  mesure_le?: string | null;
+}
+
 export interface OutilsApprentissagePayload {
   etapes: EtapeApprentissage[];
   etapes_perimees: string[];
   seuil_perime_heures?: number;
   retrain: EtatRetrain;
+  avantage_marche?: AvantageMarche | null;
   alerte: boolean;
   correcteur_contextuel: {
     actif: boolean;

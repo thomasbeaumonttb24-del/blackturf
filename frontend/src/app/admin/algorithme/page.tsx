@@ -264,7 +264,7 @@ export default function SupervisionIAPage() {
           : <ParisTab data={paris} />
       )}
       {tab === "rentabilite" && <RentabiliteTab data={renta} />}
-      {tab === "modele" && <ModeleTab algo={algo} calib={calib} converge={converge} />}
+      {tab === "modele" && <ModeleTab algo={algo} calib={calib} converge={converge} avantage={outils?.avantage_marche} />}
       {tab === "apprentissage" && (
         <ApprentissageTab
           alState={alState}

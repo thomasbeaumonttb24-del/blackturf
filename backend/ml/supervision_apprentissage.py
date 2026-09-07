@@ -373,6 +373,13 @@ async def etat_outils_apprentissage(session: AsyncSession) -> dict:
         "etapes_perimees": [e["step"] for e in etapes.get("perimees", [])],
         "seuil_perime_heures": etapes.get("seuil_heures"),
         "retrain": await _issue_retrain(session, etapes.get("etapes", [])),
+        # Mesure nocturne de l'avantage du PRODUIT SERVI sur la cote — à ne pas
+        # confondre avec `rank_delta_market`, qui juge le modèle nu (cf.
+        # ml/avantage_marche). Lue depuis le `detail` de son étape : pas de table
+        # dédiée, donc pas de migration, et l'absence de mesure reste une absence.
+        "avantage_marche": next(
+            (e.get("detail") for e in etapes.get("etapes", [])
+             if e.get("step") == "avantage_marche_servi"), None),
         "correcteur_contextuel": await _etat_meta_learner(),
         "modele_arrivee": await _etat_harville(session),
         "alpha_marche": await _etat_alpha(session),

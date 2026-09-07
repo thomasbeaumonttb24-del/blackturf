@@ -17,6 +17,7 @@ import { ChartTooltip, GRID, axisLine, axisTick, tickLine } from "@/components/c
 import { cn } from "@/lib/utils";
 import { Empty, Note, Section, StatTile, num, pct, signedPct } from "./kit";
 import type { AlgoEvolutionPayload, VerdictMarche } from "./types";
+import type { AvantageMarche } from "./OutilsApprentissage";
 
 interface CalibBin { lo: number; hi: number; n: number; proba_moy: number; freq_reelle: number }
 interface CalibPayload {
@@ -71,9 +72,11 @@ const SOURCES_RANG: Record<string, { label: string; aide: string }> = {
  *     au hold-out de la version courante (−0,0354). Une mesure non comparable
  *     est grisée et ne devient jamais un verdict vert ou rouge.
  *  2. Ce delta juge le MODÈLE NU, pas le produit servi. Le produit passe ensuite
- *     par le mélange avec le marché, qui le fait repasser au-dessus de la cote.
- *     Lire ce chiffre comme « le site conseille moins bien que la cote » serait
- *     faux, et c'est l'erreur que la mention ci-dessous prévient.
+ *     par le mélange avec le marché, qui rattrape ce déficit et le ramène à
+ *     PARITÉ avec la cote (mesuré, cf. la bannière suivante : −0,0019, IC 95 %
+ *     [−0,0051 ; +0,0014] sur 4 430 courses). Lire ce chiffre comme « le site
+ *     conseille moins bien qu'un tri par cote » serait donc faux, et c'est
+ *     l'erreur que la mention ci-dessous prévient.
  */
 function VerdictMarcheBanniere({ v }: { v?: VerdictMarche | null }) {
   if (!v) return null;
@@ -165,20 +168,145 @@ function VerdictMarcheBanniere({ v }: { v?: VerdictMarche | null }) {
       <Note>
         Le modèle est entraîné sur le RÉSIDU du marché : la cote a été retirée de son vecteur
         d&apos;apprentissage, il n&apos;a donc jamais eu pour mission de battre la cote tout seul.
-        Ce que reçoit l&apos;abonné est le mélange des deux. Un écart négatif ici signale que
-        le résidu appris s&apos;affaiblit — pas que les conseils sont moins bons qu&apos;un tri
-        par cote.
+        Ce que reçoit l&apos;abonné est le mélange des deux, et c&apos;est la bannière suivante qui
+        le mesure. Un écart négatif ici signale que le résidu appris s&apos;affaiblit — pas que
+        les conseils sont moins bons qu&apos;un tri par cote.
+      </Note>
+    </section>
+  );
+}
+
+/** Un écart et son intervalle, avec la seule règle qui vaille : pas d'IC, pas de verdict. */
+function Ecart({
+  label, valeur, ic, conclut, aide, sensPositif = true,
+}: {
+  label: string;
+  valeur?: number | null;
+  ic?: [number, number] | null;
+  conclut?: boolean;
+  aide?: string;
+  sensPositif?: boolean;
+}) {
+  const mesure = valeur != null;
+  const bon = mesure && (sensPositif ? valeur > 0 : valeur < 0);
+  return (
+    <div className="rounded-xl border border-border bg-card p-3" title={aide}>
+      <div className="text-[11px] font-semibold uppercase leading-tight tracking-[0.06em] text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-1 text-xl font-semibold tabular-nums",
+          // Non concluant = gris. Un écart dont l'intervalle traverse zéro n'est
+          // pas un petit avantage, c'est une absence de résultat.
+          !mesure || !conclut ? "text-muted-foreground" : bon ? "text-emerald-700" : "text-red-700",
+        )}
+      >
+        {mesure ? `${valeur > 0 ? "+" : "−"}${Math.abs(valeur).toFixed(4)}` : "—"}
+      </div>
+      <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+        {ic ? (
+          <>
+            IC 95 % {ic[0] > 0 ? "+" : "−"}{Math.abs(ic[0]).toFixed(4)} →{" "}
+            {ic[1] > 0 ? "+" : "−"}{Math.abs(ic[1]).toFixed(4)}
+            {!conclut && <> · contient zéro</>}
+          </>
+        ) : (
+          "intervalle non calculable"
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Le pendant honnête de la bannière précédente : ce n'est pas le modèle nu qu'on
+ * sert. La probabilité affichée a traversé les calibrations et le MÉLANGE avec le
+ * marché, et le mélange renverse la conclusion.
+ *
+ * Mesuré le 2026-09-07 sur 4 430 courses : le modèle nu est prouvé SOUS la cote
+ * (−0,0168, IC [−0,0224 ; −0,0112]), le produit servi est à PARITÉ (−0,0019, IC
+ * [−0,0051 ; +0,0014] — il contient zéro, donc aucun verdict), et la chaîne de
+ * correction apporte +0,0146 (IC [+0,0108 ; +0,0185], concluant).
+ *
+ * Le troisième chiffre est le plus utile des trois : il est le seul resté nettement
+ * positif sur toutes les fenêtres testées, et c'est lui qui justifie l'existence de
+ * la chaîne de correction.
+ */
+function AvantageServiBanniere({ a }: { a?: AvantageMarche | null }) {
+  if (!a) return null;
+  if (!a.mesure_disponible) {
+    return (
+      <div className="rounded-2xl border border-border bg-muted/40 p-4 text-[11px] leading-relaxed text-muted-foreground sm:p-5">
+        <b className="text-foreground">Avantage du produit servi : pas encore mesurable.</b>{" "}
+        {a.raison ?? "mesure indisponible"}. Aucune valeur n&apos;est affichée à la place — un
+        échantillon trop court ne devient pas un verdict en étant arrondi.
+      </div>
+    );
+  }
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+            <Scale className="h-4 w-4 text-muted-foreground/60" />
+            Et le produit RÉELLEMENT servi&nbsp;?
+          </h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            Ce que voit l&apos;abonné n&apos;est pas le modèle nu : la probabilité affichée a traversé
+            les calibrations et le mélange avec le marché. Comparaison appariée, course par
+            course, sur les prédictions figées avant le départ.
+          </p>
+        </div>
+        <span className="shrink-0 whitespace-nowrap rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+          {num(a.n_courses)} courses · {a.fenetre_jours} j
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Ecart
+          label="Produit servi vs cote"
+          valeur={a.delta_servi_vs_marche}
+          ic={a.ic95_servi_vs_marche}
+          conclut={a.conclut}
+          aide="Classement de la probabilité affichée moins celui d'un tri par cote, sur les mêmes courses."
+        />
+        <Ecart
+          label="Modèle nu vs cote"
+          valeur={a.delta_brut_vs_marche}
+          ic={a.ic95_brut_vs_marche}
+          conclut={a.ic95_brut_vs_marche ? a.ic95_brut_vs_marche[1] < 0 || a.ic95_brut_vs_marche[0] > 0 : false}
+          aide="La sortie du modèle avant toute correction. Négatif et concluant : attendu, il apprend le résidu du marché."
+        />
+        <Ecart
+          label="Apport de la chaîne"
+          valeur={a.apport_de_la_chaine}
+          ic={a.ic95_apport_de_la_chaine}
+          conclut={a.apport_conclut}
+          aide="Ce que les calibrations et le mélange ajoutent au modèle nu. C'est ce qui justifie leur existence."
+        />
+      </div>
+
+      <Note>
+        Un écart dont l&apos;intervalle contient zéro n&apos;est PAS un petit avantage : c&apos;est
+        une absence de résultat, et il reste gris. En l&apos;état le produit servi est à parité
+        avec la cote — ni au-dessus, ni en dessous, de façon prouvée — pendant que la chaîne de
+        correction, elle, rattrape un déficit du modèle nu qui est bien réel.
+        {a.mesure_le && (
+          <> Mesuré le {new Date(a.mesure_le).toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "short", timeStyle: "short" })}.</>
+        )}
       </Note>
     </section>
   );
 }
 
 export default function ModeleTab({
-  algo, calib, converge,
+  algo, calib, converge, avantage,
 }: {
   algo?: AlgoEvolutionPayload;
   calib?: CalibPayload;
   converge?: ConvergencePayload;
+  avantage?: AvantageMarche | null;
 }) {
   if (!algo) return <Empty>Chargement de la trajectoire du modèle…</Empty>;
 
@@ -232,6 +360,7 @@ export default function ModeleTab({
       </div>
 
       <VerdictMarcheBanniere v={algo.verdict_marche} />
+      <AvantageServiBanniere a={avantage} />
 
       {/* Trajectoire AUC — entraînement vs walk-forward, même unité, même axe */}
       <Section

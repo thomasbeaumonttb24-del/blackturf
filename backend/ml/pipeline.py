@@ -1496,6 +1496,25 @@ async def _run_nightly_retraining_unlocked() -> None:
             await persist_clv_monitor(clv_session, _clv)
             log.info("pipeline.clv_monitor_done", n_top1=_clv.get("n_top1"),
                      clv_top1=_clv.get("clv_top1"), edge_signal=_clv.get("edge_signal"))
+    # AVANTAGE DU PRODUIT SERVI sur la cote. Distinct de `rank_delta_market`, qui
+    # juge le modèle NU sur le hold-out de la nuit : ce n'est pas le modèle nu
+    # qu'on sert. Le produit a traversé les calibrations et surtout le MÉLANGE avec
+    # le marché, et le mélange renverse la conclusion — mesuré le 2026-09-07 sur
+    # 4 430 courses, le modèle nu est prouvé SOUS la cote (−0,0168, IC à 95 %
+    # [−0,0224 ; −0,0112]) pendant que le produit servi est à parité (−0,0019,
+    # IC [−0,0051 ; +0,0014]) et que la chaîne de correction apporte +0,0146
+    # (IC [+0,0108 ; +0,0185]).
+    #
+    # Cette mesure est le PRÉALABLE à tout branchement de `BT_MARKET_GATE` : câbler
+    # le gate sur le delta du modèle nu — négatif par construction, puisque le
+    # drapeau `market_residual` a retiré la cote du vecteur appris — figerait le
+    # modèle à vie.
+    #
+    # Purement observationnelle : elle ne modifie aucun paramètre servi.
+    async with etape(AsyncSessionLocal, "avantage_marche_servi") as _e_avantage:
+        from ml.avantage_marche import mesurer_avantage_servi
+        async with AsyncSessionLocal() as av_session:
+            _e_avantage.detail = await mesurer_avantage_servi(av_session)
     # Ré-apprend les POIDS PAR TYPE (ROI réel winsorisé) + perf par profil et met en
     # cache → la sélection future est pondérée par ce qui a VRAIMENT rapporté.
     async with etape(AsyncSessionLocal, "poids_appris_types"):
