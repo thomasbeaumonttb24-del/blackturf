@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Zap, Loader2, ArrowLeft, CheckCircle } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
@@ -42,9 +43,7 @@ export default function MotDePasseOubliePage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-4">
-            <div className="h-10 w-10 rounded-xl bg-brand-gold flex items-center justify-center">
-              <Zap className="h-5 w-5 text-white" />
-            </div>
+            <Image src="/logo.png" alt="BlackTurf" width={40} height={40} priority className="rounded-xl object-contain" />
             <span className="text-2xl font-bold">Black<span className="text-brand-gold-dark">Turf</span></span>
           </Link>
           <h1 className="text-2xl font-bold">Mot de passe oublié</h1>

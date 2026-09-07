@@ -12,12 +12,13 @@ import Image from "next/image";
 import { Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { champMotDePasse, MOT_DE_PASSE_AIDE, messageErreurApi } from "@/lib/motdepasse";
 
 const schema = z.object({
   prenom: z.string().min(1, "Prénom requis"),
   nom: z.string().optional(),
   email: z.string().email("E-mail invalide"),
-  password: z.string().min(8, "8 caractères minimum"),
+  password: champMotDePasse,
 });
 
 type FormData = z.infer<typeof schema>;
@@ -54,13 +55,7 @@ function InscriptionContent() {
       }
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-      let msg: string | undefined;
-      if (Array.isArray(detail)) {
-        msg = detail.map((d) => (d as { msg?: string })?.msg).filter(Boolean).join(", ");
-      } else if (typeof detail === "string") {
-        msg = detail;
-      }
-      toast.error(msg || "Erreur lors de la création du compte");
+      toast.error(messageErreurApi(detail) || "Erreur lors de la création du compte");
     } finally {
       setLoading(false);
     }
@@ -121,12 +116,17 @@ function InscriptionContent() {
                 <input
                   {...register("password")}
                   type="password"
-                  placeholder="8 caractères minimum"
+                  placeholder="Au moins 10 caractères"
                   className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
                   autoComplete="new-password"
+                  aria-describedby="aide-mot-de-passe"
                 />
-                {errors.password && (
+                {errors.password ? (
                   <p className="text-xs text-destructive mt-1">{errors.password.message}</p>
+                ) : (
+                  <p id="aide-mot-de-passe" className="text-xs text-muted-foreground mt-1">
+                    {MOT_DE_PASSE_AIDE}
+                  </p>
                 )}
               </div>
 

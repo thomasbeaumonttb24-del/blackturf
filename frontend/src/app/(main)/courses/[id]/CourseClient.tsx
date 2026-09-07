@@ -20,6 +20,7 @@ import { useCotesLive } from "@/hooks/useWebSocket";
 import {
   ParisDisponiblesCard, ConfrontationsCard, EnjeuxParChevalCard, TempsPassageCard,
   CompteurDepart, ApercuAnalyseCard, PreuvesRecentesCard, useApercuAnalyse,
+  CapacitesAbonnementCard, CtaAbonnementBand,
 } from "@/components/courses/insights";
 import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, type ClassementSignal,
@@ -265,7 +266,7 @@ const DISCIPLINE_MASK: Record<string, { file: string; color: string }> = {
 function discMask(discipline: string): { url: string; color: string } {
   const k = discipline ? discipline.charAt(0).toUpperCase() + discipline.slice(1).toLowerCase() : "";
   const m = DISCIPLINE_MASK[k] ?? { file: "attele", color: "#0E7C66" };
-  return { url: `/img/disciplines/${m.file}-v7.png`, color: m.color };
+  return { url: `/img/disciplines/${m.file}-v9.png`, color: m.color };
 }
 
 // Feuille de style injectée (keyframes + responsive du .dc.html).
@@ -3092,11 +3093,6 @@ export default function CoursePage({
                 abonne={Boolean(user && !["free", "decouverte"].includes(user.plan))}
               />
             )}
-            {/* Preuve concrète : ce que le modèle a dit sur les dernières courses
-                COURUES. Un prospect ne peut pas juger un pourcentage global ; il
-                peut ouvrir six courses réelles et vérifier. Réservé à ceux qui
-                n'ont pas déjà le classement — un abonné n'a rien à se prouver. */}
-            {(!predictions || predictions.length === 0) && <PreuvesRecentesCard />}
         {/* ── 4 STAT CARDS ── */}
         {predictions && predictions.length > 0 && (() => {
           const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];
@@ -3175,7 +3171,7 @@ export default function CoursePage({
               Lui cacher la table, c'est lui demander de payer pour un produit
               qu'il n'a jamais vu — il reçoit donc le même aperçu. */}
           {!user && apercu?.disponible && (
-            <ClassementApercu apercu={apercu} connecte={false} onLegende={() => setShowGlossaire(true)} />
+            <ClassementApercu apercu={apercu} onLegende={() => setShowGlossaire(true)} />
           )}
 
           {user && (["free", "decouverte"].includes(user.plan) ? (
@@ -3183,7 +3179,7 @@ export default function CoursePage({
             // ses vraies colonnes — probabilités visibles, identités masquées,
             // bas de classement offert. Il faut voir ce qu'on achète.
             apercu?.disponible ? (
-              <ClassementApercu apercu={apercu} connecte onLegende={() => setShowGlossaire(true)} />
+              <ClassementApercu apercu={apercu} onLegende={() => setShowGlossaire(true)} />
             ) : (
               <ClassementVerrouille
                 titre="Le classement de l'algorithme"
@@ -3262,6 +3258,30 @@ export default function CoursePage({
               onLegende={() => setShowGlossaire(true)}
             />
           ))}
+
+          {/* ── Bloc funnel — UNIQUEMENT pour qui n'a pas le classement ──────
+              Un abonné a déjà tout : lui montrer l'inventaire de ce qu'il paie
+              et un bouton d'abonnement serait au mieux du bruit. */}
+          {(!predictions || predictions.length === 0) && (
+            <>
+              {/* Ce que l'abonnement ouvre : un inventaire de capacités réelles,
+                  à la place des trois pavés de prose qui le décrivaient. Réservé
+                  aux courses ANALYSÉES : ailleurs, il n'y a rien à ouvrir. */}
+              {apercu?.disponible && <CapacitesAbonnementCard apercu={apercu} />}
+              {/* Preuve concrète : ce que le modèle a dit sur les dernières
+                  courses COURUES. Un prospect ne peut pas juger un pourcentage
+                  global ; il peut ouvrir six courses réelles et vérifier. Vraie
+                  sur toute fiche course, y compris une que le modèle n'a pas
+                  couverte — c'est là qu'un visiteur a le plus besoin d'un
+                  chemin vers ce que le site sait faire. */}
+              <PreuvesRecentesCard />
+              {/* Le bandeau promet « le pronostic de cette course » : il ne
+                  s'affiche donc que si ce pronostic existe. */}
+              {apercu?.disponible && (
+                <CtaAbonnementBand connecte={Boolean(user)} revele={Boolean(apercu.revele)} />
+              )}
+            </>
+          )}
 
           {/* ── Modale LÉGENDE : explique les signaux sans encombrer la carte ── */}
           {showGlossaire && (

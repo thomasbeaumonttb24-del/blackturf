@@ -23,7 +23,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ApercuAnalyse } from "@/components/courses/insights";
+import type { ApercuAnalyse, ApercuSignal } from "@/components/courses/insights";
 
 export interface ClassementPrediction {
   prediction_id: string;
@@ -747,6 +747,30 @@ export function ClassementVerrouille({ titre, texte, action }: { titre: string; 
 /*  Aperçu public                                                             */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** Signaux d'une ligne RÉVÉLÉE de l'aperçu.
+ *
+ *  Même vocabulaire et mêmes couleurs que la table des abonnés (`Signaux`) —
+ *  c'est le but : ce que voit ici un prospect sur un cheval écarté est
+ *  exactement ce qu'il lira sur les seize autres en s'abonnant. Rien n'est
+ *  reconstitué côté client : le serveur ne joint ces signaux qu'aux lignes
+ *  qu'il a déjà décidé de nommer. */
+function SignauxApercu({ signaux }: { signaux?: ApercuSignal[] }) {
+  if (!signaux?.length) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10.5px] leading-tight text-stone-600">
+      {signaux.map((s, i) => {
+        const st = SENS[s.sens] ?? SENS.neutre;
+        return (
+          <span key={`${s.label}-${i}`} title={s.detail || undefined} className="inline-flex cursor-help items-center gap-1">
+            <span className={cn("text-[7px]", st.fg)} aria-hidden="true">{st.fleche}</span>
+            {nettoie(s.label)}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Aperçu du classement pour un visiteur sans abonnement.
  *
  *  Le problème résolu : à la place de la table, ce visiteur ne voyait qu'un
@@ -757,19 +781,19 @@ export function ClassementVerrouille({ titre, texte, action }: { titre: string; 
  *    • la STRUCTURE réelle de la table (les mêmes colonnes que les abonnés) ;
  *    • le rang et les PROBABILITÉS de chaque ligne — la forme complète du
  *      classement, qui n'identifie aucun cheval ;
- *    • les DERNIÈRES lignes entièrement nommées, avec cote et cote juste :
- *      savoir quel cheval le modèle écarte prouve la profondeur de l'analyse
- *      sans construire le moindre pari.
+ *    • les DERNIÈRES lignes entièrement nommées, avec cote, cote juste et les
+ *      SIGNAUX réellement retenus contre elles : savoir quel cheval le modèle
+ *      écarte, et pourquoi, prouve la profondeur de l'analyse sans construire
+ *      le moindre pari.
  *  Ce qui reste payant : le haut du classement, c'est-à-dire la sélection.
  *
  *  Les identités masquées ne sont pas cachées en CSS : l'endpoint `apercu` ne
  *  les envoie pas au navigateur (cf. api/routes/predictions.py).
  */
 export function ClassementApercu({
-  apercu, connecte, onLegende,
+  apercu, onLegende,
 }: {
   apercu: ApercuAnalyse;
-  connecte: boolean;
   onLegende?: () => void;
 }) {
   const lignes = apercu.classement ?? [];
@@ -795,39 +819,15 @@ export function ClassementApercu({
           </h3>
           <p className="mt-0.5 text-[11.5px] text-stone-600">
             {lignes.length} chevaux notés · ordre du modèle de classement
+            {!revele && apercu.nb_ecartes > 0
+              ? ` · ${apercu.nb_ecartes} écartés sous 3 % de chances`
+              : ""}
           </p>
         </div>
         <span className="ml-auto rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">
           {revele ? "course courue · classement complet" : "aperçu gratuit"}
         </span>
       </header>
-
-      {/* Ce que le modèle dit de la course, avant même de nommer un cheval */}
-      {!revele && (apercu.confiance != null || apercu.accord_marche != null || apercu.nb_ecartes > 0) && (
-        <div className="grid gap-px border-y border-stone-100 bg-stone-100 sm:grid-cols-3">
-          <div className="bg-white px-4 py-3 sm:px-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Confiance du modèle</p>
-            <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
-              {apercu.confiance != null ? apercu.confiance : "—"}
-              <span className="text-[11.5px] font-normal text-stone-600">/100</span>
-            </p>
-          </div>
-          <div className="bg-white px-4 py-3 sm:px-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Lecture du marché</p>
-            <p className="mt-1 text-[13px] font-semibold text-slate-900">
-              {apercu.accord_marche == null ? "—"
-                : apercu.accord_marche ? "confirme le favori du marché" : "ne suit pas le marché"}
-            </p>
-          </div>
-          <div className="bg-white px-4 py-3 sm:px-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Chevaux écartés</p>
-            <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
-              {apercu.nb_ecartes}
-              <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">sous 3 % de chances</span>
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* En-tête de colonnes — les colonnes RÉELLES de la table des abonnés */}
       <div className={cn("hidden items-center gap-3 border-b border-stone-200 bg-stone-50/95 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-600 sm:grid", GRILLE)}>
@@ -913,6 +913,7 @@ export function ClassementApercu({
                   {l.cote_juste != null && <span>Juste {coteJuste(l.cote_juste)}</span>}
                   {l.proba_top3 != null && <span>Top-3 {pct(l.proba_top3)}</span>}
                 </div>
+                <SignauxApercu signaux={l.signaux} />
               </div>
 
               <span className="hidden text-right font-display text-[14px] font-semibold tabular-nums text-slate-900 sm:block">
@@ -938,39 +939,24 @@ export function ClassementApercu({
         ))}
       </ol>
 
-      <footer className="border-t border-stone-100 bg-stone-50/60 px-4 py-4 sm:px-5">
-        {revele ? (
-          <p className="text-[12px] leading-5 text-stone-600">
-            Ce classement était établi <strong className="text-slate-900">avant le départ</strong>. Sur les courses
-            à venir, il est réservé aux abonnés — avec les signaux retenus pour et contre chaque cheval.
-          </p>
-        ) : (
-          <p className="text-[12px] leading-5 text-stone-600">
-            Le rang vient d&apos;un modèle d&apos;ordonnancement dédié : deux chevaux peuvent afficher
-            la même probabilité sans être au même rang.{" "}
-            Vous voyez la probabilité de victoire de chaque rang et la cote juste qui en découle,
-            mais pas les chevaux. L&apos;abonnement ouvre les noms, la cote du marché en face de la
-            cote juste — c&apos;est là que se voit un pari de valeur — et les signaux retenus{" "}
-            <strong className="text-slate-900">pour comme contre</strong> chaque partant.
-          </p>
-        )}
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <a
-            href={connecte ? "/tarifs" : "/inscription"}
-            className="inline-flex min-h-10 items-center rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-brand-dark transition-colors hover:bg-amber-600"
+      {/* Le pied ne vend plus : l'unique appel à l'abonnement de l'onglet vit
+          dans son propre bandeau, sous la démonstration. Ici, une phrase — celle
+          qui évite le contresens le plus fréquent sur cette table. */}
+      <footer className="flex flex-col gap-2 border-t border-stone-100 bg-stone-50/60 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:px-5">
+        <p className="min-w-0 flex-1 text-[11.5px] leading-5 text-stone-600">
+          {revele
+            ? "Ce classement était établi avant le départ."
+            : "Le rang vient d'un modèle d'ordonnancement dédié : deux chevaux peuvent afficher la même probabilité sans être au même rang."}
+        </p>
+        {onLegende && (
+          <button
+            type="button"
+            onClick={onLegende}
+            className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-800"
           >
-            {connecte ? "Voir le classement complet — 12€/mois" : "Essayer 7 jours gratuitement"}
-          </a>
-          {onLegende && (
-            <button
-              type="button"
-              onClick={onLegende}
-              className="inline-flex items-center gap-1 text-[12px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-800"
-            >
-              <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire ce classement
-            </button>
-          )}
-        </div>
+            <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire ce classement
+          </button>
+        )}
       </footer>
     </section>
   );
