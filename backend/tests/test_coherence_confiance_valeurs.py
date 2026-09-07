@@ -183,3 +183,45 @@ async def test_liste_ne_tronque_plus_a_vingt(client: AsyncClient, db: AsyncSessi
         await _seed(db, f"COH5C{i:02d}", dans=timedelta(hours=1 + i / 60))
     liste = (await client.get("/api/v1/value-bets", headers=admin_headers)).json()
     assert len([v for v in liste if v["course_id"].startswith("COH5C")]) == 25
+
+
+# ── Niveau minimum et courses étrangères (décisions du 2026-09-07) ────────────
+
+async def _seed_zone(db: AsyncSession, course_id: str, pays: str, niveau: int):
+    """Course dont l'hippodrome porte un pays connu ; pari de valeur au niveau demandé."""
+    part2 = await _seed(db, course_id, dans=timedelta(hours=2), vb_niveau=niveau)
+    course = await db.get(Course, course_id)
+    # `_seed` a déjà créé l'hippodrome (nom unique) avec le pays par défaut : on
+    # lui donne le pays voulu, c'est lui que la règle de zone consulte.
+    await db.execute(update(Hippodrome).where(Hippodrome.nom == course.hippodrome_nom).values(pays=pays))
+    await db.commit()
+    return part2
+
+
+async def test_une_etoile_invisible_partout(client: AsyncClient, db: AsyncSession, admin_headers):
+    part2 = await _seed_zone(db, "COH6C1", "FRA", niveau=1)
+    fiche = (await client.get("/api/v1/courses/COH6C1/predictions", headers=admin_headers)).json()
+    assert next(p["value_bet"] for p in fiche["predictions"] if p["participation_id"] == part2) is None
+    liste = (await client.get("/api/v1/value-bets", headers=admin_headers)).json()
+    assert not [v for v in liste if v["course_id"] == "COH6C1"]
+
+
+async def test_etranger_trois_etoiles_masque_quatre_visible(client: AsyncClient, db: AsyncSession, admin_headers):
+    p3 = await _seed_zone(db, "COH7C1", "ARG", niveau=3)
+    p4 = await _seed_zone(db, "COH7C2", "ARG", niveau=4)
+    pfr = await _seed_zone(db, "COH7C3", "FRA", niveau=3)
+
+    def _vb(payload, pid):
+        return next(p["value_bet"] for p in payload["predictions"] if p["participation_id"] == pid)
+
+    assert _vb((await client.get("/api/v1/courses/COH7C1/predictions", headers=admin_headers)).json(), p3) is None
+    assert _vb((await client.get("/api/v1/courses/COH7C2/predictions", headers=admin_headers)).json(), p4)["niveau"] == 4
+    assert _vb((await client.get("/api/v1/courses/COH7C3/predictions", headers=admin_headers)).json(), pfr)["niveau"] == 3
+
+    liste = (await client.get("/api/v1/value-bets", headers=admin_headers)).json()
+    vus = {v["course_id"] for v in liste if v["course_id"].startswith("COH7C")}
+    assert vus == {"COH7C2", "COH7C3"}
+
+    # Le compteur public suit la même règle (niveau_min=1 pour tout compter).
+    compteur = (await client.get("/api/v1/value-bets/compteur", params={"niveau_min": 1})).json()
+    assert compteur["count"] == 2

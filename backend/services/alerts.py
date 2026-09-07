@@ -17,6 +17,7 @@ import httpx
 
 from api.config import get_settings
 from db.models import User, AlerteLog
+from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
 from services.email_verification import clause_email_utilisable
 
 settings = get_settings()
@@ -866,7 +867,9 @@ async def send_morning_digest(session: AsyncSession):
             Course.date_heure >= start_utc,
             Course.date_heure < end_utc,
             Course.date_heure > now_utc,
-            ValueBet.actif == True,
+            # Même règle que la page /value-bets (niveau, zone, actif), à l'heure
+            # de CE module (figée en test) plutôt qu'à l'horloge réelle.
+            *_vb_filtres_sql(None, now_utc),
         )
         .order_by(ValueBet.ev_max.desc())
     )

@@ -349,6 +349,7 @@ async def job_vb_notify() -> None:
         from db.database import AsyncSessionLocal
         from db.models import ValueBet, Participation, Cheval, Course, User
         from services.alerts import notify_value_bets
+        from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
         from sqlalchemy import select, and_
         from datetime import datetime, timedelta, timezone
 
@@ -361,7 +362,10 @@ async def job_vb_notify() -> None:
                 .join(Course, Course.course_id == ValueBet.course_id)
                 .where(
                     and_(
-                        ValueBet.actif == True,
+                        # Même règle de visibilité que la page : on ne notifie
+                        # pas un pari que l'abonné ne verra nulle part (★, ou
+                        # ★★/★★★ à l'étranger).
+                        *_vb_filtres_sql(None),
                         ValueBet.notifie == False,
                         ValueBet.created_at >= cutoff,
                     )

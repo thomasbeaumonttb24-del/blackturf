@@ -212,14 +212,15 @@ async def get_predictions(
     # une seule règle de visibilité (`services.valuebets_visibilite`) : la fiche,
     # /value-bets, le flux WS et le compteur montrent désormais le même pari, au
     # même niveau, à la même espérance.
-    from services.valuebets_visibilite import visible as _vb_visible
+    from services.valuebets_visibilite import visible as _vb_visible, course_etrangere as _course_etrangere
+    _etranger = await _course_etrangere(db, course.hippodrome_nom)
     vb_res = await db.execute(
         select(ValueBet)
         .where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712
     )
     vbs_by_pid = {vb.participation_id: vb
                   for vb in vb_res.scalars().all()
-                  if _vb_visible(vb, user.plan)}
+                  if _vb_visible(vb, user.plan, etranger=_etranger)}
 
     # Cote AFFICHÉE : live avant gel, dernière connue après. Le pari de valeur,
     # lui, reste celui du cycle : son espérance est calculée sur la cote relevée au
@@ -1054,13 +1055,14 @@ async def get_course_analysis(
     # recalculait à la cote live avec pour seule entrée la cote PMU : elle pouvait
     # proposer un dutch sur deux chevaux qu'aucune autre page n'appelait paris de
     # valeur.
-    from services.valuebets_visibilite import visible as _vb_visible
+    from services.valuebets_visibilite import visible as _vb_visible, course_etrangere as _course_etrangere
+    _etranger = await _course_etrangere(db, course.hippodrome_nom)
     vbs_r = await db.execute(
         select(VBModel).where(VBModel.course_id == course_id, VBModel.actif.is_(True))
     )
     vb_map = {vb.participation_id: {"ev_max": vb.ev_max, "niveau": vb.niveau,
                                     "spi_detected": vb.spi_detected, "spi_score": vb.spi_score}
-              for vb in vbs_r.scalars().all() if _vb_visible(vb, user.plan)}
+              for vb in vbs_r.scalars().all() if _vb_visible(vb, user.plan, etranger=_etranger)}
 
     # Cotes LIVE avant le gel (T-10) : seule la cote AFFICHÉE suit le marché.
     fige = _is_prono_fige(course.date_heure)

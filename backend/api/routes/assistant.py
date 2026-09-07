@@ -26,6 +26,7 @@ from db.models import (
     User, Course, Prediction, ValueBet, Participation, Cheval,
     ModelVersion, BankrollEntry, RaceLearningLog
 )
+from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -138,9 +139,10 @@ async def _execute_tool(
                 .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
                 .join(Course, Course.course_id == ValueBet.course_id)
                 .where(
-                    ValueBet.actif == True,
                     ValueBet.niveau >= niveau_min,
-                    Course.statut.in_(["a_venir", "en_cours"]),
+                    # Même règle que la page /value-bets : l'assistant ne cite
+                    # pas un pari que l'abonné ne verrait nulle part.
+                    *_vb_filtres_sql(getattr(user, "plan", None)),
                 )
                 .order_by(desc(ValueBet.ev_max))
                 .limit(10)

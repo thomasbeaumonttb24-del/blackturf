@@ -338,7 +338,9 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
 // ─── main page ───────────────────────────────────────────────
 export default function ValueBetsPage() {
   const { user } = useAuth();
-  const [niveauMin, setNiveauMin] = useState(1);
+  // ★ n'est plus servi par le serveur (−18 % mesuré sur 60 jours) : le filtre
+  // démarre à ★★ et ne propose plus le niveau 1.
+  const [niveauMin, setNiveauMin] = useState(2);
   const [discipline, setDiscipline] = useState("Tous");
   const [sort, setSort] = useState("ev_desc");
   const [view, setView] = useState<"grid" | "list">("grid");
@@ -505,9 +507,9 @@ export default function ValueBetsPage() {
             >
               <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
               Filtres
-              {(discipline !== "Tous" || niveauMin > 1) && (
+              {(discipline !== "Tous" || niveauMin > 2) && (
                 <span className="bg-brand-gold text-brand-dark rounded-full w-4 h-4 text-[10px] flex items-center justify-center">
-                  {(discipline !== "Tous" ? 1 : 0) + (niveauMin > 1 ? 1 : 0)}
+                  {(discipline !== "Tous" ? 1 : 0) + (niveauMin > 2 ? 1 : 0)}
                 </span>
               )}
             </Button>
@@ -549,7 +551,7 @@ export default function ValueBetsPage() {
             <div>
               <div className="text-xs text-muted-foreground mb-2">Niveau minimum</div>
               <div className="flex gap-1">
-                {[1, 2, 3, 4].map((n) => (
+                {[2, 3, 4].map((n) => (
                   <button
                     key={n}
                     onClick={() => setNiveauMin(n)}
@@ -616,7 +618,7 @@ export default function ValueBetsPage() {
           </div>
 
           {/* Active filters reset */}
-          {(discipline !== "Tous" || niveauMin > 1) && (
+          {(discipline !== "Tous" || niveauMin > 2) && (
             <button
               onClick={() => { setDiscipline("Tous"); setNiveauMin(1); }}
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
