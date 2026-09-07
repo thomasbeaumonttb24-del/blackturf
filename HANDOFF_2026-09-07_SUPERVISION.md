@@ -107,15 +107,44 @@ Mesuré en continu depuis cette nuit par l'étape `avantage_marche_servi`
 
 ## Points d'exploitation
 
-- **`worker`, `scheduler` et `scraper`** ont été rebuildés puis redémarrés après la
-  dernière course du jour. Ils portent aussi les correctifs « paris de valeur » de la
-  session sœur (`9065176`, `2d2ff2c`), qui étaient poussés sans avoir jamais tourné.
-- **Rollback** : `docker tag blackturf-<svc>:avant-supervision-0907 blackturf-<svc>:latest`
-  puis `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d <svc>`.
-  Toujours les DEUX fichiers compose.
-- **Deux sessions travaillaient sur ce dépôt** cette nuit. Travail fait dans un worktree
-  isolé (`_wt_sup`, branche `fix/supervision-verite-0907`), rebasé sur `vps/main` avant
-  push : le checkout partagé `blackturf/` n'a jamais été touché.
+### Déployer, c'est pousser sur `origin` — pas sur `vps`
+
+Je me suis trompé une partie de la nuit là-dessus, et la mémoire du projet disait encore
+la version de juillet (« le pipeline GitHub est déconnecté, il faut rebuilder sur le
+VPS »). C'est faux depuis. Vérifié dans `.github/workflows/deploy.yml` :
+
+un push sur `origin/main` → build GHCR → sur le VPS **`git reset --hard origin/main`** →
+`docker compose build` **de tous les services** → `up -d` → **`alembic upgrade head`** →
+health check → `docker image prune -f`. Bout en bout **~8 minutes**.
+
+**Conséquence** : un commit poussé sur le remote `vps` SEUL est **effacé de la prod** par le
+`reset --hard` du prochain push origin, par n'importe qui. Toujours pousser sur les deux,
+`origin` d'abord. Vérifier avant : `git merge-base --is-ancestor origin/main HEAD`.
+
+C'est exactement ce qui a failli arriver cette nuit : mes 7 premiers commits n'étaient que
+sur `vps`. La session sœur les a rebasés sous les siens et poussés sur `origin` — sans quoi
+ils auraient disparu au déploiement suivant.
+
+Deux détails du workflow qui comptent :
+- `paths-ignore: "**.md"` — un commit qui ne touche que du markdown ne déploie rien.
+- `docker image prune -f` (sans `-a`) ne supprime que les images **dangling** : une image
+  taguée avant le build survit, donc le point de retour ci-dessous est intact.
+
+### Rollback
+
+```bash
+docker tag blackturf-api:avant-supervision-0907 blackturf-api:latest   # idem 4 autres svc
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+Toujours les DEUX fichiers compose. Retour durable = `git revert` + push **origin**, sinon
+le déploiement suivant réappliquera le code.
+
+### Sessions parallèles
+
+Deux sessions sur ce dépôt cette nuit. Travail fait dans un worktree isolé (`_wt_sup`,
+branche `fix/supervision-verite-0907`) : le checkout partagé `blackturf/` n'a jamais été
+touché. Les commits « paris de valeur » de la session sœur (`9065176`, `2d2ff2c`,
+`af1edb5`, `cc15c0f`, `90a099e`) sont dans la même ligne d'histoire.
 
 ---
 
