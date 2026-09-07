@@ -129,6 +129,32 @@ export interface ModelVersionRow {
   walk_forward_variance: number | null;
   actif: boolean;
   rollback: boolean;
+  /** Classement intra-course du modèle sur son hold-out. */
+  rank_auc: number | null;
+  /** Le même classement obtenu par un simple tri par cote PMU. */
+  market_rank_auc: number | null;
+  /** L'écart entre les deux. Négatif : le produit ferait mieux sans modèle. */
+  rank_delta_market: number | null;
+  /**
+   * D'où vient le delta. `null` = versions antérieures à la migration 0045, dont
+   * le chiffre vient du walk-forward (un XGBoost jetable qui mesure le dataset,
+   * pas le modèle) : jamais comparable à un `hold_out`, jamais tracé dans la
+   * même courbe.
+   */
+  rank_source: "hold_out" | "h2h" | "walk_forward" | null;
+}
+
+export interface VerdictMarche {
+  delta: number | null;
+  rank_auc: number | null;
+  market_rank_auc: number | null;
+  source: "hold_out" | "h2h" | "walk_forward" | null;
+  /** La mesure porte-t-elle sur le modèle réellement déployé ? */
+  comparable: boolean;
+  /** `null` = mesure absente. Une absence n'est jamais un succès. */
+  bat_le_marche: boolean | null;
+  /** `modele_nu` : le delta juge le modèle AVANT le mélange avec le marché. */
+  porte_sur: string;
 }
 
 export interface AlgoEvolutionPayload {
@@ -137,6 +163,7 @@ export interface AlgoEvolutionPayload {
   active: ModelVersionRow | null;
   precedente: ModelVersionRow | null;
   delta_vs_precedente: { auc_roc: number | null; brier: number | null; walk_forward_auc: number | null } | null;
+  verdict_marche: VerdictMarche | null;
   cadence_30j: Array<{ jour: string; n: number }>;
   total_versions: number;
 }

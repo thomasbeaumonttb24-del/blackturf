@@ -12,10 +12,11 @@ import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Cpu, GitBranch, TrendingDown, TrendingUp } from "lucide-react";
+import { Cpu, GitBranch, Scale, TrendingDown, TrendingUp } from "lucide-react";
 import { ChartTooltip, GRID, axisLine, axisTick, tickLine } from "@/components/charts/chart-kit";
+import { cn } from "@/lib/utils";
 import { Empty, Note, Section, StatTile, num, pct, signedPct } from "./kit";
-import type { AlgoEvolutionPayload } from "./types";
+import type { AlgoEvolutionPayload, VerdictMarche } from "./types";
 
 interface CalibBin { lo: number; hi: number; n: number; proba_moy: number; freq_reelle: number }
 interface CalibPayload {
@@ -39,6 +40,136 @@ function delta(v: number | null | undefined, digits = 4, higherIsBetter = true) 
       <Icon className="h-3 w-3" />
       {v > 0 ? "+" : "−"}{Math.abs(v).toFixed(digits)}
     </span>
+  );
+}
+
+/** D'où vient le delta marché, et ce que ça autorise à en conclure. */
+const SOURCES_RANG: Record<string, { label: string; aide: string }> = {
+  hold_out: {
+    label: "hold-out",
+    aide: "Mesuré sur le modèle réellement déployé, sur les 20 % de courses les plus récentes qu'il n'a pas vues. C'est la mesure qui fait foi.",
+  },
+  h2h: {
+    label: "duel champion/challenger",
+    aide: "Même modèle, mais sur l'échantillon restreint du duel. Comparable, sur moins de courses.",
+  },
+  walk_forward: {
+    label: "walk-forward",
+    aide: "Mesuré sur un XGBoost jetable ré-entraîné fold par fold : il décrit le dataset, pas le modèle déployé. Non comparable à un hold-out.",
+  },
+};
+
+/**
+ * Le verdict que la page ne posait pas : le modèle apporte-t-il quelque chose que
+ * la cote ne dit pas déjà ?
+ *
+ * Deux précautions tenues ici, parce que sans elles le chiffre serait pire
+ * qu'absent :
+ *
+ *  1. La SOURCE est affichée. Les versions antérieures à la migration 0045
+ *     portent un delta issu du walk-forward (≈ +0,019) qui n'est pas comparable
+ *     au hold-out de la version courante (−0,0354). Une mesure non comparable
+ *     est grisée et ne devient jamais un verdict vert ou rouge.
+ *  2. Ce delta juge le MODÈLE NU, pas le produit servi. Le produit passe ensuite
+ *     par le mélange avec le marché, qui le fait repasser au-dessus de la cote.
+ *     Lire ce chiffre comme « le site conseille moins bien que la cote » serait
+ *     faux, et c'est l'erreur que la mention ci-dessous prévient.
+ */
+function VerdictMarcheBanniere({ v }: { v?: VerdictMarche | null }) {
+  if (!v) return null;
+  const src = v.source ? SOURCES_RANG[v.source] : null;
+  const mesure = v.delta != null;
+  const conclut = mesure && v.comparable;
+  const bat = v.bat_le_marche === true;
+
+  const ton = !conclut
+    ? "border-border bg-muted/40"
+    : bat
+      ? "border-emerald-200 bg-emerald-50/60"
+      : "border-red-200 bg-red-50/60";
+  const tonValeur = !conclut ? "text-muted-foreground" : bat ? "text-emerald-700" : "text-red-700";
+
+  return (
+    <section className={cn("rounded-2xl border p-4 sm:p-5", ton)}>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+            <Scale className="h-4 w-4 text-muted-foreground/60" />
+            Le modèle bat-il la cote&nbsp;?
+          </h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            Écart entre son classement intra-course et celui d&apos;un simple tri par cote PMU,
+            sur le même échantillon. Négatif, le classement serait meilleur sans modèle.
+          </p>
+        </div>
+        <span
+          title={src?.aide}
+          className={cn(
+            "shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+            v.comparable
+              ? "border-border bg-card text-muted-foreground"
+              : "border-amber-200 bg-amber-50 text-amber-800",
+          )}
+        >
+          mesure&nbsp;: {src?.label ?? "non renseignée"}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-xl border border-border bg-card p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+            Écart
+          </div>
+          <div className={cn("mt-1 text-xl font-semibold tabular-nums", tonValeur)}>
+            {mesure ? `${v.delta! > 0 ? "+" : "−"}${Math.abs(v.delta!).toFixed(4)}` : "—"}
+          </div>
+          <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            {!mesure
+              ? "aucune mesure disponible"
+              : !v.comparable
+                ? "non comparable, aucun verdict"
+                : bat
+                  ? "le modèle apporte quelque chose"
+                  : "la cote seule classerait mieux"}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+            Classement modèle
+          </div>
+          <div className="mt-1 text-xl font-semibold tabular-nums">
+            {v.rank_auc?.toFixed(4) ?? "—"}
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">AUC intra-course</div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+            Classement cote
+          </div>
+          <div className="mt-1 text-xl font-semibold tabular-nums">
+            {v.market_rank_auc?.toFixed(4) ?? "—"}
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">même échantillon</div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+            Porte sur
+          </div>
+          <div className="mt-1 text-base font-semibold">Le modèle seul</div>
+          <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            avant le mélange avec le marché
+          </div>
+        </div>
+      </div>
+
+      <Note>
+        Le modèle est entraîné sur le RÉSIDU du marché : la cote a été retirée de son vecteur
+        d&apos;apprentissage, il n&apos;a donc jamais eu pour mission de battre la cote tout seul.
+        Ce que reçoit l&apos;abonné est le mélange des deux. Un écart négatif ici signale que
+        le résidu appris s&apos;affaiblit — pas que les conseils sont moins bons qu&apos;un tri
+        par cote.
+      </Note>
+    </section>
   );
 }
 
@@ -81,7 +212,11 @@ export default function ModeleTab({
           label="AUC walk-forward"
           value={active?.walk_forward_auc?.toFixed(4) ?? "—"}
           sub={<>vs précédente {delta(d?.walk_forward_auc)}</>}
-          hint="AUC mesurée sur des courses postérieures à l'entraînement — la seule qui compte vraiment."
+          // Elle était présentée comme « la seule qui compte vraiment ». Le
+          // walk-forward ré-entraîne un XGBoost jetable fold par fold : il décrit
+          // le DATASET, pas le modèle qu'on déploie. L'arbitre est le verdict
+          // marché affiché juste en dessous.
+          hint="AUC d'un modèle jetable ré-entraîné fold par fold : elle mesure le dataset, pas le modèle servi. L'arbitre est le verdict marché ci-dessous."
         />
         <StatTile
           label="Brier"
@@ -95,6 +230,8 @@ export default function ModeleTab({
           sub={`précision top-3 ${pct(active?.precision_top3)}`}
         />
       </div>
+
+      <VerdictMarcheBanniere v={algo.verdict_marche} />
 
       {/* Trajectoire AUC — entraînement vs walk-forward, même unité, même axe */}
       <Section
@@ -153,7 +290,7 @@ export default function ModeleTab({
 
         <Section
           title="Cadence de réentraînement (30 jours)"
-          desc="Une journée à zéro signifie qu'aucun modèle n'a été produit cette nuit-là — le gel est visible ici avant d'être visible dans les résultats."
+          desc="Une barre = un modèle PROMU cette nuit-là. Une journée vide ne dit pas que le réentraînement n'a pas tourné : un challenger rejeté ne laisse aucune barre. L'issue de la dernière nuit est dans l'onglet Outils."
         >
           {(algo.cadence_30j ?? []).length === 0 ? (
             <Empty>Aucun réentraînement sur 30 jours.</Empty>
@@ -282,6 +419,9 @@ export default function ModeleTab({
                 <th className="px-2 py-2 text-right font-semibold">AUC</th>
                 <th className="px-2 py-2 text-right font-semibold">Walk-forward</th>
                 <th className="px-2 py-2 text-right font-semibold">Brier</th>
+                <th className="px-2 py-2 text-right font-semibold" title="Classement du modèle moins celui d'un simple tri par cote PMU, sur le même échantillon.">
+                  vs cote
+                </th>
                 <th className="px-2 py-2 text-right font-semibold">Top-3</th>
                 <th className="px-2 py-2 text-right font-semibold">Courses</th>
                 <th className="py-2 pl-2 text-left font-semibold">État</th>
@@ -297,6 +437,31 @@ export default function ModeleTab({
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">{v.auc_roc?.toFixed(4) ?? "—"}</td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">{v.walk_forward_auc?.toFixed(4) ?? "—"}</td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">{v.brier?.toFixed(4) ?? "—"}</td>
+                  {/* Une valeur sans `rank_source` vient du walk-forward : elle est
+                      grisée et suivie d'un astérisque, jamais colorée comme un
+                      verdict — comparer un walk-forward à un hold-out revient à
+                      comparer deux datasets. */}
+                  <td
+                    className={cn(
+                      "px-2 py-2 text-right font-mono tabular-nums",
+                      v.rank_delta_market == null
+                        ? "text-muted-foreground"
+                        : v.rank_source == null
+                          ? "text-muted-foreground/60"
+                          : v.rank_delta_market > 0
+                            ? "text-emerald-700"
+                            : "text-red-700",
+                    )}
+                    title={
+                      v.rank_source
+                        ? SOURCES_RANG[v.rank_source]?.aide
+                        : "Mesure issue du walk-forward : elle décrit le dataset, pas le modèle déployé. Non comparable aux versions mesurées sur hold-out."
+                    }
+                  >
+                    {v.rank_delta_market == null
+                      ? "—"
+                      : `${v.rank_delta_market > 0 ? "+" : "−"}${Math.abs(v.rank_delta_market).toFixed(4)}${v.rank_source ? "" : " *"}`}
+                  </td>
                   <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{v.precision_top3 != null ? pct(v.precision_top3) : "—"}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{num(v.courses_train)}</td>
                   <td className="py-2 pl-2">
@@ -317,7 +482,9 @@ export default function ModeleTab({
         </div>
         <Note>
           « Top-3 » vide sur les anciennes versions = la métrique n&apos;était pas encore mesurée à
-          l&apos;époque, pas une précision nulle.
+          l&apos;époque, pas une précision nulle. Un « vs cote » suivi d&apos;un astérisque vient du
+          walk-forward : il décrit le dataset et non le modèle déployé, il n&apos;est donc pas
+          comparable aux valeurs colorées et n&apos;autorise aucun verdict.
         </Note>
       </Section>
     </div>
