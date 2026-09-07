@@ -32,12 +32,30 @@ export interface EtapeApprentissage {
   last_error?: string | null;
   n_obs?: number | null;
   age_heures?: number | null;
+  /**
+   * Ce que l'étape a décidé, pas seulement le fait qu'elle ait tourné. Pour le
+   * retrain : `{issue: "promu"|"rejete", raison, version, h2h_delta}`. La colonne
+   * existait en base et n'était pas lue — un rejet et une promotion affichaient
+   * tous deux « ok ».
+   */
+  detail?: Record<string, unknown> | null;
+}
+
+export interface EtatRetrain {
+  issue_derniere_nuit?: string | null;
+  raison?: string | null;
+  version_derniere_nuit?: number | null;
+  h2h_delta?: number | null;
+  derniere_promotion?: string | null;
+  jours_sans_promotion?: number | null;
+  gel_suspect?: boolean;
 }
 
 export interface OutilsApprentissagePayload {
   etapes: EtapeApprentissage[];
   etapes_perimees: string[];
   seuil_perime_heures?: number;
+  retrain: EtatRetrain;
   alerte: boolean;
   correcteur_contextuel: {
     actif: boolean;
@@ -191,6 +209,120 @@ function BadgeEtape({ e, perimee }: { e: EtapeApprentissage; perimee: boolean })
   );
 }
 
+/**
+ * Ce que l'étape a produit cette nuit, en une cellule.
+ *
+ * Ordre de préférence : l'ISSUE journalisée (`detail`), puis le nombre
+ * d'observations, puis « — ». `n_obs` n'ayant jamais été alimenté, la colonne
+ * était vide sur les vingt-deux lignes depuis son installation ; on ne la
+ * supprime pas — l'information manquante existait, elle n'était pas lue.
+ */
+function ResumeEtape({ e }: { e: EtapeApprentissage }) {
+  const d = e.detail ?? null;
+  const issue = typeof d?.issue === "string" ? d.issue : null;
+  const verdict = typeof d?.verdict === "string" ? d.verdict : null;
+  const mot = issue ?? verdict;
+
+  if (mot) {
+    const promu = mot === "promu";
+    return (
+      <span
+        title={typeof d?.raison === "string" ? d.raison : undefined}
+        className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+          promu
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-border bg-muted text-muted-foreground"
+        }`}
+      >
+        {promu ? "modèle déployé" : "challenger refusé"}
+      </span>
+    );
+  }
+  if (e.n_obs != null) {
+    return <span className="tabular-nums">{num(e.n_obs)} obs</span>;
+  }
+  return <span className="text-muted-foreground">—</span>;
+}
+
+const RAISONS_PROMOTION: Record<string, string> = {
+  better_h2h: "le challenger classe mieux que le champion sur le hold-out commun",
+  better_wf: "meilleur walk-forward que le champion",
+  synthetic_replace: "l'actif était un modèle synthétique",
+  no_current: "aucun modèle actif à remplacer",
+  unreliable_replace: "l'actif était entraîné sur trop peu de courses",
+  data_jump: "saut de volume d'entraînement",
+  tolerance: "régression sous la tolérance du cliquet",
+};
+
+/**
+ * L'issue de la dernière nuit, et depuis combien de temps le modèle n'a pas bougé.
+ *
+ * `last_status = 'ok'` sur l'étape `retrain` signifie « la nuit s'est déroulée
+ * sans exception ». Elle vaut « ok » qu'un modèle ait été déployé ou que le
+ * challenger ait été refusé. Du 02 au 06/09/2026, cinq nuits d'affilée ont
+ * rejeté leur challenger : le journal affichait « ok », l'histogramme de cadence
+ * affichait cinq journées vides — indiscernables d'un job mort — et le modèle en
+ * service datait du 01/09.
+ *
+ * Un rejet isolé n'est pas une panne, c'est le cliquet qui protège la qualité.
+ * C'est la SÉRIE qui doit se voir, d'où le décompte de jours.
+ */
+function NuitRetrain({ r }: { r?: EtatRetrain }) {
+  if (!r) return null;
+  const issue = r.issue_derniere_nuit ?? null;
+  const promu = issue === "promu";
+  const rejete = issue != null && !promu;
+  const gel = r.gel_suspect === true;
+
+  const Icone = gel ? AlertTriangle : promu ? CheckCircle2 : rejete ? Info : Clock;
+  const ton = gel
+    ? "border-amber-200 bg-amber-50 text-amber-900"
+    : promu
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : "border-border bg-muted/40 text-foreground";
+
+  return (
+    <div className={`flex items-start gap-2 rounded-xl border p-3.5 text-[11px] leading-relaxed ${ton}`}>
+      <Icone className="mt-px h-4 w-4 shrink-0" />
+      <div className="min-w-0">
+        <b>
+          Dernière nuit&nbsp;:{" "}
+          {issue == null
+            ? "issue non journalisée"
+            : promu
+              ? `modèle v${r.version_derniere_nuit ?? "?"} déployé`
+              : "challenger refusé, le modèle en service n'a pas changé"}
+        </b>
+        {r.raison && (
+          <>
+            {" "}
+            — {RAISONS_PROMOTION[r.raison] ?? r.raison}
+            {r.h2h_delta != null && (
+              <> (écart de classement {r.h2h_delta > 0 ? "+" : "−"}
+                {Math.abs(r.h2h_delta).toFixed(4)})</>
+            )}
+            .
+          </>
+        )}
+        <div className="mt-1">
+          {r.jours_sans_promotion == null ? (
+            "Aucune promotion enregistrée."
+          ) : gel ? (
+            <>
+              Aucun modèle promu depuis <b>{r.jours_sans_promotion} jours</b>. Le
+              réentraînement peut très bien tourner chaque nuit et refuser chaque
+              challenger : une journée vide dans la cadence ne prouve pas qu&apos;il est
+              mort, seulement qu&apos;il n&apos;a rien déployé.
+            </>
+          ) : (
+            <>Dernière promotion il y a {r.jours_sans_promotion} jour(s).</>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OutilsApprentissage({
   data,
 }: {
@@ -221,8 +353,14 @@ export default function OutilsApprentissage({
 
   return (
     <div className="space-y-4">
-      {/* ── Alerte de péremption ─────────────────────────────── */}
-      {data.alerte && (
+      {/* ── La nuit de réentraînement : ce qu'elle a DÉCIDÉ ───── */}
+      <NuitRetrain r={data.retrain} />
+
+      {/* ── Alerte de péremption ─────────────────────────────────
+          Condition sur la LISTE, pas sur `data.alerte` : ce drapeau couvre aussi
+          le gel du modèle, qui ne périme aucune étape — sans ça la bannière
+          annoncerait « 0 apprentissage sans succès ». */}
+      {data.etapes_perimees.length > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3.5 text-[11px] leading-relaxed text-red-800">
           <AlertTriangle className="mt-px h-4 w-4 shrink-0" />
           <div>
@@ -372,7 +510,11 @@ export default function OutilsApprentissage({
                 <tr className="border-b border-border/70">
                   <th className="py-2 pr-3 font-semibold">Étape</th>
                   <th className="py-2 pr-3 font-semibold">Dernier succès</th>
-                  <th className="py-2 pr-3 font-semibold">Observations</th>
+                  {/* `n_obs` n'a JAMAIS été écrit : la colonne affichait « — »
+                      sur les 22 étapes depuis son installation. Elle porte
+                      désormais ce que l'étape a décidé quand elle l'a journalisé,
+                      et retombe sur le nombre d'observations s'il existe. */}
+                  <th className="py-2 pr-3 font-semibold">Ce qu&apos;elle a fait</th>
                   <th className="py-2 font-semibold">État</th>
                 </tr>
               </thead>
@@ -393,8 +535,8 @@ export default function OutilsApprentissage({
                           {ageLisible(e.age_heures)}
                         </span>
                       </td>
-                      <td className="py-2 pr-3 tabular-nums text-foreground">
-                        {e.n_obs != null ? num(e.n_obs) : "—"}
+                      <td className="py-2 pr-3 text-foreground">
+                        <ResumeEtape e={e} />
                       </td>
                       <td className="py-2">
                         <BadgeEtape e={e} perimee={perimee} />

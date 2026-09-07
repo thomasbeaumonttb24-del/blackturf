@@ -274,20 +274,49 @@ async def etapes_perimees(session: AsyncSession,
              "last_status": r[3], "last_error": r[4]} for r in rows]
 
 
+def _detail_json(brut) -> Optional[dict]:
+    """`detail` en dictionnaire, ou None. Ne lève jamais.
+
+    La colonne est du TEXT : elle contient ce que l'étape a bien voulu y écrire.
+    Une ligne illisible ne doit pas faire disparaître les vingt et une autres.
+    """
+    if brut is None:
+        return None
+    if isinstance(brut, dict):
+        return brut
+    try:
+        charge = json.loads(brut)
+    except (TypeError, ValueError):
+        return None
+    return charge if isinstance(charge, dict) else None
+
+
 async def etat_apprentissages(session: AsyncSession) -> dict:
-    """Vue complète pour l'admin et le rapport du matin."""
+    """Vue complète pour l'admin et le rapport du matin.
+
+    `detail` porte l'ISSUE de l'étape — pour le retrain :
+    ``{"issue": "promu"|"rejete", "raison": …, "h2h_delta": …}``. Sans elle,
+    `last_status = 'ok'` ne distingue pas une promotion d'un rejet : une nuit qui
+    tourne parfaitement et refuse le challenger s'affiche exactement comme une
+    nuit qui déploie. Du 02 au 06/09/2026, cinq nuits de rejet ont ainsi été
+    indiscernables d'un fonctionnement nominal, alors que le modèle n'avait pas
+    bougé depuis le 01/09.
+
+    La colonne existait déjà et était écrite ; elle n'était simplement jamais lue.
+    """
     try:
         await ensure_table(session)
         rows = (await session.execute(text("""
             SELECT step, last_attempt_at, last_success_at, last_status, last_error,
-                   n_obs
+                   n_obs, detail
             FROM learning_step_runs ORDER BY step
         """))).all()
     except Exception as e:
         log.warning("learning_steps.lecture_impossible", err=str(e)[:160])
         return {"etapes": [], "perimees": [], "seuil_heures": PERIME_APRES_HEURES}
     etapes = [{"step": r[0], "last_attempt_at": r[1], "last_success_at": r[2],
-               "last_status": r[3], "last_error": r[4], "n_obs": r[5]} for r in rows]
+               "last_status": r[3], "last_error": r[4], "n_obs": r[5],
+               "detail": _detail_json(r[6])} for r in rows]
     perimees = await etapes_perimees(session)
     return {"etapes": etapes, "perimees": perimees,
             "seuil_heures": PERIME_APRES_HEURES}

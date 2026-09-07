@@ -305,6 +305,61 @@ async def _gates_actives(session: AsyncSession) -> dict:
     }
 
 
+async def _issue_retrain(session: AsyncSession, etapes: list[dict]) -> dict:
+    """Ce que la nuit a VRAIMENT décidé, et depuis quand le modèle n'a pas bougé.
+
+    `last_status = 'ok'` sur l'étape `retrain` veut dire « la nuit s'est déroulée
+    sans exception » — pas « un modèle a été déployé ». Un challenger rejeté
+    laisse exactement la même trace qu'une promotion. Du 02 au 06/09/2026, cinq
+    nuits ont ainsi tourné, rejeté leur challenger, et affiché « ok », pendant que
+    le modèle en service datait du 01/09.
+
+    Deux sources croisées, parce qu'aucune ne suffit :
+      - `learning_step_runs.detail` donne l'issue de la DERNIÈRE nuit (promu /
+        rejeté, et la raison) ;
+      - `model_versions` donne la date de la dernière promotion RÉELLE, qui est la
+        seule chose qui dise depuis combien de temps le modèle est figé.
+
+    Une nuit rejetée n'est pas une panne : c'est le cliquet qui fait son travail.
+    Une SÉRIE de nuits rejetées, elle, est un gel — d'où le décompte.
+    """
+    detail = next((e.get("detail") for e in etapes if e.get("step") == "retrain"), None)
+    issue = (detail or {}).get("issue")
+    raison = (detail or {}).get("raison")
+
+    derniere_promotion = None
+    jours_sans_promotion = None
+    try:
+        row = (await session.execute(text("""
+            SELECT max(created_at) FROM model_versions WHERE est_synthetique = false
+        """))).scalar()
+        if row is not None:
+            derniere_promotion = row
+            maintenant = datetime.now(timezone.utc)
+            if row.tzinfo is None:
+                row = row.replace(tzinfo=timezone.utc)
+            jours_sans_promotion = round((maintenant - row).total_seconds() / 86400, 1)
+    except Exception as e:  # pragma: no cover - lecture best-effort
+        await session.rollback()
+        log.warning("supervision.issue_retrain.lecture_impossible", err=str(e)[:160])
+
+    return {
+        # `None` quand la colonne `detail` n'a pas encore été écrite par une nuit :
+        # une absence d'issue n'est pas une promotion.
+        "issue_derniere_nuit": issue,
+        "raison": raison,
+        "version_derniere_nuit": (detail or {}).get("version"),
+        "h2h_delta": (detail or {}).get("h2h_delta"),
+        "derniere_promotion": (derniere_promotion.isoformat()
+                               if hasattr(derniere_promotion, "isoformat")
+                               else derniere_promotion),
+        "jours_sans_promotion": jours_sans_promotion,
+        # Un modèle figé plus de deux jours mérite d'être regardé : le nightly
+        # tourne toutes les nuits, deux rejets d'affilée sont normaux, cinq non.
+        "gel_suspect": (jours_sans_promotion is not None and jours_sans_promotion >= 2.0),
+    }
+
+
 async def etat_outils_apprentissage(session: AsyncSession) -> dict:
     """Vue unique de tous les outils d'apprentissage, pour la supervision IA."""
     from ml.learning_steps import etat_apprentissages
@@ -317,6 +372,7 @@ async def etat_outils_apprentissage(session: AsyncSession) -> dict:
         "etapes": etapes.get("etapes", []),
         "etapes_perimees": [e["step"] for e in etapes.get("perimees", [])],
         "seuil_perime_heures": etapes.get("seuil_heures"),
+        "retrain": await _issue_retrain(session, etapes.get("etapes", [])),
         "correcteur_contextuel": await _etat_meta_learner(),
         "modele_arrivee": await _etat_harville(session),
         "alpha_marche": await _etat_alpha(session),
@@ -325,5 +381,9 @@ async def etat_outils_apprentissage(session: AsyncSession) -> dict:
         "plans": await _etat_plans(session),
         "gates_types": await _gates_actives(session),
     }
-    outils["alerte"] = bool(outils["etapes_perimees"])
+    # Une étape périmée reste le signal principal, mais un modèle figé plusieurs
+    # jours par des rejets successifs n'en périme aucune : l'alerte le couvre
+    # désormais, sinon le gel reste invisible tant que les nuits « réussissent ».
+    outils["alerte"] = bool(outils["etapes_perimees"]) or bool(
+        outils["retrain"].get("gel_suspect"))
     return outils
