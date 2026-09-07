@@ -31,18 +31,29 @@ depuis `a8ba02d` (retirées de la rotation, fichiers jamais supprimés).
 
 ## Le point à comprendre avant de toucher au modèle
 
-Mesuré le 07/09 sur **1 024 courses réelles** des 21 derniers jours :
+Comparaison **appariée course par course**, avec intervalle à 95 % — c'est la seule qui
+tranche, et elle a démenti ma première lecture :
 
-| Ce qui est classé | AUC intra-course |
-|---|---|
-| Cote PMU seule | 0,7486 |
-| Modèle **brut** | 0,7326 → **−0,0160** |
-| Produit **servi** (après blend) | 0,7519 → **+0,0033** |
+| Écart | 21 j (1 064 courses) | 90 j (4 430 courses) | Verdict |
+|---|---|---|---|
+| Modèle **nu** vs cote | −0,0152 [−0,0257 ; −0,0047] | **−0,0168** [−0,0224 ; −0,0112] | prouvé SOUS |
+| Produit **servi** vs cote | +0,0030 [−0,0023 ; +0,0083] | **−0,0019** [−0,0051 ; +0,0014] | **non concluant → parité** |
+| Apport de la **chaîne** | +0,0182 [+0,0104 ; +0,0261] | **+0,0146** [+0,0108 ; +0,0185] | prouvé POSITIF |
 
 `model_versions.rank_delta_market` (v528 = **−0,0354**) juge le **modèle nu**, avant le
-mélange avec le marché. C'est cohérent, et c'est **attendu** : le drapeau `market_residual`
-a retiré la cote du vecteur d'apprentissage, le modèle apprend le RÉSIDU. Ce que reçoit
-l'abonné est le mélange, et lui bat le marché.
+mélange avec le marché. C'est cohérent avec la ligne 1, et c'est **attendu** : le drapeau
+`market_residual` a retiré la cote du vecteur d'apprentissage, le modèle apprend le RÉSIDU.
+
+Ce que reçoit l'abonné est le mélange, et il est **à parité** avec la cote — ni au-dessus
+ni en dessous, l'intervalle contient zéro. Ce qui est prouvé, c'est que **la chaîne de
+correction rattrape le déficit du modèle nu**. C'est elle qui porte la valeur aujourd'hui.
+
+> Ne jamais conclure sur une différence de moyennes agrégées : à 21 jours elle disait
+> « +0,0030, bat le marché », à 90 jours « −0,0019, sous le marché ». Choisir la fenêtre,
+> c'est choisir la conclusion. L'écart apparié dit « parité » dans les deux cas.
+
+Mesuré en continu depuis cette nuit par l'étape `avantage_marche_servi`
+(`ml/avantage_marche.py`), affiché dans l'onglet Modèle sous la bannière du modèle nu.
 
 > **Ne pas activer `BT_MARKET_GATE` en l'état.** Il gate sur le delta du modèle nu,
 > structurellement négatif par construction : plus aucun modèle ne serait jamais promu,
@@ -52,12 +63,16 @@ l'abonné est le mélange, et lui bat le marché.
 
 ## Reste à faire (par valeur, non fait cette nuit)
 
-1. **Mesurer et stocker le delta marché du PRODUIT SERVI**, à côté de celui du modèle nu.
-   Deux colonnes, deux libellés. C'est le préalable au point suivant.
-2. **Alors seulement**, rebrancher `BT_MARKET_GATE` sur ce delta-là.
-3. **Post-traitement après blend : −0,0012 d'AUC de classement** (0,7531 → 0,7519).
-   Identifier lequel des trois est responsable — la calibration longshot par tranche de
-   cote est le suspect n°1, elle n'est pas monotone par construction.
+1. ~~Mesurer le delta marché du produit servi~~ — **fait cette nuit** (étape
+   `avantage_marche_servi`, affichée dans l'onglet Modèle).
+2. **Rebrancher `BT_MARKET_GATE` sur ce delta-là** — possible maintenant que la mesure
+   existe. Attention : en l'état le produit est à parité (IC contient zéro), donc un gate
+   strict « delta > 0 » bloquerait aussi. Le gate utile est plutôt « le delta ne
+   RÉGRESSE pas », ou un plancher sur l'apport de la chaîne.
+3. **Faire remonter l'apport de la chaîne (+0,0146)**, c'est là qu'est la valeur prouvée.
+   Piste la plus directe : le post-traitement APRÈS mélange coûte du classement
+   (−0,0012 mesuré). La calibration longshot par tranche de cote est le suspect n°1 —
+   elle n'est pas monotone par construction, donc elle peut réordonner une course.
 4. **`edge_monitor` ne peut plus rien conclure** : 4 paris retenus sur 42 245
    (`n_filt = 4`, `enough_filt = false`) — 25 le mois dernier. Le filtre de conviction est
    à recalibrer ou à déclarer hors service ; en l'état la gate ROI ne se prononcera jamais.
