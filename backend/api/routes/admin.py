@@ -1096,9 +1096,24 @@ async def get_learning_convergence(
         await db.rollback()
         log.warning("admin.convergence.profil_skip", err=str(e)[:120])
 
-    # 4. DERNIÈRES VICTOIRES : courses récentes où un plan profil a été NET positif,
-    #    avec le meilleur profil + son gain net (rapports PMU réels). Concret, parlant.
+    # 4. DERNIÈRES VICTOIRES — et leur DÉNOMINATEUR.
+    #
+    # La liste ne retient que les courses où un plan a fini net positif. C'est vrai,
+    # mesuré sur les rapports PMU, et ça reste une sélection par le résultat : sur
+    # une console dont le ROI global est négatif, un mur de gains est une vitrine,
+    # pas une supervision. La liste est conservée — elle sert à ouvrir une course et
+    # à comprendre ce qui a marché — mais elle est désormais accompagnée du taux
+    # dont elle est extraite : X courses gagnantes sur Y réglées, et le net total.
+    #
+    # Le comptage porte sur les COURSES distinctes, jamais sur les paris : le même
+    # plan est ré-émis à chaque mouvement de cote, compter les lignes gonflerait le
+    # dénominateur autant que le numérateur mais pas dans le même rapport.
+    #
+    # Fenêtre bornée à 90 jours : la requête d'origine balayait tout
+    # `profil_run_log` réglé depuis l'origine, puis bouclait en Python — un coût qui
+    # croissait sans fin sur un endpoint rafraîchi toutes les deux minutes.
     out["victoires"] = []
+    out["victoires_resume"] = None
     try:
         rows = (await db.execute(text("""
             SELECT c.course_id, c.hippodrome_nom, c.date_heure, c.numero_reunion, c.numero,
@@ -1106,13 +1121,16 @@ async def get_learning_convergence(
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             WHERE r.statut = 'settled' AND r.resultat IS NOT NULL
-              AND (r.resultat->>'net')::numeric > 0
-              -- Mêmes gardes d'intégrité : victoires réelles émises avant départ only.
+              -- Mêmes gardes d'intégrité : conseils réellement émis avant le départ.
               AND c.date_heure IS NOT NULL AND r.created_at < c.date_heure
               AND COALESCE(r.meta->>'backfill', '') <> 'true'
+              AND c.date_heure >= now() - interval '90 days'
             ORDER BY c.date_heure DESC, net DESC
         """))).all()
         LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
+        # Meilleur profil par course, gagnantes ET perdantes : c'est ce qui permet
+        # de rendre le dénominateur, impossible à produire depuis la seule liste
+        # filtrée sur `net > 0`.
         best: dict = {}
         for cid, hippo, dh, n_r, n_c, profil, net in rows:
             cur = best.get(cid)
@@ -1126,7 +1144,21 @@ async def get_learning_convergence(
                 best[cid] = {"course_id": cid, "code": code, "hippodrome": hippo,
                              "date": dh.isoformat() if dh else None,
                              "profil": LBL.get(profil, profil), "net": round(netf, 2)}
-        out["victoires"] = sorted(best.values(), key=lambda x: x["date"] or "", reverse=True)[:25]
+        gagnantes = [v for v in best.values() if v["net"] > 0]
+        out["victoires"] = sorted(
+            gagnantes, key=lambda x: x["date"] or "", reverse=True)[:25]
+        n_courses = len(best)
+        out["victoires_resume"] = {
+            "fenetre_jours": 90,
+            "n_courses_reglees": n_courses,
+            "n_courses_gagnantes": len(gagnantes),
+            "taux_courses_gagnantes_pct": (
+                round(len(gagnantes) * 100.0 / n_courses, 1) if n_courses else None),
+            # Somme des MEILLEURS profils par course : ce n'est pas le net du
+            # portefeuille (qui vit dans /supervision/rentabilite), c'est le net de
+            # la population dont la liste ci-dessus est extraite. Nommé comme tel.
+            "net_meilleur_profil": round(sum(v["net"] for v in best.values()), 2),
+        }
     except Exception as e:
         await db.rollback()
         log.warning("admin.convergence.victoires_skip", err=str(e)[:120])

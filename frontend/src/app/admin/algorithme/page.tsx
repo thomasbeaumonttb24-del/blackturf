@@ -254,6 +254,7 @@ export default function SupervisionIAPage() {
           renta={renta}
           algo={algo}
           victoires={converge?.victoires}
+          victoiresResume={converge?.victoires_resume}
           onGoTo={(k) => setTab(k as TabKey)}
         />
       )}

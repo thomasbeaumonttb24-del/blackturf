@@ -25,6 +25,22 @@ interface Victoire {
   date: string | null; profil: string; net: number;
 }
 
+/**
+ * Le dénominateur de la liste ci-dessus.
+ *
+ * `victoires` est sélectionnée par le résultat : elle ne contient que des courses
+ * gagnantes. Affichée seule, sur une console dont le ROI d'ensemble est négatif,
+ * elle se lit comme une vitrine. Le résumé dit sur combien de courses réglées ces
+ * gains ont été pris.
+ */
+interface VictoiresResume {
+  fenetre_jours: number;
+  n_courses_reglees: number;
+  n_courses_gagnantes: number;
+  taux_courses_gagnantes_pct: number | null;
+  net_meilleur_profil: number;
+}
+
 function jourCourt(iso: string) {
   const [, m, d] = iso.split("-");
   return `${d}/${m}`;
@@ -75,19 +91,36 @@ function constats(paris?: ParisPayload, renta?: RentabilitePayload, algo?: AlgoE
     out.push(
       `Le modèle actif (v${algo.active.version}) affiche une AUC walk-forward de ` +
       `${algo.active.walk_forward_auc?.toFixed(4)}, ${d >= 0 ? "en hausse de" : "en baisse de"} ` +
-      `${Math.abs(d).toFixed(4)} par rapport à la version précédente.`
+      `${Math.abs(d).toFixed(4)} par rapport à la version précédente. Cette mesure décrit le ` +
+      `dataset, pas le modèle servi.`
+    );
+  }
+  // Le constat que la synthèse ne faisait pas : le modèle apporte-t-il quelque
+  // chose que la cote ne dit pas déjà ? Rendu SEULEMENT si la mesure porte sur le
+  // modèle déployé — un walk-forward ne permet aucun constat de ce genre.
+  const vm = algo?.verdict_marche;
+  if (vm?.delta != null && vm.comparable) {
+    out.push(
+      `Classement intra-course sur son hold-out : ${vm.rank_auc?.toFixed(4)} pour le modèle ` +
+      `contre ${vm.market_rank_auc?.toFixed(4)} pour un simple tri par cote PMU, soit ` +
+      `${vm.delta >= 0 ? "+" : "−"}${Math.abs(vm.delta).toFixed(4)}. ` +
+      (vm.delta >= 0
+        ? `Le modèle apporte donc quelque chose que la cote ne dit pas.`
+        : `Le modèle SEUL classe donc moins bien que la cote — attendu, puisqu'il est ` +
+          `entraîné sur le résidu du marché et que ce qui est servi est le mélange des deux.`)
     );
   }
   return out;
 }
 
 export default function OverviewTab({
-  paris, renta, algo, victoires, onGoTo,
+  paris, renta, algo, victoires, victoiresResume, onGoTo,
 }: {
   paris?: ParisPayload;
   renta?: RentabilitePayload;
   algo?: AlgoEvolutionPayload;
   victoires?: Victoire[];
+  victoiresResume?: VictoiresResume | null;
   onGoTo: (tab: string) => void;
 }) {
   const g = paris?.global;
@@ -240,6 +273,18 @@ export default function OverviewTab({
         <Section
           title="Dernières courses gagnantes"
           desc="Courses où le plan d'un profil est ressorti net positif, sur rapports PMU réels. Cliquable."
+          right={
+            // Le dénominateur, sans lequel la liste n'est qu'une sélection par le
+            // résultat. Compté en COURSES distinctes : le même plan est ré-émis à
+            // chaque mouvement de cote, compter les lignes fausserait le taux.
+            victoiresResume?.n_courses_reglees ? (
+              <span className="text-[11px] text-muted-foreground">
+                {num(victoiresResume.n_courses_gagnantes)} courses gagnantes sur{" "}
+                {num(victoiresResume.n_courses_reglees)} réglées ({pct(victoiresResume.taux_courses_gagnantes_pct)})
+                {" "}sur {victoiresResume.fenetre_jours} j
+              </span>
+            ) : undefined
+          }
         >
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {victoires!.slice(0, 12).map((v, i) => (
@@ -261,8 +306,22 @@ export default function OverviewTab({
             ))}
           </div>
           <Note>
-            Une liste de victoires ne mesure rien à elle seule — elle est là pour vérifier des cas
-            concrets, la mesure reste le ROI de l&apos;ensemble.
+            Cette liste est SÉLECTIONNÉE PAR LE RÉSULTAT : elle ne contient que des courses
+            gagnantes. Elle sert à ouvrir un cas et comprendre ce qui a marché, jamais à juger
+            la rentabilité — le taux affiché à droite est le dénominateur dont elle est extraite.
+            {victoiresResume && g?.net != null && (
+              <>
+                {" "}
+                Pour mesurer l&apos;ampleur du biais : en ne gardant a posteriori que le meilleur
+                profil de chaque course, le cumul serait de{" "}
+                <b className={tone(victoiresResume.net_meilleur_profil)}>
+                  {signedEur(victoiresResume.net_meilleur_profil)}
+                </b>
+                , alors que le capital réellement encaissé est de{" "}
+                <b className={tone(g.net)}>{signedEur(g.net)}</b>. Choisir le bon profil après
+                coup n&apos;est pas une stratégie.
+              </>
+            )}
           </Note>
         </Section>
       )}
