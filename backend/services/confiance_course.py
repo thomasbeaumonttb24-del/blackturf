@@ -69,7 +69,9 @@ def tranche(score: Optional[int]) -> Optional[tuple[int, Optional[int]]]:
     return None
 
 
-_SQL_REUSSITE = f"""
+# Chaîne SIMPLE (pas une f-string) : le contrôle anti-fuite temporelle lit les
+# constantes du code et doit voir la jointure ET la borne dans le même texte.
+_SQL_REUSSITE = """
 WITH res AS (
   SELECT DISTINCT ON (cheval_id, course_id) cheval_id, course_id, position_arrivee
   FROM historique_courses WHERE course_id IS NOT NULL AND position_arrivee IS NOT NULL
@@ -81,7 +83,7 @@ JOIN participations pa ON pa.participation_id = p.participation_id
 JOIN courses c ON c.course_id = p.course_id
 JOIN res r ON r.cheval_id = pa.cheval_id AND r.course_id = p.course_id
 WHERE p.rang_predit = 1 AND c.statut = 'termine'
-  AND c.date_heure >= now() - interval '{FENETRE_JOURS} days'
+  AND c.date_heure >= now() - make_interval(days => :jours)
   -- borne pré-départ : une prédiction recalculée après l'arrivée ne prouve rien
   AND p.created_at < c.date_heure
   AND NOT pa.non_partant AND r.position_arrivee < 99 AND p.confidence_score IS NOT NULL
@@ -105,7 +107,7 @@ async def reussite_par_tranche(session) -> dict:
         return {}
     table: dict = {}
     try:
-        rows = (await session.execute(text(_SQL_REUSSITE))).all()
+        rows = (await session.execute(text(_SQL_REUSSITE), {"jours": FENETRE_JOURS})).all()
         agg: dict = {}
         for conf, gagne in rows:
             t = tranche(conf)
