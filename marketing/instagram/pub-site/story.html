@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../fonts/fonts.css">
+<style>
+  :root{--gold:#C9931A;--gold2:#E0A521;--gold-dark:#A6741A;--ink:#14171F;--muted:#6B7280;--green:#178A4C;--w:1080px;--h:1920px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:var(--w);height:var(--h);overflow:hidden;background:#000}
+  body{font-family:'Outfit','Inter',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;position:relative}
+  .num{font-variant-numeric:tabular-nums}
+  .bg{position:absolute;inset:0;background:url(../../../frontend/public/img/duel.jpg) -1150px -430px / 2720px auto no-repeat}
+  .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 0%,rgba(0,0,0,.25) 100%)}
+  .card{position:absolute;left:64px;right:64px;top:582px;bottom:40px;background:rgba(255,255,255,.94);backdrop-filter:blur(6px);border-radius:44px;
+        box-shadow:0 30px 80px rgba(0,0,0,.45);padding:34px 52px 26px;display:flex;flex-direction:column}
+  /* logo fidèle : anneau or + cheval + BLACKTURF */
+  .head{display:flex;align-items:flex-start;justify-content:space-between}
+  .logo{display:flex;flex-direction:column;align-items:center;width:140px}
+  .ring{width:92px;height:92px;border-radius:50%;border:3px solid var(--gold);display:flex;align-items:center;justify-content:center;background:#fff}
+  .ring img{width:76px;height:auto}
+  .logo .wm{margin-top:7px;font-family:'Inter';font-weight:800;font-size:18px;letter-spacing:.12em;color:#1F2937}
+  .logo .wm b{color:var(--gold)}
+  .badge{display:inline-flex;align-items:center;gap:10px;background:#FFF7E3;border:1.5px solid #F0D48A;color:var(--gold-dark);border-radius:999px;padding:10px 20px;font-size:17px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-top:6px}
+  .badge i{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(23,138,76,.18)}
+
+  .sec{display:flex;align-items:center;gap:18px;color:var(--gold);font-weight:600;font-size:17px;letter-spacing:.22em;text-transform:uppercase;text-align:center;white-space:nowrap}
+  .sec::before,.sec::after{content:"";flex:1;height:1.5px;background:linear-gradient(90deg,transparent,#E8D5A6)}
+  .sec::after{background:linear-gradient(90deg,#E8D5A6,transparent)}
+
+  h1{text-align:center;font-size:43px;line-height:1.06;font-weight:700;letter-spacing:-.02em;margin-top:10px}
+  h1 span{color:var(--gold)}
+  .lead{text-align:center;font-size:19.5px;line-height:1.35;color:#4B5563;margin:8px auto 0;max-width:900px}
+  .lead b{color:var(--ink);font-weight:600}
+
+  .big{text-align:center;margin-top:10px}
+  .big .v{font-size:86px;font-weight:700;letter-spacing:-.045em;line-height:.95}
+  .big .v small{font-size:38px;color:var(--gold);letter-spacing:0;margin-left:6px;font-weight:700}
+  .big .l{font-size:25px;font-weight:600;line-height:1.12;margin-top:4px}
+  .big .s{font-size:16px;color:var(--muted);margin-top:4px}
+
+  .stats{display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:12px;border-top:1.5px solid #EDE6D3;border-bottom:1.5px solid #EDE6D3;padding:8px 0}
+  .stat{text-align:center;padding:0 12px;border-left:1.5px solid #EDE6D3}.stat:first-child{border-left:0}
+  .stat .v{font-size:37px;font-weight:700;letter-spacing:-.03em;line-height:1}
+  .stat .v small{font-size:22px;color:var(--gold);margin-left:3px}
+  .stat .l{font-size:16px;color:#4B5563;margin-top:5px;line-height:1.2}
+
+  .how{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:10px}
+  .step{display:flex;gap:12px;align-items:flex-start}
+  .step .n{flex:none;width:34px;height:34px;border-radius:50%;border:2px solid var(--gold);color:var(--gold-dark);font-weight:700;font-size:17px;display:flex;align-items:center;justify-content:center}
+  .step .h{font-size:18px;font-weight:700;line-height:1.1}
+  .step .d{font-size:14.5px;color:var(--muted);line-height:1.3;margin-top:3px}
+
+  .gains{margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  .gcol{text-align:center;border-left:1.5px solid #EDE6D3}.gcol:first-child{border-left:0}
+  .g1{display:flex;align-items:baseline;justify-content:center;gap:10px}
+  .g1 .m{font-size:22px;color:var(--muted);font-weight:500}.g1 .arr{color:var(--gold);font-size:22px}.g1 .g{font-size:38px;font-weight:700;color:var(--green);letter-spacing:-.03em}
+  .g1s{font-size:14px;color:#4B5563;margin-top:0}
+  .tot{margin-top:6px;text-align:center;font-size:19px;color:#4B5563}.tot b{color:var(--gold-dark);font-size:27px;font-weight:700;margin-left:8px;letter-spacing:-.02em}
+  .tots{font-size:15px;color:var(--muted)}
+  .cta{margin-top:auto;display:flex;flex-direction:column;align-items:center}
+  .cta .t{font-size:25px;font-weight:700;letter-spacing:-.01em}.cta .t span{color:var(--gold)}
+  .btn{margin-top:8px;display:inline-flex;align-items:center;gap:14px;background:#14171F;color:#fff;border-radius:999px;padding:10px 34px;font-size:26px;font-weight:600;box-shadow:0 14px 34px rgba(0,0,0,.28)}
+  .btn b{color:var(--gold2);font-weight:600}
+  .btn .free{font-size:16px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#14171F;background:var(--gold2);border-radius:999px;padding:6px 12px;margin-left:6px}
+  .bio{margin-top:5px;font-size:15px;color:var(--gold-dark);font-weight:600}
+  .legal{margin-top:7px;border-top:1.5px solid #EDE6D3;padding-top:6px;font-size:12.5px;line-height:1.35;color:#858B96;text-align:center}
+
+  .card{padding:40px 56px 30px}
+  .ring{width:104px;height:104px}.ring img{width:86px}.logo .wm{font-size:20px}
+  h1{font-size:50px;margin-top:14px}.lead{font-size:21px;margin-top:12px;max-width:980px}
+  .big{margin-top:16px}.big .v{font-size:110px}.big .v small{font-size:44px}.big .l{font-size:29px;margin-top:8px}.big .s{font-size:18px;margin-top:8px}
+  .stats{margin-top:18px;padding:14px 0}.stat .v{font-size:44px}.stat .l{font-size:18px}
+  .sec{font-size:18px}
+  .how{margin-top:14px}.step .h{font-size:20px}.step .d{font-size:16px}
+  .gains{margin-top:12px}.g1 .g{font-size:46px}.g1 .m,.g1 .arr{font-size:24px}.g1s{font-size:14.5px}
+  .tot{margin-top:10px;font-size:21px}.tot b{font-size:30px}.tots{font-size:16px}
+  .cta .t{font-size:30px}.btn{margin-top:12px;padding:14px 40px;font-size:30px}.bio{margin-top:9px;font-size:16.5px}
+  .legal{margin-top:10px;padding-top:8px;font-size:13px}
+</style></head>
+<body>
+<div class="bg"></div><div class="shade"></div>
+<div class="card">
+  <div class="head">
+    <div class="logo"><div class="ring"><img src="../../../frontend/public/img/logo-horse.png" alt=""></div><div class="wm">BLACK<b>TURF</b></div></div>
+    <div class="badge"><i></i>Essai gratuit 7 jours</div>
+  </div>
+
+  <div class="sec" style="margin-top:6px">Conseiller IA · Paris hippiques PMU</div>
+  <h1>Chaque course du PMU,<br><span>analysée avant le départ.</span></h1>
+  <p class="lead"><b>80 critères</b> par cheval, une <b>probabilité</b> par partant, un <b>plan de mise</b> adapté à votre budget.</p>
+
+  <div class="sec" style="margin-top:22px">Performance de la semaine · du 30 août au 5 septembre</div>
+  <div class="big">
+    <div class="v num">65,1<small>%</small></div>
+    <div class="l">des courses où le gagnant était dans notre Top 3</div>
+    <div class="s">235 sur 361 courses analysées · le hasard : 30,4 %</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="v num">30,5<small>%</small></div><div class="l">notre favori a gagné</div></div>
+    <div class="stat"><div class="v num">18 090</div><div class="l">courses analysées au total</div></div>
+    <div class="stat"><div class="v num">40</div><div class="l">hippodromes couverts</div></div>
+  </div>
+
+  <div class="sec" style="margin-top:12px">Comment ça marche</div>
+  <div class="how">
+    <div class="step"><div class="n">1</div><div><div class="h">Ouvrez la course</div><div class="d">Classement, probabilités, confiance : déjà calculés.</div></div></div>
+    <div class="step"><div class="n">2</div><div><div class="h">Donnez votre budget</div><div class="d">Plan de mise selon votre profil : prudent, modéré ou risqué.</div></div></div>
+    <div class="step"><div class="n">3</div><div><div class="h">Pariez où vous voulez</div><div class="d">Chez votre opérateur. Réglé à l'arrivée au rapport officiel.</div></div></div>
+  </div>
+
+  <div class="sec" style="margin-top:12px">Meilleurs gains de la semaine</div>
+  <div class="gains">
+    <div class="gcol"><div class="g1 num"><span class="m">10 €</span><span class="arr">→</span><span class="g">314 €</span></div><div class="g1s">Simple Gagnant · Deauville · R1C8</div></div>
+    <div class="gcol"><div class="g1 num"><span class="m">10 €</span><span class="arr">→</span><span class="g">296 €</span></div><div class="g1s">Couplé Gagnant · Son Pardo Palma · R2C3</div></div>
+    <div class="gcol"><div class="g1 num"><span class="m">10 €</span><span class="arr">→</span><span class="g">236 €</span></div><div class="g1s">Couplé Gagnant · Lion d'Angers · R5C7</div></div>
+  </div>
+  <div class="tot num">Total rendu par les plans<b>8 604,70 €</b><span class="tots"> · 199 plans gagnants sur 1 083 calculés · 362 courses</span></div>
+
+  <div class="cta">
+    <div class="t">Ne pariez plus <span>au hasard.</span></div>
+    <div class="btn"><span>black<b>turf.fr</b></span><span class="free">7 jours offerts</span></div>
+    <div class="bio">↑ Lien direct dans la bio · aucun prélèvement avant la fin de l'essai · dès 12 €/mois</div>
+  </div>
+  <p class="legal">Les résultats passés ne préjugent pas des résultats futurs. Jouer comporte des risques : endettement, isolement, dépendance. Appelez le 09 74 75 13 13 (appel non surtaxé). Interdit aux mineurs.</p>
+</div>
+</body></html>
