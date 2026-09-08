@@ -673,7 +673,7 @@ function HeroPalmares({ courses, depuis, stats }: {
 
         <h1 className="mt-6 font-display text-[2.4rem] font-extrabold leading-[1.04] tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)] sm:text-[4.25rem] sm:leading-[1.02]">
           Chaque pronostic IA,{" "}
-          <span className="text-gradient-animated">noté à l&apos;arrivée.</span>
+          <span className="text-gradient-animated sm:block">noté à l&apos;arrivée.</span>
         </h1>
 
         {/* Le compteur reste la preuve, mais en chapeau : le nombre garde son
@@ -690,14 +690,10 @@ function HeroPalmares({ courses, depuis, stats }: {
           réussites comme les échecs.
         </p>
 
-        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+        <div className="mt-8 flex justify-center">
           <Button size="xl" asChild
             className="press btn-shimmer bg-brand-gold text-base font-bold text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep">
             <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-5 w-5" /></Link>
-          </Button>
-          <Button variant="outline" size="xl" asChild
-            className="press border-white/25 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 hover:text-white">
-            <a href="#preuves">Voir la méthode</a>
           </Button>
         </div>
 
