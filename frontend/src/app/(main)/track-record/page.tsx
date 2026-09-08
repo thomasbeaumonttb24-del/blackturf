@@ -585,18 +585,31 @@ function HeroPalmares({ courses, depuis, stats }: {
 
   return (
     <header className="relative isolate flex min-h-[88vh] items-center overflow-hidden border-b border-border/40">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/img/palmares-hero-w1600.webp"
-        srcSet="/img/palmares-hero-w480.webp 480w, /img/palmares-hero-w640.webp 640w, /img/palmares-hero-w800.webp 800w, /img/palmares-hero-w1024.webp 1024w, /img/palmares-hero-w1600.webp 1600w"
-        sizes="100vw"
-        width={1620}
-        height={911}
-        alt="Peloton de galopeurs de face dans la ligne droite, casaques rouge, or, violette et orange."
-        fetchPriority="high"
-        decoding="async"
-        className="ken-burns absolute inset-0 h-full w-full object-cover object-[52%_center]"
-      />
+      {/* AVIF d abord, WebP en repli. C est l element LCP de la page : PageSpeed
+          chiffrait 39 ko d economies sur la seule variante servie aux mobiles. En AVIF
+          la meme image passe de 41 a 25 ko, sans perte visible — et elle finit sous un
+          voile noir a 55-85 %. Le <picture> n est pas positionne, donc l <img> reste
+          cale sur le <header>, qui l est. */}
+      <picture>
+        <source
+          type="image/avif"
+          srcSet="/img/palmares-hero-w480.avif 480w, /img/palmares-hero-w640.avif 640w, /img/palmares-hero-w800.avif 800w, /img/palmares-hero-w1024.avif 1024w, /img/palmares-hero-w1600.avif 1600w"
+          sizes="100vw"
+        />
+        {/* `no-img-element` ne se declenche pas dans un <picture> : la directive
+            de desactivation devenait inutile, et une directive inutile est une erreur. */}
+        <img
+          src="/img/palmares-hero-w1600.webp"
+          srcSet="/img/palmares-hero-w480.webp 480w, /img/palmares-hero-w640.webp 640w, /img/palmares-hero-w800.webp 800w, /img/palmares-hero-w1024.webp 1024w, /img/palmares-hero-w1600.webp 1600w"
+          sizes="100vw"
+          width={1620}
+          height={911}
+          alt="Peloton de galopeurs de face dans la ligne droite, casaques rouge, or, violette et orange."
+          fetchPriority="high"
+          decoding="async"
+          className="ken-burns absolute inset-0 h-full w-full object-cover object-[52%_center]"
+        />
+      </picture>
       {/* Mêmes deux voiles que l'accueil : vertical pour la lisibilité du texte
           blanc, horizontal léger pour asseoir le bord gauche. */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/35" aria-hidden="true" />

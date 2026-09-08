@@ -154,6 +154,16 @@ const siteJsonLd = {
   },
 };
 
+// Origine de l API, deduite de la variable publique (inlinee au build) : elle diffère
+// entre le local et la prod, et une valeur ecrite en dur se serait desynchronisee.
+const API_ORIGINE = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr").origin;
+  } catch {
+    return "https://api.blackturf.fr";
+  }
+})();
+
 export const viewport: Viewport = {
   themeColor: "#F59E0B",
   width: "device-width",
@@ -163,6 +173,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
+      {/* Toutes les donnees du site viennent d une AUTRE origine : chaque page paie
+          donc DNS + TCP + TLS avant sa premiere requete API, une fois hydratee.
+          PageSpeed chiffre l economie a 300 ms de LCP sur /track-record. React 19
+          remonte ces balises dans le <head>. */}
+      <link rel="preconnect" href={API_ORIGINE} crossOrigin="anonymous" />
+      <link rel="dns-prefetch" href={API_ORIGINE} />
       <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased min-h-screen bg-background`}>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(orgJsonLd) }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(siteJsonLd) }} />
