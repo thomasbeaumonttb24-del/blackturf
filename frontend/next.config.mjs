@@ -65,7 +65,7 @@ const nextConfig = {
       ],
     },
     {
-      source: "/:fichier(logo.png|og-image.jpg|favicon.ico)",
+      source: "/:fichier(logo.png|og-image.jpg|og-image-v2.jpg|favicon.ico)",
       headers: [
         { key: "Cache-Control", value: "public, max-age=2592000, stale-while-revalidate=86400" },
       ],

@@ -1,10 +1,10 @@
 {
-  "name": "BlackTurf — Terminal IA Hippique",
+  "name": "BlackTurf — pronostics PMU par IA",
   "short_name": "BlackTurf",
-  "description": "Votre conseiller expert en paris hippiques. Value bets IA en temps réel.",
+  "description": "Le programme PMU analysé par IA : une probabilité par cheval et un plan de mise ajusté à votre budget.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#050A18",
+  "background_color": "#FFFDF7",
   "theme_color": "#F59E0B",
   "orientation": "portrait-primary",
   "icons": [

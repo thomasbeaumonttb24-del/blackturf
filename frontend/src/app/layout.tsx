@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { jsonLd } from "@/lib/seo";
+import { jsonLd, OG_IMAGE } from "@/lib/seo";
 import { SAME_AS } from "@/lib/social";
 import { Inter, Space_Grotesk } from "next/font/google";
 import Script from "next/script";
@@ -75,7 +75,10 @@ export const metadata: Metadata = {
     title: "BlackTurf — pronostics PMU par IA, notés aux rapports réels",
     description:
       "Programme PMU du jour analysé par IA : probabilité par cheval et plan de mise sur votre budget. Pronostics notés aux rapports réels.",
-    images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "BlackTurf" }],
+    // Même constante que toutes les autres pages : une vignette déclarée à deux endroits
+    // finit par diverger, et c'est l'accueil — la page la plus partagée — qui garderait
+    // l'ancienne.
+    images: [OG_IMAGE],
   },
   // Volontairement réduite à la seule forme de carte.
   //
@@ -108,7 +111,7 @@ const orgJsonLd = {
   legalName: "Thomas Beaumont (entreprise individuelle)",
   url: "https://blackturf.fr",
   logo: "https://blackturf.fr/logo.png",
-  image: "https://blackturf.fr/og-image.jpg",
+  image: `https://blackturf.fr${OG_IMAGE.url}`,
   description:
     "Conseiller IA en paris hippiques PMU : plan de mise personnalisé et paris de valeur, réentraîné après chaque course.",
   foundingDate: "2025-04-01",

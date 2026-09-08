@@ -17,7 +17,15 @@ const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/
  * n'ait plus qu'à poser son titre et son URL. Une page qui a sa propre illustration
  * passe simplement `image`.
  */
-export const OG_IMAGE = { url: "/og-image.jpg", width: 1200, height: 630, alt: "BlackTurf" };
+/*
+ * Le NOM du fichier porte une version, et c'est volontaire : la vignette est servie avec
+ * un mois de cache (voir `next.config.mjs`), et les aperçus de Safari, iMessage, WhatsApp
+ * ou LinkedIn gardent en plus leur propre copie, indexée sur l'URL. Republier une image
+ * corrigée sous le même nom laisserait donc l'ancienne circuler des semaines. Une
+ * retouche future doit incrémenter ce nom, pas écraser le fichier.
+ * L'ancien `/og-image.jpg` reste servi (même image) pour les pages déjà en cache.
+ */
+export const OG_IMAGE = { url: "/og-image-v2.jpg", width: 1200, height: 630, alt: "BlackTurf — pronostics PMU par IA" };
 
 export function ogBase(o: {
   title: string;
