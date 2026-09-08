@@ -94,11 +94,10 @@ export const COULEURS = {
  * les moyennes des trois canaux ne sont pas identiques.
  */
 const PHOTOS = [
-  "showcase.webp", // peloton en pleine course
-  "duel.webp", // duel à l'arrivée
-  "hero-1600.webp", // départ, portes numérotées
-  "value.jpg", // piste au soleil couchant
-  "cta.jpg", // arrivée devant le public
+  "cta.jpg",
+  "showcase.webp",
+  "duel.webp",
+  "hero-1600.webp",
   "course/galop-skyline.jpg",
   "course/attele-sable.jpg",
   "course/galop-foule.jpg",
@@ -123,26 +122,111 @@ const PHOTOS = [
   "course/attele-foulee.jpg",
   "course/attele-groupe.jpg",
   "course/galop-shakopee.jpg",
-  "course/attele-duel.jpg",
+  "course/attele-13626791.jpg",
+  "course/galop-11341116.jpg",
+  "course/galop-11341133.jpg",
+  "course/galop-11341135.jpg",
+  "course/attele-14314578.jpg",
+  "course/galop-11341163.jpg",
+  "course/galop-12983689.jpg",
+  "course/galop-13028734.jpg",
+  "course/attele-15466761.jpg",
+  "course/galop-13028737.jpg",
+  "course/galop-13028768.jpg",
+  "course/galop-13033482.jpg",
+  "course/attele-15485052.jpg",
+  "course/galop-13039479.jpg",
+  "course/galop-13055806.jpg",
+  "course/galop-13055807.jpg",
+  "course/attele-15493003.jpg",
+  "course/galop-13087943.jpg",
+  "course/galop-13154679.jpg",
+  "course/galop-13867074.jpg",
+  "course/attele-15509108.jpg",
+  "course/galop-14091536.jpg",
+  "course/galop-14091570.jpg",
+  "course/galop-14091613.jpg",
+  "course/attele-15595108.jpg",
+  "course/galop-14096925.jpg",
+  "course/galop-1462363.jpg",
+  "course/galop-1462364.jpg",
+  "course/attele-15680126.jpg",
+  "course/galop-1462398.jpg",
+  "course/galop-1462399.jpg",
+  "course/galop-15576536.jpg",
+  "course/attele-15841461.jpg",
+  "course/galop-1559386.jpg",
+  "course/galop-15716877.jpg",
+  "course/galop-158976.jpg",
+  "course/attele-16360294.jpg",
+  "course/galop-17651068.jpg",
+  "course/galop-17651069.jpg",
+  "course/galop-17651072.jpg",
+  "course/attele-17651073.jpg",
+  "course/galop-20742501.jpg",
+  "course/galop-27305822.jpg",
+  "course/galop-29273720.jpg",
+  "course/attele-24507068.jpg",
+  "course/galop-30839601.jpg",
+  "course/galop-33622441.jpg",
+  "course/galop-34665172.jpg",
+  "course/attele-31870710.jpg",
+  "course/galop-34665174.jpg",
+  "course/galop-38083719.jpg",
+  "course/galop-38150664.jpg",
+  "course/attele-31997886.jpg",
+  "course/galop-38150669.jpg",
+  "course/galop-38150670.jpg",
+  "course/galop-38150671.jpg",
+  "course/attele-34000518.jpg",
+  "course/galop-4443025.jpg",
+  "course/galop-6134690.jpg",
+  "course/galop-6818591.jpg",
+  "course/attele-6750048.jpg",
 ] as const;
 
 /**
- * La photo du jour — une par jour, sans répétition avant un tour complet du fonds.
+ * La photo du jour — une image N'EST JAMAIS REPUBLIEE.
  *
- * L'index suit le NOMBRE DE JOURS écoulés depuis l'époque, pas le quantième du mois.
- * Avec le quantième, le 1er et le 31 tombaient sur la même image et le cycle se calait
- * sur la longueur du mois : sur un fonds de 32 photos, février n'en aurait montré que
- * 28 et jamais les quatre dernières. Le compte de jours avance de un chaque jour et
- * ignore les mois, donc les 32 photos passent toutes, dans l'ordre, puis recommencent.
+ * Ce fonds est une FILE D'ATTENTE qu'on consomme, pas une rotation. L'index est la
+ * DIFFERENCE entre le jour demande et `DEPART_FONDS`, sans modulo : la photo d'indice
+ * N sort le N-ieme jour, une seule fois, et ne revient pas. Le modulo precedent
+ * garantissait « pas deux fois dans le meme tour », pas « jamais deux fois ».
  *
- * Déterministe et sans état : deux rendus du même jour donnent la même image, et le
- * visuel d'hier reste reproductible — indispensable quand une publication est mise en
- * cause après coup.
+ * QUAND LE STOCK EST EPUISE on renvoie `null`, surtout pas la premiere photo. Le
+ * visuel se rend alors sans bandeau photo : le manque est VISIBLE, donc il se traite,
+ * au lieu de passer inapercu comme le ferait une repetition.
+ *
+ * NE JAMAIS INSERER une photo AVANT la position du jour courant : la file est
+ * indexee par rang, donc une insertion au milieu decale tout le calendrier restant
+ * et fait reapparaitre une image deja publiee. On ajoute EN FIN de liste.
+ *
+ * `DEPART_FONDS` est le premier jour servi. Les photos parues sous l'ancienne
+ * rotation (`value.jpg` le 07/09, `course/attele-duel.jpg` le 05/09) ont ete retirees
+ * pour ne pas ressortir ; `cta.jpg` ouvre la file, c'est la story du 08/09.
  */
-export function photoDuJour(jour: string): string {
-  const jours = Math.floor(Date.parse(`${jour}T00:00:00Z`) / 86_400_000);
-  if (!Number.isFinite(jours)) return PHOTOS[0];
-  return PHOTOS[((jours % PHOTOS.length) + PHOTOS.length) % PHOTOS.length];
+const DEPART_FONDS = "2026-09-08";
+
+function indexDuJour(jour: string): number | null {
+  const j = Math.floor(Date.parse(`${jour}T00:00:00Z`) / 86_400_000);
+  const depart = Math.floor(Date.parse(`${DEPART_FONDS}T00:00:00Z`) / 86_400_000);
+  if (!Number.isFinite(j)) return null;
+  return j - depart;
+}
+
+export function photoDuJour(jour: string): string | null {
+  const i = indexDuJour(jour);
+  if (i === null || i < 0 || i >= PHOTOS.length) return null;
+  return PHOTOS[i];
+}
+
+/** Combien de jours le fonds tient encore APRES `jour`. Sert a alerter avant la
+ *  panne seche : un stock qui s'epuise en silence se decouvre le soir ou la story
+ *  sort sans photo. */
+export function photosRestantes(jour: string): number {
+  const i = indexDuJour(jour);
+  if (i === null) return 0;
+  return Math.max(0, PHOTOS.length - i - 1);
 }
 
 /**

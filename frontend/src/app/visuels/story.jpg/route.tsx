@@ -86,8 +86,11 @@ async function donneesStory(jour: string): Promise<DonneesStory> {
   } catch {
     // Un visuel sans données reste publiable ; un visuel qui plante, non.
   }
+  // `photoDuJour` renvoie null quand le fonds est epuise : on rend alors la story
+  // SANS bandeau photo plutot que de republier une image deja parue.
+  const fichierPhoto = photoDuJour(jour);
   const [photo, horse] = await Promise.all([
-    photoEnDataUri(photoDuJour(jour), {
+    fichierPhoto === null ? Promise.resolve(null) : photoEnDataUri(fichierPhoto, {
       largeur: PHOTO_L, hauteur: PHOTO_H, luminosite: 1.04,
       // 0,82 : la fenêtre part du bas, on ne perd que du ciel. La détection de sujet
       // de `sharp` centrait le cheval et lui coupait les jambes.

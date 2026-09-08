@@ -245,9 +245,10 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       pret: classement.length > 0,
     },
     {
-      // Story verticale : elle n'entre PAS dans la publication automatique (le job du
-      // backend ne connaît que « matin » et « soir »). Elle se publie à la main depuis
-      // /studio, une fois la journée courue.
+      // Story verticale du bilan. Elle EST publiee automatiquement : le job
+      // `publication_story` du backend repasse toutes les demi-heures de 22 h a
+      // 9 h 30 et publie la premiere journee complete ET reglee. Elle reste
+      // publiable a la main depuis /studio.
       cle: "story",
       titre: `Story du soir — performance du ${jourLong(jourStory)}`,
       image: `${SITE}/visuels/story.jpg?jour=${jourStory}`,
