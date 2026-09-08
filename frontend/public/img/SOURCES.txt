@@ -1,0 +1,4 @@
+fichier|origine|traitement
+palmares-hero-460.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|recadrage 4:5 (x378,y170,923x1154) puis webp q78
+palmares-hero-700.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|idem, largeur 700
+palmares-hero-920.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|idem, largeur 920
