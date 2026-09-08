@@ -1,4 +1,6 @@
 fichier|origine|traitement
+palmares-hero-w480.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|recadrage 16:9 (x120,y200,1620x911) puis webp q78, largeur 480
 palmares-hero-w640.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|recadrage 16:9 (x120,y200,1620x911) puis webp q78, largeur 640
-palmares-hero-w1024.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|idem, largeur 1024
-palmares-hero-w1600.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|idem, largeur 1600 (source 1620 px)
+palmares-hero-w800.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|recadrage 16:9 (x120,y200,1620x911) puis webp q78, largeur 800
+palmares-hero-w1024.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|recadrage 16:9 (x120,y200,1620x911) puis webp q78, largeur 1024
+palmares-hero-w1600.webp|course/galop-mouvement.jpg (https://www.pexels.com/photo/17651070/)|recadrage 16:9 (x120,y200,1620x911) puis webp q78, largeur 1600

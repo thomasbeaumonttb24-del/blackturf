@@ -78,9 +78,12 @@ export function Footer() {
           {/* Brand */}
           <div className="col-span-2">
             <div className="flex items-center gap-2.5 mb-3">
+              {/* `alt` vide, volontairement : le nom est écrit juste à côté, et un
+                  alt qui le répète fait lire « BlackTurf BlackTurf » à un lecteur
+                  d'écran (règle axe « image-redundant-alt »). L'image est décorative. */}
               <Image
                 src="/logo.png"
-                alt="BlackTurf"
+                alt=""
                 width={30}
                 height={30}
                 className="rounded-md object-contain ring-1 ring-amber-200/60"

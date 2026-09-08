@@ -173,9 +173,12 @@ export function Navbar() {
 
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 flex-shrink-0" aria-label="BlackTurf — Accueil">
+            {/* `alt` vide, volontairement : le lien porte déjà `aria-label` ET le nom
+                écrit à côté. Un alt qui le répète fait annoncer « BlackTurf » deux
+                fois de plus (règle axe « image-redundant-alt »). */}
             <Image
               src="/logo.png"
-              alt="BlackTurf"
+              alt=""
               width={52}
               height={52}
               className="h-12 w-12 sm:h-[52px] sm:w-[52px] object-contain"

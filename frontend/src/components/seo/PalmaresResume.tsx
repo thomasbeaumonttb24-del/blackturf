@@ -68,10 +68,18 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
               ].map((c) => (
                 <div key={c.k} className="bg-white px-3.5 py-3">
                   <dt className="text-[11px] leading-snug text-brand-charcoal">{c.k}</dt>
+                  {/* La précision vit DANS le <dd> : un <div> nu glissé entre deux
+                      paires dt/dd rend la liste de définitions mal formée (règle axe
+                      « definition-list », −7 points d'accessibilité), et c'est bien
+                      une précision de la même valeur, pas un troisième terme. */}
                   <dd className="mt-1 font-display text-[19px] font-bold tabular-nums text-brand-dark">
                     {c.v}
+                    {c.s && (
+                      <span className="mt-0.5 block font-sans text-[11px] font-normal text-brand-charcoal">
+                        {c.s}
+                      </span>
+                    )}
                   </dd>
-                  {c.s && <div className="mt-0.5 text-[11px] text-brand-charcoal">{c.s}</div>}
                 </div>
               ))}
             </dl>

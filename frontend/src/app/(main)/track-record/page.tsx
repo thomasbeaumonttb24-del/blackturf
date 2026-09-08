@@ -4,9 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import {
-  Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from "recharts";
-import {
   Trophy, Star, Receipt, Coins, ArrowRight, ShieldCheck, Database,
   ExternalLink, LockKeyhole, BarChart3, RefreshCw, CheckCircle2,
   CalendarDays, Target, Crown, ChevronDown, TrendingUp, Dices,
@@ -15,8 +12,10 @@ import {
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DisciplineImg } from "@/components/ui/DisciplineIcon";
-import { axisTick, GRID, ChartTooltip } from "@/components/charts/chart-kit";
+import dynamic from "next/dynamic";
+import type { PointTendance } from "@/components/track-record/TendanceChart";
 import { statsApi } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
 import { cn } from "@/lib/utils";
 
@@ -227,7 +226,6 @@ function SectionHeading({ eyebrow, title, description, icon: Icon, align = "left
 }
 
 // ─── Courbe de tendance (30 jours) ────────────────────────────
-type PointTendance = { jour: string; top3: number | null; nb: number };
 
 /**
  * Complète la série renvoyée par l'API avec les jours SANS course mesurée.
@@ -258,74 +256,14 @@ function completerJours(
   return out;
 }
 
-function TendanceChart({ data, moyenne, hasard }: { data: PointTendance[]; moyenne: number; hasard: number | null }) {
-  return (
-    <div className="h-[260px] w-full sm:h-[300px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 12, right: 8, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id="tendanceFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="#F59E0B" stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid {...GRID} />
-          <XAxis
-            dataKey="jour"
-            tick={axisTick}
-            axisLine={false}
-            tickLine={false}
-            interval="preserveStartEnd"
-            minTickGap={28}
-          />
-          <YAxis
-            domain={[0, 100]}
-            ticks={[0, 25, 50, 75, 100]}
-            tick={axisTick}
-            axisLine={false}
-            tickLine={false}
-            width={52}
-            tickFormatter={(v: number) => `${v}%`}
-          />
-          {hasard != null && (
-            <ReferenceLine
-              y={hasard}
-              stroke="#94A3B8"
-              strokeDasharray="4 4"
-              label={{ value: `hasard ${nf(hasard, 0)} %`, position: "insideBottomRight", fontSize: 10, fill: "#94A3B8" }}
-            />
-          )}
-          <ReferenceLine
-            y={moyenne}
-            stroke="#059669"
-            strokeDasharray="5 3"
-            label={{ value: `moyenne ${nf(moyenne, 1)} %`, position: "insideTopRight", fontSize: 10, fill: "#059669" }}
-          />
-          <Tooltip
-            content={
-              <ChartTooltip
-                labelMap={{ top3: "Top-3" }}
-                valueFormatter={(v) => `${nf(v, 1)} %`}
-              />
-            }
-          />
-          <Area
-            type="monotone"
-            dataKey="top3"
-            name="Top-3"
-            stroke="#B45309"
-            strokeWidth={2}
-            fill="url(#tendanceFill)"
-            connectNulls={false}
-            isAnimationActive={false}
-            dot={false}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
+// Recharts (~100 ko) ne servait qu ici, tout en bas de page, mais son import au
+// niveau du module le faisait entrer dans le lot d hydratation initial et retardait
+// la peinture du hero. Charge a la demande, avec un substitut de meme hauteur pour
+// garder le CLS a zero.
+const TendanceChart = dynamic(() => import("@/components/track-record/TendanceChart"), {
+  ssr: false,
+  loading: () => <div className="h-[260px] w-full animate-pulse rounded-2xl bg-stone-100 sm:h-[300px]" aria-hidden="true" />,
+});
 
 // ─── Table de paris gagnés (réutilisée : 50 derniers + 30 meilleurs) ───
 function BetsTable({ bets, ranked = false }: { bets: WinningBet[]; ranked?: boolean }) {
@@ -650,7 +588,7 @@ function HeroPalmares({ courses, depuis, stats }: {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/img/palmares-hero-w1600.webp"
-        srcSet="/img/palmares-hero-w640.webp 640w, /img/palmares-hero-w1024.webp 1024w, /img/palmares-hero-w1600.webp 1600w"
+        srcSet="/img/palmares-hero-w480.webp 480w, /img/palmares-hero-w640.webp 640w, /img/palmares-hero-w800.webp 800w, /img/palmares-hero-w1024.webp 1024w, /img/palmares-hero-w1600.webp 1600w"
         sizes="100vw"
         width={1620}
         height={911}
@@ -714,6 +652,10 @@ function HeroPalmares({ courses, depuis, stats }: {
 }
 
 export default function TrackRecordPage() {
+  // Sert uniquement à savoir S'IL FAUT tenter la version admin du palmarès :
+  // pour un visiteur, l'appeler ne rapporte rien et coûte un 401 dans la console.
+  const { user, loading: authEnCours } = useAuth();
+  const estAdmin = !!user?.is_admin;
   const [recentLimit, setRecentLimit] = useState(10);
   const [recordsLimit, setRecordsLimit] = useState(10);
   const { data, isLoading, error, mutate } = useSWR<TrackRecord>(
@@ -728,16 +670,22 @@ export default function TrackRecordPage() {
     profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
     updated_at?: string;
   }>(
-    "palmares-gagnants",
+    // Tant que l'auth n'a pas tranché, on n'appelle rien : la clé `null` suspend SWR.
+    // Pour un visiteur anonyme, `hasSessionHint()` répond sans aller au réseau, donc
+    // l'attente est nulle en pratique.
+    authEnCours ? null : estAdmin ? "palmares-gagnants-admin" : "palmares-gagnants-public",
     // `palmaresGagnants` est gardé par require_admin → 401 pour un visiteur, et cette
-    // page est PUBLIQUE : sans repli, tout prospect voyait un palmarès vide. On tente
-    // d'abord la version admin (agrégats ROI/profil en plus), et on retombe sur la
-    // version publique sinon. Les blocs ROI se masquent d'eux-mêmes quand `profils`
-    // est absent — le ROI reste donc admin-only, conformément à la règle produit.
+    // page est PUBLIQUE : sans repli, tout prospect voyait un palmarès vide. Les blocs
+    // ROI se masquent d'eux-mêmes quand `profils` est absent — le ROI reste donc
+    // admin-only, conformément à la règle produit.
+    //
+    // On ne tente PLUS la version admin d'abord : le 401 était rattrapé côté code mais
+    // le navigateur le journalise quand même, et Lighthouse le compte en « erreurs de
+    // console » (−4 points de bonnes pratiques sur une page vue par des prospects).
+    // Le repli est conservé : un admin dont l'appel échoue voit la version publique
+    // plutôt qu'un palmarès vide.
     async () => {
-      try {
-        return (await statsApi.palmaresGagnants()).data;
-      } catch {
+      const publique = async () => {
         const pub = (await statsApi.palmaresPublic()).data;
         return {
           gagnants: pub.gagnants ?? [],
@@ -746,6 +694,12 @@ export default function TrackRecordPage() {
           n_courses: pub.nb_courses_reglees ?? 0,
           updated_at: pub.updated_at,
         };
+      };
+      if (!estAdmin) return publique();
+      try {
+        return (await statsApi.palmaresGagnants()).data;
+      } catch {
+        return publique();
       }
     },
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
