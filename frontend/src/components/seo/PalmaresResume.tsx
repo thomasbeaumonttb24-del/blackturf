@@ -51,7 +51,10 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
                 },
                 {
                   k: "Gagnant trouvé",
-                  v: pct(g.accuracy_top1),
+                  // Même champ que le hero du palmarès et que l'accueil :
+                  // `accuracy_top1` mesure le même évènement sur une autre table et
+                  // affichait 27,6 % ici pendant que les deux autres disaient 28,6 %.
+                  v: pct(g.favori_win_rate),
                   s: `hasard : ${pct(g.hasard_top1)}`,
                 },
                 {
@@ -86,7 +89,7 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
             <p className="mt-4 text-sm leading-relaxed text-brand-charcoal">
               Sur {g.nb_courses_analysees.toLocaleString("fr-FR")} courses de{" "}
               {g.nb_partants_moyen.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} partants
-              en moyenne, l&apos;algorithme désigne le gagnant {pct(g.accuracy_top1)} du temps, contre{" "}
+              en moyenne, l&apos;algorithme désigne le gagnant {pct(g.favori_win_rate)} du temps, contre{" "}
               {pct(g.hasard_top1)} pour un tirage au sort, et le place dans son trio de tête{" "}
               {pct(g.accuracy_top3)} du temps contre {pct(g.hasard_top3)}.{" "}
               {g.brier_moyen !== null && g.brier_moyen !== undefined && (

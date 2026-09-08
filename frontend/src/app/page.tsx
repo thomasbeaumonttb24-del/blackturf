@@ -193,7 +193,13 @@ function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
 async function fetchTrackRecord(): Promise<TrackRecord | null> {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   try {
-    const res = await fetch(`${base}/api/v1/stats/track-record`, { next: { revalidate: 3600 } });
+    // 900 s, comme /track-record (`revalidate` de son layout). À 3 600 s, l'accueil
+    // gardait pendant une heure les chiffres figés au build alors que le palmarès
+    // affichait déjà les nouveaux : constaté en prod le 2026-09-09, juste après le
+    // correctif des disqualifiés — 31,8 % ici contre 28,6 % là-bas, pour la même
+    // phrase. L'API sert ce calcul depuis son propre cache Redis, le raccourcir ne
+    // coûte donc rien à la base.
+    const res = await fetch(`${base}/api/v1/stats/track-record`, { next: { revalidate: 900 } });
     if (!res.ok) return null;
     const d = await res.json();
     const g = d?.global ?? {};
