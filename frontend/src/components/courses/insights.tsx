@@ -1110,12 +1110,9 @@ export function ApercuAnalyseCard({
               <Tuile
                 valeur={String(apercu.confiance)}
                 unite="/ 100"
-                libelle={
-                  "accord des 3 modèles sur son n°1 — pas sa chance de gagner"
-                  + (apercu.confiance_contexte
-                    ? ` · à ce niveau, le n°1 a gagné ${Math.round(apercu.confiance_contexte.n1_gagne_pct)} % des ${apercu.confiance_contexte.n_courses} dernières courses`
-                    : "")
-                }
+                /* Libellé court : le rappel « pas sa chance de gagner » et le taux de
+                   réussite historique alourdissaient une tuile de trois lignes. */
+                libelle="accord des modèles sur son n°1"
               />
             )}
             {apercu.proba_top1 != null && (
