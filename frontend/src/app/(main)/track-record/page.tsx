@@ -591,24 +591,16 @@ function BrierScale({ value }: { value: number }) {
   );
 }
 
-// ─── Cellule du bandeau de chiffres ───────────────────────────
-function StatCell({ value, label, note }: { value: React.ReactNode; label: string; note?: string }) {
+// ─── Carte de chiffre du hero (verre, même langage que la page d'accueil) ───
+function HeroStatCard({ value, label, note, cls }: {
+  value: React.ReactNode; label: string; note?: string; cls?: string;
+}) {
   return (
-    <div className="px-5 py-6 sm:px-7 sm:py-8">
-      <p className="font-display text-[1.9rem] font-bold leading-none tracking-[-0.025em] tabular-nums text-slate-900 sm:text-[2.15rem]">{value}</p>
-      <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-700">{label}</p>
-      {note && <p className="mt-1.5 text-[11.5px] leading-4 text-slate-500">{note}</p>}
+    <div className="rounded-2xl bg-white/10 px-3 py-4 ring-1 ring-white/15 backdrop-blur-md sm:px-4 sm:py-5">
+      <div className={cn("font-display text-2xl font-black tabular-nums sm:text-[2rem]", cls ?? "text-white")}>{value}</div>
+      <div className="mt-1.5 text-[10px] leading-tight text-white/70 sm:text-xs">{label}</div>
+      {note && <div className="mt-1 text-[10px] leading-tight text-white/50">{note}</div>}
     </div>
-  );
-}
-
-// ─── Garantie de la bande sous le hero ────────────────────────
-function Garantie({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
-  return (
-    <li className="flex items-center gap-2.5 text-[13px] leading-5 text-slate-600">
-      <Icon className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
-      {children}
-    </li>
   );
 }
 
@@ -621,103 +613,105 @@ function Garantie({ icon: Icon, children }: { icon: React.ElementType; children:
  * HTML servi ne contenait qu'un squelette, SANS le moindre `<h1>`. La page qui
  * porte la preuve du produit était ainsi la moins bien référencée du site —
  * `grep '<h1' track-record.html` renvoyait 0. Sortir l'en-tête du garde de
- * chargement suffit : son texte ne dépend d'aucune donnée, seuls le compteur et
- * la date de départ de la mesure en dépendent, et ils s'effacent proprement
- * quand ils ne sont pas encore connus.
+ * chargement suffit : son texte ne dépend d'aucune donnée, seuls le compteur, la
+ * date de départ de la mesure et les quatre chiffres en dépendent, et ils
+ * s'effacent proprement quand ils ne sont pas encore connus.
  *
- * REFONTE — l'en-tête précédent empilait les tics de la landing page générée :
- * photo sombre pleine largeur, titre de 68 px dont la seconde ligne passait en
- * or, et carte de chiffres flottant en chevauchement. Trois défauts concrets en
- * découlaient : (1) la photo, noyée sous deux voiles pour tenir le contraste du
- * texte, ne montrait plus rien — elle perdait justement ce qu'on lui demandait,
- * sa couleur ; (2) la ligne de garanties était écrite en `slate-600` sur un fond
- * quasi noir, sous le seuil AA ; (3) le hero sombre coupait net avec le corps de
- * page, clair. La mise en page est donc éditoriale et claire : colonne de texte
- * à gauche, photographie cadrée à droite qui garde ses couleurs, et le bandeau
- * de chiffres redescendu DANS le flux. Une seule couleur d'accent, l'or, sur le
- * filet du surtitre et le bouton principal : la hiérarchie se fait à la taille
- * et à la graisse, pas au coloriage du titre.
+ * L'en-tête reprend TRAIT POUR TRAIT celui de la page d'accueil — image plein
+ * cadre en Ken Burns, deux dégradés noirs, colonne centrée, titre dont la
+ * seconde ligne passe en dégradé or animé, bouton or + bouton verre, cartes de
+ * chiffres en verre dépoli. Les deux pages ouvrent donc de la même manière, et
+ * le visiteur qui vient de l'accueil reconnaît la maison.
+ *
+ * Deux choses seulement changent par rapport à la version précédente de cet
+ * en-tête. La photographie d'abord : l'ancienne montrait un tableau d'affichage
+ * nord-américain (« POOL TOTALS », drapeaux américain et canadien) sur un site
+ * PMU français, et son ciel délavé ne donnait aucune couleur une fois voilé. La
+ * ligne de garanties ensuite, qui était écrite en `slate-600` sur fond quasi
+ * noir — sous le seuil AA, illisible en pratique ; elle passe en `white/60`,
+ * comme le reste du texte secondaire posé sur l'image.
  */
-function HeroPalmares({ courses, depuis }: { courses: number | null; depuis: string | null }) {
+function HeroPalmares({ courses, depuis, stats }: {
+  courses: number | null;
+  depuis: string | null;
+  stats?: Array<{ value: React.ReactNode; label: string; note?: string; cls?: string }>;
+}) {
+  // Sans données (chargement, erreur), les cartes gardent leur place et leur
+  // libellé : un tiret est honnête, une carte absente ferait sauter la mise en page.
+  const cartes = stats ?? [
+    { label: "Gagnant dans le Top-3", value: "—", cls: "text-amber-300" },
+    { label: "Favori qui gagne", value: "—", cls: "text-emerald-300" },
+    { label: "Courses analysées", value: "—" },
+    { label: "Paris gagnés", value: "—" },
+  ];
+
   return (
-    <header className="relative isolate overflow-hidden border-b border-stone-200/80">
-      {/* Fond : blanc chaud, un seul halo doré très dilué côté photo. Aucun aplat
-          sombre — la suite de la page est claire. */}
-      <div
-        className="absolute inset-0 -z-10"
-        aria-hidden="true"
-        style={{
-          background:
-            "radial-gradient(115% 85% at 88% 0%, rgba(245,158,11,.11) 0%, transparent 58%), linear-gradient(180deg,#FFFFFF 0%,#FCFBF8 100%)",
-        }}
+    <header className="relative isolate flex min-h-[88vh] items-center overflow-hidden border-b border-border/40">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/img/palmares-hero-w1600.webp"
+        srcSet="/img/palmares-hero-w640.webp 640w, /img/palmares-hero-w1024.webp 1024w, /img/palmares-hero-w1600.webp 1600w"
+        sizes="100vw"
+        width={1620}
+        height={911}
+        alt="Peloton de galopeurs de face dans la ligne droite, casaques rouge, or, violette et orange."
+        fetchPriority="high"
+        decoding="async"
+        className="ken-burns absolute inset-0 h-full w-full object-cover object-[52%_center]"
       />
+      {/* Mêmes deux voiles que l'accueil : vertical pour la lisibilité du texte
+          blanc, horizontal léger pour asseoir le bord gauche. */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/35" aria-hidden="true" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-transparent" aria-hidden="true" />
 
-      <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 pb-12 pt-12 sm:px-6 sm:pb-14 sm:pt-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)] lg:gap-16 lg:pb-16 lg:pt-20">
-        {/* ── Colonne éditoriale ─────────────────────────────────── */}
-        <div>
-          <p className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700">
-            <span className="h-px w-7 bg-amber-500" aria-hidden="true" />
-            Palmarès public
-          </p>
+      <div className="relative mx-auto w-full max-w-5xl px-5 pb-16 pt-28 text-center sm:px-6 lg:px-8">
+        <p className="flex items-center justify-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-300">
+          <span className="h-px w-7 bg-amber-400/70" aria-hidden="true" />
+          Palmarès public
+          <span className="h-px w-7 bg-amber-400/70" aria-hidden="true" />
+        </p>
 
-          <h1 className="mt-6 max-w-[15ch] font-display text-[2.15rem] font-bold leading-[1.06] tracking-[-0.035em] text-slate-900 sm:text-[2.9rem] lg:text-[3.35rem]">
-            Chaque pronostic IA, noté à l&apos;arrivée.
-          </h1>
+        <h1 className="mt-6 font-display text-[2.4rem] font-extrabold leading-[1.04] tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)] sm:text-[4.25rem] sm:leading-[1.02]">
+          Chaque pronostic IA,{" "}
+          <span className="text-gradient-animated">noté à l&apos;arrivée.</span>
+        </h1>
 
-          {/* Le compteur reste la preuve, mais en attaque de chapeau et non en
-              titre de 68 px : le nombre garde son poids, la page gagne son ton. */}
-          <p className="mt-6 max-w-xl text-[1.0625rem] leading-7 text-slate-600 sm:leading-8">
-            {courses !== null && (
-              <>
-                <strong className="font-semibold tabular-nums text-slate-900">{nf(courses)} courses</strong>
-                {" "}analysées{depuis ? ` depuis le ${depuis}` : ""}.{" "}
-              </>
-            )}
-            Chaque prévision est horodatée avant le départ, puis confrontée aux rapports PMU
-            officiels — les réussites comme les échecs.
-          </p>
+        {/* Le compteur reste la preuve, mais en chapeau : le nombre garde son
+            poids sans occuper la ligne de titre. */}
+        <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-white/85 sm:text-lg">
+          {courses !== null && (
+            <>
+              <span className="font-semibold tabular-nums text-white">{nf(courses)} courses</span>
+              {" "}analysées{depuis ? ` depuis le ${depuis}` : ""}.{" "}
+            </>
+          )}
+          Chaque prévision est horodatée avant le départ, puis confrontée aux{" "}
+          <span className="font-semibold text-white">rapports PMU officiels</span> — les
+          réussites comme les échecs.
+        </p>
 
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button asChild variant="brand" size="lg" className="min-h-12 rounded-xl px-6">
-              <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-4 w-4" /></Link>
-            </Button>
-            <Button asChild variant="outline" size="lg" className="min-h-12 rounded-xl border-slate-300 bg-white px-6 text-slate-800 hover:bg-slate-50 hover:text-slate-900">
-              <a href="#preuves">Voir la méthode</a>
-            </Button>
-          </div>
+        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+          <Button size="xl" asChild
+            className="press btn-shimmer bg-brand-gold text-base font-bold text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep">
+            <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-5 w-5" /></Link>
+          </Button>
+          <Button variant="outline" size="xl" asChild
+            className="press border-white/25 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 hover:text-white">
+            <a href="#preuves">Voir la méthode</a>
+          </Button>
         </div>
 
-        {/* ── Photographie ───────────────────────────────────────────
-            Cadrée et légendée comme une illustration de presse, sans voile :
-            c'est la seule zone colorée de l'en-tête, et elle doit le rester. */}
-        <figure className="relative overflow-hidden rounded-2xl bg-white shadow-[0_30px_60px_-32px_rgba(15,23,42,.45)] ring-1 ring-slate-900/10">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/img/palmares-hero-920.webp"
-            srcSet="/img/palmares-hero-460.webp 460w, /img/palmares-hero-700.webp 700w, /img/palmares-hero-920.webp 920w"
-            sizes="(min-width: 1024px) 440px, 100vw"
-            width={923}
-            height={1154}
-            alt="Peloton de galopeurs de face dans la ligne droite, casaques rouge, or, violette et orange."
-            fetchPriority="high"
-            className="aspect-[4/3] w-full object-cover object-[50%_32%] sm:aspect-[16/10] lg:aspect-[4/5]"
-          />
-          <figcaption className="flex items-start gap-2.5 border-t border-stone-200 px-4 py-3 text-[12px] leading-5 text-slate-600">
-            <span className="mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-            Le pronostic est figé avant le départ ; c&apos;est l&apos;arrivée qui le note.
-          </figcaption>
-        </figure>
-      </div>
+        <p className="mt-5 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 text-[11px] text-white/60">
+          <span className="inline-flex items-center gap-1.5"><LockKeyhole className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" /> Horodaté avant le départ</span>
+          <span aria-hidden="true">·</span>
+          <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" /> Rapports PMU officiels</span>
+          <span aria-hidden="true">·</span>
+          <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" /> Aucun prélèvement pendant l&apos;essai</span>
+        </p>
 
-      {/* ── Bande de garanties ─────────────────────────────────────
-          Même contenu qu'avant, mais lisible : sur fond noir ces trois mentions
-          étaient écrites en gris moyen, donc sous le seuil AA. */}
-      <div className="border-t border-stone-200/80 bg-white/70">
-        <ul className="mx-auto flex max-w-7xl flex-col gap-2.5 px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-9 sm:px-6">
-          <Garantie icon={LockKeyhole}>Horodaté avant le départ</Garantie>
-          <Garantie icon={Database}>Rapports PMU officiels</Garantie>
-          <Garantie icon={CheckCircle2}>Aucun prélèvement pendant l&apos;essai</Garantie>
-        </ul>
+        <div className="mx-auto mt-10 grid max-w-3xl grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-4">
+          {cartes.map((c) => <HeroStatCard key={c.label} {...c} />)}
+        </div>
       </div>
     </header>
   );
@@ -824,37 +818,41 @@ export default function TrackRecordPage() {
   return (
     <div className="min-h-screen bg-[#FCFBF8]">
 
-      <HeroPalmares courses={g.nb_courses_analysees} depuis={depuis} />
-
-      {/* Bandeau de chiffres — DANS le flux, et non plus en chevauchement sur la
-          photo : la carte flottante posait une ombre portée sur une image, ce qui
-          salissait les deux. Ici il ouvre le corps de page, sur la même grille. */}
-      <div className="mx-auto max-w-7xl px-4 pt-10 sm:px-6 sm:pt-12">
-        <div className="grid grid-cols-2 divide-x divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_18px_40px_-34px_rgba(15,23,42,.5)] sm:grid-cols-4 sm:divide-y-0">
-          <StatCell
-            value={<CountUp value={g.accuracy_top3} decimals={1} suffix=" %" />}
-            label="Gagnant dans le Top-3"
-            note={hasard3 != null ? `Hasard : ${nf(hasard3, 0)} %` : undefined}
-          />
-          <StatCell
-            value={<CountUp value={g.accuracy_top1} decimals={1} suffix=" %" />}
-            label="Favori qui gagne"
-            note={hasard1 != null ? `Hasard : ${nf(hasard1, 1)} %` : undefined}
-          />
-          <StatCell
-            value={<CountUp value={g.nb_courses_analysees} />}
-            label="Courses analysées"
-            note={depuis ? `Depuis le ${depuis}` : undefined}
-          />
-          <StatCell
-            value={!gagnantsData ? "—" : gainConnu
+      <HeroPalmares
+        courses={g.nb_courses_analysees}
+        depuis={depuis}
+        stats={[
+          {
+            value: <CountUp value={g.accuracy_top3} decimals={1} suffix=" %" />,
+            label: "Gagnant dans le Top-3",
+            note: hasard3 != null ? `Hasard : ${nf(hasard3, 0)} %` : undefined,
+            cls: "text-amber-300",
+          },
+          {
+            value: <CountUp value={g.accuracy_top1} decimals={1} suffix=" %" />,
+            label: "Favori qui gagne",
+            note: hasard1 != null ? `Hasard : ${nf(hasard1, 1)} %` : undefined,
+            cls: "text-emerald-300",
+          },
+          {
+            value: <CountUp value={g.nb_courses_analysees} />,
+            label: "Courses analysées",
+            note: depuis ? `Depuis le ${depuis}` : undefined,
+          },
+          {
+            value: !gagnantsData ? "—" : gainConnu
               ? <CountUpEuro value={gagnantsData.total_gain ?? 0} prefix="+" />
-              : <CountUp value={nbGagnants} />}
-            label={gainConnu ? "Gains encaissés" : "Paris gagnés"}
-            note={gainConnu ? `${nf(nbGagnants)} paris gagnés` : `Sur ${nf(nbCoursesReglees)} courses réglées`}
-          />
-        </div>
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[11px] text-muted-foreground">
+              : <CountUp value={nbGagnants} />,
+            label: gainConnu ? "Gains encaissés" : "Paris gagnés",
+            note: gainConnu ? `${nf(nbGagnants)} paris gagnés` : `Sur ${nf(nbCoursesReglees)} courses réglées`,
+          },
+        ]}
+      />
+
+      {/* Sous l'image : ce qui qualifie la mesure. Ces deux lignes n'ont rien à
+          faire sur la photo — elles se lisent après les chiffres, pas avec eux. */}
+      <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 sm:pt-10">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[11px] text-muted-foreground">
           <span className="inline-flex items-start gap-1.5">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700" aria-hidden="true" />
             Cohorte mesurée : toute course dont le pronostic existait avant le départ
