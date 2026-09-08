@@ -11,6 +11,7 @@ import {
 } from "@/lib/seo";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { MENTION_LEGALE, HASHTAGS } from "@/lib/visuels";
+import { photosRestantes } from "@/lib/mosaique";
 
 const SITE = "https://blackturf.fr";
 
@@ -35,6 +36,12 @@ export interface Publication {
   pret: boolean;
   /** Pourquoi ce n'est pas encore publiable. Affiché tel quel dans /studio. */
   attente?: string;
+  /** Journee couverte par la publication, au format AAAA-MM-JJ. Story uniquement.
+   *  Le backend s en sert pour n alerter que sur la journee qu il vient de publier. */
+  jour?: string;
+  /** Jours de photos inedites encore disponibles. Story uniquement : le fonds est
+   *  une file consommee, une image publiee ne reparait jamais. */
+  photos_restantes?: number;
 }
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
@@ -253,6 +260,11 @@ export async function publicationsDuJour(): Promise<Publication[]> {
       titre: `Story du soir — performance du ${jourLong(jourStory)}`,
       image: `${SITE}/visuels/story.jpg?jour=${jourStory}`,
       fichier: `blackturf-story-${jourStory}.jpg`,
+      jour: jourStory,
+      // Combien de jours le fonds photo tient encore. Publie ici parce que la
+      // liste des photos vit cote frontend, alors que l alerte part du backend :
+      // dupliquer le compte des deux cotes le ferait diverger.
+      photos_restantes: photosRestantes(jourStory),
       legende: legendeStory,
       // RÈGLE DE PUBLICATION : après le DERNIER RÈGLEMENT de la journée, jamais avant.
       // « Au moins un plan réglé » ne suffisait pas : à 11 h du matin un tiers des

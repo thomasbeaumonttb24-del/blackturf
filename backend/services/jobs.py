@@ -781,6 +781,103 @@ CANAL_STORY = "story_performance"
 CANAL_MOSAIQUE = "mosaique_hebdo"
 
 
+# Paliers d'alerte du fonds photo des stories.
+#
+# Une LISTE DE SEUILS et non un « <= 15 » : sous quinze jours, un rappel quotidien
+# pendant deux semaines finit dans un filtre, et c'est justement l'alerte qu'on ne
+# verrait plus le jour ou elle compte. Les paliers se resserrent en approchant de
+# zero, et plusieurs valeurs proches se couvrent l'une l'autre si un passage saute.
+PALIERS_STOCK_PHOTOS = (15, 10, 7, 5, 3, 2, 1, 0)
+
+
+async def _alerter_stock_photos(jour: str) -> None:
+    """Previent l'exploitant quand il reste peu de photos inedites pour les stories.
+
+    POURQUOI CETTE ALERTE EXISTE : le fonds photo est une FILE CONSOMMEE — une image
+    publiee ne reparait jamais (regle produit du 2026-09-08). Quand la file est vide,
+    la story continue de sortir mais SANS bandeau photo. Sans alerte, on decouvre le
+    manque en regardant une story deja publiee.
+
+    LE COMPTE VIENT DU FRONTEND, pas d'un calcul refait ici : la liste des photos vit
+    dans `frontend/src/lib/mosaique.tsx`. Deux comptes finiraient par diverger, et
+    c'est celui qui declenche l'alerte qui aurait tort.
+
+    On n'alerte que si la journee annoncee par le frontend est bien celle qu'on vient
+    de publier : un decalage de date ferait alerter sur le stock d'un autre jour.
+
+    Cette fonction ne doit JAMAIS faire echouer la publication : une alerte est un
+    confort, une story publiee est le travail. D'ou le `except` large.
+    """
+    import httpx
+
+    from api.config import get_settings
+    from services.alerts import send_email
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "http://frontend:3000/visuels/legendes.json",
+                headers={"Host": "blackturf.fr"},
+            )
+            r.raise_for_status()
+            publications = r.json().get("publications", [])
+
+        story = next((p for p in publications if p.get("cle") == "story"), None)
+        if not story:
+            log.warning("jobs.story.stock_absent", jour=jour)
+            return
+
+        if story.get("jour") != jour:
+            log.info("jobs.story.stock_autre_jour",
+                     jour=jour, jour_frontend=story.get("jour"))
+            return
+
+        restantes = story.get("photos_restantes")
+        if restantes is None:
+            log.warning("jobs.story.stock_non_expose", jour=jour)
+            return
+        restantes = int(restantes)
+
+        log.info("jobs.story.stock_photos", jour=jour, restantes=restantes)
+        if restantes not in PALIERS_STOCK_PHOTOS:
+            return
+
+        if restantes == 0:
+            sujet = "BlackTurf — fonds photo des stories EPUISE"
+            corps = (
+                "<p>La derniere photo inedite vient de servir.</p>"
+                "<p>Les prochaines stories sortiront <strong>sans bandeau photo</strong> : "
+                "aucune image n'est republiee, c'est la regle.</p>"
+            )
+        else:
+            jours = "1 jour" if restantes == 1 else f"{restantes} jours"
+            sujet = f"BlackTurf — plus que {jours} de photos pour les stories"
+            corps = (
+                f"<p>Il reste <strong>{jours}</strong> de photos inedites pour la story "
+                "du soir.</p>"
+                "<p>Passe ce delai la story sortira sans bandeau photo : une image deja "
+                "publiee n'est jamais reprise.</p>"
+            )
+
+        html = (
+            corps
+            + "<p>Pour reapprovisionner : ajouter des fichiers dans "
+              "<code>frontend/public/img/course/</code>, les declarer EN FIN de la liste "
+              "<code>PHOTOS</code> de <code>frontend/src/lib/mosaique.tsx</code> "
+              "(jamais au milieu, la file est indexee par rang), et noter la provenance "
+              "dans <code>SOURCES.txt</code>.</p>"
+            "<p>Chaque photo doit etre en <strong>paysage</strong> et en "
+            "<strong>couleur</strong>.</p>"
+        )
+        destinataire = get_settings().admin_email
+        resultat = await send_email(destinataire, sujet, html)
+        log.info("jobs.story.alerte_stock", jour=jour, restantes=restantes,
+                 destinataire=destinataire, envoye=bool(resultat))
+    except Exception as e:  # noqa: BLE001
+        # Une alerte ratee ne doit pas empecher la story de partir.
+        log.warning("jobs.story.alerte_stock_echec", jour=jour, err=str(e)[:200])
+
+
 async def job_publication_story() -> None:
     """
     Publie la story de bilan de la dernière journée COURUE ET RÉGLÉE — une par jour.
@@ -890,6 +987,10 @@ async def job_publication_story() -> None:
                 media_id=resultat.media_id, raison=resultat.raison, url=url,
                 quota_restant=await quota_restant() if publication_active() else None,
             )
+            # Le stock de photos se verifie APRES la publication : c'est le seul
+            # passage quotidien ou l'on sait qu'une story vient de consommer une image.
+            await _alerter_stock_photos(jour)
+
             # Une seule story par passage : deux d'un coup noieraient la plus récente.
             return
 
