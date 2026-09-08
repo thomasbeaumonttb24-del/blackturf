@@ -89,7 +89,9 @@ interface TrackRecord {
     favori_numero: number;
     proba_top1: number;
     cote: number | null;
-    favori_position: number;
+    // `null` quand notre favori n'a pas de place à l'arrivée : disqualifié, tombé
+    // ou distancé. Le pari est perdu, la course reste comptée.
+    favori_position: number | null;
     gagnant_nom: string | null;
     rang_ia_gagnant: number | null;
     verdict: "gagnant" | "place" | "top3" | "manque";
@@ -591,6 +593,25 @@ function HeroPalmares({ courses, depuis, stats }: {
           voile noir a 55-85 %. Le <picture> n est pas positionne, donc l <img> reste
           cale sur le <header>, qui l est. */}
       <picture>
+        {/* Sur mobile, la boite du hero fait environ 432 x 972 px CSS : forcer une
+            image 16:9 a la couvrir revient a l agrandir 4,3 fois, et le peloton
+            devenait une bouillie. Un cadrage PORTRAIT 1:2 de la meme photo couvre la
+            meme boite avec 1,5x d agrandissement seulement, pour 34 ko au lieu de 25.
+            `sizes` vaut 320px et non 100vw : ce qui compte n est pas la largeur du
+            viewport mais la largeur REELLEMENT couverte, que object-cover deduit de la
+            hauteur. */}
+        <source
+          media="(max-width: 767px)"
+          type="image/avif"
+          srcSet="/img/palmares-hero-p420.avif 420w, /img/palmares-hero-p640.avif 640w, /img/palmares-hero-p900.avif 900w"
+          sizes="320px"
+        />
+        <source
+          media="(max-width: 767px)"
+          type="image/webp"
+          srcSet="/img/palmares-hero-p420.webp 420w, /img/palmares-hero-p640.webp 640w, /img/palmares-hero-p900.webp 900w"
+          sizes="320px"
+        />
         <source
           type="image/avif"
           srcSet="/img/palmares-hero-w480.avif 480w, /img/palmares-hero-w640.avif 640w, /img/palmares-hero-w800.avif 800w, /img/palmares-hero-w1024.avif 1024w, /img/palmares-hero-w1600.avif 1600w"
@@ -771,7 +792,14 @@ export default function TrackRecordPage() {
   const hasard3 = g.hasard_top3 ?? null;
   const hasard1 = g.hasard_top1 ?? null;
   const facteur3 = hasard3 && hasard3 > 0 ? g.accuracy_top3 / hasard3 : null;
-  const facteur1 = hasard1 && hasard1 > 0 ? g.accuracy_top1 / hasard1 : null;
+  // « Notre favori gagne » = `favori_win_rate` PARTOUT sur le site (ce hero, la barre
+  // de comparaison plus bas, la carte de l'accueil). `accuracy_top1` mesure exactement
+  // le même évènement sur une autre table (`race_learning_log`) : publier les deux,
+  // c'était afficher deux pourcentages différents pour une seule et même phrase.
+  // `hasard_top1` reste le bon repère des deux côtés — c'est une espérance calculée
+  // par course (1/nb_partants), pas une propriété de la cohorte.
+  const favoriGagne = g.favori_win_rate;
+  const facteur1 = hasard1 && hasard1 > 0 ? favoriGagne / hasard1 : null;
   const depuis = g.mesure_depuis
     ? new Date(g.mesure_depuis).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", year: "numeric" })
     : null;
@@ -792,7 +820,7 @@ export default function TrackRecordPage() {
             cls: "text-amber-300",
           },
           {
-            value: <CountUp value={g.accuracy_top1} decimals={1} suffix=" %" />,
+            value: <CountUp value={favoriGagne} decimals={1} suffix=" %" />,
             label: "Favori qui gagne",
             note: hasard1 != null ? `Hasard : ${nf(hasard1, 1)} %` : undefined,
             cls: "text-emerald-300",
@@ -1090,7 +1118,7 @@ export default function TrackRecordPage() {
               <ComparBar
                 label="Notre favori gagne la course"
                 aide="Le cheval classé numéro 1 par l'algorithme franchit la ligne en tête."
-                nous={g.accuracy_top1}
+                nous={favoriGagne}
                 hasard={hasard1}
                 facteur={facteur1}
               />
@@ -1333,7 +1361,7 @@ export default function TrackRecordPage() {
               n&apos;aurait aucun sens et servirait surtout à vendre. Nous affichons ce qui est vérifiable : les gains réellement
               encaissés, pari par pari, chacun consultable sur sa course.
             </Faq>
-            <Faq q="« Précision Top-3 », qu'est-ce que ça veut dire exactement ?">
+            <Faq q="« Gagnant dans le Top-3 », qu'est-ce que ça veut dire exactement ?">
               La part des courses où le cheval qui a gagné figurait parmi nos trois premiers choix.
               {hasard3 != null && ` Sur ces mêmes courses — ${g.nb_partants_moyen ? `${nf(g.nb_partants_moyen, 1)} partants en moyenne` : "champ réel"} — un tirage au sort atteindrait ${nf(hasard3, 0)} %.`}
               {" "}Ce n&apos;est pas un taux de paris gagnants : un cheval placé ne fait pas gagner un pari Simple Gagnant.
