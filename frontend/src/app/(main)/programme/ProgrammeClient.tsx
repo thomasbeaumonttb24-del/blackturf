@@ -727,9 +727,11 @@ export default function ProgrammeClient({
   }, [programme, reunionFilter, hippoSearch, discFilter, vbOnly, isPaid, vbByCourse]);
 
   /* Une journée compte jusqu'à 45 courses, et à 17 h les trois quarts sont courues.
-     Elles occupaient tout le haut de la liste : pour atteindre la prochaine course il
-     fallait faire défiler tout ce qui était joué — le reproche n°1 sur mobile. Elles
-     passent donc dans un bloc replié en BAS de la timeline.
+     Dépliées, elles occupaient tout le haut de la liste : pour atteindre la prochaine
+     course il fallait faire défiler tout ce qui était joué — le reproche n°1 sur mobile.
+     Elles vivent donc dans un bloc REPLIÉ, placé en HAUT de la timeline : replié il ne
+     coûte qu'une ligne avant les courses à venir, et l'accès aux arrivées ne demande
+     plus de descendre toute la fin de journée.
 
      Repliées, pas retirées : le HTML garde les liens vers les fiches course, seul
      chemin d'exploration vers elles (les ~17 000 archives n'ont pas d'autre entrée).
@@ -1099,17 +1101,20 @@ export default function ProgrammeClient({
           /* ── TIMELINE ── */
           <div className="relative">
             <div className="absolute left-[19px] sm:left-[22px] top-4 bottom-4 w-0.5 rounded hidden sm:block" style={{ background: "linear-gradient(180deg,#FCD34D,#F59E0B,#D97706)", opacity: 0.35 }} />
-            {rendreGroupes(groupesAVenir, true)}
+            {/* Courses déjà courues — au-DESSUS de la timeline, repliées. Elles étaient
+                en bas jusqu'au 2026-09-08 : y accéder demandait de faire défiler toute
+                la fin de journée à venir, alors qu'on les consulte pour l'arrivée et le
+                bilan, juste après la course. En haut, elles sont à un clic.
 
-            {/* Courses déjà courues — repliées, mais présentes dans le HTML : ce sont
-                autant de liens vers les fiches course, et le robot d'indexation les suit
-                même masqués. Un bouton et une classe `hidden`, et non un `details`
+                Repliées, pas retirées : le HTML garde les liens vers les fiches course,
+                seul chemin d'exploration vers elles (les ~17 000 archives n'ont pas
+                d'autre entrée). Un bouton et une classe `hidden`, et non un `details`
                 natif : le repli d'un `details` fermé dépend de la feuille de style du
                 navigateur (vérifié : dans un moteur où elle manque, les 14 lignes
                 restaient visibles et le repli ne servait à rien). Ici c'est notre CSS
                 qui décide, partout pareil. */}
             {replierTermines && (
-              <div className="mt-7">
+              <div className="mb-7">
                 <button
                   type="button"
                   onClick={() => setTerminesOuverts((v) => !v)}
@@ -1130,6 +1135,8 @@ export default function ProgrammeClient({
                 </div>
               </div>
             )}
+
+            {rendreGroupes(groupesAVenir, true)}
           </div>
         )}
 

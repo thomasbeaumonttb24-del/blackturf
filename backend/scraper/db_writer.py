@@ -5,7 +5,7 @@ Gère la déduplication et les upserts.
 import uuid
 import structlog
 from typing import Optional
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -285,6 +285,49 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
     return cheval.cheval_id
 
 
+def champs_maj_course(course: CourseScrape, date_heure: Optional[datetime],
+                      statut_annule: Optional[str]) -> dict:
+    """Champs RÉÉCRITS à chaque re-scrape d'une course déjà connue (clause ON CONFLICT).
+
+    Tout ce qui bouge en cours de journée doit figurer ici : ce qui n'y est pas reste
+    figé sur la valeur du tout premier scrape, en silence. C'est ce qui est arrivé à
+    `date_heure` — le PMU repousse les départs quand une réunion prend du retard, et
+    nos heures s'écartaient des siennes de 10 à 16 min en fin de carte (constaté le
+    2026-09-08 : R4 Vincennes annoncée 19:27 chez nous, 19h37 sur pmu.fr).
+    """
+    champs = {
+        "numero_reunion": course.numero_reunion,
+        # Heure de départ conditionnelle : `None` = payload PMU illisible, et une
+        # heure illisible ne doit JAMAIS écraser l'heure correcte déjà en base.
+        **({"date_heure": date_heure} if date_heure else {}),
+        "nom": _t(course.nom, 200),
+        "terrain_officiel": course.terrain,
+        "terrain_code": course.terrain_code,
+        "penetrometre_coef": course.penetrometre_coef,
+        "nb_partants": course.nb_partants,
+        "allocation": course.dotation,
+        "conditions_texte": course.conditions_texte,
+        "categorie_particularite": _t(course.categorie_particularite, 30),
+        "montant_offert_1er": course.montant_offert_1er,
+        "nombre_declares_partants": course.nombre_declares_partants,
+        # Re-scrape live → met à jour les paris offerts + flags jackpot (un champ
+        # réduit après scratchings peut faire passer un couplé en couplé ordre).
+        "est_quinte": course.est_quinte,
+        "est_quarte": course.est_quarte,
+        "est_tierce": course.est_tierce,
+        "est_2sur4": course.est_2sur4,
+        "paris_disponibles": course.paris_disponibles,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    # Annulation en cours de journée (cas le plus fréquent : le PMU annule une
+    # réunion entière après la publication du programme). Écriture CONDITIONNELLE :
+    # on ne remet jamais un statut existant à 'a_venir' — un re-scrape ne doit pas
+    # ressusciter une course déjà 'termine'.
+    if statut_annule:
+        champs["statut"] = statut_annule
+    return champs
+
+
 async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Optional[str]:
     """
     Sauvegarde une course et ses partants en DB.
@@ -298,8 +341,11 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
     # Réunion
     await upsert_reunion(session, course, hippodrome_id)
 
-    # Heure de départ
-    date_heure = _parse_datetime(course.date_heure)
+    # Heure de départ — TOUJOURS celle publiée par le PMU au moment du scrape.
+    # Le PMU décale les départs en cours de journée (une réunion qui prend du
+    # retard repousse toutes ses courses suivantes). `None` = payload illisible :
+    # dans ce cas on ne touche PAS à l'heure déjà en base (cf. l'upsert plus bas).
+    date_heure = _parse_datetime_strict(course.date_heure)
 
     # Statut dérivé du PMU : seule l'ANNULATION est déduite ici. Une course annulée
     # ne recevra JAMAIS d'ordreArrivee du PMU, donc sans ça elle reste 'a_venir' à
@@ -316,7 +362,9 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
         numero_reunion=course.numero_reunion,
         numero=int(course.course_id.split("C")[-1]) if "C" in course.course_id else 1,
         nom=_t(course.nom, 200),
-        date_heure=date_heure,
+        # Colonne NOT NULL : à l'INSERT seulement, un payload illisible retombe sur
+        # l'instant courant (une ligne datée faux vaut mieux qu'une course perdue).
+        date_heure=date_heure or datetime.now(timezone.utc),
         hippodrome_nom=_t(course.hippodrome, 100),
         discipline=_t(course.discipline, 20),
         distance=course.distance,
@@ -341,31 +389,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
         statut=statut_annule or "a_venir",
     ).on_conflict_do_update(
         index_elements=["course_id"],
-        set_={
-            "numero_reunion": course.numero_reunion,
-            "terrain_officiel": course.terrain,
-            "terrain_code": course.terrain_code,
-            "penetrometre_coef": course.penetrometre_coef,
-            "nb_partants": course.nb_partants,
-            "allocation": course.dotation,
-            "conditions_texte": course.conditions_texte,
-            "categorie_particularite": _t(course.categorie_particularite, 30),
-            "montant_offert_1er": course.montant_offert_1er,
-            "nombre_declares_partants": course.nombre_declares_partants,
-            # Re-scrape live → met à jour les paris offerts + flags jackpot (un champ
-            # réduit après scratchings peut faire passer un couplé en couplé ordre).
-            "est_quinte": course.est_quinte,
-            "est_quarte": course.est_quarte,
-            "est_tierce": course.est_tierce,
-            "est_2sur4": course.est_2sur4,
-            "paris_disponibles": course.paris_disponibles,
-            "updated_at": datetime.now(),
-            # Annulation en cours de journée (cas le plus fréquent : le PMU annule une
-            # réunion entière après la publication du programme). Écriture CONDITIONNELLE :
-            # on ne remet jamais un statut existant à 'a_venir' — un re-scrape ne doit
-            # pas ressusciter une course déjà 'termine'.
-            **({"statut": statut_annule} if statut_annule else {}),
-        },
+        set_=champs_maj_course(course, date_heure, statut_annule),
     )
     await session.execute(stmt)
 
@@ -491,7 +515,13 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
         redis = await get_redis()
         await redis.delete(f"course_detail:{course.course_id}")
         await redis.delete(f"analyse:{course.course_id}")
-        await redis.delete(f"programme:{course.date_heure.date().isoformat() if hasattr(course.date_heure, 'date') else str(course.date_heure)[:10]}")
+        # `course.date_heure` est le champ BRUT du PMU (epoch ms) : le découper en
+        # `[:10]` fabriquait la clé « programme:1757352600 », qui n'existe pas — le
+        # vrai cache du programme n'a donc JAMAIS été invalidé depuis sa mise en
+        # place. La clé de l'API est le JOUR CIVIL À PARIS (cf. api/routes/courses).
+        if date_heure:
+            await redis.delete(f"programme:{jour_courses(date_heure).isoformat()}")
+            await redis.delete(f"programme:apercu:{jour_courses(date_heure).isoformat()}")
     except Exception:
         pass
 
@@ -1406,14 +1436,32 @@ def _parse_date(date_str: Optional[str]):
     return None
 
 
-def _parse_datetime(dt_str: str) -> datetime:
-    """Parse l'heure PMU en datetime complet."""
-    if not dt_str:
-        return datetime.now()
+def _parse_datetime_strict(dt_str) -> Optional[datetime]:
+    """Parse l'heure PMU (epoch ms ou ISO) en datetime UTC — ``None`` si illisible.
+
+    Version STRICTE, sans repli sur ``datetime.now()`` : elle sert aux écritures
+    d'UPDATE, où un repli écraserait une heure de départ correcte par l'heure du
+    scrape. Le résultat est explicitement en UTC (`heureDepart` PMU est un epoch,
+    donc un instant absolu) : `fromtimestamp()` sans tzinfo rendait une heure
+    « locale au conteneur », juste par accident tant que le conteneur tourne en UTC.
+    """
+    if dt_str in (None, ""):
+        return None
     try:
-        # PMU retourne parfois un timestamp MS
-        if str(dt_str).isdigit() and len(str(dt_str)) > 10:
-            return datetime.fromtimestamp(int(dt_str) / 1000)
-        return datetime.fromisoformat(dt_str)
+        if isinstance(dt_str, datetime):
+            return dt_str if dt_str.tzinfo else dt_str.replace(tzinfo=timezone.utc)
+        # PMU retourne un timestamp en millisecondes. Plancher à 10^12 ms (2001) :
+        # un 0 ou un compteur de secondes donnerait une course de 1970, techniquement
+        # « lisible » et pourtant absurde — mieux vaut ne rien écrire.
+        if isinstance(dt_str, (int, float)) or (str(dt_str).isdigit() and len(str(dt_str)) > 10):
+            ms = int(dt_str)
+            return datetime.fromtimestamp(ms / 1000, tz=timezone.utc) if ms >= 10 ** 12 else None
+        dt = datetime.fromisoformat(str(dt_str))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     except Exception:
-        return datetime.now()
+        return None
+
+
+def _parse_datetime(dt_str: str) -> datetime:
+    """Parse l'heure PMU en datetime complet ; repli sur « maintenant » si illisible."""
+    return _parse_datetime_strict(dt_str) or datetime.now(timezone.utc)
