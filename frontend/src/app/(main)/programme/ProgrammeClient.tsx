@@ -376,7 +376,7 @@ interface ApercuCourse {
   accord_marche: boolean | null;
 }
 
-function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: { course: CourseSummary; reunionNum: number; vbCount?: number; apercu?: ApercuCourse; delay: number; targetId?: string }) {
+function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: { course: CourseSummary; reunionNum: number; vbCount?: number; apercu?: ApercuCourse; delay: number; onOuvrir?: () => void }) {
   const m = discMeta(course.discipline);
   const isLive = course.statut === "en_cours";
   const isDone = course.statut === "termine" || course.statut === "annule";
@@ -389,7 +389,10 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
   return (
     <Link
       href={`/courses/${course.course_id}`}
-      id={targetId}
+      /* Identifiant stable de la ligne : c'est lui qui permet de ramener le lecteur
+         exactement là où il était quand il revient d'une fiche course. */
+      id={`course-${course.course_id}`}
+      onClick={onOuvrir}
       className={cn(
         "group relative flex scroll-mt-28 items-center gap-2.5 rounded-2xl border px-3 py-2.5 no-underline transition-all duration-200 sm:gap-3 sm:px-4 sm:py-3",
         isDone
@@ -474,6 +477,37 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, targetId }: {
   );
 }
 
+/* ─── Groupement par heure ──────────────────────────────── */
+type ItemCourse = { course: CourseSummary; reunionNum: number };
+
+function grouperParHeure(items: ItemCourse[]): Array<[string, ItemCourse[]]> {
+  const map = new Map<string, ItemCourse[]>();
+  for (const it of items) {
+    const key = heureBucket(it.course.date_heure);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(it);
+  }
+  return Array.from(map.entries());
+}
+
+const estPassee = (c: CourseSummary) => c.statut === "termine" || c.statut === "annule";
+
+/* ─── Mémoire de position (retour depuis une fiche course) ──
+ * Le retour arrière rouvrait le programme TOUT EN HAUT : `DefilementHaut` remet la
+ * page à zéro à chaque changement de chemin, et `history.scrollRestoration` est
+ * volontairement en « manual » (une position restaurée par le navigateur n'a aucun
+ * rapport avec une page dont le contenu arrive après le premier rendu). Le lecteur
+ * devait donc refaire défiler les 40 courses déjà courues pour retrouver la suivante.
+ *
+ * On mémorise donc nous-mêmes, au clic, la course ouverte et la position — puis on y
+ * revient une fois la liste posée. Deux `requestAnimationFrame` : le premier laisse
+ * React rendre la liste, le second laisse le navigateur en calculer la hauteur ; c'est
+ * aussi ce qui fait passer ce saut APRÈS la remise à zéro de `DefilementHaut`.
+ * `sessionStorage` et non l'état React : le composant est démonté entre les deux pages.
+ */
+const CLE_RETOUR = "programme:retour";
+type RetourProgramme = { jour: string; courseId: string; y: number; termines: boolean };
+
 /* ─── Page ──────────────────────────────────────────────── */
 /**
  * `initialProgramme` / `initialJour` viennent du composant serveur (page.tsx) : ils
@@ -492,7 +526,7 @@ export default function ProgrammeClient({
   initialCompteurVB?: { count: number; niveau_min: number } | null;
 } ) {
   const { user } = useAuth();
-  const maintenant = useHorloge(30000);
+  const maintenant = useHorloge(15000);
   /* Jour de Paris VIVANT. Il part de `initialJour` — la valeur exacte contenue dans le
      HTML servi, donc zéro mismatch d'hydratation — puis se corrige au premier battement
      d'horloge. C'est ce qui rattrape un HTML sorti du cache (ISR ou cache navigateur :
@@ -529,6 +563,16 @@ export default function ProgrammeClient({
   const [hippoSearch, setHippoSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [vbOnly, setVbOnly] = useState(false);
+  /* Bloc « déjà courues » : replié par défaut. Valeur fixe au premier rendu (pas de
+     lecture de `sessionStorage` ici) — l'état initial doit être identique côté serveur
+     et côté navigateur, sinon l'hydratation diverge. */
+  const [terminesOuverts, setTerminesOuverts] = useState(false);
+  /* Jour actuellement affiché, lisible depuis un effet de montage sans le prendre en
+     dépendance. */
+  const jourAffiche = useRef(initialJour);
+  // Mise à jour dans un effet, jamais pendant le rendu : cet effet-ci est déclaré avant
+  // celui de restauration, donc la valeur est déjà à jour quand il la lit au montage.
+  useEffect(() => { jourAffiche.current = format(selectedDate, "yyyy-MM-dd"); }, [selectedDate]);
 
   const isToday = format(selectedDate, "yyyy-MM-dd") === jourCourant;
   const isPaid = user && !["free", "decouverte"].includes(user.plan);
@@ -603,6 +647,7 @@ export default function ProgrammeClient({
     setReunionFilter("all");
     setHippoSearch("");
     setVbOnly(false);
+    setTerminesOuverts(false);
     // Revenir sur aujourd'hui rend la main au suivi automatique du jour ; choisir une
     // autre journée le suspend, sinon le passage de minuit arracherait le visiteur de
     // la journée qu'il consulte.
@@ -624,34 +669,44 @@ export default function ProgrammeClient({
     [programme],
   );
 
-  /* Prochaine course (toutes réunions, hors terminées/annulées et hors départs passés)
+  /* Prochaine course (toutes réunions)
    *
-   * Le tri ne portait que sur `statut` : une course dont l'heure de départ était passée
-   * mais dont le statut n'avait pas encore basculé restait « prochaine course ». À 14h
-   * la page annonçait toujours celle de 11h. Le statut ne se lit jamais seul, il se
-   * croise avec `date_heure` — c'est la même règle que côté serveur.
+   * Le bandeau ne bascule plus à l'ARRIVÉE de la course précédente, mais à son DÉPART :
+   * c'est le seul moment qui intéresse le lecteur, et le résultat met plusieurs minutes
+   * à remonter (statut, puis rapports). Deux tolérances traînaient là : 20 min après
+   * l'heure annoncée pour une course « à venir », 60 min pour une course « en cours ».
+   * En fin de journée elles cumulaient et le bandeau annonçait une course déjà courue
+   * pendant que trois autres partaient.
    *
-   * Marges : le statut suit le départ avec un décalage, on garde donc 20 min après
-   * l'heure annoncée pour ne pas sauter la course qui part vraiment. Une course restée
-   * « en_cours » a droit à 60 min, le temps de la course plus la saisie de l'arrivée ;
-   * au-delà c'est une donnée bloquée, pas une course en piste.
+   * Règle : est « prochaine » la première course dont le départ n'est PAS passé. Le
+   * statut ne sert plus qu'à écarter les courses finies ou annulées — il n'est jamais
+   * lu seul, il se croise avec `date_heure` (même règle que côté serveur).
+   *
+   * Seule marge conservée : 30 s, l'imprécision de l'horloge du navigateur. Et si plus
+   * aucune course n'est à venir (dernière de la journée), on retombe sur celle qui est
+   * réellement en piste — au plus 30 min après son départ, au-delà c'est une donnée
+   * bloquée, pas une course.
    */
   const nextRace = useMemo(() => {
     if (!programme || !isToday) return null;
     const t = maintenant ? maintenant.getTime() : null;
-    const TOLERANCE_A_VENIR_MS = 20 * 60 * 1000;
-    const TOLERANCE_EN_COURS_MS = 60 * 60 * 1000;
-    const cands: Array<{ course: CourseSummary; reunionNum: number }> = [];
+    const MARGE_HORLOGE_MS = 30 * 1000;
+    const TOLERANCE_EN_COURS_MS = 30 * 60 * 1000;
+    const aVenir: ItemCourse[] = [];
+    const enPiste: ItemCourse[] = [];
     for (const r of programme.reunions) for (const c of r.courses) {
-      if (c.statut === "termine" || c.statut === "annule") continue;
-      if (t !== null) {
-        const marge = c.statut === "en_cours" ? TOLERANCE_EN_COURS_MS : TOLERANCE_A_VENIR_MS;
-        if (new Date(c.date_heure).getTime() + marge < t) continue;
-      }
-      cands.push({ course: c, reunionNum: r.numero });
+      if (estPassee(c)) continue;
+      const item = { course: c, reunionNum: r.numero };
+      if (t === null) { aVenir.push(item); continue; }
+      const depart = new Date(c.date_heure).getTime();
+      if (depart + MARGE_HORLOGE_MS >= t) aVenir.push(item);
+      else if (c.statut === "en_cours" && depart + TOLERANCE_EN_COURS_MS >= t) enPiste.push(item);
     }
-    cands.sort((a, b) => new Date(a.course.date_heure).getTime() - new Date(b.course.date_heure).getTime());
-    return cands[0] ?? null;
+    const parHeure = (a: ItemCourse, b: ItemCourse) =>
+      new Date(a.course.date_heure).getTime() - new Date(b.course.date_heure).getTime();
+    aVenir.sort(parHeure);
+    enPiste.sort(parHeure);
+    return aVenir[0] ?? enPiste[enPiste.length - 1] ?? null;
   }, [programme, isToday, maintenant]);
 
   /* Aplatir + filtrer + trier par heure */
@@ -671,21 +726,167 @@ export default function ProgrammeClient({
     return items;
   }, [programme, reunionFilter, hippoSearch, discFilter, vbOnly, isPaid, vbByCourse]);
 
+  /* Une journée compte jusqu'à 45 courses, et à 17 h les trois quarts sont courues.
+     Elles occupaient tout le haut de la liste : pour atteindre la prochaine course il
+     fallait faire défiler tout ce qui était joué — le reproche n°1 sur mobile. Elles
+     passent donc dans un bloc replié en BAS de la timeline.
+
+     Repliées, pas retirées : le HTML garde les liens vers les fiches course, seul
+     chemin d'exploration vers elles (les ~17 000 archives n'ont pas d'autre entrée).
+     Et sur une journée entièrement courue — une date passée — il n'y a rien à replier,
+     sinon la page s'ouvrirait vide. */
+  const flatAVenir = useMemo(() => flat.filter((it) => !estPassee(it.course)), [flat]);
+  const flatTermines = useMemo(() => flat.filter((it) => estPassee(it.course)), [flat]);
+  const replierTermines = flatAVenir.length > 0 && flatTermines.length > 0;
+
   /* Groupes horaires */
-  const groups = useMemo(() => {
-    const map = new Map<string, typeof flat>();
-    for (const it of flat) {
-      const key = heureBucket(it.course.date_heure);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(it);
-    }
-    return Array.from(map.entries());
-  }, [flat]);
+  const groupesAVenir = useMemo(
+    () => grouperParHeure(replierTermines ? flatAVenir : flat),
+    [replierTermines, flatAVenir, flat],
+  );
+  const groupesTermines = useMemo(
+    () => (replierTermines ? grouperParHeure(flatTermines) : []),
+    [replierTermines, flatTermines],
+  );
+
+  /* Au clic sur une course : on note où on était, et si le bloc des courses courues
+     était ouvert. Écriture protégée — en navigation privée `sessionStorage` peut
+     lever, et on ne casse pas une page pour un confort de défilement. */
+  const memoriserRetour = useCallback((courseId: string) => {
+    try {
+      sessionStorage.setItem(
+        CLE_RETOUR,
+        JSON.stringify({
+          jour: format(selectedDate, "yyyy-MM-dd"),
+          courseId,
+          y: window.scrollY,
+          termines: terminesOuverts,
+        } as RetourProgramme),
+      );
+    } catch { /* position non mémorisée : la page s'ouvrira en haut, comme avant */ }
+  }, [selectedDate, terminesOuverts]);
+
+  /* Retour effectif à la ligne quittée.
+   *
+   * Effet de MONTAGE, sans dépendances : c'est ce qui l'a fait marcher. Piloté par les
+   * données (`loading`, `flat.length`, `selectedDate`), il se relançait — et son
+   * nettoyage annulait la boucle de saut avant même son premier essai, de sorte que le
+   * saut n'avait jamais lieu (mesuré : « nettoyage 0 »). Il n'a de toute façon besoin
+   * d'aucun état : il cherche une ligne dans le DOM, et le DOM sait quand elle arrive.
+   *
+   * Trois autres pièges, tous mesurés ici :
+   *  · une référence d'élément prise dans l'effet ne survit pas à l'hydratation (React
+   *    remplace les nœuds) — la ligne est donc RELUE à chaque essai ;
+   *  · pendant le streaming, le HTML existe EN DOUBLE, une copie encore dans le
+   *    conteneur masqué de React. `getElementById` renvoyait cette copie-là et rien ne
+   *    bougeait : on cherche l'instance VISIBLE ;
+   *  · `requestAnimationFrame` ne bat pas dans un onglet en arrière-plan — la boucle
+   *    tourne donc sur une minuterie.
+   *
+   * Elle s'arrête dès que le lecteur touche à la molette ou au clavier : on ne se bat
+   * jamais contre son défilement à lui.
+   */
+  useEffect(() => {
+    let pos: RetourProgramme | null = null;
+    try {
+      const brut = sessionStorage.getItem(CLE_RETOUR);
+      // Consommée tout de suite : un retour, une restauration. Sans cela un
+      // rechargement ultérieur rejouerait le même saut.
+      sessionStorage.removeItem(CLE_RETOUR);
+      if (brut) {
+        const lu = JSON.parse(brut) as RetourProgramme;
+        if (lu?.courseId && lu?.jour) pos = lu;
+      }
+    } catch { /* stockage indisponible ou valeur illisible : la page s'ouvre en haut */ }
+    if (!pos) return;
+    if (pos.jour !== jourAffiche.current) return;
+    if (pos.termines) setTerminesOuverts(true);
+
+    const { courseId, y } = pos;
+    let annule = false;
+    let essais = 0;
+    let atteint = false;
+    let minuterie: ReturnType<typeof setTimeout> | null = null;
+    const abandonner = () => { annule = true; if (minuterie) clearTimeout(minuterie); };
+    window.addEventListener("wheel", abandonner, { passive: true, once: true });
+    window.addEventListener("touchstart", abandonner, { passive: true, once: true });
+    window.addEventListener("keydown", abandonner, { once: true });
+
+    const tenter = () => {
+      if (annule) return;
+      const instances = document.querySelectorAll<HTMLElement>(`[id="course-${CSS.escape(courseId)}"]`);
+      // `offsetParent` nul = ligne masquée : soit la copie de streaming, soit une course
+      // terminée pendant la visite, passée dans le bloc replié.
+      const cible = Array.from(instances).find((el) => el.offsetParent);
+      if (cible) {
+        const rect = cible.getBoundingClientRect();
+        const vise = Math.max(0, rect.top + window.scrollY - window.innerHeight / 2 + rect.height / 2);
+        if (Math.abs(window.scrollY - vise) > 8) {
+          window.scrollTo({ top: vise, behavior: "instant" as ScrollBehavior });
+        }
+        atteint = true;
+      }
+      // ~1,5 s de tentatives : le temps que l'hydratation finisse, que le programme
+      // arrive si le rendu serveur ne l'avait pas fourni, et que les hauteurs se posent.
+      if (++essais < 30) { minuterie = setTimeout(tenter, 50); return; }
+      // Budget épuisé sans jamais voir la ligne : soit elle est repliée (course terminée
+      // entre-temps) et rester en haut, sur les courses à venir, est exactement ce qu'on
+      // venait chercher ; soit la liste a changé et les pixels restent le seul repère.
+      if (!atteint && instances.length === 0 && y > 0) {
+        window.scrollTo({ top: y, behavior: "instant" as ScrollBehavior });
+      }
+    };
+    minuterie = setTimeout(tenter, 0);
+
+    // Pas de nettoyage qui annule la boucle : en développement React monte, démonte et
+    // remonte chaque composant, et ce nettoyage-là tuait la restauration. La boucle
+    // s'éteint d'elle-même en 1,5 s, et elle ne déplace la page que si elle retrouve
+    // CETTE ligne-là, visible — sur une autre page, elle ne trouve rien.
+    return () => {
+      window.removeEventListener("wheel", abandonner);
+      window.removeEventListener("touchstart", abandonner);
+      window.removeEventListener("keydown", abandonner);
+    };
+  }, []);
 
   const dayName = cap(format(selectedDate, "EEEE", { locale: fr }));
   const restDate = format(selectedDate, "d MMMM yyyy", { locale: fr });
 
   const resetFilters = () => { setDiscFilter("Tous"); setReunionFilter("all"); setHippoSearch(""); setVbOnly(false); };
+
+  /* Un seul rendu de groupes, servi deux fois : la liste du haut et le bloc replié.
+     `anime` est coupé pour le bloc replié — l'animation d'entrée se rejouerait à
+     chaque ouverture, sur des dizaines de lignes d'un coup. */
+  const rendreGroupes = (groupes: Array<[string, ItemCourse[]]>, anime: boolean) => (
+    <div className="space-y-7">
+      {groupes.map(([hour, items]) => (
+        <div key={hour} className="relative">
+          <div className="mb-3.5 flex items-center gap-3.5">
+            <div
+              className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
+              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 4px 12px -4px rgba(217,119,6,.4)" }}
+            >
+              {hour}
+            </div>
+            <span className="text-xs font-semibold text-gray-600">{items.length} course{items.length > 1 ? "s" : ""}</span>
+          </div>
+          <div className="ml-0 sm:ml-[62px] flex flex-col gap-2.5">
+            {items.map(({ course, reunionNum }, i) => (
+              <TimelineRow
+                key={course.course_id}
+                course={course}
+                reunionNum={reunionNum}
+                vbCount={isPaid ? vbByCourse[course.course_id] : undefined}
+                apercu={apercuByCourse[course.course_id]}
+                delay={anime ? Math.min(i, 8) * 0.05 : 0}
+                onOuvrir={() => memoriserRetour(course.course_id)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div
@@ -888,7 +1089,7 @@ export default function ProgrammeClient({
             <p className="text-sm text-gray-600">Essayez une autre date</p>
             <button onClick={() => selectDate(new Date(`${jourCourant}T12:00:00`))} className="mt-1 text-sm font-medium text-amber-700 hover:underline">Revenir à aujourd&apos;hui</button>
           </div>
-        ) : groups.length === 0 ? (
+        ) : flat.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16">
             <Filter className="h-8 w-8 text-gray-300" />
             <p className="text-sm text-gray-600">Aucune course ne correspond aux filtres</p>
@@ -898,34 +1099,37 @@ export default function ProgrammeClient({
           /* ── TIMELINE ── */
           <div className="relative">
             <div className="absolute left-[19px] sm:left-[22px] top-4 bottom-4 w-0.5 rounded hidden sm:block" style={{ background: "linear-gradient(180deg,#FCD34D,#F59E0B,#D97706)", opacity: 0.35 }} />
-            <div className="space-y-7">
-              {groups.map(([hour, items]) => (
-                <div key={hour} className="relative">
-                  <div className="mb-3.5 flex items-center gap-3.5">
-                    <div
-                      className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
-                      style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 4px 12px -4px rgba(217,119,6,.4)" }}
-                    >
-                      {hour}
-                    </div>
-                    <span className="text-xs font-semibold text-gray-600">{items.length} course{items.length > 1 ? "s" : ""}</span>
-                  </div>
-                  <div className="ml-0 sm:ml-[62px] flex flex-col gap-2.5">
-                    {items.map(({ course, reunionNum }, i) => (
-                      <TimelineRow
-                        key={course.course_id}
-                        course={course}
-                        reunionNum={reunionNum}
-                        vbCount={isPaid ? vbByCourse[course.course_id] : undefined}
-                        apercu={apercuByCourse[course.course_id]}
-                        delay={Math.min(i, 8) * 0.05}
-                        targetId={course.course_id === nextRace?.course.course_id ? "next-race-row" : undefined}
-                      />
-                    ))}
-                  </div>
+            {rendreGroupes(groupesAVenir, true)}
+
+            {/* Courses déjà courues — repliées, mais présentes dans le HTML : ce sont
+                autant de liens vers les fiches course, et le robot d'indexation les suit
+                même masqués. Un bouton et une classe `hidden`, et non un `details`
+                natif : le repli d'un `details` fermé dépend de la feuille de style du
+                navigateur (vérifié : dans un moteur où elle manque, les 14 lignes
+                restaient visibles et le repli ne servait à rien). Ici c'est notre CSS
+                qui décide, partout pareil. */}
+            {replierTermines && (
+              <div className="mt-7">
+                <button
+                  type="button"
+                  onClick={() => setTerminesOuverts((v) => !v)}
+                  aria-expanded={terminesOuverts}
+                  aria-controls="courses-terminees"
+                  className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[#E9E6DC] bg-white/70 px-4 py-3 text-left text-[13px] font-semibold text-gray-700 transition-colors hover:border-gray-300"
+                >
+                  <span>
+                    {flatTermines.length} course{flatTermines.length > 1 ? "s" : ""} déjà courue{flatTermines.length > 1 ? "s" : ""}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[12px] font-medium text-amber-700">
+                    {terminesOuverts ? "Masquer" : "Afficher"}
+                    <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", terminesOuverts && "rotate-90")} />
+                  </span>
+                </button>
+                <div id="courses-terminees" className={cn("mt-5", !terminesOuverts && "hidden")}>
+                  {rendreGroupes(groupesTermines, false)}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
