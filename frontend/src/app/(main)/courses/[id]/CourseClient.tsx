@@ -383,13 +383,11 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
     }
   };
   const profilDesc = PROFILS_MISE.find((p) => p.key === profil)?.desc;
-  const evColor = plan.ev_global > 0 ? CX.em : CX.red;
   // Teinte par niveau : Sécurité=émeraude, Rendement=or, Coup à tenter=rose.
   const nivStyle = (niveau: string) =>
     niveau === "securite" ? { bg: CX.emBg, bd: CX.emBd, color: CX.emDeep } :
     niveau === "rendement" ? { bg: CX.goldBg, bd: CX.goldBd, color: CX.goldDeep } :
     { bg: CX.redBg, bd: CX.redBd, color: CX.redDeep };
-  const cell = { borderRadius: 12, border: `1px solid ${CX.bd2}`, background: CX.surf1, padding: "11px 12px" } as const;
   return (
     <div className="cx-plan" style={{ animation: "cxFadeUp .4s cubic-bezier(.16,1,.3,1) both", color: CX.ink2 }}>
       {/* Switch profil rapide — même mise, recalcul instantané */}
@@ -416,36 +414,27 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         <p style={{ margin: "0 2px 18px", fontSize: 11.5, lineHeight: 1.45, color: CX.gray500 }}>{profilDesc}</p>
       )}
 
-      {/* Header résumé */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-        <div style={{ borderRadius: 14, border: `1px solid ${CX.bd2}`, background: CX.surf1, padding: "13px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }}>
+      {/* Header résumé — argent SEULEMENT : ce qui est disponible, ce qui part réellement
+          en jeu, ce qui reste. Aucune projection de rendement (ni théorique, ni observée) :
+          un « +/−x % » à côté du budget se lisait comme une promesse de gain et brouillait
+          la seule question utile ici — combien je mise et sur quoi. Le rendement réel du
+          service reste public et chiffré sur /track-record. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "start", gap: 14, borderRadius: 14, border: `1px solid ${CX.bd2}`, background: CX.surf1, padding: "14px 16px", marginBottom: 14 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, height: 14, marginBottom: 6, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }}>
             <WalletCards className="h-3.5 w-3.5" aria-hidden="true" /> Budget
           </div>
           <div style={{ fontFamily: CX.sg, fontSize: 25, fontWeight: 700, color: CX.ink, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{plan.montant_total}€</div>
         </div>
-        <div style={{ borderRadius: 14, border: `1px solid ${CX.bd2}`, background: CX.surf1, padding: "13px 14px", textAlign: "right" }}>
-          <div style={{ marginBottom: 5, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }} title="Projection calculée à partir des rapports estimés.">Rendement estimé</div>
-          <div style={{ fontFamily: CX.sg, fontSize: 20, fontWeight: 700, color: evColor, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-            {plan.ev_global > 0 ? "+" : ""}{(plan.ev_global * 100).toFixed(1)}%
-          </div>
+        <div aria-hidden="true" style={{ width: 1, height: 38, marginTop: 2, background: CX.bd3 }} />
+        <div style={{ textAlign: "right" }}>
+          <div style={{ height: 14, marginBottom: 6, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }}>Total misé</div>
+          <div style={{ fontFamily: CX.sg, fontSize: 25, fontWeight: 700, color: CX.ink, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{plan.montant_joue.toFixed(2)}€</div>
+          {plan.montant_reserve > 0 && (
+            <div style={{ marginTop: 5, fontSize: 10.5, color: CX.gray500, fontVariantNumeric: "tabular-nums" }}>{plan.montant_reserve.toFixed(2)}€ gardés de côté</div>
+          )}
         </div>
       </div>
-
-      {/* Rendement RÉEL observé — honnêteté (2026-07-13) : l'espérance ci-dessus est
-          théorique (rapports estimés) et ressort ~0/+2% ; le rendement réel de ce profil
-          est négatif (prélèvement PMU ~15-25%). On l'affiche sans détour. */}
-      {plan.roi_observe && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 12, border: `1px solid ${plan.roi_observe.roi >= 0 ? CX.emBd : CX.redBd}`, background: plan.roi_observe.roi >= 0 ? CX.emBg : CX.redBg, padding: "10px 12px", marginBottom: 12, fontSize: 11.5, lineHeight: 1.4, color: CX.gray600 }}>
-          <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 16, color: plan.roi_observe.roi >= 0 ? CX.emDeep : CX.redDeep, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-            {plan.roi_observe.roi > 0 ? "+" : ""}{(plan.roi_observe.roi * 100).toFixed(0)}%
-          </span>
-          <span>
-            <b>Rendement réel observé</b> sur {plan.roi_observe.nb} plans · {plan.roi_observe.jours}&nbsp;j
-            <span style={{ display: "block", marginTop: 1, fontSize: 10.5, color: CX.gray500 }}>Aucune garantie de gain.</span>
-          </span>
-        </div>
-      )}
 
       {/* Résumé IA */}
       <details style={{ borderRadius: 12, border: `1px solid ${CX.bd2}`, background: CX.surf2, marginBottom: 16 }}>
@@ -456,19 +445,12 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         <p style={{ margin: 0, padding: "0 12px 12px 32px", fontSize: 11.5, lineHeight: 1.55, color: CX.gray600 }}>{plan.resume_ia}</p>
       </details>
 
-      {/* Le marché a bougé depuis le gel de la sélection.
-          La sélection, elle, ne bouge plus (c'est le contrat : le conseil doit être
-          jouable et vérifiable). Mais taire le mouvement revenait à afficher un gain
-          que le marché n'offre plus — cas mesuré : un ticket vendu « ×10 minimum »
-          dont la cote était retombée à ×4 au départ. */}
-      {(plan.marche_a_bouge || (plan.paris_hors_tranche_live ?? 0) > 0) && (
-        <div role="status" style={{ marginBottom: 12, borderRadius: 12, border: "1px solid rgba(239,68,68,.25)", background: "rgba(239,68,68,.06)", padding: "10px 12px", fontSize: 11, lineHeight: 1.5, color: CX.redDeep }}>
-          <strong style={{ fontWeight: 700 }}>Le marché a bougé depuis le calcul du plan.</strong>{" "}
-          {(plan.paris_hors_tranche_live ?? 0) > 0
-            ? `${plan.paris_hors_tranche_live} pari${(plan.paris_hors_tranche_live ?? 0) > 1 ? "s" : ""} ne paie plus le multiplicateur visé par ce profil.`
-            : "Les gains affichés sont recalculés aux cotes actuelles ; la sélection, elle, reste celle du gel."}
-        </div>
-      )}
+      {/* Le bandeau d'alerte « Le marché a bougé depuis le calcul du plan » a été retiré :
+          il ouvrait le plan sur un avertissement rouge que le lecteur ne pouvait pas
+          exploiter (la sélection est figée, il n'y a rien à faire). Le mouvement des cotes
+          reste visible là où il sert : sur le ticket concerné, ligne « joué à … / cote
+          actuelle … », et la mention de bas de plan rappelle que les gains suivent le
+          marché jusqu'au départ. */}
 
       {/* Niveaux */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -509,8 +491,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                               && Math.abs(c.cote_live / c.cote - 1) >= 0.1 ? (
                               <span key={c.numero} style={{ fontSize: 10.5, color: CX.gray500, whiteSpace: "nowrap" }}>
                                 <span style={{ fontWeight: 650, color: CX.ink2 }}>N°{c.numero}</span>
-                                <span> joué à {c.cote.toFixed(1)}</span>
-                                <span style={{ color: CX.redDeep }}> · marché {c.cote_live.toFixed(1)}</span>
+                                <span> joué à {c.cote.toFixed(1)} · cote actuelle {c.cote_live.toFixed(1)}</span>
                               </span>
                             ) : null
                           ))}
@@ -519,23 +500,15 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                       <div style={{ marginTop: 3, fontSize: 10.5, color: CX.gray500 }}>Probabilité estimée {(p.probabilite * 100).toFixed(0)}%</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div style={{ fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{p.mise.toFixed(2)}€</div>
-                      <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 650, color: CX.emDeep }}>Gain estimé ~{p.gain_potentiel.toFixed(0)}€</div>
-                      {/* Le multiplicateur n'est montré QUE s'il a bougé : sinon il
-                          répète le gain estimé juste au-dessus. */}
-                      {p.rapport_a_bouge && p.rapport_estime != null && p.rapport_live != null && (
-                        <div style={{ marginTop: 2, fontSize: 10, color: CX.gray400, fontVariantNumeric: "tabular-nums" }}>
-                          ×{p.rapport_estime.toFixed(1)}
-                          <span style={{ color: CX.redDeep }}> → ×{p.rapport_live.toFixed(1)}</span>
-                        </div>
-                      )}
+                      <div style={{ fontSize: 10, fontWeight: 600, color: CX.gray500 }}>Mise</div>
+                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{p.mise.toFixed(2)}€</div>
+                      {/* Un seul chiffre de gain par ticket : ce que ce pari rapporte s'il
+                          passe. Le multiplicateur re-tarifé (×10 → ×4) doublait la ligne
+                          sans rien apprendre de plus. */}
+                      <div style={{ marginTop: 6, fontSize: 10, fontWeight: 600, color: CX.gray500 }}>Si gagnant</div>
+                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.emDeep, fontVariantNumeric: "tabular-nums" }}>~{p.gain_potentiel.toFixed(0)}€</div>
                     </div>
                   </div>
-                  {p.hors_tranche_live && (
-                    <p style={{ margin: "7px 0 0", padding: "6px 8px", borderRadius: 8, background: "rgba(239,68,68,.07)", fontSize: 10.5, lineHeight: 1.45, color: CX.redDeep }}>
-                      Le marché a bougé depuis le calcul : ce ticket ne paie plus le multiplicateur visé par le profil.
-                    </p>
-                  )}
                   {p.raisons && p.raisons.length > 0 && (
                     <details style={{ marginTop: 8 }}>
                       <summary style={{ minHeight: 32, cursor: "pointer", fontSize: 10.5, color: CX.goldDeep, fontWeight: 650, listStyle: "none", display: "inline-flex", alignItems: "center", gap: 4 }} className="select-none">
@@ -572,21 +545,10 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         </details>
       )}
 
-      {/* Résumé totaux */}
-      <div style={{ display: "grid", gridTemplateColumns: typeof plan.esperance_gain === "number" ? "repeat(2,1fr)" : "1fr", gap: 8, marginTop: 14 }}>
-        <div style={cell}>
-          <div style={{ fontSize: 10.5, color: CX.gray500 }}>Total joué</div>
-          <div style={{ marginTop: 3, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{plan.montant_joue.toFixed(2)}€</div>
-        </div>
-        {typeof plan.esperance_gain === "number" && (
-          <div style={cell}>
-            <div style={{ fontSize: 10.5, color: CX.gray500 }}>Gain projeté</div>
-            <div style={{ marginTop: 3, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, color: plan.esperance_gain >= 0 ? CX.emDeep : CX.redDeep, fontVariantNumeric: "tabular-nums" }}>
-              {plan.esperance_gain >= 0 ? "+" : ""}{plan.esperance_gain.toFixed(2)}€
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Le pavé « Total joué / Gain projeté » a été retiré : le total est remonté dans
+          l'en-tête (« Total misé ») et le « gain projeté » — une espérance nette, donc
+          presque toujours un montant NÉGATIF de quelques centimes — se lisait comme une
+          perte annoncée sur un plan qu'on demande à l'utilisateur de jouer. */}
 
       {/* Paris écartés — transparence : ce que l'IA refuse et POURQUOI */}
       {plan.paris_ecartes && plan.paris_ecartes.length > 0 && (
