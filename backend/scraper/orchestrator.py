@@ -18,6 +18,7 @@ Fréquences :
 """
 import asyncio
 import argparse
+import contextlib
 import os
 import threading
 import time
@@ -91,6 +92,30 @@ HEARTBEAT_PATH = os.getenv("BT_SCRAPER_HEARTBEAT", "/app/data/scraper_heartbeat"
 # depuis longtemps — mais leur seul décompte continuait de nourrir l'alerte
 # qualité. 7 jours : assez pour diagnostiquer, trop court pour devenir un passif.
 POST_COURSE_FAILURE_TTL_S = 7 * 24 * 3600
+
+# ── RE-GEL DU PRONO JUSTE AVANT LE VERROU T-10 ────────────────────────────────
+# Le (re)calcul des pronos est porté par `run_once`, c'est-à-dire par le cycle qui
+# ouvre un navigateur furtif et enchaîne tous les scrapes : mesuré en prod, il
+# repasse sur les prédictions toutes les ~20 min, pas toutes les 8. Une course
+# pouvait donc être pronostiquée puis FIGÉE sur des cotes vieilles d'une demi-heure,
+# alors que c'est précisément dans la dernière demi-heure que le marché PMU bouge.
+#
+# Cas mesuré — Auteuil 08/09/2026 R1C8, départ 16:13 UTC. Dernier prono à 15:45 sur
+# une cote de 5,1 pour le n°1 du classement (LILETTE) ; la même cote valait 8,2 à
+# T-10 et 10,0 au départ. Le plan a été gelé sur un prix qui n'existait déjà plus :
+# à 5,1 le cheval est à −7 % d'EV et le moteur lui préfère le n°2 du classement ;
+# à 8,2 il est à +49 % d'EV, dans la tranche du profil modéré, et pour la MÊME mise
+# contractuelle (5 € pour viser ×4 de 10 €). Le cheval a gagné.
+#
+# Cette boucle courte est INDÉPENDANTE du cycle de scrape : elle relance
+# `predict_course` sur les courses qui entrent dans la fenêtre du verrou. Comme
+# `predict_course` réécrit `cote_figee`, les value bets ET les plans figés des trois
+# profils (`record_profil_runs`), tout ce qui sera lu après le gel repose alors sur
+# le dernier prix connu AVANT le gel. Elle ne repousse pas le verrou : la fenêtre est
+# bornée au-dessus de T-PRONO_LOCK_MIN, jamais en deçà.
+PRONO_LOCK_MIN = 10          # doit rester égal à api.routes.courses.PRONO_LOCK_MIN
+REGEL_WINDOW_S = 60          # largeur de la fenêtre de re-gel (T-10 min → T-11 min)
+REGEL_TICK_S = 30            # cadence de la boucle — < REGEL_WINDOW_S, sinon des courses sautent
 
 # Monotonic du début du cycle en cours ; None = aucun cycle en vol.
 _cycle_started_at: float | None = None
@@ -469,6 +494,16 @@ class BlackTurfOrchestrator:
             log.info("orchestrator.starter_mode", interval_multiplier=mult)
 
         self._courses_today: list = []
+
+        # Sérialise les appels à `predict_course` : la boucle de re-gel tourne en
+        # parallèle du cycle de scrape et les deux écrivent les mêmes lignes
+        # (`predictions`, `value_bets`, `profil_run_log`). Les écritures sont des
+        # upserts idempotents, mais deux transactions concurrentes sur les mêmes
+        # clés peuvent s'interbloquer : une seule prédiction à la fois.
+        self._predict_lock = asyncio.Lock()
+        # Courses déjà re-gelées aujourd'hui (une seule fois par course).
+        self._regel_faits: set[str] = set()
+        self._regel_jour: str | None = None
 
     def _backoff_mult(self, source: str) -> int:
         """Multiplicateur d'intervalle selon le nb d'échecs consécutifs (plafonné)."""
@@ -1410,21 +1445,98 @@ class BlackTurfOrchestrator:
         log.info("orchestrator.daemon_start", interval_min=interval_minutes)
         _start_cycle_watchdog()
         _write_heartbeat()  # le conteneur vient de démarrer : il est vivant
-        while True:
-            _cycle_started_at = time.monotonic()
+        # Re-gel du prono avant le verrou T-10 : tâche parallèle, jamais dans le
+        # cycle (qui dure plusieurs minutes et peut être annulé par le watchdog).
+        _regel_task = asyncio.create_task(self._boucle_regel())
+        try:
+            while True:
+                _cycle_started_at = time.monotonic()
+                try:
+                    await asyncio.wait_for(self.run_once(), timeout=CYCLE_TIMEOUT_S)
+                    _write_heartbeat()
+                except asyncio.TimeoutError:
+                    # L'annulation a abouti : inutile de tuer le process, le cycle
+                    # suivant repart sur un navigateur neuf. Si elle N'aboutit PAS,
+                    # on ne passe jamais ici et c'est le watchdog thread qui tranche.
+                    log.error("orchestrator.cycle_timeout", timeout_s=CYCLE_TIMEOUT_S)
+                except Exception as e:
+                    log.error("orchestrator.daemon_error", error=str(e))
+                finally:
+                    _cycle_started_at = None
+                await asyncio.sleep(interval_minutes * 60)
+        finally:
+            # Le daemon s'arrête (arrêt du conteneur, annulation) : la boucle de
+            # re-gel doit mourir avec lui, sinon elle survit à sa boucle asyncio.
+            _regel_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await _regel_task
+
+    async def run_regel_pronos(self) -> None:
+        """Dernier recalcul du prono avant le verrou T-10, sur les cotes les plus fraîches.
+
+        Sélectionne les courses dont le départ tombe dans ]T-PRONO_LOCK_MIN,
+        T-PRONO_LOCK_MIN-REGEL_WINDOW_S] — donc encore AVANT le gel — et relance
+        `predict_course` dessus. Une course n'est re-gelée qu'une fois (`_regel_faits`).
+
+        La borne basse est stricte : une course déjà entrée dans les dix dernières
+        minutes n'est pas retouchée, le prono figé reste figé.
+        """
+        from sqlalchemy import text
+        from ml.pipeline import predict_course
+
+        jour = str(jour_courses())
+        if self._regel_jour != jour:
+            self._regel_jour = jour
+            self._regel_faits.clear()
+
+        async with AsyncSessionLocal() as session:
+            rows = (await session.execute(text("""
+                SELECT c.course_id
+                FROM courses c
+                WHERE c.statut = 'a_venir'
+                  AND c.date_heure >  now() + make_interval(secs => :borne_basse)
+                  AND c.date_heure <= now() + make_interval(secs => :borne_haute)
+                  AND EXISTS (
+                      SELECT 1 FROM participations p
+                      WHERE p.course_id = c.course_id AND p.non_partant = false
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM predictions pr
+                      JOIN participations pp
+                        ON pp.participation_id = pr.participation_id
+                      WHERE pp.course_id = c.course_id
+                  )
+                ORDER BY c.date_heure
+            """), {"borne_basse": PRONO_LOCK_MIN * 60,
+                   "borne_haute": PRONO_LOCK_MIN * 60 + REGEL_WINDOW_S})).fetchall()
+
+        for (cid,) in rows:
+            if cid in self._regel_faits:
+                continue
+            self._regel_faits.add(cid)
             try:
-                await asyncio.wait_for(self.run_once(), timeout=CYCLE_TIMEOUT_S)
-                _write_heartbeat()
-            except asyncio.TimeoutError:
-                # L'annulation a abouti : inutile de tuer le process, le cycle
-                # suivant repart sur un navigateur neuf. Si elle N'aboutit PAS,
-                # on ne passe jamais ici et c'est le watchdog thread qui tranche.
-                log.error("orchestrator.cycle_timeout", timeout_s=CYCLE_TIMEOUT_S)
+                async with self._predict_lock:
+                    ok = await predict_course(cid)
+                log.info("orchestrator.regel_prono", course_id=cid, ok=bool(ok))
             except Exception as e:
-                log.error("orchestrator.daemon_error", error=str(e))
-            finally:
-                _cycle_started_at = None
-            await asyncio.sleep(interval_minutes * 60)
+                # Un échec ne doit rien casser : le prono précédent reste en place,
+                # exactement comme avant l'ajout de cette boucle.
+                log.error("orchestrator.regel_prono_error", course_id=cid, error=str(e)[:200])
+
+    async def _boucle_regel(self) -> None:
+        """Boucle du re-gel — vit à côté du cycle de scrape, jamais dedans.
+
+        Volontairement hors de `run_once` : un cycle complet dure 2,5 à 6 min et peut
+        être annulé par le watchdog ; le re-gel, lui, doit tomber à la minute près.
+        """
+        log.info("orchestrator.regel_loop_start",
+                 lock_min=PRONO_LOCK_MIN, tick_s=REGEL_TICK_S, window_s=REGEL_WINDOW_S)
+        while True:
+            try:
+                await self.run_regel_pronos()
+            except Exception as e:
+                log.error("orchestrator.regel_loop_error", error=str(e)[:200])
+            await asyncio.sleep(REGEL_TICK_S)
 
     async def run_predictions_cycle(self) -> None:
         """(Re)calcule prédictions + value bets + recommandations pour les courses
@@ -1466,7 +1578,11 @@ class BlackTurfOrchestrator:
                       WHERE p.course_id = c.course_id AND p.non_partant = false
                   )
                   AND (
-                      c.date_heure > now() + interval '5 minutes'
+                      -- Le verrou annoncé au produit est T-PRONO_LOCK_MIN (10 min) ;
+                      -- ce cycle s'arrêtait à T-5 et pouvait donc changer un prono
+                      -- APRÈS l'instant de gel affiché. La borne suit désormais le
+                      -- verrou : le dernier mot revient à `run_regel_pronos`.
+                      c.date_heure > now() + make_interval(mins => :lock)
                       OR NOT EXISTS (
                           SELECT 1 FROM predictions pr
                           JOIN participations pp
@@ -1475,13 +1591,15 @@ class BlackTurfOrchestrator:
                       )
                   )
                 ORDER BY c.date_heure
-            """))
+            """), {"lock": PRONO_LOCK_MIN})
             course_ids = [row[0] for row in r.fetchall()]
 
         ok = 0
         for cid in course_ids:
             try:
-                if await predict_course(cid):
+                async with self._predict_lock:
+                    fait = await predict_course(cid)
+                if fait:
                     ok += 1
             except Exception as e:
                 log.error("orchestrator.predict_error", course_id=cid, error=str(e)[:200])
