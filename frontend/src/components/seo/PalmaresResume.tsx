@@ -18,12 +18,11 @@ import { jourCourtAnnee, type SeoTrackRecord } from "@/lib/seo";
  */
 export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
   const g = tr?.global;
-  // LE comparateur. Se mesurer au hasard flattait : battre un tirage au sort est la
-  // moindre des choses pour un modèle. Le vrai adversaire est le classement par la
-  // cote, et sur les mêmes 4 023 courses il est un peu MEILLEUR que nous en
-  // précision (62,3 % contre 61,4 % de gagnants dans le trio de tête). Le publier
-  // ne coûte rien à l'offre, il la déplace là où elle tient réellement.
-  const m = tr?.marche ?? null;
+  // Le repère publié est le HASARD, calculé sur le champ réel de chaque course.
+  // La comparaison au classement par la cote a été retirée du site le 2026-09-08 :
+  // elle reste mesurée côté API (`SeoTrackRecord.marche`), mais elle occupait les
+  // pages publiques à expliquer que le marché est aussi précis que nous, ce qui
+  // n'est pas le rôle d'une page qui doit faire essayer le produit.
   const pct = (v: number | null | undefined) =>
     v === null || v === undefined ? "—" : `${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
 
@@ -53,12 +52,12 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
                 {
                   k: "Gagnant trouvé",
                   v: pct(g.accuracy_top1),
-                  s: m ? `marché : ${pct(m.marche_top1)}` : `hasard : ${pct(g.hasard_top1)}`,
+                  s: `hasard : ${pct(g.hasard_top1)}`,
                 },
                 {
                   k: "Gagnant dans le trio de tête prédit",
                   v: pct(g.accuracy_top3),
-                  s: m ? `marché : ${pct(m.marche_top3)}` : `hasard : ${pct(g.hasard_top3)}`,
+                  s: `hasard : ${pct(g.hasard_top3)}`,
                 },
                 {
                   k: "Rendement du favori de l'algorithme",
@@ -106,20 +105,6 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
               )}
             </p>
 
-            {m && (
-              <p className="mt-3 text-sm leading-relaxed text-brand-charcoal">
-                <strong className="text-brand-dark">Et face au marché ?</strong> Sur les{" "}
-                {m.nb_courses.toLocaleString("fr-FR")} mêmes courses, classer les chevaux par leur
-                seule cote trouve le gagnant {pct(m.marche_top1)} du temps et le place dans son trio
-                de tête {pct(m.marche_top3)} du temps — contre {pct(m.ia_top1)} et {pct(m.ia_top3)}{" "}
-                pour BlackTurf. Le marché est donc aussi précis que nous, voire un peu plus. Notre
-                avantage n&apos;est pas de mieux deviner l&apos;arrivée : à précision égale, nous
-                désignons des chevaux plus chers, et miser 1 € Gagnant sur le favori du marché
-                aurait rendu {pct(m.marche_favori_roi)} contre {pct(m.ia_favori_roi)} sur le nôtre.
-                Les deux sont négatifs, et c&apos;est le prélèvement qui l&apos;impose.
-              </p>
-            )}
-
             {g.favori_roi !== null && g.favori_roi !== undefined && (
               <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm leading-relaxed text-brand-charcoal">
                 <strong className="text-brand-dark">Ce que cela ne veut pas dire.</strong> Miser 1 €
@@ -127,9 +112,8 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
                 {g.nb_favoris_evalues.toLocaleString("fr-FR")} courses, aurait rendu{" "}
                 {pct(g.favori_roi)} — autrement dit une perte. Le PMU prélève environ 20 % des
                 enjeux avant toute redistribution : le pari hippique est un jeu à somme négative,
-                et mieux classer les chevaux que le marché ne suffit pas à le renverser. BlackTurf
-                mesure sa valeur par l&apos;écart au classement du marché, jamais par un rendement
-                promis.
+                et mieux classer les chevaux que le hasard ne suffit pas à le renverser. BlackTurf
+                mesure sa valeur par la qualité de son classement, jamais par un rendement promis.
               </p>
             )}
           </>

@@ -26,7 +26,7 @@ export const revalidate = 900;
 // explique la MÉTHODE, cette page publie les RÉSULTATS.
 const TITLE = "Résultats de nos pronostics IA — taux de réussite mesuré";
 const DESCRIPTION =
-  "Ce que l'IA a produit course après course : taux de réussite comparé au hasard et au marché, et le rendement réel du favori — pertes comprises.";
+  "Ce que l'IA a produit course après course : taux de réussite face au hasard, discipline par discipline, sur des pronostics horodatés avant le départ.";
 
 export const metadata: Metadata = {
   title: TITLE,

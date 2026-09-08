@@ -131,7 +131,10 @@ export function HeroStats({ fallback }: { fallback?: HeroStatsFallback }) {
   const courses = numOf(g.nb_courses_analysees) ?? fallback?.courses_analysees ?? null;
 
   const items: Item[] = [
-    { value: accuracy, suffix: "%", decimals: 1, label: "Précision Top-3", cls: "text-amber-300" },
+    // Même libellé que la carte de la section « preuves » : le chiffre mesure la
+    // présence du gagnant réel dans notre top-3, et « Précision Top-3 » laissait le
+    // visiteur libre de lire autre chose.
+    { value: accuracy, suffix: "%", decimals: 1, label: "Gagnant dans le Top-3", cls: "text-amber-300" },
     { value: courses, suffix: "", decimals: 0, label: "Courses analysées et notées", cls: "text-white" },
     { value: favori, suffix: "%", decimals: 1, label: "Favori placé", cls: "text-emerald-300" },
   ];
