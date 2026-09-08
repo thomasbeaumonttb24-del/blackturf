@@ -1035,17 +1035,37 @@ async def _compute_track_record(db: AsyncSession) -> dict:
 
     # ── 6b. Favori IA : taux gagnant / placé + derniers pronostics ────────────
     # Le favori IA = prédiction rang_predit==1 de chaque course. On le confronte à
-    # l'arrivée réelle (sa position dans le classement officiel). Données réelles
-    # uniquement (Prediction figée + Resultat), borné aux 2000 derniers résolus.
-    # PERF : projection des seules colonnes lues (2 000 lignes x 5 entites ORM
-    # completes = ~10 000 objets, dont le JSON `classement` integral a chaque fois).
-    # ORDER BY created_at DESC LIMIT 2000 reste deterministe : aucun ex aequo sur
-    # predictions.created_at (verifie : 2 100 horodatages distincts sur 2 100).
+    # l'arrivée réelle (sa position dans le classement officiel).
+    #
+    # BIAIS CORRIGÉ LE 2026-09-08 — il gonflait les trois chiffres publiés.
+    #
+    # Quand notre favori n'avait PAS de position dans l'arrivée, la boucle faisait
+    # `continue` et la course sortait du dénominateur. Or « pas de position » ne veut
+    # pas dire « pari non réglé » : mesuré en base, sur 4 825 courses, 482 étaient
+    # dans ce cas — 391 chevaux DISQUALIFIÉS (allure irrégulière au trot, entrée
+    # présente dans le classement avec `position: null`) et 91 absents de l'arrivée
+    # publiée. Dans les deux cas le pari est PERDU. On effaçait donc 10 % de
+    # l'échantillon, et uniquement des perdants :
+    #
+    #     favori gagnant   31,8 %  →  28,6 %
+    #     favori placé     64,7 %  →  58,3 %
+    #     rendement        −1,8 %  →  −13,1 %
+    #
+    # Un vrai non-partant, lui, est REMBOURSÉ : il n'a rien à faire ni au numérateur
+    # ni au dénominateur, et il est écarté en amont par `non_partant = false`.
+    #
+    # Le `LIMIT 2000` disparaît avec : il bornait ces taux aux 2 000 dernières
+    # prédictions alors qu'`accuracy_top1` porte sur toute la cohorte, si bien que le
+    # site affichait deux valeurs différentes pour « notre n°1 gagne ». La cohorte
+    # complète tient largement (≈ 4 800 lignes, une par course).
+    #
+    # PERF : projection des seules colonnes lues — charger les entités ORM complètes
+    # embarquerait le JSON `classement` intégral à chaque fois.
     q_fav = (
         select(PredictionEvaluation.proba_top1, Participation.numero, Participation.cote_pmu,
                Cheval.nom.label("cheval_nom"), Course.course_id,
                Course.hippodrome_nom, Course.discipline, Course.date_heure,
-               Resultat.classement)
+               Resultat.classement, Resultat.rapports)
         .join(Participation, Participation.participation_id == PredictionEvaluation.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
         .join(Course, Course.course_id == PredictionEvaluation.course_id)
@@ -1056,9 +1076,10 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             PredictionEvaluation.created_at.is_not(None),
             Course.date_heure.is_not(None),
             PredictionEvaluation.created_at < Course.date_heure,
+            # Non-partant = mise remboursée : hors taux ET hors rendement.
+            Participation.non_partant.is_(False),
         )
         .order_by(PredictionEvaluation.created_at.desc())
-        .limit(2000)
     )
     fav_rows = (await db.execute(q_fav)).all()
 
@@ -1081,27 +1102,45 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                 return int(p) if isinstance(p, (int, float)) else None
         return None
 
+    def _rapport_gagnant(rapports) -> float | None:
+        """Rapport Simple Gagnant réellement payé pour 1 € (France, sinon étranger).
+
+        `participations.cote_pmu` est la cote AFFICHÉE, pas le prix encaissé : en pari
+        mutuel le rapport n'est arrêté qu'au départ. C'est donc `resultats.rapports`
+        qui règle le pari, et c'est aussi ce qu'affiche le palmarès public — les deux
+        chiffres deviennent enfin le même.
+        """
+        if not isinstance(rapports, dict):
+            return None
+        for cle in ("e_simple_gagnant", "simple_gagnant_international"):
+            v = rapports.get(cle)
+            if isinstance(v, (int, float)) and v > 0:
+                return float(v)
+        return None
+
     fav_total = fav_wins = fav_places = 0
-    # ROI RÉEL prouvé : 1€ Simple Gagnant sur le favori IA de chaque course,
-    # réglé sur l'arrivée officielle (cote_pmu réelle). Aucune valeur inventée.
+    # Rendement RÉEL : 1 € Simple Gagnant sur le favori IA de chaque course, réglé au
+    # rapport PMU payé. Aucune valeur inventée, et aucune course escamotée — une
+    # arrivée sans notre favori (disqualifié, tombé, distancé) est un pari PERDU, elle
+    # compte donc au dénominateur avec un gain nul.
     mise_fav = gain_fav = 0.0
     derniers_pronostics: list[dict] = []
     for (proba_top1, numero, cote_pmu, cheval_nom, course_id,
-         hippodrome_nom, discipline, date_heure, classement) in fav_rows:
+         hippodrome_nom, discipline, date_heure, classement, rapports) in fav_rows:
         pos = _pos_in_classement(classement, numero)
-        if pos is None:
-            continue  # non-partant / arrivée incomplète → hors taux
         fav_total += 1
         is_win = pos == 1
-        is_place = pos <= 3
+        is_place = pos is not None and pos <= 3
         fav_wins += int(is_win)
         fav_places += int(is_place)
 
-        # ROI : on ne compte que les courses où la cote PMU réelle est connue
-        if cote_pmu and cote_pmu > 1.0:
+        # Le pari est réglé dès que le rapport officiel existe — y compris, et
+        # surtout, quand notre favori a perdu.
+        rapport = _rapport_gagnant(rapports)
+        if rapport is not None:
             mise_fav += 1.0
             if is_win:
-                gain_fav += float(cote_pmu)
+                gain_fav += rapport
 
         if len(derniers_pronostics) < 20:
             gagnant_nom = None
