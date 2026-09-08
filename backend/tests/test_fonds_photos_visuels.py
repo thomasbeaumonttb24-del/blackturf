@@ -43,6 +43,15 @@ def _photos_declarees() -> list[str]:
     return re.findall(r'"([^"]+)"', bloc.group(1))
 
 
+def _photos_retirees() -> list[str]:
+    """Les sorties de file DÉCLARÉES. Liste absente = aucune sortie, pas une erreur."""
+    source = exiger(MOSAIQUE)
+    bloc = re.search(r"const PHOTOS_RETIREES = \[(.*?)\] as const;", source, re.S)
+    if not bloc:
+        return []
+    return re.findall(r'"([^"]+)"', bloc.group(1))
+
+
 def _dimensions_jpeg(chemin) -> tuple[int, int]:
     """Largeur, hauteur d'un JPEG, lues dans son en-tête."""
     data = chemin.read_bytes()
@@ -97,13 +106,29 @@ def test_toutes_les_photos_declarees_existent():
 
 def test_aucune_photo_orpheline_dans_le_dossier():
     """Un fichier présent mais jamais tiré est un poids mort dans le dépôt — et le
-    signe qu'on a retiré une photo de la liste sans supprimer son fichier."""
+    signe qu'on a retiré une photo de la liste sans supprimer son fichier.
+
+    Une exception, et une seule : `PHOTOS_RETIREES`. Une image déjà PARUE est sortie
+    de la file exprès pour ne pas ressortir, et son fichier reste au dépôt parce que
+    c'est la source d'un visuel publié. Sans cette liste, il fallait choisir entre
+    supprimer ce fichier et laisser ce test rouge en permanence — donc ne plus
+    détecter le vrai cas, l'oubli. La sortie doit être DÉCLARÉE pour être tolérée.
+    """
     declarees = {p.split("/", 1)[1] for p in _photos_declarees() if p.startswith("course/")}
+    retirees = {p.split("/", 1)[1] for p in _photos_retirees() if p.startswith("course/")}
     presentes = {f.name for f in DOSSIER_PHOTOS.glob("*.jpg")}
-    assert presentes == declarees, (
-        f"orphelines : {sorted(presentes - declarees)} · "
-        f"déclarées sans fichier : {sorted(declarees - presentes)}"
+    assert presentes == declarees | retirees, (
+        f"orphelines : {sorted(presentes - declarees - retirees)} · "
+        f"déclarées sans fichier : {sorted(declarees - presentes)} · "
+        f"retirées sans fichier : {sorted(retirees - presentes)}"
     )
+
+
+def test_une_photo_retiree_n_est_jamais_reservie():
+    """Le seul intérêt de `PHOTOS_RETIREES` est d'empêcher une reparution : une entrée
+    qui serait AUSSI dans `PHOTOS` viderait la liste de son sens."""
+    revenues = sorted(set(_photos_retirees()) & set(_photos_declarees()))
+    assert not revenues, f"retirées mais toujours dans la file : {revenues}"
 
 
 def test_aucune_photo_du_fonds_n_est_en_portrait():

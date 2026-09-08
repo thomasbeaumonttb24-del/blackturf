@@ -207,6 +207,25 @@ const PHOTOS = [
  */
 const DEPART_FONDS = "2026-09-08";
 
+/**
+ * Photos SORTIES DE LA FILE À DESSEIN, et dont le fichier reste au dépôt.
+ *
+ * Une image déjà parue ne doit jamais ressortir : celle-ci a servi le 05/09 sous
+ * l'ancienne rotation, elle a donc été retirée de `PHOTOS` en même temps que
+ * `DEPART_FONDS` était posé. Son fichier, lui, on le garde — c'est la source d'un
+ * visuel PUBLIÉ, et son attribution vit dans `SOURCES.txt` ; le supprimer casserait
+ * la trace de ce qui a été diffusé.
+ *
+ * Cette liste existe pour que l'invariant « aucun fichier orphelin dans le dossier »
+ * reste vrai ET vérifiable. Sans elle il fallait choisir entre supprimer un fichier
+ * qu'on veut garder et laisser un test rouge en permanence — c'est-à-dire ne plus
+ * détecter le VRAI cas que ce test attrape : une photo retirée de la liste par
+ * accident, dont le fichier traîne. N'y ajouter une entrée qu'avec sa raison.
+ */
+export const PHOTOS_RETIREES = [
+  "course/attele-duel.jpg", // parue le 05/09 sous l'ancienne rotation
+] as const;
+
 function indexDuJour(jour: string): number | null {
   const j = Math.floor(Date.parse(`${jour}T00:00:00Z`) / 86_400_000);
   const depart = Math.floor(Date.parse(`${DEPART_FONDS}T00:00:00Z`) / 86_400_000);
