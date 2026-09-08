@@ -156,7 +156,13 @@ export default async function PronosticsIaPage() {
 
             <dl className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200 sm:grid-cols-3">
               {[
-                { k: "Gagnant désigné", v: pct(g.accuracy_top1), s: `le hasard ferait ${pct(g.hasard_top1)}` },
+                // `favori_win_rate` et non `accuracy_top1` : les deux mesurent « notre
+                // n°1 gagne la course », mais sur deux tables. La page pilière annonçait
+                // 27,6 % pendant que le palmarès et l'accueil disaient 28,6 % — un
+                // évènement, un champ. `favori_win_rate` est aussi le seul des deux dont
+                // la cohorte exclut les non-partants (remboursés) et compte les
+                // disqualifiés comme des paris perdus.
+                { k: "Gagnant désigné", v: pct(g.favori_win_rate), s: `le hasard ferait ${pct(g.hasard_top1)}` },
                 { k: "Gagnant dans le trio prédit", v: pct(g.accuracy_top3), s: `le hasard ferait ${pct(g.hasard_top3)}` },
                 {
                   k: "Score de Brier",
@@ -225,6 +231,16 @@ export default async function PronosticsIaPage() {
                     </tbody>
                   </table>
                 </div>
+                {/* La colonne « Gagnant trouvé » vient du journal d'analyse, qui compte
+                    une course de moins que la cohorte du chiffre global juste au-dessus
+                    (celle-ci écarte les non-partants remboursés). D'où un écart d'environ
+                    un point entre le détail et le total — le dire coûte une ligne, le
+                    taire laisserait croire à une erreur de calcul. */}
+                <p className="mt-2 text-[11px] leading-snug text-brand-charcoal">
+                  Le détail par discipline est mesuré sur le journal d&apos;analyse, dont la
+                  cohorte diffère de quelques courses de celle du chiffre global : un écart
+                  d&apos;environ un point entre les deux est normal.
+                </p>
               </>
             )}
           </Section>
