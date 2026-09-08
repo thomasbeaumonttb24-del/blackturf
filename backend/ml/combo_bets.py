@@ -9,6 +9,7 @@ le pari n'est pas proposé.
 """
 from __future__ import annotations
 
+import itertools
 import math
 import numpy as np
 import structlog
@@ -508,6 +509,35 @@ def build_combo_proposals(
 # 2026-09-01, utilise par le banc de mesure A/B pour rejouer l'ancienne version.
 SG_RANGS_GARANTIS = 2
 
+# ── COUVERTURE SYSTÉMATIQUE DU HAUT DU CLASSEMENT (2026-09-08) ────────────────
+# Les combinaisons n'étaient fabriquées qu'à partir de trois sources : les 3 premiers
+# du modèle, l'outsider à valeur, et les chevaux à GROSSE cote (≥ 12). Un cheval que
+# le modèle classe 4e ou 5e mais dont la cote reste moyenne n'entrait donc dans AUCUN
+# couplé ni AUCUN trio — il n'existait tout simplement pas pour le catalogue.
+#
+# Conséquence mesurée sur R6C3 (Vincennes 08/09, 7 partants réels, profil risqué qui
+# vise ×10 minimum) : le moteur ne trouvait aucun pari à la fois dans sa tranche et
+# dans son plafond de rang, et retombait sur le filet — un Simple Gagnant à ×3,2.
+# Or les paris existaient, ils n'étaient pas énumérés :
+#     Couplé Gagnant 5-3  → ×16,7   rang max 4   proba 4,4 %
+#     Couplé Gagnant 6-3  → ×10,3   rang max 4   proba 7,0 %
+#     Trio 4-5-3          → ×11,3   rang max 4   proba 6,3 %
+# Le n°3 est 4e au classement avec une cote de 6,6 : ni top-3, ni « grosse cote ».
+#
+# On énumère donc systématiquement TOUTES les paires et TOUS les trios du haut du
+# classement, en plus des combinaisons spéciales existantes. Les probabilités sont
+# calculées en forme fermée : le coût est négligeable. Les gates de profil (tranche
+# de rapport, plafond de rang, type, EV) continuent de trancher — on leur donne
+# simplement le choix qui leur manquait.
+#
+# Bornes : 8 pour les paires (le plafond de rang le plus large, celui du profil
+# risqué, vaut 8) ; 6 pour les trios (C(8,3)=56 contre C(6,3)=20, et un trio dont le
+# 3e pied est au-delà du rang 6 est de toute façon écarté par tous les profils).
+COMBO_PAIRES_RANGS = 8
+COMBO_TRIOS_RANGS = 6
+# Couplé ORDRE : les deux sens comptent, on reste donc plus serré (4 → 12 paris).
+COMBO_ORDRE_RANGS = 4
+
 
 def enumerate_bet_candidates(
     predictions: list[dict],
@@ -795,6 +825,10 @@ def enumerate_bet_candidates(
     for gi in range(len(gros_cote)):
         for gj in range(gi + 1, len(gros_cote)):
             pairs.append((gros_cote[gi], gros_cote[gj]))
+    # Toutes les paires du haut du classement (cf. COMBO_PAIRES_RANGS) : sans elles,
+    # un cheval bien classé à cote moyenne n'apparaissait dans aucun couplé.
+    for a, b in itertools.combinations(by_p1[:COMBO_PAIRES_RANGS], 2):
+        pairs.append((a, b))
     if est_cg:
         for a, b in pairs:
             mx = max(float(cotes[a]), float(cotes[b]))
@@ -817,6 +851,9 @@ def enumerate_bet_candidates(
         for g in gros_cote:
             if by_p1[0] != g:
                 ord_pairs += [(by_p1[0], g), (g, by_p1[0])]
+        # Paires ordonnées du haut du classement, dans les deux sens.
+        for a, b in itertools.combinations(by_p1[:COMBO_ORDRE_RANGS], 2):
+            ord_pairs += [(a, b), (b, a)]
         for a, b in ord_pairs:
             mx = max(float(cotes[a]), float(cotes[b]))
             niv = "coup" if mx >= 15 else "surprise"
@@ -854,6 +891,9 @@ def enumerate_bet_candidates(
         for gj in range(gi + 1, len(gros_cote)):
             if by_p1 and by_p1[0] not in (gros_cote[gi], gros_cote[gj]):
                 trios.append((by_p1[0], gros_cote[gi], gros_cote[gj]))
+    # Tous les trios du haut du classement (cf. COMBO_TRIOS_RANGS).
+    for t in itertools.combinations(by_p1[:COMBO_TRIOS_RANGS], 3):
+        trios.append(t)
     if est_trio:
         for t in trios:
             mx = max(float(cotes[i]) for i in t)

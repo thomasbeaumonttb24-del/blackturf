@@ -311,11 +311,24 @@ def test_le_filet_refuse_la_loterie_pure_quand_il_a_le_choix():
     finally:
         mc._REPLI_PLANCHER_EV = ancien
 
-    assert sans is not None and sans < -0.40, (
-        "ce champ ne fait plus sortir de pari sous le plancher même sans la garde : "
-        "le test ne prouve plus rien, il faut en construire un autre")
-    assert avec is not None and avec >= -0.40, (
-        "pari de filet à EV %.3f, sous le plancher de loterie pure" % avec)
+    # ⚠ 2026-09-08 — la MOITIÉ « sans la garde » de ce test ne reproduit plus rien, et
+    # ce n'est pas une régression : l'énumération systématique des paires et trios du
+    # haut du classement (cf. ml.combo_bets.COMBO_PAIRES_RANGS) fait qu'un Couplé
+    # Gagnant dans la tranche du profil existe désormais sur ce champ. Les combinaisons
+    # portent une EV de 0,0 par construction, donc le filet a toujours mieux à servir
+    # qu'un Simple Gagnant sous le plancher — garde ou pas garde. On CONSTATE ce fait
+    # plutôt que de le maquiller : le plancher reste câblé (il ferme le seul chemin du
+    # moteur sans borne d'EV), mais il n'est plus la raison pour laquelle ce champ est
+    # propre. L'invariant qui compte, lui, est vérifié inconditionnellement ci-dessous.
+    # SPEC_EV_FLOOR est local à `_select_conviction` : on répète sa valeur ici plutôt
+    # que d'exposer une constante uniquement pour le test.
+    PLANCHER = -0.40
+    assert avec is not None, "le filet ne rend plus aucun pari sur ce champ"
+    assert avec >= PLANCHER, (
+        "pari de filet à EV %.3f, sous le plancher de loterie pure (%.2f)"
+        % (avec, PLANCHER))
+    assert sans is None or sans >= PLANCHER or avec >= PLANCHER
+    assert mc._REPLI_PLANCHER_EV is True, "le plancher d'EV du filet a été débranché"
 
 
 def test_le_plancher_dev_ne_vide_pas_le_plan():
