@@ -168,8 +168,16 @@ export default async function PronosticsIaPage() {
               ].map((c) => (
                 <div key={c.k} className="bg-white px-4 py-3.5">
                   <dt className="text-[11px] leading-snug text-brand-charcoal">{c.k}</dt>
-                  <dd className="mt-1 font-display text-[22px] font-bold tabular-nums text-brand-dark">{c.v}</dd>
-                  <div className="mt-0.5 text-[11px] text-brand-charcoal">{c.s}</div>
+                  {/* Même correction que la doublure du palmarès : un <div> nu glissé
+                      entre deux paires dt/dd rend la liste de définitions mal formée
+                      (règle axe « definition-list »). La précision est une nuance de la
+                      valeur, elle vit donc DANS le <dd>. */}
+                  <dd className="mt-1 font-display text-[22px] font-bold tabular-nums text-brand-dark">
+                    {c.v}
+                    <span className="mt-0.5 block font-sans text-[11px] font-normal text-brand-charcoal">
+                      {c.s}
+                    </span>
+                  </dd>
                 </div>
               ))}
             </dl>
