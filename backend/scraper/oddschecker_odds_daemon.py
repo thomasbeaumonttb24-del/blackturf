@@ -22,6 +22,11 @@ Fonctionnement (camoufox, même toolchain que zeturf-odds) :
 
 Aucune donnée inventée : pas de match nom → pas d'écriture.
 Lancé par systemd (oddschecker-odds), tourne dans /opt/scrapling_venv.
+
+Anti-bot : toute navigation passe par `ouvrir()`, qui LÈVE `PageBloquee` quand
+ce qui revient n'est pas la page demandée (403 ou page de défi Cloudflare).
+Sans cela, le défi se lisait comme une course sans cote et le daemon tournait à
+vide en silence — cf. le bloc « Blocage Cloudflare » plus bas.
 """
 from __future__ import annotations
 import os
@@ -46,21 +51,32 @@ ENUM_INTERVAL = 300     # s — ré-énumération index + sweep des courses en f
 WINDOW_H = 3            # h — ne visite que les courses partant dans < WINDOW_H
 MATCH_MIN = 7           # ± minutes heure oddschecker (UK) ↔ BlackTurf (UTC)
 PAGE_WAIT_MS = 5000
+# ── Blocage Cloudflare : signature exacte, mesurée le 09/09/2026 ─────────────
 # `enum oddschecker=0` ne veut pas dire « pas de course » : c'est un CHALLENGE
-# CLOUDFLARE, servi en HTTP 200 sous le titre « Just a moment… ». Mesuré le
-# 20/08/2026 sur la production :
-#   - premier contexte d'un navigateur neuf : passe, 156 courses énumérées ;
-#   - tout contexte SUIVANT (donc tout `browser.new_page()`, qui en crée un) :
-#     challengé, et l'attente n'y change rien — 60 s de patience ne le résolvent
-#     jamais ;
-#   - le MÊME contexte, lui, enchaîne index → course → index → autre page sans
-#     broncher : il porte le cookie `cf_clearance` obtenu au premier passage.
-# Conclusion : on garde UN contexte pour toute la vie du process, et quand la
-# clearance finit par expirer, aucune réparation interne n'est possible — seul un
-# navigateur NEUF en obtient une autre. On sort donc du process et systemd
-# relance (même remède que pour un driver mort, cf. `_exit_si_driver_mort`).
-# 2 cycles = 10 min de silence avant de payer un redémarrage.
-CHALLENGES_AVANT_REDEMARRAGE = 2
+# CLOUDFLARE. Sonde de production du 09/09 (index + pages de course, camoufox
+# identique à celui du daemon) :
+#   - la page de défi est servie en **HTTP 403** (et NON 200 comme on le croyait
+#     depuis le 20/08), titre « Just a moment… » — localisé au hasard du profil
+#     camoufox : « Nur einen Moment… », « Un momento… » ;
+#   - elle pèse 28 ko et ne contient AUCUNE ligne `tr.diff-row.evTabRow`, contre
+#     ~1 Mo et 9 à 18 lignes pour une vraie page de course ;
+#   - le cookie `cf_clearance` est bien posé et valide UN AN : ce n'est donc pas
+#     une expiration de clearance. Le blocage frappe le NAVIGATEUR (son profil),
+#     à n'importe quel moment — mesuré : après 75 s d'usage sur une sonde, jamais
+#     sur une autre après 8 pages et 5 min ;
+#   - une fois bloqué, ce navigateur le reste : 403 sur l'index ET sur les
+#     courses, trois minutes d'affilée, l'attente ne le résout jamais. Seul un
+#     navigateur NEUF repasse — immédiatement.
+# D'où la conduite : on DÉTECTE le 403/défi et on recycle le navigateur dans le
+# process (`Camoufox` rouvert = profil neuf, cf. `main`), au lieu de sortir du
+# process. Sortir marchait, mais consommait le budget systemd
+# (StartLimitBurst=10/15 min) qui doit rester disponible pour une VRAIE panne,
+# et payait 30 s de `RestartSec` à chaque défi.
+CYCLES_BLOQUES_AVANT_RECYCLAGE = 1
+# Si trois navigateurs neufs de suite ne produisent rien, ce n'est plus un défi
+# ponctuel : le profil camoufox sur disque ou l'IP est en cause, et seule une
+# sortie de process (donc un environnement complètement neuf) peut aider.
+RECYCLAGES_STERILES_AVANT_SORTIE = 3
 LONDON = ZoneInfo("Europe/London")
 
 _run = True
@@ -133,6 +149,43 @@ def _exit_si_driver_mort(exc: BaseException) -> None:
     if any(signature in message for signature in _DRIVER_MORT):
         log("driver.dead_exit", err=str(exc)[:120])
         os._exit(1)   # systemd Restart=always relance avec un driver neuf
+
+
+# ─── Anti-bot : reconnaître une page inexploitable ──────────────────────────
+class PageBloquee(RuntimeError):
+    """La page servie n'est pas celle demandée : anti-bot, erreur HTTP, redirection.
+
+    Distinguer ce cas de « la page est bonne mais ne contient pas de cote » est
+    TOUT l'objet de ce garde-fou : sans lui, le défi Cloudflare se lisait comme
+    une course sans cote, le cycle journalisait `cotes=0` et le daemon tournait à
+    vide en silence (trou de 13:00 à 15:00 le 09/09/2026, 45 min perdues par
+    heure jusqu'au recyclage horaire).
+    """
+
+
+# Titres de la page de défi, dans les langues déjà observées. Ils ne sont qu'un
+# FILET : le vrai signal est le code HTTP, qui lui ne dépend pas de la langue.
+_TITRES_DEFI = (
+    "just a moment",
+    "un momento",
+    "einen moment",
+    "un instant",
+    "checking your browser",
+    "attention required",
+)
+
+
+def ouvrir(page, url: str) -> None:
+    """Navigue et LÈVE `PageBloquee` si ce qui revient n'est pas la vraie page."""
+    reponse = page.goto(url, timeout=45000, wait_until="domcontentloaded")
+    statut = reponse.status if reponse is not None else None
+    page.wait_for_timeout(PAGE_WAIT_MS)
+    if statut is not None and statut >= 400:
+        raise PageBloquee(f"http={statut}")
+    titre = (page.title() or "")
+    if any(marqueur in titre.lower() for marqueur in _TITRES_DEFI):
+        raise PageBloquee(f"defi titre={titre[:40]}")
+
 
 # ─── DB via docker exec psql (même pattern que zeturf/genybet daemons) ──────
 def db_query(sql: str) -> list[list[str]]:
@@ -217,9 +270,12 @@ def write_odds(course_id: str, matches: list[tuple[str, str, str, float]]) -> in
 
 # ─── Scraping Oddschecker ───────────────────────────────────────────────────
 def enum_races(page) -> list[dict]:
-    """Index → [{slug, hhmm, url, dt_utc}] des courses du JOUR (heures UK locales)."""
-    page.goto(INDEX_URL, timeout=45000, wait_until="domcontentloaded")
-    page.wait_for_timeout(PAGE_WAIT_MS)
+    """Index → [{slug, hhmm, url, dt_utc}] des courses du JOUR (heures UK locales).
+
+    Lève `PageBloquee` si l'index n'est pas servi (403/défi), au lieu de rendre
+    une liste vide qui se confondrait avec un programme vide.
+    """
+    ouvrir(page, INDEX_URL)
     hrefs = page.eval_on_selector_all(
         'a[href*="/horse-racing/"]',
         'els=>[...new Set(els.map(e=>e.getAttribute("href")))]',
@@ -236,14 +292,20 @@ def enum_races(page) -> list[dict]:
                     "url": BASE + h, "dt_utc": dt_local.astimezone(timezone.utc)})
     return out
 
-def read_race(page, url: str) -> dict[str, dict[str, float]]:
-    """Page course → {nom_norm: {bk: cote}} (cotes décimales > 1).
+def read_race(page, url: str) -> tuple[dict[str, dict[str, float]], int]:
+    """Page course → ({nom_norm: {bk: cote}}, nombre de lignes de partants).
 
     Books retenus : B3=Bet365, BF=Betfair Exchange, LD=Ladbrokes, CE=Coral
     (LD/CE = Entain, cotes quasi identiques — CE sert de repli si LD absent).
+
+    Le SECOND élément du retour est ce qui rend la stérilité visible : une page
+    de course réelle porte toujours ses lignes `tr.diff-row.evTabRow` (9 à 18
+    mesurées), même quand aucun des quatre books retenus n'y cote. Zéro ligne
+    veut donc dire « page inexploitable », pas « course sans cote » — et
+    `read_race` lève déjà `PageBloquee` avant d'en arriver là quand le blocage
+    s'annonce franchement (403 ou titre de défi).
     """
-    page.goto(url, timeout=45000, wait_until="domcontentloaded")
-    page.wait_for_timeout(PAGE_WAIT_MS)
+    ouvrir(page, url)
     rows = page.evaluate("""() => {
       const KEEP = new Set(['B3', 'BF', 'LD', 'CE']);
       const out = [];
@@ -260,7 +322,8 @@ def read_race(page, url: str) -> dict[str, dict[str, float]]:
       });
       return out;
     }""")
-    return {norm_nom(r["nom"]): r["odds"] for r in rows if r.get("odds")}
+    lignes = len(rows or [])
+    return {norm_nom(r["nom"]): r["odds"] for r in rows if r.get("odds")}, lignes
 
 def match_course(bt: dict, slug: str, dt_utc: datetime):
     """course_id BlackTurf pour un meeting oddschecker (hippo fuzzy + heure ±MATCH_MIN)."""
@@ -284,91 +347,165 @@ def _dormir(t0: float) -> None:
         time.sleep(1)
 
 
+# Verdicts d'un cycle. Seuls BLOQUE et STERILE réclament un navigateur neuf ;
+# VEILLE est un cycle SAIN (la nuit, il n'y a rien à coter).
+VEILLE = "veille"     # aucune course dans la fenêtre : on ne sort même pas
+UTILE = "utile"       # au moins une page de course servie et exploitable
+BLOQUE = "bloque"     # anti-bot franc : 403, page de défi, ou index vide
+STERILE = "sterile"   # pages servies, mais pas une seule ligne de partants
+ERREUR = "erreur"     # panne applicative (base injoignable, driver…)
+
+
+def _cycle(page) -> tuple[str, int]:
+    """Un balayage complet de la fenêtre. Rend (verdict, cotes écrites)."""
+    t0 = time.time()
+    cotes_du_cycle = 0
+    try:
+        bt = load_blackturf()
+        now = datetime.now(timezone.utc)
+        # Fenêtre calculée sur NOTRE base avant toute requête sortante :
+        # sans course à coter, on ne réveille pas Cloudflare pour rien
+        # (et on ne consomme pas de recyclage la nuit).
+        attendues = [c for c in bt.values() if c["dt_obj"] and
+                     timedelta(minutes=-10) <= (c["dt_obj"] - now) <= timedelta(hours=WINDOW_H)]
+        if not attendues:
+            log("cycle", courses=0, cotes=0, veille=True, sec=int(time.time() - t0))
+            return VEILLE, 0
+
+        races = enum_races(page)
+        if not races:
+            # Index servi en 200 mais sans un seul lien de course, alors que NOUS
+            # attendons des courses : variante silencieuse du défi, que le code
+            # HTTP n'a pas trahie.
+            log("index.vide", attendues=len(attendues), titre=str(page.title())[:40])
+            return BLOQUE, 0
+
+        visit = []
+        for r in races:
+            if not (timedelta(minutes=-10) <= (r["dt_utc"] - now) <= timedelta(hours=WINDOW_H)):
+                continue
+            cid = match_course(bt, r["slug"], r["dt_utc"])
+            if cid:
+                visit.append((cid, r))
+        log("enum", oddschecker=len(races), blackturf=len(bt), fenetre=len(visit))
+
+        lues = vides = 0
+        bloquee = None
+        for cid, r in visit:
+            try:
+                odds_by_nom, lignes = read_race(page, r["url"])
+            except PageBloquee as e:
+                # Inutile d'insister sur les courses suivantes : le blocage frappe
+                # le NAVIGATEUR, pas la page (mesuré le 09/09 : 403 sur l'index
+                # comme sur toutes les courses, sans rémission).
+                bloquee = str(e)
+                log("race.bloquee", url=r["url"][-40:], err=bloquee[:60])
+                break
+            except Exception as e:
+                log("race.error", url=r["url"][-40:], err=str(e)[:100])
+                # Un driver mort se présente d'abord ici, course après course :
+                # sans ce contrôle, le cycle se terminait « proprement » sur dix
+                # erreurs et le process survivait à un navigateur inutilisable.
+                _exit_si_driver_mort(e)
+                continue
+            if not lignes:
+                # Page servie, mais sans la moindre ligne de partants : ce n'est
+                # pas une course sans cote, c'est une page qui n'est pas la bonne.
+                vides += 1
+                log("race.vide", url=r["url"][-40:], titre=str(page.title())[:40])
+                continue
+            lues += 1
+            chevaux = bt[cid]["chevaux"]
+            matches = []
+            for nom_n, odds in odds_by_nom.items():
+                entry = chevaux.get(nom_n)
+                if not entry:
+                    continue
+                _, pid = entry
+                if "B3" in odds:
+                    matches.append((pid, "cote_bet365", "bet365", odds["B3"]))
+                if "BF" in odds:
+                    matches.append((pid, "cote_betfair_exchange", "betfair_exchange", odds["BF"]))
+                ld = odds.get("LD") or odds.get("CE")
+                if ld:
+                    matches.append((pid, "cote_ladbrokes", "ladbrokes", ld))
+            if matches:
+                n = write_odds(cid, matches)
+                cotes_du_cycle += n
+                log("wrote", race=f"{r['slug']}/{r['hhmm']}", course=cid, cotes=n)
+        # Bilan de PRODUCTIVITÉ, pas de simple survie : cette ligne distingue
+        # « rien à faire » de « tourne à vide ».
+        log("cycle", courses=len(visit), cotes=cotes_du_cycle, lues=lues,
+            vides=vides, sec=int(time.time() - t0))
+        if bloquee is not None:
+            return BLOQUE, cotes_du_cycle
+        if visit and lues == 0:
+            log("cycle.sterile", visitees=len(visit), vides=vides)
+            return STERILE, cotes_du_cycle
+        return UTILE, cotes_du_cycle
+    except PageBloquee as e:
+        log("index.bloque", err=str(e)[:80])
+        return BLOQUE, cotes_du_cycle
+    except Exception as e:
+        log("cycle.error", err=str(e)[:140])
+        _exit_si_driver_mort(e)
+        return ERREUR, cotes_du_cycle
+
+
+def _attendre(secondes: int) -> None:
+    """Pause interruptible par SIGTERM (le daemon doit s'arrêter en < 2 s)."""
+    for _ in range(int(max(0, secondes))):
+        if not _run:
+            return
+        time.sleep(1)
+
+
 def main():
     global _cycle_started_at
     log("oddschecker_daemon.start", enum=ENUM_INTERVAL, window_h=WINDOW_H,
         cycle_timeout_s=CYCLE_TIMEOUT_S)
     _start_watchdog()
-    # Le watchdog est armé AVANT l'ouverture du navigateur : un hang dans
-    # `Camoufox(...)` lui-même (déjà observé sur les daemons soeurs) est
-    # couvert, pas seulement les hangs à l'intérieur de la boucle `while _run`.
-    _cycle_started_at = time.time()
-    with Camoufox(headless=True, geoip=True) as browser:
-        # UN SEUL contexte pour tout le process : c'est lui qui porte la
-        # clearance Cloudflare (cf. note en tête de fichier).
-        page = browser.new_page()
-        challenges = 0
-        while _run:
-            _cycle_started_at = time.time()
-            t0 = time.time()
-            cotes_du_cycle = 0
-            try:
-                bt = load_blackturf()
-                now = datetime.now(timezone.utc)
-                # Fenêtre calculée sur NOTRE base avant toute requête sortante :
-                # sans course à coter, on ne réveille pas Cloudflare pour rien
-                # (et on ne consomme pas de redémarrage la nuit).
-                attendues = [c for c in bt.values() if c["dt_obj"] and
-                             timedelta(minutes=-10) <= (c["dt_obj"] - now) <= timedelta(hours=WINDOW_H)]
-                if not attendues:
-                    log("cycle", courses=0, cotes=0, veille=True,
-                        sec=int(time.time() - t0))
+    recyclages_steriles = 0
+    while _run:
+        # Le watchdog est armé AVANT l'ouverture du navigateur : un hang dans
+        # `Camoufox(...)` lui-même (déjà observé sur les daemons soeurs) est
+        # couvert, pas seulement les hangs à l'intérieur de la boucle de cycles.
+        _cycle_started_at = time.time()
+        productif = False
+        try:
+            with Camoufox(headless=True, geoip=True) as browser:
+                # UN SEUL contexte par navigateur : c'est lui qui porte la
+                # clearance Cloudflare (cf. note en tête de fichier).
+                page = browser.new_page()
+                bloques = 0
+                while _run:
+                    _cycle_started_at = time.time()
+                    t0 = time.time()
+                    verdict, cotes = _cycle(page)
+                    if verdict in (BLOQUE, STERILE):
+                        bloques += 1
+                        if bloques >= CYCLES_BLOQUES_AVANT_RECYCLAGE:
+                            log("navigateur.recyclage", motif=verdict, cycles=bloques)
+                            break
+                    else:
+                        bloques = 0
+                        productif = productif or verdict in (UTILE, VEILLE)
                     _dormir(t0)
-                    continue
-
-                races = enum_races(page)
-                if not races:
-                    # Index vide alors que NOUS attendons des courses : c'est le
-                    # challenge, pas un creux de programme.
-                    challenges += 1
-                    log("cloudflare.challenge", n=challenges,
-                        attendues=len(attendues), titre=str(page.title())[:40])
-                    if challenges >= CHALLENGES_AVANT_REDEMARRAGE:
-                        log("cloudflare.exit", n=challenges)
-                        os._exit(1)   # systemd relance : navigateur neuf = clearance neuve
-                    _dormir(t0)
-                    continue
-                challenges = 0
-
-                visit = []
-                for r in races:
-                    if not (timedelta(minutes=-10) <= (r["dt_utc"] - now) <= timedelta(hours=WINDOW_H)):
-                        continue
-                    cid = match_course(bt, r["slug"], r["dt_utc"])
-                    if cid:
-                        visit.append((cid, r))
-                log("enum", oddschecker=len(races), blackturf=len(bt), fenetre=len(visit))
-                for cid, r in visit:
-                    try:
-                        odds_by_nom = read_race(page, r["url"])
-                        chevaux = bt[cid]["chevaux"]
-                        matches = []
-                        for nom_n, odds in odds_by_nom.items():
-                            entry = chevaux.get(nom_n)
-                            if not entry:
-                                continue
-                            _, pid = entry
-                            if "B3" in odds:
-                                matches.append((pid, "cote_bet365", "bet365", odds["B3"]))
-                            if "BF" in odds:
-                                matches.append((pid, "cote_betfair_exchange", "betfair_exchange", odds["BF"]))
-                            ld = odds.get("LD") or odds.get("CE")
-                            if ld:
-                                matches.append((pid, "cote_ladbrokes", "ladbrokes", ld))
-                        if matches:
-                            n = write_odds(cid, matches)
-                            cotes_du_cycle += n
-                            log("wrote", race=f"{r['slug']}/{r['hhmm']}", course=cid, cotes=n)
-                    except Exception as e:
-                        log("race.error", url=r["url"][-40:], err=str(e)[:100])
-                # Bilan de PRODUCTIVITÉ, pas de simple survie : cette ligne
-                # distingue « rien à faire » de « tourne à vide ».
-                log("cycle", courses=len(visit), cotes=cotes_du_cycle,
-                    sec=int(time.time() - t0))
-            except Exception as e:
-                log("cycle.error", err=str(e)[:140])
-                _exit_si_driver_mort(e)
-            _dormir(t0)
+        except Exception as e:
+            log("navigateur.error", err=str(e)[:140])
+            _exit_si_driver_mort(e)
+        if not _run:
+            break
+        if productif:
+            recyclages_steriles = 0
+        else:
+            recyclages_steriles += 1
+            if recyclages_steriles >= RECYCLAGES_STERILES_AVANT_SORTIE:
+                log("navigateur.sterile_exit", recyclages=recyclages_steriles)
+                os._exit(1)   # systemd repart avec un process ET un profil neufs
+            # Un navigateur neuf coûte ~10 s de CPU : sur un blocage qui ne cède
+            # pas, on espace au lieu d'enchaîner les lancements.
+            _attendre(60 * recyclages_steriles)
     log("oddschecker_daemon.stop")
 
 if __name__ == "__main__":

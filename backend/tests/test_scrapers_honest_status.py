@@ -138,22 +138,31 @@ def test_le_daemon_oddschecker_garde_un_seul_contexte():
     daemon à être challengé en permanence.
     """
     lignes = ODDSCHECKER.splitlines()
-    debut = next(i for i, l in enumerate(lignes) if l.strip() == "while _run:")
-    corps = "\n".join(lignes[debut:])
+    debut = next(i for i, l in enumerate(lignes) if l.strip() == "with Camoufox(headless=True, geoip=True) as browser:")
+    fin = next(i for i, l in enumerate(lignes[debut:], debut) if l.strip().startswith("except Exception"))
+    corps_navigateur = "\n".join(lignes[debut:fin])
+    ouverture, _, cycles = corps_navigateur.partition("page = browser.new_page()")
 
-    assert "page = browser.new_page()" in "\n".join(lignes[:debut]), \
-        "le contexte doit être ouvert AVANT la boucle et vivre tout le process"
-    assert "browser.new_page()" not in corps, \
+    assert ouverture, "la page doit être ouverte juste après le navigateur"
+    assert "browser.new_page()" not in cycles, \
         "une page par cycle = un contexte sans cf_clearance = challenge garanti"
 
 
-def test_un_challenge_cloudflare_persistant_fait_redemarrer_le_daemon():
-    """Aucune réparation interne n'existe : seul un navigateur NEUF obtient une
-    nouvelle clearance. Le process doit donc sortir pour que systemd relance —
-    même remède que pour un driver Playwright mort."""
+def test_un_blocage_cloudflare_fait_recycler_le_navigateur():
+    """Aucune réparation interne n'existe DANS un navigateur bloqué : mesuré le
+    09/09/2026, il rend 403 sur l'index comme sur les courses trois minutes
+    d'affilée. Un navigateur NEUF, lui, repasse immédiatement — et un `Camoufox`
+    rouvert dans le même process en est un.
+
+    On recycle donc le navigateur au lieu de sortir : le budget systemd
+    (StartLimitBurst=10/15 min) doit rester disponible pour une vraie panne. La
+    sortie de process reste le dernier recours, quand plusieurs navigateurs neufs
+    de suite ne produisent rien."""
     normalise = " ".join(ODDSCHECKER.split())
-    assert "CHALLENGES_AVANT_REDEMARRAGE" in normalise
-    assert 'log("cloudflare.exit"' in normalise
+    assert "CYCLES_BLOQUES_AVANT_RECYCLAGE" in normalise
+    assert 'log("navigateur.recyclage"' in normalise
+    assert "RECYCLAGES_STERILES_AVANT_SORTIE" in normalise
+    assert 'log("navigateur.sterile_exit"' in normalise
     assert "os._exit(1)" in normalise
 
 
@@ -170,7 +179,7 @@ def test_le_daemon_oddschecker_journalise_sa_productivite():
     """« Le daemon tourne » n'est pas « le daemon produit ». Sans le nombre de
     cotes écrites par cycle, un daemon qui tourne à vide reste indétectable."""
     normalise = " ".join(ODDSCHECKER.split())
-    assert 'log("cycle", courses=len(visit), cotes=cotes_du_cycle' in normalise
+    assert 'log("cycle", courses=len(visit), cotes=cotes_du_cycle, lues=lues, vides=vides' in normalise
 
 
 ZETURF = (BACKEND / "scraper/zeturf_live_daemon.py").read_text(encoding="utf-8")

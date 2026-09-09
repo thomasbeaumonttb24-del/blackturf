@@ -7,9 +7,15 @@ Description=Recycle les daemons de cotes avant qu'ils saturent leur MemoryHigh
 # plafonds pleins simultanement = reclaim permanent : la pression memoire
 # globale « full » restait a 60-94 %, avec 283 Mo de RAM libre.
 # Un simple redemarrage des deux a rendu 1 356 Mo et fait retomber la pression
-# a 4 %. Il guerit AUSSI la sterilite silencieuse d'oddschecker, qui journalise
-# `cotes=0` a chaque cycle passe un quart d'heure : la relance a immediatement
-# reproduit `cotes=270`.
+# a 4 %.
+#
+# Ce timer guerissait AUSSI, par effet de bord, la sterilite silencieuse
+# d'oddschecker (`cotes=0` a chaque cycle passe un quart d'heure) — mais une
+# heure de latence pour une panne qui coute 45 min de production par heure.
+# Depuis le 09/09/2026 le daemon la detecte lui-meme et recycle son navigateur
+# dans la minute (`log navigateur.recyclage`) : ce timer ne garde donc que son
+# role de MEMOIRE. Ne pas le retirer pour autant, la fuite camoufox, elle, est
+# toujours la.
 # :25 evite la pause (:40) et la reprise (:10) du couple pause/resume.
 OnCalendar=*-*-* *:25:00
 Persistent=false
