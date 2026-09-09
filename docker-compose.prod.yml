@@ -277,6 +277,15 @@ services:
       - scrape_data:/app/data
       - ml_models:/app/models   # nécessaire : run_predictions_cycle charge le modèle
     restart: unless-stopped
+    # PID 1 du conteneur = le process python de l'orchestrateur. Quand le driver
+    # node de Playwright meurt, les process chrome qu'il avait lances sont
+    # reparentes sur PID 1 — qui ne les recolte jamais : 282 zombies mesures en
+    # 18 h le 09/09/2026 (~370/jour, pids.max=8039, donc saturation des forks du
+    # conteneur en ~3 semaines sans deploiement). `init: true` interpose tini,
+    # qui recolte les orphelins. Le watchdog reste intact : il appelle
+    # `os._exit(1)` sur le process python, tini propage le code de sortie et
+    # `restart: unless-stopped` relance comme avant.
+    init: true
     # Le scraper peut GELER sans mourir (cf. 11/08 : 4 j 16 h de silence, process
     # « Up », 0 exception). Un healthcheck de liveness ne verrait rien → on teste
     # le heartbeat écrit à la fin de chaque cycle. NB : Docker ne redémarre pas un

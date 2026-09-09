@@ -1,0 +1,9 @@
+[Unit]
+Description=BlackTurf - recyclage periodique des daemons de cotes (fuite camoufox)
+
+[Service]
+Type=oneshot
+# `try-restart` et NON `restart` : il ne redemarre QUE les unites deja actives.
+# Un `restart` demarrerait les daemons pendant la fenetre de pause nocturne
+# 01:40-03:10 UTC et volerait au retrain les ~2,1 Go que cette pause lui rend.
+ExecStart=/bin/systemctl try-restart zeturf-odds.service oddschecker-odds.service

@@ -1,0 +1,18 @@
+[Unit]
+Description=Recycle les daemons de cotes avant qu'ils saturent leur MemoryHigh
+
+[Timer]
+# Mesure du 09/09/2026 : zeturf-odds et oddschecker-odds atteignent chacun
+# ~1,1 Go (MemoryHigh=1100M) et saturent aussi MemorySwapMax=512M. Les deux
+# plafonds pleins simultanement = reclaim permanent : la pression memoire
+# globale « full » restait a 60-94 %, avec 283 Mo de RAM libre.
+# Un simple redemarrage des deux a rendu 1 356 Mo et fait retomber la pression
+# a 4 %. Il guerit AUSSI la sterilite silencieuse d'oddschecker, qui journalise
+# `cotes=0` a chaque cycle passe un quart d'heure : la relance a immediatement
+# reproduit `cotes=270`.
+# :25 evite la pause (:40) et la reprise (:10) du couple pause/resume.
+OnCalendar=*-*-* *:25:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

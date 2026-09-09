@@ -154,6 +154,15 @@ services:
     volumes:
       - scrape_data:/app/data
     restart: unless-stopped
+    # PID 1 du conteneur = le process python de l'orchestrateur. Quand le driver
+    # node de Playwright meurt, les process chrome qu'il avait lances sont
+    # reparentes sur PID 1 — qui ne les recolte jamais : 282 zombies mesures en
+    # 18 h le 09/09/2026 (~370/jour, pids.max=8039, donc saturation des forks du
+    # conteneur en ~3 semaines sans deploiement). `init: true` interpose tini,
+    # qui recolte les orphelins. Le watchdog reste intact : il appelle
+    # `os._exit(1)` sur le process python, tini propage le code de sortie et
+    # `restart: unless-stopped` relance comme avant.
+    init: true
 
   worker:
     build:
