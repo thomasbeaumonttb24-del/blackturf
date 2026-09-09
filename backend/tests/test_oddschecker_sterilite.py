@@ -49,11 +49,24 @@ class FausseReponse:
 class FaussePage:
     """Page Playwright minimale : statut HTTP, titre et lignes de partants."""
 
-    def __init__(self, statut=200, titre="Kempton 19:00 Betting Odds", lignes=None):
+    def __init__(self, statut=200, titre="Kempton 19:00 Betting Odds", lignes=None,
+                 lignes_apres_attente=None):
         self.statut = statut
         self.titre = titre
         self.lignes = lignes if lignes is not None else []
+        # Rendu tardif : ce que le sélecteur fait apparaître, comme sur le site.
+        self.lignes_apres_attente = lignes_apres_attente
         self.visitees = []
+        self.attentes_selecteur = 0
+
+    def wait_for_selector(self, _selecteur, timeout=None):
+        self.attentes_selecteur += 1
+        if self.lignes_apres_attente is not None:
+            self.lignes = self.lignes_apres_attente
+            return object()
+        if not self.lignes:
+            raise TimeoutError("selecteur absent")
+        return object()
 
     def goto(self, url, **_kw):
         self.visitees.append(url)
@@ -110,6 +123,20 @@ def test_read_race_rend_le_nombre_de_lignes_de_partants(daemon):
     odds, lignes = daemon.read_race(page, "https://www.oddschecker.com/x")
     assert odds == {}
     assert lignes == 2
+
+
+def test_read_race_laisse_sa_chance_a_un_rendu_tardif(daemon):
+    """Le tableau des cotes est posé par du JS. Mesuré le 09/09 : la page Kempton
+    19:00 rend zéro ligne à un passage et huit au suivant, sans rien changer
+    d'autre. Sans cette attente, une lenteur de rendu se ferait passer pour un
+    blocage et ferait recycler un navigateur parfaitement sain."""
+    page = FaussePage(lignes=[], lignes_apres_attente=[{"nom": "Kalice", "odds": {"B3": 3.1}}])
+
+    odds, lignes = daemon.read_race(page, "https://www.oddschecker.com/x")
+
+    assert page.attentes_selecteur == 1
+    assert lignes == 1
+    assert odds == {"kalice": {"B3": 3.1}}
 
 
 def test_read_race_normalise_les_noms_et_garde_les_cotes(daemon):

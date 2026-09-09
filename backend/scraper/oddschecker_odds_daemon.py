@@ -51,6 +51,10 @@ ENUM_INTERVAL = 300     # s — ré-énumération index + sweep des courses en f
 WINDOW_H = 3            # h — ne visite que les courses partant dans < WINDOW_H
 MATCH_MIN = 7           # ± minutes heure oddschecker (UK) ↔ BlackTurf (UTC)
 PAGE_WAIT_MS = 5000
+# Lignes de partants d'une page de course : leur PRÉSENCE prouve que la page
+# servie est bien la bonne (une page de défi n'en a aucune).
+SELECTEUR_PARTANTS = "tr.diff-row.evTabRow"
+SELECTEUR_TIMEOUT_MS = 8000
 # ── Blocage Cloudflare : signature exacte, mesurée le 09/09/2026 ─────────────
 # `enum oddschecker=0` ne veut pas dire « pas de course » : c'est un CHALLENGE
 # CLOUDFLARE. Sonde de production du 09/09 (index + pages de course, camoufox
@@ -306,6 +310,15 @@ def read_race(page, url: str) -> tuple[dict[str, dict[str, float]], int]:
     s'annonce franchement (403 ou titre de défi).
     """
     ouvrir(page, url)
+    # Le tableau des cotes est posé par du JS : à 5 s d'attente fixe, une page
+    # parfaitement saine rend parfois zéro ligne (mesuré le 09/09 sur Kempton
+    # 19:00, rendue vide à un passage et complète au suivant). On laisse donc sa
+    # chance au sélecteur avant de conclure — sans quoi une lenteur de rendu se
+    # ferait passer pour un blocage, et ferait recycler un navigateur sain.
+    try:
+        page.wait_for_selector(SELECTEUR_PARTANTS, timeout=SELECTEUR_TIMEOUT_MS)
+    except Exception:
+        pass   # vraie page vide ou blocage : le compte de lignes tranchera
     rows = page.evaluate("""() => {
       const KEEP = new Set(['B3', 'BF', 'LD', 'CE']);
       const out = [];
