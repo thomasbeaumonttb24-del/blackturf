@@ -625,6 +625,19 @@ def start_scheduler() -> None:
         # publierait à une heure imprévisible.
         misfire_grace_time=600,
     )
+    # Surveillance de la story — 10 h 05 Paris, APRÈS le dernier passage de la fenêtre.
+    #
+    # Une story qui ne part pas ne produit AUCUN événement : les passages journalisent
+    # « pas encore » toutes les demi-heures et s'arrêtent. Le 2026-09-09, un plan resté
+    # `partial` a bloqué la journée et l'absence de publication ne s'est vue que sur
+    # Instagram, le lendemain. Ce job la transforme en alerte ; il ne publie rien.
+    scheduler.add_job(
+        job_surveillance_story,
+        CronTrigger(hour=10, minute=5, timezone="Europe/Paris"),
+        id="surveillance_story",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     # Tuile hebdomadaire de la mosaïque — LE DIMANCHE, toutes les demi-heures de 8 h à
     # 13 h, Paris. Même raison que la story : la semaine se termine le samedi soir mais
     # le rattrapage nocturne règle encore au petit matin. Le job attend que le samedi
@@ -995,6 +1008,89 @@ async def job_publication_story() -> None:
             return
 
     log.info("jobs.story.rien_a_publier", candidats=candidats)
+
+
+async def job_surveillance_story() -> None:
+    """Prévient l'exploitant quand la story de la veille N'EST PAS partie.
+
+    POURQUOI CE JOB EXISTE : le 2026-09-09, un seul plan sur 212 est resté `partial`
+    (rapport d'un pool international non reconnu au règlement) ; `journee_complete`
+    est donc resté faux et la story n'est jamais partie. Rien n'a alerté — les
+    passages du job écrivaient `jobs.story.pas_encore` toutes les demi-heures, dans
+    un log que personne ne lit la nuit, et l'absence de publication ne s'est vue que
+    sur Instagram le lendemain.
+
+    Une non-publication est un ÉVÉNEMENT, pas l'absence d'événement : ce job la
+    transforme en message. Il tourne APRÈS la dernière chance de la fenêtre de nuit
+    (le job de publication passe jusqu'à 09:30 Paris), et il ne publie rien lui-même —
+    republier à la main est une décision de l'exploitant, pas un rattrapage
+    automatique à une heure où la story n'a plus de sens.
+    """
+    from datetime import timedelta as _td
+
+    from sqlalchemy import text as _text
+
+    from api.config import get_settings
+    from db.database import AsyncSessionLocal
+    from services.alerts import send_email
+    from services.temps_courses import jour_courses
+
+    veille = (jour_courses() - _td(days=1)).isoformat()
+
+    async with AsyncSessionLocal() as session:
+        ligne = (await session.execute(_text(
+            "SELECT publie_at, nb_tentatives, derniere_raison "
+            "FROM publications_sociales WHERE jour = :j AND canal = :c"
+        ), {"j": veille, "c": CANAL_STORY})).mappings().first()
+
+        if ligne and ligne["publie_at"] is not None:
+            log.info("jobs.story.surveillance_ok", jour=veille)
+            return
+
+        # Rien de publié : on dit POURQUOI, avec ce que l'API attend encore. Sans ce
+        # détail, l'alerte se réduit à « ça n'a pas marché » et il faut tout refaire.
+        reste, nb_plans, abandonnes = None, None, None
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(
+                    "http://api:8000/api/v1/stats/meilleurs-plans-jour",
+                    params={"jour": veille}, headers={"Host": "api.blackturf.fr"},
+                )
+                r.raise_for_status()
+                d = r.json()
+            reste = d.get("reste_a_venir")
+            nb_plans = d.get("nb_plans")
+            abandonnes = d.get("plans_abandonnes")
+        except Exception as e:  # noqa: BLE001
+            log.warning("jobs.story.surveillance_bilan_indisponible",
+                        jour=veille, err=str(e)[:160])
+
+        log.error("jobs.story.non_publiee", jour=veille, reste=reste,
+                  nb_plans=nb_plans, plans_abandonnes=abandonnes,
+                  tentatives=(ligne or {}).get("nb_tentatives"),
+                  raison=(ligne or {}).get("derniere_raison"))
+
+        try:
+            html = (
+                f"<p>La story de bilan du <strong>{veille}</strong> n'a pas été publiée "
+                "sur Instagram. La fenêtre de publication automatique (22 h → 09 h 30) "
+                "est passée.</p>"
+                f"<p>Ce que l'API attendait encore : <code>{reste}</code><br>"
+                f"Plans du jour : <code>{nb_plans}</code> — "
+                f"plans abandonnés (rapport PMU jamais publié) : <code>{abandonnes}</code><br>"
+                f"Tentatives d'envoi : <code>{(ligne or {}).get('nb_tentatives')}</code> — "
+                f"dernière raison : <code>{(ligne or {}).get('derniere_raison')}</code></p>"
+                "<p>Aucune republication automatique : une story de la veille perd son "
+                "sens en journée, la décision revient à l'exploitant.</p>"
+            )
+            envoye = await send_email(
+                get_settings().admin_email,
+                f"BlackTurf — story du {veille} NON publiée", html,
+            )
+            log.info("jobs.story.surveillance_alerte", jour=veille, envoye=bool(envoye))
+        except Exception as e:  # noqa: BLE001
+            log.warning("jobs.story.surveillance_alerte_echec", jour=veille, err=str(e)[:200])
 
 
 async def job_publication_mosaique() -> None:

@@ -217,3 +217,109 @@ async def test_le_job_ne_revient_jamais_publier_un_jour_plus_ancien(db, monkeypa
     assert envois == [f"https://blackturf.fr/visuels/story.jpg?jour={JOUR.isoformat()}"]
     jours = [l["jour"] for l in await _lignes(db)]
     assert jours == [JOUR.isoformat()], f"jours publiés : {jours}"
+
+
+# ── Surveillance : une story qui ne part PAS doit se voir ─────────────────────
+#
+# Le 2026-09-09, un seul plan sur 212 est resté `partial` (rapport d'un pool
+# international non reconnu au règlement). `journee_complete` n'est jamais devenu
+# vrai, la story n'est jamais partie — et RIEN ne l'a signalé : les passages du job
+# écrivaient « pas encore » toutes les demi-heures dans un log que personne ne lit la
+# nuit. L'absence de publication n'était un événement pour personne.
+
+
+def _surveillance(monkeypatch, db, alertes: list):
+    """Branche le job de surveillance : session de test, e-mail factice, API muette."""
+    import db.database as _dbmod
+
+    class _Session:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(_dbmod, "AsyncSessionLocal", _Session)
+
+    import services.alerts as al
+
+    async def _envoyer(destinataire, sujet, html):
+        alertes.append((destinataire, sujet, html))
+        return True
+
+    monkeypatch.setattr(al, "send_email", _envoyer)
+
+    import services.temps_courses as tc
+    monkeypatch.setattr(tc, "jour_courses", lambda: JOUR)
+
+
+async def _ligne_publication(db, jour: str, *, publie: bool):
+    from sqlalchemy import text
+    await db.execute(text(
+        "INSERT INTO publications_sociales (publication_id, jour, canal, media_id, "
+        "publie_at, derniere_tentative_at, nb_tentatives, derniere_raison) "
+        "VALUES ('p-1', :j, :c, :m, :p, :p2, 1, :r)"
+    ), {"j": jour, "c": jobs.CANAL_STORY,
+        "m": "media-1" if publie else None,
+        "p": "2026-09-05 02:30:00+00" if publie else None,
+        "p2": "2026-09-05 02:30:00+00",
+        "r": None if publie else "journee jamais complete"})
+    await db.commit()
+
+
+async def test_la_surveillance_alerte_quand_la_story_de_la_veille_n_est_pas_partie(
+        db, monkeypatch):
+    alertes: list = []
+    _surveillance(monkeypatch, db, alertes)
+
+    await jobs.job_surveillance_story()
+
+    assert len(alertes) == 1, "une story manquante doit produire un message, pas rien"
+    _, sujet, _ = alertes[0]
+    assert "2026-09-04" in sujet and "NON publiée" in sujet
+
+
+async def test_la_surveillance_se_tait_quand_la_story_est_partie(db, monkeypatch):
+    alertes: list = []
+    _surveillance(monkeypatch, db, alertes)
+    await _ligne_publication(db, "2026-09-04", publie=True)
+
+    await jobs.job_surveillance_story()
+
+    assert alertes == [], "une alerte quotidienne inutile finit dans un filtre"
+
+
+async def test_la_surveillance_alerte_aussi_sur_un_envoi_echoue(db, monkeypatch):
+    """Une ligne existe mais `publie_at` est NULL (jeton expiré, quota…) : c'est une
+    story absente d'Instagram, donc une alerte."""
+    alertes: list = []
+    _surveillance(monkeypatch, db, alertes)
+    await _ligne_publication(db, "2026-09-04", publie=False)
+
+    await jobs.job_surveillance_story()
+
+    assert len(alertes) == 1
+    assert "journee jamais complete" in alertes[0][2]
+
+
+async def test_la_surveillance_ne_publie_rien_elle_meme(db, monkeypatch):
+    """Elle alerte, elle ne rattrape pas : une story de la veille publiée en pleine
+    journée ne dit plus rien de juste, et republier est une décision de l'exploitant."""
+    from tests._descripteurs_deploiement import RACINE, exiger
+    source = exiger(RACINE / "backend" / "services" / "jobs.py")
+    debut = source.index("async def job_surveillance_story")
+    fin = source.index("async def job_publication_mosaique")
+    corps = source[debut:fin]
+    assert "publier_story" not in corps and "publier_image" not in corps
+
+
+def test_la_surveillance_est_planifiee_apres_la_fenetre_de_publication():
+    from tests._descripteurs_deploiement import RACINE, exiger
+    source = exiger(RACINE / "backend" / "services" / "jobs.py")
+    assert 'id="surveillance_story"' in source
+    assert "CronTrigger(hour=10, minute=5" in source, (
+        "la surveillance doit passer APRÈS le dernier essai de publication (09:30)"
+    )

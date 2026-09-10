@@ -33,9 +33,10 @@ def _plan(mise: float) -> dict:
         "ev_estime": 0.1, "description": "d"}]}]}
 
 
-def _course(db, course_id: str, *, hippodrome: str = "HIPPODROME DU LION D ANGERS"):
+def _course(db, course_id: str, *, hippodrome: str = "HIPPODROME DU LION D ANGERS",
+            depart: datetime = DEPART):
     db.add(Course(course_id=course_id, reunion_id="5", numero=4, nom="Prix T",
-                  date_heure=DEPART, hippodrome_nom=hippodrome, discipline="Plat",
+                  date_heure=depart, hippodrome_nom=hippodrome, discipline="Plat",
                   distance=2000, nb_partants=10, statut="termine"))
 
 
@@ -386,8 +387,14 @@ async def test_une_course_annulee_ne_bloque_pas_la_publication_pour_toujours(db,
 
 
 @pytest.mark.asyncio
-async def test_un_plan_pas_encore_regle_bloque_la_publication(db, client):
-    """Le rapport Multi est publié en différé : le total bouge encore après l'arrivée."""
+async def test_un_plan_pas_encore_regle_bloque_la_publication(db, client, monkeypatch):
+    """Le rapport Multi est publié en différé : le total bouge encore après l'arrivée.
+
+    Tant que la nuit n'est pas passée, on ATTEND — c'est ce qui a évité de publier le
+    2026-09-06 un total amputé des 165 plans réglés à 04 h 19."""
+    from api.routes import stats as _stats
+    monkeypatch.setattr(_stats, "_attente_reglement_terminee", lambda *a, **k: False)
+
     _course(db, "04092026R5C4")
     _emission(db, "04092026R5C4", "d", retour=49.0, emitted_at=DEPART - timedelta(minutes=20))
     _emission(db, "04092026R5C4", "attente", retour=0.0, profil="conservateur",
@@ -398,6 +405,72 @@ async def test_un_plan_pas_encore_regle_bloque_la_publication(db, client):
     corps = await _corps(client)
     assert corps["journee_complete"] is False
     assert corps["reste_a_venir"]["plans_non_regles"] == 1
+    assert corps["plans_abandonnes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_un_plan_jamais_reglable_ne_bloque_pas_la_journee_pour_toujours(db, client):
+    """CAUSE RACINE DU 2026-09-09 — la story du jour n'est jamais partie.
+
+    Un pari GAGNANT dont le PMU ne publie pas le rapport pour le type joué reste
+    `partial` à vie : le règlement le re-tente indéfiniment (≈300 tentatives cette
+    nuit-là) et `journee_complete` ne devient jamais vrai. Un seul plan sur 212 a
+    suffi à bloquer la publication, sans erreur et sans alerte.
+
+    Au matin (ici : une journée vieille de plusieurs jours, donc bien après la borne),
+    on cesse d'attendre. Le plan est de toute façon exclu des totaux, qui n'agrègent
+    que du `settled` : attendre plus longtemps ne change aucun chiffre publié, ça
+    n'empêche que la publication."""
+    _course(db, "04092026R5C4")
+    _emission(db, "04092026R5C4", "d", retour=49.0, emitted_at=DEPART - timedelta(minutes=20))
+    _emission(db, "04092026R5C4", "jamais", retour=0.0, profil="conservateur",
+              statut="partial", emitted_at=DEPART - timedelta(minutes=18))
+    _resultat(db, "04092026R5C4")
+    await db.commit()
+
+    corps = await _corps(client)
+    assert corps["reste_a_venir"]["plans_non_regles"] == 0
+    assert corps["journee_complete"] is True
+    # L'abandon est COMPTÉ : un plan qu'on cesse d'attendre en silence est un chiffre
+    # manquant que personne ne peut expliquer le lendemain.
+    assert corps["plans_abandonnes"] == 1
+    # Et il ne rentre pas dans les totaux : seul le plan réglé compte.
+    assert corps["nb_plans"] == 1 and corps["total_retour"] == 49.0
+
+
+def test_l_attente_des_reglements_couvre_toute_la_nuit():
+    """La borne d'abandon est une heure de PARIS le lendemain, et elle doit tomber
+    après le rattrapage nocturne (qui a déjà réglé des plans à 04 h 19) et avant la fin
+    de la fenêtre de publication (09 h 30). Une borne calculée en UTC serait deux
+    heures trop tôt l'été, donc en pleine séance de rattrapage."""
+    from zoneinfo import ZoneInfo
+
+    from api.routes.stats import _attente_reglement_terminee
+
+    PARIS = ZoneInfo("Europe/Paris")
+    minuit = datetime(2026, 9, 5, 0, 30, tzinfo=PARIS)
+    rattrapage = datetime(2026, 9, 5, 4, 19, tzinfo=PARIS)
+    matin = datetime(2026, 9, 5, 5, 0, tzinfo=PARIS)
+
+    assert _attente_reglement_terminee("04092026", minuit) is False
+    assert _attente_reglement_terminee("04092026", rattrapage) is False, (
+        "abandonner avant le rattrapage publierait un total amputé"
+    )
+    assert _attente_reglement_terminee("04092026", matin) is True
+    # Le jour COURANT ne s'abandonne jamais : sa nuit n'a pas eu lieu.
+    assert _attente_reglement_terminee("05092026", matin) is False
+
+
+def test_la_borne_d_abandon_est_lue_en_heure_de_paris():
+    """03 h 00 UTC = 05 h 00 Paris en été : l'heure UTC déciderait de l'abandon deux
+    heures trop tôt, en pleine nuit de rattrapage."""
+    from api.routes.stats import _attente_reglement_terminee
+
+    trois_h_utc = datetime(2026, 9, 5, 3, 0, tzinfo=timezone.utc)   # 05:00 Paris
+    deux_h_utc = datetime(2026, 9, 5, 2, 0, tzinfo=timezone.utc)    # 04:00 Paris
+
+    assert _attente_reglement_terminee("04092026", trois_h_utc) is True
+    assert _attente_reglement_terminee("04092026", deux_h_utc) is False
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ Cache Redis pour éviter requêtes lourdes répétées.
 import json
 import asyncio
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -38,6 +38,46 @@ router = APIRouter()
 # Sert à décider si la journée est finie (`journee_complete`), donc si le visuel du
 # soir peut être publié.
 MARGE_FIN_JOURNEE_MIN = 25
+
+# Heure (Paris) du LENDEMAIN à partir de laquelle on cesse d'attendre le règlement des
+# plans d'une journée. Passé ce point, un plan encore non réglé n'empêche plus de
+# déclarer la journée finie.
+#
+# POURQUOI UNE HEURE FIXE ET NON UN DÉLAI depuis le départ : un rapport PMU peut
+# légitimement arriver très tard — le rattrapage nocturne (02:00 UTC) a réglé les 165
+# derniers plans du 2026-09-05 à 04 h 19. Un délai de quelques heures après la course
+# aurait déclaré la journée finie AVANT eux et publié un total amputé de 165 plans.
+# Toute la nuit, on attend donc sans céder ; ce n'est qu'au matin, le rattrapage passé,
+# que l'attente devient sans espoir.
+#
+# CE QUE CETTE BORNE ÉVITE : un rapport que le PMU ne publiera JAMAIS pour le type joué
+# laisse le plan `partial` à vie, et un seul plan suffit à bloquer la journée POUR
+# TOUJOURS — le 2026-09-09, 1 plan sur 212 a empêché la story de partir. 05 h est après
+# le rattrapage (≈04 h 30 au plus tard) et avant la fin de la fenêtre de publication
+# (09 h 30) : la journée reste publiable le matin même.
+HEURE_ABANDON_REGLEMENT_PARIS = 5
+
+
+def _attente_reglement_terminee(jjmmaaaa: str,
+                                maintenant: datetime | None = None) -> bool:
+    """A-t-on cessé d'attendre les règlements de la journée `jjmmaaaa` (JJMMAAAA) ?
+
+    Vrai à partir de `HEURE_ABANDON_REGLEMENT_PARIS` le LENDEMAIN, heure de Paris. Le
+    fuseau est explicite : `datetime.now()` dans un conteneur en UTC placerait la borne
+    deux heures trop tôt l'été, donc au milieu du rattrapage nocturne.
+    """
+    from services.temps_courses import PARIS
+
+    ref = (maintenant or datetime.now(timezone.utc)).astimezone(PARIS)
+    try:
+        jour = date(int(jjmmaaaa[4:8]), int(jjmmaaaa[2:4]), int(jjmmaaaa[:2]))
+    except (TypeError, ValueError):
+        return False
+    borne = datetime.combine(
+        jour + timedelta(days=1),
+        time(hour=HEURE_ABANDON_REGLEMENT_PARIS), tzinfo=PARIS,
+    )
+    return ref >= borne
 
 
 async def _cache_get(redis: aioredis.Redis, key: str) -> Any | None:
@@ -2079,6 +2119,15 @@ async def stats_meilleurs_plans_jour(
     #
     # La marge de 25 min couvre ce différé. La borne est calculée EN PYTHON et passée
     # en paramètre : `now()` n'existe pas sous SQLite, et cette requête est testée.
+    #
+    # MAIS L'ATTENTE EST BORNÉE AU MATIN (`HEURE_ABANDON_REGLEMENT_PARIS`). Un plan dont
+    # le rapport PMU ne sera JAMAIS publié pour le type joué reste `partial`
+    # indéfiniment et bloquait alors la journée POUR TOUJOURS : le 2026-09-09, un seul
+    # plan sur 212 (un Couplé Ordre gagnant d'un pool international, cf.
+    # bet_settlement) a empêché la story de partir. Passé 05 h le lendemain — après le
+    # rattrapage nocturne, donc quand plus rien n'est attendu — on cesse d'attendre ce
+    # plan. Il est de toute façon exclu des totaux, qui n'agrègent que des règlements
+    # `settled` : l'attendre plus longtemps ne change aucun chiffre publié.
     limite = datetime.now(timezone.utc) - timedelta(minutes=MARGE_FIN_JOURNEE_MIN)
     fin = await db.execute(
         text("""
@@ -2103,10 +2152,21 @@ async def stats_meilleurs_plans_jour(
         {"jjmmaaaa": jjmmaaaa, "limite": limite},
     )
     f = fin.mappings().first() or {}
+    # L'abandon se décide EN PYTHON, sur l'horloge, et pas dans la requête : la borne
+    # est une heure de Paris (fuseau que SQLite ne connaît pas), et la requête est testée.
+    non_regles = int(f.get("plans_non_regles") or 0)
+    plans_abandonnes = 0
+    if non_regles and _attente_reglement_terminee(jjmmaaaa):
+        # Plans qu'on a cessé d'attendre : ils ne bloquent plus `journee_complete` et
+        # n'entrent pas dans les totaux — la CTE des plans publiés exige
+        # `statut = 'settled'`. Le chiffre est renvoyé pour que l'abandon soit VISIBLE :
+        # un plan lâché en silence est un total inexplicable le lendemain.
+        plans_abandonnes, non_regles = non_regles, 0
+        log.warning("stats.jour.plans_abandonnes", jour=jjmmaaaa, nb=plans_abandonnes)
     restes = {
         "courses_a_venir": int(f.get("courses_a_venir") or 0),
         "courses_en_attente": int(f.get("courses_en_attente") or 0),
-        "plans_non_regles": int(f.get("plans_non_regles") or 0),
+        "plans_non_regles": non_regles,
     }
 
     # ── Totaux de la journée, sur les MÊMES plans publiés ────────────────────
@@ -2145,6 +2205,10 @@ async def stats_meilleurs_plans_jour(
         # publication.
         "journee_complete": not any(restes.values()) and int(v.get("nb_courses") or 0) > 0,
         "reste_a_venir": restes,
+        # Plans qu'on a cessé d'attendre (rapport PMU jamais publié pour le type joué).
+        # Ils ne bloquent plus la publication et ne comptent pas dans les totaux : le
+        # nombre est renvoyé pour que cet abandon reste visible au lieu d'être muet.
+        "plans_abandonnes": plans_abandonnes,
         "nb_plans": int(t.get("nb_plans") or 0),
         "nb_plans_gagnants": int(t.get("nb_plans_gagnants") or 0),
         "total_mise": total_mise,

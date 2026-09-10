@@ -36,15 +36,24 @@ from typing import Optional
 # "simple_gagnant"… PAS de préfixe `e_` (celui-ci est le codePari des COTES live, jamais
 # stocké dans les rapports définitifs). On garde les variantes `e_*` en second pour
 # rétro-compat avec d'éventuelles vieilles lignes. Mettre la clé réelle EN PREMIER.
+#
+# ⚠️ POOLS INTERNATIONAUX : sur une course étrangère reprise par le PMU, le rapport
+# est publié sous `<type>_international` et JAMAIS sous la clé habituelle. La variante
+# doit donc figurer ici pour CHAQUE type offert sur ces réunions (liste de référence :
+# `_CODE_FLAG` de services/bet_catalog.py ; verrou : tests/test_rapports_internationaux.py).
+# Une clé manquante ne se voit pas comme une erreur, elle se lit comme « rapport pas
+# encore publié » : le 2026-09-09, 09092026R6C6 a payé un `couple_ordre_international`
+# de 24,6 sur un Couplé Ordre GAGNANT ; faute de la clé, le plan est resté `partial`,
+# donc `journee_complete` faux, donc la story du soir n'est jamais partie.
 _RAPPORT_KEYS = {
     "Simple Gagnant": ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international"),
     "Simple Placé":   ("simple_place", "e_simple_place", "simple_place_international"),
-    "Couplé Gagnant": ("couple_gagnant", "e_couple_gagnant"),
-    "Couplé Placé":   ("couple_place", "e_couple_place"),
+    "Couplé Gagnant": ("couple_gagnant", "e_couple_gagnant", "couple_gagnant_international"),
+    "Couplé Placé":   ("couple_place", "e_couple_place", "couple_place_international"),
     # Paris à l'ORDRE (champ réduit) — combinaison gagnante dans l'ordre exact.
-    "Couplé Ordre":   ("couple_ordre", "e_couple_ordre"),
-    "Trio":           ("trio", "e_trio"),
-    "Trio Ordre":     ("trio_ordre", "e_trio_ordre"),
+    "Couplé Ordre":   ("couple_ordre", "e_couple_ordre", "couple_ordre_international"),
+    "Trio":           ("trio", "e_trio", "trio_international"),
+    "Trio Ordre":     ("trio_ordre", "e_trio_ordre", "trio_ordre_international"),
     "Super 4":        ("super_quatre", "e_super_quatre"),
     "2sur4":          ("deux_sur_quatre", "e_deux_sur_quatre"),
     # Jackpots désordre — vrais rapports PMU (base 1€). Le rapport publié est celui
