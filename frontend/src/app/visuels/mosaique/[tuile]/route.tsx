@@ -48,7 +48,10 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
   try {
     const url = new URL(`${API}/stats/bilan-semaine`);
     if (semaine) url.searchParams.set("fin", semaine);
-    const res = await fetch(url.toString(), { next: { revalidate: 600 } });
+    // Sans cache : ce visuel est publié dans le fil le dimanche. Le cache de données
+    // sert la réponse PÉRIMÉE d'abord — c'est ce qui a fait partir la story du
+    // 2026-09-10 à « 0 € rendu ». Cf. `visuels/story.jpg/route.tsx`.
+    const res = await fetch(url.toString(), { cache: "no-store" });
     if (res.ok) {
       const d = await res.json();
       const a = d.analyse ?? {};

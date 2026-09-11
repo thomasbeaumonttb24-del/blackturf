@@ -138,7 +138,9 @@ async def test_la_story_part_une_fois_la_journee_finie(db, monkeypatch):
     assert len(envois) == 1
     # L'URL porte le JOUR : sans lui, Meta irait chercher le visuel du jour courant,
     # et publierait une story qui ne parle pas de la journée annoncée.
-    assert envois[0].endswith(f"/visuels/story.jpg?jour={JOUR.isoformat()}")
+    # Et le nombre de plans VALIDÉ : le visuel refuse de se rendre s'il lit autre chose
+    # (incident du 2026-09-11, story partie à « 0 € » depuis une réponse en cache).
+    assert envois[0].endswith(f"/visuels/story.jpg?jour={JOUR.isoformat()}&plans=198")
     [ligne] = await _lignes(db)
     assert ligne["jour"] == JOUR.isoformat()
     assert ligne["media_id"] == "media-1"

@@ -55,7 +55,8 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
   try {
     const url = new URL(`${API}/stats/bilan-semaine`);
     if (semaine) url.searchParams.set("fin", semaine);
-    const res = await fetch(url.toString(), { next: { revalidate: 600 } });
+    // Sans cache : l'aperçu doit montrer ce qui PARTIRA, pas une réponse périmée.
+    const res = await fetch(url.toString(), { cache: "no-store" });
     if (res.ok) {
       const d = await res.json();
       const a = d.analyse ?? {};

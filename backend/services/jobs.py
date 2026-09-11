@@ -969,7 +969,10 @@ async def job_publication_story() -> None:
                          reste=d.get("reste_a_venir"), nb_plans=d.get("nb_plans"))
                 continue
 
-            url = f"{base}/visuels/story.jpg?jour={jour}"
+            # `plans=` : le visuel refuse de se rendre (409) si l'API ne dit plus ce que
+            # ce job vient de valider. Le 2026-09-11, l'image est partie avec les chiffres
+            # d'une réponse en cache de la veille (0 plan) alors qu'ici on en lisait 159.
+            url = f"{base}/visuels/story.jpg?jour={jour}&plans={int(d['nb_plans'])}"
             resultat = await publier_story(url)
 
             # La ligne est écrite QUE ÇA MARCHE OU NON : un échec sans trace se répète

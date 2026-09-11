@@ -80,7 +80,9 @@ export async function GET(req: Request) {
 
   let d: Record<string, unknown> | null = null;
   try {
-    const res = await fetch(url.toString(), { next: { revalidate: 600 } });
+    // Sans cache : c'est la légende qui PART dans le fil (cf. `story.jpg/route.tsx`,
+    // incident du 2026-09-11 — une réponse périmée servie avant d'être rafraîchie).
+    const res = await fetch(url.toString(), { cache: "no-store" });
     if (res.ok) d = await res.json();
   } catch {
     d = null;
