@@ -38,7 +38,7 @@ JOBS = RACINE / "backend" / "services" / "jobs.py"
 
 def _code(chemin) -> str:
     """Le source sans ses commentaires : ils citent précisément ce qui est interdit."""
-    src = exiger(chemin).read_text(encoding="utf-8")
+    src = exiger(chemin)
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
     return "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("//"))
 
@@ -78,7 +78,7 @@ def test_la_story_refuse_un_bilan_different_de_celui_valide():
 
 
 def test_le_job_transmet_le_nombre_de_plans_valide():
-    src = exiger(JOBS).read_text(encoding="utf-8")
+    src = exiger(JOBS)
     assert re.search(r"/visuels/story\.jpg\?jour=\{jour\}&plans=\{int\(d\['nb_plans'\]\)\}", src), (
         "l'URL donnée à Meta doit porter `plans=` : c'est ce qui empêche l'image de "
         "diverger du bilan que le job a validé"

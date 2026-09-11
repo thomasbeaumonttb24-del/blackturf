@@ -216,7 +216,7 @@ async def test_le_job_ne_revient_jamais_publier_un_jour_plus_ancien(db, monkeypa
     await jobs.job_publication_story()   # publie le 05
     await jobs.job_publication_story()   # ne doit RIEN publier, surtout pas le 04
 
-    assert envois == [f"https://blackturf.fr/visuels/story.jpg?jour={JOUR.isoformat()}"]
+    assert envois == [f"https://blackturf.fr/visuels/story.jpg?jour={JOUR.isoformat()}&plans=198"]
     jours = [l["jour"] for l in await _lignes(db)]
     assert jours == [JOUR.isoformat()], f"jours publiés : {jours}"
 
