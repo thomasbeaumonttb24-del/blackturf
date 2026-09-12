@@ -106,12 +106,24 @@ def test_petit_champ_le_plafond_cede_plutot_que_de_vider_le_plan():
 TYPES_SANS_AUCUN_GAGNANT = ["Super 4", "Pick5", "Multi en 4", "Multi en 5"]
 
 
-@pytest.mark.parametrize("type_mort", TYPES_SANS_AUCUN_GAGNANT + ["Trio", "Trio Ordre"])
+@pytest.mark.parametrize("type_mort", TYPES_SANS_AUCUN_GAGNANT + ["Trio Ordre"])
 def test_le_profil_risque_ne_propose_plus_les_types_perdants(type_mort):
     """Mesuré sur les règlements réels : Super 4, Pick5 et Multi en 4 comptent
     ZÉRO gagnant sur 134, 86 et 145 paris — donc −100 % par construction, pas par
-    malchance. Le Trio rend −58,7 % winsorisé sur 13 682 paris."""
+    malchance. Le Trio Ordre rend −86 % sur 128 paris."""
     assert type_mort not in mc.PROFIL_CONFIG["agressif"]["types"]
+
+
+def test_le_trio_est_un_ticket_gros_lot_plafonne_et_non_un_pari_de_rendement():
+    """Le Trio est REVENU au profil risqué le 2026-09-12, mais comme ticket « gros
+    lot » (`loterie`) : exempté du gate dur de l'apprentissage, limité à UN par plan
+    et à `var_cap` en mise. Il rend −25 à −35 % sur toutes ses constructions ; on ne
+    le joue pas pour son rendement, on le joue parce que les gains de 1 000 à
+    4 500 € du profil étaient tous des Trios à 2-10 €."""
+    assert "Trio" in mc.PROFIL_CONFIG["agressif"]["types"]
+    assert "Trio" in mc.PROFIL_CONFIG["agressif"]["loterie"]
+    assert mc.LOTERIE_MAX_TICKETS == 1
+    assert "Trio" in mc._HIGH_VAR_TYPES          # donc plafonné par var_cap
 
 
 def test_le_profil_risque_garde_de_quoi_jouer():
@@ -189,16 +201,25 @@ def _plans_du_risque(preds, info):
 
 class _RisqueAncrageStrict:
     """Reproduit l'état EXACT de la production du 2026-09-02 : le risqué en ancrage
-    strict. C'est cet état qui vidait la sélection et faisait tomber toutes les
-    courses sur le filet — la démonstration du défaut a donc besoin de lui, même si
-    le réglage a depuis été retiré du profil (cf. `ancrage_strict`)."""
+    strict ET sans Trio au catalogue (il n'y est revenu que le 2026-09-12, comme
+    ticket « gros lot »). C'est cet état qui vidait la sélection et faisait tomber
+    toutes les courses sur le filet — la démonstration du défaut a donc besoin de
+    lui, même si les réglages ont depuis changé (cf. `ancrage_strict`, `loterie`)."""
 
     def __enter__(self):
-        self._ancien = mc.PROFIL_CONFIG["agressif"].get("ancrage_strict", False)
-        mc.PROFIL_CONFIG["agressif"]["ancrage_strict"] = True
+        cfg = mc.PROFIL_CONFIG["agressif"]
+        self._ancien = (cfg.get("ancrage_strict", False), set(cfg["types"]),
+                        set(cfg.get("loterie") or ()), cfg["rang_max"], mc.ANCRAGE_MODE)
+        cfg["ancrage_strict"] = True
+        cfg["types"] = set(cfg["types"]) - {"Trio"}
+        cfg["loterie"] = set()
+        cfg["rang_max"] = 4                 # plafond du 2026-09-03
+        mc.ANCRAGE_MODE = "top2"            # ancrage sur les deux premiers, d'alors
 
     def __exit__(self, *exc):
-        mc.PROFIL_CONFIG["agressif"]["ancrage_strict"] = self._ancien
+        cfg = mc.PROFIL_CONFIG["agressif"]
+        (cfg["ancrage_strict"], cfg["types"], cfg["loterie"], cfg["rang_max"],
+         mc.ANCRAGE_MODE) = self._ancien
         return False
 
 

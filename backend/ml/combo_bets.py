@@ -1165,11 +1165,13 @@ def build_coverage_bets(
             p_market = max(sim_m.p_coverage(sel, 4), 1e-4)
             rapport = float(min(max(TRJ["Multi"] / p_market, 1.1), 5000.0))
             niveau = "jackpot" if n == 4 else "couverture"
-            # PRIX RÉEL de la formule : on couvre toutes les combinaisons de 4 parmi n,
-            # donc 3 € × C(n,4) — 3 € en 4, 15 € en 5, 45 € en 6, 105 € en 7. Annoncer
-            # 3 € quel que soit n conseillait un ticket que le PMU ne vend pas.
+            # PRIX de la formule : 3 € FIXES quel que soit n. Le PMU couvre les C(n,4)
+            # combinaisons pour la mise de base et publie un rapport par formule,
+            # déjà divisé par ce nombre (cf. services.pmu_paris_reference._MULTI_COUT
+            # et la preuve chiffrée qui l'accompagne). Facturer 3 € × C(n,4) ET régler
+            # au rapport divisé comptait le prix deux fois.
             n_combis = math.comb(n, 4)
-            cout = round(MULTI_UNIT * n_combis, 2)
+            cout = round(MULTI_UNIT, 2)
             proposals.append({
                 "niveau": niveau,
                 "type_pari": f"{_label} en {n}",

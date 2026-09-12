@@ -170,20 +170,25 @@ def mise_base(nom_pari: str | None) -> float:
     return p.mise_base if p else 1.0
 
 
-# Le Multi est le seul pari du catalogue dont le PRIX dépend du nombre de chevaux
-# choisis : on couvre toutes les combinaisons de 4 parmi N, donc le ticket coûte
-# 3 € × C(N,4) — 3 € en 4, 15 € en 5, 45 € en 6, 105 € en 7. Le PMU publie d'ailleurs
-# un rapport DIFFÉRENT par formule (rapports_detail.e_multi, quatre entrées
-# décroissantes), ce que le règlement sait déjà lire.
-_MULTI_COUT = {4: 3.0, 5: 15.0, 6: 45.0, 7: 105.0}
+# Le Multi se joue à MISE FIXE de 3 € que l'on choisisse 4, 5, 6 ou 7 chevaux :
+# c'est le rapport qui décroît avec le nombre de chevaux, pas le prix du ticket.
+# Preuve dans nos propres données (rapports_detail.e_multi, 31122025R1C6) : en 4
+# 577,5 € / en 5 115,5 € / en 6 38,5 € / en 7 16,5 € — soit des ratios de 5, 3 et
+# 2,33, c'est-à-dire exactement C(5,4)/C(4,4), C(6,4)/C(5,4), C(7,4)/C(6,4). Le PMU
+# divise le rapport par le nombre de combinaisons couvertes ; il ne facture pas
+# chaque combinaison. Une version antérieure (2026-08-23) facturait 3 € × C(N,4)
+# — 105 € pour un « Multi en 7 » — ET réglait au rapport déjà divisé : le pari
+# était compté deux fois plus cher qu'il n'est, et les formules en 5/6/7
+# devenaient invendables sur un plan de 10 €.
+_MULTI_COUT = {4: 3.0, 5: 3.0, 6: 3.0, 7: 3.0}
 
 
 def cout_minimum(nom_pari: str | None) -> float:
     """Prix du ticket le moins cher réellement achetable pour ce type de pari.
 
-    Conseiller 8 € sur un « Multi en 7 » revient à conseiller un ticket que le PMU
-    ne vend pas : la formule coûte 105 € et rien en dessous. Cette fonction donne
-    le plancher à respecter avant de proposer le pari.
+    Pour le Multi, 3 € quelle que soit la formule (cf. `_MULTI_COUT`). Cette
+    fonction donne le plancher à respecter avant de proposer un pari : un ticket
+    au-dessus du budget du plan n'est pas un conseil, c'est un ticket invendable.
     """
     n = str(nom_pari or "")
     if "Multi en " in n:

@@ -325,14 +325,14 @@ class TestTicketsAppoint:
         un plan complet : le nombre de tickets finançables dépend du budget et de la
         cible de gain, pas de la règle anti-doublon qu'on veut tester ici."""
         from services.mise_calculator import _couvre_deja
-        ancre = frozenset({1, 2})
-        t1 = {"type_pari": "Trio", "_ancre_top2": True, "_ancre_nums": ancre,
+        ancre = frozenset({1})
+        t1 = {"type_pari": "Trio", "_ancre": True, "_ancre_nums": ancre,
               "chevaux": [{"numero": 1}, {"numero": 2}, {"numero": 7}]}
-        t2 = {"type_pari": "Trio", "_ancre_top2": True, "_ancre_nums": ancre,
+        t2 = {"type_pari": "Trio", "_ancre": True, "_ancre_nums": ancre,
               "chevaux": [{"numero": 1}, {"numero": 2}, {"numero": 9}]}
         assert not _couvre_deja(t2, [t1]), "deux pieds libres différents = deux paris"
         # Le vrai doublon reste détecté.
-        t3 = {"type_pari": "Trio", "_ancre_top2": True, "_ancre_nums": ancre,
+        t3 = {"type_pari": "Trio", "_ancre": True, "_ancre_nums": ancre,
               "chevaux": [{"numero": 2}, {"numero": 1}, {"numero": 7}]}
         assert _couvre_deja(t3, [t1]), "même combinaison = doublon"
 
@@ -404,10 +404,16 @@ class TestTicketsAppoint:
         Les trois periodes ci-dessus viennent de `predictions` avec les memes
         gardes anti-fuite (created_at < date_heure, cote_figee non nulle)."""
         from services.mise_calculator import _rang_max_effectif, PROFIL_CONFIG
-        # bornes par profil, du plus strict au plus large
+        # bornes par profil. Le risque est passe de 4 a 5 le 2026-09-12 avec l'ancrage
+        # sur le rang 1 : le plafond a 4 avait ete mesure avec l'ancien ancrage (r1 ET
+        # r2) et coupait surtout des couples r3-r5 sans point d'appui ; avec l'ancrage
+        # sur le rang 1, le rang 5 est un PIED de l'eventail r1 x (r3..r5). Le rang 6
+        # reste exclu (-45 % comme pied de couple, 2 945 tickets rejoues). Les paris a
+        # un cheval sont bornes plus bas (rang_max_simple = 3 : rang 4 -> -8 a -19 %).
         assert PROFIL_CONFIG["conservateur"]["rang_max"] == 5
         assert PROFIL_CONFIG["equilibre"]["rang_max"] == 6
-        assert PROFIL_CONFIG["agressif"]["rang_max"] == 4
+        assert PROFIL_CONFIG["agressif"]["rang_max"] == 5
+        assert PROFIL_CONFIG["agressif"]["rang_max_simple"] == 3
         # champ large : c'est le plafond du profil qui borne
         assert _rang_max_effectif(8, 20) == 8
         # champ reduit : le rang 8 serait le dernier cheval -> le champ borne
@@ -618,26 +624,26 @@ class TestAncrageTop2:
     COURSE = {"course_id": "T1", "nb_partants": 12, "discipline": "Attelé"}
 
     def test_le_filtre_ne_garde_que_les_combinaisons_ancrees(self):
-        from services.mise_calculator import _filtrer_ancrage_top2
+        from services.mise_calculator import _filtrer_ancrage
         simple = {"chevaux": [{"numero": 1}]}
-        ancre = {"chevaux": [{"numero": 1}, {"numero": 2}], "_ancre_top2": True}
-        libre = {"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre_top2": False}
-        out = _filtrer_ancrage_top2([simple, ancre, libre], {"ancrage_top2": True})
+        ancre = {"chevaux": [{"numero": 1}, {"numero": 2}], "_ancre": True}
+        libre = {"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre": False}
+        out = _filtrer_ancrage([simple, ancre, libre], {"ancrage_top2": True})
         assert out == [simple, ancre]           # le simple n'est jamais touché
 
     def test_repli_total_si_aucune_combinaison_ancree(self):
         """Promesse produit : un plan sur CHAQUE course. Sans candidat ancré, on ne
         prive de rien — la liste revient telle quelle."""
-        from services.mise_calculator import _filtrer_ancrage_top2
-        libres = [{"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre_top2": False},
-                  {"chevaux": [{"numero": 5}, {"numero": 6}], "_ancre_top2": False}]
-        assert _filtrer_ancrage_top2(list(libres), {"ancrage_top2": True}) == libres
+        from services.mise_calculator import _filtrer_ancrage
+        libres = [{"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre": False},
+                  {"chevaux": [{"numero": 5}, {"numero": 6}], "_ancre": False}]
+        assert _filtrer_ancrage(list(libres), {"ancrage_top2": True}) == libres
 
     def test_desactivable_par_profil(self):
-        from services.mise_calculator import _filtrer_ancrage_top2
-        cands = [{"chevaux": [{"numero": 1}, {"numero": 2}], "_ancre_top2": True},
-                 {"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre_top2": False}]
-        assert _filtrer_ancrage_top2(list(cands), {"ancrage_top2": False}) == cands
+        from services.mise_calculator import _filtrer_ancrage
+        cands = [{"chevaux": [{"numero": 1}, {"numero": 2}], "_ancre": True},
+                 {"chevaux": [{"numero": 3}, {"numero": 4}], "_ancre": False}]
+        assert _filtrer_ancrage(list(cands), {"ancrage_top2": False}) == cands
 
     def test_les_trois_profils_ancrent_par_defaut(self):
         from services.mise_calculator import PROFIL_CONFIG, _effective_config
@@ -649,34 +655,35 @@ class TestAncrageTop2:
         course (−32,8 % ancré contre −27,6 %) et rejeu A/B sur 400 courses (le type
         passe de −8,1 % à −24,2 % quand on l'ancre). Il faut deux chevaux dans les
         trois premiers : deux cotes courtes paient ~×3 sur un pool qui prend 23 %."""
-        from services.mise_calculator import _filtrer_ancrage_top2, TYPES_SANS_ANCRAGE
+        from services.mise_calculator import _filtrer_ancrage, TYPES_SANS_ANCRAGE
         assert "Couplé Placé" in TYPES_SANS_ANCRAGE
         cp_libre = {"chevaux": [{"numero": 3}, {"numero": 4}], "type_pari": "Couplé Placé",
-                    "_ancre_top2": False}
+                    "_ancre": False}
         cg_ancre = {"chevaux": [{"numero": 1}, {"numero": 2}], "type_pari": "Couplé Gagnant",
-                    "_ancre_top2": True}
+                    "_ancre": True}
         cg_libre = {"chevaux": [{"numero": 5}, {"numero": 6}], "type_pari": "Couplé Gagnant",
-                    "_ancre_top2": False}
-        out = _filtrer_ancrage_top2([cp_libre, cg_ancre, cg_libre], {"ancrage_top2": True})
+                    "_ancre": False}
+        out = _filtrer_ancrage([cp_libre, cg_ancre, cg_libre], {"ancrage_top2": True})
         assert cp_libre in out, "le couplé placé non ancré doit survivre"
         assert cg_ancre in out and cg_libre not in out
 
     def test_un_couple_place_seul_ne_declenche_pas_le_filtre(self):
         """Un couplé placé ancré ne doit pas servir de prétexte à couper les autres
         combinaisons : il est hors du périmètre de la règle, des deux côtés."""
-        from services.mise_calculator import _filtrer_ancrage_top2
+        from services.mise_calculator import _filtrer_ancrage
         cp_ancre = {"chevaux": [{"numero": 1}, {"numero": 2}], "type_pari": "Couplé Placé",
-                    "_ancre_top2": True}
+                    "_ancre": True}
         trio_libre = {"chevaux": [{"numero": 4}, {"numero": 5}, {"numero": 6}],
-                      "type_pari": "Trio", "_ancre_top2": False}
-        out = _filtrer_ancrage_top2([cp_ancre, trio_libre], {"ancrage_top2": True})
+                      "type_pari": "Trio", "_ancre": False}
+        out = _filtrer_ancrage([cp_ancre, trio_libre], {"ancrage_top2": True})
         assert out == [cp_ancre, trio_libre]
 
-    def _combinaisons_non_ancrees(self, profil, champ, montant=30):
+    def _combinaisons_sans_rang_1(self, profil, champ, montant=30):
+        """Combinaisons du plan qui ne contiennent PAS le rang 1 du classement."""
         from services.mise_calculator import TYPES_SANS_ANCRAGE
         rang = {int(p["numero"]): i for i, p in enumerate(
             sorted(champ, key=lambda x: float(x["proba_top1"]), reverse=True), start=1)}
-        top2 = {n for n, r in rang.items() if r <= 2}
+        r1 = next(n for n, r in rang.items() if r == 1)
         d = plan_to_dict(generer_plan(montant, profil, champ, self.COURSE,
                                       respect_montant=True))
         hors = []
@@ -684,47 +691,35 @@ class TestAncrageTop2:
             for p in niv["paris"]:
                 nums = {c["numero"] for c in p["chevaux"]}
                 if len(nums) >= 2 and p["type"] not in TYPES_SANS_ANCRAGE:
-                    if not top2 <= nums:
+                    if r1 not in nums:
                         hors.append((p["type"], sorted(nums)))
-        return hors, sorted(top2)
+        return hors, r1
 
-    @pytest.mark.parametrize("profil", ["conservateur", "equilibre"])
-    def test_les_combinaisons_du_plan_contiennent_les_deux_premiers(self, profil):
-        """Bandes de rapport ×1,8–5 et ×4–15 : une combinaison ancrée sur les deux
-        favoris y tombe, donc le filtre souple trouve toujours de quoi préférer."""
-        hors, top2 = self._combinaisons_non_ancrees(profil, _field(12))
-        assert not hors, (f"{profil} : {hors} sans appui sur les 2 premiers {top2}")
+    @pytest.mark.parametrize("profil", ["conservateur", "equilibre", "agressif"])
+    def test_les_combinaisons_du_plan_contiennent_le_rang_1(self, profil):
+        """ANCRAGE SUR LE RANG 1 (2026-09-12). Mesuré sans biais de sélection sur
+        4 048 courses (1 € plat sur le classement, vrais rapports PMU) :
 
-    def test_le_risque_accepte_une_combinaison_non_ancree_faute_d_ancree(self):
-        """DÉCISION MESURÉE DU 2026-09-02, et elle va contre l'intuition du 2026-09-01.
+            Couplé Gagnant  r1 × (r3..r5)  −9,1 %   (désaccord marché : +44,8 %)
+                            r1-r2 seul    −17,0 %
+                            r2 × (r3..r5) −15,7 %   (désaccord : −51,1 %)
+                            r3-r4-r5 box  −23,4 %
 
-        Le profil risqué exige ≥ ×10 du total misé. Deux favoris ne paient jamais ×10 :
-        sur un champ ouvert, AUCUNE combinaison ancrée sur les deux premiers n'entre
-        dans sa tranche. Le mode `ancrage_strict`, posé la veille, les interdisait
-        toutes dans ce cas — mais ce n'est pas « rien » qui prenait leur place : le
-        profil se rabattait sur un Simple Gagnant au rang 5-6 ou, le plus souvent, sur
-        le filet de secours.
+        Le point d'appui qui paie est le rang 1 — pas « les deux premiers ». Exiger
+        r1 ET r2 ne laissait au couplé gagnant que r1-r2, qui ne paie presque jamais
+        ×10 : le profil risqué retombait sur un ticket unique, puis sur le filet.
+        Dès qu'une combinaison portée par le rang 1 tient la tranche, aucune
+        combinaison sans lui ne doit sortir."""
+        hors, r1 = self._combinaisons_sans_rang_1(profil, _field(8))
+        assert not hors, f"{profil} : {hors} sans le rang 1 (N°{r1})"
 
-        Rejeu A/B, 1 200 dernières courses réglées, prédictions figées avant le départ,
-        mêmes courses des deux côtés, ROI winsorisé au 30× :
-
-            ancrage_strict = True   → −22,5 %   1,03 pari/course
-            ancrage_strict = False  → −12,3 %   1,46 pari/course
-
-        Le veto coûtait 10 points : une combinaison non ancrée à −14,6 % reste
-        meilleure que ce sur quoi le profil se rabat quand on la lui interdit. La
-        PRÉFÉRENCE mesurée reste, elle, entièrement en place (`ancrage_top2` souple,
-        testé juste au-dessus) : dès qu'une combinaison ancrée est disponible, aucune
-        non ancrée ne sort.
-
-        Champ reconstruit le 2026-09-03 avec le plafond de rang du risqué à 4 : il
-        faut deux favoris COURTS (2,2 et 2,8 — leur couplé ne paie pas ×10) et des
-        rangs 3-4 LONGS (13 et 16 — leur couplé, lui, y entre). C'est exactement la
-        configuration décrite ci-dessus, et `_field()` ne la produisait plus une fois
-        les rangs 5+ écartés : le plan retombait sur un Simple Gagnant, donc sur
-        aucune combinaison du tout, et le test passait sans rien démontrer.
-        """
-        from services.mise_calculator import PROFIL_CONFIG
+    def test_le_risque_etale_un_eventail_sur_le_rang_1(self):
+        """Champ à deux favoris courts (2,2 et 2,8) et rangs 3-4 longs (13 et 16) :
+        r1-r2 ne paie pas ×10, mais r1 × (r3, r4) si. Avec l'ancien ancrage (r1 ET
+        r2) le plan n'avait aucune combinaison ancrée et acceptait n'importe quel
+        couplé ; avec l'ancrage sur le rang 1, l'éventail r1 × pieds EST le plan."""
+        from services.mise_calculator import PROFIL_CONFIG, ANCRAGE_MODE
+        assert ANCRAGE_MODE == "r1"
         assert PROFIL_CONFIG["agressif"].get("ancrage_strict") is False
         rows = [(0.34, 2.2), (0.26, 2.8), (0.14, 13.0), (0.11, 16.0),
                 (0.06, 26.0), (0.04, 34.0), (0.03, 45.0), (0.02, 60.0)]
@@ -732,10 +727,14 @@ class TestAncrageTop2:
                   "proba_top1": p, "proba_top3": min(1.0, p * 2.2),
                   "cote_pmu": c, "non_partant": False}
                  for i, (p, c) in enumerate(rows)]
-        hors, _ = self._combinaisons_non_ancrees("agressif", champ)
-        assert hors, ("le risqué ne sort plus aucune combinaison non ancrée sur ce "
-                      "champ : si c'est voulu, c'est la mesure ci-dessus qu'il faut "
-                      "refaire, pas ce test qu'il faut retirer")
+        hors, r1 = self._combinaisons_sans_rang_1("agressif", champ)
+        assert not hors, f"combinaisons sans le rang 1 (N°{r1}) : {hors}"
+        d = plan_to_dict(generer_plan(30, "agressif", champ, self.COURSE,
+                                      respect_montant=True))
+        combos = [p for niv in d["niveaux"] for p in niv["paris"]
+                  if len(p["chevaux"]) >= 2]
+        assert combos, "le risqué doit jouer au moins une combinaison ancrée ici"
+        assert all(any(c["numero"] == r1 for c in p["chevaux"]) for p in combos)
 
     def test_le_rang_du_pied_libre_ne_departage_plus_rien(self):
         """Le bonus porte par le rang du 3e pied est NEUTRALISE (_ANC_NEUTRE, 2026-08-31).
@@ -786,21 +785,21 @@ class TestAncrageTop2:
 # ── Prix réel des formules Multi ─────────────────────────────────────────────
 
 class TestPrixFormuleMulti:
-    """Le Multi est le seul pari dont le PRIX dépend du nombre de chevaux : on couvre
-    toutes les combinaisons de 4 parmi n, donc 3 € × C(n,4). Le moteur annonçait 3 €
-    quelle que soit la formule et misait 7-9 € sur des « Multi en 7 » — des tickets
-    que le PMU ne vend pas (105 € minimum)."""
+    """Le Multi se joue à MISE FIXE de 3 € en 4, 5, 6 ou 7 chevaux : c'est le
+    rapport qui décroît avec la formule, pas le prix. Preuve dans nos rapports
+    (31122025R1C6) : en 4 → 577,5 €, en 5 → 115,5 €, en 6 → 38,5 €, en 7 → 16,5 €,
+    soit des ratios de 5, 3 et 2,33 = C(5,4)/C(4,4), C(6,4)/C(5,4), C(7,4)/C(6,4).
+    Le PMU divise le rapport par le nombre de combinaisons ; facturer en plus
+    3 € × C(n,4) (version du 2026-08-23) comptait le prix deux fois."""
 
     COURSE = {"nb_partants": 16, "course_id": "T1", "discipline": "Attelé",
               "paris_disponibles": ["E_SIMPLE_GAGNANT", "E_MULTI"]}
 
     def test_cout_minimum_suit_la_grille_pmu(self):
         from services.pmu_paris_reference import cout_minimum
-        assert cout_minimum("Multi en 4") == 3.0
-        assert cout_minimum("Multi en 5") == 15.0
-        assert cout_minimum("Multi en 6") == 45.0
-        assert cout_minimum("Multi en 7") == 105.0
-        assert cout_minimum("Mini Multi en 6") == 45.0
+        for n in (4, 5, 6, 7):
+            assert cout_minimum(f"Multi en {n}") == 3.0
+            assert cout_minimum(f"Mini Multi en {n}") == 3.0
         assert cout_minimum("Simple Gagnant") == 1.0
 
     def test_le_candidat_porte_le_cout_reel(self):
@@ -809,16 +808,15 @@ class TestPrixFormuleMulti:
         multis = {p["type_pari"]: p for p in props["proposals"]
                   if "Multi en" in p.get("type_pari", "")}
         assert multis, "aucune formule Multi proposée — le test ne vérifie rien"
-        for nom, attendu in (("Multi en 4", 3.0), ("Multi en 5", 15.0),
-                             ("Multi en 6", 45.0), ("Multi en 7", 105.0)):
+        for nom in ("Multi en 4", "Multi en 5", "Multi en 6", "Multi en 7"):
             p = multis.get(nom)
             if p is None:
                 continue
-            assert p["cout_total"] == attendu, f"{nom} annoncé à {p['cout_total']}€"
+            assert p["cout_total"] == 3.0, f"{nom} annoncé à {p['cout_total']}€"
             assert p["nb_combinaisons"] == math.comb(int(nom[-1]), 4)
-            # Le gain affiché suit le prix réel du ticket, pas la mise de base
-            # (le rapport est arrondi à 0.1 → tolérance de 0.05 × le prix).
-            assert abs(p["gain_potentiel"] - p["rapport_estime"] * attendu) <= 0.05 * attendu
+            # Le gain affiché suit le prix du ticket (3 €), le rapport étant déjà
+            # celui de la formule (arrondi à 0.1 → tolérance de 0.05 × le prix).
+            assert abs(p["gain_potentiel"] - p["rapport_estime"] * 3.0) <= 0.15
 
     def test_un_plan_ne_propose_jamais_un_ticket_invendable(self):
         from services.pmu_paris_reference import cout_minimum

@@ -195,6 +195,7 @@ interface PariRec {
   rapport_live?: number;       // multiplicateur aux cotes du marché maintenant
   rapport_a_bouge?: boolean;   // écart ≥ 15 % entre les deux
   hors_tranche_live?: boolean; // le marché a fait sortir le ticket de la tranche du profil
+  hors_tranche?: boolean;      // ticket de secours servi HORS de la tranche du profil (filet)
 }
 
 interface PariEcarte {
@@ -498,6 +499,15 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                         </div>
                       )}
                       <div style={{ marginTop: 3, fontSize: 10.5, color: CX.gray500 }}>Probabilité estimée {(p.probabilite * 100).toFixed(0)}%</div>
+                      {/* Ticket servi hors de la tranche du profil : le filet « chaque course
+                          est jouée » n'a rien trouvé dans la bande de gain. Le dire SUR le
+                          ticket, pas seulement dans la note de bas de plan — sinon la promesse
+                          « ≥ ×10 » affichée en tête du profil paraît trahie sans explication. */}
+                      {p.hors_tranche && (
+                        <div style={{ marginTop: 5, display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 6, border: `1px solid ${CX.goldBd}`, background: CX.goldBg, padding: "2px 7px", fontSize: 10, fontWeight: 650, color: CX.goldDeep }}>
+                          Hors tranche du profil — seul pari jouable ici
+                        </div>
+                      )}
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 10, fontWeight: 600, color: CX.gray500 }}>Mise</div>

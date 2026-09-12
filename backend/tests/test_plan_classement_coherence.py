@@ -122,8 +122,17 @@ def test_le_favori_ia_non_joue_recoit_un_motif_precis_pas_une_formule_creuse():
     """
     poids_prod = {"Couplé Gagnant": 0.0, "Couplé Ordre": 0.0, "Trio": 0.0,
                   "Trio Ordre": 0.0}
-    plan = mc.generer_plan(10, "agressif", _preds(2), COURSE_INFO,
-                           roi_weights=poids_prod, respect_montant=True)
+    # Depuis le 2026-09-12 le Trio du risqué est un ticket « gros lot » exempté du
+    # gate dur : il porterait le n°5 à 2 €. On reproduit l'état de la course de
+    # référence (pas de gros lot) pour que le cas « favori non joué » existe encore.
+    cfg = mc.PROFIL_CONFIG["agressif"]
+    ancien_loterie = set(cfg.get("loterie") or ())
+    cfg["loterie"] = set()
+    try:
+        plan = mc.generer_plan(10, "agressif", _preds(2), COURSE_INFO,
+                               roi_weights=poids_prod, respect_montant=True)
+    finally:
+        cfg["loterie"] = ancien_loterie
     joues = {h["numero"] for p in _paris(plan) for h in p.chevaux}
     assert 5 not in joues, "le n°5 est joué : ce n'est plus le cas à expliquer"
     fav = plan.classement[0]

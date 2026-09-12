@@ -274,9 +274,21 @@ class TestCalibrationAppliquee:
         revanche, le rapport corrigé doit valoir le facteur × le rapport brut.
         """
         def _par_pari(plan_d):
-            return {(p["type"], tuple(sorted(c["numero"] for c in p["chevaux"]))):
-                    p["gain_potentiel"] / p["mise"]
-                    for niv in plan_d["niveaux"] for p in niv["paris"] if p["mise"] > 0}
+            """Rapport de chaque pari du plan — retenus (gain/mise) ET écartés
+            (`rapport_estime`, que le plan expose pour expliquer le refus). Depuis
+            que le meilleur ticket n'est plus sacrifié à la diversification
+            (2026-09-12), un plan modéré tient souvent en UN gagnant sec à la
+            frontière de la bande ; la calibration le fait sortir de la bande, et
+            il n'y a plus de pari commun parmi les seuls RETENUS. Les écartés
+            portent le même rapport corrigé : la comparaison reste au niveau du plan."""
+            out = {(p["type"], tuple(sorted(c["numero"] for c in p["chevaux"]))):
+                   p["gain_potentiel"] / p["mise"]
+                   for niv in plan_d["niveaux"] for p in niv["paris"] if p["mise"] > 0}
+            for e in plan_d.get("paris_ecartes") or []:
+                cle = (e["type"], tuple(sorted(c["numero"] for c in e["chevaux"])))
+                if cle not in out and e.get("rapport_estime"):
+                    out[cle] = float(e["rapport_estime"])
+            return out
 
         types_eq = list(PROFIL_CONFIG["equilibre"]["types"])
         plan_sans = plan_to_dict(generer_plan(20, "equilibre", _field(10), COURSE,
