@@ -654,6 +654,19 @@ def start_scheduler() -> None:
         replace_existing=True,
         misfire_grace_time=600,
     )
+    # Surveillance de la mosaïque — dimanche 14 h 05 Paris, APRÈS le dernier passage.
+    #
+    # `hour="8-13", minute="0,30"` tire encore à 13 h 30 : une surveillance à 13 h 10
+    # alerterait sur une tuile qui peut partir vingt minutes plus tard. Même écart que
+    # la story (dernier passage 09:30, surveillance 10:05). Le 2026-09-13, six envois
+    # refusés n'ont produit aucune alerte ; ce job la produit, il ne publie rien.
+    scheduler.add_job(
+        job_surveillance_mosaique,
+        CronTrigger(day_of_week="sun", hour=14, minute=5, timezone="Europe/Paris"),
+        id="surveillance_mosaique",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     # Renouvellement des jetons d'integration — 04:20 Paris, tous les jours. Le job ne
     # renouvelle qu'a l'approche de l'echeance ; passer tous les jours sert a absorber
     # plusieurs echecs consecutifs avant que le jeton n'expire pour de bon.
@@ -792,6 +805,26 @@ CANAL_STORY = "story_performance"
 # de semaine, pas le dimanche de publication : c'est la semaine qui est unique, et
 # c'est elle qui ne doit pas partir deux fois.
 CANAL_MOSAIQUE = "mosaique_hebdo"
+
+
+def _samedi_semaine_close() -> str:
+    """Le samedi de la dernière semaine CLOSE, au format ISO — clé `jour` de la mosaïque.
+
+    Partagé par la publication et sa surveillance : deux calculs de « la semaine
+    écoulée » finiraient par viser deux lignes différentes, et la surveillance se
+    tairait sur la semaine qui n'est pas partie.
+    """
+    from datetime import timedelta as _td
+
+    from services.temps_courses import jour_courses
+
+    # `jour_courses()` donne la journée de courses au sens de Paris — `date.today()`
+    # en UTC désigne encore la veille jusqu'à 2 h.
+    aujourdhui = jour_courses()
+    samedi = aujourdhui - _td(days=(aujourdhui.weekday() - 5) % 7)
+    if samedi == aujourdhui:  # on est samedi : la semaine n'est pas finie
+        samedi = aujourdhui - _td(days=7)
+    return samedi.isoformat()
 
 
 # Paliers d'alerte du fonds photo des stories.
@@ -1118,7 +1151,7 @@ async def job_publication_mosaique() -> None:
     publications de la même semaine.
     """
     import uuid as _uuid
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from datetime import datetime as _dt, timezone as _tz
 
     import httpx
     from sqlalchemy import text as _text
@@ -1126,26 +1159,20 @@ async def job_publication_mosaique() -> None:
     from api.config import get_settings
     from db.database import AsyncSessionLocal
     from services.instagram import publier_image, publication_active, quota_restant
-    from services.temps_courses import jour_courses
 
     base = (get_settings().frontend_url or "https://blackturf.fr").rstrip("/")
     API_JOUR = "http://api:8000/api/v1/stats/meilleurs-plans-jour"
     ENTETE = {"Host": "api.blackturf.fr"}
 
-    # Le samedi qui vient de s'écouler. `jour_courses()` donne la journée de courses
-    # au sens de Paris — `date.today()` en UTC désigne encore la veille jusqu'à 2 h.
-    aujourdhui = jour_courses()
-    samedi = aujourdhui - _td(days=(aujourdhui.weekday() - 5) % 7)
-    if samedi == aujourdhui:  # on est samedi : la semaine n'est pas finie
-        samedi = aujourdhui - _td(days=7)
-    jour = samedi.isoformat()
+    # Le samedi qui vient de s'écouler.
+    jour = _samedi_semaine_close()
 
     async with AsyncSessionLocal() as session:
         deja = (await session.execute(_text(
-            "SELECT publie_at FROM publications_sociales "
+            "SELECT publie_at, nb_tentatives, derniere_raison FROM publications_sociales "
             "WHERE jour = :j AND canal = :c"
-        ), {"j": jour, "c": CANAL_MOSAIQUE})).first()
-        if deja and deja[0] is not None:
+        ), {"j": jour, "c": CANAL_MOSAIQUE})).mappings().first()
+        if deja and deja["publie_at"] is not None:
             log.info("jobs.mosaique.deja_publiee", jour=jour)
             return
 
@@ -1207,6 +1234,151 @@ async def job_publication_mosaique() -> None:
             raison=resultat.raison, url=legende.get("image"),
             quota_restant=await quota_restant() if publication_active() else None,
         )
+
+    if not resultat.publie:
+        await _alerter_echecs_mosaique(jour, avant=deja, raison=resultat.raison)
+
+
+async def _alerter_echecs_mosaique(jour: str, *, avant, raison: str | None) -> None:
+    """Prévient l'exploitant DÈS LE DEUXIÈME envoi refusé de la matinée.
+
+    POURQUOI : le 2026-09-13, six envois ont été refusés de 8 h à 10 h 30 (« création
+    du conteneur refusée (400) ») sans que personne le sache. La fenêtre court
+    jusqu'à 13 h 30 : une alerte au deuxième échec laisse le temps de corriger et de
+    voir la tuile partir au passage suivant ; celle de 14 h 05 arrive trop tard pour ça.
+
+    Pourquoi pas au PREMIER : un refus isolé de Meta se rattrape souvent tout seul
+    trente minutes plus tard. Pourquoi une seule fois : un message toutes les demi-
+    heures jusqu'à 13 h 30 finirait dans un filtre ; `job_surveillance_mosaique` fait
+    le récapitulatif si la tuile n'est toujours pas partie.
+
+    Les attentes légitimes (samedi pas réglé, légende pas prête, API indisponible)
+    n'écrivent AUCUNE ligne : tout échec compté ici est un envoi réellement refusé.
+    Une raison vide n'en est pas un signal exploitable — on ne l'alerte pas.
+
+    Ne doit JAMAIS casser la publication : une alerte est un confort.
+    """
+    from html import escape as _esc
+
+    from api.config import get_settings
+    from services.alerts import send_email
+
+    if not raison or not avant or not avant["derniere_raison"]:
+        return
+    if int(avant["nb_tentatives"] or 0) != 1:  # cette tentative n'est pas la 2e
+        return
+
+    try:
+        html = (
+            f"<p>La tuile de la mosaïque de la semaine close le <strong>{jour}</strong> "
+            "a été refusée <strong>deux fois de suite</strong>.</p>"
+            f"<p>1<sup>er</sup> refus : <code>{_esc(str(avant['derniere_raison']))}</code><br>"
+            f"2<sup>e</sup> refus : <code>{_esc(raison)}</code></p>"
+            "<p>Le job repasse toutes les demi-heures jusqu'à <strong>13 h 30</strong> "
+            "(Paris) : un correctif déployé avant peut encore faire partir la tuile "
+            "aujourd'hui. Aucune autre alerte avant le récapitulatif de 14 h 05.</p>"
+            "<p>Pistes : <code>docker logs blackturf_nginx</code> — une requête "
+            "<code>facebookexternalhit</code> en 499 veut dire que Meta a raccroché "
+            "pendant le rendu ; logs du scheduler, <code>instagram.conteneur.refuse</code>, "
+            "pour le corps de la réponse Meta.</p>"
+        )
+        envoye = await send_email(
+            get_settings().admin_email,
+            f"BlackTurf — mosaïque du {jour} refusée 2 fois", html,
+        )
+        log.warning("jobs.mosaique.alerte_echecs", jour=jour, raison=raison[:160],
+                    envoye=bool(envoye))
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.mosaique.alerte_echecs_echec", jour=jour, err=str(e)[:200])
+
+
+async def job_surveillance_mosaique() -> None:
+    """Prévient l'exploitant quand la tuile du dimanche N'EST PAS partie.
+
+    POURQUOI CE JOB EXISTE : le 2026-09-13, `job_publication_mosaique` a échoué six
+    fois dans la matinée (Meta raccrochait pendant le rendu de la tuile) et rien n'a
+    alerté. La seule trace était une ligne `publications_sociales` sans `publie_at`,
+    que personne ne lit un dimanche. C'est le pendant de `job_surveillance_story`.
+
+    Il tourne APRÈS le dernier passage de la fenêtre (13 h 30 Paris) et ne publie
+    rien : republier une tuile hors fenêtre est une décision de l'exploitant — une
+    tuile publiée ne se déplace plus sur la grille.
+
+    Une semaine SANS ligne n'est une panne de publication que si le samedi est réglé.
+    Samedi jamais réglé : la story du samedi n'est pas partie non plus, et
+    `job_surveillance_story` l'a signalé à 10 h 05 — on ne double pas l'alerte.
+    API muette : on ne sait pas, donc on alerte.
+    """
+    from html import escape as _esc
+
+    import httpx
+    from sqlalchemy import text as _text
+
+    from api.config import get_settings
+    from db.database import AsyncSessionLocal
+    from services.alerts import send_email
+
+    jour = _samedi_semaine_close()
+
+    async with AsyncSessionLocal() as session:
+        ligne = (await session.execute(_text(
+            "SELECT publie_at, nb_tentatives, derniere_raison, derniere_tentative_at "
+            "FROM publications_sociales WHERE jour = :j AND canal = :c"
+        ), {"j": jour, "c": CANAL_MOSAIQUE})).mappings().first()
+
+    if ligne and ligne["publie_at"] is not None:
+        log.info("jobs.mosaique.surveillance_ok", jour=jour)
+        return
+
+    # Ce que l'API attend encore : sans ce détail l'alerte se réduit à « ça n'a pas
+    # marché », et il faut tout refaire à la main.
+    reste, complete = None, None
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                "http://api:8000/api/v1/stats/meilleurs-plans-jour",
+                params={"jour": jour}, headers={"Host": "api.blackturf.fr"},
+            )
+            r.raise_for_status()
+            d = r.json()
+        reste = d.get("reste_a_venir")
+        complete = bool(d.get("journee_complete"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.mosaique.surveillance_bilan_indisponible",
+                    jour=jour, err=str(e)[:160])
+
+    if ligne is None and complete is False:
+        log.warning("jobs.mosaique.surveillance_samedi_pas_regle", jour=jour, reste=reste)
+        return
+
+    tentatives = (ligne or {}).get("nb_tentatives")
+    raison = (ligne or {}).get("derniere_raison")
+    log.error("jobs.mosaique.non_publiee", jour=jour, reste=reste,
+              journee_complete=complete, tentatives=tentatives, raison=raison)
+
+    try:
+        html = (
+            f"<p>La tuile de la mosaïque de la semaine close le <strong>{jour}</strong> "
+            "n'a pas été publiée sur Instagram. La fenêtre de publication automatique "
+            "(dimanche 8 h → 13 h 30) est passée.</p>"
+            f"<p>Samedi réglé (<code>journee_complete</code>) : <code>{complete}</code><br>"
+            f"Ce que l'API attendait encore : <code>{_esc(str(reste))}</code><br>"
+            f"Tentatives d'envoi : <code>{tentatives}</code> — "
+            f"dernière le <code>{(ligne or {}).get('derniere_tentative_at')}</code><br>"
+            f"Dernière raison : <code>{_esc(str(raison))}</code></p>"
+            + ("" if ligne else
+               "<p>Aucune tentative d'envoi : le job n'est pas allé jusqu'à Meta "
+               "(légende pas prête, bilan indisponible, ou scheduler arrêté).</p>")
+            + "<p>Aucune republication automatique : une tuile publiée ne se déplace "
+            "plus sur la grille, la décision revient à l'exploitant.</p>"
+        )
+        envoye = await send_email(
+            get_settings().admin_email,
+            f"BlackTurf — mosaïque du {jour} NON publiée", html,
+        )
+        log.info("jobs.mosaique.surveillance_alerte", jour=jour, envoye=bool(envoye))
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.mosaique.surveillance_alerte_echec", jour=jour, err=str(e)[:200])
 
 
 async def job_renouveler_jetons() -> None:
