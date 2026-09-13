@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
 import { jourParis, jourLong, jourCourt, periodeCourte } from "@/lib/seo";
+import { cleEnvoi, envoiGarde, garderEnvoi } from "@/lib/envoi-visuel";
 import {
   Tuile, TUILE_L, TUILE_H, PLAN_L, PLAN_H, photoDuCycle, photoEnDataUri, imageEnDataUri,
   type DonneesMosaique, type SemaineMosaique,
@@ -140,6 +141,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ tuile: string }
   const m = /^([01])-([012])$/.exec(tuile.replace(/\.jpg$/, ""));
   if (!m) return new Response("Tuile inconnue", { status: 404 });
 
+  // `?envoi=` : Meta vient chercher l'image que le job de publication a déjà fait
+  // composer et vérifiée. La recomposer prend 8,5 s, et Meta n'attend pas — cf.
+  // `lib/envoi-visuel.ts` (tuile du 2026-09-13 jamais partie).
+  const envoi = cleEnvoi(req.url);
+  const dejaRendue = envoiGarde(envoi);
+  if (dejaRendue) return dejaRendue;
+
   const rangee = Number(m[1]);
   const colonne = Number(m[2]);
   // `?semaine=AAAA-MM-JJ` (un samedi) : la publication du dimanche porte sur la
@@ -158,8 +166,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ tuile: string }
   try {
     const { default: sharp } = await import("sharp");
     const jpeg = await sharp(png).flatten({ background: "#F5F2EA" }).jpeg({ quality: 92 }).toBuffer();
+    garderEnvoi(envoi, new Uint8Array(jpeg), "image/jpeg");
     return new Response(new Uint8Array(jpeg), {
-      headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=900" },
+      headers: {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": envoi ? "no-store" : "public, max-age=900",
+      },
     });
   } catch {
     return new Response(new Uint8Array(png), {

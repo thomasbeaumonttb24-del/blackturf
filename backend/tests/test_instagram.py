@@ -18,16 +18,29 @@ def _configurer(monkeypatch, *, jeton="jeton-de-test", compte="17841400000000000
 
 
 class _Reponse:
-    def __init__(self, status=200, payload=None, texte=""):
+    def __init__(self, status=200, payload=None, texte="", headers=None, contenu=b""):
         self.status_code = status
         self._payload = payload or {}
         self.text = texte
+        self.headers = headers or {}
+        self.content = contenu
 
     def json(self):
         return self._payload
 
 
-def _client(appels, reponses, statuts=None, corps=None):
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+
+
+def _image_ok():
+    return _Reponse(200, headers={"content-type": "image/jpeg"}, contenu=JPEG)
+
+
+def _vers_meta(url: str) -> bool:
+    return url.startswith("https://graph.")
+
+
+def _client(appels, reponses, statuts=None, corps=None, images=None, image=None):
     """
     Double du client httpx.
 
@@ -36,6 +49,10 @@ def _client(appels, reponses, statuts=None, corps=None):
     n'enregistre qu'une URL, et publier avant que Meta ait fini de télécharger l'image
     échoue en 400 / 9007 / 2207027. Par défaut le conteneur est prêt du premier coup :
     un test qui ne porte pas sur l'attente n'a pas à la décrire.
+
+    Les GET vers le SITE (téléchargement préalable de l'image) ne sont pas mêlés à
+    `appels`, qui ne décrit que le dialogue avec Meta : ils vont dans `images`, et
+    `image` fixe la réponse du site (un JPEG valide par défaut).
     """
 
     class _C:
@@ -54,7 +71,11 @@ def _client(appels, reponses, statuts=None, corps=None):
                 corps.append(data or {})
             return reponses.pop(0)
 
-        async def get(self, url, params=None):
+        async def get(self, url, params=None, **kw):
+            if not _vers_meta(url):
+                if images is not None:
+                    images.append(url)
+                return image if image is not None else _image_ok()
             appels.append(url)
             if statuts is None:
                 return _Reponse(200, {"status_code": "FINISHED"})
@@ -189,7 +210,9 @@ async def test_une_panne_reseau_pendant_l_attente_ne_leve_pas(monkeypatch):
     _Base = _client(appels, [_Reponse(200, {"id": "conteneur-1"})])
 
     class _C(_Base):
-        async def get(self, url, params=None):
+        async def get(self, url, params=None, **kw):
+            if not _vers_meta(url):
+                return _image_ok()
             appels.append(url)
             raise instagram.httpx.ConnectError("connexion coupee")
 
@@ -216,7 +239,9 @@ async def test_une_faute_de_programmation_n_est_pas_maquillee_en_panne_reseau(mo
     _Base = _client(appels, [_Reponse(200, {"id": "conteneur-1"})])
 
     class _C(_Base):
-        async def get(self, url, params=None):
+        async def get(self, url, params=None, **kw):
+            if not _vers_meta(url):
+                return _image_ok()
             raise AttributeError("boum")
 
     monkeypatch.setattr(instagram.httpx, "AsyncClient", _C)
@@ -325,7 +350,8 @@ async def test_une_story_declare_son_type_a_la_creation_du_conteneur(monkeypatch
 
     assert res.publie is True and res.media_id == "media-s"
     assert corps[0]["media_type"] == "STORIES", "sans ce champ, Meta publie dans le FIL"
-    assert corps[0]["image_url"].endswith("jour=2026-09-05")
+    # Le jour arrive intact ; la clé d'envoi s'ajoute derrière (2026-09-13).
+    assert "story.jpg?jour=2026-09-05&envoi=" in corps[0]["image_url"]
 
 
 async def test_une_story_ne_transporte_aucune_legende(monkeypatch):
@@ -367,3 +393,128 @@ async def test_une_story_ne_part_pas_non_plus_sans_interrupteur(monkeypatch):
     assert res.publie is False
     assert "simulation" in (res.raison or "")
     assert appels == []
+
+
+# ── Téléchargement de l'image AVANT Meta ────────────────────────────────────
+# 2026-09-13 : la tuile hebdomadaire n'est jamais partie. Composée à la demande en
+# 8,5 s, elle n'arrivait pas avant que Meta abandonne (nginx : 499), et Meta refusait
+# le conteneur (« Media download has failed ») six passages de suite. Le service fait
+# désormais composer l'image lui-même, sur une URL à clé d'envoi que le site garde en
+# mémoire, et ne confie à Meta que cette URL — donc des octets déjà vérifiés.
+
+
+async def test_l_image_est_telechargee_avant_d_etre_confiee_a_meta(monkeypatch):
+    _configurer(monkeypatch, actif=True)
+    appels: list[str] = []
+    corps: list[dict] = []
+    images: list[str] = []
+    reponses = [_Reponse(200, {"id": "c"}), _Reponse(200, {"id": "m"})]
+    monkeypatch.setattr(
+        instagram.httpx, "AsyncClient", _client(appels, reponses, corps=corps, images=images),
+    )
+
+    res = await instagram.publier_image(
+        "https://blackturf.fr/visuels/mosaique/1-1?semaine=2026-09-12", "Bonjour",
+    )
+
+    assert res.publie is True
+    assert len(images) == 1, "l'image doit être téléchargée une fois, avant Meta"
+    # Meta reçoit EXACTEMENT l'URL que le service vient de faire composer : c'est elle
+    # que le site garde en mémoire sous sa clé d'envoi.
+    assert corps[0]["image_url"] == images[0]
+    assert images[0].startswith("https://blackturf.fr/visuels/mosaique/1-1?semaine=2026-09-12&envoi=")
+
+
+async def test_la_cle_d_envoi_s_ajoute_aux_parametres_existants(monkeypatch):
+    """La story porte déjà `jour=` et `plans=` : ils doivent arriver intacts à la route,
+    sinon ses contrôles 409 ne s'exercent plus."""
+    _configurer(monkeypatch, actif=True)
+    corps: list[dict] = []
+    reponses = [_Reponse(200, {"id": "c"}), _Reponse(200, {"id": "m"})]
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client([], reponses, corps=corps))
+
+    await instagram.publier_story("https://blackturf.fr/visuels/story.jpg?jour=2026-09-12&plans=279")
+
+    url = corps[0]["image_url"]
+    assert url.startswith("https://blackturf.fr/visuels/story.jpg?jour=2026-09-12&plans=279&envoi=")
+    assert url.count("?") == 1
+
+
+async def test_chaque_tentative_a_sa_propre_cle_d_envoi(monkeypatch):
+    """Une clé réutilisée resservirait l'image d'une tentative précédente — donc
+    potentiellement celle d'un bilan qui a changé depuis."""
+    _configurer(monkeypatch, actif=True)
+    images: list[str] = []
+    reponses = [_Reponse(200, {"id": "c"}), _Reponse(200, {"id": "m"})] * 2
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client([], reponses, images=images))
+
+    await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "a")
+    await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "b")
+
+    assert len(set(images)) == 2
+
+
+async def test_une_image_refusee_par_le_site_ne_part_jamais_chez_meta(monkeypatch):
+    """Un 409 (bilan différent de celui validé) ou un 503 (API absente) doit arrêter la
+    publication AVANT Meta, avec la vraie raison — pas un « 400 » de Meta."""
+    _configurer(monkeypatch, actif=True)
+    appels: list[str] = []
+    refus = _Reponse(409, texte="Bilan différent de celui validé (plans=278, attendu=279)")
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client(appels, [], image=refus))
+
+    res = await instagram.publier_story("https://blackturf.fr/visuels/story.jpg?jour=2026-09-12&plans=279")
+
+    assert res.publie is False
+    assert "409" in (res.raison or "")
+    assert "Bilan différent" in (res.raison or "")
+    assert appels == [], "rien ne doit partir chez Meta"
+
+
+async def test_une_image_png_n_est_pas_confiee_a_meta(monkeypatch):
+    """La route retombe sur du PNG si la conversion JPEG échoue ; Meta le refuserait."""
+    _configurer(monkeypatch, actif=True)
+    appels: list[str] = []
+    png = _Reponse(200, headers={"content-type": "image/png"}, contenu=b"\x89PNG\r\n")
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _client(appels, [], image=png))
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is False
+    assert "JPEG" in (res.raison or "")
+    assert appels == []
+
+
+async def test_un_site_injoignable_ne_leve_pas(monkeypatch):
+    _configurer(monkeypatch, actif=True)
+    appels: list[str] = []
+    _Base = _client(appels, [])
+
+    class _C(_Base):
+        async def get(self, url, params=None, **kw):
+            if not _vers_meta(url):
+                raise instagram.httpx.ReadTimeout("trop long")
+            return await super().get(url, params, **kw)
+
+    monkeypatch.setattr(instagram.httpx, "AsyncClient", _C)
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is False
+    assert "injoignable" in (res.raison or "")
+    assert appels == []
+
+
+async def test_le_refus_de_meta_garde_son_explication(monkeypatch):
+    """« création du conteneur refusée (400) » a masqué six passages de suite que Meta
+    n'arrivait pas à télécharger l'image : l'explication de Meta doit aller en base."""
+    _configurer(monkeypatch, actif=True)
+    erreur = {"error": {"message": "Only photo or video can be accepted as media type.",
+                        "error_user_title": "Media download has failed."}}
+    monkeypatch.setattr(
+        instagram.httpx, "AsyncClient", _client([], [_Reponse(400, erreur)]),
+    )
+
+    res = await instagram.publier_image("https://blackturf.fr/visuels/quinte.jpg", "Bonjour")
+
+    assert res.publie is False
+    assert res.raison == "création du conteneur refusée (400) : Media download has failed."

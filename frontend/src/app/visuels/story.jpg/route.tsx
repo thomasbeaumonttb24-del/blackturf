@@ -3,6 +3,7 @@ import path from "node:path";
 import { ImageResponse } from "next/og";
 import { jourParis, jourLong } from "@/lib/seo";
 import { jourDemande } from "@/lib/visuels";
+import { cleEnvoi, envoiGarde, garderEnvoi } from "@/lib/envoi-visuel";
 import { photoDuJour, photoEnDataUri, imageEnDataUri } from "@/lib/mosaique";
 import {
   Story, STORY_L, STORY_H, PHOTO_H, type DonneesStory, type MeilleurPlan,
@@ -118,6 +119,13 @@ export async function GET(req: Request) {
   // `?jour=AAAA-MM-JJ` : la story de bilan se publie le lendemain matin, quand la
   // journée est enfin réglée. Sans ce paramètre, le visuel de la veille disparaît au
   // premier passage de minuit — constaté sur le 2026-09-05, plus récupérable au réveil.
+  // `?envoi=` : l'image que le job de publication vient de faire composer et de
+  // vérifier (contrôles 503/409 ci-dessous compris). Meta la reçoit sans attendre la
+  // recomposition — cf. `lib/envoi-visuel.ts`.
+  const envoi = cleEnvoi(req.url);
+  const dejaRendue = envoiGarde(envoi);
+  if (dejaRendue) return dejaRendue;
+
   const jour = jourDemande(req.url, jourParis());
   const bilan = await bilanDuJour(jour);
 
@@ -160,6 +168,7 @@ export async function GET(req: Request) {
   try {
     const { default: sharp } = await import("sharp");
     const jpeg = await sharp(png).flatten({ background: "#F5F2EA" }).jpeg({ quality: 92 }).toBuffer();
+    garderEnvoi(envoi, new Uint8Array(jpeg), "image/jpeg");
     return new Response(new Uint8Array(jpeg), {
       headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store" },
     });

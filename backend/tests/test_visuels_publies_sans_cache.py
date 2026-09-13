@@ -35,6 +35,34 @@ PUBLIEES = (
 STORY = VISUELS / "story.jpg" / "route.tsx"
 JOBS = RACINE / "backend" / "services" / "jobs.py"
 
+# Images que Meta vient chercher lui-même, et la mémoire d'envoi qui les lui sert.
+IMAGES_PUBLIEES = (STORY, VISUELS / "mosaique" / "[tuile]" / "route.tsx")
+ENVOI = RACINE / "frontend" / "src" / "lib" / "envoi-visuel.ts"
+
+
+def test_meta_recoit_l_image_deja_composee_pour_l_envoi():
+    """
+    Incident du 2026-09-13 : la tuile hebdomadaire se composait en 8,5 s, Meta abandonnait
+    avant (nginx : 499) et refusait le conteneur six passages de suite. Le service fait
+    composer l'image sous une clé `envoi=`, et la route doit resservir CES octets à Meta
+    au lieu de tout recomposer.
+
+    La mémoire n'est relue QUE sous une clé d'envoi : sans elle, une visite du studio
+    pourrait déposer une image que Meta publierait plus tard — exactement le défaut du
+    2026-09-11 sous une autre forme.
+    """
+    for chemin in IMAGES_PUBLIEES:
+        code = _code(chemin)
+        assert "cleEnvoi(req.url)" in code, f"{chemin.relative_to(RACINE)} : clé d'envoi non lue"
+        assert "envoiGarde(envoi)" in code, f"{chemin.relative_to(RACINE)} : image gardée non resservie"
+        assert 'garderEnvoi(envoi, new Uint8Array(jpeg), "image/jpeg")' in code, (
+            f"{chemin.relative_to(RACINE)} : le JPEG rendu n'est pas gardé pour Meta"
+        )
+    lib = _code(ENVOI)
+    assert 'searchParams.get("envoi")' in lib
+    assert "if (!cle) return null;" in lib, "sans clé d'envoi, rien ne doit être relu"
+    assert "if (!cle) return;" in lib, "sans clé d'envoi, rien ne doit être gardé"
+
 
 def _code(chemin) -> str:
     """Le source sans ses commentaires : ils citent précisément ce qui est interdit."""

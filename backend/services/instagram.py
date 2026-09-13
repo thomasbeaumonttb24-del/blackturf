@@ -17,6 +17,7 @@ jamais démarrer parce qu'un jeton s'est trouvé présent dans l'environnement.
 """
 import asyncio
 import os
+import uuid
 from typing import Optional
 
 import httpx
@@ -165,6 +166,55 @@ async def _attendre_conteneur(
     return False, f"conteneur toujours pas prêt après {int(essais * pause)} s"
 
 
+# Temps laissé au site pour composer l'image. Une tuile de mosaïque met ~8,5 s.
+DELAI_RENDU_S = 90
+
+
+def _url_envoi(url_image: str) -> str:
+    """L'URL de l'image, marquée d'une clé propre à CETTE tentative de publication."""
+    separateur = "&" if "?" in url_image else "?"
+    return f"{url_image}{separateur}envoi={uuid.uuid4().hex}"
+
+
+async def _preparer_image(client: httpx.AsyncClient, url_envoi: str) -> Optional[str]:
+    """
+    Télécharge l'image AVANT de la confier à Meta. Renvoie la raison d'échec, ou None.
+
+    POURQUOI (2026-09-13, tuile hebdomadaire jamais partie) : Meta va chercher l'image
+    lui-même et n'attend pas longtemps. Une tuile composée à la demande met 8,5 s ; Meta
+    coupait avant la fin (nginx : 499) et répondait « Media download has failed » — six
+    passages de suite. En la téléchargeant d'abord sur une URL portant une clé d'envoi,
+    le site compose l'image pour NOUS, sans limite de temps, et la garde sous cette clé
+    (`frontend/src/lib/envoi-visuel.ts`) : Meta la reçoit ensuite immédiatement, et ce
+    sont exactement les octets vérifiés ici.
+
+    Second bénéfice : un refus du site (409 bilan différent, 503 API absente) se lit
+    avec sa vraie raison, au lieu du « 400 » opaque de Meta.
+    """
+    try:
+        r = await client.get(url_envoi, timeout=DELAI_RENDU_S)
+    except httpx.HTTPError as e:
+        return f"image injoignable : {type(e).__name__}: {e}"[:200]
+    if r.status_code != 200:
+        return f"image refusée par le site ({r.status_code}) : {r.text[:120]}"[:200]
+    type_image = r.headers.get("content-type", "")
+    # Meta n'accepte que du JPEG ; la route retombe sur du PNG si la conversion échoue.
+    if not type_image.startswith("image/jpeg") or not r.content.startswith(b"\xff\xd8"):
+        return f"l'image servie n'est pas un JPEG ({type_image or 'type absent'})"
+    return None
+
+
+def _raison_meta(reponse, etape: str) -> str:
+    """Le refus de Meta avec son explication : le code HTTP seul ne dit rien."""
+    try:
+        erreur = (reponse.json() or {}).get("error") or {}
+        detail = erreur.get("error_user_title") or erreur.get("message") or ""
+    except Exception:  # noqa: BLE001
+        detail = ""
+    raison = f"{etape} refusée ({reponse.status_code})"
+    return f"{raison} : {detail}"[:200] if detail else raison
+
+
 async def publier_story(url_image: str) -> ResultatPublication:
     """
     Publie une STORY (24 h, hors du fil) sur le compte Instagram configuré.
@@ -219,9 +269,15 @@ async def publier_image(
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
+            url_envoi = _url_envoi(url_image)
+            echec_image = await _preparer_image(client, url_envoi)
+            if echec_image:
+                log.warning("instagram.image.indisponible", url_image=url_envoi, raison=echec_image)
+                return ResultatPublication(False, raison=echec_image)
+
             # `caption` n'est envoyé QUE pour le fil : une story n'affiche pas de
             # légende, et Meta ne définit pas ce qu'il fait du champ dans ce cas.
-            corps = {"image_url": url_image, "access_token": jeton}
+            corps = {"image_url": url_envoi, "access_token": jeton}
             if media_type:
                 corps["media_type"] = media_type
             else:
@@ -234,7 +290,7 @@ async def publier_image(
                     corps=conteneur.text[:300],
                 )
                 return ResultatPublication(
-                    False, raison=f"création du conteneur refusée ({conteneur.status_code})"
+                    False, raison=_raison_meta(conteneur, "création du conteneur")
                 )
 
             creation_id = conteneur.json().get("id")
@@ -260,7 +316,7 @@ async def publier_image(
                 )
 
             media_id = publication.json().get("id")
-            log.info("instagram.publie", media_id=media_id, url_image=url_image)
+            log.info("instagram.publie", media_id=media_id, url_image=url_envoi)
             return ResultatPublication(True, media_id=media_id)
 
     except Exception as e:  # noqa: BLE001
