@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { champMotDePasse, MOT_DE_PASSE_AIDE, messageErreurApi } from "@/lib/motdepasse";
 import { authApi } from "@/lib/api";
+import { cheminInterne, memoriserIntention, planEssai } from "@/lib/intentionEssai";
+import { AVANTAGES_COMPTE_GRATUIT } from "@/components/billing/CompteGratuitCta";
 
 const schema = z.object({
   prenom: z.string().min(1, "Prénom requis"),
@@ -24,12 +26,7 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
-const PERKS = [
-  "Programme PMU du jour",
-  "Prédictions IA (limité)",
-  "Suivi de capital",
-  "7 jours d'essai Standard offert",
-];
+const PERKS = ["Programme PMU du jour", ...AVANTAGES_COMPTE_GRATUIT];
 
 function InscriptionContent() {
   const [loading, setLoading] = useState(false);
@@ -40,7 +37,10 @@ function InscriptionContent() {
   const [renvoi, setRenvoi] = useState(false);
   const { register: registerAuth } = useAuth();
   const params = useSearchParams();
-  const plan = params.get("plan") || "free";
+  // Intention d'arrivée : `?plan=expert` depuis « Essayer 7 jours », `?suite=/courses/…`
+  // depuis un appel à créer un compte. Mémorisée pour l'écran de confirmation d'adresse.
+  const plan = planEssai(params.get("plan"));
+  const suite = cheminInterne(params.get("suite"));
 
   const {
     register,
@@ -52,6 +52,7 @@ function InscriptionContent() {
     setLoading(true);
     try {
       const res = await registerAuth(data);
+      memoriserIntention({ plan, suite });
       setEnAttente(res.email);
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -74,13 +75,57 @@ function InscriptionContent() {
     }
   }
 
+  // Écran d'attente. Il avait disparu lors de la refonte SEO de la page (colonne
+  // de présentation sortie du <Suspense>) : après « Créer mon compte », le
+  // formulaire restait affiché sans un mot, l'inscrit ne savait pas qu'un lien
+  // l'attendait — 26 comptes gratuits sur 44 jamais confirmés au 2026-09-13.
+  if (enAttente) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl text-center">
+        <div className="h-12 w-12 rounded-full bg-brand-gold/15 flex items-center justify-center mx-auto mb-4">
+          <MailCheck className="h-6 w-6 text-brand-gold-dark" />
+        </div>
+        <h2 className="text-xl font-bold mb-2">Vérifiez votre boîte mail</h2>
+        <p className="text-sm text-muted-foreground">
+          Un lien de confirmation vient de partir à{" "}
+          <span className="font-medium text-foreground">{enAttente}</span>. Ouvrez-le
+          pour activer votre compte — il est valable 24 heures.
+        </p>
+        <p className="text-xs text-muted-foreground mt-3">
+          Rien reçu au bout de deux minutes ? Regardez dans les indésirables.
+        </p>
+        <p className="text-xs text-muted-foreground mt-3">
+          Dès la confirmation, votre essai {plan === "expert" ? "Expert" : "Standard"} de
+          7 jours vous sera proposé.
+        </p>
+
+        <Button variant="outline" className="w-full mt-6" onClick={renvoyerLien} disabled={renvoi}>
+          {renvoi ? <Loader2 className="h-4 w-4 animate-spin" /> : "Renvoyer le lien"}
+        </Button>
+        <p className="text-xs text-muted-foreground mt-4">
+          Adresse erronée ?{" "}
+          <button
+            type="button"
+            onClick={() => setEnAttente(null)}
+            className="font-medium text-brand-gold-dark underline underline-offset-2"
+          >
+            Recommencer l&apos;inscription
+          </button>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div>
           <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl">
             <h2 className="text-xl font-bold mb-1">Créer un compte</h2>
             <p className="text-sm text-muted-foreground mb-6">
               Déjà inscrit ?{" "}
-              <Link href="/login" className="font-medium text-brand-gold-dark underline underline-offset-2">
+              <Link
+                href={suite ? `/login?redirect=${encodeURIComponent(suite)}` : "/login"}
+                className="font-medium text-brand-gold-dark underline underline-offset-2"
+              >
                 Se connecter
               </Link>
             </p>
@@ -185,7 +230,7 @@ export default function InscriptionPage() {
             <span className="text-gradient">BlackTurf</span>
           </h1>
           <p className="text-muted-foreground mb-6 md:mb-8">
-            Le programme PMU du jour, les prédictions de l&apos;algorithme et un plan de mise
+            Le marché des cotes en direct, le classement de l&apos;algorithme et un plan de mise
             calculé sur votre budget. Compte gratuit, 7 jours d&apos;essai Standard offerts.
           </p>
 

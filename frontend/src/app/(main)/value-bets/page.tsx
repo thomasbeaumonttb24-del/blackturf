@@ -410,11 +410,17 @@ export default function ValueBetsPage() {
         <Lock className="h-12 w-12 mx-auto mb-4 text-muted-foreground" aria-hidden="true" />
         <h1 className="text-2xl font-bold mb-2">Paris de valeur IA</h1>
         <p className="text-muted-foreground mb-6">
-          Connectez-vous pour accéder aux paris de valeur détectés en temps réel.
+          Créez votre compte gratuit, puis démarrez 7 jours d&apos;essai Standard pour voir
+          les paris de valeur détectés en temps réel.
         </p>
-        <Button variant="brand" asChild>
-          <Link href="/login?redirect=/value-bets">Se connecter</Link>
-        </Button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <Button variant="brand" asChild>
+            <Link href="/inscription?plan=standard&suite=%2Fvalue-bets">Créer mon compte gratuit</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/login?redirect=/value-bets">Se connecter</Link>
+          </Button>
+        </div>
       </div>
     );
   }

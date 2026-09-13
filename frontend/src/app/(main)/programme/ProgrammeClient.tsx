@@ -23,6 +23,10 @@ import {
   ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter,
 } from "lucide-react";
 import Link from "next/link";
+import { TrendingUp as IconeMarcheDirect } from "lucide-react";
+import { CheckoutButton } from "@/components/billing/CheckoutButton";
+import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
+import { peutDemarrerEssai } from "@/lib/auth";
 import useSWR from "swr";
 import { coursesApi, predictionsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -330,7 +334,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
    à un compte non abonné. Visible tant que l'utilisateur n'est pas déjà payant
    (free/decouverte ou visiteur non connecté) : donne un signal de ce qui se
    joue EN CE MOMENT sans casser le paywall. */
-function ValueBetsCompteurBanner({ initial }: { initial?: { count: number; niveau_min: number } | null }) {
+function ValueBetsCompteurBanner({ initial, href = "/tarifs", libelle = "Visibles dès Standard" }: { initial?: { count: number; niveau_min: number } | null; href?: string; libelle?: string }) {
   const { data } = useSWR(
     "/value-bets-compteur-banner",
     () => predictionsApi.valueBetsCompteur(3).then((r) => r.data as { count: number; niveau_min: number }),
@@ -343,7 +347,7 @@ function ValueBetsCompteurBanner({ initial }: { initial?: { count: number; nivea
   if (!data || !data.count) return null;
   return (
     <Link
-      href="/tarifs"
+      href={href}
       className="relative flex flex-wrap items-center justify-between gap-3 overflow-hidden rounded-2xl px-4 py-3.5 transition-transform hover:-translate-y-0.5 sm:px-5 sm:py-4"
       style={{ border: "1px solid rgba(16,185,129,.28)", background: "linear-gradient(135deg,rgba(16,185,129,.08),rgba(255,255,255,.92))" }}
     >
@@ -361,7 +365,7 @@ function ValueBetsCompteurBanner({ initial }: { initial?: { count: number; nivea
         className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-[12.5px] font-bold text-white shadow-sm"
         style={{ background: "linear-gradient(135deg,#10B981,#059669)" }}
       >
-        Visibles dès Standard <ChevronRight className="h-3.5 w-3.5" />
+        {libelle} <ChevronRight className="h-3.5 w-3.5" />
       </span>
     </Link>
   );
@@ -525,7 +529,7 @@ export default function ProgrammeClient({
   initialJour: string; // "YYYY-MM-DD", jour de Paris calculé côté serveur
   initialCompteurVB?: { count: number; niveau_min: number } | null;
 } ) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const maintenant = useHorloge(15000);
   /* Jour de Paris VIVANT. Il part de `initialJour` — la valeur exacte contenue dans le
      HTML servi, donc zéro mismatch d'hydratation — puis se corrige au premier battement
@@ -980,7 +984,15 @@ export default function ProgrammeClient({
         {nextRace && <NextRaceBanner item={nextRace} />}
 
         {/* ── Bandeau value bets actifs (Free/Découverte + visiteurs non connectés) ── */}
-        {!isPaid && <ValueBetsCompteurBanner initial={initialCompteurVB} />}
+        {!isPaid && (
+          <ValueBetsCompteurBanner
+            initial={initialCompteurVB}
+            // Anonyme : l'étape d'avant l'abonnement, c'est le compte gratuit (et son
+            // essai). Compte gratuit avec essai à prendre : il est offert, pas « dès 12 € ».
+            href={user ? "/tarifs" : "/inscription?plan=standard&suite=%2Fprogramme"}
+            libelle={!user ? "Créer un compte gratuit" : peutDemarrerEssai(user) ? "Essai 7 jours offert" : "Visibles dès Standard"}
+          />
+        )}
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (
@@ -1140,8 +1152,29 @@ export default function ProgrammeClient({
           </div>
         )}
 
-        {/* ── Upsell (utilisateurs gratuits) ── */}
-        {!isPaid && isToday && programme && programme.nb_courses > 0 && (
+        {/* ── Visiteur anonyme : ce qu'un compte gratuit ouvre sur ces courses ── */}
+        {!authLoading && !user && programme && programme.nb_courses > 0 && (
+          <CompteGratuitCta
+            icone={IconeMarcheDirect}
+            titre="Suivez le marché des cotes en direct sur ces courses"
+            texte="Créez votre compte gratuit en 30 secondes : l'évolution des cotes minute par minute, le classement de l'algorithme sur une course par jour et votre plan de mise."
+            suite="/programme"
+          />
+        )}
+
+        {/* ── Compte gratuit : l'essai de 7 jours, en un clic ── */}
+        {!isPaid && user && peutDemarrerEssai(user) && isToday && programme && programme.nb_courses > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3.5 rounded-[20px] px-5 py-4" style={{ border: "1px solid rgba(16,185,129,.28)", background: "linear-gradient(135deg,#ECFDF5,#FFFBF0)" }}>
+            <div className="min-w-[200px] flex-1">
+              <p className="text-sm font-bold text-emerald-900">Paris de valeur de ce soir : 7 jours offerts</p>
+              <p className="mt-1 text-xs text-emerald-800">Essai Standard gratuit — carte demandée, 0 € prélevé avant la fin de l&apos;essai.</p>
+            </div>
+            <CheckoutButton plan="standard" periodicite="monthly" label="Démarrer mon essai" size="default" className="flex-shrink-0" />
+          </div>
+        )}
+
+        {/* ── Upsell (utilisateurs gratuits ayant déjà pris l'essai) ── */}
+        {!isPaid && user && !peutDemarrerEssai(user) && isToday && programme && programme.nb_courses > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3.5 rounded-[20px] px-5 py-4" style={{ border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)" }}>
             <div className="min-w-[200px]">
               <p className="text-sm font-bold text-amber-900">Paris de valeur verrouillés</p>

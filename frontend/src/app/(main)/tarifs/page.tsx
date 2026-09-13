@@ -132,7 +132,7 @@ export default function TarifsPage() {
               <span className="text-muted-foreground">/mois</span>
             </div>
             <ul className="space-y-3 mb-8">
-              {["Programme PMU du jour", "Cotes publiques", "Classement IA : 1 course/jour", "1 alerte par jour"].map((f) => (
+              {["Programme PMU du jour", "Marché des cotes en direct", "Classement IA : 1 course/jour", "1 alerte par jour"].map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm">
                   <Check className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   {f}

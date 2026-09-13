@@ -15,6 +15,7 @@ import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
+import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import {
@@ -894,15 +895,13 @@ function MiseCalculatorWidget({
   // qui n'a même pas encore de compte gratuit.
   if (!userPlan) {
     return (
-      <div style={{ textAlign: "center", padding: "24px 0" }}>
-        <Calculator className="h-10 w-10 mx-auto mb-3" style={{ color: CX.gold, opacity: 0.6 }} />
-        <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: CX.ink2 }}>Calculateur de mise</p>
-        <p style={{ fontSize: 12, color: CX.gray400, marginBottom: 16 }}>
-          Entrez votre mise → BlackTurf génère votre plan de pari personnalisé.
-        </p>
-        <Button variant="brand" size="sm" asChild>
-          <Link href={`/login?redirect=/courses/${courseId}`}>Se connecter</Link>
-        </Button>
+      <div style={{ padding: "18px 18px 20px" }}>
+        <CompteGratuitCta
+          icone={Calculator}
+          titre="Votre plan de mise sur cette course"
+          texte="Entrez votre budget : BlackTurf répartit vos mises sur les paris les plus justes de la course. Un plan par jour est offert avec le compte gratuit."
+          suite={`/courses/${courseId}`}
+        />
       </div>
     );
   }
@@ -2460,11 +2459,13 @@ function PartantDetail({ partant, eloChamp }: { partant: Partant; eloChamp?: { m
   );
 }
 
-function MarcheCotes({ courseId, partants, statut }: { courseId: string; partants: Partant[]; statut: string }) {
+function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { courseId: string; partants: Partant[]; statut: string; connecte: boolean; authLoading: boolean }) {
   const [chartData, setChartData] = useState<Array<Record<string, number | string>>>([]);
   const isLive = statut !== "termine";
 
   useEffect(() => {
+    // Anonyme : les deux routes exigent un compte (401). Inutile de les appeler.
+    if (!connecte) return;
     let alive = true;
     const pidToNum: Record<string, number> = {};
     for (const p of partants) pidToNum[p.participation_id] = p.numero;
@@ -2518,7 +2519,21 @@ function MarcheCotes({ courseId, partants, statut }: { courseId: string; partant
       iv = setInterval(poll, 5000);
     }
     return () => { alive = false; if (iv) clearInterval(iv); };
-  }, [courseId, partants, isLive]);
+  }, [courseId, partants, isLive, connecte]);
+
+  // Visiteur anonyme : le marché des cotes demande un compte (gratuit). Avant, la
+  // carte disparaissait sans un mot — rien ne disait qu'elle existait.
+  if (!connecte) {
+    if (authLoading) return null;
+    return (
+      <CompteGratuitCta
+        icone={TrendingUp}
+        titre="Marché des cotes en direct"
+        texte="Suivez l'évolution de la cote de chaque partant, rafraîchie toutes les 5 secondes jusqu'au départ : qui est joué, qui décroche. Réservé aux comptes BlackTurf — la création est gratuite."
+        suite={`/courses/${courseId}`}
+      />
+    );
+  }
 
   if (chartData.length < 2) return null;
 
@@ -2680,7 +2695,7 @@ export default function CoursePage({
   initialResultats?: ResultatsData | null;
 }) {
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [course, setCourse] = useState<CourseData | null>(initialCourse);
   const [predictions, setPredictions] = useState<Prediction[] | null>(null);
   // Métadonnées du calcul renvoyées par /predictions : sans elles, le tableau met
@@ -4007,7 +4022,7 @@ export default function CoursePage({
         {ongletActif === "marche" && (
           <>
           {course.statut !== "termine" && (
-            <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} />
+            <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} connecte={!!user} authLoading={authLoading} />
           )}
 
           {/* ── Comparaison multi-bookmakers — ouverte : c'est le contenu principal de l'onglet Marché ── */}
