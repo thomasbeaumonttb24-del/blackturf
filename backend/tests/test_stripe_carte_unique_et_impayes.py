@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from db.models import CarteConnue, Subscription, SubscriptionEvent, User
 import api.routes.stripe_routes as sr
@@ -178,6 +179,51 @@ async def test_carte_inconnue_est_memorisee_pour_la_prochaine_fois(db, monkeypat
     connue = await db.get(CarteConnue, "fp_carte_1")
     assert connue is not None and connue.user_id == user.user_id
     assert connue.financement == "prepaid" and connue.dernier4 == "4242"
+
+
+@pytest.mark.asyncio
+async def test_deux_webhooks_simultanes_sur_une_carte_inconnue_ne_levent_pas(engine, db, monkeypatch):
+    """Régression du 2026-09-12 : `UniqueViolationError` sur `cartes_connues_pkey`.
+
+    Au checkout, plusieurs webhooks Stripe arrivent dans la même seconde, chacun
+    dans sa session. Tous lisaient « carte inconnue » avant que le premier n'ait
+    écrit ; le second levait à son flush → 500 → rejeu Stripe.
+    """
+    _stripe_muet(monkeypatch, [CARTE])
+    user = await _user(db)
+    cartes = sr._cartes_du_client({"customer": "cus_test"})
+
+    async with async_sessionmaker(engine, expire_on_commit=False)() as autre:
+        meme_user = await autre.get(User, user.user_id)
+        await sr._memoriser_cartes(user, cartes, db)            # webhook A
+        await sr._memoriser_cartes(meme_user, cartes, autre)    # webhook B, en parallèle
+        await db.commit()
+        await autre.commit()
+
+    connue = await db.get(CarteConnue, "fp_carte_1")
+    await db.refresh(connue)
+    assert connue.user_id == user.user_id
+    assert connue.tentatives_autres_comptes == 0, "même compte : pas une tentative"
+
+
+@pytest.mark.asyncio
+async def test_deux_comptes_simultanes_sur_la_meme_carte_le_second_est_vu(engine, db, monkeypatch):
+    """Deux comptes, même carte, même seconde : le perdant de l'insertion doit
+    quand même voir le conflit et ne pas obtenir d'essai."""
+    _stripe_muet(monkeypatch, [CARTE])
+    premier = await _user(db, email="a@blackturf.fr", customer="cus_1")
+    second = await _user(db, email="b@blackturf.fr", customer="cus_2")
+
+    async with async_sessionmaker(engine, expire_on_commit=False)() as autre:
+        second_b = await autre.get(User, second.user_id)
+        verdict_a, _ = await sr._controler_carte(premier, {"customer": "cus_1"}, db)
+        verdict_b, conflit = await sr._controler_carte(second_b, {"customer": "cus_2"}, autre)
+        await db.commit()
+        await autre.commit()
+
+    assert verdict_a == "ok"
+    assert verdict_b == "essai_refuse"
+    assert conflit.email == "a@blackturf.fr"
 
 
 @pytest.mark.asyncio

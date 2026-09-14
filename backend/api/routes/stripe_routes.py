@@ -222,17 +222,31 @@ async def _carte_dun_autre_compte(user: User, cartes: list[dict],
     return None
 
 
+def _insert(db: AsyncSession):
+    """`INSERT … ON CONFLICT` du dialecte de la session (PostgreSQL en prod, SQLite en test)."""
+    if db.get_bind().dialect.name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert
+    else:
+        from sqlalchemy.dialects.postgresql import insert
+    return insert
+
+
 async def _memoriser_cartes(user: User, cartes: list[dict], db: AsyncSession) -> None:
     """Enregistre les cartes vues. Le PREMIER compte qui présente une carte la garde.
 
     Une carte présentée par un second compte n'est pas réattribuée : on incrémente
     seulement son compteur de tentatives, qui sert de signal de fraude organisée.
+
+    Insertion en `ON CONFLICT DO NOTHING` et non « lire puis ajouter » : au checkout,
+    Stripe envoie `payment_method.attached`, `setup_intent.succeeded`,
+    `customer.updated` et `customer.subscription.created` dans la même seconde. Deux
+    webhooks lisaient « carte inconnue » en parallèle, le second levait
+    `UniqueViolationError` → 500 → rejeu Stripe (constaté le 2026-09-12).
     """
     maintenant = datetime.now(timezone.utc)
     for carte in cartes:
-        connue = await db.get(CarteConnue, carte["empreinte"])
-        if connue is None:
-            db.add(CarteConnue(
+        insertion = await db.execute(
+            _insert(db)(CarteConnue).values(
                 empreinte=carte["empreinte"],
                 user_id=user.user_id,
                 email=user.email,
@@ -240,10 +254,17 @@ async def _memoriser_cartes(user: User, cartes: list[dict], db: AsyncSession) ->
                 marque=carte.get("marque"),
                 dernier4=carte.get("dernier4"),
                 financement=carte.get("financement"),
+                tentatives_autres_comptes=0,
                 premiere_vue=maintenant,
                 derniere_vue=maintenant,
-            ))
+            ).on_conflict_do_nothing(index_elements=["empreinte"])
+        )
+        if insertion.rowcount == 1:
             continue
+        connue = (await db.execute(
+            select(CarteConnue).where(CarteConnue.empreinte == carte["empreinte"])
+            .execution_options(populate_existing=True)
+        )).scalar_one()
         connue.derniere_vue = maintenant
         if connue.user_id in (None, user.user_id):
             connue.user_id = user.user_id
@@ -266,8 +287,11 @@ async def _controler_carte(user: User, sub: dict,
     if not cartes:
         return "ok", None
 
-    conflit = None if politique == "ignorer" else await _carte_dun_autre_compte(user, cartes, db)
+    # Mémoriser AVANT de chercher le conflit : si un autre compte a présenté la même
+    # carte dans la même seconde, c'est sa ligne (celle qui a gagné l'insertion)
+    # qu'on relit, et le conflit est vu au lieu de passer entre les deux webhooks.
     await _memoriser_cartes(user, cartes, db)
+    conflit = None if politique == "ignorer" else await _carte_dun_autre_compte(user, cartes, db)
     if conflit is None:
         return "ok", None
 
