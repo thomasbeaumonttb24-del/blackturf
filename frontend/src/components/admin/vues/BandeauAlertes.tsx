@@ -146,8 +146,7 @@ export default function BandeauAlertes() {
 
   return (
     <Panneau
-      titre="Ce qui demande une action"
-      desc="Incidents ouverts, classés du plus coûteux au moins urgent. Chaque ligne mène à l'écran où on le traite."
+      titre="À traiter"
       icone={lignes.length > 0 ? <AlertTriangle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
       ton={lignes.some((l) => l.gravite === "alerte") ? "alerte" : lignes.length > 0 ? "attention" : "ok"}
       bodyClassName="p-0 sm:p-0"
@@ -157,10 +156,7 @@ export default function BandeauAlertes() {
       ) : lignes.length === 0 ? (
         <p className="flex items-start gap-2 px-4 py-4 text-[13px] leading-relaxed text-emerald-800 sm:px-5">
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
-          <span>
-            Rien à traiter : aucune erreur ouverte, toutes les sources répondent, aucun
-            paiement en échec et le modèle a été ré-entraîné dans les {MODELE_PERIME_H} h.
-          </span>
+          <span>Tout est au vert : paiements, sources de données et modèle.</span>
         </p>
       ) : (
         <ul className="divide-y divide-border/60">

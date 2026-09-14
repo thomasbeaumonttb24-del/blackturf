@@ -89,7 +89,44 @@ export interface MouvementAbo {
   created_at: string;
 }
 
+export type Formule = "standard" | "expert";
+export type CaseCompte = "payants" | "essais" | "offerts" | "gratuits";
+
+/** Chaque compte (hors admin) est rangé dans UNE seule case : la somme des
+ *  quatre vaut `comptes`. */
+export interface Repartition {
+  comptes: number;
+  payants: number;
+  essais: number;
+  offerts: number;
+  gratuits: number;
+  par_formule: Record<Formule, { payants: number; essais: number; offerts: number }>;
+}
+
+export interface CompteOffert {
+  user_id: string;
+  email: string;
+  plan: Formule;
+  created_at: string;
+  last_login: string | null;
+}
+
+export interface EnLigneData {
+  disponible: boolean;
+  fenetre_min: number;
+  total: number | null;
+  connectes: number | null;
+  anonymes: number | null;
+  comptes: Array<{
+    user_id: string; email: string; plan: string; is_admin: boolean;
+    chemin: string | null; vu_il_y_a_s: number | null;
+  }>;
+  pages: Array<{ chemin: string; n: number }>;
+}
+
 export interface AbonnementsData {
+  repartition: Repartition;
+  offerts: CompteOffert[];
   resume: {
     en_essai_avec_carte: number;
     en_essai_sans_carte: number;

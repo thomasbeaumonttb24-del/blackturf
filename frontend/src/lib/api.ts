@@ -228,6 +228,7 @@ export const adminApi = {
     api.delete("/integrations/instagram", { baseURL: `${API_URL}/admin/api` }),
 
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
+  enLigne: () => api.get("/en-ligne", { baseURL: `${API_URL}/admin/api` }),
   users: (params?: Record<string, unknown>) =>
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),
   userDetail: (id: string) =>

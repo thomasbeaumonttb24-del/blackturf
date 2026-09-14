@@ -652,3 +652,230 @@ export function BarrePolarite({ value, max }: { value: number | null; max: numbe
 
 export const DIVERGING_POS = "#059669";
 export const DIVERGING_NEG = "#EF4444";
+
+/* ─────────────────────── tableau de bord (2026-09-14) ──────────────────── */
+// L'exploitant jugeait la console « illisible, trop d'infos inutiles ». Ces
+// briques portent la nouvelle grammaire : un gros chiffre par question, une
+// barre pour une proportion, une ligne par personne — et plus de paragraphes
+// d'explication sous chaque titre.
+
+const ACCENTS_KPI = {
+  neutre: "bg-slate-100 text-slate-600",
+  or: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200/70",
+  ok: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200/70",
+  bleu: "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200/70",
+  violet: "bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200/70",
+} as const;
+
+/** Grand chiffre d'en-tête d'écran. Quatre par rangée au maximum. */
+export function Kpi({
+  label, valeur, sub, icone, accent = "neutre",
+}: {
+  label: string;
+  valeur: React.ReactNode;
+  sub?: React.ReactNode;
+  icone?: React.ReactNode;
+  accent?: keyof typeof ACCENTS_KPI;
+}) {
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <span className={cn(T.etiquette, "leading-tight")}>{label}</span>
+        {icone && (
+          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", ACCENTS_KPI[accent])} aria-hidden>
+            {icone}
+          </span>
+        )}
+      </div>
+      <div className="mt-1.5 text-[26px] font-semibold leading-none tracking-tight tabular-nums sm:text-[30px]">
+        {valeur}
+      </div>
+      {sub && <div className="mt-2 text-xs leading-snug text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+export function GrilleKpi({ children }: { children: React.ReactNode }) {
+  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">{children}</div>;
+}
+
+/** Point vert « en direct ». L'animation se coupe si l'OS demande moins de mouvement. */
+export function PointLive({ className }: { className?: string }) {
+  return (
+    <span className={cn("relative flex h-2.5 w-2.5 shrink-0", className)} aria-hidden>
+      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
+      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+    </span>
+  );
+}
+
+/** Une proportion en une barre, puis la légende chiffrée — la couleur n'est
+ *  jamais seule à porter l'information. */
+export function BarreRepartition({
+  segments, total,
+}: {
+  segments: ReadonlyArray<{ cle: string; label: string; n: number; couleur: string }>;
+  total: number;
+}) {
+  const t = total > 0 ? total : segments.reduce((s, x) => s + x.n, 0);
+  return (
+    <div>
+      <div
+        role="img"
+        aria-label={segments.map((s) => `${s.label} : ${s.n}`).join(", ")}
+        className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full bg-muted"
+      >
+        {t > 0 && segments.filter((s) => s.n > 0).map((s) => (
+          <div key={s.cle} className={cn("h-full first:rounded-l-full last:rounded-r-full", s.couleur)} style={{ width: `${(s.n / t) * 100}%` }} />
+        ))}
+      </div>
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+        {segments.map((s) => (
+          <div key={s.cle} className="flex items-start gap-2">
+            <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", s.couleur)} aria-hidden />
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">{s.label}</dt>
+              <dd className="text-lg font-semibold leading-tight tabular-nums">
+                {nf.format(s.n)}
+                <span className="ml-1.5 text-xs font-medium text-muted-foreground">
+                  {t > 0 ? pct((s.n / t) * 100, 0) : "—"}
+                </span>
+              </dd>
+            </div>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+const TEINTES_AVATAR = [
+  "bg-amber-100 text-amber-800", "bg-emerald-100 text-emerald-800", "bg-sky-100 text-sky-800",
+  "bg-violet-100 text-violet-800", "bg-rose-100 text-rose-800", "bg-slate-200 text-slate-700",
+];
+
+/** Pastille d'initiales, couleur stable par adresse — repère visuel d'une ligne. */
+export function Initiales({ email }: { email: string }) {
+  const nom = (email || "?").split("@")[0];
+  const parts = nom.split(/[._+-]+/).filter(Boolean);
+  const texte = ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? parts[0]?.[1] ?? "")).toUpperCase();
+  let h = 0;
+  for (const ch of email || "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return (
+    <span
+      aria-hidden
+      className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold", TEINTES_AVATAR[h % TEINTES_AVATAR.length])}
+    >
+      {texte}
+    </span>
+  );
+}
+
+export function CelluleCompte({ email, detail }: { email: string; detail?: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <Initiales email={email} />
+      <div className="min-w-0">
+        <div className="truncate text-[13px] font-medium" title={email}>{email}</div>
+        {detail && <div className="truncate text-xs text-muted-foreground">{detail}</div>}
+      </div>
+    </div>
+  );
+}
+
+const FORMULES: Record<string, { texte: string; classe: string }> = {
+  expert: { texte: "Expert", classe: "bg-amber-50 text-amber-800 ring-amber-200" },
+  pro: { texte: "Expert", classe: "bg-amber-50 text-amber-800 ring-amber-200" },
+  standard: { texte: "Standard", classe: "bg-slate-100 text-slate-700 ring-slate-200" },
+  starter: { texte: "Standard", classe: "bg-slate-100 text-slate-700 ring-slate-200" },
+  free: { texte: "Gratuit", classe: "bg-card text-muted-foreground ring-border" },
+  admin: { texte: "Admin", classe: "bg-brand-dark text-white ring-brand-dark" },
+};
+
+export function BadgeFormule({ plan, periodicite }: { plan: string | null | undefined; periodicite?: string | null }) {
+  const f = FORMULES[plan ?? ""] ?? { texte: plan ?? "—", classe: "bg-muted text-muted-foreground ring-border" };
+  return (
+    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", f.classe)}>
+      {f.texte}
+      {periodicite && <span className="font-medium opacity-70">· {periodicite === "annual" ? "an" : "mois"}</span>}
+    </span>
+  );
+}
+
+/** État en une pastille de couleur + un mot. */
+export function Etat({ ton, children, titre }: { ton: Ton; children: React.ReactNode; titre?: string }) {
+  const point = { neutre: "bg-slate-400", ok: "bg-emerald-500", attention: "bg-amber-500", alerte: "bg-red-500", or: "bg-amber-500" }[ton];
+  return (
+    <span title={titre} className={cn("inline-flex items-center gap-1.5 whitespace-nowrap text-[13px]", TONS[ton].texte)}>
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", point)} aria-hidden />
+      {children}
+    </span>
+  );
+}
+
+export interface Colonne<L> {
+  titre: string;
+  rendu: (ligne: L) => React.ReactNode;
+  droite?: boolean;
+  className?: string;
+}
+
+/**
+ * Tableau de personnes : tableau au-dessus de `md`, cartes en dessous. La
+ * première colonne devient le titre de la carte, les autres ses champs.
+ */
+export function Tableau<L>({
+  lignes, colonnes, cle, label, vide, limite = 12,
+}: {
+  lignes: L[];
+  colonnes: Colonne<L>[];
+  cle: (ligne: L) => string;
+  label: string;
+  vide: React.ReactNode;
+  limite?: number;
+}) {
+  const [tout, setTout] = React.useState(false);
+  if (lignes.length === 0) return <Vide>{vide}</Vide>;
+  const visibles = tout ? lignes : lignes.slice(0, limite);
+  const [tete, ...reste] = colonnes;
+
+  return (
+    <>
+      <CartesOuTableau
+        cartes={visibles.map((l) => (
+          <Carte key={cle(l)}>
+            <div className="min-w-0">{tete.rendu(l)}</div>
+            {reste.length > 0 && (
+              <div className="mt-2.5 space-y-1.5 border-t border-border/60 pt-2.5">
+                {reste.map((c) => <Champ key={c.titre} label={c.titre}>{c.rendu(l)}</Champ>)}
+              </div>
+            )}
+          </Carte>
+        ))}
+        tableau={
+          <DefilementX label={label}>
+            <table className="w-full min-w-[640px] border-collapse">
+              <thead>
+                <tr className="border-b border-border">
+                  {colonnes.map((c) => (
+                    <th key={c.titre} scope="col" className={cn(TH, c.droite && "text-right", c.className)}>{c.titre}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibles.map((l) => (
+                  <tr key={cle(l)} className="border-b border-border/50 transition-colors last:border-0 hover:bg-muted/30">
+                    {colonnes.map((c) => (
+                      <td key={c.titre} className={cn(TD, "py-3", c.droite && "text-right tabular-nums", c.className)}>{c.rendu(l)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DefilementX>
+        }
+      />
+      <VoirPlus total={lignes.length} montres={limite} tout={tout} onToggle={() => setTout((v) => !v)} />
+    </>
+  );
+}

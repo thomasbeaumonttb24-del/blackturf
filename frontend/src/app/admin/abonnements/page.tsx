@@ -1,97 +1,147 @@
 "use client";
 
 /**
- * Abonnements — essais, cartes manquantes, journal Stripe.
+ * Abonnements — qui paie, qui essaie, qui a un accès offert, qui est gratuit.
  *
- * Ce contenu était une section repliée au milieu de `/admin`, elle-même
- * contenant une seconde section repliée pour le journal. Deux niveaux de
- * dépliage : l'information la plus commerciale du produit était à trois clics
- * et zéro chemin de navigation.
+ * Refonte du 2026-09-14 : l'écran empilait six tuiles, trois paragraphes
+ * d'explication et deux listes, et l'exploitant le jugeait illisible. Il répond
+ * maintenant à quatre questions, dans cet ordre : combien ça rapporte, comment se
+ * répartissent les comptes, qui est dans chaque case, ce qui s'est passé.
  *
- * Trois choses tenues ici :
- *   · un échec de paiement coupe l'accès — il est remonté en haut, hors de
- *     tout dépliage ;
- *   · on compte les INCIDENTS, pas les lignes du journal : un seul incident
- *     écrit deux mouvements à quelques secondes d'écart (le statut Stripe
- *     `past_due`, puis `paiement_echoue`) ;
- *   · un essai perdu n'est pas une résiliation. Le premier n'a jamais converti,
- *     le second était un client.
+ * Règles gardées de la version précédente :
+ *   · on compte les INCIDENTS de paiement, pas les lignes du journal (un échec
+ *     écrit `past_due` puis `paiement_echoue` à quelques secondes d'écart) ;
+ *   · un essai perdu n'est pas une résiliation.
  */
 
 import { useState } from "react";
-import { AlertTriangle, CreditCard, History, Users2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { cn, formatDateTime, formatEuro } from "@/lib/utils";
+import { AlertTriangle, CreditCard, Gift, Hourglass, Wallet } from "lucide-react";
+import { cn, formatDateTime } from "@/lib/utils";
 import {
-  Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, Encart, GrilleTuiles, Panneau,
-  Puce, Squelette, TD, TH, Tuile, VoirPlus, Vide, depuis, num,
+  BadgeFormule, BarreRepartition, CelluleCompte, EnTetePage, Encart, Etat, GrilleKpi, Kpi,
+  Panneau, PointLive, Puce, Segments, Squelette, TH, Tableau, VoirPlus, Vide, depuis, eur, num,
+  type Colonne,
 } from "@/components/admin/ui";
-import { incidentsPaiement, useAbonnements } from "@/components/admin/data";
+import { incidentsPaiement, useAbonnements, useEnLigne } from "@/components/admin/data";
 import {
-  MOUVEMENT_LABELS, MOUVEMENT_TONS, type AbonneLigne, type MouvementAbo,
+  MOUVEMENT_LABELS, MOUVEMENT_TONS,
+  type AbonneLigne, type CompteOffert, type MouvementAbo, type Repartition,
 } from "@/components/admin/types";
 
-/** Un statut Stripe brut n'est pas un libellé : « past_due » s'affichait tel
- *  quel dans la colonne « État », en anglais et en serpent. */
-const ETATS_STRIPE: Record<string, { texte: string; aide: string }> = {
-  past_due: { texte: "Impayé", aide: "Impayé — accès coupé, relances Stripe en cours" },
-  unpaid: { texte: "Impayé définitif", aide: "Relances Stripe épuisées" },
-  canceled: { texte: "Résilié", aide: "Abonnement clos chez Stripe" },
-  incomplete: { texte: "Incomplet", aide: "Paiement jamais finalisé" },
-  incomplete_expired: { texte: "Expiré", aide: "Paiement abandonné — abonnement expiré" },
-  paused: { texte: "Suspendu", aide: "Abonnement suspendu" },
-  cancel_at_period_end: { texte: "Fin de période", aide: "Résilié, mais payé jusqu'à la fin de la période en cours" },
+type Onglet = "payants" | "essais" | "offerts" | "journal";
+
+/** Un statut Stripe brut n'est pas un libellé. */
+const ETATS_STRIPE: Record<string, string> = {
+  past_due: "Impayé",
+  unpaid: "Impayé définitif",
+  canceled: "Résilié",
+  incomplete: "Incomplet",
+  incomplete_expired: "Expiré",
+  paused: "Suspendu",
+  cancel_at_period_end: "Fin de période",
 };
 
-/** État d'un abonnement, en un mot. La phrase complète est en infobulle : le
- *  libellé long occupait trois lignes dans sa cellule et repliait la pastille
- *  en un ovale. */
-function etatAbonne(a: AbonneLigne) {
-  if (!a.carte_enregistree) {
-    return (
-      <Badge variant="warning" className="text-[11px]" title="Essai ouvert sans carte — aucun accès tant qu'un moyen de paiement n'est pas rattaché">
-        Carte manquante
-      </Badge>
-    );
-  }
-  if (a.en_essai) return <Badge variant="secondary" className="text-[11px]">Essai en cours</Badge>;
-  if (a.acces_ouvert) return <Badge variant="success" className="text-[11px]">Actif</Badge>;
-  const st = ETATS_STRIPE[a.statut];
+const dateCourte = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }) : "—";
+
+const montant = (cents: number) => eur(cents / 100, cents % 100 ? 2 : 0);
+
+/* ───────────────────────────── colonnes ───────────────────────────── */
+
+function etatPayant(a: AbonneLigne) {
+  if (a.statut === "cancel_at_period_end") return <Etat ton="attention" titre="Résilié, payé jusqu'à la fin de la période">Fin de période</Etat>;
+  if (a.acces_ouvert) return <Etat ton="ok">Actif</Etat>;
+  const alerte = a.statut === "past_due" || a.statut === "unpaid";
   return (
-    <Badge
-      variant="secondary"
-      className={cn("whitespace-nowrap text-[11px]", a.statut.startsWith("past_due") || a.statut === "unpaid" ? "text-destructive" : undefined)}
-      title={st?.aide}
-    >
-      {st?.texte ?? a.statut}
-    </Badge>
+    <Etat ton={alerte ? "alerte" : "neutre"} titre={alerte ? "Accès coupé, relances Stripe en cours" : undefined}>
+      {ETATS_STRIPE[a.statut] ?? a.statut}
+    </Etat>
   );
 }
 
-/** « Starter / mois » — la périodicité ne prend pas de capitale. `capitalize`
- *  posé sur toute la cellule écrivait « Starter / An ». */
-function formule(a: AbonneLigne) {
-  return (
-    <>
-      <span className="capitalize">{a.plan}</span>
-      <span className="text-xs text-muted-foreground">
-        {a.periodicite === "annual" ? " / an" : " / mois"}
-      </span>
-    </>
-  );
-}
-
-function finEssai(a: AbonneLigne) {
+/** Jours restants en barre : on voit d'un coup d'œil qui arrive au bout. */
+function FinEssai({ a }: { a: AbonneLigne }) {
   if (!a.essai_fin) return <span className="text-muted-foreground">—</span>;
+  const j = a.jours_essai_restants;
+  const urgent = j != null && j <= 3;
   return (
-    <>
-      {formatDateTime(a.essai_fin)}
-      {a.jours_essai_restants !== null && (
-        <span className={cn("ml-1 text-xs", a.jours_essai_restants <= 3 ? "font-semibold text-amber-700" : "text-muted-foreground")}>
-          (J−{a.jours_essai_restants})
+    <div className="ml-auto w-full min-w-[9rem] max-w-[12rem] md:ml-0">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className={cn("font-semibold tabular-nums", urgent ? "text-amber-700" : "text-foreground")}>
+          {j != null ? `J−${Math.max(0, Math.ceil(j))}` : "Terminé"}
         </span>
-      )}
-    </>
+        <span className="text-muted-foreground" title={formatDateTime(a.essai_fin)}>
+          {new Date(a.essai_fin).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn("h-full rounded-full", urgent ? "bg-amber-500" : "bg-sky-500")}
+          style={{ width: `${j != null ? Math.max(4, Math.min(100, (j / 7) * 100)) : 0}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+const COLONNES_PAYANTS: Colonne<AbonneLigne>[] = [
+  { titre: "Compte", rendu: (a) => <CelluleCompte email={a.email} />, className: "max-w-[300px]" },
+  { titre: "Formule", rendu: (a) => <BadgeFormule plan={a.plan} periodicite={a.periodicite} /> },
+  { titre: "État", rendu: etatPayant },
+  { titre: "Client depuis", rendu: (a) => <span className="whitespace-nowrap">{dateCourte(a.depuis)}</span> },
+  { titre: "Montant", rendu: (a) => <span className="font-semibold">{montant(a.montant_cents)}</span>, droite: true },
+];
+
+const COLONNES_ESSAIS: Colonne<AbonneLigne>[] = [
+  { titre: "Compte", rendu: (a) => <CelluleCompte email={a.email} />, className: "max-w-[300px]" },
+  { titre: "Formule", rendu: (a) => <BadgeFormule plan={a.plan} /> },
+  {
+    titre: "Carte",
+    rendu: (a) => a.carte_enregistree
+      ? <Etat ton="ok">Enregistrée</Etat>
+      : <Etat ton="attention" titre="Aucun accès tant qu'un moyen de paiement n'est pas rattaché">Manquante</Etat>,
+  },
+  { titre: "Fin d'essai", rendu: (a) => <FinEssai a={a} /> },
+];
+
+const COLONNES_OFFERTS: Colonne<CompteOffert>[] = [
+  { titre: "Compte", rendu: (o) => <CelluleCompte email={o.email} />, className: "max-w-[300px]" },
+  { titre: "Accès", rendu: (o) => <BadgeFormule plan={o.plan} /> },
+  { titre: "Inscrit le", rendu: (o) => <span className="whitespace-nowrap">{dateCourte(o.created_at)}</span> },
+  {
+    titre: "Dernière connexion",
+    rendu: (o) => <span className="whitespace-nowrap text-muted-foreground" title={o.last_login ? formatDateTime(o.last_login) : undefined}>{depuis(o.last_login)}</span>,
+    droite: true,
+  },
+];
+
+/* ───────────────────────────── blocs ───────────────────────────── */
+
+function Formules({ r }: { r: Repartition }) {
+  const cellule = "px-3 py-2.5 text-right text-[13px] font-semibold tabular-nums";
+  return (
+    <div className="mt-5 overflow-hidden rounded-xl border border-border/70">
+      <table className="w-full border-collapse">
+        <thead className="bg-muted/40">
+          <tr>
+            <th scope="col" className={cn(TH, "px-3")}>Formule</th>
+            <th scope="col" className={cn(TH, "px-3 text-right")}>Payants</th>
+            <th scope="col" className={cn(TH, "px-3 text-right")}>En essai</th>
+            <th scope="col" className={cn(TH, "px-3 text-right")}>Offerts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(["standard", "expert"] as const).map((f) => (
+            <tr key={f} className="border-t border-border/60">
+              <th scope="row" className="px-3 py-2.5 text-left"><BadgeFormule plan={f} /></th>
+              <td className={cellule}>{num(r.par_formule[f].payants)}</td>
+              <td className={cellule}>{num(r.par_formule[f].essais)}</td>
+              <td className={cellule}>{num(r.par_formule[f].offerts)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -105,67 +155,43 @@ function jourMouvement(iso: string): string {
   return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 }
 
-function montantMouvement(cents: number | null): string | null {
-  if (cents == null || cents === 0) return null;
-  return `${(cents / 100).toFixed(2).replace(".", ",")} €`;
-}
-
-// Habillage d'une ligne de journal. La pastille colorée porte le TON, le libellé
-// reste du texte : mis dans une pastille, il faisait varier la largeur du simple
-// au quadruple (« Essai ouvert » contre « Impayé — accès coupé, relances Stripe
-// en cours ») et plus aucune colonne ne s'alignait d'une ligne à l'autre.
-const RAIL: Record<string, { point: string; texte: string; rail: string; fond: string }> = {
-  ok: { point: "bg-emerald-600", texte: "text-emerald-800", rail: "border-l-emerald-500/60", fond: "bg-emerald-50/50" },
-  attention: { point: "bg-amber-500", texte: "text-amber-800", rail: "border-l-amber-400/70", fond: "bg-amber-50/50" },
-  alerte: { point: "bg-destructive", texte: "text-destructive", rail: "border-l-destructive/60", fond: "bg-destructive/[0.04]" },
-  neutre: { point: "bg-muted-foreground/40", texte: "text-foreground", rail: "border-l-border", fond: "" },
+const POINT_TON: Record<string, string> = {
+  ok: "bg-emerald-500", attention: "bg-amber-500", alerte: "bg-red-500", neutre: "bg-slate-300",
 };
 
 function Journal({ mouvements }: { mouvements: MouvementAbo[] }) {
   const [tout, setTout] = useState(false);
   if (mouvements.length === 0) return <Vide>Aucun mouvement enregistré.</Vide>;
-  const visibles = tout ? mouvements : mouvements.slice(0, 10);
+  const visibles = tout ? mouvements : mouvements.slice(0, 12);
 
   return (
     <>
-      <ol className="space-y-1">
+      <ol>
         {visibles.map((m, i, liste) => {
-          const st = RAIL[MOUVEMENT_TONS[m.type] ?? "neutre"];
-          const libelle = MOUVEMENT_LABELS[m.type] ?? m.type;
-          const montant = montantMouvement(m.montant_cents);
+          const ton = MOUVEMENT_TONS[m.type] ?? "neutre";
           const jour = jourMouvement(m.created_at);
-          // Séparateur de journée : le journal mélangeait « il y a 5 h » et
-          // « il y a 7 j » sans repère, on ne voyait plus ce qui s'était passé
-          // aujourd'hui.
           const nouveauJour = i === 0 || jour !== jourMouvement(liste[i - 1].created_at);
+          const somme = m.montant_cents ? montant(m.montant_cents) : null;
           return (
             <li key={m.event_id}>
               {nouveauJour && (
-                <div className="flex items-center gap-2 px-1 pb-1 pt-3 first:pt-0">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                    {jour}
-                  </span>
-                  <span className="h-px flex-1 bg-border" />
+                <div className="pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground first:pt-0">
+                  {jour}
                 </div>
               )}
-              <div className={cn("flex items-start gap-3 rounded-lg border-l-2 py-2.5 pl-3 pr-2", st.rail, st.fond)}>
-                <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", st.point)} aria-hidden />
+              <div className="flex items-center gap-3 border-b border-border/50 py-2.5 last:border-0">
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", POINT_TON[ton])} aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <div className={cn("text-[13px] font-semibold leading-snug", st.texte)}>{libelle}</div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                    <span className="truncate" title={m.email ?? undefined}>
-                      {m.email ?? "compte supprimé"}
-                    </span>
-                    {m.plan && (
-                      <span className="capitalize">
-                        · {m.plan_precedent ? `${m.plan_precedent} → ${m.plan}` : m.plan}
-                      </span>
-                    )}
-                    {m.pendant_essai && <span className="text-amber-700">· pendant l&apos;essai</span>}
+                  <div className={cn("truncate text-[13px] font-medium", ton === "alerte" && "text-red-700")}>
+                    {MOUVEMENT_LABELS[m.type] ?? m.type}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground" title={m.email ?? undefined}>
+                    {m.email ?? "compte supprimé"}
+                    {m.plan && <span className="capitalize"> · {m.plan_precedent ? `${m.plan_precedent} → ${m.plan}` : m.plan}</span>}
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
-                  {montant && <div className="text-[13px] font-semibold tabular-nums">{montant}</div>}
+                  {somme && <div className="text-[13px] font-semibold tabular-nums">{somme}</div>}
                   <div className="whitespace-nowrap text-xs text-muted-foreground" title={formatDateTime(m.created_at)}>
                     {depuis(m.created_at)}
                   </div>
@@ -175,155 +201,160 @@ function Journal({ mouvements }: { mouvements: MouvementAbo[] }) {
           );
         })}
       </ol>
-      <VoirPlus total={mouvements.length} montres={10} tout={tout} onToggle={() => setTout((v) => !v)} />
+      <VoirPlus total={mouvements.length} montres={12} tout={tout} onToggle={() => setTout((v) => !v)} />
     </>
   );
 }
 
+/* ───────────────────────────── page ───────────────────────────── */
+
 export default function AbonnementsPage() {
   const { data } = useAbonnements();
+  const { data: live } = useEnLigne();
+  const [onglet, setOnglet] = useState<Onglet>("payants");
   const { uniques, dernier } = incidentsPaiement(data);
 
+  const entete = (
+    <EnTetePage
+      titre="Abonnements"
+      icone={<CreditCard className="h-4 w-4" />}
+      actions={live?.disponible ? (
+        <span className="inline-flex h-9 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-[13px] font-semibold text-emerald-800">
+          <PointLive /> {num(live.total)} en ligne
+        </span>
+      ) : undefined}
+    />
+  );
+
+  if (!data) {
+    return (
+      <div className="space-y-5 sm:space-y-6">
+        {entete}
+        <GrilleKpi>
+          {[0, 1, 2, 3].map((i) => <div key={i} className="h-[7.25rem] animate-pulse rounded-2xl bg-muted" />)}
+        </GrilleKpi>
+        <Panneau><Squelette lignes={6} /></Panneau>
+      </div>
+    );
+  }
+
+  const r = data.repartition;
+  const payants = data.abonnes.filter((a) => a.carte_enregistree && !a.en_essai);
+  const essais = data.abonnes
+    .filter((a) => a.en_essai || !a.carte_enregistree)
+    .sort((a, b) => (a.jours_essai_restants ?? 99) - (b.jours_essai_restants ?? 99));
+  const s = data.resume;
+
+  const onglets = [
+    { key: "payants", label: `Payants · ${payants.length}` },
+    { key: "essais", label: `Essais · ${essais.length}` },
+    { key: "offerts", label: `Offerts · ${data.offerts.length}` },
+    { key: "journal", label: "Journal" },
+  ] as const;
+
   return (
-    <div className="space-y-4 sm:space-y-5">
-      <EnTetePage
-        titre="Abonnements"
-        icone={<CreditCard className="h-4 w-4" />}
-        desc="Essais en cours, cartes manquantes, encaissements et résiliations — tout ce qui décide de l'accès au produit."
-        actions={
-          <>
-            {uniques.length > 0 && (
-              <Puce ton="alerte">
-                {uniques.length} incident{uniques.length > 1 ? "s" : ""} · 7 j
-              </Puce>
-            )}
-            {data && <Puce ton={data.resume.abonnes_payants > 0 ? "ok" : "neutre"}>{data.resume.abonnes_payants} payant(s)</Puce>}
-          </>
-        }
-      />
+    <div className="space-y-5 sm:space-y-6">
+      {entete}
 
-      {!data ? (
-        <Panneau titre="Chargement"><Squelette lignes={5} /></Panneau>
-      ) : (
-        <>
-          {dernier && (
-            <Encart ton="alerte" icone={<AlertTriangle className="h-4 w-4" />}>
-              <b>{MOUVEMENT_LABELS[dernier.type] ?? dernier.type}</b>
-              {" — "}
-              {dernier.email ?? "compte supprimé"}, <span title={formatDateTime(dernier.created_at)}>{depuis(dernier.created_at)}</span>.
-              {uniques.length > 1 && ` ${uniques.length - 1} autre${uniques.length > 2 ? "s" : ""} incident${uniques.length > 2 ? "s" : ""} sur 7 jours.`}
-              {" "}L&apos;accès est coupé dès le premier échec — Stripe relance la carte, pas nous.
-            </Encart>
-          )}
-
-          <Panneau
-            titre="État du parc"
-            desc="Photo de l'instant. « Sans carte » ne veut pas dire « en attente » : sans moyen de paiement rattaché, l'accès est bloqué."
-            icone={<Users2 className="h-3.5 w-3.5" />}
-          >
-            <GrilleTuiles colonnes={6}>
-              <Tuile label="Payants" valeur={num(data.resume.abonnes_payants)} ton={data.resume.abonnes_payants > 0 ? "ok" : "neutre"} />
-              <Tuile label="En essai" valeur={num(data.resume.en_essai_avec_carte)} />
-              <Tuile
-                label="Sans carte"
-                valeur={num(data.resume.en_essai_sans_carte)}
-                ton={data.resume.en_essai_sans_carte > 0 ? "attention" : "neutre"}
-                sub={data.resume.en_essai_sans_carte > 0 ? "accès bloqué" : undefined}
-              />
-              <Tuile
-                label="Fin d'essai < 3 j"
-                valeur={num(data.resume.fin_essai_sous_3j)}
-                ton={data.resume.fin_essai_sous_3j > 0 ? "attention" : "neutre"}
-              />
-              <Tuile label="Revenu mensuel" valeur={formatEuro(data.resume.mrr)} sub={`ARR ${formatEuro(data.resume.arr)}`} />
-              <Tuile label="Résiliations 30 j" valeur={num(data.resume.resiliations_30j)} />
-            </GrilleTuiles>
-
-            <Encart>
-              Sur 30 jours : <b>{data.resume.essais_ouverts_30j}</b> essai(s) ouvert(s),{" "}
-              <b>{data.resume.essais_perdus_30j}</b> perdu(s) faute de carte,{" "}
-              <b>{data.resume.resiliations_pendant_essai_30j}</b> résiliation(s) survenue(s)
-              pendant l&apos;essai. Un essai perdu n&apos;est pas une résiliation : le premier
-              n&apos;a jamais converti, le second était un client.
-            </Encart>
-          </Panneau>
-
-          <Panneau
-            titre="Abonnements en cours"
-            desc={`${data.abonnes.length} ligne(s) — un abonnement par compte, montant réellement facturé.`}
-            actions={<Puce>{data.abonnes.length}</Puce>}
-          >
-            {data.abonnes.length === 0 ? (
-              <Vide>Aucun abonnement en cours.</Vide>
-            ) : (
-              <CartesOuTableau
-                cartes={data.abonnes.map((a) => (
-                  <Carte
-                    key={a.stripe_subscription_id ?? a.user_id}
-                    ton={!a.carte_enregistree ? "attention" : "neutre"}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{a.email}</span>
-                      <span className="shrink-0 text-[13px] font-semibold tabular-nums">
-                        {formatEuro(a.montant_cents / 100)}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <Badge variant="secondary" className="text-[11px]">{formule(a)}</Badge>
-                      {etatAbonne(a)}
-                    </div>
-                    {a.essai_fin && (
-                      <div className="mt-2 border-t border-border/60 pt-2">
-                        <Champ label="Fin d'essai">{finEssai(a)}</Champ>
-                      </div>
-                    )}
-                  </Carte>
-                ))}
-                tableau={
-                  <DefilementX label="Abonnements en cours">
-                    <table className="w-full min-w-[680px] border-collapse">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className={TH}>Compte</th>
-                          <th className={TH}>Formule</th>
-                          <th className={TH}>État</th>
-                          <th className={TH}>Fin d&apos;essai</th>
-                          <th className={cn(TH, "text-right")}>Montant</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.abonnes.map((a) => (
-                          <tr
-                            key={a.stripe_subscription_id ?? a.user_id}
-                            className="border-b border-border/40 last:border-0 hover:bg-muted/30"
-                          >
-                            <td className={cn(TD, "max-w-[260px] truncate")} title={a.email}>{a.email}</td>
-                            <td className={cn(TD, "whitespace-nowrap")}>{formule(a)}</td>
-                            <td className={TD}>{etatAbonne(a)}</td>
-                            <td className={cn(TD, "whitespace-nowrap")}>{finEssai(a)}</td>
-                            <td className={cn(TD, "text-right tabular-nums whitespace-nowrap")}>
-                              {formatEuro(a.montant_cents / 100)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </DefilementX>
-                }
-              />
-            )}
-          </Panneau>
-
-          <Panneau
-            titre="Journal des mouvements"
-            desc="Ce que Stripe a réellement enregistré : essais, cartes, encaissements, résiliations. Groupé par journée."
-            icone={<History className="h-3.5 w-3.5" />}
-            actions={<Puce>{data.mouvements.length} mouvement(s)</Puce>}
-          >
-            <Journal mouvements={data.mouvements} />
-          </Panneau>
-        </>
+      {dernier && (
+        <Encart ton="alerte" icone={<AlertTriangle className="h-4 w-4" />}>
+          <b>{uniques.length} incident{uniques.length > 1 ? "s" : ""} de paiement sur 7 jours</b>
+          {" — dernier : "}{MOUVEMENT_LABELS[dernier.type] ?? dernier.type}, {dernier.email ?? "compte supprimé"},{" "}
+          <span title={formatDateTime(dernier.created_at)}>{depuis(dernier.created_at)}</span>.
+        </Encart>
       )}
+
+      <GrilleKpi>
+        <Kpi label="Revenu mensuel" valeur={eur(s.mrr)} sub={`${eur(s.arr)} par an`} icone={<Wallet className="h-4 w-4" />} accent="or" />
+        <Kpi
+          label="Payants"
+          valeur={num(r.payants)}
+          sub={`Standard ${r.par_formule.standard.payants} · Expert ${r.par_formule.expert.payants}`}
+          icone={<CreditCard className="h-4 w-4" />}
+          accent="ok"
+        />
+        <Kpi
+          label="En essai"
+          valeur={num(r.essais)}
+          sub={s.en_essai_sans_carte > 0
+            ? `dont ${s.en_essai_sans_carte} sans carte`
+            : s.fin_essai_sous_3j > 0
+              ? `${s.fin_essai_sous_3j} finissent sous 3 j`
+              : `Standard ${r.par_formule.standard.essais} · Expert ${r.par_formule.expert.essais}`}
+          icone={<Hourglass className="h-4 w-4" />}
+          accent="bleu"
+        />
+        <Kpi
+          label="Offerts"
+          valeur={num(r.offerts)}
+          sub={`Standard ${r.par_formule.standard.offerts} · Expert ${r.par_formule.expert.offerts}`}
+          icone={<Gift className="h-4 w-4" />}
+          accent="violet"
+        />
+      </GrilleKpi>
+
+      <Panneau titre="Répartition des comptes" actions={<Puce>{num(r.comptes)} comptes</Puce>}>
+        <BarreRepartition
+          total={r.comptes}
+          segments={[
+            { cle: "payants", label: "Payants", n: r.payants, couleur: "bg-emerald-500" },
+            { cle: "essais", label: "En essai", n: r.essais, couleur: "bg-sky-500" },
+            { cle: "offerts", label: "Offerts", n: r.offerts, couleur: "bg-violet-500" },
+            { cle: "gratuits", label: "Gratuits", n: r.gratuits, couleur: "bg-slate-300" },
+          ]}
+        />
+        <Formules r={r} />
+      </Panneau>
+
+      <Panneau bodyClassName="p-0 sm:p-0">
+        <div className="border-b border-border/60 p-2 sm:px-4">
+          <Segments
+            items={onglets}
+            actif={onglet}
+            onChange={setOnglet}
+            className="border-0 bg-transparent p-0 shadow-none"
+          />
+        </div>
+        <div className="p-4 sm:p-5">
+          {onglet === "payants" && (
+            <Tableau
+              lignes={payants}
+              colonnes={COLONNES_PAYANTS}
+              cle={(a) => a.stripe_subscription_id ?? a.user_id}
+              label="Abonnés payants"
+              vide="Aucun abonné payant pour l'instant."
+            />
+          )}
+          {onglet === "essais" && (
+            <Tableau
+              lignes={essais}
+              colonnes={COLONNES_ESSAIS}
+              cle={(a) => a.stripe_subscription_id ?? a.user_id}
+              label="Essais en cours"
+              vide="Aucun essai en cours."
+            />
+          )}
+          {onglet === "offerts" && (
+            <Tableau
+              lignes={data.offerts}
+              colonnes={COLONNES_OFFERTS}
+              cle={(o) => o.user_id}
+              label="Accès offerts"
+              vide="Aucun accès offert. Un plan payant accordé à la main depuis « Comptes » apparaît ici."
+            />
+          )}
+          {onglet === "journal" && (
+            <>
+              <p className="mb-3 text-xs text-muted-foreground">
+                30 derniers jours : <b className="text-foreground">{s.essais_ouverts_30j}</b> essais ouverts ·{" "}
+                <b className="text-foreground">{s.essais_perdus_30j}</b> perdus sans carte ·{" "}
+                <b className="text-foreground">{s.resiliations_30j}</b> résiliations
+              </p>
+              <Journal mouvements={data.mouvements} />
+            </>
+          )}
+        </div>
+      </Panneau>
     </div>
   );
 }

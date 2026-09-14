@@ -17,7 +17,7 @@ import useSWR from "swr";
 import { adminApi, statsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import type {
-  AbonnementsData, CompteLigne, DashboardData, ModelVersion,
+  AbonnementsData, CompteLigne, DashboardData, EnLigneData, ModelVersion,
   PalmaresNet, ScraperStatus, SystemError,
 } from "./types";
 import { MOUVEMENTS_ECHEC, scraperSain } from "./types";
@@ -77,6 +77,16 @@ export function useAbonnements() {
     estAdmin ? "/admin-abonnements" : null,
     () => adminApi.abonnements().then((r) => r.data),
     { refreshInterval: CADENCE.normal, revalidateOnFocus: true, keepPreviousData: true },
+  );
+}
+
+/** Personnes sur le site en ce moment. Rafraîchi vite : c'est un chiffre « en direct ». */
+export function useEnLigne() {
+  const { estAdmin } = useEstAdmin();
+  return useSWR<EnLigneData>(
+    estAdmin ? "/admin-en-ligne" : null,
+    () => adminApi.enLigne().then((r) => r.data),
+    { refreshInterval: 15_000, revalidateOnFocus: true, keepPreviousData: true },
   );
 }
 

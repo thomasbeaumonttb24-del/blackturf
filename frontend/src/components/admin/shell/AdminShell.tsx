@@ -27,7 +27,23 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRequireAuth } from "@/hooks/useAuth";
-import { useAlertes, useEstAdmin } from "../data";
+import { useAlertes, useEnLigne, useEstAdmin } from "../data";
+import { PointLive } from "../ui";
+
+/** Compteur « en ligne » permanent, au pied de la barre latérale. */
+function EnLigneMini() {
+  const { data } = useEnLigne();
+  if (!data?.disponible) return null;
+  return (
+    <Link
+      href="/admin"
+      className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/70 transition-colors hover:bg-white/10"
+    >
+      <PointLive />
+      <span><b className="font-semibold tabular-nums text-white">{data.total}</b> en ligne</span>
+    </Link>
+  );
+}
 
 interface Destination {
   href: string;
@@ -74,7 +90,7 @@ function Pastille({ n, actif }: { n: number; actif: boolean }) {
       aria-label={`${n} point${n > 1 ? "s" : ""} d'attention`}
       className={cn(
         "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
-        actif ? "bg-background/20 text-background" : "bg-destructive text-destructive-foreground",
+        actif ? "bg-brand-gold text-brand-dark" : "bg-destructive text-destructive-foreground",
       )}
     >
       {n > 99 ? "99+" : n}
@@ -132,7 +148,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="min-h-dvh bg-muted/25">
+    <div className="min-h-dvh bg-[#F6F5F1]">
       {/* ── Barre du haut, téléphone et tablette ───────────────────────────
           Elle porte le nom de l'écran courant : sur mobile la navigation est
           en bas, et sans ce rappel une page défilée ne dit plus où l'on est. */}
@@ -165,15 +181,15 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       <div className="mx-auto flex w-full max-w-[1500px]">
         {/* ── Barre latérale, à partir de 1024 px ─────────────────────────── */}
-        <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-border/70 bg-background lg:flex">
+        <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col bg-brand-dark text-white lg:flex">
           <div className="px-5 py-5">
             <Link href="/" className="group flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-dark text-sm font-bold text-brand-gold">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm font-bold text-brand-gold ring-1 ring-inset ring-brand-gold/40">
                 BT
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-semibold leading-tight">BlackTurf</span>
-                <span className="block text-[11px] leading-tight text-muted-foreground">
+                <span className="block text-[11px] leading-tight text-white/50">
                   Console d&apos;administration
                 </span>
               </span>
@@ -190,10 +206,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                   href={d.href}
                   aria-current={actif ? "page" : undefined}
                   className={cn(
-                    "flex min-h-[2.75rem] items-center gap-3 rounded-xl px-3 text-[13px] font-semibold transition-colors",
+                    "flex min-h-[2.75rem] items-center gap-3 rounded-xl px-3 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold",
                     actif
-                      ? "bg-foreground text-background"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      ? "bg-white/10 text-white shadow-[inset_3px_0_0_0_#F59E0B]"
+                      : "text-white/60 hover:bg-white/5 hover:text-white",
                   )}
                 >
                   <Icone className="h-4 w-4 shrink-0" aria-hidden />
@@ -204,10 +220,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             })}
           </nav>
 
-          <div className="border-t border-border/70 px-5 py-4">
+          <div className="space-y-3 border-t border-white/10 px-4 py-4">
+            <EnLigneMini />
             <Link
               href="/"
-              className="flex items-center gap-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              className="flex items-center gap-2 px-1 text-xs font-medium text-white/50 transition-colors hover:text-white"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Retour au site public
             </Link>

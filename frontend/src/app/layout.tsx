@@ -8,6 +8,7 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/useAuth";
 import { Suspense } from "react";
 import DefilementHaut from "@/components/DefilementHaut";
+import SignalPresence from "@/components/SignalPresence";
 
 // `display: "optional"` plutôt que `"swap"`, et on s'en tient au sous-ensemble `latin`.
 //
@@ -188,6 +189,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <DefilementHaut />
         </Suspense>
         <AuthProvider>{children}</AuthProvider>
+        <SignalPresence />
         <Toaster
           theme="light"
           position="top-right"

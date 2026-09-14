@@ -1507,6 +1507,9 @@ async def abonnements(
     abonnes = []
     mrr_cents = 0
     en_essai = essai_sans_carte = payants = fin_essai_3j = 0
+    # Répartition par COMPTE (un compte peut porter deux lignes d'abonnement).
+    ids_payants: dict[str, str] = {}
+    ids_essai: dict[str, str] = {}
     for sub, user in lignes:
         essai_fin = sub.essai_fin
         if essai_fin is not None and essai_fin.tzinfo is None:
@@ -1518,10 +1521,13 @@ async def abonnements(
 
         if sans_carte:
             essai_sans_carte += 1
+            ids_essai.setdefault(user.user_id, sub.plan)
         elif en_cours_dessai:
             en_essai += 1
+            ids_essai.setdefault(user.user_id, sub.plan)
         elif sub.statut in STATUTS_ACCES_ADMIN:
             payants += 1
+            ids_payants.setdefault(user.user_id, sub.plan)
             # Un abonnement annuel ne rapporte pas douze fois son prix chaque mois.
             mrr_cents += montant / 12 if sub.periodicite == "annual" else montant
         if en_cours_dessai and jours_restants is not None and jours_restants <= 3:
@@ -1573,7 +1579,41 @@ async def abonnements(
         )
     )).scalar() or 0
 
+    # ── Répartition de TOUS les comptes, chacun rangé dans UNE seule case ──
+    # Ordre de priorité : payant > essai > offert > gratuit. « Offert » = un plan
+    # payant accordé à la main (amis, tests) sans aucun abonnement Stripe vivant.
+    # Le compte d'administration n'est compté nulle part : c'est un outil, pas un client.
+    def _formule(plan: Optional[str]) -> str:
+        return {"starter": "standard", "pro": "expert"}.get(plan or "", plan or "standard")
+
+    ids_abonnes = {user.user_id for _, user in lignes}
+    par_formule = {f: {"payants": 0, "essais": 0, "offerts": 0} for f in ("standard", "expert")}
+    repartition = {"comptes": 0, "payants": 0, "essais": 0, "offerts": 0, "gratuits": 0}
+    offerts = []
+    for u in (await db.execute(
+        select(User).where(User.is_admin.is_not(True)).order_by(desc(User.created_at))
+    )).scalars().all():
+        repartition["comptes"] += 1
+        if u.user_id in ids_payants:
+            case_, formule = "payants", _formule(ids_payants[u.user_id])
+        elif u.user_id in ids_essai:
+            case_, formule = "essais", _formule(ids_essai[u.user_id])
+        elif u.plan in PRIX_MENSUEL_CENTS and u.user_id not in ids_abonnes:
+            case_, formule = "offerts", _formule(u.plan)
+            offerts.append({
+                "user_id": u.user_id, "email": u.email, "plan": formule,
+                "created_at": u.created_at, "last_login": u.last_login_at,
+            })
+        else:
+            case_, formule = "gratuits", None
+        repartition[case_] += 1
+        if formule in par_formule:
+            par_formule[formule][case_] += 1
+    repartition["par_formule"] = par_formule
+
     return {
+        "repartition": repartition,
+        "offerts": offerts,
         "resume": {
             "en_essai_avec_carte": en_essai,
             "en_essai_sans_carte": essai_sans_carte,
@@ -1602,6 +1642,55 @@ async def abonnements(
             for m in mouvements
         ],
         "computed_at": now.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────
+# Présence en ligne
+# ─────────────────────────────────────────────
+@router.get("/en-ligne")
+async def en_ligne(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Qui a le site ouvert en ce moment (signal < 5 min), cf. services/presence.
+    `disponible=False` si Redis ne répond pas : l'écran dit « inconnu », pas « 0 »."""
+    from collections import Counter
+    from services.presence import en_ligne as photo_presence
+
+    photo = await photo_presence()
+    if photo is None:
+        return {"disponible": False, "fenetre_min": 5, "total": None, "connectes": None,
+                "anonymes": None, "comptes": [], "pages": []}
+
+    visiteurs = photo["visiteurs"]
+    ids = [v["user_id"] for v in visiteurs if v["user_id"]]
+    comptes_db = {}
+    if ids:
+        comptes_db = {u.user_id: u for u in (await db.execute(
+            select(User).where(User.user_id.in_(ids))
+        )).scalars().all()}
+
+    comptes = []
+    for v in visiteurs:
+        u = comptes_db.get(v["user_id"]) if v["user_id"] else None
+        if u is None:
+            continue
+        comptes.append({
+            "user_id": u.user_id, "email": u.email, "plan": u.plan, "is_admin": u.is_admin,
+            "chemin": v["chemin"], "vu_il_y_a_s": v["vu_il_y_a_s"],
+        })
+    comptes.sort(key=lambda c: c["vu_il_y_a_s"] if c["vu_il_y_a_s"] is not None else 10**6)
+
+    pages = Counter(v["chemin"] for v in visiteurs if v["chemin"])
+    return {
+        "disponible": True,
+        "fenetre_min": photo["fenetre_s"] // 60,
+        "total": len(visiteurs),
+        "connectes": len(comptes),
+        "anonymes": len(visiteurs) - len(comptes),
+        "comptes": comptes,
+        "pages": [{"chemin": c, "n": n} for c, n in pages.most_common(6)],
     }
 
 
