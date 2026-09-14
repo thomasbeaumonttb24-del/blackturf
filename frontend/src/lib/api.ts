@@ -214,6 +214,51 @@ export const notificationsApi = {
     api.put("/notifications/prefs", data),
 };
 
+// ─── Communauté (/chat) ─────────────────────────────────────
+export type ChatMessage = {
+  message_id: string;
+  contenu: string;
+  created_at: string;
+  auteur: { user_id: string; pseudo: string; role: "admin" | "abonne" | "membre" };
+};
+
+export type ChatMoi = {
+  user_id: string;
+  pseudo: string | null;
+  banni: boolean;
+  email_confirme: boolean;
+  is_admin: boolean;
+};
+
+export type ChatSignalement = {
+  signalement_id: string;
+  motif: string | null;
+  created_at: string;
+  signale_par: string;
+  message: ChatMessage;
+  auteur_banni: boolean;
+};
+
+export type ChatBanni = { user_id: string; pseudo: string | null; email: string; banni_at: string };
+
+// Écriture par REST, lecture en direct par la socket `/ws/chat` (useWebSocket).
+export const chatApi = {
+  moi: () => api.get<ChatMoi>("/chat/moi"),
+  choisirPseudo: (pseudo: string) => api.put<{ pseudo: string }>("/chat/pseudo", { pseudo }),
+  messages: (avant?: string) =>
+    api.get<{ messages: ChatMessage[]; plus_anciens: boolean }>("/chat/messages", {
+      params: avant ? { avant } : {},
+    }),
+  envoyer: (contenu: string) => api.post<ChatMessage>("/chat/messages", { contenu }),
+  supprimer: (id: string) => api.delete(`/chat/messages/${id}`),
+  signaler: (id: string, motif?: string) => api.post(`/chat/messages/${id}/signaler`, { motif }),
+  signalements: () => api.get<{ signalements: ChatSignalement[] }>("/chat/moderation/signalements"),
+  classerSignalement: (id: string) => api.post(`/chat/moderation/signalements/${id}/classer`),
+  bannis: () => api.get<{ bannis: ChatBanni[] }>("/chat/moderation/bannis"),
+  bannir: (userId: string, banni: boolean, effacerMessages = false) =>
+    api.put(`/chat/moderation/bannis/${userId}`, { banni, effacer_messages: effacerMessages }),
+};
+
 export const adminApi = {
   // Intégrations tierces. Comme tout le reste de l'admin, ces routes vivent sur
   // `/admin/api/*` et NON sous `/api/v1` : oublier `baseURL` ici produit un appel vers

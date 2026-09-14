@@ -3,9 +3,12 @@ WebSocket routes — BlackTurf.
 - /ws/courses/{course_id}/cotes : cotes live (30s refresh)
 - /ws/value-bets : stream value bets actifs
 - /ws/user/alertes : alertes in-app personnalisées
+- /ws/chat : salon communautaire (lecture seule ; l'écriture passe par REST)
 """
 import asyncio
 import json
+import time
+import uuid
 import structlog
 from datetime import datetime, timedelta, timezone
 
@@ -488,3 +491,144 @@ async def broadcast_alert(payload: dict):
         await redis.publish("alertes:broadcast", json.dumps(payload))
     except Exception as e:
         log.error("ws.broadcast.failed", error=str(e))
+
+
+# ─────────────────────────────────────────────
+# Communauté (salon de discussion)
+# ─────────────────────────────────────────────
+CHAT_CANAL = "chat:salon"  # même canal que api/routes/chat.py (publication)
+CHAT_PRESENTS_CLE = "chat:presents"
+# Une socket qui ne rafraîchit plus sa présence (worker tué, coupure brutale) sort
+# du décompte après ce délai — il faut qu'il dépasse l'intervalle de ping.
+CHAT_PRESENTS_TTL = PING_INTERVAL * 3
+
+
+async def _chat_presents(redis) -> int:
+    """Membres DISTINCTS connectés au salon (plusieurs onglets = une personne)."""
+    await redis.zremrangebyscore(CHAT_PRESENTS_CLE, "-inf", time.time() - CHAT_PRESENTS_TTL)
+    membres = await redis.zrange(CHAT_PRESENTS_CLE, 0, -1)
+    return len({m.split(":", 1)[0] for m in membres})
+
+
+@router.websocket("/chat")
+async def ws_chat(websocket: WebSocket):
+    """Flux du salon : messages, suppressions, nombre de présents.
+
+    Tout compte actif et non banni du salon. Un bannissement publié sur le canal
+    ferme en 4403 les sockets ouvertes du membre visé, sur tous les workers.
+    """
+    await websocket.accept()
+    user_id = await _authenticate_ws(websocket, "")
+    if not user_id:
+        await fermer_ws(websocket, code=4401)
+        return
+
+    async with async_session_factory() as db:
+        row = (await db.execute(
+            select(User.is_active, User.chat_banni_at).where(User.user_id == user_id)
+        )).first()
+    if not row or not row[0]:
+        await fermer_ws(websocket, code=4401)
+        return
+    if row[1] is not None:
+        await fermer_ws(websocket, code=4403)
+        return
+
+    loop = asyncio.get_event_loop()
+    etat = {"pong": loop.time()}
+    membre = f"{user_id}:{uuid.uuid4().hex[:12]}"
+    redis = await get_redis()
+    pubsub = redis.pubsub()
+    listen_task: asyncio.Task | None = None
+    ping_task: asyncio.Task | None = None
+
+    async def diffuser_presents():
+        try:
+            n = await _chat_presents(redis)
+            await redis.publish(CHAT_CANAL, json.dumps({"type": "presents", "n": n}))
+        except Exception as e:  # noqa: BLE001
+            log.warning("ws.chat.presents_failed", error=str(e))
+
+    try:
+        await pubsub.subscribe(CHAT_CANAL)
+        await redis.zadd(CHAT_PRESENTS_CLE, {membre: time.time()})
+        await diffuser_presents()
+
+        async def listen():
+            try:
+                async for msg in pubsub.listen():
+                    if msg["type"] != "message":
+                        continue
+                    try:
+                        data = json.loads(msg["data"])
+                    except Exception:
+                        continue
+                    if data.get("type") == "bannissement":
+                        if data.get("user_id") == user_id:
+                            await websocket.send_json({"type": "banni"})
+                            await fermer_ws(websocket, code=4403)
+                            return
+                        continue  # l'identité des bannis ne regarde pas le salon
+                    await websocket.send_json(data)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                # Abonnement Redis perdu : fermer pour que le client se reconnecte,
+                # plutôt que garder une socket ouverte qui ne reçoit plus rien.
+                if not _est_deconnexion(e):
+                    log.warning("ws.chat.listen_failed", error=str(e))
+                await fermer_ws(websocket, code=1011)
+
+        async def heartbeat():
+            while True:
+                await asyncio.sleep(PING_INTERVAL)
+                if loop.time() - etat["pong"] > PONG_TIMEOUT:
+                    log.info("ws.chat.pong_timeout", user_id=user_id)
+                    await fermer_ws(websocket)
+                    break
+                try:
+                    await websocket.send_json({
+                        "type": "ping",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    await redis.zadd(CHAT_PRESENTS_CLE, {membre: time.time()})
+                except Exception:
+                    break
+
+        listen_task = asyncio.create_task(listen())
+        ping_task = asyncio.create_task(heartbeat())
+
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                if json.loads(raw).get("type") == "pong":
+                    etat["pong"] = loop.time()
+            except Exception:
+                pass
+
+    except WebSocketDisconnect:
+        log.info("ws.chat.disconnect", user_id=user_id)
+    except Exception as e:
+        if _est_deconnexion(e):
+            log.info("ws.chat.disconnect", user_id=user_id)
+        else:
+            log.error("ws.chat.error", error=str(e))
+    finally:
+        for task in [listen_task, ping_task]:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        try:
+            await pubsub.unsubscribe()
+            await pubsub.aclose()
+        except Exception:
+            pass
+        try:
+            await redis.zrem(CHAT_PRESENTS_CLE, membre)
+        except Exception:
+            pass
+        await diffuser_presents()
+        await fermer_ws(websocket)

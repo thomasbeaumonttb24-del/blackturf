@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2 } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -190,7 +190,10 @@ export function Navbar() {
           </Link>
 
           {/* Desktop nav */}
-          <div className="hidden md:flex items-center gap-0.5">
+          {/* Liens texte à partir de `lg` seulement : entre 768 et 1 024 px ils
+              passaient sur deux lignes (« Tableau de / bord »). En dessous, le menu
+              replié les porte. */}
+          <div className="hidden lg:flex items-center gap-0.5">
             {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => {
               const Icon = (link as { icon?: LucideIcon }).icon;
               return (
@@ -199,8 +202,8 @@ export function Navbar() {
                   href={link.href}
                   rel={link.prive ? "nofollow" : undefined}
                   className={cn(
-                    "relative px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5",
-                    "after:absolute after:left-3.5 after:right-3.5 after:-bottom-0.5 after:h-0.5 after:rounded-full after:bg-gradient-gold after:transition-transform after:duration-200 after:origin-left",
+                    "relative whitespace-nowrap px-2.5 xl:px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5",
+                    "after:absolute after:left-2.5 after:right-2.5 xl:after:left-3.5 xl:after:right-3.5 after:-bottom-0.5 after:h-0.5 after:rounded-full after:bg-gradient-gold after:transition-transform after:duration-200 after:origin-left",
                     pathname === link.href
                       ? "text-brand-gold-dark font-semibold after:scale-x-100"
                       : "text-gray-600 hover:text-gray-900 after:scale-x-0 hover:after:scale-x-100"
@@ -232,6 +235,24 @@ export function Navbar() {
 
             {user ? (
               <>
+                {/* Communauté : une icône plutôt qu'un 7e lien texte, qui faisait
+                    passer la barre sur deux lignes dès 1 050 px — et visible sur
+                    mobile, où la liste de liens est repliée dans le menu. */}
+                <Link
+                  href="/chat"
+                  rel="nofollow"
+                  aria-label="Communauté"
+                  title="Communauté"
+                  className={cn(
+                    "inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                    pathname === "/chat"
+                      ? "bg-brand-gold-tint text-brand-gold-dark"
+                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
+                  )}
+                >
+                  <MessagesSquare className="h-4 w-4" />
+                </Link>
+
                 {/* Alerts bell with unread count */}
                 <Button
                   variant="ghost"
@@ -293,6 +314,14 @@ export function Navbar() {
                           onClick={() => setUserMenuOpen(false)}
                         >
                           <BarChart2 className="h-4 w-4 text-blue-400" /> Mes statistiques
+                        </Link>
+                        <Link
+                          href="/chat"
+                          rel="nofollow"
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <MessagesSquare className="h-4 w-4 text-brand-gold-dark" /> Communauté
                         </Link>
                         <Link
                           href="/notifications"
@@ -372,7 +401,7 @@ export function Navbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="md:hidden text-gray-600 hover:bg-gray-100"
+              className="lg:hidden text-gray-600 hover:bg-gray-100"
               onClick={() => setMenuOpen(!menuOpen)}
               aria-label={menuOpen ? "Fermer le menu" : "Ouvrir le menu"}
             >
@@ -384,7 +413,7 @@ export function Navbar() {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden border-t border-gray-100 bg-white p-4 space-y-1 shadow-lg">
+        <div className="lg:hidden border-t border-gray-100 bg-white p-4 space-y-1 shadow-lg">
           {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => (
             <Link
               key={link.href}

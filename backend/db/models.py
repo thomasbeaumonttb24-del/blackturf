@@ -869,11 +869,46 @@ class User(Base):
     # bankroll, profil…) et ne reflète donc pas l'usage du site.
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Communauté (/chat). `pseudo` : nom public du salon, jamais le prénom ni
+    # l'e-mail. Unicité insensible à la casse : index unique sur lower(pseudo)
+    # (migration 0049), vérifiée aussi par la route pour un message clair.
+    pseudo: Mapped[str | None] = mapped_column(String(20))
+    # Bannissement du salon SEUL : n'affecte ni la connexion ni l'abonnement.
+    chat_banni_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Bankroll de référence
     bankroll_initiale: Mapped[float | None] = mapped_column(Float)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ChatMessage(Base):
+    """Message du salon communautaire. Suppression DOUCE (`supprime_at`) : la
+    modération doit pouvoir relire ce qu'elle a retiré si un membre conteste."""
+    __tablename__ = "chat_messages"
+
+    message_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    contenu: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    supprime_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    supprime_par: Mapped[str | None] = mapped_column(String(36))
+
+
+class ChatSignalement(Base):
+    """Signalement d'un message par un membre — un seul par membre et par message."""
+    __tablename__ = "chat_signalements"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", name="uq_chat_signalement_message_user"),
+    )
+
+    signalement_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    message_id: Mapped[str] = mapped_column(ForeignKey("chat_messages.message_id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"))
+    motif: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    traite_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Subscription(Base):

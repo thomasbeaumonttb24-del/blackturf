@@ -5,13 +5,24 @@ import { hasSessionHint } from "@/lib/auth";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
 
-export function useWebSocket(path: string, enabled = true) {
+type WebSocketOptions = {
+  /** Appelé pour CHAQUE trame métier. `messages` (état React) peut regrouper
+   *  plusieurs trames dans un même rendu : lire seulement `messages[0]` en perd. */
+  onMessage?: (data: unknown) => void;
+  /** Appelé à chaque ouverture, reconnexions comprises. */
+  onOpen?: () => void;
+};
+
+export function useWebSocket(path: string, enabled = true, options: WebSocketOptions = {}) {
   const [messages, setMessages] = useState<unknown[]>([]);
   const [connected, setConnected] = useState(false);
+  const [closeCode, setCloseCode] = useState<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout>>();
   const attemptRef = useRef(0);     // compteur de tentatives (backoff)
   const closingRef = useRef(false); // true après unmount → bloque la reconnexion
+  const optionsRef = useRef(options);
+  useEffect(() => { optionsRef.current = options; });
 
   const connect = useCallback(() => {
     if (!enabled || closingRef.current) return;
@@ -29,6 +40,8 @@ export function useWebSocket(path: string, enabled = true) {
     ws.onopen = () => {
       attemptRef.current = 0; // connexion OK → reset du backoff
       setConnected(true);
+      setCloseCode(null);
+      optionsRef.current.onOpen?.();
     };
     ws.onmessage = (e) => {
       try {
@@ -45,11 +58,20 @@ export function useWebSocket(path: string, enabled = true) {
         }
         if (data?.type === "pong") return;
 
+        optionsRef.current.onMessage?.(data);
         setMessages((prev) => [data, ...prev].slice(0, 100));
       } catch {}
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
+      // Socket PÉRIMÉE (remplacée par une plus récente) : sa fermeture ne doit rien
+      // relancer. Sans ce garde, un démontage/remontage rapide (StrictMode, navigation)
+      // laissait la vieille socket armer une reconnexion → deux flux ouverts, chaque
+      // trame reçue en double.
+      if (wsRef.current !== ws) return;
       setConnected(false);
+      setCloseCode(e.code);
+      // 4403 = refus définitif (paywall, bannissement) : se reconnecter ne changera rien.
+      if (e.code === 4403) return;
       // Pas de reconnexion si démonté/désactivé, et plafond de tentatives (évite la
       // tempête : avant, reconnexion toutes les 5s à l'infini même serveur down).
       if (closingRef.current || !enabled || attemptRef.current >= 8) return;
@@ -68,7 +90,12 @@ export function useWebSocket(path: string, enabled = true) {
       // (sinon WS zombie qui reconnecte un composant démonté).
       closingRef.current = true;
       clearTimeout(retryRef.current);
-      wsRef.current?.close();
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws) {
+        ws.onmessage = null;
+        ws.close();
+      }
     };
   }, [connect]);
 
@@ -80,7 +107,16 @@ export function useWebSocket(path: string, enabled = true) {
 
   const clear = useCallback(() => setMessages([]), []);
 
-  return { messages, connected, send, clear };
+  /** Relance manuelle après abandon (plafond de tentatives atteint). */
+  const reconnect = useCallback(() => {
+    clearTimeout(retryRef.current);
+    attemptRef.current = 0;
+    const ws = wsRef.current;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    connect();
+  }, [connect]);
+
+  return { messages, connected, closeCode, send, clear, reconnect };
 }
 
 export function useCotesLive(courseId: string, enabled = true) {

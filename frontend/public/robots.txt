@@ -16,6 +16,7 @@ Disallow: /assistant
 Disallow: /dashboard
 Disallow: /notifications
 Disallow: /studio
+Disallow: /chat
 
 # Prefetch interne de Next.js. Ces adresses portent un jeton qui change a chaque
 # deploiement et renvoient la page ENTIERE en HTML : autant de doublons, dans un espace
@@ -51,6 +52,7 @@ Disallow: /assistant
 Disallow: /dashboard
 Disallow: /notifications
 Disallow: /studio
+Disallow: /chat
 
 # Prefetch interne de Next.js. Ces adresses portent un jeton qui change a chaque
 # deploiement et renvoient la page ENTIERE en HTML : autant de doublons, dans un espace
