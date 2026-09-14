@@ -241,9 +241,21 @@ export type ChatSignalement = {
 
 export type ChatBanni = { user_id: string; pseudo: string | null; email: string; banni_at: string };
 
+/**
+ * Marque le salon lu au moment où la page se ferme (onglet fermé, navigation pleine
+ * page) : React ne démonte rien dans ce cas et axios ne sait pas garder la requête
+ * vivante. `keepalive` le permet ; POST sans corps ni en-tête = pas de pré-vol CORS.
+ */
+export function marquerChatLuAuDepart() {
+  fetch(`${API_URL}/api/v1/chat/lu`, { method: "POST", credentials: "include", keepalive: true }).catch(() => {});
+}
+
 // Écriture par REST, lecture en direct par la socket `/ws/chat` (useWebSocket).
 export const chatApi = {
   moi: () => api.get<ChatMoi>("/chat/moi"),
+  // Bulle de la barre de navigation : messages des autres depuis la dernière lecture.
+  nonLus: () => api.get<{ non_lus: number }>("/chat/non-lus"),
+  marquerLu: () => api.post("/chat/lu"),
   choisirPseudo: (pseudo: string) => api.put<{ pseudo: string }>("/chat/pseudo", { pseudo }),
   messages: (avant?: string) =>
     api.get<{ messages: ChatMessage[]; plus_anciens: boolean }>("/chat/messages", {

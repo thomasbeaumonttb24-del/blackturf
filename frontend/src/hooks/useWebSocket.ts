@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { hasSessionHint } from "@/lib/auth";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
@@ -133,5 +133,11 @@ export function useValueBetsStream(enabled = true) {
 
 export function useAlertesStream(enabled = true) {
   const { messages, connected } = useWebSocket("/user/alertes", enabled);
-  return { alertes: messages, connected };
+  // Les trames `chat_message` (bulle de la Communauté) passent par ce canal mais ne
+  // sont pas des alertes : elles ne doivent pas relancer la liste des notifications.
+  const alertes = useMemo(
+    () => messages.filter((m) => (m as { type?: string } | null)?.type !== "chat_message"),
+    [messages],
+  );
+  return { alertes, connected };
 }

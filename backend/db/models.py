@@ -875,6 +875,11 @@ class User(Base):
     pseudo: Mapped[str | None] = mapped_column(String(20))
     # Bannissement du salon SEUL : n'affecte ni la connexion ni l'abonnement.
     chat_banni_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Repère de lecture du salon (bulle « non lus »). `deferred` : jamais chargée par un
+    # select(User) ordinaire, donc sans effet sur l'API tant que la migration 0050 n'est
+    # pas passée. À lire par `select(User.chat_lu_at)`, jamais par `user.chat_lu_at`
+    # (chargement paresseux = MissingGreenlet en asynchrone).
+    chat_lu_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), deferred=True)
 
     # Bankroll de référence
     bankroll_initiale: Mapped[float | None] = mapped_column(Float)

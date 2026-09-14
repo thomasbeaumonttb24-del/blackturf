@@ -38,11 +38,46 @@ async def test_compte_gratuit_ecrit_apres_avoir_choisi_un_pseudo(client, inscrir
     assert liste["plus_anciens"] is False
 
 
+async def test_compteur_de_messages_non_lus(client, inscrire):
+    lecteur = await _membre(inscrire, "lecteur@blackturf.fr", "Lecteur", client)
+    bavard = await _membre(inscrire, "bavard@blackturf.fr", "Bavard", client)
+    assert (await client.get(f"{BASE}/non-lus", headers=lecteur)).json() == {"non_lus": 0}
+
+    for texte in ("un", "deux"):
+        assert (await client.post(f"{BASE}/messages", json={"contenu": texte}, headers=bavard)).status_code == 200
+
+    assert (await client.get(f"{BASE}/non-lus", headers=lecteur)).json() == {"non_lus": 2}
+    # Ses propres messages ne comptent pas.
+    assert (await client.get(f"{BASE}/non-lus", headers=bavard)).json() == {"non_lus": 0}
+
+    assert (await client.post(f"{BASE}/lu", headers=lecteur)).status_code == 204
+    assert (await client.get(f"{BASE}/non-lus", headers=lecteur)).json() == {"non_lus": 0}
+
+    assert (await client.post(f"{BASE}/messages", json={"contenu": "trois"}, headers=bavard)).status_code == 200
+    assert (await client.get(f"{BASE}/non-lus", headers=lecteur)).json() == {"non_lus": 1}
+
+
 async def test_pseudo_unique_sans_tenir_compte_de_la_casse(client, inscrire):
     await _membre(inscrire, "a@blackturf.fr", "Turfiste", client)
     h2 = await inscrire(email="b@blackturf.fr")
     r = await client.put(f"{BASE}/pseudo", json={"pseudo": "turfiste"}, headers=h2)
     assert r.status_code == 409
+
+
+async def test_pseudo_modifiable_et_repercute_sur_les_messages(client, inscrire):
+    h = await _membre(inscrire, "change@blackturf.fr", "AncienNom", client)
+    await client.post(f"{BASE}/messages", json={"contenu": "avant"}, headers=h)
+    await _membre(inscrire, "occupe@blackturf.fr", "NomPris", client)
+
+    assert (await client.put(f"{BASE}/pseudo", json={"pseudo": "nompris"}, headers=h)).status_code == 409
+    r = await client.put(f"{BASE}/pseudo", json={"pseudo": "NouveauNom"}, headers=h)
+    assert r.status_code == 200 and r.json() == {"pseudo": "NouveauNom"}
+    # Reprendre son propre pseudo, casse changée comprise, reste permis.
+    assert (await client.put(f"{BASE}/pseudo", json={"pseudo": "nouveaunom"}, headers=h)).status_code == 200
+
+    assert (await client.get(f"{BASE}/moi", headers=h)).json()["pseudo"] == "nouveaunom"
+    messages = (await client.get(f"{BASE}/messages", headers=h)).json()["messages"]
+    assert [m["auteur"]["pseudo"] for m in messages if m["contenu"] == "avant"] == ["nouveaunom"]
 
 
 async def test_pseudo_invalide_ou_reserve(client, inscrire):

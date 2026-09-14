@@ -9,8 +9,8 @@ import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashbo
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
-import { useAlertesStream } from "@/hooks/useWebSocket";
-import { notificationsApi } from "@/lib/api";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { chatApi, notificationsApi } from "@/lib/api";
 import { planLabel, cn } from "@/lib/utils";
 
 /**
@@ -155,16 +155,33 @@ export function Navbar() {
     { refreshInterval: 60000 },
   );
 
+  // Bulle de la Communauté : messages des autres membres depuis la dernière lecture.
+  const surChat = pathname === "/chat";
+  const { data: chatData, mutate: mutateChat } = useSWR(
+    user ? "chat-non-lus" : null,
+    () => chatApi.nonLus().then((r) => r.data),
+    { refreshInterval: 60000 },
+  );
+
   // Alerte poussée en direct (WS `/ws/user/alertes`) → le badge monte immédiatement
-  // au lieu d'attendre le prochain sondage de 60 s. Le canal existait côté backend
-  // depuis le début mais AUCUN écran ne s'y abonnait.
-  const { alertes } = useAlertesStream(!!user);
-  const nbAlertesWs = alertes.length;
-  useEffect(() => {
-    if (nbAlertesWs > 0) mutateNotifCount();
-  }, [nbAlertesWs, mutateNotifCount]);
+  // au lieu d'attendre le prochain sondage de 60 s. Le même canal porte les trames
+  // `chat_message` : elles incrémentent la bulle de la Communauté SANS requête (le
+  // sondage recale le chiffre), plutôt que de faire relire le compteur à chaque
+  // membre connecté pour chaque message posté.
+  const onAlerte = useCallback((data: unknown) => {
+    const trame = data as { type?: string; auteur_id?: string } | null;
+    if (trame?.type === "chat_message") {
+      if (!surChat && trame.auteur_id !== user?.user_id) {
+        mutateChat((d) => ({ non_lus: (d?.non_lus ?? 0) + 1 }), { revalidate: false });
+      }
+      return;
+    }
+    mutateNotifCount();
+  }, [surChat, user?.user_id, mutateChat, mutateNotifCount]);
+  useWebSocket("/user/alertes", !!user, { onMessage: onAlerte });
 
   const nbNonLues = notifData?.count ?? 0;
+  const nbChat = surChat ? 0 : (chatData?.non_lus ?? 0);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-white/90 backdrop-blur-md shadow-sm shadow-black/[0.04]">
@@ -241,16 +258,26 @@ export function Navbar() {
                 <Link
                   href="/chat"
                   rel="nofollow"
-                  aria-label="Communauté"
+                  aria-label={nbChat > 0
+                    ? `Communauté — ${nbChat} message${nbChat > 1 ? "s" : ""} non lu${nbChat > 1 ? "s" : ""}`
+                    : "Communauté"}
                   title="Communauté"
                   className={cn(
-                    "inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
-                    pathname === "/chat"
+                    "relative inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                    surChat
                       ? "bg-brand-gold-tint text-brand-gold-dark"
                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
                   )}
                 >
                   <MessagesSquare className="h-4 w-4" />
+                  {nbChat > 0 && (
+                    <span
+                      aria-hidden
+                      className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white"
+                    >
+                      {nbChat > 9 ? "9+" : nbChat}
+                    </span>
+                  )}
                 </Link>
 
                 {/* Alerts bell with unread count */}
@@ -322,6 +349,11 @@ export function Navbar() {
                           onClick={() => setUserMenuOpen(false)}
                         >
                           <MessagesSquare className="h-4 w-4 text-brand-gold-dark" /> Communauté
+                          {nbChat > 0 && (
+                            <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold text-white">
+                              {nbChat > 9 ? "9+" : nbChat}
+                            </span>
+                          )}
                         </Link>
                         <Link
                           href="/notifications"
@@ -378,6 +410,22 @@ export function Navbar() {
                 </div>
               </>
             ) : (
+              <>
+              {/* Visible aussi sans compte : la page invite à s'inscrire pour lire le salon. */}
+              <Link
+                href="/chat"
+                rel="nofollow"
+                aria-label="Communauté"
+                title="Communauté"
+                className={cn(
+                  "inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                  surChat
+                    ? "bg-brand-gold-tint text-brand-gold-dark"
+                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
+                )}
+              >
+                <MessagesSquare className="h-4 w-4" />
+              </Link>
               <div className="hidden md:flex items-center gap-2">
                 <Button
                   variant="ghost"
@@ -395,6 +443,7 @@ export function Navbar() {
                   Essai gratuit
                 </Button>
               </div>
+              </>
             )}
 
             {/* Mobile hamburger */}

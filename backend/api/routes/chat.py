@@ -103,6 +103,20 @@ async def publier(evenement: dict) -> None:
         log.error("chat.publish_failed", type=evenement.get("type"), error=str(e))
 
 
+async def signaler_aux_barres_de_navigation(auteur_id: str) -> None:
+    """Fait monter la bulle « non lus » sur TOUTES les pages, en direct.
+
+    La barre de navigation écoute déjà `/ws/user/alertes` : on y passe plutôt que
+    d'ouvrir une socket du salon sur chaque page (qui fausserait aussi le nombre de
+    présents). Aucun contenu dans la trame — un banni ne lit rien par ce biais.
+    """
+    try:
+        redis = await redis_client.get_redis()
+        await redis.publish("alertes:broadcast", json.dumps({"type": "chat_message", "auteur_id": auteur_id}))
+    except Exception as e:  # noqa: BLE001
+        log.warning("chat.bulle_publish_failed", error=str(e))
+
+
 async def _creneau_libre(user_id: str) -> bool:
     """Un message toutes les INTERVALLE_MIN_S secondes par compte (fail-open)."""
     try:
@@ -136,6 +150,42 @@ async def chat_moi(user: User = Depends(get_current_user)):
         "email_confirme": email_confirme(user),
         "is_admin": bool(user.is_admin),
     }
+
+
+@router.get("/chat/non-lus")
+async def compter_non_lus(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Messages des AUTRES membres postés depuis la dernière lecture du salon.
+
+    Jamais ouvert : on compte depuis la création du compte — un membre existant voit
+    ce qui s'est dit, un nouvel inscrit ne reçoit pas tout l'historique d'un coup.
+    """
+    if user.chat_banni_at is not None:
+        return {"non_lus": 0}
+    repere = await db.scalar(select(User.chat_lu_at).where(User.user_id == user.user_id))
+    if repere is None:
+        repere = user.created_at
+    q = select(func.count(ChatMessage.message_id)).where(
+        ChatMessage.supprime_at.is_(None),
+        ChatMessage.user_id != user.user_id,
+    )
+    if repere is not None:
+        q = q.where(ChatMessage.created_at > repere)
+    return {"non_lus": int(await db.scalar(q) or 0)}
+
+
+@router.post("/chat/lu", status_code=204)
+async def marquer_lu(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        update(User).where(User.user_id == user.user_id).values(chat_lu_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.put("/chat/pseudo")
@@ -235,6 +285,7 @@ async def envoyer_message(
     await db.commit()
 
     await publier({"type": "message", "message": payload})
+    await signaler_aux_barres_de_navigation(payload["auteur"]["user_id"])
     return payload
 
 

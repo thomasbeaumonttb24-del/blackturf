@@ -1,17 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import { format, isToday, isYesterday, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
   MessagesSquare, SendHorizontal, Flag, Trash2, Ban, ShieldCheck, Loader2, RefreshCw,
-  ArrowDown, Check, X, Sparkles,
+  ArrowDown, Check, X, Sparkles, Pencil, UserPlus,
 } from "lucide-react";
-import { useRequireAuth } from "@/hooks/useAuth";
+import Link from "next/link";
+import { useAuth } from "@/hooks/useAuth";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { chatApi, type ChatMessage, type ChatMoi } from "@/lib/api";
+import { chatApi, marquerChatLuAuDepart, type ChatMessage, type ChatMoi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const LONGUEUR_MAX = 500;
@@ -323,6 +324,99 @@ function PanneauModeration({
   );
 }
 
+// ─── Modifier son pseudo ─────────────────────────────────────
+function ModalPseudo({
+  actuel, userId, onFermer, onEnregistre,
+}: {
+  actuel: string;
+  userId: string;
+  onFermer: () => void;
+  onEnregistre: (pseudo: string) => void;
+}) {
+  const [pseudo, setPseudo] = useState(actuel);
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onFermer(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onFermer]);
+
+  const valider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const nouveau = pseudo.trim();
+    if (nouveau === actuel) return onFermer();
+    setEnvoi(true);
+    setErreur(null);
+    try {
+      const r = await chatApi.choisirPseudo(nouveau);
+      toast.success(`Vous apparaissez désormais sous le nom ${r.data.pseudo}`);
+      onEnregistre(r.data.pseudo);
+    } catch (err) {
+      setErreur(detailErreur(err, "Impossible d'enregistrer ce pseudo."));
+    } finally {
+      setEnvoi(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/40 p-4 backdrop-blur-sm" onClick={onFermer}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="titre-pseudo"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h2 id="titre-pseudo" className="text-lg font-bold text-gray-900">Modifier mon pseudo</h2>
+          <button onClick={onFermer} aria-label="Fermer" className="rounded-lg p-1 text-gray-600 hover:bg-gray-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <form onSubmit={valider} className="mt-4 space-y-3">
+          <div className="flex items-center gap-3 rounded-2xl bg-gray-50 p-3">
+            <Avatar pseudo={pseudo.trim() || "?"} userId={userId} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-gray-900">{pseudo.trim() || "Votre pseudo"}</div>
+              <div className="text-xs text-gray-600">Visible par tous les membres</div>
+            </div>
+          </div>
+          <label htmlFor="nouveau-pseudo" className="sr-only">Nouveau pseudo</label>
+          <input
+            id="nouveau-pseudo"
+            value={pseudo}
+            onChange={(e) => { setPseudo(e.target.value); setErreur(null); }}
+            maxLength={20}
+            autoComplete="off"
+            autoFocus
+            aria-invalid={!!erreur}
+            className={cn(
+              "w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-gray-900 outline-none transition",
+              "focus:border-brand-gold focus:ring-4 focus:ring-brand-gold/15",
+              erreur ? "border-red-300" : "border-gray-300",
+            )}
+          />
+          <p className="text-xs text-gray-600">3 à 20 caractères : lettres, chiffres, point, tiret ou soulignement.</p>
+          {erreur && <p role="alert" className="text-sm font-medium text-red-700">{erreur}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onFermer}
+              className="rounded-xl px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">
+              Annuler
+            </button>
+            <button type="submit" disabled={envoi || pseudo.trim().length < 3}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-gold px-4 py-2 text-sm font-semibold text-brand-dark shadow-sm ring-1 ring-brand-gold/30 transition hover:bg-brand-gold-deep disabled:cursor-not-allowed disabled:opacity-50">
+              {envoi && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Enregistrer
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Salon ───────────────────────────────────────────────────
 function Squelette() {
   return (
@@ -340,7 +434,12 @@ function Squelette() {
   );
 }
 
-function Salon({ moi, onBanni }: { moi: ChatMoi; onBanni: () => void }) {
+function Salon({ moi, onBanni, onPseudoModifie }: {
+  moi: ChatMoi;
+  onBanni: () => void;
+  onPseudoModifie: (pseudo: string) => void;
+}) {
+  const [editionPseudo, setEditionPseudo] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [plusAnciens, setPlusAnciens] = useState(false);
   const [chargement, setChargement] = useState(true);
@@ -397,12 +496,56 @@ function Salon({ moi, onBanni }: { moi: ChatMoi; onBanni: () => void }) {
 
   useEffect(() => { chargerRecents(); }, [chargerRecents]);
 
+  // Lecture du salon → la bulle « non lus » de la barre de navigation retombe à zéro.
+  // Regroupé (1 s) pour qu'une rafale de messages ne produise qu'un appel, et
+  // seulement onglet visible : un salon ouvert en arrière-plan n'a rien été lu.
+  const { mutate: mutateGlobal } = useSWRConfig();
+  const minuterieLu = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const envoyerLu = useCallback(() => {
+    chatApi.marquerLu()
+      .then(() => mutateGlobal("chat-non-lus", { non_lus: 0 }, { revalidate: false }))
+      .catch(() => {});
+  }, [mutateGlobal]);
+  const marquerLu = useCallback(() => {
+    if (minuterieLu.current) clearTimeout(minuterieLu.current);
+    minuterieLu.current = setTimeout(() => {
+      minuterieLu.current = null;
+      if (document.visibilityState === "visible") envoyerLu();
+    }, 1000);
+  }, [envoyerLu]);
+  useEffect(() => {
+    // Ouvrir le salon, c'est l'avoir lu : marquage immédiat. Une temporisation ici se
+    // perdait si l'on repartait vite (constaté en recette : bulle restée à 4).
+    if (document.visibilityState === "visible") envoyerLu();
+    const onVisible = () => { if (document.visibilityState === "visible") marquerLu(); };
+    const onPageHide = () => {
+      if (!minuterieLu.current) return;
+      clearTimeout(minuterieLu.current);
+      minuterieLu.current = null;
+      marquerChatLuAuDepart();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pagehide", onPageHide);
+      // Quitter le salon avec un marquage en attente : l'envoyer tout de suite, sinon
+      // le dernier message lu réapparaîtrait comme non lu.
+      if (minuterieLu.current) {
+        clearTimeout(minuterieLu.current);
+        minuterieLu.current = null;
+        if (document.visibilityState === "visible") envoyerLu();
+      }
+    };
+  }, [marquerLu, envoyerLu]);
+
   const onEvent = useCallback((data: unknown) => {
     const e = data as ChatEvent;
     if (e.type === "message") {
       const inedit = !connus.current.has(e.message.message_id);
       fusionner([e.message]);
       if (inedit && e.message.auteur.user_id !== moi.user_id && !collerEnBas.current) setNonLus((n) => n + 1);
+      if (inedit) marquerLu();
     } else if (e.type === "suppression") {
       setMessages((prev) => prev.filter((m) => !e.message_ids.includes(m.message_id)));
     } else if (e.type === "presents") {
@@ -410,7 +553,7 @@ function Salon({ moi, onBanni }: { moi: ChatMoi; onBanni: () => void }) {
     } else if (e.type === "banni") {
       onBanni();
     }
-  }, [fusionner, onBanni, moi.user_id]);
+  }, [fusionner, onBanni, moi.user_id, marquerLu]);
 
   const dejaOuvert = useRef(false);
   const onOpen = useCallback(() => {
@@ -532,8 +675,18 @@ function Salon({ moi, onBanni }: { moi: ChatMoi; onBanni: () => void }) {
             <TuileIcone><MessagesSquare className="h-5 w-5" /></TuileIcone>
             <div className="min-w-0">
               <h1 className="text-base font-bold leading-tight tracking-tight text-gray-900 sm:text-lg">Communauté</h1>
-              <p className="truncate text-xs text-gray-600">
-                L&apos;entraide des turfistes · vous êtes <strong className="font-semibold text-gray-900">{moi.pseudo}</strong>
+              <p className="flex min-w-0 items-center gap-1 text-xs text-gray-600">
+                <span className="hidden truncate sm:inline">L&apos;entraide des turfistes ·</span>
+                <span className="shrink-0">vous êtes</span>
+                <button
+                  onClick={() => setEditionPseudo(true)}
+                  title="Modifier mon pseudo"
+                  aria-label={`Modifier mon pseudo (${moi.pseudo})`}
+                  className="group/pseudo inline-flex min-w-0 items-center gap-1 rounded-md px-1 font-semibold text-gray-900 hover:bg-amber-100/70"
+                >
+                  <span className="truncate">{moi.pseudo}</span>
+                  <Pencil className="h-3 w-3 shrink-0 text-gray-500 group-hover/pseudo:text-brand-gold-dark" />
+                </button>
               </p>
             </div>
           </div>
@@ -573,6 +726,22 @@ function Salon({ moi, onBanni }: { moi: ChatMoi; onBanni: () => void }) {
             )}
           </div>
         </div>
+
+        {editionPseudo && moi.pseudo && (
+          <ModalPseudo
+            actuel={moi.pseudo}
+            userId={moi.user_id}
+            onFermer={() => setEditionPseudo(false)}
+            onEnregistre={(p) => {
+              // Les messages déjà affichés prennent le nouveau nom tout de suite ; les
+              // autres membres le verront à leur prochain chargement.
+              setMessages((prev) => prev.map((m) =>
+                m.auteur.user_id === moi.user_id ? { ...m, auteur: { ...m.auteur, pseudo: p } } : m));
+              onPseudoModifie(p);
+              setEditionPseudo(false);
+            }}
+          />
+        )}
 
         {moi.is_admin && moderation && (
           <PanneauModeration onSupprimer={supprimer} onBannir={bannir} onFermer={() => setModeration(false)} />
@@ -798,16 +967,87 @@ function Salon({ moi, onBanni }: { moi: ChatMoi; onBanni: () => void }) {
   );
 }
 
+// ─── Invitation (visiteur sans compte) ───────────────────────
+const APERCU_BULLES = [
+  { largeur: "58%", moi: false }, { largeur: "40%", moi: false }, { largeur: "50%", moi: true },
+  { largeur: "66%", moi: false }, { largeur: "36%", moi: true }, { largeur: "54%", moi: false },
+  { largeur: "46%", moi: false }, { largeur: "60%", moi: true },
+];
+
+const ATOUTS = [
+  "Partagez vos gains, vos tuyaux et vos analyses",
+  "Échangez en direct avec d'autres passionnés de turf",
+  "Gratuit : un compte suffit",
+];
+
+function Invitation() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-8 md:px-6 md:py-10">
+      <Carte className="relative overflow-hidden">
+        {/* Aperçu flouté du salon : de simples formes, aucun vrai message n'est exposé. */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 select-none px-5 py-4 opacity-80 blur-[3px]">
+          {APERCU_BULLES.map((b, i) => (
+            <div key={i} className={cn("mt-4 flex items-end gap-2.5", b.moi && "flex-row-reverse")}>
+              <div className={cn("h-9 w-9 shrink-0 rounded-full bg-gradient-to-br", AVATAR_TEINTES[i % AVATAR_TEINTES.length])} />
+              <div className="space-y-1.5" style={{ width: b.largeur }}>
+                <div className={cn("h-2.5 w-20 rounded bg-gray-300", b.moi && "ml-auto")} />
+                <div className={cn("h-11 rounded-2xl", b.moi ? "bg-amber-100 ring-1 ring-amber-200" : "border border-gray-200 bg-white")} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/75 to-white/95" />
+
+        <div className="relative flex justify-center px-4 py-12 sm:py-16">
+          <div className="w-full max-w-md rounded-3xl border border-gray-200 bg-white/95 p-6 text-center shadow-xl shadow-gray-900/5 sm:p-8">
+            <div className="mx-auto w-fit"><TuileIcone><MessagesSquare className="h-5 w-5" /></TuileIcone></div>
+            <h1 className="mt-4 text-2xl font-bold tracking-tight text-gray-900">Rejoignez la communauté des turfistes</h1>
+            <p className="mt-2 text-sm leading-relaxed text-gray-600">
+              Gains, tuyaux, analyses, courses du jour : les membres BlackTurf échangent en direct.
+              Créez votre compte gratuit pour lire les messages et participer.
+            </p>
+            <ul className="mx-auto mt-5 w-fit space-y-2 text-left">
+              {ATOUTS.map((a) => (
+                <li key={a} className="flex items-center gap-2 text-sm text-gray-700">
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+                    <Check className="h-3 w-3 text-emerald-700" />
+                  </span>
+                  {a}
+                </li>
+              ))}
+            </ul>
+            <Link
+              href="/inscription"
+              className="btn-shimmer mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-gold px-4 py-3 text-sm font-semibold text-brand-dark shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 transition hover:bg-brand-gold-deep active:scale-[0.99]"
+            >
+              <UserPlus className="h-4 w-4" /> Créer mon compte gratuit
+            </Link>
+            <p className="mt-4 text-sm text-gray-600">
+              Déjà membre ?{" "}
+              <Link href="/login?redirect=/chat" className="font-semibold text-brand-gold-dark hover:underline">
+                Se connecter
+              </Link>
+            </p>
+          </div>
+        </div>
+      </Carte>
+    </div>
+  );
+}
+
 // ─── Page ────────────────────────────────────────────────────
 export default function ChatPage() {
-  const { user, loading } = useRequireAuth();
+  // Pas de redirection vers la connexion : un visiteur sans compte voit l'invitation,
+  // c'est elle qui donne envie de s'inscrire.
+  const { user, loading } = useAuth();
   const { data: moi, error, mutate } = useSWR(user ? "chat-moi" : null, () => chatApi.moi().then((r) => r.data));
 
   const onBanni = useCallback(() => {
     mutate((m) => (m ? { ...m, banni: true } : m), { revalidate: false });
   }, [mutate]);
 
-  if (loading || !user || (!moi && !error)) {
+  if (!loading && !user) return <Invitation />;
+  if (loading || (!moi && !error)) {
     return (
       <div className="flex justify-center py-28 text-gray-600">
         <Loader2 className="h-6 w-6 animate-spin" aria-label="Chargement" />
@@ -839,5 +1079,11 @@ export default function ChatPage() {
     );
   }
   if (!moi.pseudo) return <ChoixPseudo userId={moi.user_id} onChoisi={() => mutate()} />;
-  return <Salon moi={moi} onBanni={onBanni} />;
+  return (
+    <Salon
+      moi={moi}
+      onBanni={onBanni}
+      onPseudoModifie={(p) => mutate((m) => (m ? { ...m, pseudo: p } : m), { revalidate: false })}
+    />
+  );
 }
