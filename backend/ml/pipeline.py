@@ -1368,15 +1368,6 @@ async def _run_nightly_retraining_unlocked() -> None:
                      "status", "retenu", "raison", "beta_modele", "beta_marche",
                      "n_courses", "gain_logv_vs_marche", "gain_logv_vs_servi",
                      "delta_auc_vs_servi")})
-    # MODÈLE TECHNIQUE — victoire et placement sans information de marché, jugés sur
-    # les 28 derniers jours jamais vus (ml.modele_technique). Après le mélange : il
-    # le supplante quand il est retenu, le mélange reste le repli.
-    async with etape(AsyncSessionLocal, "modele_technique"):
-        from ml.modele_technique import entrainer_et_valider as _mt_entrainer
-        _mt_out = await _mt_entrainer()
-        log.info("pipeline.modele_technique_done",
-                 **{k: v for k, v in _mt_out.items() if k in (
-                     "status", "retenu", "placement_retenu", "train_fin", "n_lignes")})
     # Recalcule la calibration par tranche de cote (corrige favori/longshot dans l'EV
     # des value bets) — auto-apprentissage : s'affine à chaque nuit avec les résultats.
     async with etape(AsyncSessionLocal, "calibration_cote"):
@@ -1566,6 +1557,19 @@ async def _run_nightly_retraining_unlocked() -> None:
         res = await _validate_pmu(_date.today().strftime("%d%m%Y"))
         if res.get("mismatches"):
             log.error("pipeline.nightly_pmu_drift", n=len(res["mismatches"]), sample=res["mismatches"][:5])
+    # MODÈLE TECHNIQUE — victoire et placement sans information de marché, jugés sur
+    # les 28 derniers jours jamais vus (ml.modele_technique). EN DERNIER : il
+    # reconstruit un jeu d'entraînement (~1,2 Go mesuré) dans le processus qui vient
+    # de réentraîner l'ensemble ; si la mémoire manquait, seule cette étape serait
+    # perdue, jamais les calibrations et apprentissages de plans qui précèdent.
+    import gc as _gc
+    _gc.collect()
+    async with etape(AsyncSessionLocal, "modele_technique"):
+        from ml.modele_technique import entrainer_et_valider as _mt_entrainer
+        _mt_out = await _mt_entrainer()
+        log.info("pipeline.modele_technique_done",
+                 **{k: v for k, v in _mt_out.items() if k in (
+                     "status", "retenu", "placement_retenu", "train_fin", "n_lignes")})
 
 
 async def _do_retraining(mois: int, label: str) -> dict:
