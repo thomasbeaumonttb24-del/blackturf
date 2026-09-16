@@ -494,9 +494,9 @@ export function ClassementAlgo({
           </h3>
           <p
             className="mt-0.5 text-[11.5px] text-stone-600"
-            title="Le rang vient d'un modèle d'ordonnancement dédié, entraîné à ordonner les partants d'une même course. Il ne suit donc pas toujours l'ordre des probabilités : deux chevaux peuvent afficher le même pourcentage sans être au même rang."
+            title="Le rang suit la probabilité de victoire : le n°1 est le cheval le plus probable, donc celui dont la cote juste est la plus basse. Cette probabilité combine le modèle et le marché, avec des poids réappris chaque nuit sur les arrivées réelles."
           >
-            {lignes.length} chevaux notés · ordre du modèle de classement
+            {lignes.length} chevaux notés · du plus probable au moins probable
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">

@@ -275,3 +275,29 @@ async def test_relancer_la_chaine_ne_duplique_pas_les_predictions(db, tmp_path, 
     n = (await db.execute(text(
         "SELECT COUNT(*) FROM predictions WHERE course_id = 'R1C5'"))).scalar()
     assert n == N_PARTANTS, f"{n} lignes pour {N_PARTANTS} partants"
+
+
+@pytest.mark.asyncio
+async def test_le_melange_appris_devient_la_proba_servie_et_le_rang(db, tmp_path, monkeypatch):
+    """Paramètres retenus → la proba de victoire PERSISTÉE est exactement le mélange
+    p ∝ brute^β_modèle · marché^β_marché, et le rang affiché la suit. C'est d'elle
+    que sortent la cote juste et le classement de la fiche."""
+    from ml import melange_arrivees as ma
+
+    monkeypatch.setattr(ma, "_cache", {"retenu": True, "beta_modele": 0.3,
+                                       "beta_marche": 0.7})
+    _, out = await _lancer(db, tmp_path, monkeypatch, "R1C6")
+    assert out is not None
+
+    rows = sorted(await _servies(db, "R1C6"), key=lambda r: int(r[0]))
+    servies = np.array([float(r[1]) for r in rows])
+    brutes = np.array([float(r[4]) for r in rows])
+    cotes = np.array([float(r[5]) for r in rows])
+    attendu = ma.appliquer(brutes, cotes, 0.3, 0.7)
+    assert attendu is not None
+    assert np.allclose(servies, attendu, atol=1e-9)
+
+    par_rang = {int(r[3]): float(r[1]) for r in rows}
+    ordonnees = [par_rang[k] for k in sorted(par_rang)]
+    assert ordonnees == sorted(ordonnees, reverse=True), (
+        "le rang 1 doit porter la cote juste la plus basse")

@@ -377,3 +377,34 @@ def test_le_rejet_efface_le_modele_precedent():
     src = inspect.getsource(jobs.job_meta_learner_retrain)
     assert "rejected_not_useful" in src
     assert "META_LEARNER_PATH.unlink" in src
+
+
+def test_le_singleton_suit_le_fichier_du_nocturne(tmp_path, monkeypatch):
+    """Le conteneur scraper gardait le méta-apprenant chargé à son démarrage : un
+    pickle réécrit (ou effacé après rejet) la nuit n'était jamais servi. L'instance
+    doit suivre la date du fichier."""
+    import os
+    import time
+
+    from ml import meta_learner as mlm
+
+    chemin = tmp_path / "meta_learner.pkl"
+    monkeypatch.setattr(mlm, "META_LEARNER_PATH", chemin)
+    monkeypatch.setattr(mlm, "_meta_learner_instance", None)
+    monkeypatch.setattr(mlm, "_meta_learner_mtime", None)
+
+    a = mlm.MetaLearner()
+    a._n_samples = 111
+    a.save(chemin)
+    assert mlm.get_meta_learner()._n_samples == 111
+
+    b = mlm.MetaLearner()
+    b._n_samples = 222
+    b.save(chemin)
+    futur = time.time() + 5
+    os.utime(chemin, (futur, futur))       # horloges de fichiers grossières
+    assert mlm.get_meta_learner()._n_samples == 222
+
+    chemin.unlink()                        # rejet durable par le nocturne
+    apres_rejet = mlm.get_meta_learner()
+    assert apres_rejet.is_trained is False and apres_rejet._n_samples != 222

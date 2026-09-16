@@ -141,6 +141,13 @@ class AlgoFlags:
     # d'arrivée prédit (rang_predit) UNIQUEMENT — n'affecte PAS les probas/EV
     # (calibrées). Validé offline : +~0.8pt top1 / 3118 courses holdout (non sig
     # p~0.11), neutre top3/ndcg. Réversible. Nécessite un modèle entraîné AVEC ranker.
+    #
+    # MESURÉ EN PRODUCTION le 2026-09-16 — il DÉGRADE le classement servi : sur 1 607
+    # courses figées à T-10 (17/08 → 16/09), `rang_predit` (avec ranker) contre le
+    # simple ordre de `proba_top1` : AUC intra-course −0,0070 [−0,0125 ; −0,0015],
+    # rang 1 gagnant 28,6 % contre 29,6 %. Et il cassait la lecture de la fiche : le
+    # rang ne suivait l'ordre des cotes justes que pour 55 % des partants. Coupé en
+    # production (`docker-compose.prod.yml`, défaut 0) ; le rang suit la proba servie.
     ranker_blend: bool = field(default_factory=lambda: _env_bool("BT_RANKER_BLEND"))
     ranker_blend_weight: float = field(default_factory=lambda: _env_float("BT_RANKER_BLEND_WEIGHT", 1.0))
     # ── Apprendre le RÉSIDU du marché (diagnostic 2026-08-20) — DÉFAUT OFF ───
@@ -212,6 +219,18 @@ class AlgoFlags:
     sharpness_calibration: bool = field(
         default_factory=lambda: _env_bool("BT_SHARPNESS_CALIBRATION", True))
 
+    # ── Mélange appris sur les arrivées (2026-09-16) ─────────────────────────
+    # Second étage de Benter : p ∝ p̂_brut^β_modèle · q_marché^β_marché, β appris
+    # chaque nuit sur les arrivées (`ml.melange_arrivees`). Remplace la proba de
+    # victoire servie — donc la cote juste, le rang affiché et les plans ; la
+    # détection des paris de valeur garde la chaîne d'avant. Mesuré hors échantillon
+    # (1 607 courses figées à T-10) : +0,037 de log-vraisemblance du gagnant sur la
+    # chaîne servie, +0,011 sur la cote seule, classement à parité.
+    # ACTIF PAR DÉFAUT et sans effet tant que le nocturne n'a rien retenu. Rollback
+    # immédiat, sans attendre la nuit : BT_MELANGE_ARRIVEES=0.
+    melange_arrivees: bool = field(
+        default_factory=lambda: _env_bool("BT_MELANGE_ARRIVEES", True))
+
     def as_dict(self) -> dict:
         return {
             "train_prerace_only": self.train_prerace_only,
@@ -236,6 +255,7 @@ class AlgoFlags:
             "market_gate": self.market_gate,
             "market_gate_margin": self.market_gate_margin,
             "sharpness_calibration": self.sharpness_calibration,
+            "melange_arrivees": self.melange_arrivees,
         }
 
 

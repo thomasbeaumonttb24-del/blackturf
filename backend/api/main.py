@@ -55,6 +55,10 @@ async def lifespan(app: FastAPI):
             # cache mémoire, comme alpha. Sans ce chargement, un exposant appris
             # resterait appris et jamais servi jusqu'au redémarrage suivant.
             _nettete = await charger_nettete(al_session)
+            # Mélange appris sur les arrivées (proba servie, cote juste, rang) — même
+            # cache mémoire ; relu ensuite toutes les 5 min par ml.reglages_appris.
+            from ml.melange_arrivees import charger as charger_melange
+            _melange = await charger_melange(al_session)
             log.info(
                 "adaptive_learning.initialized",
                 temperature=round(al.temperature, 4),
@@ -64,6 +68,7 @@ async def lifespan(app: FastAPI):
                 exposants_arrivee=[round(x, 3) for x in _exp],
                 alpha_marche=round(float(_alpha.get("alpha_max") or 0.42), 3),
                 nettete_probas=round(float(_nettete.get("exposant") or 1.0), 3),
+                melange_arrivees=bool(_melange.get("retenu")),
             )
     except Exception as e:
         log.warning("adaptive_learning.init_failed", err=str(e))

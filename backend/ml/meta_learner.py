@@ -540,8 +540,13 @@ class MetaLearner:
         """
         save_path = Path(path) if path else META_LEARNER_PATH
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, "wb") as f:
+        # Écriture ATOMIQUE : d'autres processus relisent ce fichier dès que sa date
+        # change (cf. `get_meta_learner`) ; ils ne doivent jamais lire un pickle à
+        # moitié écrit.
+        tmp_path = save_path.with_name(save_path.name + ".tmp")
+        with open(tmp_path, "wb") as f:
             pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp_path.replace(save_path)
         log.info("meta_learner.saved", path=str(save_path), n_samples=self._n_samples)
         return save_path
 
@@ -1015,6 +1020,15 @@ def _compute_validation_metrics(model, X_val: np.ndarray, y_val: np.ndarray) -> 
 
 _meta_learner_instance: Optional[MetaLearner] = None
 _contextual_corrector_instance: Optional[ContextualCorrector] = None
+# Date de modification du fichier que porte l'instance (None = aucun fichier lu).
+_meta_learner_mtime: Optional[float] = None
+
+
+def _mtime_fichier() -> Optional[float]:
+    try:
+        return META_LEARNER_PATH.stat().st_mtime
+    except OSError:
+        return None
 
 
 def get_meta_learner() -> MetaLearner:
@@ -1024,21 +1038,52 @@ def get_meta_learner() -> MetaLearner:
     Crée l'instance si elle n'existe pas encore.
     Tente de charger le modèle depuis META_LEARNER_PATH si disponible.
 
+    SUIT LE FICHIER. Le réentraînement de 03:00 tourne dans le scheduler et
+    remplace le pickle (ou l'EFFACE quand la mesure le refuse), mais le conteneur
+    scraper — qui écrit l'essentiel des prédictions — gardait l'instance chargée à
+    son démarrage : un modèle de plusieurs jours, voire un modèle rejeté, restait
+    servi jusqu'au redémarrage (constaté le 2026-09-16 : pickle réécrit la nuit,
+    conteneur démarré 45 h plus tôt). On compare donc la date du fichier à chaque
+    appel — un `stat`, rien au regard d'une course — et l'on relit s'il a changé.
+    Fichier disparu = rejet durable → instance non entraînée.
+
     Returns
     -------
     MetaLearner
         Instance singleton.
     """
-    global _meta_learner_instance
+    global _meta_learner_instance, _meta_learner_mtime
+    mtime = _mtime_fichier()
     if _meta_learner_instance is None:
         _meta_learner_instance = MetaLearner()
         # Tentative de chargement automatique depuis le disque
-        if META_LEARNER_PATH.exists():
+        if mtime is not None:
             try:
                 _meta_learner_instance = MetaLearner.load(META_LEARNER_PATH)
+                _meta_learner_mtime = mtime
                 log.info("meta_learner.auto_loaded", path=str(META_LEARNER_PATH))
             except Exception as e:
                 log.warning("meta_learner.auto_load_failed", err=str(e))
+        return _meta_learner_instance
+    if mtime == _meta_learner_mtime:
+        return _meta_learner_instance
+    if mtime is None:
+        # Le fichier lu a disparu : le nocturne l'a refusé. Une instance entraînée
+        # EN MÉMOIRE sans fichier (entraînement à froid non sauvegardé) n'est pas
+        # concernée — elle n'a jamais été lue depuis le disque.
+        if _meta_learner_mtime is not None:
+            log.info("meta_learner.fichier_retire", path=str(META_LEARNER_PATH))
+            _meta_learner_instance = MetaLearner()
+            _meta_learner_mtime = None
+        return _meta_learner_instance
+    try:
+        _meta_learner_instance = MetaLearner.load(META_LEARNER_PATH)
+        _meta_learner_mtime = mtime
+        log.info("meta_learner.recharge", path=str(META_LEARNER_PATH))
+    except Exception as e:
+        # Fichier en cours d'écriture ou corrompu : on garde l'instance en place et
+        # l'on retentera au prochain appel (mtime non mémorisé).
+        log.warning("meta_learner.rechargement_echoue", err=str(e)[:140])
     return _meta_learner_instance
 
 

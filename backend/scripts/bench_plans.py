@@ -154,7 +154,47 @@ def _v_div_ancien():
     mc._DIVERSIFICATION_GARDE_LE_MEILLEUR = False
 
 
+# Poids du mélange appris sur les arrivées (ml.melange_arrivees), mesurés le
+# 2026-09-16 sur les 1 513 courses figées à T-10 du 17/08 au 16/09.
+MELANGE_BETAS = (0.3093, 0.7061)
+
+
+def _transformer_melange(d):
+    """Proba de victoire = mélange appris (brute du modèle × cote figée), comme la
+    servira `predict_course`. Course sans brute ou sans cote complète : inchangée."""
+    from ml.melange_arrivees import appliquer
+    vivants = [p for p in d["preds"] if not p["non_partant"]]
+    brutes = [p.get("proba_top1_raw") for p in vivants]
+    if any(b is None for b in brutes):
+        return d["preds"], d["desaccord"]
+    nouv = appliquer(brutes, [p["cote_pmu"] for p in vivants], *MELANGE_BETAS)
+    if nouv is None:
+        return d["preds"], d["desaccord"]
+    par_num = {int(p["numero"]): float(x) for p, x in zip(vivants, nouv)}
+    out = []
+    for p in d["preds"]:
+        q = dict(p)
+        n = int(p["numero"])
+        if n in par_num:
+            ancien = float(p["proba_top1"] or 0.0)
+            q["proba_top1"] = par_num[n]
+            # La bande d'incertitude suit la proba dans la même proportion.
+            if ancien > 0:
+                for k in ("proba_top1_low", "proba_top1_high"):
+                    if q.get(k) is not None:
+                        q[k] = min(0.999, float(q[k]) * par_num[n] / ancien)
+        out.append(q)
+    rang1 = max(par_num, key=par_num.get)
+    favori = min(vivants, key=lambda p: float(p["cote_pmu"]))["numero"]
+    return out, int(rang1) != int(favori)
+
+
+def _v_melange():
+    _G["transform"] = _transformer_melange
+
+
 VARIANTS = {
+    "melange": _v_melange,
     "prod_avant": _v_prod_avant,
     "combo1": _v_combo1,
     "combo1_pmin2": _v_combo1_pmin2,
@@ -198,7 +238,8 @@ async def _charger(debut, fin, limit):
         for cid in cids:
             rows = (await s.execute(text("""
                 SELECT pa.numero, ch.nom, pr.proba_top3, pr.proba_top1, pr.cote_figee,
-                       pa.non_partant, pr.proba_top1_low, pr.proba_top1_high
+                       pa.non_partant, pr.proba_top1_low, pr.proba_top1_high,
+                       pr.proba_top1_raw
                 FROM predictions pr
                 JOIN participations pa ON pa.participation_id = pr.participation_id
                 JOIN chevaux ch ON ch.cheval_id = pa.cheval_id
@@ -210,7 +251,8 @@ async def _charger(debut, fin, limit):
             """), {"c": cid})).fetchall()
             preds = [{"numero": r[0], "nom_cheval": r[1], "proba_top3": r[2],
                       "proba_top1": r[3], "cote_pmu": r[4], "non_partant": r[5],
-                      "proba_top1_low": r[6], "proba_top1_high": r[7]} for r in rows]
+                      "proba_top1_low": r[6], "proba_top1_high": r[7],
+                      "proba_top1_raw": r[8]} for r in rows]
             vivants = [p for p in preds if not p["non_partant"]]
             if len(vivants) < 5:
                 continue
@@ -280,11 +322,14 @@ def _run_course(d):
     from services.mise_calculator import generer_plan, plan_to_dict
     from services.bet_settlement import settle_plan
     rows = []
+    preds, desaccord = d["preds"], d["desaccord"]
+    if _G.get("transform"):
+        preds, desaccord = _G["transform"](d)
     for profil in PROFILS:
         rw = _G["poids"].get(f"{profil}|{d['discipline']}|{d['nb']}") or {}
         try:
             plan = plan_to_dict(generer_plan(
-                MONTANT, profil, d["preds"], d["ci"], None, rw, _G["heat"], None,
+                MONTANT, profil, preds, d["ci"], None, rw, _G["heat"], None,
                 respect_montant=True, rapport_calib=_G["rc"], ev_band_perf=_G["ev"]))
         except Exception as e:  # une course qui casse le moteur doit se voir
             rows.append({"course_id": d["course_id"], "profil": profil, "erreur": str(e)[:120]})
@@ -316,7 +361,7 @@ def _run_course(d):
         min_ratio = min((float(p.get("gain_potentiel") or 0) / MONTANT for p in paris), default=0.0)
         rows.append({
             "course_id": d["course_id"], "date": d["date"], "discipline": d["discipline"],
-            "nb": d["nb"], "desaccord": int(d["desaccord"]), "profil": profil,
+            "nb": d["nb"], "desaccord": int(desaccord), "profil": profil,
             "nb_paris": len(paris), "mise": round(mise, 2), "gain": round(gain, 2),
             "gain_w": round(sum(min(g, WINSOR * m) for m, g in gains), 2),
             "n_gagne": n_gagne, "n_attente": n_att,

@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc, func
+from sqlalchemy import select, and_, desc, func, text
 
 from api.model_metrics import real_model_metrics, plausible_brier
 from api.middleware.rate_limit import rate_limit_predictions, rate_limit_public
@@ -102,6 +102,28 @@ class PredictionOut(BaseModel):
     cote_figee: Optional[float] = None
     cote_juste: Optional[float] = None  # cote "juste" IA = 1/proba_top1 (sans marge)
     value_bet: Optional[dict]
+
+
+async def _dernier_calcul(db: AsyncSession, course_id: str, repli):
+    """Heure du DERNIER calcul des probabilités affichées.
+
+    `predictions.created_at` n'est jamais réécrit par l'upsert (il garde l'heure du
+    premier pronostic, pour l'intégrité du palmarès) : la fiche annonçait donc
+    « calculé le … 09:12 » pour des probabilités recalculées à T-10 avec la cote de
+    T-10. Le journal append-only `prediction_snapshots` porte l'heure réelle de
+    chaque calcul. Repli sur l'ancienne valeur s'il est muet.
+    """
+    try:
+        r = (await db.execute(text(
+            "SELECT max(observed_at) FROM prediction_snapshots WHERE course_id = :c"),
+            {"c": course_id})).scalar()
+    except Exception:                                            # noqa: BLE001
+        try:
+            await db.rollback()
+        except Exception:                                        # noqa: BLE001
+            pass
+        return repli
+    return r or repli
 
 
 def _value_bet_out(vb: "ValueBet") -> dict:
@@ -326,7 +348,8 @@ async def get_predictions(
         recommandations=recos,
         verrouille=False,
         quota_restant=quota_restant,
-        calcule_a=min((p.created_at for p, _, _ in rows if p.created_at), default=None),
+        calcule_a=await _dernier_calcul(
+            db, course_id, min((p.created_at for p, _, _ in rows if p.created_at), default=None)),
         confiance=_conf,
         confiance_contexte=_conf_ctx,
         cotes_figees=fige,

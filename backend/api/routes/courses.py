@@ -1638,6 +1638,10 @@ async def get_mise_plan(
     # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
     try:
+        # Exposants d'arrivée (Harville) lus en cache mémoire par le moteur de plan :
+        # relus en base au plus toutes les 5 min (cf. ml.reglages_appris).
+        from ml.reglages_appris import rafraichir as _rafraichir_reglages
+        await _rafraichir_reglages()
         from ml.bet_performance import get_learned_type_weights, get_model_heat
         roi_weights = await get_learned_type_weights(
             db, profil=profil,
@@ -1869,6 +1873,10 @@ async def enregistrer_paris(
     # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré) :
     # poids par type APPRIS POUR CE PROFIL + multiplicateurs de signaux par profil.
     try:
+        # Exposants d'arrivée (Harville) lus en cache mémoire par le moteur de plan :
+        # relus en base au plus toutes les 5 min (cf. ml.reglages_appris).
+        from ml.reglages_appris import rafraichir as _rafraichir_reglages
+        await _rafraichir_reglages()
         from ml.bet_performance import get_learned_type_weights, get_model_heat
         roi_weights = await get_learned_type_weights(
             db, profil=profil,
@@ -2034,6 +2042,8 @@ async def get_bilan_pronostic(
             return _sim_cache
         roi_weights, heat = {}, 0.0
         try:
+            from ml.reglages_appris import rafraichir as _rafraichir_reglages
+            await _rafraichir_reglages()
             from ml.bet_performance import get_learned_type_weights, get_model_heat
             roi_weights = await get_learned_type_weights(
                 db, discipline=getattr(course, "discipline", None),

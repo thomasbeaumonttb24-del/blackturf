@@ -141,6 +141,21 @@ export interface OutilsApprentissagePayload {
     mis_a_jour_le?: string | null;
     pourquoi?: string;
   };
+  melange_arrivees?: {
+    mesure_disponible: boolean;
+    en_service: boolean;
+    beta_modele?: number | null;
+    beta_marche?: number | null;
+    examen_retenu?: boolean | null;
+    gain_logv_vs_marche?: number | null;
+    gain_logv_vs_servi?: number | null;
+    delta_auc_vs_servi?: number | null;
+    n_courses?: number | null;
+    min_courses?: number | null;
+    raison?: string | null;
+    examine_le?: string | null;
+    pourquoi?: string;
+  };
   temperature: {
     temperature?: number | null;
     bornes: number[];
@@ -191,7 +206,14 @@ const NOMS_ETAPES: Record<string, string> = {
   poids_appris_types: "Poids appris par type de pari",
   integrite_pmu: "Intégrité des données PMU",
   nettete_probas: "Netteté des probabilités servies",
+  melange_arrivees: "Mélange modèle × marché appris sur les arrivées",
 };
+
+/** Écart signé à quatre décimales (« +0,0374 ») ; tiret si inconnu. */
+function signedNum(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return `${v > 0 ? "+" : ""}${v.toFixed(4).replace(".", ",")}`;
+}
 
 function nomEtape(step: string): string {
   return NOMS_ETAPES[step] ?? step.replace(/_/g, " ");
@@ -376,6 +398,7 @@ export default function OutilsApprentissage({
   const temp = data.temperature;
   const alpha = data.alpha_marche;
   const nettete = data.nettete_probas;
+  const melange = data.melange_arrivees;
   const plans = data.plans;
   const gates = data.gates_types;
 
@@ -485,6 +508,26 @@ export default function OutilsApprentissage({
                     ? `écart de la queue ${signedPct((nettete.ecart_bande_haute_en_place ?? 0) * 100)} → ${signedPct((nettete.ecart_bande_haute_candidat ?? 0) * 100)} sur ${num(nettete.n_bande_haute)} partants`
                     : (nettete.raison ?? "aucun exposant ne fait mieux"))
                 : `en attente — ${num(nettete?.min_courses)} courses nécessaires`}
+            </span>
+          }
+        />
+        <StatTile
+          label="Mélange appris sur les arrivées"
+          hint="La probabilité de victoire servie — donc la cote juste et le rang affiché — combine la proba brute du modèle et la cote : p ∝ modèle^β₁ × marché^β₂. Les deux poids sont appris chaque nuit sur les arrivées réelles, et retenus seulement s'ils battent la cote seule hors échantillon sans annoncer ni classer moins bien que ce qui est servi."
+          value={
+            melange?.en_service && melange.beta_modele != null && melange.beta_marche != null
+              ? `${melange.beta_modele.toFixed(2)} / ${melange.beta_marche.toFixed(2)}`
+              : "—"
+          }
+          valueClass={melange?.en_service ? "text-emerald-700" : "text-muted-foreground"}
+          sub={melange?.en_service ? "poids modèle / marché en service" : "chaîne d'avant servie"}
+          footer={
+            <span className="text-[11px] text-muted-foreground">
+              {melange?.mesure_disponible
+                ? (melange.examen_retenu
+                    ? `vraisemblance ${signedNum(melange.gain_logv_vs_marche)} vs cote, ${signedNum(melange.gain_logv_vs_servi)} vs servi — ${num(melange.n_courses)} courses`
+                    : (melange.raison ?? "mesure non concluante"))
+                : `en attente — ${num(melange?.min_courses)} courses nécessaires`}
             </span>
           }
         />

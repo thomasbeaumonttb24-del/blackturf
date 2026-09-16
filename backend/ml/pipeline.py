@@ -1344,6 +1344,21 @@ async def _run_nightly_retraining_unlocked() -> None:
             await n_session.commit()
         log.info("pipeline.nettete_done", **{k: v for k, v in _n.items()
                                              if k != "raisons"})
+    # MÉLANGE APPRIS SUR LES ARRIVÉES — la proba de victoire servie, donc la cote
+    # juste et le rang affiché (ml.melange_arrivees). Ses entrées (proba brute du
+    # modèle, cote) ne dépendent d'aucune étape ci-dessus : l'ordre ne change rien à
+    # la mesure, il la place simplement avec les autres corrections de la proba
+    # servie. Paramètres en place conservés si la mesure du soir ne conclut pas.
+    async with etape(AsyncSessionLocal, "melange_arrivees"):
+        from ml.melange_arrivees import calculer_et_persister as _calc_melange
+        async with AsyncSessionLocal() as ma_session:
+            _ma = await _calc_melange(ma_session)
+            await ma_session.commit()
+        log.info("pipeline.melange_arrivees_done",
+                 **{k: v for k, v in _ma.items() if k in (
+                     "status", "retenu", "raison", "beta_modele", "beta_marche",
+                     "n_courses", "gain_logv_vs_marche", "gain_logv_vs_servi",
+                     "delta_auc_vs_servi")})
     # Recalcule la calibration par tranche de cote (corrige favori/longshot dans l'EV
     # des value bets) — auto-apprentissage : s'affine à chaque nuit avec les résultats.
     async with etape(AsyncSessionLocal, "calibration_cote"):
@@ -1888,6 +1903,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         return None
 
     async with AsyncSessionLocal() as session:
+        # Réglages appris la nuit (mélange sur les arrivées, alpha, netteté…) : le
+        # conteneur scraper, qui écrit l'essentiel des prédictions, ne les chargeait
+        # jamais (cf. ml.reglages_appris). Session dédiée, pas celle-ci.
+        from ml.reglages_appris import rafraichir as _rafraichir_reglages
+        await _rafraichir_reglages()
+
         course = await session.get(Course, course_id)
         if not course:
             return None
@@ -2220,6 +2241,35 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.sharpness_skip", err=str(e)[:140])
 
+        # Proba de la chaîne ci-dessus, conservée pour la DÉTECTION des paris de
+        # valeur. Leurs seuils (EV, confiance, bandes d'EV apprises, niveau ★★★★ au
+        # rendement mesuré) ont été établis sur cette grandeur : les déplacer exige
+        # un rejeu dédié sur les deux axes, classement ET rendement (protocole du
+        # 2026-09-07). Tout le reste — proba affichée, cote juste, rang, plans — suit
+        # le mélange appris ci-dessous.
+        _p1_detection_vb = np.asarray(probas_top1, dtype=float).copy()
+
+        # ── MÉLANGE APPRIS SUR LES ARRIVÉES (second étage) ──────────────────────
+        # p ∝ p̂_brut^β_modèle · q_marché^β_marché, β appris chaque nuit sur les
+        # arrivées réelles (ml.melange_arrivees). Mesuré hors échantillon sur 1 607
+        # courses figées à T-10 : log-vraisemblance du gagnant +0,037 sur la chaîne
+        # ci-dessus, +0,011 sur la cote seule, classement à parité. Remplace la
+        # proba de victoire servie quand des paramètres sont retenus ET que tous les
+        # partants sont cotés ; sinon la chaîne ci-dessus reste servie telle quelle.
+        _melange_applique = False
+        try:
+            from ml.algo_flags import FLAGS as _AFma
+            if _AFma.melange_arrivees:
+                from ml.melange_arrivees import appliquer as _ma_appliquer, en_service as _ma_params
+                _ma = _ma_params()
+                if _ma is not None:
+                    _p_ma = _ma_appliquer(_raw_p1_snap, cotes_pmu, *_ma)
+                    if _p_ma is not None:
+                        probas_top1 = _p_ma
+                        _melange_applique = True
+        except Exception as e:
+            log.warning("pipeline.melange_arrivees_skip", err=str(e)[:140])
+
         # Désactive avant recalcul, sans SUPPRIMER : l'identité du value bet et son
         # flag `notifie` doivent survivre aux rafraîchissements de cotes. L'ancien
         # DELETE recréait les mêmes lignes avec notifie=false toutes les 20 minutes
@@ -2464,10 +2514,11 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             # Fetch cote history for SPI
             cotes_history = await _get_cotes_history(session, pid) if pid else None
 
-            # Value bet GAGNANT : EV = cote_gagnant × P(victoire). On passe proba_t1
-            # (proba de victoire normalisée), pas proba_t3 (placé) — sinon EV gonflé.
+            # Value bet GAGNANT : EV = cote_gagnant × P(victoire). On passe la proba
+            # de victoire normalisée, pas proba_t3 (placé) — sinon EV gonflé. Celle de
+            # la chaîne de détection, cf. `_p1_detection_vb`.
             vb = detect_value_bet(
-                proba_t1,
+                float(_p1_detection_vb[i]),
                 cote_pmu=cote_pmu,
                 cote_geny=cote_geny,
                 cote_bzh=cote_bzh,
@@ -2754,7 +2805,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.markowitz.failed", error=str(e))
 
-        log.info("pipeline.predict.done", course_id=course_id, nb_predictions=len(predictions))
+        log.info("pipeline.predict.done", course_id=course_id, nb_predictions=len(predictions),
+                 melange_arrivees=_melange_applique)
         return fiche
 
 

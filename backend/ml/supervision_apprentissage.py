@@ -182,6 +182,42 @@ async def _etat_alpha(session: AsyncSession) -> dict:
     }
 
 
+async def _etat_melange(session: AsyncSession) -> dict:
+    """MÉLANGE APPRIS — la proba de victoire servie, la cote juste, le rang affiché.
+
+    Deux lectures distinctes : les paramètres EN SERVICE (ligne 1, écrite seulement
+    quand une mesure tient) et le dernier EXAMEN (ligne 2, chaque nuit). Un examen
+    refusé n'efface pas ce qui est en service.
+    """
+    from ml.melange_arrivees import MIN_COURSES, _ID_EXAMEN, _ID_SERVICE, _lire
+
+    service = await _lire(session, _ID_SERVICE)
+    examen = await _lire(session, _ID_EXAMEN)
+    if not examen and not service:
+        return {"mesure_disponible": False, "en_service": False,
+                "min_courses": MIN_COURSES,
+                "pourquoi": "mélange jamais examiné — la chaîne d'avant est servie"}
+    en_service = bool(service and service.get("retenu"))
+    ref = examen or service or {}
+    return {
+        "mesure_disponible": True,
+        "en_service": en_service,
+        "beta_modele": (service or {}).get("beta_modele") if en_service else None,
+        "beta_marche": (service or {}).get("beta_marche") if en_service else None,
+        "applique_depuis": (service or {}).get("applique_depuis") if en_service else None,
+        "examen_retenu": bool(ref.get("retenu")),
+        "gain_logv_vs_marche": ref.get("gain_logv_vs_marche"),
+        "gain_logv_vs_marche_ic95": ref.get("gain_logv_vs_marche_ic95"),
+        "gain_logv_vs_servi": ref.get("gain_logv_vs_servi"),
+        "delta_auc_vs_servi": ref.get("delta_auc_vs_servi"),
+        "betas_par_moitie": ref.get("betas_par_moitie"),
+        "n_courses": ref.get("n_courses"),
+        "min_courses": MIN_COURSES,
+        "raison": ref.get("raison"),
+        "examine_le": ref.get("examine_le"),
+    }
+
+
 async def _etat_nettete(session: AsyncSession) -> dict:
     """NETTETÉ — la probabilité servie est-elle trop concentrée sur les premiers ?
 
@@ -384,6 +420,7 @@ async def etat_outils_apprentissage(session: AsyncSession) -> dict:
         "modele_arrivee": await _etat_harville(session),
         "alpha_marche": await _etat_alpha(session),
         "nettete_probas": await _etat_nettete(session),
+        "melange_arrivees": await _etat_melange(session),
         "temperature": await _etat_temperature(session),
         "plans": await _etat_plans(session),
         "gates_types": await _gates_actives(session),
