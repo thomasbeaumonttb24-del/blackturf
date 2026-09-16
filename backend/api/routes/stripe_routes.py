@@ -555,6 +555,10 @@ async def cancel_subscription(
         for sub in subs:
             if not sub.stripe_subscription_id:
                 continue
+            if sub.statut == "cancel_at_period_end":
+                # Double clic : déjà résilié, ne pas journaliser (ni notifier) deux fois.
+                cancelled_via_stripe = True
+                continue
             try:
                 stripe.Subscription.modify(sub.stripe_subscription_id,
                                            cancel_at_period_end=True)
@@ -840,6 +844,15 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
              sans_carte=sans_carte, essai_refuse=essai_refuse)
 
 
+def _resiliation_programmee(sub: dict) -> bool:
+    """Vrai si l'abonnement s'arrêtera seul à l'échéance.
+
+    Le portail client récent pose `cancel_at` (date) plutôt que
+    `cancel_at_period_end` : les deux formes sont lues.
+    """
+    return bool(sub.get("cancel_at_period_end") or sub.get("cancel_at"))
+
+
 async def _handle_subscription_updated(sub: dict, db: AsyncSession):
     result = await db.execute(
         select(Subscription).where(Subscription.stripe_subscription_id == sub["id"])
@@ -864,7 +877,13 @@ async def _handle_subscription_updated(sub: dict, db: AsyncSession):
     if sans_carte:
         subscription.statut = STATUT_SANS_CARTE
     elif statut_stripe in ("active", "trialing"):
-        subscription.statut = "active"
+        # Une résiliation programmée reste `active`/`trialing` chez Stripe jusqu'à
+        # l'échéance : seul le drapeau la distingue. Sans lui, le webhook qui suit
+        # `/stripe/cancel` d'une seconde ÉCRASAIT `cancel_at_period_end` par
+        # `active` et journalisait « Abonnement actif » — la résiliation
+        # disparaissait du suivi admin (constaté le 2026-09-16 sur 3 comptes).
+        subscription.statut = ("cancel_at_period_end" if _resiliation_programmee(sub)
+                               else "active")
     else:
         subscription.statut = statut_stripe
     subscription.periode_debut = _ts(sub, "current_period_start") or subscription.periode_debut
@@ -894,8 +913,17 @@ async def _handle_subscription_updated(sub: dict, db: AsyncSession):
                               plan_precedent=plan_precedent,
                               montant_cents=_montant_cents(sub))
         elif statut_precedent != subscription.statut:
-            await journaliser(db, "abonnement_actif" if subscription.statut in STATUTS_ACCES
-                              else subscription.statut, user, subscription,
+            if subscription.statut == "cancel_at_period_end":
+                # Résiliation faite hors du site (portail Stripe, tableau de bord).
+                type_ = "resiliation_demandee"
+            elif (statut_precedent == "cancel_at_period_end"
+                  and subscription.statut == "active"):
+                type_ = "resiliation_annulee"
+            elif subscription.statut in STATUTS_ACCES:
+                type_ = "abonnement_actif"
+            else:
+                type_ = subscription.statut
+            await journaliser(db, type_, user, subscription,
                               montant_cents=_montant_cents(sub),
                               detail={"statut_precedent": statut_precedent})
 
@@ -1067,6 +1095,8 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
                       montant_cents=invoice.get("amount_due"),
                       detail={"facture": invoice.get("id"),
                               "tentative": invoice.get("attempt_count"),
+                              # Date de la prochaine relance Stripe (None = plus aucune).
+                              "prochaine_relance": invoice.get("next_payment_attempt"),
                               "motif": invoice.get("billing_reason"),
                               "plan_apres": user.plan,
                               "acces_ouvert": user.plan != "free"})

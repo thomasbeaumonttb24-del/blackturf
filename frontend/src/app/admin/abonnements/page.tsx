@@ -23,6 +23,7 @@ import {
   type Colonne,
 } from "@/components/admin/ui";
 import { incidentsPaiement, useAbonnements, useEnLigne } from "@/components/admin/data";
+import SuiviDeparts from "@/components/admin/vues/SuiviDeparts";
 import {
   MOUVEMENT_LABELS, MOUVEMENT_TONS,
   type AbonneLigne, type CompteOffert, type MouvementAbo, type Repartition,
@@ -80,6 +81,9 @@ function FinEssai({ a }: { a: AbonneLigne }) {
           style={{ width: `${j != null ? Math.max(4, Math.min(100, (j / 7) * 100)) : 0}%` }}
         />
       </div>
+      {a.statut === "cancel_at_period_end" && (
+        <div className="mt-1 text-xs font-medium text-amber-700">Résilié — ne sera pas débité</div>
+      )}
     </div>
   );
 }
@@ -239,7 +243,10 @@ export default function AbonnementsPage() {
   }
 
   const r = data.repartition;
-  const payants = data.abonnes.filter((a) => a.carte_enregistree && !a.en_essai);
+  // Un impayé n'est plus un payant : il vit dans « Essais, résiliations et impayés ».
+  const payants = data.abonnes.filter(
+    (a) => a.carte_enregistree && !a.en_essai && a.statut !== "past_due" && a.statut !== "unpaid",
+  );
   const essais = data.abonnes
     .filter((a) => a.en_essai || !a.carte_enregistree)
     .sort((a, b) => (a.jours_essai_restants ?? 99) - (b.jours_essai_restants ?? 99));
@@ -292,6 +299,12 @@ export default function AbonnementsPage() {
           accent="violet"
         />
       </GrilleKpi>
+
+      {data.suivi && (
+        <div id="departs" className="scroll-mt-20">
+          <SuiviDeparts suivi={data.suivi} />
+        </div>
+      )}
 
       <Panneau titre="Répartition des comptes" actions={<Puce>{num(r.comptes)} comptes</Puce>}>
         <BarreRepartition

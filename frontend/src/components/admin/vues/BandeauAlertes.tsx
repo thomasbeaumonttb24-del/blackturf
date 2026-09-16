@@ -16,7 +16,7 @@
 
 import Link from "next/link";
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, CreditCard, Radio, Brain, ShieldAlert,
+  AlertTriangle, ArrowRight, CheckCircle2, CreditCard, Radio, Brain, ShieldAlert, UserMinus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Panneau, depuis } from "../ui";
@@ -61,6 +61,21 @@ export default function BandeauAlertes() {
         : "",
       href: "/admin/abonnements",
       lienLabel: "Voir les abonnements",
+    });
+  }
+
+  // ── Départs annoncés : l'accès court encore, mais aucun débit ne partira.
+  const resiliations = (abos?.suivi?.comptes ?? []).filter((p) => p.issue === "resiliation_programmee");
+  if (resiliations.length > 0) {
+    const n = resiliations.length;
+    lignes.push({
+      cle: "resiliations",
+      gravite: "attention",
+      icone: UserMinus,
+      titre: `${n} résiliation${n > 1 ? "s" : ""} en cours`,
+      detail: resiliations.map((p) => p.email).slice(0, 3).join(" · ") + (n > 3 ? ` +${n - 3}` : ""),
+      href: "/admin/abonnements#departs",
+      lienLabel: "Voir les départs",
     });
   }
 

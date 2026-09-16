@@ -124,9 +124,68 @@ export interface EnLigneData {
   pages: Array<{ chemin: string; n: number }>;
 }
 
+/** Issue d'un parcours d'abonnement — une seule par compte, cf. `admin._suivi_essais`. */
+export type IssueSuivi =
+  | "impaye"
+  | "resiliation_programmee"
+  | "en_essai"
+  | "converti"
+  | "resilie_pendant_essai"
+  | "resilie_apres_paiement"
+  | "essai_perdu_sans_carte";
+
+export interface ParcoursAbo {
+  user_id: string;
+  email: string;
+  formule: string;
+  plan_compte: string;
+  issue: IssueSuivi;
+  statut: string;
+  date_issue: string | null;
+  debut: string | null;
+  essai_fin: string | null;
+  a_eu_essai: boolean;
+  essai_refuse: boolean;
+  /** Date de fin d'accès (à venir pour une résiliation programmée, passée sinon). */
+  fin_acces: string | null;
+  resiliation_le: string | null;
+  resiliation_pendant_essai: boolean;
+  a_paye: boolean;
+  impaye_regularise: boolean;
+  montant_cents: number | null;
+  echecs_paiement: number;
+  derniere_tentative: string | null;
+  prochaine_relance: string | null;
+  relances_terminees: boolean;
+  inscrit_le: string | null;
+  derniere_connexion: string | null;
+}
+
+export interface CheckoutAbandonne {
+  user_id: string;
+  email: string;
+  plan: string;
+  inscrit_le: string | null;
+  derniere_connexion: string | null;
+}
+
+export interface SuiviEssais {
+  resume: Record<IssueSuivi, number> & {
+    checkouts_abandonnes: number;
+    essais_ouverts: number;
+    essais_termines: number;
+    essais_convertis: number;
+    taux_conversion_essai: number | null;
+    repasses_gratuits: number;
+  };
+  comptes: ParcoursAbo[];
+  checkouts_abandonnes: CheckoutAbandonne[];
+}
+
 export interface AbonnementsData {
   repartition: Repartition;
   offerts: CompteOffert[];
+  suivi: SuiviEssais;
   resume: {
     en_essai_avec_carte: number;
     en_essai_sans_carte: number;
@@ -212,6 +271,7 @@ export const MOUVEMENT_LABELS: Record<string, string> = {
   essai_bientot_fini: "Essai bientôt fini",
   essai_termine_sans_carte: "Essai perdu (sans carte)",
   resiliation_demandee: "Résiliation demandée",
+  resiliation_annulee: "Résiliation annulée — abonnement repris",
   resilie: "Résilié",
   paiement_echoue: "Paiement échoué — accès coupé",
   paiement_recu: "Paiement encaissé — accès rétabli",
@@ -230,6 +290,7 @@ export const MOUVEMENT_LABELS: Record<string, string> = {
 export const MOUVEMENT_TONS: Record<string, "ok" | "attention" | "alerte" | "neutre"> = {
   carte_ajoutee: "ok",
   abonnement_actif: "ok",
+  resiliation_annulee: "ok",
   paiement_recu: "ok",
   essai_ouvert: "neutre",
   changement_plan: "neutre",

@@ -35,6 +35,7 @@ LIBELLES = {
     "essai_bientot_fini": "Essai bientôt terminé",
     "essai_termine_sans_carte": "Essai terminé sans carte — abonnement annulé",
     "resiliation_demandee": "Résiliation demandée",
+    "resiliation_annulee": "Résiliation annulée — abonnement repris",
     "resilie": "Abonnement résilié",
     "paiement_echoue": "Paiement en échec — accès coupé",
     "paiement_recu": "Paiement encaissé — accès rétabli",
@@ -64,7 +65,7 @@ LIBELLES = {
 TYPES_NOTIFIES = {
     "essai_ouvert", "essai_sans_carte", "carte_ajoutee", "abonnement_actif",
     "changement_plan", "essai_bientot_fini", "essai_termine_sans_carte",
-    "resiliation_demandee", "resilie", "paiement_echoue", "paiement_recu",
+    "resiliation_demandee", "resiliation_annulee", "resilie", "paiement_echoue", "paiement_recu",
     "essai_refuse_carte_reutilisee", "carte_refusee_autre_compte",
     "unpaid",
 }

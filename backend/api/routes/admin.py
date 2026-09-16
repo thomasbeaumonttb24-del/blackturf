@@ -1614,6 +1614,7 @@ async def abonnements(
     return {
         "repartition": repartition,
         "offerts": offerts,
+        "suivi": await _suivi_essais(db, now),
         "resume": {
             "en_essai_avec_carte": en_essai,
             "en_essai_sans_carte": essai_sans_carte,
@@ -1642,6 +1643,199 @@ async def abonnements(
             for m in mouvements
         ],
         "computed_at": now.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────
+# Suivi des essais : qui résilie, qui ne paie pas, qui abandonne
+# ─────────────────────────────────────────────
+# Demande de l'exploitant (2026-09-16) : les compteurs sur 30 jours ne disaient
+# pas QUI avait résilié, QUI n'avait pas payé à la fin de son essai et était
+# repassé en gratuit, ni QUI avait ouvert le paiement sans aller au bout.
+#
+# Chaque compte ayant eu au moins un abonnement Stripe reçoit UNE issue, lue sur
+# son abonnement le plus récent et complétée par le journal (seul à savoir s'il
+# a payé, combien de prélèvements ont échoué, quand la résiliation a été faite).
+ISSUES_SUIVI = (
+    "impaye",                  # prélèvement refusé (fin d'essai ou échéance) → accès coupé
+    "resiliation_programmee",  # résilié, garde l'accès jusqu'à l'échéance
+    "en_essai",
+    "converti",                # a payé, toujours abonné
+    "resilie_pendant_essai",   # parti sans jamais payer
+    "resilie_apres_paiement",  # client payant perdu
+    "essai_perdu_sans_carte",
+)
+
+
+def _aware(d: Optional[datetime]) -> Optional[datetime]:
+    return d.replace(tzinfo=timezone.utc) if d is not None and d.tzinfo is None else d
+
+
+async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
+    comptes = {u.user_id: u for u in (await db.execute(
+        select(User).where(User.is_admin.is_not(True))
+    )).scalars().all()}
+
+    subs_par_compte: dict[str, list[Subscription]] = {}
+    for sub in (await db.execute(
+        select(Subscription).order_by(Subscription.created_at)
+    )).scalars().all():
+        if sub.user_id in comptes:
+            subs_par_compte.setdefault(sub.user_id, []).append(sub)
+
+    evts_par_compte: dict[str, list[SubscriptionEvent]] = {}
+    if subs_par_compte:
+        for e in (await db.execute(
+            select(SubscriptionEvent)
+            .where(SubscriptionEvent.user_id.in_(list(subs_par_compte)))
+            .order_by(SubscriptionEvent.created_at)
+        )).scalars().all():
+            evts_par_compte.setdefault(e.user_id, []).append(e)
+
+    lignes = []
+    for uid, subs in subs_par_compte.items():
+        u = comptes[uid]
+        sub = subs[-1]
+        sid = sub.stripe_subscription_id
+        tous = evts_par_compte.get(uid, [])
+        # Mouvements de CET abonnement (ou non rattachés à un abonnement précis).
+        evts = [e for e in tous if e.stripe_subscription_id in (sid, None)]
+
+        def _types(*types: str) -> list[SubscriptionEvent]:
+            return [e for e in evts if e.type in types]
+
+        paiements = _types("paiement_recu")
+        echecs = _types("paiement_echoue")
+        dernier_paiement = _aware(paiements[-1].created_at) if paiements else None
+        # Série d'échecs EN COURS : ceux postérieurs au dernier paiement réussi.
+        serie = [e for e in echecs
+                 if dernier_paiement is None or _aware(e.created_at) > dernier_paiement]
+        essai_refuse = any(e.type == "essai_refuse_carte_reutilisee" for e in evts)
+        essai_fin = None if essai_refuse else _aware(sub.essai_fin)
+        a_eu_essai = not essai_refuse and (
+            essai_fin is not None
+            or any(e.type in ("essai_ouvert", "essai_sans_carte") for e in evts)
+        )
+        essai_en_cours = essai_fin is not None and essai_fin > now
+        a_paye = bool(paiements)
+        resiliations = _types("resiliation_demandee")
+        resiliation = resiliations[-1] if resiliations else None
+        fin_evt = next((e for e in reversed(evts)
+                        if e.type in ("resilie", "essai_termine_sans_carte")), None)
+        date_fin = _aware(fin_evt.created_at) if fin_evt else _aware(sub.updated_at)
+
+        statut = sub.statut
+        reprises = _types("resiliation_annulee")
+        if (statut == "active" and resiliation is not None
+                and (not reprises or reprises[-1].created_at < resiliation.created_at)):
+            # Avant le correctif du 2026-09-16, le webhook suivant la résiliation
+            # réécrivait `active` : le journal, lui, a gardé la demande.
+            statut = "cancel_at_period_end"
+        if statut in ("past_due", "unpaid", "incomplete") or (
+            statut in ("canceled", "incomplete_expired") and serie
+        ):
+            issue = "impaye"
+            date_issue = _aware(serie[0].created_at) if serie else _aware(sub.updated_at)
+        elif statut == "cancel_at_period_end":
+            issue = "resiliation_programmee"
+            date_issue = _aware(resiliation.created_at) if resiliation else _aware(sub.updated_at)
+        elif statut == STATUT_SANS_CARTE_ADMIN or (statut == "active" and essai_en_cours):
+            issue = "en_essai"
+            date_issue = _aware(sub.created_at)
+        elif statut == "active":
+            issue = "converti"
+            date_issue = (_aware(paiements[0].created_at) if paiements
+                          else essai_fin or _aware(sub.created_at))
+        elif statut == "canceled" and fin_evt is not None and fin_evt.type == "essai_termine_sans_carte":
+            issue, date_issue = "essai_perdu_sans_carte", date_fin
+        elif statut == "canceled":
+            issue = "resilie_apres_paiement" if a_paye else "resilie_pendant_essai"
+            date_issue = date_fin
+        else:
+            continue  # statut inconnu : ne pas inventer de case
+
+        # Fin (ou perte) d'accès : la date que l'exploitant veut lire.
+        if issue == "resiliation_programmee":
+            fin_acces = essai_fin if essai_en_cours else _aware(sub.periode_fin)
+        elif issue in ("impaye", "resilie_pendant_essai", "resilie_apres_paiement",
+                       "essai_perdu_sans_carte"):
+            fin_acces = date_issue
+        else:
+            fin_acces = None
+
+        prochaine_relance = None
+        if statut == "past_due" and serie:
+            ts = (serie[-1].detail or {}).get("prochaine_relance")
+            if isinstance(ts, (int, float)):
+                prochaine_relance = datetime.fromtimestamp(ts, tz=timezone.utc)
+
+        if resiliation is None:
+            resiliation_pendant_essai = False
+        elif resiliation.pendant_essai is not None:
+            resiliation_pendant_essai = bool(resiliation.pendant_essai)
+        else:
+            resiliation_pendant_essai = (essai_fin is not None
+                                         and _aware(resiliation.created_at) < essai_fin)
+
+        lignes.append({
+            "user_id": uid,
+            "email": u.email,
+            "formule": sub.plan,
+            "plan_compte": u.plan,
+            "issue": issue,
+            "statut": statut,
+            "date_issue": date_issue,
+            "debut": _aware(sub.created_at),
+            "essai_fin": essai_fin,
+            "a_eu_essai": a_eu_essai,
+            "essai_refuse": essai_refuse,
+            "fin_acces": fin_acces,
+            "resiliation_le": _aware(resiliation.created_at) if resiliation else None,
+            "resiliation_pendant_essai": resiliation_pendant_essai,
+            "a_paye": a_paye,
+            "impaye_regularise": bool(echecs) and not serie and a_paye,
+            "montant_cents": (max((e.montant_cents for e in evts if e.montant_cents), default=None)
+                              or PRIX_MENSUEL_CENTS.get(sub.plan)),
+            "echecs_paiement": len(serie),
+            "derniere_tentative": _aware(serie[-1].created_at) if serie else None,
+            "prochaine_relance": prochaine_relance,
+            "relances_terminees": issue == "impaye" and statut != "past_due",
+            "inscrit_le": _aware(u.created_at),
+            "derniere_connexion": _aware(u.last_login_at),
+        })
+
+    lignes.sort(key=lambda l: l["date_issue"] or now, reverse=True)
+    par_issue = {i: sum(1 for l in lignes if l["issue"] == i) for i in ISSUES_SUIVI}
+
+    # Essais arrivés au bout : ont-ils payé ? Seuls les comptes ayant réellement eu
+    # une période gratuite comptent — un essai refusé (carte déjà vue) n'en est pas un.
+    termines = [l for l in lignes if l["a_eu_essai"]
+                and l["issue"] not in ("en_essai", "resiliation_programmee")]
+    convertis = [l for l in termines if l["a_paye"] or l["issue"] == "converti"]
+
+    # Paiement ouvert (le client Stripe naît au checkout) mais aucun abonnement :
+    # la personne s'est arrêtée à l'écran de carte bancaire.
+    abandons = [
+        {"user_id": u.user_id, "email": u.email, "plan": u.plan,
+         "inscrit_le": _aware(u.created_at), "derniere_connexion": _aware(u.last_login_at)}
+        for u in sorted(comptes.values(), key=lambda x: _aware(x.created_at) or now, reverse=True)
+        if u.stripe_customer_id and u.user_id not in subs_par_compte
+    ]
+
+    return {
+        "resume": {
+            **par_issue,
+            "checkouts_abandonnes": len(abandons),
+            "essais_ouverts": sum(1 for l in lignes if l["a_eu_essai"]),
+            "essais_termines": len(termines),
+            "essais_convertis": len(convertis),
+            "taux_conversion_essai": (round(len(convertis) / len(termines) * 100, 1)
+                                      if termines else None),
+            "repasses_gratuits": sum(1 for l in lignes if l["plan_compte"] == "free"
+                                     and l["issue"] != "en_essai"),
+        },
+        "comptes": lignes,
+        "checkouts_abandonnes": abandons,
     }
 
 
