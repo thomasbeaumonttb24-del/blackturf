@@ -1359,6 +1359,15 @@ async def _run_nightly_retraining_unlocked() -> None:
                      "status", "retenu", "raison", "beta_modele", "beta_marche",
                      "n_courses", "gain_logv_vs_marche", "gain_logv_vs_servi",
                      "delta_auc_vs_servi")})
+    # MODÈLE TECHNIQUE — victoire et placement sans information de marché, jugés sur
+    # les 28 derniers jours jamais vus (ml.modele_technique). Après le mélange : il
+    # le supplante quand il est retenu, le mélange reste le repli.
+    async with etape(AsyncSessionLocal, "modele_technique"):
+        from ml.modele_technique import entrainer_et_valider as _mt_entrainer
+        _mt_out = await _mt_entrainer()
+        log.info("pipeline.modele_technique_done",
+                 **{k: v for k, v in _mt_out.items() if k in (
+                     "status", "retenu", "placement_retenu", "train_fin", "n_lignes")})
     # Recalcule la calibration par tranche de cote (corrige favori/longshot dans l'EV
     # des value bets) — auto-apprentissage : s'affine à chaque nuit avec les résultats.
     async with etape(AsyncSessionLocal, "calibration_cote"):
@@ -2270,6 +2279,31 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.melange_arrivees_skip", err=str(e)[:140])
 
+        # ── MODÈLE TECHNIQUE (prioritaire) ──────────────────────────────────────
+        # Victoire et placement estimés SANS rien de ce que disent les parieurs,
+        # puis mélangés à la cote avec des poids appris sur des courses jamais vues
+        # (ml.modele_technique). C'est lui qui repère le cheval sous-évalué : ses
+        # désaccords avec la cote sont mesurés justes. Chaque proba n'est remplacée
+        # que si son propre verdict nocturne l'a retenue et que tous les partants
+        # sont cotés ; sinon la valeur ci-dessus reste servie.
+        _source_victoire = "melange" if _melange_applique else "chaine"
+        _placement_technique = False
+        try:
+            from ml.algo_flags import FLAGS as _AFmt
+            if _AFmt.modele_technique:
+                from ml.modele_technique import en_service as _mt_en_service
+                _mt = _mt_en_service()
+                if _mt is not None:
+                    _pw, _pp = _mt.servir(X, cotes_pmu)
+                    if _pw is not None:
+                        probas_top1 = _pw
+                        _source_victoire = "technique"
+                    if _pp is not None:
+                        probas_top3 = _pp
+                        _placement_technique = True
+        except Exception as e:
+            log.warning("pipeline.modele_technique_skip", err=str(e)[:140])
+
         # Désactive avant recalcul, sans SUPPRIMER : l'identité du value bet et son
         # flag `notifie` doivent survivre aux rafraîchissements de cotes. L'ancien
         # DELETE recréait les mêmes lignes avec notifie=false toutes les 20 minutes
@@ -2806,7 +2840,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             log.warning("pipeline.markowitz.failed", error=str(e))
 
         log.info("pipeline.predict.done", course_id=course_id, nb_predictions=len(predictions),
-                 melange_arrivees=_melange_applique)
+                 melange_arrivees=_melange_applique, source_victoire=_source_victoire,
+                 placement_technique=_placement_technique)
         return fiche
 
 

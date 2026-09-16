@@ -301,3 +301,40 @@ async def test_le_melange_appris_devient_la_proba_servie_et_le_rang(db, tmp_path
     ordonnees = [par_rang[k] for k in sorted(par_rang)]
     assert ordonnees == sorted(ordonnees, reverse=True), (
         "le rang 1 doit porter la cote juste la plus basse")
+
+
+@pytest.mark.asyncio
+async def test_le_modele_technique_est_prioritaire_sur_victoire_et_placement(db, tmp_path, monkeypatch):
+    """Modèle technique en service → proba de victoire ET placé servies viennent de
+    lui (mélangées à la cote), le rang suit, et la somme des placés vaut 3."""
+    from ml import melange_arrivees as ma
+    from ml import modele_technique as mt
+
+    monkeypatch.setattr(ma, "_cache", {"retenu": True, "beta_modele": 0.3,
+                                       "beta_marche": 0.7})
+    monkeypatch.setattr(mt, "PARAMS_XGB", {**mt.PARAMS_XGB, "n_estimators": 20})
+    rng = np.random.default_rng(4)
+    n = 1500
+    X = pd.DataFrame({"elo_global": rng.normal(1500, 60, n),
+                      "forme_5_courses": rng.random(n), "cote_pmu": rng.random(n) * 20})
+    tech = mt.ModeleTechnique(mt.colonnes_techniques(X.columns))
+    tech.entrainer(X, pd.Series((X.elo_global > 1480).astype(int)),
+                   pd.Series((X.elo_global > 1560).astype(int)))
+    tech.melange = {"retenu": True, "beta_modele": 0.45, "beta_marche": 0.72}
+    tech.placement = {"retenu": True, "poids": [0.4, 0.7, -0.4, 2.0]}
+    monkeypatch.setattr(mt, "en_service", lambda: tech)
+    from ml import algo_flags
+    monkeypatch.setattr(algo_flags, "FLAGS", algo_flags.AlgoFlags(modele_technique=True))
+
+    _, out = await _lancer(db, tmp_path, monkeypatch, "R1C7")
+    assert out is not None
+    rows = sorted(await _servies(db, "R1C7"), key=lambda r: int(r[0]))
+    feats = pd.DataFrame(_features("R1C7"))
+    cotes = [float(r[5]) for r in rows]
+    attendu_v, attendu_p = tech.servir(feats, cotes)
+    assert np.allclose([float(r[1]) for r in rows], attendu_v, atol=1e-6)
+    assert np.allclose([float(r[2]) for r in rows], attendu_p, atol=1e-6)
+    assert sum(float(r[2]) for r in rows) == pytest.approx(3.0, abs=1e-4)
+    par_rang = {int(r[3]): float(r[1]) for r in rows}
+    ordonnees = [par_rang[k] for k in sorted(par_rang)]
+    assert ordonnees == sorted(ordonnees, reverse=True)

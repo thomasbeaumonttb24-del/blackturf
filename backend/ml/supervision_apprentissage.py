@@ -182,6 +182,57 @@ async def _etat_alpha(session: AsyncSession) -> dict:
     }
 
 
+async def _etat_modele_technique(session: AsyncSession) -> dict:
+    """MODÈLE TECHNIQUE — victoire et placement sans information de marché.
+
+    Ligne 1 = ce qui est EN SERVICE (écrite quand un verdict tient), ligne 2 = le
+    dernier examen nocturne. Un examen refusé laisse le modèle en place servi.
+    """
+    from ml.modele_technique import (MIN_COURSES_VALIDATION, VALIDATION_JOURS,
+                                     _ID_EXAMEN, _ID_SERVICE, lire_etat)
+
+    service = await lire_etat(session, _ID_SERVICE)
+    examen = await lire_etat(session, _ID_EXAMEN)
+    if not service and not examen:
+        return {"mesure_disponible": False, "en_service": False,
+                "min_courses": MIN_COURSES_VALIDATION, "validation_jours": VALIDATION_JOURS,
+                "pourquoi": "modèle technique jamais entraîné — le mélange modèle × cote est servi"}
+    from ml.algo_flags import FLAGS
+
+    ref = examen or service or {}
+    vic = ref.get("victoire") or {}
+    pla = ref.get("placement") or {}
+    svc = service or {}
+    return {
+        "mesure_disponible": True,
+        # Retenu par la mesure ET servi : le drapeau le garde en observation tant
+        # que le moteur de plans n'est pas recalé sur ses probas.
+        "servi": bool(FLAGS.modele_technique),
+        "en_service": bool(svc.get("retenu") or svc.get("placement_retenu")),
+        "victoire_en_service": bool(svc.get("retenu")),
+        "placement_en_service": bool(svc.get("placement_retenu")),
+        "beta_modele": (svc.get("victoire") or {}).get("beta_modele"),
+        "beta_marche": (svc.get("victoire") or {}).get("beta_marche"),
+        "train_fin": svc.get("train_fin"),
+        "applique_depuis": svc.get("applique_depuis"),
+        "examen_victoire_retenu": bool(vic.get("retenu")),
+        "gain_logv_vs_marche": vic.get("gain_logv_vs_marche"),
+        "gain_logv_vs_marche_ic95": vic.get("gain_logv_vs_marche_ic95"),
+        "gain_logv_vs_servi": vic.get("gain_logv_vs_servi"),
+        "delta_auc_vs_servi": vic.get("delta_auc_vs_servi"),
+        "raison_victoire": vic.get("raison"),
+        "examen_placement_retenu": bool(pla.get("retenu")),
+        "logloss_placement_nouveau": pla.get("logloss_partant_nouveau"),
+        "logloss_placement_servi": pla.get("logloss_partant_servi"),
+        "raison_placement": pla.get("raison"),
+        "n_courses": vic.get("n_courses"),
+        "n_lignes": ref.get("n_lignes"),
+        "n_colonnes": ref.get("n_colonnes"),
+        "min_courses": MIN_COURSES_VALIDATION,
+        "examine_le": ref.get("examine_le"),
+    }
+
+
 async def _etat_melange(session: AsyncSession) -> dict:
     """MÉLANGE APPRIS — la proba de victoire servie, la cote juste, le rang affiché.
 
@@ -421,6 +472,7 @@ async def etat_outils_apprentissage(session: AsyncSession) -> dict:
         "alpha_marche": await _etat_alpha(session),
         "nettete_probas": await _etat_nettete(session),
         "melange_arrivees": await _etat_melange(session),
+        "modele_technique": await _etat_modele_technique(session),
         "temperature": await _etat_temperature(session),
         "plans": await _etat_plans(session),
         "gates_types": await _gates_actives(session),

@@ -141,6 +141,28 @@ export interface OutilsApprentissagePayload {
     mis_a_jour_le?: string | null;
     pourquoi?: string;
   };
+  modele_technique?: {
+    mesure_disponible: boolean;
+    servi?: boolean;
+    en_service: boolean;
+    victoire_en_service?: boolean;
+    placement_en_service?: boolean;
+    beta_modele?: number | null;
+    beta_marche?: number | null;
+    train_fin?: string | null;
+    examen_victoire_retenu?: boolean;
+    gain_logv_vs_marche?: number | null;
+    delta_auc_vs_servi?: number | null;
+    raison_victoire?: string | null;
+    examen_placement_retenu?: boolean;
+    logloss_placement_nouveau?: number | null;
+    logloss_placement_servi?: number | null;
+    raison_placement?: string | null;
+    n_courses?: number | null;
+    n_colonnes?: number | null;
+    min_courses?: number | null;
+    pourquoi?: string;
+  };
   melange_arrivees?: {
     mesure_disponible: boolean;
     en_service: boolean;
@@ -207,6 +229,7 @@ const NOMS_ETAPES: Record<string, string> = {
   integrite_pmu: "Intégrité des données PMU",
   nettete_probas: "Netteté des probabilités servies",
   melange_arrivees: "Mélange modèle × marché appris sur les arrivées",
+  modele_technique: "Modèle technique (sans la cote)",
 };
 
 /** Écart signé à quatre décimales (« +0,0374 ») ; tiret si inconnu. */
@@ -399,6 +422,7 @@ export default function OutilsApprentissage({
   const alpha = data.alpha_marche;
   const nettete = data.nettete_probas;
   const melange = data.melange_arrivees;
+  const technique = data.modele_technique;
   const plans = data.plans;
   const gates = data.gates_types;
 
@@ -508,6 +532,32 @@ export default function OutilsApprentissage({
                     ? `écart de la queue ${signedPct((nettete.ecart_bande_haute_en_place ?? 0) * 100)} → ${signedPct((nettete.ecart_bande_haute_candidat ?? 0) * 100)} sur ${num(nettete.n_bande_haute)} partants`
                     : (nettete.raison ?? "aucun exposant ne fait mieux"))
                 : `en attente — ${num(nettete?.min_courses)} courses nécessaires`}
+            </span>
+          }
+        />
+        <StatTile
+          label="Modèle technique"
+          hint="Victoire et placement estimés SANS la cote ni rien de ce que disent les parieurs (forme, ELO, confrontations, aptitudes, jockey, entraîneur, risque de faute…), réappris chaque nuit jusqu'à J-28 puis jugés sur les 28 derniers jours jamais vus. C'est lui qui repère les chevaux sous-évalués. Mis en service seulement s'il bat la cote seule sans classer ni annoncer moins bien que ce qui est servi."
+          value={
+            technique?.victoire_en_service && technique.beta_modele != null && technique.beta_marche != null
+              ? `${technique.beta_modele.toFixed(2)} / ${technique.beta_marche.toFixed(2)}`
+              : technique?.en_service ? "Placement seul" : "—"
+          }
+          valueClass={technique?.en_service && technique.servi ? "text-emerald-700" : "text-muted-foreground"}
+          sub={
+            !technique?.en_service
+              ? "mélange modèle × cote servi"
+              : technique.servi
+                ? `poids technique / cote · placement ${technique.placement_en_service ? "en service" : "non retenu"}`
+                : "retenu, en observation — pas encore affiché"
+          }
+          footer={
+            <span className="text-[11px] text-muted-foreground">
+              {technique?.mesure_disponible
+                ? (technique.examen_victoire_retenu
+                    ? `vraisemblance ${signedNum(technique.gain_logv_vs_marche)} vs cote · classement ${signedNum(technique.delta_auc_vs_servi)} · ${num(technique.n_courses)} courses`
+                    : (technique.raison_victoire ?? "mesure non concluante"))
+                : `en attente — ${num(technique?.min_courses)} courses nécessaires`}
             </span>
           }
         />

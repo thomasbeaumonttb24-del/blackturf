@@ -231,6 +231,24 @@ class AlgoFlags:
     melange_arrivees: bool = field(
         default_factory=lambda: _env_bool("BT_MELANGE_ARRIVEES", True))
 
+    # ── Modèle technique (2026-09-16) ────────────────────────────────────────
+    # Modèles de victoire et de placement SANS aucune information de marché
+    # (`ml.modele_technique`), réappris chaque nuit jusqu'à J-28 et mélangés à la
+    # cote avec des poids appris sur les 28 derniers jours jamais vus. Prioritaire
+    # sur le mélange ci-dessus quand il est en service. Mesuré (1 536 courses) :
+    # gain sur la cote +0,032 contre +0,011 pour le modèle qui lit la cote ;
+    # placement log-loss 0,5055 contre 0,5430. Détection des paris de valeur
+    # inchangée.
+    #
+    # DÉFAUT OFF — EN OBSERVATION (décision Thomas, 2026-09-16). Le banc des plans
+    # (3 768 courses, apparié) donne, plans nourris par ces probas : prudent −1,1 pt,
+    # modéré −4,5, risqué −8 (w30), non significatif mais négatif sur les deux
+    # moitiés — le moteur de plans a été calé sur l'ancienne distribution. Le nocturne
+    # entraîne et mesure le modèle chaque nuit ; il ne sera SERVI (BT_MODELE_TECHNIQUE=1)
+    # qu'une fois le moteur de plans recalé au banc sur ces probas.
+    modele_technique: bool = field(
+        default_factory=lambda: _env_bool("BT_MODELE_TECHNIQUE", False))
+
     def as_dict(self) -> dict:
         return {
             "train_prerace_only": self.train_prerace_only,
@@ -256,6 +274,7 @@ class AlgoFlags:
             "market_gate_margin": self.market_gate_margin,
             "sharpness_calibration": self.sharpness_calibration,
             "melange_arrivees": self.melange_arrivees,
+            "modele_technique": self.modele_technique,
         }
 
 

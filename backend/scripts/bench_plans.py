@@ -193,8 +193,110 @@ def _v_melange():
     _G["transform"] = _transformer_melange
 
 
+def _transformer_csv(d):
+    """Probas victoire ET placé lues dans le CSV de `BT_BENCH_PROBAS`
+    (course_id, numero, p1, p3) — ex. le modèle technique scoré sur les features
+    figées. Course absente ou incomplète du CSV : inchangée."""
+    table = _G.setdefault("_probas_csv", _lire_probas_csv())
+    vivants = [p for p in d["preds"] if not p["non_partant"]]
+    lignes = {int(p["numero"]): table.get((d["course_id"], int(p["numero"]))) for p in vivants}
+    if not vivants or any(v is None for v in lignes.values()):
+        return d["preds"], d["desaccord"]
+    out = []
+    for p in d["preds"]:
+        q = dict(p)
+        v = lignes.get(int(p["numero"]))
+        if v is not None:
+            ancien = float(p["proba_top1"] or 0.0)
+            q["proba_top1"], q["proba_top3"] = v
+            if ancien > 0:
+                for k in ("proba_top1_low", "proba_top1_high"):
+                    if q.get(k) is not None:
+                        q[k] = min(0.999, float(q[k]) * v[0] / ancien)
+        out.append(q)
+    rang1 = max(lignes, key=lambda n: lignes[n][0])
+    favori = min(vivants, key=lambda p: float(p["cote_pmu"]))["numero"]
+    return out, int(rang1) != int(favori)
+
+
+def _lire_probas_csv():
+    table = {}
+    with open(os.environ["BT_BENCH_PROBAS"], newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            table[(r["course_id"], int(r["numero"]))] = (float(r["p1"]), float(r["p3"]))
+    return table
+
+
+def _v_csv():
+    _G["transform"] = _transformer_csv
+
+
+def _garder(champ):
+    """Variante CSV qui ne remplace qu'UNE des deux probas (décomposition)."""
+    def _t(d):
+        nouv, des = _transformer_csv(d)
+        if nouv is d["preds"]:
+            return nouv, des
+        out = []
+        for p, q in zip(d["preds"], nouv):
+            r = dict(p)
+            r[champ] = q[champ]
+            if champ == "proba_top1":
+                for k in ("proba_top1_low", "proba_top1_high"):
+                    r[k] = q.get(k)
+            out.append(r)
+        if champ != "proba_top1":
+            des = d["desaccord"]
+        return out, des
+    return _t
+
+
+def _v_csv_sans_des():
+    _v_csv()
+    _v_sans_des()
+
+
+def _v_csv_adouci():
+    """Même ORDRE que le CSV, proba de victoire ramenée à la netteté du marché :
+    p ∝ p^(1/1,163) (1,163 = β technique + β marché appris)."""
+    def _t(d):
+        nouv, des = _transformer_csv(d)
+        if nouv is d["preds"]:
+            return nouv, des
+        viv = [q for q in nouv if not q["non_partant"]]
+        brut = {int(q["numero"]): float(q["proba_top1"]) ** (1 / 1.163) for q in viv}
+        tot = sum(brut.values())
+        out = []
+        for q in nouv:
+            r = dict(q)
+            n = int(q["numero"])
+            if n in brut and tot > 0:
+                ancien = float(q["proba_top1"])
+                r["proba_top1"] = brut[n] / tot
+                if ancien > 0:
+                    for k in ("proba_top1_low", "proba_top1_high"):
+                        if r.get(k) is not None:
+                            r[k] = min(0.999, float(r[k]) * r["proba_top1"] / ancien)
+            out.append(r)
+        return out, des
+    _G["transform"] = _t
+
+
+def _v_csv_p1():
+    _G["transform"] = _garder("proba_top1")
+
+
+def _v_csv_p3():
+    _G["transform"] = _garder("proba_top3")
+
+
 VARIANTS = {
     "melange": _v_melange,
+    "csv": _v_csv,
+    "csv_p1": _v_csv_p1,
+    "csv_adouci": _v_csv_adouci,
+    "csv_sans_des": _v_csv_sans_des,
+    "csv_p3": _v_csv_p3,
     "prod_avant": _v_prod_avant,
     "combo1": _v_combo1,
     "combo1_pmin2": _v_combo1_pmin2,
