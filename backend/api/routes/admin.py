@@ -1657,7 +1657,8 @@ async def abonnements(
 # son abonnement le plus récent et complétée par le journal (seul à savoir s'il
 # a payé, combien de prélèvements ont échoué, quand la résiliation a été faite).
 ISSUES_SUIVI = (
-    "impaye",                  # prélèvement refusé (fin d'essai ou échéance) → accès coupé
+    "impaye",                  # prélèvement refusé (fin d'essai ou échéance) → accès coupé, relances en cours
+    "impaye_perdu",            # 2 relances refusées → abonnement clos (cf. services.relances_paiement)
     "resiliation_programmee",  # résilié, garde l'accès jusqu'à l'échéance
     "en_essai",
     "converti",                # a payé, toujours abonné
@@ -1731,11 +1732,13 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
             # Avant le correctif du 2026-09-16, le webhook suivant la résiliation
             # réécrivait `active` : le journal, lui, a gardé la demande.
             statut = "cancel_at_period_end"
-        if statut in ("past_due", "unpaid", "incomplete") or (
-            statut in ("canceled", "incomplete_expired") and serie
-        ):
+        perdus = _types("impaye_perdu")
+        if statut in ("past_due", "unpaid", "incomplete"):
             issue = "impaye"
             date_issue = _aware(serie[0].created_at) if serie else _aware(sub.updated_at)
+        elif statut in ("canceled", "incomplete_expired") and (serie or perdus):
+            issue = "impaye_perdu"
+            date_issue = _aware(perdus[-1].created_at) if perdus else date_fin
         elif statut == "cancel_at_period_end":
             issue = "resiliation_programmee"
             date_issue = _aware(resiliation.created_at) if resiliation else _aware(sub.updated_at)
@@ -1757,8 +1760,10 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
         # Fin (ou perte) d'accès : la date que l'exploitant veut lire.
         if issue == "resiliation_programmee":
             fin_acces = essai_fin if essai_en_cours else _aware(sub.periode_fin)
-        elif issue in ("impaye", "resilie_pendant_essai", "resilie_apres_paiement",
-                       "essai_perdu_sans_carte"):
+        elif issue in ("impaye", "impaye_perdu") and serie:
+            fin_acces = _aware(serie[0].created_at)  # l'accès tombe au premier refus
+        elif issue in ("impaye", "impaye_perdu", "resilie_pendant_essai",
+                       "resilie_apres_paiement", "essai_perdu_sans_carte"):
             fin_acces = date_issue
         else:
             fin_acces = None
@@ -1799,7 +1804,10 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
             "echecs_paiement": len(serie),
             "derniere_tentative": _aware(serie[-1].created_at) if serie else None,
             "prochaine_relance": prochaine_relance,
-            "relances_terminees": issue == "impaye" and statut != "past_due",
+            "relances_faites": sum(1 for e in _types("relance_paiement")
+                                   if dernier_paiement is None
+                                   or _aware(e.created_at) > dernier_paiement),
+            "relances_terminees": issue == "impaye_perdu" or statut == "unpaid",
             "inscrit_le": _aware(u.created_at),
             "derniere_connexion": _aware(u.last_login_at),
         })

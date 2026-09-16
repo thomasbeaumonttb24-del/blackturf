@@ -188,7 +188,7 @@ async def test_suivi_range_chaque_parcours(client: AsyncClient, admin_headers, d
     await _evt(db, perdu, "paiement_recu", "sub_perdu", 900, montant_cents=1200)
     await _evt(db, perdu, "resilie", "sub_perdu", 10)
 
-    # Relances Stripe épuisées : l'abonnement est clos, mais c'est un impayé.
+    # Relances épuisées : l'abonnement est clos, le compte est perdu — pas une résiliation.
     epuise = await _compte(db, "epuise@x.fr")
     await _abo(db, epuise, "canceled", "sub_epuise", essai_fin=MAINTENANT - timedelta(days=25))
     await _evt(db, epuise, "essai_ouvert", "sub_epuise", 32 * 24)
@@ -209,7 +209,7 @@ async def test_suivi_range_chaque_parcours(client: AsyncClient, admin_headers, d
         "paye@x.fr": "converti",
         "parti-essai@x.fr": "resilie_pendant_essai",
         "client-perdu@x.fr": "resilie_apres_paiement",
-        "epuise@x.fr": "impaye",
+        "epuise@x.fr": "impaye_perdu",
     }
     par_email = {c["email"]: c for c in suivi["comptes"]}
     assert par_email["impaye@x.fr"]["echecs_paiement"] == 2
@@ -220,9 +220,9 @@ async def test_suivi_range_chaque_parcours(client: AsyncClient, admin_headers, d
     assert [a["email"] for a in suivi["checkouts_abandonnes"]] == ["abandon@x.fr"]
 
     r = suivi["resume"]
-    assert (r["impaye"], r["resiliation_programmee"], r["en_essai"], r["converti"],
-            r["resilie_pendant_essai"], r["resilie_apres_paiement"],
-            r["checkouts_abandonnes"]) == (2, 2, 1, 1, 1, 1, 1)
+    assert (r["impaye"], r["impaye_perdu"], r["resiliation_programmee"], r["en_essai"],
+            r["converti"], r["resilie_pendant_essai"], r["resilie_apres_paiement"],
+            r["checkouts_abandonnes"]) == (1, 1, 2, 1, 1, 1, 1, 1)
     # Essais arrivés au bout : impayé, payé, parti pendant l'essai, épuisé → 1 sur 4.
     assert (r["essais_termines"], r["essais_convertis"]) == (4, 1)
     assert r["taux_conversion_essai"] == 25.0

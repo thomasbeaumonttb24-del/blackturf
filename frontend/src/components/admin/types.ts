@@ -127,6 +127,7 @@ export interface EnLigneData {
 /** Issue d'un parcours d'abonnement — une seule par compte, cf. `admin._suivi_essais`. */
 export type IssueSuivi =
   | "impaye"
+  | "impaye_perdu"
   | "resiliation_programmee"
   | "en_essai"
   | "converti"
@@ -154,6 +155,8 @@ export interface ParcoursAbo {
   impaye_regularise: boolean;
   montant_cents: number | null;
   echecs_paiement: number;
+  /** Relances faites par nous (J+3, J+7) — 2 au maximum. */
+  relances_faites: number;
   derniere_tentative: string | null;
   prochaine_relance: string | null;
   relances_terminees: boolean;
@@ -275,6 +278,8 @@ export const MOUVEMENT_LABELS: Record<string, string> = {
   resilie: "Résilié",
   paiement_echoue: "Paiement échoué — accès coupé",
   paiement_recu: "Paiement encaissé — accès rétabli",
+  relance_paiement: "Relance du prélèvement",
+  impaye_perdu: "Impayé après 2 relances — compte perdu",
   essai_refuse_carte_reutilisee: "Essai refusé — carte d'un autre compte",
   carte_refusee_autre_compte: "Abonnement refusé — carte d'un autre compte",
   // Statuts Stripe bruts : `_handle_subscription_updated` les journalise tels quels
@@ -302,6 +307,8 @@ export const MOUVEMENT_TONS: Record<string, "ok" | "attention" | "alerte" | "neu
   incomplete: "attention",
   paused: "attention",
   essai_termine_sans_carte: "alerte",
+  relance_paiement: "attention",
+  impaye_perdu: "alerte",
   resiliation_demandee: "alerte",
   resilie: "alerte",
   paiement_echoue: "alerte",
@@ -317,6 +324,7 @@ export const MOUVEMENTS_ECHEC = new Set([
   "paiement_echoue",
   "past_due",
   "unpaid",
+  "impaye_perdu",
   "essai_termine_sans_carte",
   "essai_refuse_carte_reutilisee",
   "carte_refusee_autre_compte",

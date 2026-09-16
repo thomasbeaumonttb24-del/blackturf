@@ -325,6 +325,24 @@ async def job_data_quality_check() -> None:
         log.error("jobs.data_quality_check.error", error=str(e))
 
 
+async def job_relances_paiement() -> None:
+    """Toutes les heures ouvrées — relance à J+3 et J+7 un prélèvement refusé,
+    puis clôt l'abonnement (compte perdu). Cf. services/relances_paiement."""
+    try:
+        from api.config import get_settings
+        import stripe
+        cle = get_settings().stripe_secret_key
+        if not cle:
+            return
+        stripe.api_key = cle
+        from db.database import AsyncSessionLocal
+        from services.relances_paiement import traiter_impayes
+        async with AsyncSessionLocal() as session:
+            await traiter_impayes(session)
+    except Exception as e:
+        log.error("jobs.relances_paiement.error", error=str(e))
+
+
 async def job_resolve_courses_sans_resultat() -> None:
     """1x/jour — clôture les courses passées restées sans résultat.
 
@@ -564,6 +582,16 @@ def start_scheduler() -> None:
         id="drift_check",
         replace_existing=True,
         misfire_grace_time=300,
+    )
+
+    # Relances d'un prélèvement refusé : jamais la nuit — un SMS de refus bancaire
+    # à 3 h du matin fait le même effet qu'une relance de trop.
+    scheduler.add_job(
+        job_relances_paiement,
+        CronTrigger(minute=35, hour="10-20", timezone="Europe/Paris"),
+        id="relances_paiement",
+        replace_existing=True,
+        misfire_grace_time=1800,
     )
 
     # Pre-chauffe caches pages publiques lentes — toutes les 30 min

@@ -44,10 +44,11 @@ function Quand({ iso, futur = false }: { iso: string | null | undefined; futur?:
   );
 }
 
-const PARTIS: IssueSuivi[] = ["resilie_pendant_essai", "resilie_apres_paiement", "essai_perdu_sans_carte"];
+const PARTIS: IssueSuivi[] = ["impaye_perdu", "resilie_pendant_essai", "resilie_apres_paiement", "essai_perdu_sans_carte"];
 
 const ISSUE: Record<IssueSuivi, { label: string; ton: "ok" | "attention" | "alerte" | "neutre" }> = {
   impaye: { label: "Impayé — accès coupé", ton: "alerte" },
+  impaye_perdu: { label: "Perdu — impayé", ton: "alerte" },
   resiliation_programmee: { label: "Résiliation en cours", ton: "attention" },
   en_essai: { label: "En essai", ton: "neutre" },
   converti: { label: "Payant", ton: "ok" },
@@ -89,12 +90,20 @@ const COLONNES: Record<Exclude<Vue, "abandons">, Colonne<ParcoursAbo>[]> = {
       ),
     },
     {
-      titre: "Prochaine relance",
-      rendu: (p) => p.relances_terminees
-        ? <Etat ton="neutre" titre="Stripe a cessé de retenter le prélèvement">Terminées</Etat>
-        : p.prochaine_relance
-          ? <Quand iso={p.prochaine_relance} futur />
-          : <Etat ton="attention">En cours</Etat>,
+      titre: "Relances",
+      rendu: (p) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="whitespace-nowrap text-[13px]">
+            <b className="tabular-nums">{Math.min(p.relances_faites, 2)}</b>
+            <span className="text-muted-foreground"> / 2</span>
+          </span>
+          {p.prochaine_relance && (
+            <span className="whitespace-nowrap text-xs text-muted-foreground" title={formatDateTime(p.prochaine_relance)}>
+              prochaine le {dateCourte(p.prochaine_relance)}
+            </span>
+          )}
+        </div>
+      ),
     },
     compteActuel,
   ],
@@ -119,10 +128,12 @@ const COLONNES: Record<Exclude<Vue, "abandons">, Colonne<ParcoursAbo>[]> = {
   ],
   partis: [
     compte,
-    { titre: "Parti le", rendu: (p) => <Quand iso={p.fin_acces} /> },
+    { titre: "Parti le", rendu: (p) => <Quand iso={p.date_issue} /> },
     {
       titre: "Motif",
-      rendu: (p) => p.issue === "resilie_apres_paiement"
+      rendu: (p) => p.issue === "impaye_perdu"
+        ? <Etat ton="alerte" titre="Prélèvement refusé, puis refusé encore à J+3 et J+7 : abonnement clos">Impayé après 2 relances</Etat>
+        : p.issue === "resilie_apres_paiement"
         ? <Etat ton="alerte">Résilié après avoir payé</Etat>
         : p.issue === "essai_perdu_sans_carte"
           ? <Etat ton="neutre">Essai sans carte, expiré</Etat>
@@ -193,7 +204,8 @@ export default function SuiviDeparts({ suivi }: { suivi: SuiviEssais }) {
     .sort((a, b) => (a.fin_acces ?? "").localeCompare(b.fin_acces ?? ""));
   const partis = suivi.comptes.filter((p) => PARTIS.includes(p.issue));
   const nbPartis = partis.length;
-  const pendantEssai = partis.filter((p) => p.issue !== "resilie_apres_paiement").length;
+  const perdus = partis.filter((p) => p.issue === "impaye_perdu").length;
+  const sansPayer = partis.filter((p) => p.issue === "resilie_pendant_essai" || p.issue === "essai_perdu_sans_carte").length;
 
   const [vue, setVue] = useState<Vue>(
     impayes.length ? "impayes" : resiliations.length ? "resiliations" : nbPartis ? "partis" : "tous",
@@ -225,7 +237,7 @@ export default function SuiviDeparts({ suivi }: { suivi: SuiviEssais }) {
           label="Impayés"
           valeur={num(impayes.length)}
           sub={impayes.length
-            ? `${impayesApresEssai} en fin d'essai · repassés gratuits`
+            ? `${impayesApresEssai} en fin d'essai · relancés à J+3 et J+7`
             : "aucun prélèvement en échec"}
           ton={impayes.length ? "alerte" : "neutre"}
           actif={vue === "impayes"}
@@ -244,7 +256,10 @@ export default function SuiviDeparts({ suivi }: { suivi: SuiviEssais }) {
         <Compteur
           label="Partis"
           valeur={num(nbPartis)}
-          sub={nbPartis ? `dont ${pendantEssai} sans avoir jamais payé` : "aucun départ"}
+          sub={nbPartis
+            ? [perdus && `${perdus} perdu${perdus > 1 ? "s" : ""} (impayé)`, sansPayer && `${sansPayer} résilié${sansPayer > 1 ? "s" : ""} pendant l'essai`]
+              .filter(Boolean).join(" · ")
+            : "aucun départ"}
           ton={nbPartis ? "attention" : "neutre"}
           actif={vue === "partis"}
           onClick={() => setVue("partis")}
@@ -271,7 +286,8 @@ export default function SuiviDeparts({ suivi }: { suivi: SuiviEssais }) {
               { cle: "en_essai", label: "En essai", n: r.en_essai, couleur: "bg-sky-500" },
               { cle: "resiliation", label: "Résiliation en cours", n: r.resiliation_programmee, couleur: "bg-amber-400" },
               { cle: "impaye", label: "Impayés", n: r.impaye, couleur: "bg-red-500" },
-              { cle: "partis", label: "Partis", n: nbPartis, couleur: "bg-slate-400" },
+              { cle: "perdus", label: "Perdus (impayé)", n: perdus, couleur: "bg-red-900" },
+              { cle: "partis", label: "Résiliés", n: nbPartis - perdus, couleur: "bg-slate-400" },
             ]}
           />
         </div>

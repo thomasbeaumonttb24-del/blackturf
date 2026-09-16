@@ -39,6 +39,8 @@ LIBELLES = {
     "resilie": "Abonnement résilié",
     "paiement_echoue": "Paiement en échec — accès coupé",
     "paiement_recu": "Paiement encaissé — accès rétabli",
+    "relance_paiement": "Relance du prélèvement refusé",
+    "impaye_perdu": "Impayé après 2 relances — abonnement clos, compte perdu",
     "essai_refuse_carte_reutilisee": "Essai refusé — carte déjà vue sur un autre compte",
     "carte_refusee_autre_compte": "Abonnement refusé — carte rattachée à un autre compte",
 
@@ -67,7 +69,7 @@ TYPES_NOTIFIES = {
     "changement_plan", "essai_bientot_fini", "essai_termine_sans_carte",
     "resiliation_demandee", "resiliation_annulee", "resilie", "paiement_echoue", "paiement_recu",
     "essai_refuse_carte_reutilisee", "carte_refusee_autre_compte",
-    "unpaid",
+    "unpaid", "impaye_perdu",
 }
 
 

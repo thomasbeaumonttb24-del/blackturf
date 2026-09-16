@@ -942,7 +942,11 @@ async def _handle_subscription_deleted(sub: dict, db: AsyncSession):
         subscription.statut = "canceled"
 
     user = await _find_user_by_customer(sub["customer"], db)
-    if user:
+    if user and statut_precedent == "canceled":
+        # Déjà clos de notre côté (impayé perdu, cf. services.relances_paiement) :
+        # le mouvement est journalisé, ne pas y ajouter une « résiliation ».
+        pass
+    elif user:
         # Un essai qui meurt faute de carte n'est pas une résiliation : c'est un
         # prospect qui n'a jamais converti. Les confondre fausserait le churn.
         await journaliser(
@@ -1061,9 +1065,17 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
     le produit restait livré tout ce temps sans un centime encaissé — le scénario
     exact de la carte prépayée vidée à la fin de l'essai.
 
-    L'abonnement Stripe, lui, N'EST PAS annulé : les relances suivent leur cours et
-    le premier paiement qui passe rend l'accès dans la seconde.
+    L'abonnement Stripe, lui, N'EST PAS annulé : le premier paiement qui passe rend
+    l'accès dans la seconde.
+
+    Depuis le 2026-09-16, ce n'est plus Stripe qui relance (jusqu'à 8 refus en
+    13 jours sur un compte : l'effet « site arnaque »). Sa collecte automatique est
+    coupée dès le premier refus ; `services.relances_paiement` retente à J+3 et J+7
+    puis clôt l'abonnement.
     """
+    from services.relances_paiement import (couper_collecte_stripe, premier_refus,
+                                            prochaine_relance)
+
     sub_id = _sub_id_facture(invoice)
     user = await _find_user_by_customer(invoice.get("customer"), db)
     if not user:
@@ -1077,6 +1089,12 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
         )).scalar_one_or_none()
     if sub is not None:
         sub.statut = "past_due"
+
+    facture_id = invoice.get("id")
+    if facture_id and invoice.get("auto_advance") is not False:
+        couper_collecte_stripe(facture_id)
+    debut = (await premier_refus(db, facture_id) if facture_id else None) or datetime.now(timezone.utc)
+    relance = prochaine_relance(debut, invoice.get("attempt_count") or 1)
 
     plan_precedent = user.plan
     # `past_due` ne fait plus partie des statuts d'accès : l'abonnement en échec
@@ -1095,8 +1113,8 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
                       montant_cents=invoice.get("amount_due"),
                       detail={"facture": invoice.get("id"),
                               "tentative": invoice.get("attempt_count"),
-                              # Date de la prochaine relance Stripe (None = plus aucune).
-                              "prochaine_relance": invoice.get("next_payment_attempt"),
+                              # Prochaine relance planifiée par NOUS (None = plus aucune).
+                              "prochaine_relance": int(relance.timestamp()) if relance else None,
                               "motif": invoice.get("billing_reason"),
                               "plan_apres": user.plan,
                               "acces_ouvert": user.plan != "free"})
