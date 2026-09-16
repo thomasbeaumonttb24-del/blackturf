@@ -249,6 +249,15 @@ class AlgoFlags:
     modele_technique: bool = field(
         default_factory=lambda: _env_bool("BT_MODELE_TECHNIQUE", False))
 
+    # ── Confirmation technique des valeurs ★★ (2026-09-16) ───────────────────
+    # Un pari de valeur ★★ que le modèle technique ne confirme pas (p × cote < 1)
+    # est rétrogradé en ★ (non affiché). Mesuré : −32 % / −36 % non confirmés contre
+    # −7 % / −1 % confirmés, deux moitiés (cf. ml.modele_technique.confirmer_valeur).
+    # Utilise le modèle technique même en observation : c'est un filtre, pas un
+    # affichage. Rollback : BT_VB_CONFIRMATION_TECHNIQUE=0.
+    vb_confirmation_technique: bool = field(
+        default_factory=lambda: _env_bool("BT_VB_CONFIRMATION_TECHNIQUE", True))
+
     def as_dict(self) -> dict:
         return {
             "train_prerace_only": self.train_prerace_only,
@@ -275,6 +284,7 @@ class AlgoFlags:
             "sharpness_calibration": self.sharpness_calibration,
             "melange_arrivees": self.melange_arrivees,
             "modele_technique": self.modele_technique,
+            "vb_confirmation_technique": self.vb_confirmation_technique,
         }
 
 

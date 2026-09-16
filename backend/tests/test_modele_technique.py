@@ -68,6 +68,15 @@ def test_sous_le_volume_minimal_le_placement_n_est_pas_retenu():
     assert v["retenu"] is False
 
 
+def test_seuls_les_deux_etoiles_non_confirmes_sont_retrogrades():
+    assert mt.confirmer_valeur(2, 0.08, 10.0) == (1, False)      # 0,8 < 1
+    assert mt.confirmer_valeur(2, 0.12, 10.0) == (2, True)       # 1,2 ≥ 1
+    assert mt.confirmer_valeur(4, 0.01, 10.0) == (4, None)       # ★★★★ jamais touché
+    assert mt.confirmer_valeur(3, 0.01, 10.0) == (3, None)
+    assert mt.confirmer_valeur(2, None, 10.0) == (2, None)       # pas de modèle : inchangé
+    assert mt.confirmer_valeur(2, 0.2, None) == (2, None)
+
+
 def test_rien_n_est_servi_sans_verdict_retenu():
     m = mt.ModeleTechnique(["a"])
     assert m.servir(pd.DataFrame({"a": [1.0, 2.0]}), [2.0, 3.0]) == (None, None)

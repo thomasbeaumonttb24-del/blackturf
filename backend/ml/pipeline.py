@@ -2297,17 +2297,21 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # sont cotés ; sinon la valeur ci-dessus reste servie.
         _source_victoire = "melange" if _melange_applique else "chaine"
         _placement_technique = False
+        # Proba de victoire technique, calculée même en OBSERVATION : elle sert à
+        # confirmer les valeurs ★★ (cf. ml.modele_technique.confirmer_valeur).
+        _p1_technique = None
         try:
             from ml.algo_flags import FLAGS as _AFmt
-            if _AFmt.modele_technique:
+            if _AFmt.modele_technique or _AFmt.vb_confirmation_technique:
                 from ml.modele_technique import en_service as _mt_en_service
                 _mt = _mt_en_service()
                 if _mt is not None:
                     _pw, _pp = _mt.servir(X, cotes_pmu)
-                    if _pw is not None:
+                    _p1_technique = _pw
+                    if _AFmt.modele_technique and _pw is not None:
                         probas_top1 = _pw
                         _source_victoire = "technique"
-                    if _pp is not None:
+                    if _AFmt.modele_technique and _pp is not None:
                         probas_top3 = _pp
                         _placement_technique = True
         except Exception as e:
@@ -2580,6 +2584,21 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             )
             niveau_vb = 0
             ev_max = 0.0
+            if vb and _p1_technique is not None:
+                try:
+                    from ml.algo_flags import FLAGS as _AFvb
+                    if _AFvb.vb_confirmation_technique:
+                        from ml.modele_technique import confirmer_valeur as _confirmer
+                        _niv, _conf = _confirmer(int(vb["niveau"]), float(_p1_technique[i]),
+                                                 cote_pmu)
+                        if _conf is False:
+                            log.info("pipeline.valeur_non_confirmee", course_id=course_id,
+                                     numero=feat.get("numero"), niveau=vb["niveau"],
+                                     p_technique=round(float(_p1_technique[i]), 4),
+                                     cote=cote_pmu)
+                        vb["niveau"] = _niv
+                except Exception as e:
+                    log.warning("pipeline.confirmation_valeur_skip", err=str(e)[:140])
             if vb:
                 await save_value_bet(session, pred_id, course_id, pid, vb)
                 niveau_vb = vb["niveau"]

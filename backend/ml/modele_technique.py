@@ -280,6 +280,38 @@ class ModeleTechnique:
         return chemin
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Confirmation des valeurs détectées ★★
+# ──────────────────────────────────────────────────────────────────────────────
+# Mesuré le 2026-09-16, paris de valeur ★★ du 10/08 au 15/09 réglés au rapport PMU
+# officiel du Simple Gagnant (gains plafonnés ×20), selon que le modèle technique
+# (sans la cote, mélangé à la cote) confirme la valeur — p_technique × cote ≥ 1 :
+#
+#                         10/08 → 27/08          28/08 → 15/09
+#     non confirmés    185 paris  −32,4 % ± 16    583 paris  −36,5 % ± 9
+#     confirmés         92 paris   −7,1 % ± 26    355 paris   −1,1 % ± 15
+#
+# Même écart dans les deux moitiés (et sur toute la période 01/07 → 15/09 :
+# −32,6 % contre −2,5 %). Aucun écart en ★★★ (−18,1 / −18,6) ni en ★★★★
+# (+16,5 / +16,7) : la confirmation ne s'applique qu'au ★★. Un ★★ non confirmé est
+# RÉTROGRADÉ en ★ — il reste écrit en base pour la mesure, il n'est plus affiché
+# (`services.valuebets_visibilite.NIVEAU_MIN_VISIBLE = 2`).
+NIVEAU_A_CONFIRMER = 2
+
+
+def confirmer_valeur(niveau: int, p_technique: Optional[float],
+                     cote: Optional[float]) -> tuple[int, Optional[bool]]:
+    """(niveau retenu, confirmée ?) — None quand la confirmation ne s'applique pas
+    (autre niveau, pas de proba technique, pas de cote) : le niveau est inchangé."""
+    if niveau != NIVEAU_A_CONFIRMER or p_technique is None or not cote or cote <= 1:
+        return niveau, None
+    try:
+        confirme = float(p_technique) * float(cote) >= 1.0
+    except (TypeError, ValueError):
+        return niveau, None
+    return (niveau if confirme else niveau - 1), confirme
+
+
 _instance: Optional[ModeleTechnique] = None
 _mtime: Optional[float] = None
 

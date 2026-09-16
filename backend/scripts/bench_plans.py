@@ -282,6 +282,62 @@ def _v_csv_adouci():
     _G["transform"] = _t
 
 
+def _sans_proba_factor():
+    """Facteurs annoncé→réel de PROBA par type neutralisés : ils corrigent la
+    sur-confiance de l'ANCIEN modèle (appris sur ses plans)."""
+    import copy
+    rc = copy.deepcopy(_G.get("rc") or {})
+    for t in (rc.get("global") or {}).values():
+        if isinstance(t, dict):
+            t["proba_factor"] = 1.0
+    _G["rc"] = rc
+
+
+def _sans_payout_buckets():
+    import copy
+    rc = copy.deepcopy(_G.get("rc") or {})
+    rc.pop("payout_buckets", None)
+    rc.pop("types", None)
+    _G["rc"] = rc
+
+
+def _v_csv_sans_pf():
+    _v_csv()
+    _sans_proba_factor()
+
+
+def _v_base_sans_pf():
+    _sans_proba_factor()
+
+
+def _v_csv_sans_evb():
+    _v_csv()
+    _G["ev"] = None
+
+
+def _v_csv_neutre():
+    """Probas techniques, tout ce qui a été appris sur les plans de l'ancien modèle
+    neutralisé : facteurs de proba, bandes d'EV, tranches de rapport."""
+    _v_csv()
+    _sans_proba_factor()
+    _sans_payout_buckets()
+    _G["ev"] = None
+
+
+def _v_base_neutre():
+    _sans_proba_factor()
+    _sans_payout_buckets()
+    _G["ev"] = None
+
+
+def _v_csv_sans_cap():
+    from ml import algo_flags
+    _v_csv()
+    algo_flags.FLAGS = algo_flags.AlgoFlags(combo_market_cap=False)
+    import ml.combo_bets as cb
+    cb._AF = algo_flags.FLAGS if hasattr(cb, "_AF") else None
+
+
 def _v_csv_p1():
     _G["transform"] = _garder("proba_top1")
 
@@ -294,6 +350,11 @@ VARIANTS = {
     "melange": _v_melange,
     "csv": _v_csv,
     "csv_p1": _v_csv_p1,
+    "csv_sans_pf": _v_csv_sans_pf,
+    "base_sans_pf": _v_base_sans_pf,
+    "csv_sans_evb": _v_csv_sans_evb,
+    "csv_neutre": _v_csv_neutre,
+    "base_neutre": _v_base_neutre,
     "csv_adouci": _v_csv_adouci,
     "csv_sans_des": _v_csv_sans_des,
     "csv_p3": _v_csv_p3,
@@ -416,8 +477,8 @@ _G = {}
 def _init(variant, heat, rc, ev, poids):
     import warnings
     warnings.filterwarnings("ignore")
-    VARIANTS[variant]()
     _G.update({"heat": heat, "rc": rc, "ev": ev, "poids": poids})
+    VARIANTS[variant]()
 
 
 def _run_course(d):
