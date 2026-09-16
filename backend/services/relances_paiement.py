@@ -100,20 +100,15 @@ async def _clore(db: AsyncSession, sub: Subscription, user: Optional[User],
     """Facture annulée, abonnement clos, compte perdu. Faux si Stripe a refusé."""
     from api.routes.stripe_routes import _plan_effectif
 
-    if facture.get("status") == "open":
-        try:
-            stripe.Invoice.void_invoice(facture["id"])
-        except Exception as e:  # noqa: BLE001
-            # Une facture qu'on n'annule pas n'empêche pas de clore : l'abonnement
-            # annulé met fin à toute collecte automatique chez Stripe.
-            log.warning("relances.annulation_facture_echouee", facture=facture["id"],
-                        error=str(e)[:150])
-    # `canceled` est écrit AVANT d'appeler Stripe : son webhook
-    # `customer.subscription.deleted` peut arriver avant la fin de ce traitement,
-    # et c'est ce statut qui l'empêche de journaliser une « résiliation » de plus.
+    # 1. `canceled` écrit AVANT tout appel Stripe : les webhooks que ces appels
+    #    déclenchent arrivent pendant ce traitement, et c'est ce statut qui les
+    #    empêche de journaliser une « résiliation » ou de rouvrir l'accès.
     statut_avant = sub.statut
     sub.statut = "canceled"
     await db.commit()
+    # 2. L'abonnement d'abord. Annuler la facture en premier faisait repasser
+    #    l'abonnement `active` chez Stripe (sa seule facture impayée disparue) :
+    #    le webhook rouvrait le plan Expert une seconde (constaté le 2026-09-16).
     try:
         stripe.Subscription.delete(sub.stripe_subscription_id)
     except stripe.error.InvalidRequestError as e:
@@ -124,6 +119,13 @@ async def _clore(db: AsyncSession, sub: Subscription, user: Optional[User],
         sub.statut = statut_avant
         await db.commit()
         return False
+    # 3. La facture ensuite : le client ne doit plus rien pour un service coupé.
+    if facture.get("status") == "open":
+        try:
+            stripe.Invoice.void_invoice(facture["id"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("relances.annulation_facture_echouee", facture=facture["id"],
+                        error=str(e)[:150])
 
     if user is not None:
         user.plan = await _plan_effectif(user.user_id, db, sauf_stripe_id=sub.stripe_subscription_id)

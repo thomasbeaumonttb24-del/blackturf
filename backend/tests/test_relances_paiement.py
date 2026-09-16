@@ -140,6 +140,20 @@ async def test_seconde_relance_refusee_a_j7_clot_le_compte(db, monkeypatch):
     assert (s.statut, u.plan) == ("canceled", "free")
     assert (await _journal(db, u))[-1] == "impaye_perdu"
 
+    # Stripe clôt l'abonnement AVANT d'annuler la facture (l'inverse le rendait `active`).
+    assert stripe_.appels.index("delete:sub_impaye") < stripe_.appels.index("void")
+
+    # Un `updated` arrivé en retard ne rouvre rien.
+    monkeypatch.setattr(sr, "PLAN_FROM_PRICE", {"price_x": "expert"})
+    await sr._handle_subscription_updated({
+        "id": "sub_impaye", "customer": "cus_impaye", "status": "active",
+        "items": {"data": [{"price": {"id": "price_x", "recurring": {"interval": "month"}}}]},
+    }, db)
+    await db.refresh(s)
+    await db.refresh(u)
+    assert (s.statut, u.plan) == ("canceled", "free")
+    assert "abonnement_actif" not in await _journal(db, u)
+
     # Le webhook de Stripe qui confirme la suppression n'ajoute pas de « résiliation ».
     await sr._handle_subscription_deleted({"id": "sub_impaye", "customer": "cus_impaye"}, db)
     assert "resilie" not in await _journal(db, u)

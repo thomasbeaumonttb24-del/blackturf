@@ -862,6 +862,14 @@ async def _handle_subscription_updated(sub: dict, db: AsyncSession):
         await _handle_subscription_created(sub, db)
         return
 
+    if subscription.statut == "canceled" and sub.get("status") != "canceled":
+        # Clos de notre côté (impayé perdu) : un `updated` arrivé dans le désordre
+        # ne doit ni rouvrir l'accès ni journaliser un « abonnement actif ».
+        # Un abonnement clos chez Stripe ne se réactive jamais.
+        log.info("stripe.updated_ignore_abonnement_clos", sub=sub.get("id"),
+                 statut_stripe=sub.get("status"))
+        return
+
     plan = _plan_from_sub(sub)
     if plan is None:
         log.error("stripe.unknown_price", sub=sub.get("id"))
