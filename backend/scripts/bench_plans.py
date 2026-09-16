@@ -366,6 +366,60 @@ def _v_base_sans_edge():
     _sans_edge()
 
 
+# Cote de CLÔTURE attendue (mesuré le 2026-09-17, 1 536 courses, hors échantillon
+# croisé) : ln q_clôture ≈ 0,80·ln q_T-10 + 0,35·ln p_technique_brut (centré par
+# course, puis renormalisé). Erreur quadratique 0,2533 → 0,2009. p_technique_brut
+# est retrouvé depuis la proba mélangée du CSV : ln p_mél = 0,4538·ln p_tech +
+# 0,7092·ln q (+ constante de course).
+_CLOTURE = (0.80, 0.351)
+_MELANGE_TECH = (0.4538, 0.7092)
+
+
+def _cotes_cloture(d, preds_proba):
+    import math
+    vivants = [p for p in d["preds"] if not p["non_partant"]]
+    table = _G.setdefault("_probas_csv", _lire_probas_csv())
+    v = {int(p["numero"]): table.get((d["course_id"], int(p["numero"]))) for p in vivants}
+    if not vivants or any(x is None for x in v.values()):
+        return None
+    cotes = {int(p["numero"]): float(p["cote_pmu"]) for p in vivants}
+    inv = {n: 1.0 / c for n, c in cotes.items()}
+    tot = sum(inv.values())
+    q = {n: x / tot for n, x in inv.items()}
+    lpt = {n: (math.log(max(v[n][0], 1e-9)) - _MELANGE_TECH[1] * math.log(q[n])) / _MELANGE_TECH[0]
+           for n in q}
+    lc = {n: _CLOTURE[0] * math.log(q[n]) + _CLOTURE[1] * lpt[n] for n in q}
+    m = max(lc.values())
+    e = {n: math.exp(x - m) for n, x in lc.items()}
+    se = sum(e.values())
+    return {n: 1.0 / (e[n] / se * tot) for n in e}   # même marge que la cote de T-10
+
+
+def _avec_cloture(transform):
+    def _t(d):
+        preds, des = transform(d) if transform else (d["preds"], d["desaccord"])
+        cl = _cotes_cloture(d, preds)
+        if cl is None:
+            return preds, des
+        out = []
+        for p in preds:
+            r = dict(p)
+            n = int(p["numero"])
+            if n in cl:
+                r["cote_pmu"] = round(max(cl[n], 1.01), 2)
+            out.append(r)
+        return out, des
+    return _t
+
+
+def _v_csv_cloture():
+    _G["transform"] = _avec_cloture(_transformer_csv)
+
+
+def _v_base_cloture():
+    _G["transform"] = _avec_cloture(None)
+
+
 def _v_csv_p1():
     _G["transform"] = _garder("proba_top1")
 
@@ -383,6 +437,8 @@ VARIANTS = {
     "csv_sans_evb": _v_csv_sans_evb,
     "csv_neutre": _v_csv_neutre,
     "csv_sans_edge": _v_csv_sans_edge,
+    "csv_cloture": _v_csv_cloture,
+    "base_cloture": _v_base_cloture,
     "base_sans_edge": _v_base_sans_edge,
     "base_neutre": _v_base_neutre,
     "csv_adouci": _v_csv_adouci,
