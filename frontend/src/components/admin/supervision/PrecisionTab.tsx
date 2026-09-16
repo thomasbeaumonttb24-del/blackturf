@@ -169,7 +169,7 @@ export default function PrecisionTab() {
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="jour" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} tickFormatter={jourCourt} />
                 <YAxis domain={[0.2, 0.4]} tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={46} tickFormatter={(v) => `${Math.round(v * 100)} %`} />
-                <Tooltip content={<ChartTooltip valueFormatter={(v) => `${(v * 100).toFixed(1)} %`} labelFormatter={(l) => jourCourt(String(l))} />} />
+                <Tooltip content={<ChartTooltip valueFormatter={(v) => pct(v * 100)} labelFormatter={(l) => jourCourt(String(l))} />} />
                 <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                 <Line type="monotone" dataKey="n1_gagne_7j" name="Classement servi" stroke="#F59E0B" strokeWidth={2.5} dot={false} connectNulls isAnimationActive={false} />
                 <Line type="monotone" dataKey="favori_gagne_7j" name="Favori du marché" stroke="#64748B" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
@@ -185,7 +185,7 @@ export default function PrecisionTab() {
               <LineChart data={jours} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="jour" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} tickFormatter={jourCourt} />
-                <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={52} tickFormatter={(v) => v.toFixed(2)} />
+                <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} width={52} tickFormatter={(v) => v.toFixed(2).replace(".", ",")} />
                 <ReferenceLine y={0} stroke="#94A3B8" />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => signe(v)} labelFormatter={(l) => jourCourt(String(l))} />} />
                 <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
@@ -219,15 +219,15 @@ export default function PrecisionTab() {
                     <tr key={t.tranche} className="border-t border-border/60">
                       <td className="py-1.5 pr-3 font-medium">{t.tranche}</td>
                       <td className="py-1.5 pr-3 text-right">{num(t.partants)}</td>
-                      <td className="py-1.5 pr-3 text-right">{(t.annonce * 100).toFixed(1)} %</td>
-                      <td className="py-1.5 pr-3 text-right">{(t.realise * 100).toFixed(1)} %</td>
+                      <td className="py-1.5 pr-3 text-right">{pct(t.annonce * 100)}</td>
+                      <td className="py-1.5 pr-3 text-right">{pct(t.realise * 100)}</td>
                       <td className="py-1.5 text-right">{num(t.victoires)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <Note>Placement : log-loss du placé servi {c.placement_logloss_servi?.toFixed(4) ?? "—"}{tech?.placement_logloss != null ? `, modèle technique ${tech.placement_logloss.toFixed(4)}` : ""} (plus bas = plus juste) · top 3 annoncé juste à {c.top3_annonce_juste_servi != null ? pct(c.top3_annonce_juste_servi * 100) : "—"}.</Note>
+            <Note>Placement : log-loss du placé servi {c.placement_logloss_servi != null ? c.placement_logloss_servi.toFixed(4).replace(".", ",") : "—"}{tech?.placement_logloss != null ? `, modèle technique ${tech.placement_logloss.toFixed(4).replace(".", ",")}` : ""} (plus bas = plus juste) · top 3 annoncé juste à {c.top3_annonce_juste_servi != null ? pct(c.top3_annonce_juste_servi * 100) : "—"}.</Note>
           </Section>
           <Section
             title="Valeurs détectées, réglées au rapport PMU"

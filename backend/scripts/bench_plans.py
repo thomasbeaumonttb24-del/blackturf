@@ -338,6 +338,34 @@ def _v_csv_sans_cap():
     cb._AF = algo_flags.FLAGS if hasattr(cb, "_AF") else None
 
 
+def _sans_edge():
+    """Écart modèle − cote de T-10 mis à zéro sur chaque candidat : la conviction
+    (1 + 3·edge), les « coups crédibles » et le repli n'en tiennent plus compte.
+    Hypothèse testée : cet écart est racheté par le marché avant la clôture."""
+    import ml.combo_bets as cb
+    if getattr(cb, "_bench_sans_edge", False):
+        return
+    orig = cb.enumerate_bet_candidates
+
+    def _wrap(*a, **k):
+        out = orig(*a, **k)
+        for c in out:
+            if "edge" in c:
+                c["edge"] = 0.0
+        return out
+    cb.enumerate_bet_candidates = _wrap
+    cb._bench_sans_edge = True
+
+
+def _v_csv_sans_edge():
+    _v_csv()
+    _sans_edge()
+
+
+def _v_base_sans_edge():
+    _sans_edge()
+
+
 def _v_csv_p1():
     _G["transform"] = _garder("proba_top1")
 
@@ -354,6 +382,8 @@ VARIANTS = {
     "base_sans_pf": _v_base_sans_pf,
     "csv_sans_evb": _v_csv_sans_evb,
     "csv_neutre": _v_csv_neutre,
+    "csv_sans_edge": _v_csv_sans_edge,
+    "base_sans_edge": _v_base_sans_edge,
     "base_neutre": _v_base_neutre,
     "csv_adouci": _v_csv_adouci,
     "csv_sans_des": _v_csv_sans_des,

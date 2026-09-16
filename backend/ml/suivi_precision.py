@@ -54,6 +54,10 @@ FRAICHEUR_MAX_MIN = 120
 # Le nocturne recalcule les derniers jours : des résultats ou des rapports peuvent
 # arriver en retard (réclamations, rapports internationaux).
 JOURS_RECALCULES = 7
+# Sous ce nombre de courses, une moyenne glissante sur 7 jours n'est pas affichée :
+# en début de série elle repose sur une poignée de courses (un 0 % un jour à 3
+# courses se lit comme un effondrement).
+MIN_COURSES_GLISSANT = 100
 # Premier jour où les prédictions sont figées à T-10 (avant : la veille au soir).
 PREMIER_JOUR = date(2026, 8, 17)
 WINSOR = 30.0
@@ -489,6 +493,10 @@ async def lire_suivi(session: AsyncSession, jours: int = 60, segment: str = "tou
         fenetre7 = cumuler(c for jj, c in par_jour if j - timedelta(days=6) <= jj <= j)
         l7 = lire_cumul(fenetre7)
         l1 = lire_cumul(cumul)
+        if l7["n_courses"] < MIN_COURSES_GLISSANT:
+            serie.append({"jour": j.isoformat(), "courses": l1["n_courses"],
+                          "courses_7j": l7["n_courses"]})
+            continue
         serie.append({
             "jour": j.isoformat(), "courses": l1["n_courses"],
             "n1_gagne_7j": l7["n1_gagne_servi"], "favori_gagne_7j": l7["favori_gagne_marche"],
