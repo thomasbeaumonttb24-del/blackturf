@@ -337,6 +337,9 @@ export const adminApi = {
   // quels correcteurs ont PROUVÉ qu'ils amélioraient quelque chose.
   supervisionOutilsApprentissage: () =>
     api.get("/supervision/outils-apprentissage", { baseURL: `${API_URL}/admin/api` }),
+  // Précision de ce qui a été servi à T-10, jour par jour, contre les arrivées réelles.
+  supervisionSuiviPrecision: (jours = 60, segment = "tout") =>
+    api.get("/supervision/suivi-precision", { baseURL: `${API_URL}/admin/api`, params: { jours, segment } }),
   // Suivi des abonnements : essais en cours, carte manquante, journal des mouvements.
   abonnements: () =>
     api.get("/abonnements", { baseURL: `${API_URL}/admin/api` }),

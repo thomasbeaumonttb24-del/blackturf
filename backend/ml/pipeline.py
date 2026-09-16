@@ -1344,6 +1344,15 @@ async def _run_nightly_retraining_unlocked() -> None:
             await n_session.commit()
         log.info("pipeline.nettete_done", **{k: v for k, v in _n.items()
                                              if k != "raisons"})
+    # SUIVI DE LA PRÉCISION — ce qui a été servi à T-10 contre les arrivées, jour par
+    # jour, face au marché et au modèle technique en observation (ml.suivi_precision).
+    # AVANT le réentraînement technique : un jour se mesure avec le modèle qui était en
+    # place, jamais avec un modèle dont les poids ont été réglés sur lui.
+    async with etape(AsyncSessionLocal, "suivi_precision"):
+        from ml.suivi_precision import calculer_et_persister as _calc_suivi
+        async with AsyncSessionLocal() as sp_session:
+            _sp = await _calc_suivi(sp_session)
+        log.info("pipeline.suivi_precision_done", **_sp)
     # MÉLANGE APPRIS SUR LES ARRIVÉES — la proba de victoire servie, donc la cote
     # juste et le rang affiché (ml.melange_arrivees). Ses entrées (proba brute du
     # modèle, cote) ne dépendent d'aucune étape ci-dessus : l'ordre ne change rien à

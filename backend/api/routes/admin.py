@@ -2269,6 +2269,26 @@ async def supervision_outils_apprentissage(
     return await etat_outils_apprentissage(db)
 
 
+@router.get("/supervision/suivi-precision")
+async def supervision_suivi_precision(
+    jours: int = 60,
+    segment: str = "tout",
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Précision de ce qui a été servi à T-10, jour par jour, contre les arrivées.
+
+    Classement (n°1 gagnant, AUC intra-course), justesse des cotes justes
+    (log-vraisemblance du gagnant, calibration par tranche), placement, référence
+    marché sur les mêmes courses, modèle technique en observation, valeurs détectées
+    réglées au rapport PMU officiel. Calculé par l'étape nocturne `suivi_precision`
+    et persisté : aucune valeur n'est estimée à la volée.
+    """
+    from ml.suivi_precision import lire_suivi
+    segment = segment if segment in ("tout", "attele", "plat", "monte", "obstacle") else "tout"
+    return await lire_suivi(db, jours=max(7, min(int(jours), 365)), segment=segment)
+
+
 @router.get("/supervision/pulse")
 async def supervision_pulse(
     db: AsyncSession = Depends(get_db),

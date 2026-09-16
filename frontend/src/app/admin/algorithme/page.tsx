@@ -33,6 +33,7 @@ import OverviewTab from "@/components/admin/supervision/OverviewTab";
 import ParisTab from "@/components/admin/supervision/ParisTab";
 import RentabiliteTab from "@/components/admin/supervision/RentabiliteTab";
 import ModeleTab from "@/components/admin/supervision/ModeleTab";
+import PrecisionTab from "@/components/admin/supervision/PrecisionTab";
 import ApprentissageTab from "@/components/admin/supervision/ApprentissageTab";
 import OutilsApprentissage, {
   type OutilsApprentissagePayload,
@@ -46,6 +47,7 @@ const TABS = [
   { key: "paris", label: "Types de paris" },
   { key: "rentabilite", label: "Rentabilité" },
   { key: "modele", label: "Modèle" },
+  { key: "precision", label: "Précision" },
   { key: "apprentissage", label: "Apprentissage" },
   { key: "outils", label: "Outils" },
 ] as const;
@@ -277,6 +279,7 @@ export default function SupervisionIAPage() {
           loadingHistory={loadingHistory}
         />
       )}
+      {tab === "precision" && <PrecisionTab />}
       {tab === "outils" && <OutilsApprentissage data={outils} />}
 
       <p className="pb-2 text-center text-xs leading-relaxed text-muted-foreground">
