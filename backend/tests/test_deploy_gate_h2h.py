@@ -454,3 +454,38 @@ async def test_h2h_delta_porte_sur_le_classement_pas_sur_l_AUC_poolee(monkeypatc
 
     assert res["delta"] == pytest.approx(res["rank_challenger"] - res["rank_champion"])
     assert "auc_challenger" in res and "auc_champion" in res
+
+
+class _FakeWinModel(_FakeModel):
+    def predict_win_proba(self, X):
+        return np.clip(self.predict_proba(X), 1e-3, None)
+
+
+@pytest.mark.asyncio
+async def test_h2h_mesure_aussi_le_modele_de_victoire(monkeypatch):
+    """Le duel porte aussi la cote juste servie (modèle de VICTOIRE) : un challenger
+    nettement moins juste est prouvé moins bon et bloquerait la promotion."""
+    from ml import pipeline as pl
+    X, y = _holdout(400)
+    session = _FakeSession(X["course_id"].unique())
+    monkeypatch.setattr(pl.BlackTurfEnsemble, "load_current",
+                        classmethod(lambda cls: _FakeWinModel(0.95)))
+
+    res = await pl._head_to_head_auc(session, _FakeWinModel(0.30), X, y,
+                                     _FakeMV(pd.Timestamp("2026-06-29")), y_win_hold=y)
+
+    v = res["victoire"]
+    assert v is not None and v["n_courses"] == 400
+    assert v["moyenne"] < 0 and pl._victoire_bloque(v) is True
+
+
+@pytest.mark.asyncio
+async def test_h2h_sans_modele_de_victoire_ne_mesure_rien(monkeypatch):
+    from ml import pipeline as pl
+    X, y = _holdout(400)
+    session = _FakeSession(X["course_id"].unique())
+    monkeypatch.setattr(pl.BlackTurfEnsemble, "load_current",
+                        classmethod(lambda cls: _FakeModel(0.95)))
+    res = await pl._head_to_head_auc(session, _FakeModel(0.30), X, y,
+                                     _FakeMV(pd.Timestamp("2026-06-29")), y_win_hold=y)
+    assert res["victoire"] is None

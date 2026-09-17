@@ -8,6 +8,7 @@ Flux :
   predict_course()  → prédictions + value bets + recommandations
 """
 import asyncio
+import math
 import uuid
 import structlog
 import numpy as np
@@ -150,6 +151,7 @@ def _should_deploy(
     market_gate_enabled: bool = False,
     rank_delta_market: Optional[float] = None,
     market_gate_margin: float = 0.0,
+    victoire_bloque: bool = False,
 ) -> bool:
     """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
 
@@ -230,6 +232,10 @@ def _should_deploy(
     structural_replace = (
         current_is_synth or no_current or current_unreliable or data_jump
     )
+    # MODÈLE DE VICTOIRE (cf. `_victoire_bloque`) : un challenger dont la cote juste
+    # servie est prouvée moins juste n'est pas promu, sauf remplacement structurel.
+    if victoire_bloque and not structural_replace:
+        return False
     # Mérite de ranking : head-to-head si mesuré, sinon walk-forward (repli).
     if h2h_delta is not None:
         ranking_improvement = h2h_delta >= 0.0
@@ -247,6 +253,77 @@ def _should_deploy(
             and not ranking_improvement and not structural_replace):
         return False
     return structural_replace or ranking_acceptable
+
+
+# ── Modèle de VICTOIRE au contrôle de promotion ──────────────────────────────
+# La cote juste affichée vient du modèle de victoire (proba brute mélangée à la
+# cote par `melange_arrivees`), pas de l'ensemble top-3 que juge `h2h_delta`. Un
+# modèle de victoire dégradé passait donc sans contrôle. On mesure, sur le même
+# hold-out que le duel de classement, la log-vraisemblance du gagnant de la proba
+# SERVIE (brute × cote, β en service) du champion et du challenger, course par
+# course. Le challenger n'est bloqué que s'il est PROUVÉ moins bon (borne haute de
+# l'IC à 95 % sous zéro) ET d'un écart matériel : un contrôle qui bloquerait sur
+# du bruit gèlerait le modèle, comme en juin-août.
+VICTOIRE_TOLERANCE = 0.002
+VICTOIRE_MIN_COURSES = 300
+
+
+def _vraisemblance_victoire(p_win, y_win, groupes, cotes,
+                            betas: Optional[tuple[float, float]]) -> dict:
+    """{course_id: −ln p(gagnant)} de la proba de victoire servie. Fonction pure.
+
+    Proba servie = mélange `melange_arrivees` quand β et cotes sont disponibles,
+    sinon proba brute normalisée dans la course. Course sans gagnant unique ou
+    sans proba exploitable : absente.
+    """
+    from ml import melange_arrivees as _ma
+    p_win = np.asarray(p_win, dtype=float)
+    y = np.asarray(y_win, dtype=float)
+    g = np.asarray(groupes)
+    c = np.asarray(cotes, dtype=float) if cotes is not None else None
+    out: dict = {}
+    ordre = np.argsort(g, kind="stable")
+    bornes = np.flatnonzero(np.r_[True, g[ordre][1:] != g[ordre][:-1], True])
+    for a, b in zip(bornes[:-1], bornes[1:]):
+        idx = ordre[a:b]
+        yy = y[idx]
+        if len(idx) < 2 or yy.sum() != 1:
+            continue
+        p = p_win[idx]
+        if not np.isfinite(p).all() or p.sum() <= 0:
+            continue
+        servi = None
+        if betas is not None and c is not None:
+            servi = _ma.appliquer(p, c[idx], betas[0], betas[1])
+        if servi is None:
+            servi = p / p.sum()
+        out[g[idx[0]]] = -math.log(max(float(servi[int(np.argmax(yy))]), 1e-15))
+    return out
+
+
+def _ecart_victoire(ll_champion: dict, ll_challenger: dict) -> Optional[dict]:
+    """Écart apparié (champion − challenger ; > 0 = challenger plus juste) + IC 95 %."""
+    communs = [k for k in ll_challenger if k in ll_champion]
+    if len(communs) < VICTOIRE_MIN_COURSES:
+        return None
+    d = np.array([ll_champion[k] - ll_challenger[k] for k in communs])
+    m = float(d.mean())
+    se = float(d.std(ddof=1) / math.sqrt(len(d)))
+    return {"moyenne": m, "ic95": [m - 1.96 * se, m + 1.96 * se], "n_courses": len(d)}
+
+
+def _arrondir_victoire(ecart: Optional[dict]) -> Optional[dict]:
+    if not ecart:
+        return None
+    return {"ecart": round(ecart["moyenne"], 4), "ic95": [round(x, 4) for x in ecart["ic95"]],
+            "n_courses": ecart["n_courses"], "bloque": _victoire_bloque(ecart)}
+
+
+def _victoire_bloque(ecart: Optional[dict], tolerance: float = VICTOIRE_TOLERANCE) -> bool:
+    """Le modèle de victoire du challenger est-il PROUVÉ moins juste ?"""
+    if not ecart:
+        return False
+    return ecart["ic95"][1] < 0.0 and ecart["moyenne"] < -tolerance
 
 
 def _motif_promotion(
@@ -509,8 +586,12 @@ async def _head_to_head_auc(
     X_hold: pd.DataFrame,
     y_hold: pd.Series,
     current_mv: Optional[ModelVersion],
+    y_win_hold: Optional[pd.Series] = None,
 ) -> Optional[dict]:
     """AUC du champion ET du challenger sur EXACTEMENT le même échantillon.
+
+    Avec `y_win_hold`, mesure aussi la cote juste servie des deux modèles de
+    victoire (clé `victoire`, cf. `_ecart_victoire`).
 
     L'échantillon = le hold-out temporel du challenger (courses qu'il n'a pas vues),
     RESTREINT aux courses postérieures à la FIN D'ENTRAÎNEMENT du champion — donc
@@ -595,6 +676,29 @@ async def _head_to_head_auc(
             _rang_melange(y_oos, probas, _cotes, _groupes, _alpha_max),
         )
 
+    # Cote juste servie des modèles de victoire : β du mélange en service.
+    _yw_oos = y_win_hold[mask] if (y_win_hold is not None and len(y_win_hold) == len(mask)) else None
+    _betas = None
+    if _yw_oos is not None:
+        try:
+            from ml import melange_arrivees as _ma
+            await _ma.charger(session)
+            _betas = _ma.en_service()
+        except Exception as e:                                   # noqa: BLE001
+            log.warning("pipeline.h2h.melange_indisponible", err=str(e)[:160])
+
+    def _ll_victoire(modele) -> Optional[dict]:
+        if _yw_oos is None:
+            return None
+        try:
+            pw = modele.predict_win_proba(X_oos)
+            if pw is None:
+                return None
+            return _vraisemblance_victoire(pw, _yw_oos, _groupes, _cotes, _betas)
+        except Exception as e:                                   # noqa: BLE001
+            log.warning("pipeline.h2h.victoire_scoring_failed", err=str(e)[:160])
+            return None
+
     try:
         champion = BlackTurfEnsemble.load_current()
         if champion is None:
@@ -603,6 +707,7 @@ async def _head_to_head_auc(
         # du schéma de features entre les deux générations.
         auc_champion, rank_champion, servi_champion = _mesures(
             champion.predict_proba(X_oos))
+        ll_win_champion = _ll_victoire(champion)
     except Exception as e:
         log.warning("pipeline.h2h.champion_scoring_failed", err=str(e)[:160])
         return None
@@ -616,6 +721,15 @@ async def _head_to_head_auc(
     except Exception as e:
         log.warning("pipeline.h2h.challenger_scoring_failed", err=str(e)[:160])
         return None
+    ll_win_challenger = _ll_victoire(challenger)
+    victoire = (_ecart_victoire(ll_win_champion, ll_win_challenger)
+                if ll_win_champion is not None and ll_win_challenger is not None else None)
+    log.info("pipeline.h2h.victoire",
+             mesure=victoire is not None, melange=_betas is not None,
+             ecart=round(victoire["moyenne"], 4) if victoire else None,
+             ic95=[round(x, 4) for x in victoire["ic95"]] if victoire else None,
+             n_courses=victoire["n_courses"] if victoire else None,
+             bloque=_victoire_bloque(victoire))
 
     # Le MARCHÉ passe le même examen, sur le même échantillon. C'est la référence
     # qui manquait : sans elle, champion et challenger peuvent se succéder
@@ -674,6 +788,7 @@ async def _head_to_head_auc(
         "alpha_max": _alpha_max,
         "n_rows": n_rows,
         "n_courses": n_courses,
+        "victoire": victoire,
     }
 
 
@@ -1616,6 +1731,8 @@ async def _do_retraining(mois: int, label: str) -> dict:
         from ml.models import temporal_holdout_mask
         _hm = temporal_holdout_mask(X)
         X_hold, y_hold = X[_hm].copy(), y[_hm].copy()
+        yw_hold = (y_win[_hm].copy()
+                   if (y_win is not None and len(y_win) == len(y)) else None)
         # Dernière course RÉELLEMENT apprise (migration 0043). Elle sera la borne de
         # l'arbitrage champion/challenger de la nuit suivante, où `created_at` — la date
         # de PROMOTION — ne vaut rien : le hold-out couvre les 20 % de courses les plus
@@ -1700,8 +1817,11 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 _betting_edge_ok = True
 
         # Arbitrage champion/challenger sur un hold-out commun (cf. _head_to_head_auc).
-        _h2h = await _head_to_head_auc(session, model, X_hold, y_hold, current_mv)
-        del X_hold, y_hold
+        _h2h = await _head_to_head_auc(session, model, X_hold, y_hold, current_mv,
+                                       y_win_hold=yw_hold)
+        del X_hold, y_hold, yw_hold
+        _victoire = (_h2h or {}).get("victoire")
+        _victoire_bloquee = _victoire_bloque(_victoire)
         _release_memory(f"{label}.holdout_freed")
         _h2h_delta = _h2h["delta"] if _h2h else None
 
@@ -1755,6 +1875,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
             market_gate_enabled=_AF.market_gate,
             rank_delta_market=_rank_delta_market,
             market_gate_margin=_AF.market_gate_margin,
+            victoire_bloque=_victoire_bloquee,
         ):
             version_num = await _get_next_version_num(session)
             model.deploy(version_num)
@@ -1848,6 +1969,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 "wf_precedent": round(current_wf, 4),
                 "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 "dette": round(_dette_apres, 4),
+                "victoire": _arrondir_victoire(_victoire),
             }
 
             # AUTO-PURGE : garder seulement les N derniers .pkl archivés (model_v*.pkl
@@ -1873,6 +1995,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
             # divergeront un jour.
             _raison_rejet = (
                 "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
+                else "victoire" if _victoire_bloquee
                 else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
                                     and not (_h2h_delta is not None and _h2h_delta >= 0)
                                     and new_wf < current_wf)
@@ -1887,6 +2010,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 "wf_champion": round(current_wf, 4),
                 "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 "dette": round(_dette, 4),
+                "victoire": _arrondir_victoire(_victoire),
             }
             log.warning(
                 "pipeline.retrain.rollback",
