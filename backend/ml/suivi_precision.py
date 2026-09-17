@@ -24,7 +24,10 @@ Ce module compare, course par course, ce qui a RÉELLEMENT été servi avant le 
     mêmes courses, uniquement quand elles sont postérieures à sa fin
     d'entraînement — jamais en échantillon ;
   - valeurs détectées : les paris de valeur de la course par niveau, réglés au
-    rapport PMU officiel du Simple Gagnant.
+    rapport PMU officiel du Simple Gagnant ;
+  - paris par type : 1 € sur la meilleure combinaison (gagnant, placé, couplés,
+    trio) du classement servi, des favoris du marché et du modèle technique, réglé
+    au rapport officiel — ce qu'une proba plus juste rapporte réellement.
 
 Aucune valeur n'est inventée : une journée sans course mesurable n'a pas de ligne,
 un indicateur sans observation vaut `None`. Les sommes (et sommes de carrés des
@@ -61,6 +64,8 @@ MIN_COURSES_GLISSANT = 100
 # Premier jour où les prédictions sont figées à T-10 (avant : la veille au soir).
 PREMIER_JOUR = date(2026, 8, 17)
 WINSOR = 30.0
+# Version des mesures stockées : 2 = paris par type (servi / marché / technique).
+VERSION = 2
 
 # Tranches de COTE JUSTE (1/proba) pour la calibration.
 TRANCHES = ((1.0, 3.0), (3.0, 6.0), (6.0, 11.0), (11.0, 20.0), (20.0, 40.0), (40.0, 1e9))
@@ -78,16 +83,110 @@ def _auc(scores: np.ndarray, g: int) -> float:
     return ma._auc_course(np.asarray(scores, dtype=float), g)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Paris joués sur la meilleure combinaison de chaque source, au rapport officiel
+# ──────────────────────────────────────────────────────────────────────────────
+# Une proba plus juste ne rapporte que si le RAPPORT ne l'a pas déjà intégrée : le PMU
+# paie la cote de clôture, et le marché des dix dernières minutes rachète ce que le
+# modèle technique voyait à T-10 (mesuré le 17/09 : contre la cote de clôture, son
+# gain de vraisemblance tombe à +0,0015 [−0,002 ; +0,005]). La seule mesure qui
+# tranche est donc l'argent : pour chaque source (servi, marché, technique), 1 € sur
+# sa meilleure combinaison de chaque type, réglé au rapport PMU officiel.
+TYPES_PARIS = (("sg", "Simple Gagnant"), ("sp", "Simple Placé"), ("cg", "Couplé Gagnant"),
+               ("cp", "Couplé Placé"), ("trio", "Trio"))
+SOURCES_PARIS = ("servi", "marche", "tech")
+
+
+def _harville(p: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(couplé gagnant n×n, trio n×n×n, placé n) sous Harville, ordre indifférent."""
+    import itertools
+    n = len(p)
+    p = np.clip(p / p.sum(), 1e-12, 1.0)
+    p2 = p[:, None] * p[None, :] / np.clip(1.0 - p[:, None], 1e-12, None)
+    np.fill_diagonal(p2, 0.0)
+    p3 = p2[:, :, None] * p[None, None, :] / np.clip(1.0 - p[:, None, None] - p[None, :, None],
+                                                     1e-12, None)
+    i = np.arange(n)
+    p3[i, i, :] = 0.0
+    p3[i, :, i] = 0.0
+    p3[:, i, i] = 0.0
+    trio = sum(p3.transpose(perm) for perm in itertools.permutations(range(3)))
+    place = p2.sum(0) + p2.sum(1) + p3.sum((0, 1))
+    return p2 + p2.T, trio, place
+
+
+def selections(numeros: Sequence[int], p1: Sequence[float],
+               p3: Optional[Sequence[float]] = None) -> Optional[dict]:
+    """{code type: numéros joués} — la combinaison la plus probable de chaque type.
+
+    Gagnant : plus forte proba de victoire. Placé : plus forte proba placé fournie
+    (Harville sinon). Couplés et Trio : Harville sur la proba de victoire.
+    """
+    nums = [int(x) for x in numeros]
+    a = np.asarray(p1, dtype=float)
+    if len(nums) < 3 or a.size != len(nums) or not np.isfinite(a).all() or a.sum() <= 0:
+        return None
+    cg, trio, place = _harville(a)
+    if p3 is not None:
+        b = np.asarray(p3, dtype=float)
+        if b.size == len(nums) and np.isfinite(b).all():
+            place = b
+    cp = trio.sum(2)                                  # les deux dans les 3 premiers
+    iu = np.triu_indices(len(nums), 1)
+    k_cg, k_cp = int(np.argmax(cg[iu])), int(np.argmax(cp[iu]))
+    i, j, k = np.unravel_index(int(np.argmax(trio)), trio.shape)
+    return {
+        "sg": (nums[int(np.argmax(a))],),
+        "sp": (nums[int(np.argmax(place))],),
+        "cg": tuple(sorted((nums[iu[0][k_cg]], nums[iu[1][k_cg]]))),
+        "cp": tuple(sorted((nums[iu[0][k_cp]], nums[iu[1][k_cp]]))),
+        "trio": tuple(sorted((nums[i], nums[j], nums[k]))),
+    }
+
+
+def mesurer_paris(sel_par_source: dict, regler) -> dict:
+    """Retours à 1 € par (type × source) et écarts appariés.
+
+    `regler(nom_type, numeros)` → retour pour 1 € (rapport si gagné, 0 si perdu) ou
+    None quand le pari n'est pas offert ou que le rapport gagnant n'est pas publié —
+    un pari indéterminé n'est compté ni gagné ni perdu. Écarts sur retours plafonnés
+    à ×30 : technique − servi, servi − marché.
+    """
+    m: dict = {}
+    for code, nom in TYPES_PARIS:
+        ret = {}
+        for src, sel in sel_par_source.items():
+            if not sel:
+                continue
+            r = regler(nom, list(sel[code]))
+            if r is None:
+                continue
+            ret[src] = float(r)
+            m[f"pt_{code}_{src}_n"] = 1
+            m[f"pt_{code}_{src}_r"] = float(r)
+            m[f"pt_{code}_{src}_rw"] = float(min(r, WINSOR))
+        w = {s: min(r, WINSOR) for s, r in ret.items()}
+        if "tech" in w and "servi" in w:
+            m[f"d_pt_{code}_tech"] = w["tech"] - w["servi"]
+            m[f"nd_pt_{code}_tech"] = 1
+        if "servi" in w and "marche" in w:
+            m[f"d_pt_{code}_servi"] = w["servi"] - w["marche"]
+            m[f"nd_pt_{code}_servi"] = 1
+    return m
+
+
 def mesurer_course(numeros: Sequence[int], servi1: Sequence[float], servi3: Sequence[float],
                    cotes: Sequence[float], gagnant: int, places: set,
                    tech1: Optional[Sequence[float]] = None,
                    tech3: Optional[Sequence[float]] = None,
                    sg_rang1: Optional[dict] = None,
-                   valeurs: Iterable[dict] = ()) -> Optional[dict]:
+                   valeurs: Iterable[dict] = (),
+                   regler=None) -> Optional[dict]:
     """Mesures d'une course, ou None si elle n'est pas mesurable.
 
     `sg_rang1` = {"gagne": bool, "rapport": float|None} du Simple Gagnant sur le n°1.
     `valeurs` = [{"niveau": int, "gagne": bool, "rapport": float|None}].
+    `regler` = voir `mesurer_paris` (None : pas de mesure des paris par type).
     """
     nums = [int(n) for n in numeros]
     if gagnant not in nums or len(nums) < ma.MIN_PARTANTS:
@@ -165,6 +264,13 @@ def mesurer_course(numeros: Sequence[int], servi1: Sequence[float], servi3: Sequ
         t[2] += float(r)
         t[3] += float(min(r, WINSOR))
     m["valeurs"] = vb
+
+    if regler is not None:
+        sources = {"servi": selections(nums, s1, s3 if np.isfinite(s3).all() else None),
+                   "marche": selections(nums, q)}
+        if m.get("n_tech"):
+            sources["tech"] = selections(nums, tech1, tech3)
+        m.update(mesurer_paris(sources, regler))
     return m
 
 
@@ -175,8 +281,12 @@ def mesurer_course(numeros: Sequence[int], servi1: Sequence[float], servi3: Sequ
 _SOMMES = ("n", "hit_servi", "hit_marche", "top3_servi", "auc_servi", "auc_marche",
            "ll_servi", "ll_marche", "ll3_servi", "n_partants3", "prec3_servi",
            "n_tech", "hit_tech", "auc_tech", "ll_tech", "ll3_tech", "n_partants3_tech",
-           "sg1_n", "sg1_retour", "sg1_retour_w")
-_ECARTS = ("d_auc", "d_ll", "d_auc_tech", "d_ll_tech")
+           "sg1_n", "sg1_retour", "sg1_retour_w") + tuple(
+    f"pt_{code}_{src}_{suffixe}" for code, _ in TYPES_PARIS for src in SOURCES_PARIS
+    for suffixe in ("n", "r", "rw")) + tuple(
+    f"nd_pt_{code}_{src}" for code, _ in TYPES_PARIS for src in ("tech", "servi"))
+_ECARTS = ("d_auc", "d_ll", "d_auc_tech", "d_ll_tech") + tuple(
+    f"d_pt_{code}_{src}" for code, _ in TYPES_PARIS for src in ("tech", "servi"))
 
 
 def cumuler(mesures: Iterable[dict]) -> dict:
@@ -271,7 +381,28 @@ def lire_cumul(tot: dict) -> dict:
              "roi": round(v[2] / v[0] - 1, 4), "roi_winsorise": round(v[3] / v[0] - 1, 4)}
             for niv, v in sorted((tot.get("valeurs") or {}).items()) if v[0]
         ],
+        "paris_par_type": _lire_paris(tot),
     }
+    return out
+
+
+def _lire_paris(tot: dict) -> list[dict]:
+    out = []
+    for code, nom in TYPES_PARIS:
+        ligne: dict = {"type": nom}
+        for src in SOURCES_PARIS:
+            n = int(tot.get(f"pt_{code}_{src}_n") or 0)
+            ligne[src] = ({"paris": n,
+                           "roi": round(tot[f"pt_{code}_{src}_r"] / n - 1, 4),
+                           "roi_winsorise": round(tot[f"pt_{code}_{src}_rw"] / n - 1, 4)}
+                          if n else None)
+        if ligne["servi"] is None:
+            continue
+        for src, cle in (("tech", "technique_vs_servi"), ("servi", "servi_vs_marche")):
+            k = f"d_pt_{code}_{src}"
+            ligne[cle] = _moyenne_ic(tot.get(f"sum_{k}", 0.0), tot.get(f"sq_{k}", 0.0),
+                                     int(tot.get(f"n{k}") or 0))
+        out.append(ligne)
     return out
 
 
@@ -309,7 +440,7 @@ def _segment(discipline: Optional[str]) -> str:
 
 async def mesurer_jour(session: AsyncSession, j: date) -> dict[str, dict]:
     """{segment: cumul} des courses du jour `j` (heure de Paris)."""
-    from services.bet_settlement import settle_pari
+    from services.bet_settlement import _RAPPORT_KEYS, settle_pari
 
     debut, fin = _bornes_jour(j)
     try:
@@ -402,6 +533,15 @@ async def mesurer_jour(session: AsyncSession, j: date) -> dict[str, dict]:
             return {"gagne": r["gagne"], "rapport": r["rapport_reel"],
                     "rapport_connu": (not r["gagne"]) or r["rapport_reel"] is not None}
 
+        def _regler(nom: str, sel: list) -> Optional[float]:
+            # Type non offert sur la course (aucun rapport publié) : pari indéterminé.
+            if not any((rapports or {}).get(k) for k in _RAPPORT_KEYS.get(nom, ())):
+                return None
+            r = settle_pari(nom, sel, classement, rapports, len(nums), detail)
+            if not r["gagne"]:
+                return 0.0
+            return float(r["rapport_reel"]) if r["rapport_reel"] else None
+
         valeurs = []
         for num, niv in vb_par_course.get(cid, []):
             if num in nums and niv:
@@ -409,7 +549,8 @@ async def mesurer_jour(session: AsyncSession, j: date) -> dict[str, dict]:
                 if v["rapport_connu"]:
                     valeurs.append({"niveau": niv, "gagne": v["gagne"], "rapport": v["rapport"]})
         m = mesurer_course(nums, s1, [x[2] for x in l], cotes, gagnant, places,
-                           tech1=t1, tech3=t3, sg_rang1=_sg(rang1), valeurs=valeurs)
+                           tech1=t1, tech3=t3, sg_rang1=_sg(rang1), valeurs=valeurs,
+                           regler=_regler)
         if m is None:
             continue
         par_segment.setdefault("tout", []).append(m)
@@ -424,7 +565,10 @@ async def mesurer_jour(session: AsyncSession, j: date) -> dict[str, dict]:
 # en place quand le jour a été mesuré pour la première fois (étape nocturne placée
 # AVANT le réentraînement technique).
 _CLES_TECHNIQUE = ("n_tech", "hit_tech", "auc_tech", "ll_tech", "ll3_tech", "n_partants3_tech",
-                   "sum_d_auc_tech", "sq_d_auc_tech", "sum_d_ll_tech", "sq_d_ll_tech")
+                   "sum_d_auc_tech", "sq_d_auc_tech", "sum_d_ll_tech", "sq_d_ll_tech") + tuple(
+    k for code, _ in TYPES_PARIS
+    for k in (f"pt_{code}_tech_n", f"pt_{code}_tech_r", f"pt_{code}_tech_rw",
+              f"sum_d_pt_{code}_tech", f"sq_d_pt_{code}_tech", f"nd_pt_{code}_tech"))
 
 
 def figer_technique(nouveau: dict, ancien: Optional[dict]) -> dict:
@@ -445,7 +589,9 @@ async def calculer_et_persister(session: AsyncSession,
     for j, seg, d in (await session.execute(text(
             "SELECT jour, segment, data FROM suivi_precision"))).all():
         existants[(j, seg)] = json.loads(d) if isinstance(d, str) else d
-    deja = {j for j, _ in existants}
+    # Un jour mesuré par une version plus ancienne du suivi (mesures manquantes) est
+    # recalculé une fois ; ses mesures techniques restent figées.
+    deja = {j for (j, _), d in existants.items() if int(d.get("version") or 1) >= VERSION}
     jours = []
     j = PREMIER_JOUR
     while j < aujourd_hui:
@@ -459,6 +605,7 @@ async def calculer_et_persister(session: AsyncSession,
                               {"j": j.isoformat()})
         for seg, cumul in segments.items():
             cumul = figer_technique(cumul, existants.get((j.isoformat(), seg)))
+            cumul["version"] = VERSION
             await session.execute(text("""
                 INSERT INTO suivi_precision (jour, segment, data, updated_at)
                 VALUES (:j, :s, :d, CURRENT_TIMESTAMP)

@@ -44,6 +44,26 @@ interface Cumul {
   simple_gagnant_n1: { paris: number; roi: number; roi_winsorise: number } | null;
   calibration_cote_juste: Array<{ tranche: string; partants: number; annonce: number; realise: number; victoires: number }>;
   valeurs_detectees: Array<{ niveau: number; paris: number; gagnants: number; roi: number; roi_winsorise: number }>;
+  paris_par_type?: Array<{
+    type: string;
+    servi: Roi | null;
+    marche: Roi | null;
+    tech: Roi | null;
+    servi_vs_marche: Ecart;
+    technique_vs_servi: Ecart;
+  }>;
+}
+
+type Roi = { paris: number; roi: number; roi_winsorise: number };
+
+function RoiLu({ r }: { r: Roi | null }) {
+  if (!r) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span>
+      <span className={r.roi >= 0 ? "text-emerald-700" : "text-red-700"}>{signe(r.roi * 100, 1)} %</span>
+      <span className="block text-[10.5px] text-muted-foreground">{num(r.paris)} paris</span>
+    </span>
+  );
 }
 
 interface SuiviPayload {
@@ -269,6 +289,41 @@ export default function PrecisionTab() {
             <Note>Un ROI sur quelques centaines de paris a une erreur-type de 10 à 20 points : lire la tendance sur 30 jours, jamais sur une journée.</Note>
           </Section>
         </div>
+      )}
+
+      {c?.paris_par_type && c.paris_par_type.length > 0 && (
+        <Section
+          title="Ce que rapporterait chaque classement, par type de pari"
+          desc="1 € par course sur la combinaison la plus probable de chaque source (gagnant, placé, couplés et trio par Harville), réglé au rapport PMU officiel. Le PMU paie la cote de clôture : une proba plus juste à T-10 ne rapporte que si le marché ne l'a pas rattrapée avant le départ. C'est cette mesure qui décidera si le modèle technique peut piloter les plans."
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-[12px]">
+              <thead>
+                <tr className="text-left text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                  <th className="py-1.5 pr-3">Pari</th>
+                  <th className="py-1.5 pr-3 text-right">Classement servi</th>
+                  <th className="py-1.5 pr-3 text-right">Favoris du marché</th>
+                  <th className="py-1.5 pr-3">Servi − marché (×30)</th>
+                  <th className="py-1.5 pr-3 text-right">Modèle technique</th>
+                  <th className="py-1.5">Technique − servi (×30)</th>
+                </tr>
+              </thead>
+              <tbody className="tabular-nums align-top">
+                {c.paris_par_type.map((t) => (
+                  <tr key={t.type} className="border-t border-border/60">
+                    <td className="py-1.5 pr-3 font-medium">{t.type}</td>
+                    <td className="py-1.5 pr-3 text-right"><RoiLu r={t.servi} /></td>
+                    <td className="py-1.5 pr-3 text-right"><RoiLu r={t.marche} /></td>
+                    <td className="py-1.5 pr-3"><EcartLu e={t.servi_vs_marche} mieux="rapporte plus — prouvé" /></td>
+                    <td className="py-1.5 pr-3 text-right"><RoiLu r={t.tech} /></td>
+                    <td className="py-1.5"><EcartLu e={t.technique_vs_servi} mieux="rapporte plus — prouvé" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Note>Écarts en euros par euro joué, gains plafonnés à ×30, course par course sur les mêmes courses. Le modèle technique n&apos;est compté que sur les courses parties après son entraînement.</Note>
+        </Section>
       )}
     </div>
   );

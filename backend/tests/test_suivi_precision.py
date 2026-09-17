@@ -82,3 +82,66 @@ def test_les_mesures_techniques_d_un_jour_restent_figees():
     assert fige["n_tech"] == avant["n_tech"]    # partie technique : celle d'origine
     assert fige["ll_tech"] == avant["ll_tech"]
     assert sp.figer_technique(nouveau, None) is nouveau
+
+
+def _regler_arrivee(arrivee, rapports, offerts=("Simple Gagnant", "Simple Placé", "Couplé Gagnant",
+                                               "Couplé Placé", "Trio")):
+    """Règlement simplifié d'une arrivée 1-2-3 pour les tests."""
+    top2, top3 = set(arrivee[:2]), set(arrivee[:3])
+
+    def regler(nom, sel):
+        if nom not in offerts:
+            return None
+        s = set(sel)
+        gagne = {"Simple Gagnant": s == {arrivee[0]}, "Simple Placé": s <= top3,
+                 "Couplé Gagnant": s == top2, "Couplé Placé": s <= top3,
+                 "Trio": s == top3}[nom]
+        return rapports.get((nom, tuple(sorted(s)))) if gagne else 0.0
+    return regler
+
+
+def test_chaque_source_joue_sa_meilleure_combinaison():
+    sel = sp.selections([1, 2, 3, 4, 5], [0.40, 0.25, 0.15, 0.12, 0.08])
+    assert sel["sg"] == (1,)
+    assert sel["cg"] == (1, 2)
+    assert sel["trio"] == (1, 2, 3)
+    # Proba placé fournie : c'est elle qui choisit le placé, pas Harville.
+    assert sp.selections([1, 2, 3, 4, 5], [0.40, 0.25, 0.15, 0.12, 0.08],
+                         [0.5, 0.9, 0.4, 0.3, 0.2])["sp"] == (2,)
+    assert sp.selections([1, 2], [0.5, 0.5]) is None
+
+
+def test_les_paris_par_type_au_rapport_reel_et_les_ecarts_apparies():
+    rapports = {("Simple Gagnant", (1,)): 2.0, ("Trio", (1, 2, 3)): 12.0,
+                ("Couplé Gagnant", (1, 2)): 4.0, ("Simple Placé", (1,)): 1.2,
+                ("Couplé Placé", (1, 2)): 2.0}
+    m = _course(gagnant=1, tech1=[0.10, 0.15, 0.20, 0.25, 0.30],
+                regler=_regler_arrivee([1, 2, 3], rapports))
+    # Servi (1 > 2 > 3) : tout gagne. Marché (cotes 2 < 4 < 6) : pareil.
+    assert m["pt_sg_servi_r"] == 2.0 and m["pt_trio_servi_r"] == 12.0
+    assert m["pt_trio_marche_r"] == 12.0 and m["d_pt_trio_servi"] == 0.0
+    # Technique (5 > 4 > 3) : Trio perdu → écart apparié −12.
+    assert m["pt_trio_tech_r"] == 0.0 and m["d_pt_trio_tech"] == -12.0
+    lu = sp.lire_cumul(sp.cumuler([m]))
+    trio = next(t for t in lu["paris_par_type"] if t["type"] == "Trio")
+    assert trio["servi"]["roi"] == pytest.approx(11.0)
+    assert trio["tech"]["roi"] == pytest.approx(-1.0)
+    assert trio["technique_vs_servi"]["n"] == 1
+
+
+def test_un_pari_non_offert_ou_sans_rapport_n_est_pas_compte():
+    m = _course(gagnant=1, regler=_regler_arrivee([1, 2, 3], {("Simple Gagnant", (1,)): None},
+                                                  offerts=("Simple Gagnant",)))
+    assert "pt_trio_servi_n" not in m           # Trio non offert
+    assert "pt_sg_servi_n" not in m             # gagné mais rapport pas publié
+    lu = sp.lire_cumul(sp.cumuler([m]))
+    assert lu["paris_par_type"] == []
+
+
+def test_les_paris_du_modele_technique_restent_figes():
+    reg = _regler_arrivee([1, 2, 3], {("Simple Gagnant", (1,)): 2.0})
+    avant = sp.cumuler([_course(gagnant=1, tech1=[0.5, 0.2, 0.1, 0.1, 0.1], regler=reg)])
+    nouveau = sp.cumuler([_course(gagnant=1, tech1=[0.1, 0.5, 0.2, 0.1, 0.1], regler=reg)])
+    fige = sp.figer_technique(nouveau, avant)
+    assert fige["pt_sg_tech_r"] == avant["pt_sg_tech_r"] == 2.0
+    assert fige["sum_d_pt_sg_tech"] == avant["sum_d_pt_sg_tech"]
