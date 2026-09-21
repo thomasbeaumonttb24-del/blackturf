@@ -34,11 +34,11 @@ export default function GuideTypesParis() {
     publisher: { "@type": "Organization", name: "BlackTurf", logo: { "@type": "ImageObject", url: "https://blackturf.fr/logo.png" } },
     mainEntityOfPage: "https://blackturf.fr/guides/types-de-paris-pmu",
   };
-  const faqLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: FAQ.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })),
-  };
+  /* Le balisage FAQPage a été retiré le 2026-09-21.
+   *
+   * Google ne produit plus aucun rich result à partir de FAQPage depuis le 7 mai 2026 :
+   * le balisage restait valide, sans risque — et sans effet. Les questions-réponses
+   * restent affichées sur la page, là où elles servent ; c'est le JSON-LD mort qui part. */
   const breadcrumb = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -51,7 +51,6 @@ export default function GuideTypesParis() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(articleLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(faqLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumb) }} />
 
       <SeoHero
