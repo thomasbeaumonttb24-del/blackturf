@@ -93,7 +93,7 @@ export default function Body() {
       </p>
       <p>
         La conclusion pratique va à rebours de l&apos;intuition : ce n&apos;est pas dans les grosses
-        cotes que se cache la valeur, c&apos;est là qu&apos;elle est <em>systématiquement</em>
+        cotes que se cache la valeur, c&apos;est là qu&apos;elle est <em>systématiquement</em>{" "}
         absente. Un outsider ne se joue que sur une raison précise, jamais par principe.
       </p>
 
