@@ -1,16 +1,15 @@
 import {
-  bornesDuMois,
+  decalerJours,
+  fetchJoursResultats,
   fetchSeoIndex,
   jourParis,
-  moisArchives,
-  PREMIER_JOUR_ARCHIVE,
 } from "@/lib/seo";
 import { ARTICLES } from "@/lib/blog";
 import { HIPPODROMES } from "@/lib/hippodromes";
 import { DISCIPLINES } from "@/lib/disciplines";
 
 /**
- * Sitemaps enfants — `/sitemaps/pages.xml` et `/sitemaps/AAAA-MM.xml`.
+ * Sitemaps enfants — `pages.xml`, `resultats.xml`, `courses.xml`.
  *
  * Deux règles Google gouvernent ce fichier :
  *
@@ -24,6 +23,9 @@ import { DISCIPLINES } from "@/lib/disciplines";
  * Seules des URLs canoniques, en 200 et indexables, sont listées : `/login`, `/recherche`
  * et `/value-bets` sont en `noindex` et n'y figurent donc pas — une URL en noindex
  * listée dans un sitemap est un signal contradictoire.
+ *
+ * Les treize sitemaps mensuels qui poussaient dix-neuf mille fiches d'archive ont été
+ * retirés le 2026-09-21 : le raisonnement et les mesures sont dans `app/sitemap.xml`.
  */
 export const revalidate = 3600;
 
@@ -76,17 +78,21 @@ function rendre(entrees: Entree[]): Response {
 
 /** Pages fixes, pages du jour, rubriques éditoriales. */
 function sitemapPages(): Response {
-  const maintenant = new Date().toISOString();
   const aujourdhui = jourParis();
   // Les pages hippodrome et discipline embarquent le programme du jour : leur contenu
   // change bien chaque jour, mais une fois — pas à chaque régénération.
   const debutDeJournee = iso(aujourdhui, "04:00:00");
 
   const entrees: Entree[] = [
-    // Contenu réellement renouvelé plusieurs fois par jour : `maintenant` est honnête.
-    { loc: `${BASE}/programme`, lastmod: maintenant },
-    { loc: `${BASE}/quinte-du-jour`, lastmod: maintenant },
-    { loc: `${BASE}/resultats`, lastmod: maintenant },
+    // Ces trois pages sont refaites chaque jour — programme du jour, quinté du jour,
+    // arrivées du jour. Leur lastmod est celui du DÉBUT de journée et non l'heure de
+    // régénération : le sitemap étant régénéré toutes les heures, `new Date()` y
+    // déplaçait la date à chaque passage du cache. Un lastmod qui bouge sans que le
+    // contenu bouge est un lastmod menteur, et Google finit par ignorer le fichier
+    // entier — la page perdrait plus qu'elle ne gagnerait à se dire fraîche.
+    { loc: `${BASE}/programme`, lastmod: debutDeJournee },
+    { loc: `${BASE}/quinte-du-jour`, lastmod: debutDeJournee },
+    { loc: `${BASE}/resultats`, lastmod: debutDeJournee },
 
     { loc: BASE, lastmod: iso(MAJ.accueil) },
     { loc: `${BASE}/tarifs`, lastmod: iso(MAJ.tarifs) },
@@ -117,30 +123,59 @@ function sitemapPages(): Response {
   return rendre(entrees);
 }
 
-/** Un mois d'archives : les journées d'arrivées et toutes leurs fiches course. */
-async function sitemapMois(ym: string): Promise<Response> {
+/**
+ * `resultats.xml` — toutes les journées qui portent une arrivée.
+ *
+ * C'est l'archive qui a une demande mesurée : Search Console montre des requêtes comme
+ * « arrivée du 10 septembre 2025 » (position 10), « archives quinté 2025 » ou « archives
+ * du pmu » sur ces pages, là où les fiches course d'archive font 9 impressions en
+ * 90 jours. Une journée de résultats rassemble jusqu'à quatre-vingt-dix arrivées et
+ * leurs rapports : c'est la page utile, et c'est elle qui mène aux fiches.
+ *
+ * Une journée passée ne change plus : son lastmod est figé à 21 h UTC, après la dernière
+ * arrivée. La journée en cours a son adresse propre, `/resultats`, et n'est pas listée.
+ */
+async function sitemapResultats(): Promise<Response> {
   const aujourdhui = jourParis();
-  const { debut, fin } = bornesDuMois(ym, aujourdhui);
-  // Le mois en cours bouge encore (courses ajoutées, arrivées publiées) ; un mois clos
-  // est figé et peut être mis en cache longtemps côté Next.
-  const revalider = ym === aujourdhui.slice(0, 7) ? 600 : 21600;
-  const { courses, jours } = await fetchSeoIndex(debut, fin, revalider);
+  const jours = await fetchJoursResultats();
 
-  const entrees: Entree[] = [
-    // Une journée d'arrivées ne change plus après 21 h UTC. La journée en cours a son
-    // adresse propre, `/resultats`, et n'est donc jamais listée ici.
-    ...jours
-      .filter((j) => j !== aujourdhui)
+  return rendre(
+    jours
+      .map((j) => j.jour)
+      .filter((j) => j && j !== aujourdhui)
       .map((j) => ({ loc: `${BASE}/resultats/${j}`, lastmod: iso(j, "21:00:00") })),
-    // Une course terminée est immuable : son lastmod est le jour de la course. Une
-    // course encore à venir voit ses cotes bouger jusqu'au départ.
-    ...courses.map((c) => ({
-      loc: `${BASE}/courses/${c.id}`,
-      lastmod: c.termine ? iso(c.jour, "21:00:00") : new Date().toISOString(),
-    })),
-  ];
+  );
+}
 
-  return rendre(entrees);
+/**
+ * `courses.xml` — la fenêtre de course vivante, et elle seule.
+ *
+ * Une fiche course n'intéresse la recherche que dans les jours qui entourent l'épreuve :
+ * avant, pour les partants et les cotes ; après, pour l'arrivée et les rapports. Passé
+ * ce délai elle se fige en archive, et Google le sait — sur 21 h de journal il ne
+ * consacrait que 7 requêtes sur 267 à ce stock, tout en l'ayant déclaré au sitemap.
+ *
+ * Quatorze jours en arrière, un jour en avant : le lendemain est publié la veille au
+ * soir, et deux semaines couvrent le temps qu'un lecteur met à chercher une arrivée
+ * « récente ». Les fiches plus anciennes restent explorables par `/resultats/<jour>`.
+ */
+const FENETRE_COURSES_JOURS = 14;
+
+async function sitemapCourses(): Promise<Response> {
+  const aujourdhui = jourParis();
+  const debut = decalerJours(aujourdhui, -FENETRE_COURSES_JOURS);
+  const fin = decalerJours(aujourdhui, 1);
+  const { courses } = await fetchSeoIndex(debut, fin, 600);
+
+  return rendre(
+    // Une course terminée est immuable : son lastmod est le jour de la course. Une
+    // course encore à venir voit ses cotes bouger jusqu'au départ — mais un lastmod
+    // à la seconde près serait du bruit : le début de journée suffit à dire « ça bouge ».
+    courses.map((c) => ({
+      loc: `${BASE}/courses/${c.id}`,
+      lastmod: c.termine ? iso(c.jour, "21:00:00") : iso(aujourdhui, "04:00:00"),
+    })),
+  );
 }
 
 export async function GET(
@@ -162,14 +197,14 @@ export async function GET(
   const nom = fichier.slice(0, -".xml".length);
 
   if (nom === "pages") return sitemapPages();
+  if (nom === "resultats") return sitemapResultats();
+  if (nom === "courses") return sitemapCourses();
 
-  // Seuls les mois réellement couverts sont servis : sans cette liste blanche, un robot
-  // fabriquerait « /sitemaps/1998-04.xml » à l'infini et chaque requête interrogerait
-  // l'API pour rien.
-  if (moisArchives().includes(nom)) return sitemapMois(nom);
-
+  // Les anciens `/sitemaps/AAAA-MM.xml` tombent ici depuis le 2026-09-21. Un 404 est la
+  // réponse juste : le fichier n'existe plus, et l'index ne le déclare plus. Google
+  // retire de lui-même un enfant disparu de l'index qu'il a lu.
   return new Response(
-    `Sitemap inconnu. Attendu : pages.xml, ou un mois entre ${PREMIER_JOUR_ARCHIVE.slice(0, 7)}.xml et ${jourParis().slice(0, 7)}.xml.`,
+    "Sitemap inconnu. Attendu : pages.xml, resultats.xml ou courses.xml.",
     { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } },
   );
 }
