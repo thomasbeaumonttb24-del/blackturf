@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { OG_IMAGE, filAriane, jsonLd } from "@/lib/seo";
+import { OG_IMAGE, fetchProfilLieux, filAriane, jsonLd } from "@/lib/seo";
 import Link from "next/link";
 import { MapPin, Trophy, ArrowRight } from "lucide-react";
-import { HIPPODROMES } from "@/lib/hippodromes";
+import { HIPPODROMES, matchHippodrome } from "@/lib/hippodromes";
 import { SeoHero, Container, Callout, Chip } from "@/components/seo/kit";
 
 export const metadata: Metadata = {
@@ -18,8 +18,35 @@ export const metadata: Metadata = {
   },
 };
 
-export default function HippodromesIndex() {
+// L'index se régénère avec le profil chiffré qu'il affiche : une fois par jour suffit.
+export const revalidate = 21600;
+
+export default async function HippodromesIndex() {
   const sorted = [...HIPPODROMES].sort((a, b) => a.name.localeCompare(b.name, "fr"));
+
+  /* Une ligne de chiffres par carte.
+   *
+   * Seize liens accompagnés du même gabarit — ville, disciplines, course phare — ne disent
+   * pas au lecteur laquelle des seize pages il veut ouvrir, et ne disent rien de plus à un
+   * robot. Le volume de courses et la réussite du favori sur douze mois distinguent les
+   * fiches les unes des autres dès l'index, et annoncent ce que la fiche contient.
+   *
+   * Le libellé PMU le plus fourni fait foi : un taux ne s'additionne pas. */
+  const profils = await fetchProfilLieux();
+  const chiffres = new Map<string, { courses: number; favori: number | null }>();
+  for (const h of sorted) {
+    const parts = Object.entries(profils?.lieux ?? {})
+      .filter(([nom]) => matchHippodrome(nom, h))
+      .map(([, p]) => p)
+      .filter((p) => (p.nb_courses_12m ?? 0) > 0)
+      .sort((a, b) => (b.nb_courses_12m ?? 0) - (a.nb_courses_12m ?? 0));
+    if (parts.length) {
+      chiffres.set(h.slug, {
+        courses: parts[0].nb_courses_12m ?? 0,
+        favori: parts[0].taux_favori ?? null,
+      });
+    }
+  }
   const itemListLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
@@ -68,6 +95,22 @@ export default function HippodromesIndex() {
               {h.signature && (
                 <p className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-brand-gold-dark">
                   <Trophy className="h-3.5 w-3.5" /> {h.signature}
+                </p>
+              )}
+              {chiffres.has(h.slug) && (
+                <p className="mt-3 text-xs text-brand-charcoal">
+                  <span className="font-semibold text-brand-dark">
+                    {chiffres.get(h.slug)!.courses.toLocaleString("fr-FR")}
+                  </span>{" "}
+                  courses sur douze mois
+                  {chiffres.get(h.slug)!.favori != null && (
+                    <>
+                      {" · le favori y gagne "}
+                      <span className="font-semibold text-brand-dark">
+                        {chiffres.get(h.slug)!.favori!.toLocaleString("fr-FR")} %
+                      </span>
+                    </>
+                  )}
                 </p>
               )}
             </Link>
