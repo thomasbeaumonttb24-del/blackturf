@@ -96,22 +96,30 @@ function rendre(entrees: Entree[]): Response {
 }
 
 /** Pages fixes, pages du jour, rubriques éditoriales. */
-function sitemapPages(): Response {
+async function sitemapPages(): Promise<Response> {
   const aujourdhui = jourParis();
   // Les pages hippodrome et discipline embarquent le programme du jour : leur contenu
   // change bien chaque jour, mais une fois — pas à chaque régénération.
   const debutDeJournee = iso(aujourdhui, "04:00:00");
 
+  /* Le programme, le quinté et les arrivées changent PLUSIEURS FOIS PAR JOUR : cotes qui
+   * bougent jusqu'au départ, non-partants déclarés, arrivées publiées au fil de l'après-midi.
+   *
+   * Ni `new Date()` ni le début de journée ne conviennent. Le premier déplace la date à
+   * chaque régénération du sitemap, même quand rien n'a bougé — un lastmod menteur, que
+   * Google finit par ignorer pour tout le fichier. Le second sous-déclare l'inverse : il
+   * dit « rien n'a changé depuis 4 h » d'une page dont les cotes viennent d'être réécrites.
+   *
+   * `derniere_maj` est la dernière écriture RÉELLE en base sur une course du jour. Elle
+   * bouge quand le contenu bouge, et seulement là. Repli sur le début de journée si l'API
+   * ne répond pas — jamais sur l'heure courante. */
+  const { derniereMaj } = await fetchSeoIndex(aujourdhui, aujourdhui, 600);
+  const majDuJour = derniereMaj ?? debutDeJournee;
+
   const entrees: Entree[] = [
-    // Ces trois pages sont refaites chaque jour — programme du jour, quinté du jour,
-    // arrivées du jour. Leur lastmod est celui du DÉBUT de journée et non l'heure de
-    // régénération : le sitemap étant régénéré toutes les heures, `new Date()` y
-    // déplaçait la date à chaque passage du cache. Un lastmod qui bouge sans que le
-    // contenu bouge est un lastmod menteur, et Google finit par ignorer le fichier
-    // entier — la page perdrait plus qu'elle ne gagnerait à se dire fraîche.
-    { loc: `${BASE}/programme`, lastmod: debutDeJournee },
-    { loc: `${BASE}/quinte-du-jour`, lastmod: debutDeJournee },
-    { loc: `${BASE}/resultats`, lastmod: debutDeJournee },
+    { loc: `${BASE}/programme`, lastmod: majDuJour },
+    { loc: `${BASE}/quinte-du-jour`, lastmod: majDuJour },
+    { loc: `${BASE}/resultats`, lastmod: majDuJour },
 
     { loc: BASE, lastmod: iso(MAJ.accueil) },
     { loc: `${BASE}/tarifs`, lastmod: iso(MAJ.tarifs) },
@@ -189,12 +197,16 @@ async function sitemapCourses(): Promise<Response> {
   if (!courses.length) return indisponible("des courses");
 
   return rendre(
-    // Une course terminée est immuable : son lastmod est le jour de la course. Une
-    // course encore à venir voit ses cotes bouger jusqu'au départ — mais un lastmod
-    // à la seconde près serait du bruit : le début de journée suffit à dire « ça bouge ».
+    // Une course COURUE est immuable : arrivée et rapports ne changent plus, son lastmod
+    // est le soir de la course. Une course À VENIR, elle, bouge jusqu'au départ — cotes,
+    // non-partants, prévisions — et c'est `maj` (l'`updated_at` de la base) qui le dit,
+    // pas une heure conventionnelle. Repli sur le début de journée si le champ manque,
+    // jamais sur l'heure courante : une date inventée vaut moins qu'une date prudente.
     courses.map((c) => ({
       loc: `${BASE}/courses/${c.id}`,
-      lastmod: c.termine ? iso(c.jour, "21:00:00") : iso(aujourdhui, "04:00:00"),
+      lastmod: c.termine
+        ? iso(c.jour, "21:00:00")
+        : (c.maj ?? iso(aujourdhui, "04:00:00")),
     })),
   );
 }
@@ -217,7 +229,7 @@ export async function GET(
   }
   const nom = fichier.slice(0, -".xml".length);
 
-  if (nom === "pages") return sitemapPages();
+  if (nom === "pages") return await sitemapPages();
   if (nom === "resultats") return sitemapResultats();
   if (nom === "courses") return sitemapCourses();
 

@@ -530,7 +530,9 @@ async def get_seo_index(
     if (fin - debut).days + 1 > SEO_INDEX_MAX_JOURS:
         raise HTTPException(400, f"Intervalle trop large (max {SEO_INDEX_MAX_JOURS} jours).")
 
-    cache_key = f"seo:index:{debut.isoformat()}:{fin.isoformat()}"
+    # v2 : ajout de `maj` et `derniere_maj`. Sans changement de clé, six heures de payloads
+    # d’ancienne forme seraient servis, et le sitemap retomberait en silence sur son repli.
+    cache_key = f"seo:index:v2:{debut.isoformat()}:{fin.isoformat()}"
     try:
         redis = await get_redis()
         cached = await redis.get(cache_key)
@@ -545,6 +547,13 @@ async def get_seo_index(
             func.date(Course.date_heure).label("jour"),
             Course.statut,
             Course.hippodrome_nom,
+            # Date de dernière modification RÉELLE de la course — cotes, non-partants,
+            # statut. Le sitemap en fait le `lastmod` des fiches à venir : une fiche de
+            # course qui n'a pas encore été courue change plusieurs fois par jour, et
+            # dater ces pages au début de journée revenait à cacher à Google qu'elles
+            # bougent. `updated_at` est posé par la base à chaque écriture : c'est la
+            # seule date qui ne ment ni dans un sens ni dans l'autre.
+            Course.updated_at,
         )
         .where(func.date(Course.date_heure) >= debut)
         .where(func.date(Course.date_heure) <= fin)
@@ -564,13 +573,18 @@ async def get_seo_index(
             "jour": str(r.jour),
             "termine": r.statut == "termine",
             "hippodrome": r.hippodrome_nom,
+            "maj": r.updated_at.isoformat() if r.updated_at else None,
         }
         for r in rows
     ]
     jours = sorted({c["jour"] for c in courses if c["termine"]})
+    # Dernière écriture, toutes courses de la période confondues : c'est le `lastmod` des
+    # pages qui agrègent la journée (`/programme`, `/quinte-du-jour`, `/resultats`).
+    majs = [r.updated_at for r in rows if r.updated_at]
     result = {
         "debut": debut.isoformat(),
         "fin": fin.isoformat(),
+        "derniere_maj": max(majs).isoformat() if majs else None,
         "courses": courses,
         "jours": jours,
     }

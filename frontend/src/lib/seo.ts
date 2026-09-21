@@ -529,6 +529,9 @@ export interface SeoIndexCourse {
   jour: string; // AAAA-MM-JJ
   termine: boolean;
   hippodrome: string;
+  /** Dernière écriture en base sur la course — cotes, non-partants, statut. C'est le
+   *  `lastmod` honnête d'une fiche à venir, qui change plusieurs fois par jour. */
+  maj?: string | null;
 }
 
 /** "2026-08-26" + n jours → "2026-08-xx" (arithmétique en UTC midi, sans dérive de fuseau). */
@@ -543,16 +546,24 @@ export async function fetchSeoIndex(
   debut: string,
   fin: string,
   revalidate = 3600,
-): Promise<{ courses: SeoIndexCourse[]; jours: string[] }> {
+): Promise<{ courses: SeoIndexCourse[]; jours: string[]; derniereMaj: string | null }> {
   try {
     const res = await fetch(`${API}/seo/index?debut=${debut}&fin=${fin}`, {
       next: { revalidate },
     });
-    if (!res.ok) return { courses: [], jours: [] };
-    const d = (await res.json()) as { courses?: SeoIndexCourse[]; jours?: string[] };
-    return { courses: d.courses ?? [], jours: d.jours ?? [] };
+    if (!res.ok) return { courses: [], jours: [], derniereMaj: null };
+    const d = (await res.json()) as {
+      courses?: SeoIndexCourse[];
+      jours?: string[];
+      derniere_maj?: string | null;
+    };
+    return {
+      courses: d.courses ?? [],
+      jours: d.jours ?? [],
+      derniereMaj: d.derniere_maj ?? null,
+    };
   } catch {
-    return { courses: [], jours: [] };
+    return { courses: [], jours: [], derniereMaj: null };
   }
 }
 
