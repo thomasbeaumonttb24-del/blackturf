@@ -184,6 +184,32 @@ export function getHippodrome(slug: string): Hippodrome | undefined {
   return HIPPODROMES.find((h) => h.slug === slug);
 }
 
+/** Le nom sans « Hippodrome », mais AVEC son article : « de Vincennes », « du
+ *  Croisé-Laroche », « d'Auteuil ». Écrit pour être collé derrière « la piste » — « la
+ *  piste de Croisé-Laroche » serait fautif, et dépose une faute sur seize pages. Un nom
+ *  sans article en reçoit un : « ParisLongchamp » → « de ParisLongchamp ». Le nom complet
+ *  reste celui du titre et du balisage. */
+/**
+ * Le slug de la fiche correspondant à un libellé d'hippodrome du PMU, s'il en existe une.
+ *
+ * Sert au maillage interne. Mesuré le 2026-09-21 : les seize fiches d'hippodrome
+ * n'étaient liées QUE depuis `/hippodromes`, page elle-même explorée une fois par
+ * quinzaine — et sept d'entre elles étaient « URL inconnue de Google », jamais explorées,
+ * bien que présentes au sitemap depuis un mois. Les pages que Googlebot visite tous les
+ * jours sont le programme, les résultats et les fiches course : c'est de là que le lien
+ * doit partir.
+ */
+export function slugHippodrome(hippodromeNom: string | undefined): string | null {
+  if (!hippodromeNom) return null;
+  return HIPPODROMES.find((h) => matchHippodrome(hippodromeNom, h))?.slug ?? null;
+}
+
+export function nomCourt(h: Hippodrome): string {
+  const reste = h.name.replace(/^Hippodrome\s+/i, "").trim();
+  if (!reste) return h.name;
+  return /^(de la |de l'|des |du |de |d')/i.test(reste) ? reste : `de ${reste}`;
+}
+
 export function matchHippodrome(hippodromeNom: string | undefined, h: Hippodrome): boolean {
   if (!hippodromeNom) return false;
   const up = hippodromeNom.toUpperCase();

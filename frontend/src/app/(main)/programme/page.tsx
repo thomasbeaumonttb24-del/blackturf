@@ -13,6 +13,7 @@ import {
 
   jsonLd,
 } from "@/lib/seo";
+import { slugHippodrome } from "@/lib/hippodromes";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import { PreuvesRecentesCard } from "@/components/courses/insights";
 import ProgrammeClient from "./ProgrammeClient";
@@ -149,7 +150,21 @@ export default async function ProgrammePage() {
           {(prog?.reunions ?? []).map((r) => (
             <div key={r.reunion_id}>
               <h3 className="text-sm font-bold uppercase tracking-wide text-gray-700">
-                R{r.numero} — {titleCase(r.hippodrome)}
+                R{r.numero} —{" "}
+                {/* Le nom de l'hippodrome mène à sa fiche quand elle existe. C'est le seul
+                    lien quotidien vers ces pages : jusqu'au 2026-09-21 elles n'étaient
+                    liées que depuis `/hippodromes`, et sept des seize n'avaient jamais été
+                    explorées par Google. */}
+                {slugHippodrome(r.hippodrome) ? (
+                  <a
+                    href={`/hippodromes/${slugHippodrome(r.hippodrome)}`}
+                    className="underline-offset-2 hover:text-brand-gold-dark hover:underline"
+                  >
+                    {titleCase(r.hippodrome)}
+                  </a>
+                ) : (
+                  titleCase(r.hippodrome)
+                )}
               </h3>
               <ul className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
                 {(r.courses ?? []).map((c) => (

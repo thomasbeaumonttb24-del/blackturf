@@ -78,6 +78,30 @@ export default async function DisciplinePage({ params }: { params: Promise<{ slu
       ),
       partants_moyen:
         Math.round((parts.reduce((s, [, p]) => s + p.partants_moyen * p.nb_courses, 0) / nb) * 10) / 10,
+      ...(() => {
+        // Douze derniers mois. Un taux de réussite se recompose : c'est un rapport de
+        // comptages, donc la moyenne pondérée par le nombre de courses redonne le taux
+        // d'ensemble. Une MÉDIANE, non : la médiane de l'attelé et celle du monté ne se
+        // mélangent pas. Quand la discipline couvre plusieurs libellés PMU, le rapport
+        // médian est donc tu plutôt qu'approximé.
+        const avec12 = parts.filter(([, p]) => (p.nb_courses_12m ?? 0) > 0);
+        if (!avec12.length) return {};
+        const n12 = avec12.reduce((s, [, p]) => s + (p.nb_courses_12m ?? 0), 0);
+        const pesables = avec12.filter(([, p]) => p.taux_favori != null);
+        const poidsTaux = pesables.reduce((s, [, p]) => s + (p.nb_courses_12m ?? 0), 0);
+        return {
+          nb_courses_12m: n12,
+          nb_quintes_12m: avec12.reduce((s, [, p]) => s + (p.nb_quintes_12m ?? 0), 0),
+          taux_favori: poidsTaux
+            ? Math.round(
+                (pesables.reduce((s, [, p]) => s + (p.taux_favori ?? 0) * (p.nb_courses_12m ?? 0), 0) /
+                  poidsTaux) * 10,
+              ) / 10
+            : null,
+          rapport_gagnant_median:
+            avec12.length === 1 ? (avec12[0][1].rapport_gagnant_median ?? null) : null,
+        };
+      })(),
     };
   })();
 

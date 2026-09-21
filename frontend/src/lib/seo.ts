@@ -584,7 +584,17 @@ export async function fetchArriveesDuJour(
  * d'hippodrome et de discipline un contenu qui leur soit propre — elles n'avaient qu'un
  * paragraphe d'introduction et le programme du jour.
  */
-export interface ProfilLieu {
+/** Ce que les douze derniers mois disent du lieu — absent si trop peu de courses. */
+export interface ProfilRecent {
+  nb_courses_12m?: number;
+  nb_quintes_12m?: number;
+  /** Part des courses gagnées par le favori du marché PMU, en %. */
+  taux_favori?: number | null;
+  /** Rapport Simple Gagnant médian, en euros pour 1 € joué. */
+  rapport_gagnant_median?: number | null;
+}
+
+export interface ProfilLieu extends ProfilRecent {
   nb_courses: number;
   nb_journees: number;
   distance_min: number | null;
@@ -592,9 +602,11 @@ export interface ProfilLieu {
   distance_moyenne: number;
   partants_moyen: number;
   disciplines: Record<string, number>;
+  top_jockeys?: Array<{ nom: string; victoires: number }>;
+  top_entraineurs?: Array<{ nom: string; victoires: number }>;
 }
 
-export interface ProfilDiscipline {
+export interface ProfilDiscipline extends ProfilRecent {
   nb_courses: number;
   nb_hippodromes: number;
   distance_min: number | null;

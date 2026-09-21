@@ -20,6 +20,7 @@ import {
   jsonLd,
   fetchApercuCourse,
 } from "@/lib/seo";
+import { slugHippodrome } from "@/lib/hippodromes";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import CourseClient from "./CourseClient";
 
@@ -534,6 +535,19 @@ export default async function CoursePage({ params }: Props) {
 
             <nav className="mt-5 flex flex-wrap gap-2 text-[12.5px]">
               {[
+                // La fiche de l'hippodrome quand elle existe. Les fiches course sont les
+                // pages que Googlebot visite le plus souvent — la course du jour l'attire,
+                // l'archive non — et jusqu'au 2026-09-21 aucune d'elles ne liait la fiche
+                // du lieu : les seize pages d'hippodrome dépendaient d'un unique lien
+                // depuis `/hippodromes`, et sept n'avaient jamais été explorées.
+                ...(slugHippodrome(course.hippodrome_nom)
+                  ? [
+                      {
+                        href: `/hippodromes/${slugHippodrome(course.hippodrome_nom)}`,
+                        txt: `${titleCase(course.hippodrome_nom)} : statistiques et réunions`,
+                      },
+                    ]
+                  : []),
                 { href: "/programme", txt: "Programme PMU du jour" },
                 { href: "/quinte-du-jour", txt: "Quinté+ du jour" },
                 { href: "/resultats", txt: "Arrivées et rapports du jour" },

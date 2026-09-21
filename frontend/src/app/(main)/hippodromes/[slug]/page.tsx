@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MapPin, Trophy, ChevronRight, CalendarDays } from "lucide-react";
-import { HIPPODROMES, getHippodrome, matchHippodrome } from "@/lib/hippodromes";
+import { HIPPODROMES, getHippodrome, matchHippodrome, nomCourt } from "@/lib/hippodromes";
 import {
   fetchProgramme,
   fetchProfilLieux,
@@ -28,11 +28,20 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const h = getHippodrome(slug);
   if (!h) return { title: "Hippodrome" };
-  const title = `${h.name} — programme et courses PMU`;
+  // Le titre annonce les trois choses que la page porte vraiment, et tient sous la
+  // limite d'affichage de Google (~60 caractères) pour les seize fiches.
+  const title = `${h.name} — programme et résultats`;
+  // La description dit ce que la page contient RÉELLEMENT depuis qu'elle porte le profil
+  // chiffré : pas seulement le programme du jour, mais des statistiques de lieu qu'on ne
+  // trouve pas ailleurs. La région est tombée : elle coûtait la limite des 160 caractères
+  // sans jamais être tapée en recherche.
+  const queue =
+    "Programme du jour, arrivées et statistiques du lieu : réussite du favori, rapports, vainqueurs.";
+  const avecVille = `${h.name} (${h.city}) : ${h.disciplines.join(", ")}. ${queue}`;
+  // Au-delà de 160 caractères Google tronque : quand le nom de la commune fait déborder,
+  // c'est lui qui saute — il est déjà dans le nom de l'hippodrome neuf fois sur dix.
   const description =
-    `${h.name} (${h.city}, ${h.region}) : ${h.disciplines.join(", ")}.` +
-    (h.signature ? ` Course phare : ${h.signature}.` : "") +
-    " Programme du jour, partants et cotes.";
+    avecVille.length <= 160 ? avecVille : `${h.name} : ${h.disciplines.join(", ")}. ${queue}`;
   return {
     title,
     description,
@@ -85,7 +94,12 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
    * libellés peuvent désigner le même lieu : on les additionne. */
   const profils = await fetchProfilLieux();
   const profil = (() => {
-    const parts = Object.entries(profils?.lieux ?? {}).filter(([nom]) => matchHippodrome(nom, h));
+    const parts = Object.entries(profils?.lieux ?? {})
+      .filter(([nom]) => matchHippodrome(nom, h))
+      // Le libellé le plus fourni d'abord : les volumes s'additionnent, mais un taux de
+      // réussite et un rapport médian ne s'additionnent pas. Le bloc « douze derniers
+      // mois » est donc celui du libellé principal, jamais une moyenne de moyennes.
+      .sort((a, b) => b[1].nb_courses - a[1].nb_courses);
     if (!parts.length) return null;
     return parts.reduce((acc, [, p]) => {
       if (!acc) return { ...p, disciplines: { ...p.disciplines } };
@@ -168,7 +182,7 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
 
         {profil && (
           <Section title={`Ce qui se court à ${h.city}`}>
-            <ProfilChiffreLieu nom={h.name} p={profil} />
+            <ProfilChiffreLieu nom={h.name} court={nomCourt(h)} p={profil} />
           </Section>
         )}
 

@@ -19,7 +19,161 @@ import { disciplineLabel, type ProfilLieu, type ProfilDiscipline } from "@/lib/s
  */
 const fr = (n: number) => n.toLocaleString("fr-FR");
 
-export function ProfilChiffreLieu({ nom, p }: { nom: string; p: ProfilLieu }) {
+/** « le plat », « l'attelé » : sans l'article, la phrase disait « la discipline la plus
+ *  courue y est plat ». L'élision suit la première lettre du libellé. */
+const avecArticle = (label: string) => {
+  const l = label.toLowerCase();
+  return /^[aeiouâàéèêîïôùûh]/.test(l) ? `l'${l}` : `le ${l}`;
+};
+
+const euros = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Les douze derniers mois du lieu — la partie qui distingue vraiment deux fiches.
+ *
+ * Le volume et les distances décrivent une programmation ; ils ne disent pas ce qui s'y
+ * passe. La part de courses gagnées par le favori du marché et le rapport gagnant médian,
+ * si : entre 27 % à Chantilly et 44 % à Mons, ce n'est plus le même pari. Les deux
+ * chiffres sortent de l'arrivée officielle et de la cote PMU au départ.
+ *
+ * Rien n'est affiché quand la mesure ne tient pas : sous trente courses cotées, un taux
+ * de réussite n'est que du bruit, et le bloc disparaît plutôt que de meubler.
+ */
+function BlocRecent({
+  p,
+  lieu,
+}: {
+  p: { nb_courses_12m?: number; taux_favori?: number | null; rapport_gagnant_median?: number | null; nb_quintes_12m?: number };
+  lieu?: string;
+}) {
+  const n = p.nb_courses_12m ?? 0;
+  if (!n || (p.taux_favori == null && p.rapport_gagnant_median == null)) return null;
+
+  return (
+    <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/40 p-4 sm:p-5">
+      <p className="font-display text-[13px] font-semibold uppercase tracking-wide text-brand-gold-dark">
+        Les douze derniers mois
+      </p>
+      <dl className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-amber-200 bg-amber-200 sm:grid-cols-3">
+        {[
+          { k: "Courses courues", v: fr(n) },
+          p.taux_favori != null
+            ? { k: "Courses gagnées par le favori", v: `${p.taux_favori.toLocaleString("fr-FR")} %` }
+            : null,
+          p.rapport_gagnant_median != null
+            ? { k: "Rapport gagnant médian", v: `${euros(p.rapport_gagnant_median)} €` }
+            : null,
+        ]
+          .filter((c): c is { k: string; v: string } => c !== null)
+          .map((c) => (
+            <div key={c.k} className="bg-white px-3.5 py-3">
+              <dt className="text-[11px] leading-snug text-brand-charcoal">{c.k}</dt>
+              <dd className="mt-1 font-display text-[18px] font-bold tabular-nums text-brand-dark">
+                {c.v}
+              </dd>
+            </div>
+          ))}
+      </dl>
+      <p className="mt-3 text-sm leading-relaxed text-brand-charcoal">
+        Sur les {fr(n)} courses disputées {lieu ? `sur la piste ${lieu}` : "dans cette discipline"}{" "}
+        depuis un an
+        {p.taux_favori != null ? (
+          <>
+            , le favori du marché PMU l&apos;a emporté {p.taux_favori.toLocaleString("fr-FR")} fois sur
+            cent. {p.taux_favori >= 35
+              ? "C'est au-dessus de la moyenne française : la logique y est plutôt respectée, et les gros rapports s'y font rares."
+              : p.taux_favori <= 30
+                ? "C'est en dessous de la moyenne française : les favoris y tombent souvent, et l'outsider s'y défend mieux qu'ailleurs."
+                : "C'est proche de la moyenne française, toutes disciplines confondues."}
+          </>
+        ) : (
+          "."
+        )}
+        {p.rapport_gagnant_median != null && (
+          <>
+            {" "}Une course sur deux y a payé le gagnant au-dessus de {euros(p.rapport_gagnant_median)} €
+            pour 1 € joué.
+          </>
+        )}
+        {p.nb_quintes_12m ? (
+          <>
+            {" "}
+            {fr(p.nb_quintes_12m)} Quinté+ y {p.nb_quintes_12m > 1 ? "ont été courus" : "a été couru"}{" "}
+            sur la période.
+          </>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
+/** Ceux qui gagnent sur place — une liste vraie, jamais un palmarès inventé. */
+function BlocHommes({
+  jockeys,
+  entraineurs,
+  lieu,
+  monte,
+}: {
+  jockeys?: Array<{ nom: string; victoires: number }>;
+  entraineurs?: Array<{ nom: string; victoires: number }>;
+  lieu: string;
+  monte: boolean;
+}) {
+  const j = (jockeys ?? []).slice(0, 5);
+  const e = (entraineurs ?? []).slice(0, 5);
+  if (!j.length && !e.length) return null;
+
+  const colonne = (titre: string, gens: Array<{ nom: string; victoires: number }>) =>
+    gens.length ? (
+      <div>
+        <p className="text-[13px] font-semibold text-brand-dark">{titre}</p>
+        <ol className="mt-2 space-y-1.5">
+          {gens.map((g, i) => (
+            <li key={g.nom} className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="text-brand-charcoal">
+                <span className="mr-2 tabular-nums text-[11px] text-brand-gold-dark">{i + 1}.</span>
+                {g.nom}
+              </span>
+              <span className="shrink-0 tabular-nums text-[12.5px] font-medium text-brand-dark">
+                {fr(g.victoires)} victoire{g.victoires > 1 ? "s" : ""}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    ) : null;
+
+  return (
+    <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 sm:p-5">
+      <p className="font-display text-[13px] font-semibold uppercase tracking-wide text-brand-gold-dark">
+        Qui gagne sur la piste {lieu}
+      </p>
+      <p className="mt-2 text-sm leading-relaxed text-brand-charcoal">
+        Les vainqueurs des douze derniers mois, comptés sur les arrivées officielles. Une
+        spécialité locale se lit ici mieux que dans n&apos;importe quel classement national :
+        un {monte ? "driver" : "jockey"} qui domine un hippodrome connaît sa piste.
+      </p>
+      <div className="mt-4 grid gap-5 sm:grid-cols-2">
+        {colonne(monte ? "Drivers et jockeys" : "Jockeys", j)}
+        {colonne("Entraîneurs", e)}
+      </div>
+    </div>
+  );
+}
+
+export function ProfilChiffreLieu({
+  nom,
+  court,
+  p,
+}: {
+  nom: string;
+  /** Le nom sans son préfixe — « Vincennes » plutôt que « Hippodrome de Vincennes ». Les
+   *  phrases l'emploient derrière « la piste de », qui évite les pièges d'accord de
+   *  « à / au / aux » sur les seize fiches. */
+  court?: string;
+  p: ProfilLieu;
+}) {
+  const lieu = court || nom;
   const disciplines = Object.entries(p.disciplines);
   const total = disciplines.reduce((s, [, n]) => s + n, 0) || 1;
   const principale = disciplines[0];
@@ -51,14 +205,17 @@ export function ProfilChiffreLieu({ nom, p }: { nom: string; p: ProfilLieu }) {
       </dl>
 
       <p className="mt-4 text-sm leading-relaxed text-brand-charcoal">
-        BlackTurf a analysé {fr(p.nb_courses)} courses disputées à {nom}, réparties sur{" "}
+        BlackTurf a analysé {fr(p.nb_courses)} courses disputées sur la piste {lieu},
+        réparties sur{" "}
         {fr(p.nb_journees)} journées.{" "}
         {principale && (
           <>
-            La discipline la plus courue y est {disciplineLabel(principale[0]).toLowerCase()}, avec{" "}
+            La discipline la plus courue y est {avecArticle(disciplineLabel(principale[0]))}, avec{" "}
             {Math.round((principale[1] / total) * 100)} % des épreuves
             {disciplines.length > 1
-              ? ` — les ${disciplines.length - 1} autre${disciplines.length > 2 ? "s" : ""} se partagent le reste.`
+              ? disciplines.length > 2
+                ? ` — les ${disciplines.length - 1} autres se partagent le reste.`
+                : " — l'autre discipline se partage le reste."
               : "."}{" "}
           </>
         )}
@@ -79,6 +236,15 @@ export function ProfilChiffreLieu({ nom, p }: { nom: string; p: ProfilLieu }) {
           ))}
         </ul>
       )}
+
+      <BlocRecent p={p} lieu={lieu} />
+
+      <BlocHommes
+        jockeys={p.top_jockeys}
+        entraineurs={p.top_entraineurs}
+        lieu={lieu}
+        monte={(principale?.[0] ?? "").toUpperCase().includes("ATTEL")}
+      />
 
       <p className="mt-4 text-[12px] leading-relaxed text-brand-charcoal">
         Chiffres établis sur l&apos;ensemble des courses de la base BlackTurf dont l&apos;arrivée a
@@ -124,6 +290,8 @@ export function ProfilChiffreDiscipline({ nom, p }: { nom: string; p: ProfilDisc
         partants pèse directement sur les rapports : plus le peloton est fourni, plus une
         combinaison exacte devient improbable — et mieux elle paie.
       </p>
+
+      <BlocRecent p={p} />
 
       <p className="mt-4 text-[12px] leading-relaxed text-brand-charcoal">
         Chiffres établis sur l&apos;ensemble des courses de la base BlackTurf dont l&apos;arrivée a

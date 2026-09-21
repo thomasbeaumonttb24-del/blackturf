@@ -16,6 +16,7 @@ import {
 
   jsonLd,
 } from "@/lib/seo";
+import { slugHippodrome } from "@/lib/hippodromes";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
@@ -57,6 +58,18 @@ export async function ResultatsJour({ jour }: { jour: string }) {
 
   const quinte = avecArrivee.find(([c]) => c.est_quinte);
   const rapportsQuinte = quinte ? rapportsTries(quinte[1].rapports) : [];
+
+  // Les hippodromes de la journée, dans l'ordre des réunions, sans doublon. Le slug est
+  // nul pour les lieux qui n'ont pas de fiche — la majorité, les fiches couvrant les
+  // seize hippodromes français principaux.
+  const lieuxDuJour = [
+    ...new Map(
+      (prog?.reunions ?? [])
+        .map((r) => titleCase(r.hippodrome))
+        .filter(Boolean)
+        .map((nom) => [nom, { nom, slug: slugHippodrome(nom) }]),
+    ).values(),
+  ];
 
   const veille = decalerJour(jour, -1);
   const lendemain = decalerJour(jour, 1);
@@ -151,6 +164,35 @@ export async function ResultatsJour({ jour }: { jour: string }) {
       />
 
       <Container>
+        {/* Les hippodromes du jour, liés à leur fiche.
+         *
+         * Le nom de l'hippodrome est déjà écrit sur chaque ligne d'arrivée, mais à
+         * l'intérieur du lien vers la fiche course : on ne peut pas y imbriquer un second
+         * lien. Cette ligne le fait une fois par réunion, avec une ancre qui nomme le
+         * lieu. Elle donne aux seize fiches d'hippodrome un lien depuis une page explorée
+         * tous les jours — mesuré le 2026-09-21, elles n'en avaient qu'un, depuis
+         * `/hippodromes`, et sept d'entre elles n'avaient jamais été explorées. */}
+        {lieuxDuJour.length > 0 && (
+          <p className="mb-6 text-sm text-brand-charcoal">
+            Hippodromes du jour :{" "}
+            {lieuxDuJour.map(({ nom, slug }, i) => (
+              <span key={nom}>
+                {i > 0 && " · "}
+                {slug ? (
+                  <Link
+                    href={`/hippodromes/${slug}`}
+                    className="font-medium text-brand-gold-dark underline-offset-2 hover:underline"
+                  >
+                    {nom}
+                  </Link>
+                ) : (
+                  nom
+                )}
+              </span>
+            ))}
+          </p>
+        )}
+
         {quinte ? (
           <Section title={`Arrivée du Quinté+ — ${titleCase(quinte[0].hippodrome_nom)}`}>
             <p className="text-sm text-brand-charcoal">

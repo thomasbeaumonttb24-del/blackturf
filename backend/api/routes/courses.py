@@ -673,7 +673,9 @@ async def get_seo_profil_lieux(
     """
     import json
 
-    cache_key = "seo:profil-lieux"
+    # v2 : ajout du bloc « douze derniers mois ». Changer la clé évite de servir six
+    # heures durant un payload d’ancienne forme, que le frontend lirait sans le dire.
+    cache_key = "seo:profil-lieux:v2"
     try:
         redis = await get_redis()
         cached = await redis.get(cache_key)
@@ -744,17 +746,168 @@ async def get_seo_profil_lieux(
             **extra,
         }
 
+    # ── Douze derniers mois : ce que l'historique dit du LIEU, pas du site ──────────
+    #
+    # Le volume et les distances ci-dessus décrivent la programmation ; ils ne disent
+    # rien de ce qui s'y passe. Ces quatre mesures, elles, distinguent réellement deux
+    # hippodromes l'un de l'autre : la part de courses gagnées par le favori du marché,
+    # le rapport gagnant médian, et les hommes qui gagnent sur place.
+    #
+    # Toutes sortent de l'arrivée officielle et de la cote PMU au départ — aucune
+    # estimation. La fenêtre est de douze mois glissants : au-delà, les écuries et les
+    # drivers ont changé, et la moyenne décrirait un hippodrome qui n'existe plus.
+    #
+    # Le seuil de 30 courses n'est pas décoratif : sous ce nombre, un taux de réussite
+    # du favori n'a pas de sens (une course pèse plus de trois points) et publier le
+    # chiffre reviendrait à présenter du bruit comme un fait.
+    SEUIL_12M = 30
+
+    douze: dict = {}
+    douze_disciplines: dict = {}
+    try:
+        rows_12m = (await db.execute(text("""
+            WITH courues AS (
+                SELECT c.course_id, c.hippodrome_nom AS lieu, upper(c.discipline) AS disc,
+                       c.est_quinte
+                  FROM courses c
+                 WHERE c.statut = 'termine'
+                   AND c.date_heure >= now() - interval '12 months'
+            ),
+            gagnants AS (
+                SELECT k.course_id, k.lieu, k.disc, k.est_quinte,
+                       (SELECT (e->>'numero')::int
+                          FROM jsonb_array_elements(r.classement::jsonb) e
+                         WHERE (e->>'position') = '1' LIMIT 1)          AS numero,
+                       (r.rapports->>'e_simple_gagnant')::numeric       AS rapport_gagnant
+                  FROM courues k
+                  JOIN resultats r ON r.course_id = k.course_id
+                 WHERE jsonb_typeof(r.classement::jsonb) = 'array'
+            ),
+            favoris AS (
+                -- Favori = cote PMU la plus basse au départ, non-partants exclus.
+                SELECT DISTINCT ON (p.course_id) p.course_id, p.numero
+                  FROM participations p
+                  JOIN courues k ON k.course_id = p.course_id
+                 WHERE p.non_partant = false
+                   AND p.cote_pmu IS NOT NULL AND p.cote_pmu > 1
+                 ORDER BY p.course_id, p.cote_pmu ASC, p.numero ASC
+            )
+            -- Un seul balayage pour les deux familles de fiches : par lieu ET par
+            -- discipline. Les lignes de discipline portent `lieu` à NULL.
+            SELECT g.lieu, g.disc,
+                   count(*)                                              AS n,
+                   count(*) FILTER (WHERE g.est_quinte)                  AS nb_quintes,
+                   count(f.numero)                                       AS n_fav,
+                   avg((f.numero = g.numero)::int)
+                       FILTER (WHERE f.numero IS NOT NULL) * 100         AS taux_favori,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY g.rapport_gagnant)
+                                                                         AS rapport_median
+              FROM gagnants g
+              LEFT JOIN favoris f ON f.course_id = g.course_id
+             WHERE g.numero IS NOT NULL
+             GROUP BY GROUPING SETS ((g.lieu), (g.disc))
+            HAVING count(*) >= :seuil
+        """), {"seuil": SEUIL_12M})).all()
+
+        for r in rows_12m:
+            if r.lieu is None:
+                douze_disciplines[r.disc] = {
+                    "nb_courses_12m": int(r.n),
+                    "nb_quintes_12m": int(r.nb_quintes or 0),
+                    "taux_favori": round(float(r.taux_favori), 1)
+                    if r.taux_favori is not None and int(r.n_fav or 0) >= SEUIL_12M else None,
+                    "rapport_gagnant_median": round(float(r.rapport_median), 2)
+                    if r.rapport_median is not None else None,
+                }
+                continue
+            douze[r.lieu] = {
+                "nb_courses_12m": int(r.n),
+                "nb_quintes_12m": int(r.nb_quintes or 0),
+                # Le taux n'est publié que s'il porte sur assez de courses cotées : une
+                # journée sans cotes scrapées ne doit pas fabriquer un chiffre.
+                "taux_favori": round(float(r.taux_favori), 1)
+                if r.taux_favori is not None and int(r.n_fav or 0) >= SEUIL_12M else None,
+                "rapport_gagnant_median": round(float(r.rapport_median), 2)
+                if r.rapport_median is not None else None,
+                "top_jockeys": [],
+                "top_entraineurs": [],
+            }
+
+        # Vainqueurs par lieu : qui gagne réellement ici. Deux requêtes plutôt qu'une
+        # jointure large — le GROUP BY porte sur des colonnes différentes, et la table
+        # des participations est la plus grosse du schéma.
+        rows_hommes = (await db.execute(text("""
+            WITH courues AS (
+                SELECT c.course_id, c.hippodrome_nom AS lieu
+                  FROM courses c
+                 WHERE c.statut = 'termine'
+                   AND c.date_heure >= now() - interval '12 months'
+            ),
+            gagnants AS (
+                SELECT k.course_id, k.lieu,
+                       (SELECT (e->>'numero')::int
+                          FROM jsonb_array_elements(r.classement::jsonb) e
+                         WHERE (e->>'position') = '1' LIMIT 1) AS numero
+                  FROM courues k
+                  JOIN resultats r ON r.course_id = k.course_id
+                 WHERE jsonb_typeof(r.classement::jsonb) = 'array'
+            ),
+            vainqueurs AS (
+                SELECT g.lieu, j.nom AS jockey, e.nom AS entraineur
+                  FROM gagnants g
+                  JOIN participations p
+                    ON p.course_id = g.course_id AND p.numero = g.numero
+                  LEFT JOIN jockeys j    ON j.jockey_id = p.jockey_id
+                  LEFT JOIN entraineurs e ON e.entraineur_id = p.entraineur_id
+                 WHERE g.numero IS NOT NULL
+            ),
+            par_jockey AS (
+                SELECT lieu, 'j' AS role, jockey AS nom, count(*) AS v,
+                       row_number() OVER (PARTITION BY lieu ORDER BY count(*) DESC, jockey) AS rg
+                  FROM vainqueurs WHERE jockey IS NOT NULL
+                 GROUP BY lieu, jockey
+            ),
+            par_entraineur AS (
+                SELECT lieu, 'e' AS role, entraineur AS nom, count(*) AS v,
+                       row_number() OVER (PARTITION BY lieu ORDER BY count(*) DESC, entraineur) AS rg
+                  FROM vainqueurs WHERE entraineur IS NOT NULL
+                 GROUP BY lieu, entraineur
+            )
+            SELECT lieu, role, nom, v FROM par_jockey      WHERE rg <= 5
+            UNION ALL
+            SELECT lieu, role, nom, v FROM par_entraineur  WHERE rg <= 5
+        """))).all()
+
+        for r in rows_hommes:
+            cible = douze.get(r.lieu)
+            if cible is None:
+                continue
+            cle = "top_jockeys" if r.role == "j" else "top_entraineurs"
+            cible[cle].append({"nom": r.nom, "victoires": int(r.v)})
+        for e12 in douze.values():
+            e12["top_jockeys"].sort(key=lambda x: -x["victoires"])
+            e12["top_entraineurs"].sort(key=lambda x: -x["victoires"])
+    except Exception as exc:
+        # Une fiche d'hippodrome doit rester servie même si ce bloc échoue : elle
+        # perdra ses chiffres récents, pas sa page.
+        log.warning("courses.seo_profil_12m_failed", error=str(exc))
+        douze, douze_disciplines = {}, {}
+
     result = {
         "lieux": {
             lieu: _fini(e, {
                 "nb_journees": e["nb_journees"],
                 # Triées par volume : la première est la discipline maison.
                 "disciplines": dict(sorted(e["disciplines"].items(), key=lambda kv: -kv[1])),
+                **(douze.get(lieu) or {}),
             })
             for lieu, e in lieux.items()
         },
         "disciplines": {
-            d: _fini(g, {"nb_hippodromes": len(g["lieux"])})
+            d: _fini(g, {
+                "nb_hippodromes": len(g["lieux"]),
+                **(douze_disciplines.get(d) or {}),
+            })
             for d, g in disciplines.items()
         },
     }
