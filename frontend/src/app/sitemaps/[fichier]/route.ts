@@ -54,6 +54,25 @@ type Entree = { loc: string; lastmod?: string };
 
 const iso = (jourIso: string, heure = "12:00:00") => `${jourIso}T${heure}Z`;
 
+/**
+ * Un sitemap VIDE est un mensonge, pas une réponse.
+ *
+ * `fetchSeoIndex` et `fetchJoursResultats` renvoient un tableau vide quand l'API ne répond
+ * pas — c'est leur contrat, et il convient partout ailleurs. Ici il produirait un `<urlset>`
+ * sans une seule URL, que Next mettrait en cache pour une heure et que Google lirait comme
+ * « ce site n'a plus de pages ». Un 503 dit la vérité : indisponible, reviens.
+ */
+function indisponible(quoi: string): Response {
+  return new Response(`Sitemap ${quoi} momentanément indisponible.`, {
+    status: 503,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Retry-After": "600",
+    },
+  });
+}
+
 function rendre(entrees: Entree[]): Response {
   const xml =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -138,6 +157,7 @@ function sitemapPages(): Response {
 async function sitemapResultats(): Promise<Response> {
   const aujourdhui = jourParis();
   const jours = await fetchJoursResultats();
+  if (!jours.length) return indisponible("des résultats");
 
   return rendre(
     jours
@@ -166,6 +186,7 @@ async function sitemapCourses(): Promise<Response> {
   const debut = decalerJours(aujourdhui, -FENETRE_COURSES_JOURS);
   const fin = decalerJours(aujourdhui, 1);
   const { courses } = await fetchSeoIndex(debut, fin, 600);
+  if (!courses.length) return indisponible("des courses");
 
   return rendre(
     // Une course terminée est immuable : son lastmod est le jour de la course. Une
