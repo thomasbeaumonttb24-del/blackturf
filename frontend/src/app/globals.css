@@ -610,3 +610,65 @@
 .blog-prose tbody tr:last-child td { border-bottom: 0; }
 .blog-prose tbody tr:nth-child(even) td { background: #FAFAF9; }
 .blog-prose .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+
+/* ── Blocs de mise en page d'article (components/blog/kit.tsx) ──────────────────
+   `blog-prose` habille le CORPS du texte : marges de paragraphe, puces dessinées,
+   tableaux rayés, titres à filet doré. Ces règles sont bonnes pour de la prose et
+   mauvaises pour un bloc composé — elles rendaient les chiffres clés gris et petits,
+   collaient une puce devant chaque ligne de sommaire et rayaient les comparatifs.
+   `bp-bloc` rend donc leur autonomie à ces blocs, sans toucher au reste. */
+.blog-prose .bp-bloc p { margin: 0; font-size: inherit; line-height: inherit; color: inherit; }
+.blog-prose .bp-bloc ul,
+.blog-prose .bp-bloc ol { margin: 0; padding: 0; list-style: none; }
+.blog-prose .bp-bloc li { margin: 0; padding-left: 0; font-size: inherit; line-height: inherit; }
+.blog-prose .bp-bloc ul li::before { content: none; }
+.blog-prose .bp-bloc table { margin: 0; font-size: inherit; }
+.blog-prose .bp-bloc thead th {
+  background: transparent; color: inherit; text-transform: none;
+  letter-spacing: normal; border-bottom: 0; white-space: normal;
+}
+.blog-prose .bp-bloc tbody td,
+.blog-prose .bp-bloc tbody th { border-bottom: 0; white-space: normal; color: inherit; }
+.blog-prose .bp-bloc tbody tr:nth-child(even) td { background: transparent; }
+.blog-prose .bp-bloc a { font-weight: inherit; text-decoration: none; }
+.blog-prose .bp-bloc a:hover { text-decoration: underline; }
+/* Le chapô est le premier enfant de l'article : sans cette exception, la règle
+   `> p:first-of-type` ne l'atteint pas et l'attaque perd sa taille. */
+.blog-prose .bp-bloc + p { margin-top: 0; }
+
+/* ── Comparatif : tableau sur écran large, fiches empilées sur téléphone ────────
+   Le mobile fait 73 % des impressions du site. Un comparatif à trois colonnes y
+   tenait dans un conteneur à défilement horizontal : la troisième colonne — la
+   nôtre, celle qui porte la réponse — restait hors écran et personne ne la voyait.
+   Sous 640 px, chaque ligne devient une fiche où les deux valeurs s'empilent,
+   précédées du nom de leur colonne (attribut `data-col`). Le balisage reste un
+   `<table>` avec ses en-têtes : la structure lue par un robot ne change pas. */
+@media (max-width: 639px) {
+  .bp-comparatif { overflow-x: visible; }
+  .bp-comparatif table,
+  .bp-comparatif tbody,
+  .bp-comparatif tr { display: block; width: 100%; }
+  .bp-comparatif thead { display: none; }
+  /* Une `caption` dans un tableau passé en `display: block` se réduit à la largeur de
+     son premier mot : elle doit redevenir un bloc pleine largeur. */
+  .bp-comparatif caption { display: block; width: 100%; margin-bottom: 0.6rem; }
+  .bp-comparatif tr {
+    margin-bottom: 0.75rem; padding: 0.15rem 0 0.35rem;
+    border: 1px solid #E5E7EB; border-radius: 0.9rem; background: #fff;
+  }
+  .bp-comparatif tbody th[scope="row"] {
+    display: block; padding: 0.7rem 0.9rem 0.35rem;
+    font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #6B7280;
+  }
+  .bp-comparatif tbody td {
+    display: block; padding: 0.15rem 0.9rem 0.6rem; background: transparent !important;
+  }
+  .bp-comparatif tbody td::before {
+    content: attr(data-col);
+    display: block; margin-bottom: 0.1rem;
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: #B45309;
+  }
+  .bp-comparatif tbody td:first-of-type::before { color: #9CA3AF; }
+}
