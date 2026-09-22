@@ -601,9 +601,12 @@ async def compute_features_for_participation(
         f10 = float(np.mean(scores[:10])) if len(scores) >= 10 else f5
         tendance = 0.0
         if len(scores) >= 3:
+            # x=0 = course la plus récente (musique lue de gauche à droite), donc une
+            # pente positive de polyfit signifie une forme en baisse : on l'inverse pour
+            # que tendance > 0 == progression, cohérent avec momentum_carriere.
             x = np.arange(min(len(scores), 5))
             y = scores[:5]
-            tendance = float(np.clip(np.polyfit(x, y, 1)[0] * 5, -1, 1))
+            tendance = float(np.clip(-np.polyfit(x, y, 1)[0] * 5, -1, 1))
         regularite = float(1.0 - min(np.std(scores[:5]), 1.0)) if len(scores) >= 3 else 0.5
         taux_top3 = sum(1 for p in musique_positions[:5] if 0 < p <= 3) / min(len(musique_positions), 5) if musique_positions else 0
         taux_vict = sum(1 for p in musique_positions[:5] if p == 1) / min(len(musique_positions), 5) if musique_positions else 0
@@ -2502,7 +2505,8 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         f3 = float(np.mean(scores[:3])) if len(scores) >= 3 else f1
         f5 = float(np.mean(scores[:5])) if len(scores) >= 5 else f3
         f10 = float(np.mean(scores[:10])) if len(scores) >= 10 else f5
-        tendance = float(np.clip(np.polyfit(np.arange(min(len(scores), 5)), scores[:5], 1)[0] * 5, -1, 1)) if len(scores) >= 3 else 0.0
+        # x=0 = course la plus récente : pente inversée pour que tendance > 0 == progression.
+        tendance = float(np.clip(-np.polyfit(np.arange(min(len(scores), 5)), scores[:5], 1)[0] * 5, -1, 1)) if len(scores) >= 3 else 0.0
         regularite = float(1.0 - min(np.std(scores[:5]), 1.0)) if len(scores) >= 3 else 0.5
         taux_top3 = sum(1 for p in musique_positions[:5] if 0 < p <= 3) / min(len(musique_positions), 5) if musique_positions else 0
         taux_vict = sum(1 for p in musique_positions[:5] if p == 1) / min(len(musique_positions), 5) if musique_positions else 0

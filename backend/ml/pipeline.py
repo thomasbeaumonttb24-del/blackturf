@@ -882,6 +882,29 @@ async def _capture_closing_cotes(course_id: str) -> None:
         log.warning("pipeline.closing_cotes_skip", course_id=course_id, err=str(e)[:140])
 
 
+async def _snapshot_elo_avant(session: AsyncSession, course_id: str) -> None:
+    """Fige l'ELO pré-course de chaque partant dans participations.elo_avant_*.
+
+    Sans ça, features.py retombe sur chevaux.elo_score_* (COALESCE) qui est déjà
+    mis à jour par CETTE course (ou une suivante) au moment d'un futur retrain —
+    fuite temporelle silencieuse (l'ancienne implémentation ne faisait ce snapshot
+    que via le script manuel scripts/elo_rejeu.py, jamais depuis le pipeline live).
+    Filtre sur elo_avant_global IS NULL pour rester idempotent si le pipeline
+    post-course est rejoué sur la même course.
+    """
+    await session.execute(text("""
+        UPDATE participations p
+        SET elo_avant_global = ch.elo_score_global,
+            elo_avant_plat = ch.elo_score_plat,
+            elo_avant_trot = ch.elo_score_trot,
+            elo_avant_obstacle = ch.elo_score_obstacle
+        FROM chevaux ch
+        WHERE ch.cheval_id = p.cheval_id
+          AND p.course_id = :cid
+          AND p.elo_avant_global IS NULL
+    """), {"cid": course_id})
+
+
 # ─────────────────────────────────────────────
 # Post-course pipeline
 # ─────────────────────────────────────────────
@@ -921,6 +944,10 @@ async def run_post_course(course_id: str) -> None:
             for r in resultat.classement
         ]
         classement_with_ids = await _enrich_classement_with_ids(session, course_id, resultat.classement)
+
+        # Snapshot ELO pré-course AVANT toute mise à jour, pour couper la fuite
+        # temporelle (voir _snapshot_elo_avant).
+        await _snapshot_elo_avant(session, course_id)
 
         await update_elo_after_race(
             session=session,
