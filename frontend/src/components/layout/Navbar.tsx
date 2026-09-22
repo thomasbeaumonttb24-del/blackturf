@@ -9,6 +9,7 @@ import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashbo
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
+import { peutDemarrerEssai } from "@/lib/auth";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { chatApi, notificationsApi } from "@/lib/api";
 import { planLabel, cn } from "@/lib/utils";
@@ -280,6 +281,17 @@ export function Navbar() {
                   )}
                 </Link>
 
+                {/* Compte gratuit avec essai jamais pris : l'offre reste visible sur
+                    chaque page. Avant, seul le menu déroulant la portait, sous
+                    « Passer Standard » — un prix, pas une offre gratuite. */}
+                {peutDemarrerEssai(user) && (
+                  <Link
+                    href="/tarifs"
+                    className="hidden lg:inline-flex items-center gap-1.5 rounded-lg bg-brand-gold px-3 py-1.5 text-[13px] font-semibold text-brand-dark shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 hover:bg-brand-gold-deep transition-colors"
+                  >
+                    <Zap className="h-3.5 w-3.5" /> Essai 7 jours offert
+                  </Link>
+                )}
                 {/* Alerts bell with unread count */}
                 <Button
                   variant="ghost"
@@ -373,7 +385,7 @@ export function Navbar() {
                             className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-brand-gold-dark font-medium hover:bg-brand-gold-tint/60 transition-colors"
                             onClick={() => setUserMenuOpen(false)}
                           >
-                            <Zap className="h-4 w-4" /> Passer Standard
+                            <Zap className="h-4 w-4" /> {peutDemarrerEssai(user) ? "Essai gratuit 7 jours" : "Passer Standard"}
                           </Link>
                         )}
                         {/* Une seule porte vers l'administration.
@@ -479,6 +491,15 @@ export function Navbar() {
               {link.label}
             </Link>
           ))}
+          {peutDemarrerEssai(user) && (
+            <Link
+              href="/tarifs"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-xl bg-brand-gold px-4 py-2.5 text-sm font-semibold text-brand-dark"
+              onClick={() => setMenuOpen(false)}
+            >
+              <Zap className="h-4 w-4" /> Essai gratuit 7 jours
+            </Link>
+          )}
           {!user && (
             <div className="pt-2 flex gap-2">
               <Button

@@ -23,6 +23,25 @@ export interface AuthUser {
   abonnement_gerable?: boolean;
   // Vrai tant que Stripe relance la carte. Sert à EXPLIQUER la perte d'accès.
   paiement_en_echec?: boolean;
+  // Essai de 7 jours jamais consommé et aucun abonnement vivant : on peut le
+  // proposer directement, sans détour par /tarifs.
+  essai_disponible?: boolean;
+}
+
+/** Compte sans formule payante (les deux libellés historiques du gratuit). */
+export function estGratuit(user: AuthUser | null | undefined): boolean {
+  return !!user && (user.plan === "free" || user.plan === "decouverte");
+}
+
+/** L'essai peut être proposé en un clic : compte gratuit, adresse confirmée
+ *  (le checkout l'exige, sinon 403), essai jamais pris, rien en attente de carte. */
+export function peutDemarrerEssai(user: AuthUser | null | undefined): boolean {
+  return estGratuit(user)
+    && !!user!.email_verified
+    && !!user!.essai_disponible
+    && !user!.essai_bloque_sans_carte
+    && !user!.paiement_en_echec
+    && !user!.abonnement_gerable;
 }
 
 // Les JETONS ne sont plus stockés ici : ils vivent dans des cookies httpOnly posés

@@ -200,6 +200,13 @@ class UserMeResponse(BaseModel):
     # Cause de la rétrogradation, pour l'expliquer au lieu de laisser croire à
     # une panne. Vrai tant que Stripe relance la carte.
     paiement_en_echec: bool = False
+    # L'essai de 7 jours reste à prendre : jamais consommé, et aucun abonnement
+    # vivant. Sert à POUSSER l'essai là où l'utilisateur gratuit se trouve (bandeau,
+    # navbar, écran de confirmation d'adresse) au lieu de le renvoyer vers /tarifs
+    # sans lui dire qu'il y a droit. Constat du 2026-09-13 : 44 comptes gratuits,
+    # 2 seulement ont jamais ouvert l'essai. Le contrôle de carte déjà vue reste au
+    # checkout — la carte n'est pas connue avant.
+    essai_disponible: bool = False
 
 
 # ─────────────────────────────────────────────
@@ -655,6 +662,7 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         essai_fin=bloque.essai_fin if bloque else None,
         abonnement_gerable=gerable,
         paiement_en_echec=en_echec,
+        essai_disponible=user.essai_utilise_at is None and not vivants,
     )
 
 
