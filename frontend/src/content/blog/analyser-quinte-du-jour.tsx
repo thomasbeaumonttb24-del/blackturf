@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { H2, Sommaire } from "@/components/blog/kit";
 
 export const meta = {
   slug: "analyser-quinte-du-jour",
@@ -43,7 +44,19 @@ export default function Body() {
         qu&apos;il faut chercher.
       </p>
 
-      <h2>Ce qu&apos;une arrivée de Quinté+ contient, en moyenne</h2>
+      <Sommaire
+        items={[
+          { id: "ce-qu-une-arrivee-de-quinte-contient-en-", label: "Ce qu'une arrivée de Quinté+ contient, en moyenne" },
+          { id: "1-lire-les-conditions-de-course", label: "1. Lire les conditions de course" },
+          { id: "2-filtrer-la-forme-sans-se-faire-pieger", label: "2. Filtrer la forme — sans se faire piéger" },
+          { id: "3-evaluer-le-couple-jockey-entraineur", label: "3. Évaluer le couple jockey / entraîneur" },
+          { id: "4-confronter-probabilite-et-cote", label: "4. Confronter probabilité et cote" },
+          { id: "5-construire-le-champ", label: "5. Construire le champ" },
+          { id: "6-savoir-ce-que-ca-paie-avant-de-miser", label: "6. Savoir ce que ça paie, avant de miser" },
+        ]}
+      />
+
+      <H2 id="ce-qu-une-arrivee-de-quinte-contient-en-">Ce qu&apos;une arrivée de Quinté+ contient, en moyenne</H2>
       <ul>
         <li>
           <strong>{CHIFFRES.partantsMoyen} partants</strong> au départ : le peloton le plus large
@@ -67,7 +80,7 @@ export default function Body() {
         </li>
       </ul>
 
-      <h2>1. Lire les conditions de course</h2>
+      <H2 id="1-lire-les-conditions-de-course">1. Lire les conditions de course</H2>
       <p>
         Handicap ou course de groupe ? Distance, discipline, état du terrain, allocation. Un
         handicap divisé serré n&apos;a rien à voir avec un Quinté+ de spécialistes : les conditions
@@ -76,7 +89,7 @@ export default function Body() {
         s&apos;y court, et à quelle fréquence le favori y passe.
       </p>
 
-      <h2>2. Filtrer la forme — sans se faire piéger</h2>
+      <H2 id="2-filtrer-la-forme-sans-se-faire-pieger">2. Filtrer la forme — sans se faire piéger</H2>
       <p>
         Lisez la <Link href="/guides/comment-lire-la-musique">musique des chevaux</Link>, mais
         méfiez-vous : la forme évidente est sur-jouée par le public, donc sa cote est écrasée. Les
@@ -85,7 +98,7 @@ export default function Body() {
         la moitié qui lui échappe est précisément ce que vous cherchez.
       </p>
 
-      <h2>3. Évaluer le couple jockey / entraîneur</h2>
+      <H2 id="3-evaluer-le-couple-jockey-entraineur">3. Évaluer le couple jockey / entraîneur</H2>
       <p>
         Sur le Quinté+, l&apos;association jockey-entraîneur et l&apos;engagement — le cheval est-il
         placé là pour gagner ? — pèsent lourd. Un entraîneur qui déplace un cheval sur 600 km a
@@ -94,7 +107,7 @@ export default function Body() {
         se lit mieux là que dans un classement national.
       </p>
 
-      <h2>4. Confronter probabilité et cote</h2>
+      <H2 id="4-confronter-probabilite-et-cote">4. Confronter probabilité et cote</H2>
       <p>
         C&apos;est le cœur de l&apos;analyse : un cheval n&apos;est intéressant que si sa chance
         réelle dépasse ce que sa cote implique. C&apos;est la définition du{" "}
@@ -105,7 +118,7 @@ export default function Body() {
         juste.
       </p>
 
-      <h2>5. Construire le champ</h2>
+      <H2 id="5-construire-le-champ">5. Construire le champ</H2>
       <p>
         Base (un ou deux chevaux de confiance) puis champ d&apos;outsiders à valeur — et comme neuf
         arrivées sur dix contiennent un cheval à 20 ou plus, ce champ n&apos;est pas un luxe. Le
@@ -117,7 +130,7 @@ export default function Body() {
         construire le ticket lui-même.
       </p>
 
-      <h2>6. Savoir ce que ça paie, avant de miser</h2>
+      <H2 id="6-savoir-ce-que-ca-paie-avant-de-miser">6. Savoir ce que ça paie, avant de miser</H2>
       <p>
         Sur {CHIFFRES.nRapports} Quinté+ dont le PMU publie les deux rapports, le{" "}
         <strong>Désordre médian est de {CHIFFRES.desordreMedian}</strong> pour 1 € — mais la

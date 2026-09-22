@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { H2, Sommaire } from "@/components/blog/kit";
 
 export const meta = {
   slug: "champ-reduit-base-tickets",
@@ -35,7 +36,16 @@ export default function Body() {
         faut-il ? » a une réponse chiffrée, pas une réponse d&apos;opinion.
       </p>
 
-      <h2>Ce que coûte la couverture, mesuré</h2>
+      <Sommaire
+        items={[
+          { id: "ce-que-coute-la-couverture-mesure", label: "Ce que coûte la couverture, mesuré" },
+          { id: "la-base-la-ou-le-jugement-remplace-la-co", label: "La base : là où le jugement remplace la couverture" },
+          { id: "champ-total-champ-reduit-flexi", label: "Champ total, champ réduit, Flexi" },
+          { id: "la-regle-d-or", label: "La règle d'or" },
+        ]}
+      />
+
+      <H2 id="ce-que-coute-la-couverture-mesure">Ce que coûte la couverture, mesuré</H2>
       <p>
         Le tableau ci-dessous part du ticket le plus simple qui soit : prendre les N premiers
         chevaux du marché — les N cotes les plus basses au départ — et jouer toutes les
@@ -86,7 +96,7 @@ export default function Body() {
         chevaux par du jugement.
       </p>
 
-      <h2>La base : là où le jugement remplace la couverture</h2>
+      <H2 id="la-base-la-ou-le-jugement-remplace-la-co">La base : là où le jugement remplace la couverture</H2>
       <p>
         La <strong>base</strong> regroupe les chevaux présents dans toutes vos combinaisons. Chaque
         cheval passé de « champ » à « base » divise le nombre de tickets — c&apos;est
@@ -109,7 +119,7 @@ export default function Body() {
         <Link href="/blog/favori-ou-outsider">favori ou outsider</Link>.
       </p>
 
-      <h2>Champ total, champ réduit, Flexi</h2>
+      <H2 id="champ-total-champ-reduit-flexi">Champ total, champ réduit, Flexi</H2>
       <p>
         Le <strong>champ total</strong> génère toutes les combinaisons entre vos chevaux :
         c&apos;est le tableau ci-dessus, et c&apos;est cher. Le <strong>champ réduit</strong>{" "}
@@ -125,7 +135,7 @@ export default function Body() {
         <Link href="/blog/comprendre-les-cotes">prélèvement</Link>.
       </p>
 
-      <h2>La règle d&apos;or</h2>
+      <H2 id="la-regle-d-or">La règle d&apos;or</H2>
       <p>
         Un bon ticket n&apos;est pas le plus large : c&apos;est celui qui couvre les scénarios{" "}
         <strong>les plus probables ET les mieux payés</strong>. Les chiffres ci-dessus montrent

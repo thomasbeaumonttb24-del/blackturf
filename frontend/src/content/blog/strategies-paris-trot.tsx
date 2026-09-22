@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { H2, Sommaire } from "@/components/blog/kit";
 
 export const meta = {
   slug: "strategies-paris-trot",
@@ -31,7 +32,18 @@ export default function Body() {
         et ce que la mesure dit de chacun, y compris quand elle contredit l&apos;usage.
       </p>
 
-      <h2>Le trot est plus « logique » que le plat</h2>
+      <Sommaire
+        items={[
+          { id: "le-trot-est-plus-logique-que-le-plat", label: "Le trot est plus « logique » que le plat" },
+          { id: "1-la-ferrure-le-signal-que-le-marche-a-d", label: "1. La ferrure — le signal que le marché a déjà lu" },
+          { id: "2-le-recul-au-depart", label: "2. Le recul au départ" },
+          { id: "3-la-reduction-kilometrique", label: "3. La réduction kilométrique" },
+          { id: "4-le-risque-de-disqualification-chiffre", label: "4. Le risque de disqualification, chiffré" },
+          { id: "5-le-driver-et-l-entrainement", label: "5. Le driver et l'entraînement" },
+        ]}
+      />
+
+      <H2 id="le-trot-est-plus-logique-que-le-plat">Le trot est plus « logique » que le plat</H2>
       <p>
         Le favori du marché gagne <strong>36,4 %</strong> des courses d&apos;attelé, contre 32,3 % en
         monté et 31,5 % au plat. Le rapport gagnant médian suit : <strong>4,60 €</strong> pour 1 € en
@@ -39,7 +51,7 @@ export default function Body() {
         moins. Un gros rapport y demande une vraie raison, pas un coup de dé.
       </p>
 
-      <h2>1. La ferrure — le signal que le marché a déjà lu</h2>
+      <H2 id="1-la-ferrure-le-signal-que-le-marche-a-d">1. La ferrure — le signal que le marché a déjà lu</H2>
       <p>
         Un cheval déferré gagne en vitesse pure, et le déferrage se lit sur la fiche de chaque
         partant. Reste à savoir s&apos;il se <em>joue</em>. À cote comparable — entre 3 et 10, pour
@@ -80,7 +92,7 @@ export default function Body() {
         soi.
       </p>
 
-      <h2>2. Le recul au départ</h2>
+      <H2 id="2-le-recul-au-depart">2. Le recul au départ</H2>
       <p>
         En handicap de distance, certains chevaux partent 25 mètres derrière. Le recul est un
         désavantage réel, d&apos;autant plus lourd que la course est courte : il faut le rattraper
@@ -88,7 +100,7 @@ export default function Body() {
         classe compense-t-elle ces mètres, sur CETTE distance ? ».
       </p>
 
-      <h2>3. La réduction kilométrique</h2>
+      <H2 id="3-la-reduction-kilometrique">3. La réduction kilométrique</H2>
       <p>
         La « réduc » — le temps au kilomètre — mesure la vitesse intrinsèque, à condition de la
         comparer à conditions égales : distance, piste, départ à l&apos;autostart ou à la volte. Une
@@ -97,7 +109,7 @@ export default function Body() {
         <Link href="/blog/reduction-kilometrique-trot">guide de la réduction kilométrique</Link>.
       </p>
 
-      <h2>4. Le risque de disqualification, chiffré</h2>
+      <H2 id="4-le-risque-de-disqualification-chiffre">4. Le risque de disqualification, chiffré</H2>
       <p>
         Au trot, un cheval qui galope est disqualifié — le « Da » de la{" "}
         <Link href="/guides/comment-lire-la-musique">musique</Link>. Ce n&apos;est pas un accident
@@ -112,7 +124,7 @@ export default function Body() {
         pari fragile, même quand il est le plus rapide du lot.
       </p>
 
-      <h2>5. Le driver et l&apos;entraînement</h2>
+      <H2 id="5-le-driver-et-l-entrainement">5. Le driver et l&apos;entraînement</H2>
       <p>
         Le couple driver-entraîneur pèse plus qu&apos;au plat, et la spécialité locale y est forte :
         chaque fiche d&apos;<Link href="/hippodromes">hippodrome</Link> publie les cinq drivers et les

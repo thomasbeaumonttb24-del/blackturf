@@ -1,4 +1,14 @@
 import Link from "next/link";
+import {
+  Barres,
+  Chapo,
+  Chiffres,
+  Encadre,
+  H2,
+  Methode,
+  Sommaire,
+  Suite,
+} from "@/components/blog/kit";
 
 export const meta = {
   slug: "favori-ou-outsider",
@@ -35,15 +45,34 @@ const PELOTONS = [
 export default function Body() {
   return (
     <>
-      <p>
+      <Chapo>
         Éternel débat du turfiste : sécuriser avec le favori, ou viser le gros rapport de
-        l&apos;outsider ? La question se tranche par la mesure, pas par le tempérament. Voici ce
-        que donnent les <strong>211 116 partants</strong> des 18 992 courses terminées des douze
-        derniers mois dans la base BlackTurf — arrivées officielles, cote PMU au départ,
-        non-partants exclus.
-      </p>
+        l&apos;outsider ? La question se tranche par la mesure, pas par le tempérament — et la
+        mesure dit quelque chose d&apos;inattendu : c&apos;est dans les grosses cotes que la valeur
+        est le plus sûrement absente.
+      </Chapo>
 
-      <h2>Taux de victoire et rendement, par tranche de cote</h2>
+      <Chiffres
+        items={[
+          { valeur: "211 116", libelle: "partants mesurés", detail: "sur 18 992 courses" },
+          { valeur: "33,7 %", libelle: "des courses gagnées par le favori", detail: "le cheval de cote la plus basse" },
+          { valeur: "−11,0 %", libelle: "la tranche la moins chère", detail: "cotes de 5 à 10" },
+          { valeur: "−34,5 %", libelle: "la tranche la plus chère", detail: "cotes de 20 et plus" },
+        ]}
+        source="Courses terminées des douze derniers mois, arrivées officielles PMU et cote au départ, non-partants exclus."
+      />
+
+      <Sommaire
+        items={[
+          { id: "tranches", label: "Taux de victoire et rendement, par tranche de cote" },
+          { id: "biais", label: "Le biais favori-outsider, mesuré chez nous" },
+          { id: "favori", label: "Le favori gagne un tiers des courses" },
+          { id: "rangs", label: "Le deuxième et le troisième de la cote ne sauvent rien" },
+          { id: "conclusion", label: "Alors, que faut-il jouer ?" },
+        ]}
+      />
+
+      <H2 id="tranches">Taux de victoire et rendement, par tranche de cote</H2>
       <p>
         Le rendement de la dernière colonne est celui d&apos;une stratégie aveugle : miser 1 € en
         Simple Gagnant sur <em>chaque</em> cheval de la tranche, toute l&apos;année.
@@ -76,7 +105,20 @@ export default function Body() {
         </table>
       </div>
 
-      <h2>Le biais favori-outsider, mesuré chez nous</h2>
+      <Barres
+        titre="Ce que perd une mise aveugle de 1 €, par tranche de cote"
+        legende="Le tableau ci-dessus donne le détail ; ce graphique donne la forme — et elle n'est pas plate."
+        barres={TRANCHES.map((t) => ({
+          label: `Cote ${t.cote.toLowerCase()}`,
+          valeur: Math.abs(parseFloat(t.rendement.replace("−", "").replace(",", ".").replace(" %", ""))),
+          affichage: t.rendement,
+          accent: t.cote === "20 et plus",
+        }))}
+        max={38}
+        source="211 116 partants, douze mois, cote PMU au départ."
+      />
+
+      <H2 id="biais">Le biais favori-outsider, mesuré chez nous</H2>
       <p>
         Toutes les tranches perdent : c&apos;est le{" "}
         <Link href="/blog/comprendre-les-cotes">prélèvement PMU</Link>, prélevé sur chaque enjeu
@@ -97,7 +139,7 @@ export default function Body() {
         absente. Un outsider ne se joue que sur une raison précise, jamais par principe.
       </p>
 
-      <h2>Le favori gagne un tiers des courses — et plus le champ est réduit</h2>
+      <H2 id="favori">Le favori gagne un tiers des courses — et plus le champ est réduit</H2>
       <p>
         Le favori du marché — le cheval de cote la plus basse au départ — l&apos;emporte dans{" "}
         <strong>33,7 %</strong> des courses. Ce chiffre dépend d&apos;une chose avant tout : le
@@ -134,7 +176,7 @@ export default function Body() {
         précisément pour cela que le Quinté+ paie : il est difficile.
       </p>
 
-      <h2>Le deuxième et le troisième de la cote ne sauvent rien</h2>
+      <H2 id="rangs">Le deuxième et le troisième de la cote ne sauvent rien</H2>
       <p>
         On lit souvent qu&apos;il vaut mieux jouer le deuxième favori, « moins évident donc mieux
         payé ». La mesure ne le confirme pas : le 2ᵉ de la cote gagne 19,4 % des courses pour un
@@ -143,7 +185,17 @@ export default function Body() {
         ce qui vient après coûte cher.
       </p>
 
-      <h2>Alors, que faut-il jouer ?</h2>
+      <Encadre titre="Ce que ces chiffres ne disent pas" ton="garde">
+        <p>
+          Aucune de ces tranches n&apos;est rentable : la moins chère perd encore 11 %. Le tableau
+          ne désigne donc pas une stratégie à suivre, il désigne l&apos;endroit où le marché se
+          trompe le moins — et, à l&apos;autre bout, celui où il se trompe le plus. Ce qui décide du
+          résultat reste l&apos;écart entre la chance réelle d&apos;un cheval et son prix, course par
+          course.
+        </p>
+      </Encadre>
+
+      <H2 id="conclusion">Alors, que faut-il jouer ?</H2>
       <p>
         Ni le favori ni l&apos;outsider par principe : ce qui compte est l&apos;
         <strong>écart entre la probabilité réelle et la cote</strong>. Un favori à 2,0 dont la
@@ -160,6 +212,11 @@ export default function Body() {
         course, et <Link href="/track-record">le palmarès mesuré</Link> publie ce que ces analyses
         ont donné à l&apos;arrivée, pertes comprises.
       </p>
+      <Suite href="/programme" cta="Voir le programme">
+        Pour chaque course du jour : la probabilité calculée de chaque cheval face à la cote du
+        marché — exactement l&apos;écart dont parle cet article.
+      </Suite>
+
       <p className="text-sm">
         Méthode : courses terminées du 21 septembre 2025 au 21 septembre 2026, arrivées officielles
         PMU, cote PMU au départ, non-partants exclus. Le favori est le cheval de cote la plus basse
