@@ -910,6 +910,10 @@ class PmuScraper(BaseScraper):
                 return v
             robe_val = _libelle(p.get("robe"))
             race_val = _libelle(p.get("race"))
+            # Casaque : PMU expose une image PNG par partant (urlCasaque), générée
+            # pour CETTE course/numPmu — pas de champ texte descriptif ("rouge,
+            # cravate...") dans cette API.
+            casaque_url_val = p.get("urlCasaque") or None
 
             # ── Non-partant (cheval retiré avant la course) ──
             # Le PMU expose le statut du partant : "PARTANT" tant qu'il court,
@@ -970,6 +974,7 @@ class PmuScraper(BaseScraper):
                 jument_pleine=p.get("jumentPleine"),
                 race=race_val,
                 robe=robe_val,
+                casaque_url=casaque_url_val,
                 non_partant=non_partant,
                 source="pmu",
             )

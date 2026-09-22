@@ -453,6 +453,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
             indicateur_inedit=partant.indicateur_inedit,
             jument_pleine=partant.jument_pleine,
             non_partant=bool(partant.non_partant),
+            casaque_image_url=_t(getattr(partant, "casaque_url", None), 300),
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
             set_=champs_reecrits_participation(
@@ -602,6 +603,10 @@ def champs_reecrits_participation(partant, cote_pmu_v, cote_geny_v, cote_ref_v) 
     # elle disparaît du flux une fois la course retirée du programme.
     if partant.numero_corde is not None:
         champs["numero_corde"] = partant.numero_corde
+    # Même règle que la stalle : l'URL casaque disparaît du flux une fois la
+    # course retirée du programme, on ne réécrit que si présente.
+    if getattr(partant, "casaque_url", None):
+        champs["casaque_image_url"] = _t(partant.casaque_url, 300)
     return champs
 
 

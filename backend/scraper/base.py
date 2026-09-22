@@ -198,6 +198,7 @@ class PartantScrape:
     jument_pleine: Optional[bool] = None
     race: Optional[str] = None                   # race/breed
     robe: Optional[str] = None                   # robe (couleur)
+    casaque_url: Optional[str] = None            # urlCasaque PMU — image casaque jockey (par course/numPmu)
     non_partant: Optional[bool] = None           # statut PMU NON_PARTANT (cheval retiré)
     source: str = "pmu"
     scraped_at: str = ""

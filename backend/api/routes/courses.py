@@ -102,6 +102,7 @@ class PartantOut(BaseModel):
     handicap_poids: Optional[float] = None    # poids porté en handicap (kg)
     poids_prevu: Optional[float] = None        # poids prévu (kg)
     numero_corde: Optional[int] = None         # position au départ (plat)
+    casaque_image_url: Optional[str] = None    # image casaque PMU (urlCasaque, par course)
     # Carrière
     gains_carriere: Optional[int] = None
     # Devise ISO 4217 de `gains_carriere`. Le PMU renvoie les gains dans la devise
@@ -376,6 +377,7 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             handicap_poids=p.handicap_poids,
             poids_prevu=p.poids_prevu,
             numero_corde=p.numero_corde,
+            casaque_image_url=p.casaque_image_url,
             # Carrière (PerformanceCarriere, 1:1 cheval) — stocké en centimes
             gains_carriere=int(pc.gains_carriere_total / 100) if pc and pc.gains_carriere_total else None,
             gains_carriere_devise=devise_map.get(ch.cheval_id),

@@ -72,6 +72,7 @@ interface Partant {
   handicap_poids: number | null;
   poids_prevu: number | null;
   numero_corde: number | null;
+  casaque_image_url: string | null;
   gains_carriere: number | null;
   gains_carriere_devise: string | null;   // ISO 4217 — devise locale de la réunion PMU
   nb_victoires: number | null;
@@ -364,6 +365,184 @@ const CX_STYLE = `
 }
 @media (prefers-reduced-motion:reduce){*{animation:none !important}}
 `;
+
+// Badge numéro d'un partant : vraie casaque PMU (urlCasaque) quand disponible,
+// sinon repli sur une teinte déterministe par numéro (pas de casaque en base pour
+// toutes les sources/anciennes courses). L'image casaque peut 404 (course passée,
+// asset PMU expiré) → repli automatique au premier échec de chargement.
+function CasaqueNumero({ numero, imgUrl, background, color, border }: {
+  numero: number;
+  imgUrl: string | null;
+  background: string;
+  color: string;
+  border: string;
+}) {
+  const [errored, setErrored] = useState(false);
+  const showImg = !!imgUrl && !errored;
+  if (!showImg) {
+    return (
+      <span style={{
+        display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%",
+        fontFamily: CX.sg, fontWeight: 700, fontSize: 13, background, color, border: `1.5px solid ${border}`,
+      }}>
+        {numero}
+      </span>
+    );
+  }
+  return (
+    <span style={{
+      position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+      width: 30, height: 30, borderRadius: "50%", overflow: "hidden", background: "#fff", border: "1.5px solid #D4D4D8",
+    }}>
+      <img src={imgUrl!} alt="" onError={() => setErrored(true)} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+      <span style={{
+        position: "absolute", bottom: -3, right: -3, width: 15, height: 15, borderRadius: "50%",
+        display: "flex", alignItems: "center", justifyContent: "center", fontFamily: CX.sg, fontSize: 9, fontWeight: 800,
+        background: "#18181B", color: "#fff", border: "1.5px solid #fff",
+      }}>
+        {numero}
+      </span>
+    </span>
+  );
+}
+
+// Mini-heatmap Forme / Appétence / Niveau — même esprit que la « heatmap des
+// partants » de Boturfers : trois cellules colorées à scanner d'un coup d'œil
+// plutôt que des pourcentages à lire un par un. Aucune donnée neuve : ce sont
+// les mêmes champs (`partant.analyse.*`) déjà calculés côté serveur et déjà
+// affichés — seulement dans le détail déplié, jamais dans le tableau compact.
+function heatTone(pct: number) {
+  return pct >= 60
+    ? { bg: CX.emBg, fg: CX.emDeep, bd: CX.emBd }
+    : pct >= 40
+    ? { bg: CX.goldBg, fg: CX.goldDeep, bd: CX.goldBd }
+    : { bg: CX.redBg, fg: CX.redDeep, bd: CX.redBd };
+}
+function HeatCells({ analyse, eloChamp, elo }: {
+  analyse: Partant["analyse"];
+  eloChamp?: { min: number; max: number; moy: number } | null;
+  elo: number | null;
+}) {
+  if (!analyse) return null;
+  const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100));
+  const forme = pct(analyse.forme.taux_top3);
+  const appetenceVals = [analyse.contexte.pref_distance, analyse.contexte.pref_terrain, analyse.contexte.pref_hippodrome].filter((v): v is number => v != null);
+  const appetence = appetenceVals.length ? Math.round((appetenceVals.reduce((s, v) => s + v, 0) / appetenceVals.length) * 100) : null;
+  const niveauRaw = pct(analyse.elo.pct_rank) ?? (elo != null && eloChamp && eloChamp.max > eloChamp.min
+    ? Math.round(((elo - eloChamp.min) / (eloChamp.max - eloChamp.min)) * 100)
+    : null);
+  // pct_rank backend peut dépasser [0,100] en bord de distribution (percentile
+  // calculé hors du champ exact de cette course) : on clampe à l'affichage.
+  const niveau = niveauRaw == null ? null : Math.max(0, Math.min(100, niveauRaw));
+  const cells: Array<[string, number | null, string]> = [
+    ["F", forme, "Forme — % de courses terminées dans les 3 premiers"],
+    ["A", appetence, "Appétence — habitude de la distance / du terrain / de l'hippodrome"],
+    ["N", niveau, "Niveau — ELO situé dans le champ de la course"],
+  ];
+  if (cells.every(([, v]) => v == null)) return null;
+  return (
+    <div className="cx-hide-m" style={{ display: "flex", gap: 4, marginTop: 4 }}>
+      {cells.map(([label, v, title]) => {
+        const tone = v == null ? { bg: CX.surf3, fg: CX.gray400, bd: CX.bd1 } : heatTone(v);
+        return (
+          <span
+            key={label}
+            title={`${title}${v != null ? ` : ${v}%` : " : non disponible"}`}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 3, fontFamily: CX.sg, fontSize: 9.5, fontWeight: 800,
+              borderRadius: 5, padding: "2px 5px", color: tone.fg, background: tone.bg, border: `1px solid ${tone.bd}`,
+            }}
+          >
+            {label} {v != null ? `${v}%` : "—"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// Comparateur tête-à-tête — 100% client, aucune donnée de plus que ce que le
+// tableau des partants a déjà chargé. Pas de duel réel entre CES deux chevaux
+// (ça, c'est `ConfrontationsCard`, basé sur leur historique commun) : ici on
+// compare leurs stats brutes côte à côte, y compris pour deux chevaux qui ne
+// se sont jamais croisés.
+function ComparateurChevaux({ partants }: { partants: Partant[] }) {
+  const jouables = partants.filter((p) => !p.non_partant);
+  const [numA, setNumA] = useState<number | null>(jouables[0]?.numero ?? null);
+  const [numB, setNumB] = useState<number | null>(jouables[1]?.numero ?? null);
+  if (jouables.length < 2) return null;
+  const a = jouables.find((p) => p.numero === numA);
+  const b = jouables.find((p) => p.numero === numB);
+
+  const Select = ({ value, onChange, exclude }: { value: number | null; onChange: (n: number) => void; exclude: number | null }) => (
+    <select
+      value={value ?? ""}
+      onChange={(e) => onChange(Number(e.target.value))}
+      style={{ flex: 1, minWidth: 0, fontFamily: CX.sg, fontSize: 13, fontWeight: 600, color: CX.ink2, background: CX.surf1, border: `1px solid ${CX.bd1}`, borderRadius: 10, padding: "8px 10px" }}
+    >
+      {jouables.filter((p) => p.numero !== exclude).map((p) => (
+        <option key={p.numero} value={p.numero}>N°{p.numero} — {p.nom_cheval}</option>
+      ))}
+    </select>
+  );
+
+  type Row = { label: string; va: number | null; vb: number | null; fmt: (v: number) => string; higherIsBetter: boolean };
+  const rows: Row[] = a && b ? [
+    { label: "Cote actuelle", va: a.cote_pmu, vb: b.cote_pmu, fmt: (v) => formatCote(v), higherIsBetter: false },
+    { label: "ELO", va: a.elo_global, vb: b.elo_global, fmt: (v) => Math.round(v).toString(), higherIsBetter: true },
+    { label: "Dans les 3 (forme)", va: a.analyse?.forme.taux_top3 ?? null, vb: b.analyse?.forme.taux_top3 ?? null, fmt: (v) => `${Math.round(v * 100)}%`, higherIsBetter: true },
+    { label: "Victoires / courses", va: a.nb_courses ? (a.nb_victoires ?? 0) / a.nb_courses : null, vb: b.nb_courses ? (b.nb_victoires ?? 0) / b.nb_courses : null, fmt: (v) => `${Math.round(v * 100)}%`, higherIsBetter: true },
+    { label: "Nombre de courses", va: a.nb_courses, vb: b.nb_courses, fmt: (v) => v.toString(), higherIsBetter: true },
+    { label: "Repos (jours)", va: a.jours_depuis_derniere, vb: b.jours_depuis_derniere, fmt: (v) => v.toString(), higherIsBetter: false },
+  ] : [];
+
+  const Cell = ({ v, fmt, best }: { v: number | null; fmt: (v: number) => string; best: boolean }) => (
+    <div style={{ textAlign: "center", fontFamily: CX.sg, fontSize: 13, fontWeight: best ? 800 : 500, color: v == null ? CX.gray400 : best ? CX.emDeep : CX.gray600 }}>
+      {v == null ? "—" : fmt(v)}
+    </div>
+  );
+
+  return (
+    <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+      <div style={{ padding: "15px 18px 12px" }}>
+        <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>Comparateur</h2>
+        <span style={{ fontSize: 12, color: CX.gray400 }}>— mettez deux chevaux côte à côte</span>
+      </div>
+      <div style={{ display: "flex", gap: 10, padding: "0 18px 14px" }}>
+        <Select value={numA} onChange={setNumA} exclude={numB} />
+        <span style={{ alignSelf: "center", fontSize: 11, fontWeight: 700, color: CX.gray400 }}>VS</span>
+        <Select value={numB} onChange={setNumB} exclude={numA} />
+      </div>
+      {a && b && (
+        <div style={{ borderTop: `1px solid ${CX.bd4}` }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr", gap: 8, alignItems: "center", padding: "10px 18px", fontFamily: CX.sg, fontSize: 13, fontWeight: 700, color: CX.ink2, background: CX.surf2 }}>
+            <span style={{ textAlign: "right" }}>N°{a.numero} {a.nom_cheval}</span>
+            <span />
+            <span>N°{b.numero} {b.nom_cheval}</span>
+          </div>
+          {rows.map((r) => {
+            const bestA = r.va != null && r.vb != null && (r.higherIsBetter ? r.va > r.vb : r.va < r.vb);
+            const bestB = r.va != null && r.vb != null && (r.higherIsBetter ? r.vb > r.va : r.vb < r.va);
+            return (
+              <div key={r.label} style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr", gap: 8, alignItems: "center", padding: "9px 18px", borderTop: `1px solid ${CX.bd4}` }}>
+                <Cell v={r.va} fmt={r.fmt} best={bestA} />
+                <span style={{ textAlign: "center", fontSize: 10.5, color: CX.gray400, textTransform: "uppercase", letterSpacing: ".04em" }}>{r.label}</span>
+                <Cell v={r.vb} fmt={r.fmt} best={bestB} />
+              </div>
+            );
+          })}
+          {(a.musique || b.musique) && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr", gap: 8, alignItems: "center", padding: "9px 18px", borderTop: `1px solid ${CX.bd4}` }}>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}><MusiqueDisplay musique={a.musique} /></div>
+              <span style={{ textAlign: "center", fontSize: 10.5, color: CX.gray400, textTransform: "uppercase", letterSpacing: ".04em" }}>Musique</span>
+              <div><MusiqueDisplay musique={b.musique} /></div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onSave }: {
   plan: MisePlan;
@@ -3819,11 +3998,29 @@ export default function CoursePage({
           <>
           {/* Tableau partants */}
           <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px 12px", flexWrap: "wrap" }}>
               <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>Partants</h2>
               <span className="hidden sm:inline" style={{ fontSize: 12, color: CX.gray400 }}>
                 — cliquez une ligne pour le détail
               </span>
+              {/* Difficulté = inverse de la confiance du modèle sur son favori (même
+                  valeur que la pastille du programme) : pas une métrique inventée,
+                  juste reformulée pour lecture rapide façon « course serrée / claire ». */}
+              {confGlobal != null && (() => {
+                const diff = confGlobal >= 70
+                  ? { label: "Favori clair", fg: CX.emDeep, bg: CX.emBg, bd: CX.emBd }
+                  : confGlobal >= 50
+                  ? { label: "Équilibrée", fg: CX.goldDeep, bg: CX.goldBg, bd: CX.goldBd }
+                  : { label: "Course serrée", fg: CX.redDeep, bg: CX.redBg, bd: CX.redBd };
+                return (
+                  <span
+                    title={`Confiance du modèle sur son favori : ${Math.round(confGlobal)}%`}
+                    style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: diff.fg, background: diff.bg, border: `1px solid ${diff.bd}`, borderRadius: 999, padding: "3px 10px" }}
+                  >
+                    {diff.label}
+                  </span>
+                );
+              })()}
             </div>
             {/* ── En-tête colonnes (grille design) ── */}
             <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 68px 72px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
@@ -3865,14 +4062,19 @@ export default function CoursePage({
                         className="cx-prow"
                         style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 68px 72px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "12px 18px", cursor: "pointer", transition: "background .15s", background: isExp ? CX.surf2 : "transparent" }}
                       >
-                        {/* N° + badge rang */}
+                        {/* N° + badge rang — vraie casaque PMU (urlCasaque) quand dispo,
+                            sinon repli sur une teinte déterministe par numéro. */}
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                           {rang != null && rang <= 3 && (
                             <span style={{ fontFamily: CX.sg, fontSize: 10, fontWeight: 800, color: rang === 1 ? CX.gold : CX.gray400, lineHeight: 1, marginBottom: 3 }}>#{rang}</span>
                           )}
-                          <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 9, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, background: rang === 1 ? CX.goldBg : CX.surf3, color: rang === 1 ? CX.goldDeep : CX.gray700, border: `1px solid ${rang === 1 ? CX.goldBd : CX.bd1}` }}>
-                            {partant.numero}
-                          </span>
+                          <CasaqueNumero
+                            numero={partant.numero}
+                            imgUrl={partant.casaque_image_url}
+                            background={rang === 1 ? CX.goldBg : `hsl(${(partant.numero * 47) % 360} 70% 93%)`}
+                            color={rang === 1 ? CX.goldDeep : `hsl(${(partant.numero * 47) % 360} 60% 30%)`}
+                            border={rang === 1 ? CX.goldBd : `hsl(${(partant.numero * 47) % 360} 55% 75%)`}
+                          />
                         </div>
 
                         {/* Cheval : nom + badges + méta */}
@@ -3916,10 +4118,15 @@ export default function CoursePage({
                             {partant.asso_jockey_entraineur_taux != null && partant.asso_jockey_entraineur_nb != null && partant.asso_jockey_entraineur_nb >= 5 && (
                               <span className="cx-hide-m" style={{ color: CX.gold, fontWeight: 600 }}>· Duo {(partant.asso_jockey_entraineur_taux * 100).toFixed(0)}%</span>
                             )}
-                            {partant.musique && (
-                              <><span className="cx-hide-m" style={{ color: "#E5E1D5" }}>·</span><span className="cx-hide-m" style={{ fontFamily: CX.sg, letterSpacing: ".02em", color: CX.muted }}>{partant.musique}</span></>
-                            )}
                           </div>
+                          {/* Musique en pastilles colorées (1er = or, 2e-3e = bleu, 4e+ = gris,
+                              disqualifié/tombé/non-partant = rose) plutôt qu'en texte brut. */}
+                          {partant.musique && (
+                            <div className="cx-hide-m" style={{ marginTop: 4 }}>
+                              <MusiqueDisplay musique={partant.musique} />
+                            </div>
+                          )}
+                          {!np && <HeatCells analyse={partant.analyse} eloChamp={eloChamp} elo={partant.elo_global} />}
                         </div>
 
                         {/* Cote */}
@@ -3994,6 +4201,7 @@ export default function CoursePage({
                 })}
             </div>
           </div>
+            <ComparateurChevaux partants={course.partants} />
             <ConfrontationsCard courseId={id} />
           {/* ── Pronostics presse ── */}
           {course.pronostics_presse?.length > 0 && (

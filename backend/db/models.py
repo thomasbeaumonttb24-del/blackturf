@@ -348,6 +348,11 @@ class Participation(Base):
     # Non-partant
     non_partant: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Casaque jockey : image PNG générée par le PMU pour CE partant sur CETTE course
+    # (urlCasaque, ex. .../20260922-AUT-1-1.png — indexée par numPmu, pas par cheval).
+    # Stockée sur `participations` et non `chevaux` car elle est propre à la course.
+    casaque_image_url: Mapped[str | None] = mapped_column(String(300))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
