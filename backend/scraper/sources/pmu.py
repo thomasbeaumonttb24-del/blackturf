@@ -677,6 +677,13 @@ class PmuScraper(BaseScraper):
         #   - rapports        : {type: 1er rapport}  (rétro-compatibilité / agrégat)
         #   - rapports_detail : {type: [{combinaison, rapport}, …]}  (détail réel complet)
         # Aucune valeur inventée : seulement ce que le PMU publie.
+        #
+        # ⚠️ E_DEUX_SUR_QUATRE (2sur4) : le PMU publie volontairement LE MÊME dividende
+        # pour les 6 paires gagnantes d'une course (pool unique réparti sur tous les
+        # gagnants, quelle que soit la paire) — ce n'est PAS un bug de collecte ici.
+        # Vérifié combo par combo vs l'API PMU le 2026-09-22 (plusieurs courses, dont
+        # 02092026R2C4) : DB = API à l'identique. Couplé Placé/Trio, eux, varient bien
+        # par combinaison — seul 2sur4 est structurellement plat. Ne pas "corriger" ça.
         rapports = {}
         rapports_detail = {}
         try:

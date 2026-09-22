@@ -11,24 +11,28 @@ import {
 } from "@/components/blog/kit";
 
 /**
- * Article le plus court du blog avant reprise (272 mots), et l'un des plus faciles à
- * chiffrer : le 2sur4 se mesure entièrement sur l'arrivée, sans dépendre des rapports.
+ * Article le plus court du blog avant reprise (272 mots), l'un des plus faciles à
+ * chiffrer : le 2sur4 se mesure entièrement sur l'arrivée, et paie un rapport
+ * publié fiable.
  *
- * ⚠ Les rapports 2sur4 de notre collecte ne sont PAS publiables : le détail PMU
- * renvoie la même valeur pour les six combinaisons gagnantes d'une même course, ce qui
- * n'a pas de sens pour un pari mutuel et trahit un artefact de collecte. L'article s'en
- * tient donc aux fréquences, qui viennent de l'arrivée officielle et des cotes au départ.
- * Ne pas ajouter de rapport ici sans avoir d'abord corrigé le scraper.
+ * Note technique : le détail PMU du 2sur4 (`rapports_detail->'e_deux_sur_quatre'`)
+ * publie LE MÊME dividende pour les six paires gagnantes d'une course — un doute
+ * avait été soulevé le 2026-09-21 sur une possible erreur de collecte (agrégat
+ * recopié). Vérifié le 2026-09-22 octet pour octet contre l'API PMU sur plusieurs
+ * courses (dont 02092026R2C4) : la DB reproduit l'API à l'identique, et le PMU
+ * lui-même publie ce dividende unique — un pool réparti entre tous les gagnants,
+ * quelle que soit la paire trouvée. Ce n'est donc pas un artefact : les rapports
+ * 2sur4 ci-dessous sont les vrais rapports PMU.
  */
 export const meta = {
   slug: "comprendre-le-2sur4",
   title: "Le 2sur4 : le pari le plus accessible du PMU",
   description:
-    "Deux chevaux parmi les quatre premiers : mesuré sur 2 584 courses, les deux favoris y arrivent 36,5 % du temps, contre 8,8 % au hasard.",
+    "Deux chevaux parmi les quatre premiers : mesuré sur 2 584 courses, les deux favoris y arrivent 36,5 % du temps mais rendent −12 % en moyenne.",
   date: "2026-06-23",
-  updated: "2026-09-21",
+  updated: "2026-09-22",
   tags: ["2sur4", "PMU", "Accessible"],
-  readingMinutes: 7,
+  readingMinutes: 8,
 };
 
 const D = {
@@ -39,7 +43,30 @@ const D = {
   top6: 93.3,
   moyTop4: "2,17",
   hasard: 8.8,
+  rapportMedian2fav: "2,00",
+  rapportMoyen2fav: "2,41",
+  rendement2fav: -12.0,
+  pMoins2: 19.8,
+  p2a5: 43.2,
+  p5a10: 21.3,
+  p10a25: 11.9,
+  p25plus: 3.8,
 };
+
+/** Formate un pourcentage signé en français : -13.8 -> "−13,8 %". */
+function fmtPct(n: number): string {
+  const s = Math.abs(n).toFixed(1).replace(".", ",");
+  return `${n < 0 ? "−" : ""}${s} %`;
+}
+
+/** Rendement par taille de sélection jouée en formule combinée (2sur4 en N chevaux). */
+const RENDEMENT_FORMULE = [
+  { n: 4, combinaisons: 6, pctGagnant: 81.2, rendement: -13.8 },
+  { n: 5, combinaisons: 10, pctGagnant: 90.1, rendement: -17.1 },
+  { n: 6, combinaisons: 15, pctGagnant: 94.7, rendement: -20.9 },
+  { n: 7, combinaisons: 21, pctGagnant: 97.5, rendement: -23.0 },
+  { n: 8, combinaisons: 28, pctGagnant: 98.9, rendement: -26.4 },
+];
 
 export default function Body() {
   return (
@@ -65,6 +92,7 @@ export default function Body() {
         items={[
           { id: "principe", label: "Le principe, et pourquoi il est plus souple" },
           { id: "chiffres", label: "Ce que la mesure dit de sa difficulté" },
+          { id: "rapport", label: "Ce qu'il rapporte vraiment" },
           { id: "combinatoire", label: "La combinatoire, refaite à la main" },
           { id: "jouer", label: "Comment le jouer sans tomber dans le piège" },
           { id: "quand", label: "Quand le 2sur4 est le bon pari" },
@@ -125,6 +153,56 @@ export default function Body() {
         </p>
       </Encadre>
 
+      <H2 id="rapport">Ce qu&apos;il rapporte vraiment</H2>
+      <p>
+        Sur le 2sur4, le PMU publie <strong>un seul rapport par course</strong> : toutes les paires
+        gagnantes d&apos;une même arrivée sont payées pareil, un pool unique réparti entre tous les
+        gagnants quelle que soit la paire trouvée. Jouer les deux favoris rapporte en moyenne{" "}
+        {D.rapportMoyen2fav.replace(".", ",")} € pour 1 € misé quand le ticket gagne (médiane{" "}
+        {D.rapportMedian2fav.replace(".", ",")} €) — sur l&apos;ensemble des tentatives, gagnantes
+        et perdantes confondues, ce pari systématique rend{" "}
+        <strong>{fmtPct(D.rendement2fav)}</strong>.
+      </p>
+
+      <Barres
+        titre="Répartition des rapports 2sur4 publiés, pour 1 € misé"
+        legende="Le rapport unique publié par course, toutes courses de l'échantillon confondues — quelle que soit la paire jouée."
+        barres={[
+          { label: "Moins de 2 €", valeur: D.pMoins2 },
+          { label: "De 2 à 5 €", valeur: D.p2a5, accent: true },
+          { label: "De 5 à 10 €", valeur: D.p5a10 },
+          { label: "De 10 à 25 €", valeur: D.p10a25 },
+          { label: "25 € et plus", valeur: D.p25plus },
+        ]}
+        max={100}
+        source={`${D.courses} courses proposant le 2sur4, rapport publié par le PMU pour la paire gagnante.`}
+      />
+
+      <p>
+        L&apos;élargissement de la sélection illustre bien le compromis : jouer en formule combinée
+        (tous les chevaux deux à deux) fait grimper le taux de succès, mais le rendement se dégrade à
+        mesure que le nombre de combinaisons à payer augmente.
+      </p>
+
+      <Barres
+        titre="Rendement selon le nombre de chevaux joués, en formule combinée"
+        legende="Formule 2sur4 en N chevaux = C(N,2) combinaisons jouées à parts égales de la mise."
+        barres={RENDEMENT_FORMULE.map((r) => ({
+          label: `${r.n} chevaux (${r.combinaisons} combinaisons, ${String(r.pctGagnant).replace(".", ",")} % gagnant)`,
+          valeur: r.rendement,
+          affichage: fmtPct(r.rendement),
+        }))}
+        unite=""
+        max={30}
+        source="Courses de l'échantillon disposant d'au moins N chevaux cotés (2 533 à 2 553 selon N), mise répartie à parts égales sur les combinaisons ; rendement = gain moyen par euro misé − 1."
+      />
+
+      <p>
+        Le message est net : <strong>la fréquence de gain et le rendement évoluent en sens
+        inverse.</strong> Ce n&apos;est pas une raison d&apos;éviter le 2sur4 — c&apos;est une raison
+        de ne pas le jouer les yeux fermés sur les favoris les plus évidents.
+      </p>
+
       <H2 id="combinatoire">La combinatoire, refaite à la main</H2>
       <p>
         Le chiffre de référence — {String(D.hasard).replace(".", ",")} % au hasard — se retrouve à
@@ -149,9 +227,11 @@ export default function Body() {
           combinaison que tout le monde a jouée.
         </li>
         <li>
-          <strong>Ne confondez pas large et rentable.</strong> Six chevaux, c&apos;est quinze
-          combinaisons : le ticket gagne {String(D.top6).replace(".", ",")} % du temps, mais coûte
-          quinze fois la mise de base. Le calcul complet de ce compromis est dans{" "}
+          <strong>Ne confondez pas large et rentable.</strong> Passer de 4 à 6 chevaux joués fait
+          gagner {String(RENDEMENT_FORMULE[2].pctGagnant - RENDEMENT_FORMULE[0].pctGagnant).replace(".", ",")}{" "}
+          points de fréquence, mais le rendement recule de{" "}
+          {fmtPct(RENDEMENT_FORMULE[0].rendement)} à {fmtPct(RENDEMENT_FORMULE[2].rendement)} — voir
+          le graphique ci-dessus. Le calcul complet de ce compromis est dans{" "}
           <Link href="/blog/champ-reduit-base-tickets">base et champ réduit</Link>.
         </li>
         <li>
@@ -189,7 +269,7 @@ export default function Body() {
 
       <Methode>
         <p>
-          Mesures du 21 septembre 2026 sur les {D.courses} courses proposant le 2sur4, terminées
+          Mesures du 22 septembre 2026 sur les {D.courses} courses proposant le 2sur4, terminées
           entre septembre 2025 et septembre 2026, dont les quatre premières places sont publiées.
           Cotes PMU au départ, non-partants exclus ; les courses sans cote exploitable sont
           écartées, pas corrigées.
@@ -199,6 +279,12 @@ export default function Body() {
           gagnant dès que deux chevaux de la sélection figurent dans les quatre premiers. Le taux
           « au hasard » est calculé sur la taille moyenne des pelotons de l&apos;échantillon
           ({D.partants} partants).
+        </p>
+        <p>
+          Les rapports viennent du détail PMU par combinaison (rapport publié pour la paire
+          gagnante, base 1 € misé), vérifié le 22 septembre 2026 contre l&apos;API PMU sur
+          plusieurs courses de l&apos;échantillon. Les rendements sont calculés mise comprise :
+          gain moyen par euro misé, moins 1, sur toutes les tentatives (gagnantes et perdantes).
         </p>
       </Methode>
     </>
