@@ -22,6 +22,7 @@ import {
   CompteurDepart, ApercuAnalyseCard, PreuvesRecentesCard, useApercuAnalyse,
   CapacitesAbonnementCard, CtaAbonnementBand,
 } from "@/components/courses/insights";
+import { PronosticEmailPopup } from "@/components/courses/PronosticEmailPopup";
 import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, type ClassementSignal,
 } from "@/components/courses/classement";
@@ -4308,6 +4309,18 @@ export default function CoursePage({
       </div>
 
       </div>
+
+      {/* Capture e-mail sur CETTE course (funnel gratuit → conversion, cf.
+          Boturfers.fr) : réservée au visiteur non connecté, sur une course encore
+          bettable — un abonné a déjà l'accès, et une course courue n'a plus de
+          pronostic à « envoyer ». */}
+      {course && (
+        <PronosticEmailPopup
+          courseId={id}
+          hippodromeNom={course.hippodrome_nom}
+          actif={!user && ["a_venir", "en_cours"].includes(course.statut)}
+        />
+      )}
     </div>
   );
 }

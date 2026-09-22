@@ -150,6 +150,13 @@ export const predictionsApi = {
   modelVersion: () => api.get("/model/version"),
 };
 
+export const pronosticEmailApi = {
+  // Capture sur la fiche course (popup) : envoi transactionnel du pronostic de
+  // CETTE course précise, pas la newsletter hebdo. Public, aucun compte requis.
+  envoyer: (courseId: string, email: string, source?: string) =>
+    api.post<{ ok: boolean; message: string }>(`/courses/${courseId}/envoyer-pronostic`, { email, source }),
+};
+
 export const bankrollApi = {
   entries: (params?: Record<string, unknown>) => api.get("/bankroll/entries", { params }),
   create: (data: Record<string, unknown>) => api.post("/bankroll/entries", data),

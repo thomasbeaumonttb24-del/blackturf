@@ -1537,6 +1537,46 @@ class NewsletterAbonne(Base):
     relance_confirmation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+# ─────────────────────────────────────────────
+# Pronostic gratuit par e-mail (capture sur la fiche course)
+# ─────────────────────────────────────────────
+class PronosticEmailEnvoi(Base):
+    """
+    Un envoi du pronostic IA d'UNE course précise à une adresse, sur demande du
+    visiteur (popup fiche course). PAS un abonnement : envoi transactionnel unique,
+    déclenché par une action explicite de la personne sur CETTE course, donc pas
+    de double opt-in — mais un lien de désinscription reste fourni dans chaque
+    e-mail (`token_desinscription`) pour couper toute relance sur d'autres courses.
+
+    Contrainte unique (email, course_id) : une seconde soumission de la même adresse
+    sur la même course ne renvoie pas un second e-mail (anti-spam), elle retombe sur
+    la ligne existante.
+    """
+    __tablename__ = "pronostic_email_envois"
+
+    envoi_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), index=True)
+    token_desinscription: Mapped[str] = mapped_column(String(64), unique=True)
+    source: Mapped[str | None] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    envoye_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("email", "course_id", name="ux_pronostic_email_course"),
+    )
+
+
+class PronosticEmailBlocage(Base):
+    """Adresse ayant cliqué « ne plus recevoir » sous un e-mail de pronostic
+    ponctuel. Consultée avant CHAQUE envoi (cf. `pronostic_email_envois`) :
+    présente ici = plus aucun envoi, quelle que soit la course demandée ensuite."""
+    __tablename__ = "pronostic_email_blocages"
+
+    email: Mapped[str] = mapped_column(String(255), primary_key=True)
+    bloque_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class JetonIntegration(Base):
     """
     Jeton d'accès d'un service tiers, déposé depuis l'administration.
