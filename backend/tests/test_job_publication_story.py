@@ -49,6 +49,9 @@ def _bilan(complete: bool, nb_plans: int = 198) -> dict:
 def _preparer(monkeypatch, db, *, bilan: dict, envois: list, publie=True, media_id="media-1"):
     """Branche le job sur la session de test, une API simulée et un envoi factice."""
     import httpx
+    from api.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "frontend_url", "https://blackturf.fr")
 
     class _Client:
         def __init__(self, *a, **k):

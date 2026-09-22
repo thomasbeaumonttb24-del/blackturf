@@ -193,6 +193,7 @@ async def test_le_webhook_du_premier_refus_coupe_les_relances_stripe(db, monkeyp
                         periode_debut=MAINTENANT, periode_fin=MAINTENANT + timedelta(days=30)))
     await db.commit()
 
+    avant_webhook = datetime.now(timezone.utc)
     await sr._handle_payment_failed({
         "id": "in_test", "customer": "cus_refus", "subscription": "sub_refus",
         "attempt_count": 1, "auto_advance": True, "amount_due": 1900,
@@ -202,4 +203,4 @@ async def test_le_webhook_du_premier_refus_coupe_les_relances_stripe(db, monkeyp
     evt = (await db.execute(select(SubscriptionEvent).where(
         SubscriptionEvent.type == "paiement_echoue"))).scalar_one()
     relance = datetime.fromtimestamp(evt.detail["prochaine_relance"], tz=timezone.utc)
-    assert abs((relance - MAINTENANT) - timedelta(days=3)) < timedelta(minutes=5)
+    assert abs((relance - avant_webhook) - timedelta(days=3)) < timedelta(minutes=5)
