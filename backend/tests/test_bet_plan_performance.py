@@ -329,6 +329,42 @@ async def test_apply_type_gates_n_abaisse_jamais_au_dela_du_facteur():
 
 
 @pytest.mark.asyncio
+async def test_apply_profile_gate_abaisse_tous_les_types_du_profil_suspendu():
+    session = _FakeGateSession()
+    gates = {"agressif": {"status": "suspended", "factor": 0.0, "reason": "x", "roi_pct": -39, "n_paris": 800}}
+    await bpp.persist_segment_gates(session, "profil", gates)
+
+    weights = {"Couplé Gagnant": 1.35, "Trio": 1.1, "Simple Gagnant": 0.9}
+    out = await bpp.apply_profile_gate(session, "agressif", weights)
+    assert out == {"Couplé Gagnant": 0.0, "Trio": 0.0, "Simple Gagnant": 0.0}
+
+
+@pytest.mark.asyncio
+async def test_apply_profile_gate_ignore_un_profil_actif_ou_non_gate():
+    session = _FakeGateSession()
+    weights = {"Couplé Placé": 1.2}
+    # Aucun gate persisté pour ce profil → inchangé.
+    out = await bpp.apply_profile_gate(session, "conservateur", weights)
+    assert out == weights
+
+    await bpp.persist_segment_gates(session, "profil", {"equilibre": {
+        "status": "active", "factor": 1.0, "reason": None, "roi_pct": -5, "n_paris": 200}})
+    out2 = await bpp.apply_profile_gate(session, "equilibre", weights)
+    assert out2 == weights
+
+
+@pytest.mark.asyncio
+async def test_apply_profile_gate_reduit_sans_annuler_quand_status_reduced():
+    session = _FakeGateSession()
+    await bpp.persist_segment_gates(session, "profil", {"agressif": {
+        "status": "reduced", "factor": 0.5, "reason": "x", "roi_pct": -20, "n_paris": 300}})
+
+    weights = {"Simple Placé": 1.0, "Couplé Gagnant": 1.35}
+    out = await bpp.apply_profile_gate(session, "agressif", weights)
+    assert out == {"Simple Placé": 0.5, "Couplé Gagnant": 0.675}
+
+
+@pytest.mark.asyncio
 async def test_load_segment_gates_ne_leve_jamais_si_table_absente():
     class _Broken:
         async def execute(self, *_a, **_k):

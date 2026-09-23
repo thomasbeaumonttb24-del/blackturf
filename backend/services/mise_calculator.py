@@ -191,6 +191,9 @@ class MisePlan:
     # se pose tout lecteur qui voit « N°5 classé 1er » et ne le retrouve pas dans le
     # plan ; sans cette structure, la page ne peut pas y répondre.
     classement: list[dict] = field(default_factory=list)
+    # Module Quinté+ dédié (audit 2026-09-23) : présent uniquement quand la course
+    # offre E_QUINTE_PLUS ; None sinon (aucune autre course n'affiche cette clé).
+    module_quinte: Optional[dict] = None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -762,6 +765,68 @@ def _mode_label(heat: float) -> str:
     return "normal"
 
 
+# ─────────────────────────────────────────────────────────────
+# Module Quinté+ — audit du 2026-09-23, P0 « le Quinté+ offert n'entre jamais
+# dans le plan automatique contrôlé » : sur 10 courses Quinté+ du 13 au 22
+# septembre, 0/10 plans (les 3 profils confondus) contenaient un ticket
+# Quinté+. `combo_bets.enumerate_bet_candidates` sait pourtant construire un
+# candidat « Quinté+ Désordre » — mais il n'est autorisé QUE pour le profil
+# agressif (PROFIL_CONFIG) et rivalise avec les autres candidats dans la liste
+# des six meilleurs par conviction : il finit presque toujours écarté. Ce
+# module est calculé À CÔTÉ de cette compétition, pour les TROIS profils.
+# ─────────────────────────────────────────────────────────────
+# Budget dédié, borné par rapport au montant du plan pour ne pas l'écraser —
+# le module est une PROPOSITION EN PLUS des tickets normaux, pas un ticket qui
+# leur dispute le budget (le contrat produit n'a jamais parlé de rogner le
+# plan principal pour financer un Quinté+).
+QUINTE_BUDGET_FRAC = 0.5
+QUINTE_BUDGET_MIN = 2.0
+# Champ élargi = plus cher, plus de chances de toucher, rapport unitaire plus
+# petit : c'est la même logique que le reste du profil (prudent = le moins
+# cher / le plus probable, risqué = la plus grosse couverture assumée).
+QUINTE_CHAMP_PAR_PROFIL = {"conservateur": 5, "equilibre": 6, "agressif": 7}
+
+
+def _construire_module_quinte(preds: list[dict], course_info: dict, profil: str,
+                              montant: float) -> Optional[dict]:
+    """Module Quinté+ explicite pour ce profil, ou None si la course n'offre pas
+    E_QUINTE_PLUS. Ne modifie ni la sélection ni l'allocation du plan principal.
+    """
+    from ml.combo_bets import _bet_flags, build_coverage_bets
+    if not _bet_flags(course_info).get("est_quinte"):
+        return None
+
+    n_sel_vise = QUINTE_CHAMP_PAR_PROFIL.get(profil, 5)
+    budget = max(QUINTE_BUDGET_MIN, round(montant * QUINTE_BUDGET_FRAC, 2))
+    try:
+        cov = build_coverage_bets(preds, course_info, bankroll=max(budget, 10.0), budget=budget)
+    except Exception as exc:
+        return {"disponible": False, "profil": profil,
+                "motif": f"module Quinté+ non calculable ({exc.__class__.__name__})"}
+
+    props = {p["couverture"]: p for p in (cov.get("proposals") or [])
+             if p.get("type_pari") == "Quinté+ Désordre"}
+    if not props:
+        # Cas documenté par l'audit plutôt que réintroduit silencieusement : moins de
+        # 5 chevaux avec une cote exploitable, ou champ trop réduit pour la simulation.
+        return {"disponible": False, "profil": profil,
+                "motif": "moins de 5 chevaux à cote exploitable : aucune combinaison "
+                         "Quinté+ calculable pour cette course"}
+
+    # Repli : le tendu (5) exige le moins de partants exploitables, donc il est
+    # toujours présent dès que `props` ne l'est pas — jamais l'inverse (un champ
+    # plus large ne peut pas être disponible si un plus petit ne l'est pas).
+    cle = "tendue" if n_sel_vise == 5 else f"champ {n_sel_vise} chevaux"
+    choix = props.get(cle) or props.get("champ 6 chevaux") or props.get("tendue")
+
+    return {
+        "disponible": True,
+        "profil": profil,
+        "budget_alloue": budget,
+        **choix,
+    }
+
+
 def generer_plan(
     montant: float,
     profil: str,
@@ -1086,10 +1151,15 @@ def generer_plan(
     classement = _couverture_classement(selected, cands, cfg, _rang_par_num, preds,
                                         roi_weights=roi_weights, montant=montant,
                                         value_bets=_vb_par_num)
-    return _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
+    plan = _assemble_plan(selected, montant, palier, kelly_warn, profil, heat,
                           facteurs_chevaux=facteurs_chevaux, ecartes=ecartes,
                           rang_par_num=_rang_par_num, classement=classement,
                           value_bets=_vb_par_num)
+    try:
+        plan.module_quinte = _construire_module_quinte(preds, course_info, profil, montant)
+    except Exception:
+        plan.module_quinte = None
+    return plan
 
 
 # Qualité mesurée d'une cellule (type × tranche de rapport), telle qu'apprise par
@@ -3595,4 +3665,5 @@ def plan_to_dict(plan: MisePlan) -> dict:
         ],
         "paris_ecartes": plan.paris_ecartes,
         "classement": plan.classement,
+        "module_quinte": plan.module_quinte,
     }

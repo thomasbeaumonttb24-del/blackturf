@@ -970,3 +970,30 @@ async def apply_type_gates(session: AsyncSession, type_weights: dict[str, float]
         return type_weights
     return {t: round(w * gates[t]["factor"], 4) if t in gates else w
             for t, w in type_weights.items()}
+
+
+async def apply_profile_gate(session: AsyncSession, profil: str,
+                             type_weights: dict[str, float]) -> dict[str, float]:
+    """Applique le gate ``profil`` calculé par ``compute_forward_performance`` —
+    jusqu'ici stocké dans ``bet_plan_segment_gates`` mais lu par AUCUN chemin de
+    génération du plan (constat de l'audit du 2026-09-23) : un profil marqué
+    ``suspended`` n'avait donc aucun effet réel sur ce qui était proposé.
+
+    Pas d'abstention possible (contrainte produit : un pari par course, dans la
+    tranche du profil) : on n'éteint jamais le profil, on abaisse la conviction de
+    TOUS ses types par le même facteur que le gate ``type_pari`` (0.5 réduit, 0.0
+    suspendu). Un ``factor=0.0`` ramène tous les poids à 0 ; `_garantir_catalogue_profil`
+    (appelé juste après par `get_learned_type_weights`) réanime alors le plancher
+    de types au poids minimal — le profil continue de jouer, mais au ras du
+    plancher appris, pas à la conviction normale d'un profil sain.
+    """
+    if not type_weights:
+        return type_weights
+    gates = await load_segment_gates(session, "profil")
+    g = gates.get(profil)
+    if not g or g["status"] == "active":
+        return type_weights
+    factor = g["factor"]
+    log.info("bet_plan_performance.profile_gate_applied", profil=profil,
+             status=g["status"], factor=factor, reason=g.get("reason"))
+    return {t: round(w * factor, 4) for t, w in type_weights.items()}

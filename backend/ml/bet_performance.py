@@ -81,6 +81,11 @@ async def get_learned_type_weights(session: AsyncSession,
         pass
     if profil:
         try:
+            from ml.bet_plan_performance import apply_profile_gate
+            weights = await apply_profile_gate(session, profil, weights)
+        except Exception:
+            pass
+        try:
             weights = await _garantir_catalogue_profil(session, profil, weights)
         except Exception:
             pass
