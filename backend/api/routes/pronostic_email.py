@@ -30,7 +30,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.middleware.rate_limit import rate_limit_public
-from api.routes.predictions import _is_prono_fige, _signaux_du_champ
+from api.routes.predictions import _signaux_du_champ
 from db.database import get_db
 from db.models import (
     Course, Prediction, Participation, Cheval, ValueBet, FeatureML,
@@ -132,38 +132,41 @@ async def _classement_complet(db: AsyncSession, course: Course) -> list[dict]:
     vbs = list(vb_res.scalars().all())
     vbs_by_pid = {vb.participation_id: vb for vb in vbs}
 
-    # Cote AFFICHÉE : live avant le gel (T-10 min), dernière connue après — même
-    # règle que /courses/{id}/predictions, pour ne pas comparer une cote juste
-    # fraîche à une cote de marché périmée.
-    fige = _is_prono_fige(course.date_heure)
-    live_cotes: dict[int, float] = {}
-    if not fige and course.statut in ("a_venir", "en_cours"):
-        try:
-            from services.pmu_cotes import fetch_live_cotes
-            live_cotes = {int(c["numero"]): float(c["cote"])
-                          for c in await fetch_live_cotes(course_id) if c.get("cote")}
-        except Exception:
-            live_cotes = {}
-
-    # Signaux réels, calculés depuis les features déjà en base (fonction PURE,
-    # aucun appel réseau ni modèle chargé) — même source que l'aperçu public.
-    features_par_pid: dict[str, dict] = {}
+    # Cote de marché : `cote_pmu`, tenue à jour par le scraper — PAS un appel
+    # live à `fetch_live_cotes` comme /courses/{id}/predictions. Cet endpoint
+    # est déclenché en synchrone par la soumission d'un visiteur anonyme : un
+    # appel réseau supplémentaire ici (parfois lent, notamment sur les
+    # hippodromes étrangers) ferait échouer l'envoi pour une fraîcheur de cote
+    # dont un e-mail figé au moment de la demande n'a pas besoin.
+    #
+    # Signaux réels, calculés depuis les features déjà en base — même source
+    # que l'aperçu public (`api.routes.predictions._signaux_du_champ`).
+    # ENRICHISSEMENT OPTIONNEL : un échec ici (SQL ou ML) ne doit jamais faire
+    # échouer l'envoi lui-même — l'e-mail part alors sans signaux plutôt que pas
+    # du tout. `desempoisonner` est indispensable : PostgreSQL avorte toute la
+    # transaction dès qu'une requête échoue, et sans ce rollback l'échec
+    # ressortirait sur le `commit` de l'envoi, quinze lignes plus bas, avec un
+    # message qui n'aurait plus aucun rapport avec la cause (cf. db.database).
+    signaux_par_pid: dict[str, list[dict]] = {}
     try:
         pids = [part.participation_id for _, part, _ in rows]
+        features_par_pid: dict[str, dict] = {}
         if pids:
             fr = await db.execute(
                 select(FeatureML.participation_id, FeatureML.features)
                 .where(FeatureML.participation_id.in_(pids))
             )
             features_par_pid = {pid: (f or {}) for pid, f in fr.all() if f}
+        signaux_par_pid, _agregat = _signaux_du_champ(rows, vbs, features_par_pid)
     except Exception:
-        features_par_pid = {}
-    signaux_par_pid, _agregat = _signaux_du_champ(rows, vbs, features_par_pid)
+        from db.database import desempoisonner
+        await desempoisonner(db)
+        signaux_par_pid = {}
 
     chevaux = []
     for pred, part, cheval in rows:
         vb = vbs_by_pid.get(part.participation_id)
-        marche = (live_cotes.get(part.numero) if not fige else None) or part.cote_pmu
+        marche = part.cote_pmu
         juste = _cote_juste(pred.proba_top1)
         chevaux.append({
             "numero": part.numero,
@@ -364,8 +367,7 @@ async def envoyer_pronostic(
     if deja_aujourdhui.scalar_one_or_none() is not None:
         return DemandeOut(
             ok=False,
-            message="Vous avez déjà reçu un pronostic gratuit aujourd'hui — un seul envoi par jour. "
-                    "Revenez demain pour une nouvelle course.",
+            message="Votre envoi gratuit de la journée vous a déjà été envoyé aujourd'hui — revenez demain.",
         )
 
     envoi = PronosticEmailEnvoi(
