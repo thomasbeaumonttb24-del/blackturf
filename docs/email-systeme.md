@@ -6,8 +6,8 @@ Le compte de contrôle `thomas.beaumont.tb24@gmail.com` reçoit **un exemplaire 
 
 | Famille | Déclencheur | Destinataires | Revue avant envoi |
 | --- | --- | --- | --- |
-| Valeurs du jour | Tous les jours à 10 h Paris, reprises à 10 h 15/30/45 si nécessaire | Comptes Starter, Standard, Expert éligibles et opt-in | Suspendu par défaut ; aperçu `docs/email-previews/quotidien.html` |
-| Lettre hebdomadaire | Lundi et mardi, 9 h–20 h Paris, toutes les 30 minutes jusqu'au bilan complet | Inscrits confirmés et comptes actifs éligibles, sans doublon | Suspendu par défaut ; aperçu `docs/email-previews/hebdomadaire.html` |
+| Valeurs du jour | Tous les jours à 10 h Paris, reprises à 10 h 15/30/45 si nécessaire | Comptes Starter, Standard, Expert éligibles et opt-in | Activé en production ; aperçu `docs/email-previews/quotidien.html` |
+| Lettre hebdomadaire | Lundi et mardi, 9 h–20 h Paris, toutes les 30 minutes jusqu'au bilan complet | Inscrits confirmés et comptes actifs éligibles, sans doublon | Activé en production ; aperçu `docs/email-previews/hebdomadaire.html` |
 | Confirmation de newsletter | Demande d'inscription | Adresse demandant l'inscription | Transactionnel immédiat |
 | Vérification d'adresse et mot de passe | Inscription, renvoi ou demande de réinitialisation | Compte concerné | Transactionnel immédiat, jeton secret |
 | Pronostic d'une course | Demande explicite sur la fiche course | Adresse demandant ce pronostic | Transactionnel immédiat, une fois par adresse et course |
