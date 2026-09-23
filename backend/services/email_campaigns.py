@@ -1,6 +1,7 @@
 """Scheduled editorial email. Fail closed on incomplete financial evidence."""
 import hashlib
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
@@ -18,6 +19,42 @@ from services.valuebets_visibilite import filtres_sql
 PARIS = ZoneInfo("Europe/Paris")
 PROFILS = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
 log = structlog.get_logger()
+
+
+def editorial_enabled():
+    """Editorial campaigns require an explicit production release after review."""
+    return os.getenv("EMAIL_EDITORIAL_ENABLED", "0") == "1"
+
+
+CONTROL_ADDRESS = "thomas.beaumont.tb24@gmail.com"
+
+
+async def send_control_copy(session, campaign, subject, html, plain, now):
+    """One non-personalized editorial sample per campaign for the owner."""
+    from services.alerts import send_email
+    key = hashlib.sha256(f"control:{campaign}:{CONTROL_ADDRESS}".encode()).hexdigest()
+    await insert_once(session, EmailLivraison, {
+        "cle": key, "campagne": campaign + "-controle", "email": CONTROL_ADDRESS,
+        "statut": "pending", "created_at": now,
+        "requete": {"to": CONTROL_ADDRESS, "subject": "[COPIE DE CONTRÔLE] " + subject,
+                    "html": html, "text": plain, "idempotency_key": key},
+    })
+    row = (await session.execute(select(EmailLivraison).where(EmailLivraison.cle == key)
+            .with_for_update(skip_locked=True))).scalar_one_or_none()
+    if not row or row.statut != "pending":
+        await session.commit()
+        return
+    if now - utc(row.created_at) > timedelta(hours=23):
+        row.statut = "review"
+        row.erreur = "Copie de contrôle à vérifier chez Resend avant relance."
+        await session.commit()
+        return
+    result = await send_email(**row.requete)
+    row.statut = "sent" if result else "pending"
+    row.envoye_at = now if result else None
+    row.provider_id = getattr(result, "provider_id", None)
+    row.erreur = None if result else getattr(result, "erreur", "Échec fournisseur")
+    await session.commit()
 
 
 def utc(dt):
@@ -208,6 +245,9 @@ async def deliver(session, campaign, email, subject, html, plain, unsubscribe, n
 
 
 async def send_weekly(session, now=None):
+    if not editorial_enabled():
+        log.info("newsletter.envoi_suspendu", campagne="hebdomadaire")
+        return 0
     from services.alerts import prefs_utilisateur, _unsubscribe_url, make_unsubscribe_token
     now = now or datetime.now(timezone.utc)
     start, _ = period(now)
@@ -244,20 +284,28 @@ async def send_weekly(session, now=None):
         url = f"{SITE}/api/v1/newsletter/desinscription?jeton={subscriber.token_desinscription}"
         targets[subscriber.email.lower()] = (url, url)
     sent = 0
+    control_payload = None
     for email, (unsubscribe, oneclick) in targets.items():
         html, plain = weekly(edition.donnees, unsubscribe, archive)
         count = len(edition.donnees["top"])
         subject = f"BlackTurf — top {count} des plans et bilan de la semaine" if count else "BlackTurf — le bilan de la semaine, pertes comprises"
         if await deliver(session, key, email, subject, html, plain, oneclick, now):
             sent += 1
+            if email != CONTROL_ADDRESS and control_payload is None:
+                control_payload = (subject, *weekly(edition.donnees, None, archive))
             subscriber = subscribers_by_email.get(email)
             if subscriber:
                 subscriber.dernier_envoi_at = now
                 await session.commit()
+    if control_payload and CONTROL_ADDRESS not in targets:
+        await send_control_copy(session, key, *control_payload, now)
     return sent
 
 
 async def send_daily(session, now=None):
+    if not editorial_enabled():
+        log.info("newsletter.envoi_suspendu", campagne="quotidien")
+        return 0
     from services.alerts import prefs_utilisateur, _unsubscribe_url, make_unsubscribe_token
     now = now or datetime.now(timezone.utc)
     local = now.astimezone(PARIS)
@@ -267,6 +315,7 @@ async def send_daily(session, now=None):
         User.marketing_opt_out_at.is_(None), clause_email_utilisable(),
     ))).scalars().all()
     sent = 0
+    control_payload = None
     for user in users:
         prefs = prefs_utilisateur(user)
         if not prefs["email_quotidien"]:
@@ -302,4 +351,9 @@ async def send_daily(session, now=None):
                          f"BlackTurf — {len(items)} valeur(s) détectée(s) ce {local.strftime('%d/%m')}",
                          html, plain, oneclick, now):
             sent += 1
+            if user.email.lower() != CONTROL_ADDRESS and control_payload is None:
+                control_html, control_plain = daily(items, local.strftime("%d/%m/%Y à %H:%M (Paris)"), SITE + "/notifications")
+                control_payload = (f"BlackTurf — {len(items)} valeur(s) détectée(s) ce {local.strftime('%d/%m')}", control_html, control_plain)
+    if control_payload and not any(u.email.lower() == CONTROL_ADDRESS for u in users):
+        await send_control_copy(session, "jour-" + local.date().isoformat(), *control_payload, now)
     return sent

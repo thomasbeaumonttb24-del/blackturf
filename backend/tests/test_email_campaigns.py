@@ -16,6 +16,20 @@ from tests.test_alerts_weekly_best_vb import _seed_value_bet, _make_user
 NOW = datetime(2026, 9, 21, 7, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _enable_editorial_for_campaign_tests(monkeypatch):
+    monkeypatch.setenv("EMAIL_EDITORIAL_ENABLED", "1")
+
+
+@pytest.mark.asyncio
+async def test_editorial_send_paused_until_review(db, monkeypatch):
+    monkeypatch.setenv("EMAIL_EDITORIAL_ENABLED", "0")
+    await seed_plan(db)
+    assert await campaign.send_daily(db, NOW) == 0
+    assert await campaign.send_weekly(db, NOW) == 0
+    assert (await db.execute(select(EmailLivraison))).scalars().all() == []
+
+
 async def seed_plan(db, number=1, *, stake=10, returned=50, origin="profil_run", pre=True,
                     pending=False, suffix="a", departure=None):
     cid = f"16092026R1C{number}"
@@ -133,9 +147,11 @@ async def test_double_opt_in_dedup_and_preferences(db, monkeypatch):
     monkeypatch.setattr("services.alerts.send_email", sender)
     await campaign.send_weekly(db, NOW)
     await campaign.send_weekly(db, NOW + timedelta(minutes=30))
-    assert sender.await_count == 2
-    assert {c.kwargs["to"] for c in sender.await_args_list} == {account.email, "newsletter@example.com"}
-    assert all(c.kwargs["idempotency_key"] and c.kwargs["unsubscribe_url"] and c.kwargs["text"] for c in sender.await_args_list)
+    assert sender.await_count == 3
+    assert {c.kwargs["to"] for c in sender.await_args_list} == {account.email, "newsletter@example.com", campaign.CONTROL_ADDRESS}
+    assert sum(c.kwargs["to"] == campaign.CONTROL_ADDRESS for c in sender.await_args_list) == 1
+    assert all(c.kwargs["idempotency_key"] and c.kwargs["text"] for c in sender.await_args_list)
+    assert all(c.kwargs["unsubscribe_url"] for c in sender.await_args_list if c.kwargs["to"] != campaign.CONTROL_ADDRESS)
     edition = await db.get(EmailEdition, "hebdo-2026-09-14")
     assert "token" not in str(edition.donnees)
 
@@ -171,9 +187,9 @@ async def test_daily_paris_cutoff_preference_and_idempotence(db, monkeypatch):
     monkeypatch.setattr("services.alerts.send_email", sender)
     await campaign.send_daily(db, NOW)
     await campaign.send_daily(db, NOW+timedelta(minutes=15))
-    assert sender.await_count == 1
-    assert sender.await_args.kwargs["to"] == user.email
-    assert "14:00" in sender.await_args.kwargs["html"]  # UTC 12 → Paris 14
+    assert sender.await_count == 2
+    assert {c.kwargs["to"] for c in sender.await_args_list} == {user.email, campaign.CONTROL_ADDRESS}
+    assert "14:00" in sender.await_args_list[0].kwargs["html"]  # UTC 12 → Paris 14
 
 
 @pytest.mark.asyncio

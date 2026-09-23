@@ -1,5 +1,19 @@
 # Mails éditoriaux BlackTurf
 
+**Envoi suspendu pour revue.** `EMAIL_EDITORIAL_ENABLED` vaut `0` par défaut en production. Les campagnes quotidiennes et hebdomadaires ne partent pas tant que cette variable n'est pas passée explicitement à `1` après validation des aperçus et des audiences. Les e-mails transactionnels déclenchés par une action du client (vérification d'adresse, réinitialisation de mot de passe, etc.) continuent de fonctionner.
+
+Le compte de contrôle `thomas.beaumont.tb24@gmail.com` reçoit **un exemplaire par édition éditoriale réellement envoyée**, même s'il est en formule Free. S'il est déjà dans les destinataires normaux de l'hebdomadaire, il ne reçoit pas de doublon. La copie de contrôle n'inclut aucun lien de désabonnement d'un autre destinataire. Les e-mails de vérification d'adresse et de réinitialisation de mot de passe ne sont jamais copiés : ils contiennent des jetons personnels donnant accès aux comptes. Leur existence et leur statut doivent être contrôlés dans les journaux techniques, sans transmettre ces jetons.
+
+| Famille | Déclencheur | Destinataires | Revue avant envoi |
+| --- | --- | --- | --- |
+| Valeurs du jour | Tous les jours à 10 h Paris, reprises à 10 h 15/30/45 si nécessaire | Comptes Starter, Standard, Expert éligibles et opt-in | Suspendu par défaut ; aperçu `docs/email-previews/quotidien.html` |
+| Lettre hebdomadaire | Lundi et mardi, 9 h–20 h Paris, toutes les 30 minutes jusqu'au bilan complet | Inscrits confirmés et comptes actifs éligibles, sans doublon | Suspendu par défaut ; aperçu `docs/email-previews/hebdomadaire.html` |
+| Confirmation de newsletter | Demande d'inscription | Adresse demandant l'inscription | Transactionnel immédiat |
+| Vérification d'adresse et mot de passe | Inscription, renvoi ou demande de réinitialisation | Compte concerné | Transactionnel immédiat, jeton secret |
+| Pronostic d'une course | Demande explicite sur la fiche course | Adresse demandant ce pronostic | Transactionnel immédiat, une fois par adresse et course |
+| Abonnement et résiliation | Événement Stripe ou demande du compte | Compte concerné ; certaines alertes à l'administration | Transactionnel immédiat |
+| Alertes d'exploitation | Incident ou seuil technique | Adresse d'administration | Automatique ; pas de campagne client |
+
 ## Cadence et contenu
 
 - **Chaque jour dès 10 h (Paris)** : un relevé horodaté des valeurs encore visibles, pour les comptes Starter/Standard/Expert dont l'adresse est utilisable et la préférence `email_quotidien` active. Aucun mail si aucune valeur n'est disponible. Les passages suivants à 10 h 15, 10 h 30 et 10 h 45 servent uniquement aux reprises ; une campagne `jour-AAAA-MM-JJ` ne livre qu'une fois par adresse. Le seuil de niveau et le délai du plan Standard restent applicables. Les non-partants sont exclus.

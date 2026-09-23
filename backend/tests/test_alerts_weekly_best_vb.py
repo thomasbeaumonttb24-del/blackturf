@@ -25,6 +25,11 @@ from api.routes.auth import _hash
 
 pytestmark = pytest.mark.asyncio
 
+
+@pytest.fixture(autouse=True)
+def _enable_editorial_for_legacy_campaign_tests(monkeypatch):
+    monkeypatch.setenv("EMAIL_EDITORIAL_ENABLED", "1")
+
 NOW = datetime.now(timezone.utc)
 
 
@@ -369,9 +374,9 @@ async def test_digest_quotidien_idempotent(db: AsyncSession, monkeypatch):
     await send_morning_digest(db)
     await send_morning_digest(db)  # relance manuelle / restart le même jour
 
-    assert mock_email.await_count == 1
-    assert mock_email.await_args.kwargs["to"] == user.email
-    assert "Cheval DIGEST1" in mock_email.await_args.kwargs["html"]
+    assert mock_email.await_count == 2
+    assert {call.kwargs["to"] for call in mock_email.await_args_list} == {user.email, "thomas.beaumont.tb24@gmail.com"}
+    assert "Cheval DIGEST1" in mock_email.await_args_list[0].kwargs["html"]
     logs = (await db.execute(
         select(AlerteLog).where(
             AlerteLog.user_id == user.user_id,
