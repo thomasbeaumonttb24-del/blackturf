@@ -12,6 +12,7 @@ items = [
     {"course_id": "demo", "heure": "15:10", "hippodrome": "ParisLongchamp · exemple fictif", "nom_cheval": "Un nom particulièrement long pour vérifier le retour à la ligne", "numero": 12, "niveau": 4, "ev": .186},
 ]
 data = {"debut": "14/09/2026 (DÉMONSTRATION)", "fin": "20/09/2026 · chiffres fictifs",
+        "algo": {"courses": 7, "gagnant_top3": 4, "premier_gagnant": 2},
         "top": [{"course_id": "demo", "profil": "Modéré", "date": "16/09 à 15:10", "hippodrome": "Course de démonstration", "code": "R1C4", "mise": 10.0, "retour": 75.40, "net": 65.40},
                 {"course_id": "demo", "profil": "Prudent", "date": "18/09 à 14:20", "hippodrome": "Exemple fictif", "code": "R2C3", "mise": 10.0, "retour": 42.20, "net": 32.20},
                 {"course_id": "demo", "profil": "Risqué", "date": "20/09 à 16:05", "hippodrome": "Exemple fictif", "code": "R1C5", "mise": 10.0, "retour": 28.50, "net": 18.50}],

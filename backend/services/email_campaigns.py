@@ -9,7 +9,7 @@ from sqlalchemy import bindparam, select, text, func
 import structlog
 
 from db.models import (EmailEdition, EmailLivraison, NewsletterAbonne, User,
-                       Course, ValueBet, Participation, Cheval)
+                       Course, ValueBet, Participation, Cheval, Resultat, PredictionSnapshot)
 from services.bet_plan_snapshots import CTE_PLAN_PUBLIE
 from services.email_templates import daily, weekly, SITE
 from services.email_verification import clause_email_utilisable
@@ -48,6 +48,58 @@ async def insert_once(session, model, values):
         from sqlalchemy.dialects.sqlite import insert
     await session.execute(insert(model).values(**values).on_conflict_do_nothing())
     await session.commit()
+
+
+async def weekly_algorithm_numbers(session, start, end):
+    """Compare the last complete live pre-race ranking with the official winner."""
+    races = (await session.execute(select(Course.course_id, Course.date_heure, Resultat.classement)
+        .join(Resultat, Resultat.course_id == Course.course_id)
+        .where(Course.date_heure >= start.astimezone(timezone.utc),
+               Course.date_heure < end.astimezone(timezone.utc), Course.statut == "termine"))).all()
+    eligible = {}
+    for course_id, departure, classement in races:
+        winners = []
+        for row in classement or []:
+            try:
+                if int(row.get("position")) == 1:
+                    winners.append(int(row["numero"]))
+            except (TypeError, ValueError, KeyError, AttributeError):
+                continue
+        if len(winners) == 1:
+            eligible[course_id] = (utc(departure), winners[0])
+    if not eligible:
+        return {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0}
+    snapshots = (await session.execute(select(
+        PredictionSnapshot.course_id, PredictionSnapshot.prediction_run_id,
+        PredictionSnapshot.observed_at, PredictionSnapshot.rang_predit,
+        Participation.numero, Participation.non_partant)
+        .join(Participation, Participation.participation_id == PredictionSnapshot.participation_id)
+        .where(PredictionSnapshot.course_id.in_(eligible),
+               PredictionSnapshot.is_pre_course == True,
+               PredictionSnapshot.is_replayable == True,
+               PredictionSnapshot.origin == "live"))).all()
+    runs = {}
+    for course_id, run_id, observed, rank, numero, non_partant in snapshots:
+        if utc(observed) >= eligible[course_id][0]:
+            continue
+        run = runs.setdefault(course_id, {}).setdefault(run_id, {"observed": utc(observed), "ranks": {}})
+        run["observed"] = max(run["observed"], utc(observed))
+        if rank in (1, 2, 3) and not non_partant:
+            run["ranks"].setdefault(rank, []).append(numero)
+    metrics = {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0}
+    for course_id, by_run in runs.items():
+        latest = max(by_run.values(), key=lambda row: row["observed"])
+        ranks = latest["ranks"]
+        if set(ranks) != {1, 2, 3} or any(len(values) != 1 for values in ranks.values()):
+            continue
+        predicted = [ranks[rank][0] for rank in (1, 2, 3)]
+        if len(set(predicted)) != 3:
+            continue
+        winner = eligible[course_id][1]
+        metrics["courses"] += 1
+        metrics["gagnant_top3"] += int(winner in predicted)
+        metrics["premier_gagnant"] += int(winner == predicted[0])
+    return metrics
 
 
 async def build_week(session, now):
@@ -102,8 +154,10 @@ async def build_week(session, now):
                           "code": f"R{r['numero_reunion']}C{r['numero']}" if r["numero_reunion"] else f"Course {r['numero']}",
                           "mise": float(stake), "retour": float(returned), "net": float(net)})
     plans.sort(key=lambda x: (-x["net"], x["course_id"], x["profil"]))
+    algo = await weekly_algorithm_numbers(session, start, end)
     return {"debut": start.strftime("%d/%m/%Y"), "fin": (end - timedelta(days=1)).strftime("%d/%m/%Y"),
             "periode": start.date().isoformat(), "top": plans[:3],
+            "algo": algo,
             "profils": [{k: float(v) if isinstance(v, Decimal) else v for k, v in p.items()}
                         for p in totals.values() if p["n"]]}
 

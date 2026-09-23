@@ -85,6 +85,14 @@ def weekly(data, unsubscribe=None, archive=None):
         amounts = f"Mise totale : {euro(plan['mise'])} · Retour, mise incluse : {euro(plan['retour'])}"
         body += card(f'<p style="margin:0 0 10px;font-size:12px;color:#80612b;font-weight:bold;letter-spacing:1px">#{rank:02d} &nbsp;·&nbsp; PROFIL {e(plan["profil"]).upper()}</p><h2 style="margin:0 0 12px;font-size:20px;line-height:27px;color:#142b23">{e(description)}</h2><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin:0 0 14px;background:#eff5ed;border-left:3px solid #3d7658"><tr><td style="padding:12px"><div style="color:#515952;font-size:13px">Bénéfice net du plan</div><div style="font-size:32px;line-height:40px;color:#24513d;font-weight:bold">+{e(euro(plan["net"]))}</div></td></tr></table><p style="margin:0 0 16px;color:#515952;font-size:14px">Mise totale : <strong>{e(euro(plan["mise"]))}</strong><br>Retour, mise incluse : <strong>{e(euro(plan["retour"]))}</strong></p><a href="{e(url)}" style="color:#244e3d;font-weight:bold">Voir la course →</a>')
         text.extend([f"N° {rank} — {description} — {plan['profil']}", f"Bénéfice net : +{euro(plan['net'])}", amounts, url])
+    algo = data.get("algo") or {}
+    if algo.get("courses", 0) > 0:
+        n = int(algo["courses"])
+        top3 = int(algo["gagnant_top3"])
+        top1 = int(algo["premier_gagnant"])
+        body += '<h2 style="font-size:21px;line-height:27px;margin:28px 0 12px;color:#142b23">Les chiffres de l’algorithme</h2>'
+        body += card(f'<p style="margin:0 0 16px;color:#515952;font-size:13px">Sur <strong>{n} courses évaluables</strong> de cette semaine :</p><p style="margin:0 0 8px;font-size:19px;line-height:27px;color:#142b23"><strong style="color:#80612b">{top3}/{n}</strong> gagnants figuraient dans notre top 3</p><p style="margin:0 0 16px;font-size:19px;line-height:27px;color:#142b23"><strong style="color:#80612b">{top1}/{n}</strong> premiers choix de l’IA ont gagné</p><p style="margin:0;color:#5c665e;font-size:12px;line-height:19px">Classement IA figé avant le départ et comparé à l’arrivée officielle. Les courses sans classement complet vérifiable sont exclues.</p>')
+        text.extend(["Les chiffres de l’algorithme", f"{top3}/{n} gagnants figuraient dans notre top 3", f"{top1}/{n} premiers choix de l’IA ont gagné", "Classements IA figés avant le départ ; courses sans classement complet exclues."])
     body += button("Lire et partager le bilan", archive or SITE + "/palmares")
     body += '<p style="font-size:13px;color:#515952"><strong>À retenir</strong><br>Le retour inclut la mise. Le bénéfice net est ce qu’il reste une fois toutes les mises du plan déduites. Les meilleurs résultats ne représentent pas à eux seuls la performance de la semaine.</p>'
     text.extend([archive or SITE + "/palmares", INSTAGRAM, RESPONSABLE])

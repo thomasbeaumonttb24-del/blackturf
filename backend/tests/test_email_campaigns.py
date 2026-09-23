@@ -6,7 +6,8 @@ import pytest
 from sqlalchemy import select
 
 from db.models import (BetPlanSnapshot, BetPlanSettlement, EmailEdition, EmailLivraison,
-                       NewsletterAbonne, User, Course)
+                       NewsletterAbonne, User, Course, Prediction, PredictionSnapshot,
+                       Participation, Cheval)
 from services import email_campaigns as campaign
 from services.alerts import ResultatEnvoi
 from services.email_templates import daily, weekly
@@ -45,6 +46,46 @@ async def test_top_net_and_losses_complete_week(db):
     assert [p["net"] for p in data["top"]] == [60, 50, 40]
     assert data["profils"] == [{"label": "Modéré", "n": 5, "mise": 140, "retour": 290, "net": 150}]
     assert data["debut"] == "14/09/2026" and data["fin"] == "20/09/2026"
+
+
+@pytest.mark.asyncio
+async def test_weekly_algorithm_numbers_use_latest_complete_pre_race_run(db):
+    departure = datetime(2026, 9, 16, 12, tzinfo=timezone.utc)
+    for race, winner in [(1, 1), (2, 2)]:
+        cid = f"16092026R1C{race}"
+        await _seed_value_bet(db, cid, numero_gagnant=winner, date_heure=departure)
+        for number in (2, 3):
+            horse_id = f"horse-{cid}-{number}"
+            part_id = f"part-{cid}-{number}"
+            pred_id = f"pred-{cid}-{number}"
+            db.add(Cheval(cheval_id=horse_id, nom=f"Cheval {number}", age=4, sexe="H"))
+            db.add(Participation(participation_id=part_id, course_id=cid,
+                                 cheval_id=horse_id, numero=number, non_partant=False))
+            db.add(Prediction(prediction_id=pred_id, participation_id=part_id,
+                              course_id=cid, proba_top1=.1, proba_top3=.3, rang_predit=number))
+        await db.commit()
+        for number in (1, 2, 3):
+            db.add(PredictionSnapshot(snapshot_id=f"s-{cid}-{number}", prediction_run_id=f"run-{cid}",
+                prediction_id=f"pred-{cid}" if number == 1 else f"pred-{cid}-{number}",
+                participation_id=f"part-{cid}" if number == 1 else f"part-{cid}-{number}",
+                course_id=cid, features={}, features_hash="x" * 64,
+                feature_schema_hash="y" * 64, proba_top1=.3, proba_top3=.6,
+                rang_predit=number, observed_at=departure-timedelta(minutes=10),
+                course_start_at=departure, is_pre_course=True, origin="live", is_replayable=True))
+    await db.commit()
+    start, end = campaign.period(NOW)
+    assert await campaign.weekly_algorithm_numbers(db, start, end) == {
+        "courses": 2, "gagnant_top3": 2, "premier_gagnant": 1}
+    cid = "16092026R1C2"
+    db.add(PredictionSnapshot(snapshot_id="latest-incomplete", prediction_run_id="later-run",
+        prediction_id=f"pred-{cid}", participation_id=f"part-{cid}", course_id=cid,
+        features={}, features_hash="x" * 64, feature_schema_hash="y" * 64,
+        proba_top1=.3, proba_top3=.6, rang_predit=1,
+        observed_at=departure-timedelta(minutes=5), course_start_at=departure,
+        is_pre_course=True, origin="live", is_replayable=True))
+    await db.commit()
+    assert await campaign.weekly_algorithm_numbers(db, start, end) == {
+        "courses": 1, "gagnant_top3": 1, "premier_gagnant": 1}
 
 
 @pytest.mark.asyncio
@@ -177,6 +218,10 @@ def test_three_star_signal_and_weekly_photo():
     html, _ = weekly({"debut": "14/09/2026", "fin": "20/09/2026", "top": [], "profils": []})
     assert "galop-foule.jpg" in html and "sans lien avec les courses" in html
     assert "Toute la semaine" not in html
+    html, plain = weekly({"debut": "14/09/2026", "fin": "20/09/2026", "top": [],
+                          "algo": {"courses": 7, "gagnant_top3": 4, "premier_gagnant": 2}})
+    assert "4/7" in html and "2/7" in plain
+    assert "courses évaluables" in html and "Prudent" not in html
 
 
 @pytest.mark.parametrize("date", [datetime(2026, 3, 30, 7, tzinfo=timezone.utc), datetime(2026, 10, 26, 8, tzinfo=timezone.utc)])
