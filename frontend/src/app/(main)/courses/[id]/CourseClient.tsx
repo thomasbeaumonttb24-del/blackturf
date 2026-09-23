@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
+import { CasaquesProvider, CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
 import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -368,46 +369,6 @@ const CX_STYLE = `
 @media (prefers-reduced-motion:reduce){*{animation:none !important}}
 `;
 
-// Badge numéro d'un partant : vraie casaque PMU (urlCasaque) quand disponible,
-// sinon repli sur une teinte déterministe par numéro (pas de casaque en base pour
-// toutes les sources/anciennes courses). L'image casaque peut 404 (course passée,
-// asset PMU expiré) → repli automatique au premier échec de chargement.
-function CasaqueNumero({ numero, imgUrl, background, color, border }: {
-  numero: number;
-  imgUrl: string | null;
-  background: string;
-  color: string;
-  border: string;
-}) {
-  const [errored, setErrored] = useState(false);
-  const showImg = !!imgUrl && !errored;
-  if (!showImg) {
-    return (
-      <span style={{
-        display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%",
-        fontFamily: CX.sg, fontWeight: 700, fontSize: 13, background, color, border: `1.5px solid ${border}`,
-      }}>
-        {numero}
-      </span>
-    );
-  }
-  return (
-    <span style={{
-      position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
-      width: 30, height: 30, borderRadius: "50%", overflow: "hidden", background: "#fff", border: "1.5px solid #D4D4D8",
-    }}>
-      <img src={imgUrl!} alt="" onError={() => setErrored(true)} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-      <span style={{
-        position: "absolute", bottom: -3, right: -3, width: 15, height: 15, borderRadius: "50%",
-        display: "flex", alignItems: "center", justifyContent: "center", fontFamily: CX.sg, fontSize: 9, fontWeight: 800,
-        background: "#18181B", color: "#fff", border: "1.5px solid #fff",
-      }}>
-        {numero}
-      </span>
-    </span>
-  );
-}
-
 // Mini-heatmap Forme / Appétence / Niveau — même esprit que la « heatmap des
 // partants » de Boturfers : trois cellules colorées à scanner d'un coup d'œil
 // plutôt que des pourcentages à lire un par un. Aucune donnée neuve : ce sont
@@ -518,9 +479,9 @@ function ComparateurChevaux({ partants }: { partants: Partant[] }) {
       {a && b && (
         <div style={{ borderTop: `1px solid ${CX.bd4}` }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr", gap: 8, alignItems: "center", padding: "10px 18px", fontFamily: CX.sg, fontSize: 13, fontWeight: 700, color: CX.ink2, background: CX.surf2 }}>
-            <span style={{ textAlign: "right" }}>N°{a.numero} {a.nom_cheval}</span>
+            <span style={{ textAlign: "right" }}><IdentiteCheval numero={a.numero} nom={a.nom_cheval} /></span>
             <span />
-            <span>N°{b.numero} {b.nom_cheval}</span>
+            <span><IdentiteCheval numero={b.numero} nom={b.nom_cheval} /></span>
           </div>
           {rows.map((r) => {
             const bestA = r.va != null && r.vb != null && (r.higherIsBetter ? r.va > r.vb : r.va < r.vb);
@@ -659,7 +620,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "start", gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: CX.ink2 }}>{p.type}</div>
-                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map(c => `N°${c.numero}`).join(" + ")}</div>
+                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map((c, i) => <span key={c.numero} className="inline-flex items-center gap-1">{i > 0 && "+"}<CasaqueNumero numero={c.numero} /></span>)}</div>
                       {/* Prix utilisé par le moteur vs prix du marché — affiché
                           UNIQUEMENT quand les deux divergent. Le reste du temps la ligne
                           n'apprendrait rien et alourdirait la page ; quand ils divergent,
@@ -672,7 +633,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                             c.cote != null && c.cote_live != null
                               && Math.abs(c.cote_live / c.cote - 1) >= 0.1 ? (
                               <span key={c.numero} style={{ fontSize: 10.5, color: CX.gray500, whiteSpace: "nowrap" }}>
-                                <span style={{ fontWeight: 650, color: CX.ink2 }}>N°{c.numero}</span>
+                                <span style={{ fontWeight: 650, color: CX.ink2 }}><CasaqueNumero numero={c.numero} /></span>
                                 <span> joué à {c.cote.toFixed(1)} · cote actuelle {c.cote_live.toFixed(1)}</span>
                               </span>
                             ) : null
@@ -852,7 +813,7 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
           return (
             <Fragment key={p.participation_id}>
               <div style={{ padding: "9px 14px", fontSize: 12.5, color: CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
-                <span style={{ color: CX.gray400, marginRight: 5 }}>{p.numero}</span>{p.nom_cheval}
+                <IdentiteCheval numero={p.numero} nom={p.nom_cheval} />
               </div>
               {activeSources.map((s) => {
                 const val = (p as unknown as Record<string, unknown>)[s.key] as number | null;
@@ -918,7 +879,7 @@ function PronosticsPresse({ pronostics }: {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {consensus.map(([num, { nb, nom }]) => (
               <span key={num} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: CX.goldDeep, background: "#FFFFFF", border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "3px 9px" }}>
-                N°{num} {nom && <span style={{ fontWeight: 400, color: CX.gold }}>{nom}</span>}
+                <IdentiteCheval numero={Number(num)} nom={nom} />
                 <span style={{ fontSize: 10, color: CX.gold }}>×{nb}</span>
               </span>
             ))}
@@ -1438,7 +1399,7 @@ function ResultatsSection({ resultats, partants }: {
                       {pos}
                     </span>
                   </td>
-                  <td className="px-2 py-2 tabular-nums">{c.numero}</td>
+                  <td className="px-2 py-2 tabular-nums"><CasaqueNumero numero={c.numero} /></td>
                   <td className="px-2 py-2">{c.nom}</td>
                   {hasTemps && (
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
@@ -1464,7 +1425,7 @@ function ResultatsSection({ resultats, partants }: {
                       DSQ
                     </span>
                   </td>
-                  <td className="px-2 py-2 tabular-nums">{c.numero}</td>
+                  <td className="px-2 py-2 tabular-nums"><CasaqueNumero numero={c.numero} /></td>
                   <td className="px-2 py-2">
                     <span className="line-through decoration-rose-400/60">{c.nom}</span>
                     <span className="ml-2 align-middle text-[11px] font-medium text-rose-700">{fmtIncident(c.incident)}</span>
@@ -1669,7 +1630,7 @@ function PronosticVerdictSection({ predictions, classement }: {
           </span>
           {gagnant && (
             <span className="text-[12px] text-stone-600">
-              vainqueur <span className="font-semibold text-slate-900">N°{gagnant.numero} {gagnant.nom}</span>
+              vainqueur <span className="font-semibold text-slate-900"><IdentiteCheval numero={gagnant.numero} nom={gagnant.nom} /></span>
               {rangIAduGagnant != null
                 ? <> · classé {ord(rangIAduGagnant)} par le modèle</>
                 : <> · absent du classement du modèle</>}
@@ -1689,7 +1650,7 @@ function PronosticVerdictSection({ predictions, classement }: {
             <div className="mt-1 hidden truncate text-[11px] text-stone-600 sm:block">
               {favPos == null
                 ? "non classé à l'arrivée"
-                : favoriIA ? `N°${favoriIA.numero} ${favoriIA.nom_cheval}` : ""}
+                : favoriIA ? <IdentiteCheval numero={favoriIA.numero} nom={favoriIA.nom_cheval} /> : ""}
             </div>
           </div>
           <div className="px-3 py-2.5 sm:px-4">
@@ -1744,7 +1705,7 @@ function PronosticVerdictSection({ predictions, classement }: {
                     qu'annonce le commentaire de course et qu'on retrouve dans
                     l'arrivée officielle. */}
                 <span className="flex items-baseline gap-1.5 truncate">
-                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900">N°{p.numero}</span>
+                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900"><CasaqueNumero numero={p.numero} /></span>
                   <span className="truncate text-[13px] text-stone-600">{p.nom_cheval}</span>
                 </span>
                 <div className="mt-1 flex items-center gap-2 sm:hidden">
@@ -2010,7 +1971,7 @@ function ConfrontationRangs({ predN, realN, gagnant, rangGagnant, modeleAVuGagna
                       "inline-flex items-center rounded-lg px-2 py-1 font-display text-[13px] font-bold tabular-nums ring-1",
                       predHit ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-stone-50 text-stone-600 ring-stone-200",
                     )}>
-                      N°{pred}
+                      <CasaqueNumero numero={pred} />
                     </span>
                     {predHit && (
                       <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-700">
@@ -2033,7 +1994,7 @@ function ConfrontationRangs({ predN, realN, gagnant, rangGagnant, modeleAVuGagna
                         : reelVu ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
                         : "bg-stone-50 text-stone-600 ring-stone-200",
                     )}>
-                      N°{reel}
+                      <CasaqueNumero numero={reel} />
                     </span>
                     {reelGagnant && (
                       <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-amber-700">
@@ -2053,7 +2014,7 @@ function ConfrontationRangs({ predN, realN, gagnant, rangGagnant, modeleAVuGagna
 
       {gagnant != null && (
         <p className="mt-2 text-[12px] text-stone-600">
-          Vainqueur <span className="font-semibold text-slate-900">N°{gagnant}</span> —{" "}
+          Vainqueur <span className="font-semibold text-slate-900"><CasaqueNumero numero={gagnant} /></span> —{" "}
           {modeleAVuGagnant ? (
             <span className="font-medium text-emerald-700">
               trouvé : le modèle le classait {rangGagnant === 1 ? "1ᵉʳ" : `${rangGagnant}ᵉ`}
@@ -2772,8 +2733,8 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
             return (
               <div key={r.num} style={{ borderRadius: 14, border: `1px dashed ${CX.bd3}`, background: CX.surf2, padding: "11px 13px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 7, background: "#D1D5DB", color: "#FFFFFF", fontFamily: CX.sg, fontWeight: 700, fontSize: 11, flexShrink: 0 }}>{r.num}</span>
-                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.nom}</span>
+
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><IdentiteCheval numero={r.num} nom={r.nom} /></span>
                 </div>
                 <div style={{ marginTop: 12, height: 34, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, color: CX.muted }}>
                   Cote non publiée
@@ -2795,8 +2756,8 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
           return (
             <div key={r.num} className="hover:-translate-y-0.5" style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${isFav ? CX.goldBd : CX.bd1}`, background: isFav ? "#FFFCF4" : "#FFFFFF", padding: "11px 13px 0", boxShadow: "0 1px 2px rgba(0,0,0,.03)", transition: "transform .18s,box-shadow .18s" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 7, background: isFav ? CX.gold : CX.ink, color: "#FFFFFF", fontFamily: CX.sg, fontWeight: 700, fontSize: 11, flexShrink: 0 }}>{r.num}</span>
-                <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.nom}</span>
+
+                <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><IdentiteCheval numero={r.num} nom={r.nom} /></span>
               </div>
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 9 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
@@ -2982,12 +2943,15 @@ export default function CoursePage({
         .then((res) => {
           if (!alive) return;
           const cotes: Array<{ numero: number; cote: number }> = res.data?.cotes ?? [];
-          if (!cotes.length) return;
+          if (!cotes.length) {
+            setLiveCoteHttp({});
+            return;
+          }
           const m: Record<number, number> = {};
           for (const c of cotes) m[c.numero] = c.cote;
           setLiveCoteHttp(m);
         })
-        .catch(() => {});
+        .catch(() => { if (alive) setLiveCoteHttp({}); });
     poll();
     const iv = setInterval(poll, 5000);
     return () => { alive = false; clearInterval(iv); };
@@ -3167,8 +3131,8 @@ export default function CoursePage({
   const ongletParDefaut = course.statut === "termine" ? "resultats" : "synthese";
   const ongletActif = ONGLETS.some((o) => o.cle === onglet) ? onglet! : ongletParDefaut;
 
-
   return (
+    <CasaquesProvider partants={course.partants}>
     <div style={{ minHeight: "100vh", background: CX_PAGE_BG }}>
       <style dangerouslySetInnerHTML={{ __html: CX_STYLE }} />
       <div className="cx-wrap" style={{ maxWidth: 1120, margin: "0 auto", padding: "22px 20px 90px" }}>
@@ -3394,7 +3358,7 @@ export default function CoursePage({
               {/* Favori algo */}
               <div className="cx-fade" style={{ position: "relative", overflow: "hidden", borderRadius: 18, border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(135deg,rgba(245,158,11,.09),transparent 70%)", padding: "16px 18px", animationDelay: ".04s" }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gold }}>Favori algo</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>N°{fav.numero} {fav.nom_cheval}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><IdentiteCheval numero={fav.numero} nom={fav.nom_cheval} /></div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
                   <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.gold, lineHeight: 1 }}>{Math.round(fav.proba_top1 * 100)}%</span>
                   <span style={{ fontSize: 11, color: CX.gray400 }}>victoire{favCote ? ` · cote ${formatCote(favCote)}` : ""}</span>
@@ -3405,7 +3369,7 @@ export default function CoursePage({
                 <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: topVB ? CX.emDeep : CX.gray400 }}>Pari de valeur</div>
                 {topVB ? (
                   <>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>N°{topVB.numero} {topVB.nom_cheval}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><IdentiteCheval numero={topVB.numero} nom={topVB.nom_cheval} /></div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
                       <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</span>
                       <span style={{ fontSize: 11, color: CX.gray400 }}>espérance · {etoiles(topVB.value_bet!.niveau)}</span>
@@ -3461,7 +3425,7 @@ export default function CoursePage({
           <div style={{ display: "flex", alignItems: "center", gap: 9, borderRadius: 14, border: "1px solid rgba(245,158,11,.32)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)", padding: "11px 16px", marginBottom: 20, fontSize: 13, color: CX.gray600 }}>
             <Zap className="h-4 w-4 flex-shrink-0" style={{ color: CX.gold }} />
             <span>
-              <b style={{ color: CX.goldDeep }}>Pari de valeur exceptionnel</b> — N°{topVBFranc.numero} {topVBFranc.nom_cheval} · {etoiles(topVBFranc.value_bet!.niveau)} · espérance <b style={{ color: CX.em }}>+{Math.round(topVBFranc.value_bet!.ev_max * 100)}%</b> détectée par l&apos;algorithme.
+              <b style={{ color: CX.goldDeep }}>Pari de valeur exceptionnel</b> — <IdentiteCheval numero={topVBFranc.numero} nom={topVBFranc.nom_cheval} /> · {etoiles(topVBFranc.value_bet!.niveau)} · espérance <b style={{ color: CX.em }}>+{Math.round(topVBFranc.value_bet!.ev_max * 100)}%</b> détectée par l&apos;algorithme.
             </span>
           </div>
         )}
@@ -3838,7 +3802,7 @@ export default function CoursePage({
                   <div className="flex flex-wrap gap-1.5">
                     {analysis.market_signals.map((s, i) => (
                       <span key={i} style={{ fontSize: 11, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 999, padding: "3px 10px" }}>
-                        N°{s.numero} {s.nom} — {s.signal}
+                        <IdentiteCheval numero={s.numero} nom={s.nom} /> — {s.signal}
                       </span>
                     ))}
                   </div>
@@ -3872,7 +3836,7 @@ export default function CoursePage({
                   return (
                   <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "13px 14px" }} className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span style={{ fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}>N°{c.numero} {c.nom}</span>
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
                       <span style={{ fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
                     </div>
                     {/* Chiffres clés : valeur modèle vs marché */}
@@ -4039,7 +4003,7 @@ export default function CoursePage({
               })()}
             </div>
             {/* ── En-tête colonnes (grille design) ── */}
-            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px 1fr 58px 68px 72px 24px" : "44px 1fr 58px 24px"), gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
+            <div className="cx-prow" style={{ display: "grid", gridTemplateColumns: (predictions && predictions.length > 0 ? "44px minmax(0,1fr) 58px 68px 72px 24px" : "44px minmax(0,1fr) 58px 24px"), gap: 12, alignItems: "center", padding: "0 18px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: CX.muted }}>
               <span style={{ textAlign: "center" }}>N°</span>
               <span>Cheval</span>
               <span style={{ textAlign: "right" }} title="Cote du marché — live tant que la course n'est pas partie">Cote</span>
@@ -4087,9 +4051,7 @@ export default function CoursePage({
                           <CasaqueNumero
                             numero={partant.numero}
                             imgUrl={partant.casaque_image_url}
-                            background={rang === 1 ? CX.goldBg : `hsl(${(partant.numero * 47) % 360} 70% 93%)`}
-                            color={rang === 1 ? CX.goldDeep : `hsl(${(partant.numero * 47) % 360} 60% 30%)`}
-                            border={rang === 1 ? CX.goldBd : `hsl(${(partant.numero * 47) % 360} 55% 75%)`}
+                            vertical
                           />
                         </div>
 
@@ -4337,5 +4299,6 @@ export default function CoursePage({
         />
       )}
     </div>
+    </CasaquesProvider>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { IdentiteCheval } from "@/components/courses/identite-cheval";
 
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
@@ -166,10 +167,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           {/* Horse */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              {vb.numero != null && (
-                <span className="font-black text-base leading-none tabular-nums text-slate-900 shrink-0">N°{vb.numero}</span>
-              )}
-              <span className="text-sm text-muted-foreground truncate">{vb.nom_cheval}</span>
+              <IdentiteCheval numero={vb.numero} nom={vb.nom_cheval} courseId={vb.course_id} />
               {isExpert && vb.spi_detected && (
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-500 text-amber-700 shrink-0 gap-0.5">
                   <Zap className="w-2.5 h-2.5" aria-hidden="true" /> Afflux
@@ -266,10 +264,7 @@ function VBCard({ vb, isExpert, view }: { vb: VB; isExpert: boolean; view: "grid
           <div className="mb-1">
             {/* Le numéro d'abord, en gras : c'est lui qu'on joue. Le nom confirme. */}
             <h3 className="flex items-baseline gap-2 min-w-0">
-              {vb.numero != null && (
-                <span className="font-black text-xl leading-none tabular-nums text-slate-900 shrink-0">N°{vb.numero}</span>
-              )}
-              <span className="text-sm text-muted-foreground truncate">{vb.nom_cheval}</span>
+              <IdentiteCheval numero={vb.numero} nom={vb.nom_cheval} courseId={vb.course_id} />
             </h3>
             <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span>{vb.hippodrome_nom}</span>

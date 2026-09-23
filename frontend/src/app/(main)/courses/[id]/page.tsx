@@ -1,3 +1,4 @@
+import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
@@ -493,7 +494,7 @@ export default async function CoursePage({ params }: Props) {
                         className={`border-t border-stone-100 ${p.non_partant ? "text-stone-600" : "text-stone-600"}`}
                       >
                         <td className="px-3 py-2 font-display font-bold tabular-nums text-slate-900">
-                          {p.numero}
+                          <CasaqueNumero numero={p.numero} imgUrl={p.casaque_image_url} />
                         </td>
                         <td className={`px-3 py-2 font-medium text-slate-900 ${p.non_partant ? "line-through opacity-60" : ""}`}>
                           {titleCase(p.nom_cheval)}

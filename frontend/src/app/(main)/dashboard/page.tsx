@@ -1,4 +1,5 @@
 "use client";
+import { IdentiteCheval } from "@/components/courses/identite-cheval";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -139,7 +140,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-foreground">N°{pariDuJour.numero} {pariDuJour.nom_cheval}</span>
+                      <span className="font-bold text-foreground"><IdentiteCheval numero={pariDuJour.numero} nom={pariDuJour.nom_cheval} courseId={pariDuJour.course_id} /></span>
                       <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-700 font-semibold">
                         EV +{((pariDuJour.ev ?? 0) * 100).toFixed(0)}%
                       </span>
@@ -340,10 +341,7 @@ export default function DashboardPage() {
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             {/* Le dossard en gras, le nom en confirmation : même règle que /value-bets. */}
-                            {vb.numero != null && (
-                              <span className="font-black text-base leading-none tabular-nums text-foreground shrink-0">N°{vb.numero}</span>
-                            )}
-                            <span className="text-sm text-muted-foreground truncate">{vb.nom_cheval}</span>
+                            <IdentiteCheval numero={vb.numero} nom={vb.nom_cheval} courseId={vb.course_id} />
                             <StarRating n={vb.niveau} />
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">

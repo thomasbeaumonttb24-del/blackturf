@@ -384,6 +384,7 @@ export function codeReunionCourse(courseId: string): string {
 /* ───────────────────────── Détail course + partants (SSR) ───────────────────────── */
 
 export interface SeoPartant {
+  casaque_image_url?: string | null;
   numero: number;
   nom_cheval: string;
   age?: number | null;

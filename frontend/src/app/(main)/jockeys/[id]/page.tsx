@@ -1,4 +1,5 @@
 "use client";
+import { IdentiteCheval } from "@/components/courses/identite-cheval";
 
 import { useParams } from "next/navigation";
 import useSWR from "swr";
@@ -49,6 +50,7 @@ interface AssociationEntraineur {
 }
 
 interface Participation {
+  casaque_image_url?: string | null;
   date: string;
   nom_cheval: string;
   cheval_id: string;
@@ -420,7 +422,7 @@ export default function JockeyPage() {
                     href={`/chevaux/${p.cheval_id}`}
                     className="text-sm font-semibold truncate block hover:text-brand-gold-dark transition-colors"
                   >
-                    {p.nom_cheval}
+                    <IdentiteCheval numero={p.numero} nom={p.nom_cheval} imgUrl={p.casaque_image_url} />
                   </Link>
                   <p className="text-[11px] text-muted-foreground font-mono">
                     {p.date ? String(p.date).slice(0, 10) : "—"}
@@ -475,7 +477,7 @@ export default function JockeyPage() {
                         href={`/chevaux/${p.cheval_id}`}
                         className="hover:text-brand-gold-dark transition-colors"
                       >
-                        {p.nom_cheval}
+                        <IdentiteCheval numero={p.numero} nom={p.nom_cheval} imgUrl={p.casaque_image_url} />
                       </Link>
                     </td>
                     <td className="px-3 py-2 max-w-[110px] truncate hidden sm:table-cell">{p.hippodrome || "—"}</td>

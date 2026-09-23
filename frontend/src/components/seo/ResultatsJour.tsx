@@ -1,3 +1,4 @@
+import { IdentiteCheval } from "@/components/courses/identite-cheval";
 import Link from "next/link";
 import {
   fetchProgramme,
@@ -196,11 +197,8 @@ export async function ResultatsJour({ jour }: { jour: string }) {
         {quinte ? (
           <Section title={`Arrivée du Quinté+ — ${titleCase(quinte[0].hippodrome_nom)}`}>
             <p className="text-sm text-brand-charcoal">
-              Arrivée :{" "}
-              <strong className="tabular-nums">
-                {quinte[1].classement!.slice(0, 5).map((l) => l.numero).join(" - ")}
-              </strong>{" "}
-              — {titleCase(quinte[1].classement![0].nom)} l&apos;emporte.
+              Arrivée :{" "} <strong className="tabular-nums">{quinte[1].classement!.slice(0, 5).map((l) => l.numero).join(" - ")}</strong>
+              — <IdentiteCheval numero={quinte[1].classement![0].numero} nom={titleCase(quinte[1].classement![0].nom)} courseId={quinte[0].course_id} /> l&apos;emporte.
             </p>
             {rapportsQuinte.length ? (
               <div className="mt-4 overflow-x-auto">
@@ -247,11 +245,8 @@ export async function ResultatsJour({ jour }: { jour: string }) {
                   </div>
                   <div className="mt-1.5 text-sm text-brand-charcoal">
                     Arrivée :{" "}
-                    <strong className="tabular-nums">
-                      {r.classement!.slice(0, 5).map((l) => l.numero).join(" - ")}
-                    </strong>{" "}
                     <span className="text-brand-charcoal">
-                      ({r.classement!.slice(0, 3).map((l) => titleCase(l.nom)).join(", ")})
+                      {r.classement!.slice(0, 5).map((l) => <span key={l.numero} className="mr-3 inline-flex mt-2"><IdentiteCheval numero={l.numero} nom={titleCase(l.nom)} courseId={c.course_id} /></span>)}
                     </span>
                   </div>
                   {rapportsTries(r.rapports).length ? (

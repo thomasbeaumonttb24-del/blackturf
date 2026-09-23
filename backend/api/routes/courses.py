@@ -3424,7 +3424,8 @@ async def get_jockey(jockey_id: str, db: AsyncSession = Depends(get_db)):
             co.discipline,
             p.numero,
             p.cote_pmu,
-            h.position_arrivee
+            h.position_arrivee,
+            p.casaque_image_url
         FROM participations p
         JOIN courses co ON co.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
@@ -3447,6 +3448,7 @@ async def get_jockey(jockey_id: str, db: AsyncSession = Depends(get_db)):
             "numero": r[5],
             "cote": r[6],
             "position": r[7],  # position d'arrivée réelle (None si non disponible)
+            "casaque_image_url": r[8],
         })
 
     return {

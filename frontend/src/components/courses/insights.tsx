@@ -1,4 +1,5 @@
 "use client";
+import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
 
 /**
  * Blocs d'information de la fiche course qui exploitent des données déjà
@@ -227,10 +228,10 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
     >
       {meilleur && meilleur.bilan > 0 && (
         <p className="mb-4 rounded-xl bg-amber-50/70 px-3 py-2.5 text-xs leading-5 text-amber-900 ring-1 ring-amber-100">
-          <strong className="font-semibold">N°{meilleur.numero} {meilleur.nom}</strong> a le meilleur bilan
+          <strong className="font-semibold"><IdentiteCheval numero={meilleur.numero} nom={meilleur.nom} /></strong> a le meilleur bilan
           face à ce champ : {meilleur.victoires} victoire{meilleur.victoires > 1 ? "s" : ""} pour{" "}
           {meilleur.defaites} défaite{meilleur.defaites > 1 ? "s" : ""} en confrontation directe
-          {meilleur.top_victime ? ` — dont ${meilleur.top_victime.nb}× devant N°${meilleur.top_victime.numero} ${meilleur.top_victime.nom}` : ""}.
+          {meilleur.top_victime ? <> — dont {meilleur.top_victime.nb}× devant <IdentiteCheval numero={meilleur.top_victime.numero} nom={meilleur.top_victime.nom} /></> : null}.
         </p>
       )}
 
@@ -243,7 +244,7 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
               <div className="flex items-center gap-2 text-[13px]">
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
                   <span className={cn("font-display text-[15px] font-bold tabular-nums", aMene ? "text-slate-900" : "text-stone-700")}>
-                    N°{p.a_numero}
+                    <CasaqueNumero numero={p.a_numero} />
                   </span>
                   <span className={cn("truncate text-[12.5px]", aMene ? "font-semibold text-slate-800" : "text-stone-600")}>
                     {p.a_nom}
@@ -254,7 +255,7 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
                 </span>
                 <span className="flex min-w-0 flex-1 items-baseline justify-end gap-1.5 truncate">
                   <span className={cn("font-display text-[15px] font-bold tabular-nums", bMene ? "text-slate-900" : "text-stone-700")}>
-                    N°{p.b_numero}
+                    <CasaqueNumero numero={p.b_numero} />
                   </span>
                   <span className={cn("truncate text-[12.5px]", bMene ? "font-semibold text-slate-800" : "text-stone-600")}>
                     {p.b_nom}
@@ -545,11 +546,7 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
           return (
             <li key={l.numero} className="-mx-1.5 rounded-xl px-1.5 py-3 transition-colors hover:bg-stone-50/70">
               <div className="flex items-center gap-2.5">
-                <span className={cn(
-                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11.5px] font-bold tabular-nums ring-1",
-                  tete ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-stone-200")}>
-                  {l.numero}
-                </span>
+                <CasaqueNumero numero={l.numero} />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-slate-800">
                   {l.nom ? titre(l.nom) : "—"}
                 </span>
@@ -679,8 +676,7 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
           <Flame className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
           <p className="text-[11.5px] leading-5 text-amber-900">
             <strong className="font-bold">
-              {alerte.type === "grosse_mise" ? "Grosse mise" : "Afflux"} sur le {alerte.numero}
-              {alerte.nom ? ` — ${titre(alerte.nom)}` : ""}
+              {alerte.type === "grosse_mise" ? "Grosse mise" : "Afflux"} sur <IdentiteCheval numero={alerte.numero} nom={alerte.nom ? titre(alerte.nom) : ""} />
             </strong>
             {alerte.delta_eur != null && ` : +${nf(alerte.delta_eur)} €`}
             {alerte.delta_part_pts != null && ` (+${nf(alerte.delta_part_pts, 1)} pt de la masse)`}
@@ -792,7 +788,7 @@ export function TempsPassageCard({ courseId }: { courseId: string }) {
             {lignes.map((l) => (
               <tr key={l.numero}>
                 <td className="py-2 pr-3">
-                  <span className="font-mono text-xs text-muted-foreground">N°{l.numero}</span>{" "}
+                  <span className="font-mono text-xs text-muted-foreground"><CasaqueNumero numero={l.numero} /></span>{" "}
                   <span className="font-medium text-slate-900">{l.nom}</span>
                 </td>
                 {cols.map((c) => {
@@ -1036,7 +1032,7 @@ export function ApercuAnalyseCard({
       {fav && (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[11px] font-semibold text-white">Marché</span>
-          favori N°{fav.numero} {fav.nom_cheval} à {nf(fav.cote_pmu as number, 1)}
+          favori <IdentiteCheval numero={fav.numero} nom={fav.nom_cheval} /> à {nf(fav.cote_pmu as number, 1)}
           {lectureMarche ? ` · ${lectureMarche}` : ""}
         </p>
       )}
@@ -1076,7 +1072,7 @@ export function ApercuAnalyseCard({
                   )}
                 >
                   <span className="w-5 text-center font-display text-sm font-bold text-stone-600">{p.rang}</span>
-                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900">N°{p.numero}</span>
+                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900"><CasaqueNumero numero={p.numero} /></span>
                   <span className="min-w-0 flex-1 truncate text-[13px] text-stone-600">{p.nom}</span>
                   {place != null && (
                     <span className="rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
@@ -1482,7 +1478,7 @@ export function PreuvesRecentesCard() {
                     reconnaître le cheval, pas à jouer. */}
                 <span className="mt-1.5 flex items-baseline gap-1.5 truncate">
                   <span className="font-display text-[16px] font-bold leading-none text-slate-900">
-                    N°{c.gagnant_numero}
+                    <CasaqueNumero numero={c.gagnant_numero} />
                   </span>
                   <span className="truncate text-[12.5px] text-stone-600">
                     {c.gagnant_nom ? titre(c.gagnant_nom) : "—"}

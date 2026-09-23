@@ -22,6 +22,7 @@
 
 import { useEffect, useState } from "react";
 import { ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
+import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { cn } from "@/lib/utils";
 import type { ApercuAnalyse, ApercuSignal } from "@/components/courses/insights";
 
@@ -94,6 +95,15 @@ const ECART_RAPPEL_COTE = 0.2;
  *  dit que tout est au prix inventerait une hiérarchie qu'il n'écrit pas. */
 const ECART_MEILLEUR_PRIX = 0.08;
 
+/** Même comparaison que la colonne « Lecture du prix », à partir de la cote
+ * actuellement affichée. Les value bets enregistrés lors du pronostic sont
+ * distincts et ne doivent pas servir à compter ces écarts mouvants. */
+export function ecartPrix(marche: number | null | undefined, juste: number | null | undefined): number | null {
+  if (marche == null || !Number.isFinite(marche) || marche <= 0 ||
+      juste == null || !Number.isFinite(juste) || juste <= 0 || juste >= COTE_JUSTE_MAX) return null;
+  return marche / juste - 1;
+}
+
 /** Préférence d'affichage des signaux, conservée d'une course à l'autre. */
 const CLE_SIGNAUX = "bt.classement.signaux";
 
@@ -120,13 +130,13 @@ function Identite({ numero, nom, taille = "normal", terne }: {
   terne?: boolean;
 }) {
   return (
-    <span className="flex min-w-0 items-baseline gap-1.5">
+    <span className="flex min-w-0 items-center gap-1.5">
       <span className={cn(
         "font-display font-bold tabular-nums",
         taille === "grand" ? "text-[16px]" : "text-[15px]",
         terne ? "text-stone-600" : "text-slate-900",
       )}>
-        N°{numero}
+        <CasaqueNumero numero={numero} />
       </span>
       <span className={cn("truncate", taille === "grand" ? "text-[13px]" : "text-[12.5px]", terne ? "text-stone-600" : "text-stone-700")}>
         {nom}
@@ -209,7 +219,8 @@ function BarreProba({
  *  plus. Il ne remplace pas l'espérance de gain du modèle (badge « valeur »),
  *  qui, elle, tient compte de la calibration et des garde-fous. */
 function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
-  if (marche == null || juste == null || juste <= 0) {
+  const ecart = ecartPrix(marche, juste);
+  if (marche == null || !Number.isFinite(marche) || marche <= 0 || juste == null || !Number.isFinite(juste) || juste <= 0) {
     return <span className="text-[13px] text-stone-300">—</span>;
   }
   // La cote juste est bornée côté API. Sur un cheval que le modèle chiffre sous
@@ -226,9 +237,8 @@ function LecturePrix({ marche, juste }: { marche: number | null; juste: number |
       </span>
     );
   }
-  const ecart = marche / juste - 1;
-  const abs = Math.abs(Math.round(ecart * 100));
-  if (abs < ECART_MEILLEUR_PRIX * 100) {
+  const abs = Math.abs(Math.round((ecart ?? 0) * 100));
+  if (Math.abs(ecart ?? 0) < ECART_MEILLEUR_PRIX) {
     return (
       <span
         title={`Le marché paie ${cote(marche)}, le modèle estime la cote juste à ${coteJuste(juste)} : prix conforme.`}
@@ -238,7 +248,7 @@ function LecturePrix({ marche, juste }: { marche: number | null; juste: number |
       </span>
     );
   }
-  const genereux = ecart > 0;
+  const genereux = (ecart ?? 0) > 0;
   return (
     <span
       title={
@@ -333,16 +343,21 @@ function Signaux({ signaux }: { signaux: ClassementSignal[] }) {
  *  affichées (somme, écart, rapprochement avec l'arrivée) — jamais un jugement
  *  ajouté par l'interface. */
 function Synthese({
-  lignes, positionsReelles, calculeA, cotesFigees,
+  lignes, positionsReelles, calculeA, cotesFigees, coteLive, nonPartants,
 }: {
   lignes: ClassementPrediction[];
   positionsReelles?: Record<number, number>;
   calculeA?: string | null;
   cotesFigees?: boolean;
+  coteLive?: Record<number, number | null>;
+  nonPartants?: Set<number>;
 }) {
   const fav = lignes[0];
   const concentration = lignes.slice(0, 3).reduce((s, p) => s + p.proba_top1, 0);
-  const nbValeur = lignes.filter((p) => p.value_bet).length;
+  const ecarts = lignes.filter((p) => !nonPartants?.has(p.numero))
+    .map((p) => ecartPrix(coteLive?.[p.numero] ?? p.cote_pmu, p.cote_juste))
+    .filter((ecart): ecart is number => ecart != null);
+  const nbEcarts = ecarts.filter((ecart) => ecart >= ECART_MEILLEUR_PRIX).length;
 
   const gagnantNum = positionsReelles
     ? Number(Object.keys(positionsReelles).find((n) => positionsReelles[Number(n)] === 1))
@@ -358,7 +373,7 @@ function Synthese({
       <div className="bg-white px-4 py-3 sm:px-5">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Favori du modèle</p>
         {fav ? (
-          <p className="mt-1 flex min-w-0 items-baseline gap-1.5 truncate">
+          <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate">
             <Identite numero={fav.numero} nom={fav.nom_cheval} taille="grand" />
             <span className="shrink-0 text-[13px] font-semibold tabular-nums text-amber-700">{pct(fav.proba_top1)}</span>
           </p>
@@ -383,7 +398,7 @@ function Synthese({
         {gagnant ? (
           <>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Vainqueur</p>
-            <p className="mt-1 flex min-w-0 items-baseline gap-1.5 truncate">
+            <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate">
               <Identite numero={gagnant.numero} nom={gagnant.nom_cheval} taille="grand" />
               <span
                 className={cn(
@@ -399,9 +414,9 @@ function Synthese({
           <>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Écarts de prix détectés</p>
             <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
-              {nbValeur}
+              {ecarts.length ? nbEcarts : "—"}
               <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">
-                {nbValeur > 1 ? "chevaux payés au-dessus de leur chance" : nbValeur === 1 ? "cheval payé au-dessus de sa chance" : "— le marché est en ligne avec le modèle"}
+                {!ecarts.length ? "cotes indisponibles" : nbEcarts > 1 ? "chevaux payés au-dessus de leur chance" : nbEcarts === 1 ? "cheval payé au-dessus de sa chance" : "— aucun écart positif d’au moins 8 %"}
               </span>
             </p>
           </>
@@ -410,7 +425,7 @@ function Synthese({
           <p className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-stone-600">
             <Clock3 className="h-3 w-3" aria-hidden="true" />
             calculé le {horodatage}
-            {cotesFigees ? " · cotes figées" : " · cotes suivies en direct"}
+            {cotesFigees ? " · cotes figées" : " · modèle calculé à cette date · comparaison avec les cotes affichées"}
           </p>
         )}
       </div>
@@ -462,8 +477,8 @@ export function ClassementAlgo({
     const m = coteLive?.[p.numero] ?? p.cote_pmu;
     if (nonPartants?.has(p.numero) || m == null || p.cote_juste == null) return best;
     if (p.cote_juste >= COTE_JUSTE_MAX) return best;   // borne atteinte : non chiffrable
-    const ecart = m / p.cote_juste - 1;
-    if (ecart < ECART_MEILLEUR_PRIX) return best;
+    const ecart = ecartPrix(m, p.cote_juste);
+    if (ecart == null || ecart < ECART_MEILLEUR_PRIX) return best;
     return best && best.ecart >= ecart ? best : { numero: p.numero, ecart };
   }, null);
   const grille = aCoteJuste ? COLS.avecJuste : COLS.sansJuste;
@@ -526,6 +541,8 @@ export function ClassementAlgo({
         positionsReelles={positionsReelles}
         calculeA={calculeA}
         cotesFigees={cotesFigees}
+        coteLive={coteLive}
+        nonPartants={nonPartants}
       />
 
       <div className="max-h-[36rem] overflow-y-auto">

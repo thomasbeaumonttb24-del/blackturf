@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import Link from "next/link";
 import {
   fetchProgramme,
@@ -205,7 +206,7 @@ export default async function QuinteDuJourPage() {
                         // teinté suffit à les distinguer sans toucher au contraste du texte.
                         className={`border-b border-amber-50 ${p.non_partant ? "bg-stone-100/70" : ""}`}
                       >
-                        <td className="py-2 pr-3 font-semibold tabular-nums">{p.numero}</td>
+                        <td className="py-2 pr-3 font-semibold tabular-nums"><CasaqueNumero numero={p.numero} imgUrl={p.casaque_image_url} /></td>
                         <td className="py-2 pr-3 font-medium text-brand-dark">
                           {titleCase(p.nom_cheval)}
                           {p.non_partant ? " (non-partant)" : ""}
