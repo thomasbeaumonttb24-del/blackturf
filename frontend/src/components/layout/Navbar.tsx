@@ -21,27 +21,26 @@ import { planLabel, cn } from "@/lib/utils";
  * marque, revient à insister auprès de Google sur des adresses qu'il n'a pas le droit de
  * lire — c'est ainsi qu'une URL finit « indexée malgré le blocage », sans contenu.
  */
-type NavLink = { href: string; label: string; icon?: LucideIcon; prive?: boolean };
+type NavLink = { href: string; label: string; description: string; icon?: LucideIcon; prive?: boolean };
 
 const NAV_LINKS_PUBLIC: NavLink[] = [
-  { href: "/programme", label: "Programme" },
-  { href: "/quinte-du-jour", label: "Quinté+" },
-  { href: "/resultats", label: "Résultats" },
-  { href: "/value-bets", label: "Paris de valeur", prive: true },
-  { href: "/track-record", label: "Palmarès" },
-  { href: "/assistant", label: "Assistant IA", prive: true },
-  { href: "/tarifs", label: "Tarifs" },
+  { href: "/programme", label: "Courses du jour", description: "Réunions, horaires et partants" },
+  { href: "/quinte-du-jour", label: "Quinté+", description: "La course du jour en détail" },
+  { href: "/resultats", label: "Résultats", description: "Arrivées et rapports officiels" },
+  { href: "/value-bets", label: "Paris repérés", description: "Sélections selon les cotes", prive: true },
+  { href: "/track-record", label: "Nos performances", description: "Bilan de nos pronostics" },
+  { href: "/tarifs", label: "Offres", description: "Comparer les abonnements" },
 ];
 
 // Jamais rendu pour un visiteur anonyme — donc jamais vu par un robot — mais marqué de
 // la même façon pour que les deux listes ne divergent pas.
 const NAV_LINKS_AUTH: NavLink[] = [
-  { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, prive: true },
-  { href: "/programme", label: "Programme" },
-  { href: "/value-bets", label: "Paris de valeur", prive: true },
-  { href: "/track-record", label: "Palmarès" },
-  { href: "/bankroll", label: "Capital", prive: true },
-  { href: "/assistant", label: "Assistant IA", prive: true },
+  { href: "/dashboard", label: "Mon espace", description: "Votre tableau de bord", icon: LayoutDashboard, prive: true },
+  { href: "/programme", label: "Courses du jour", description: "Réunions, horaires et partants" },
+  { href: "/quinte-du-jour", label: "Quinté+", description: "La course du jour en détail" },
+  { href: "/resultats", label: "Résultats", description: "Arrivées et rapports officiels" },
+  { href: "/value-bets", label: "Paris repérés", description: "Sélections selon les cotes", prive: true },
+  { href: "/track-record", label: "Nos performances", description: "Bilan de nos pronostics" },
 ];
 
 // ── Search palette ──────────────────────────────────────────────────────────
@@ -183,9 +182,10 @@ export function Navbar() {
 
   const nbNonLues = notifData?.count ?? 0;
   const nbChat = surChat ? 0 : (chatData?.non_lus ?? 0);
+  const lienActif = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-border bg-white/90 backdrop-blur-md shadow-sm shadow-black/[0.04]">
+    <nav className="sticky top-0 z-50 border-b border-[#e2e6df] bg-white/95 backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
 
@@ -199,11 +199,12 @@ export function Navbar() {
               alt=""
               width={52}
               height={52}
-              className="h-12 w-12 sm:h-[52px] sm:w-[52px] object-contain"
+              className="w-12 sm:w-[52px] object-contain"
+              style={{ height: "auto" }}
               priority
             />
-            <span className="text-xl font-bold tracking-tight text-gray-900">
-              Black<span className="text-brand-gold-dark">Turf</span>
+            <span className="text-xl font-bold tracking-tight text-[#17231f]">
+              Black<span className="text-[#876438]">Turf</span>
             </span>
           </Link>
 
@@ -218,13 +219,14 @@ export function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  title={link.description}
+                  aria-current={lienActif(link.href) ? "page" : undefined}
                   rel={link.prive ? "nofollow" : undefined}
                   className={cn(
-                    "relative whitespace-nowrap px-2.5 xl:px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1.5",
-                    "after:absolute after:left-2.5 after:right-2.5 xl:after:left-3.5 xl:after:right-3.5 after:-bottom-0.5 after:h-0.5 after:rounded-full after:bg-gradient-gold after:transition-transform after:duration-200 after:origin-left",
-                    pathname === link.href
-                      ? "text-brand-gold-dark font-semibold after:scale-x-100"
-                      : "text-gray-600 hover:text-gray-900 after:scale-x-0 hover:after:scale-x-100"
+                    "relative whitespace-nowrap px-2 xl:px-3 py-2 rounded-md text-[13px] xl:text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a47b45]",
+                    lienActif(link.href)
+                      ? "bg-[#f5f6f2] text-[#17231f] font-semibold"
+                      : "text-gray-600 hover:bg-[#f5f6f2] hover:text-[#17231f]"
                   )}
                 >
                   {Icon && <Icon className="h-3.5 w-3.5" />}
@@ -354,6 +356,12 @@ export function Navbar() {
                         >
                           <BarChart2 className="h-4 w-4 text-blue-400" /> Mes statistiques
                         </Link>
+                        <Link href="/bankroll" rel="nofollow" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
+                          <Gauge className="h-4 w-4 text-gray-600" /> Suivi du capital
+                        </Link>
+                        <Link href="/assistant" rel="nofollow" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
+                          <MessagesSquare className="h-4 w-4 text-gray-600" /> Poser une question
+                        </Link>
                         <Link
                           href="/chat"
                           rel="nofollow"
@@ -474,23 +482,32 @@ export function Navbar() {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="lg:hidden border-t border-gray-100 bg-white p-4 space-y-1 shadow-lg">
+        <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-gray-100 bg-white p-4 shadow-lg lg:hidden">
+          <div className="space-y-1">
           {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => (
             <Link
               key={link.href}
               href={link.href}
               rel={link.prive ? "nofollow" : undefined}
               className={cn(
-                "block rounded-xl px-4 py-2.5 text-sm font-medium transition-colors",
-                pathname === link.href
+                "block rounded-lg px-4 py-3 transition-colors",
+                lienActif(link.href)
                   ? "bg-brand-gold-tint text-brand-gold-dark"
                   : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
               )}
               onClick={() => setMenuOpen(false)}
             >
-              {link.label}
+              <span className="block text-sm font-semibold">{link.label}</span>
+              <span className="mt-0.5 block text-xs font-normal text-gray-600">{link.description}</span>
             </Link>
           ))}
+          {user && (
+            <div className="mt-3 border-t border-gray-100 pt-3">
+              <p className="px-4 pb-2 text-[10px] font-bold uppercase tracking-[.14em] text-gray-500">Mes outils</p>
+              <Link href="/bankroll" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>Suivi du capital</Link>
+              <Link href="/assistant" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>Poser une question</Link>
+            </div>
+          )}
           {peutDemarrerEssai(user) && (
             <Link
               href="/tarifs"
@@ -519,6 +536,7 @@ export function Navbar() {
               </Button>
             </div>
           )}
+          </div>
         </div>
       )}
     </nav>
