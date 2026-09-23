@@ -29,12 +29,25 @@ function clefStockage(courseId: string): string {
   return `bt_pronostic_popup_${courseId}`;
 }
 
+// Un seul déclenchement de popup par jour, tous hippodromes confondus : sans ce
+// verrou, la clef par course laissait le popup ressortir sur CHAQUE nouvelle
+// fiche ouverte le même jour (vu/fermé sur la course A n'empêchait rien sur la
+// course B). La date est celle du fuseau local du visiteur — un « jour » au
+// sens calendaire vécu, pas un TTL glissant de 24 h.
+const CLE_JOUR = "bt_pronostic_popup_jour";
+
+function aujourdHui(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /**
  * Popup de capture e-mail sur la fiche course, inspiré de Boturfers.fr : propose
  * d'envoyer le pronostic IA de CETTE course précise (pas la newsletter hebdo
  * générique). Non bloquant — fermable à tout moment, ne réapparaît pas une fois
  * vu/fermé/rempli pour cette course (`localStorage`, jamais re-sollicité après un
- * premier passage, y compris entre deux sessions).
+ * premier passage, y compris entre deux sessions) NI pour une autre course déjà
+ * proposée le même jour (verrou quotidien global, cf. `CLE_JOUR`).
  */
 export function PronosticEmailPopup({
   courseId,
@@ -49,13 +62,19 @@ export function PronosticEmailPopup({
   const [visible, setVisible] = useState(false);
   const [email, setEmail] = useState("");
   const [etat, setEtat] = useState<"repos" | "envoi" | "envoye" | "indisponible" | "erreur">("repos");
+  // Message du serveur pour le cas "indisponible" (pronostic pas encore prêt,
+  // ou quota d'un envoi par jour déjà consommé) : deux raisons différentes,
+  // un seul état visuel, donc on affiche le texte réel plutôt qu'un message figé.
+  const [messageServeur, setMessageServeur] = useState<string | null>(null);
   const declenche = useRef(false);
 
   useEffect(() => {
     if (!actif) return;
     let deja = false;
     try {
-      deja = Boolean(localStorage.getItem(clefStockage(courseId)));
+      deja =
+        Boolean(localStorage.getItem(clefStockage(courseId))) ||
+        localStorage.getItem(CLE_JOUR) === aujourdHui();
     } catch {
       // stockage indisponible (navigation privée…) : on retombe sur le déclenchement normal
     }
@@ -87,6 +106,7 @@ export function PronosticEmailPopup({
   function memoriser() {
     try {
       localStorage.setItem(clefStockage(courseId), String(Date.now()));
+      localStorage.setItem(CLE_JOUR, aujourdHui());
     } catch {
       // pas grave : au pire le popup peut réapparaître à la prochaine visite
     }
@@ -104,6 +124,7 @@ export function PronosticEmailPopup({
     try {
       const res = await pronosticEmailApi.envoyer(courseId, email.trim(), "fiche_course_popup");
       memoriser();
+      setMessageServeur(res.data.message || null);
       setEtat(res.data.ok ? "envoye" : "indisponible");
     } catch {
       setEtat("erreur");
@@ -169,7 +190,8 @@ export function PronosticEmailPopup({
 
           {etat === "indisponible" && (
             <p style={{ margin: 0, fontSize: 13, color: CX.gray500 }}>
-              Le pronostic de cette course n&apos;est pas encore prêt — réessayez un peu avant le départ.
+              {messageServeur ||
+                "Le pronostic de cette course n'est pas encore prêt — réessayez un peu avant le départ."}
             </p>
           )}
 
@@ -187,7 +209,10 @@ export function PronosticEmailPopup({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="votre@email.fr"
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:ring-2"
+                  // text-base (16px) : en dessous, iOS zoome sur le champ à la mise
+                  // au point et le popup — en position fixed — saute et se déforme
+                  // pendant la saisie. sm: repasse à 14px sur les écrans non tactiles.
+                  className="w-full rounded-lg border px-3 py-2 text-base outline-none transition-colors focus:ring-2 sm:text-sm"
                   style={{ borderColor: "#D1D5DB", color: CX.ink2 }}
                 />
                 <button
