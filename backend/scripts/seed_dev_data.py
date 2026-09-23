@@ -11,7 +11,6 @@ Cree :
   - ~180 participations
   - 1 ModelVersion active
   - Predictions + ValueBets pour courses a_venir
-  - Predictions figees + Resultats (classement, rapports) pour courses termine
   - ScrapeLog recent
   - BankrollEntries historiques pour user expert
 
@@ -40,7 +39,7 @@ from db.database import AsyncSessionLocal as async_session
 from db.models import (
     Hippodrome, Jockey, Entraineur, Cheval, Reunion, Course,
     Participation, Prediction, ValueBet, ModelVersion,
-    User, BankrollEntry, ScrapeLog, Resultat,
+    User, BankrollEntry, ScrapeLog
 )
 from api.routes.auth import _hash
 
@@ -189,18 +188,12 @@ async def seed(reset: bool = False):
     async with async_session() as session:
         if reset:
             print("[seed] Reset tables...")
-            from sqlalchemy import text
-            # CASCADE plutôt qu'un DELETE table par table : des migrations ajoutées après
-            # l'écriture de cette liste (alertes_log, chat_messages, prediction_snapshots…)
-            # référencent désormais users/courses/predictions par clé étrangère, et un simple
-            # DELETE sur la table parente échoue dès qu'une seule d'entre elles a une ligne.
-            # CASCADE efface aussi ces dépendantes sans qu'il faille les nommer une à une —
-            # et reste correct si de nouvelles tables dépendantes apparaissent plus tard.
-            for tbl in ["value_bets", "predictions", "resultats", "participations", "courses",
+            from sqlalchemy import delete, text
+            for tbl in ["value_bets", "predictions", "participations", "courses",
                         "reunions", "bankroll_entries", "scrape_log",
                         "model_versions", "chevaux", "jockeys", "entraineurs",
                         "hippodromes", "users"]:
-                await session.execute(text(f"TRUNCATE TABLE {tbl} CASCADE"))
+                await session.execute(text(f"DELETE FROM {tbl}"))
             await session.commit()
 
         today = date.today()
@@ -233,7 +226,6 @@ async def seed(reset: bool = False):
         # ── 3. Chevaux ────────────────────────────────────────────────────
         print("[seed] Chevaux...")
         cheval_ids = []
-        cheval_nom_par_id = {}
         for nom, sexe, age, elo in CHEVAUX_DATA:
             c = Cheval(
                 cheval_id=str(uuid.uuid4()),
@@ -246,7 +238,6 @@ async def seed(reset: bool = False):
             )
             session.add(c)
             cheval_ids.append((c.cheval_id, elo))
-            cheval_nom_par_id[c.cheval_id] = nom
         await session.flush()
 
         # ── 4. ModelVersion ────────────────────────────────────────────────
@@ -348,7 +339,7 @@ async def seed(reset: bool = False):
                         non_partant=False,
                     )
                     session.add(part)
-                    part_ids_for_course.append((part_id, elo, cote_pmu, cheval_id, i + 1))
+                    part_ids_for_course.append((part_id, elo, cote_pmu))
                     participation_records.append((part_id, course_id, elo, cote_pmu, statut))
 
                 await session.flush()
@@ -357,7 +348,7 @@ async def seed(reset: bool = False):
                 if statut == "a_venir":
                     # Calculer rang par ELO
                     sorted_parts = sorted(part_ids_for_course, key=lambda x: -x[1])
-                    for rang, (part_id, elo, cote_pmu, cheval_id, numero) in enumerate(sorted_parts):
+                    for rang, (part_id, elo, cote_pmu) in enumerate(sorted_parts):
                         elo_norm = (elo - 1000) / 700
                         proba_top3 = max(0.05, min(0.90, elo_norm * 0.5 + rng.uniform(0.1, 0.4)))
                         proba_top1 = proba_top3 * rng.uniform(0.25, 0.45)
@@ -408,75 +399,6 @@ async def seed(reset: bool = False):
                                 detecte_a=now,
                             )
                             session.add(vb)
-
-                elif statut == "termine":
-                    # Pronostic FIGÉ AVANT LE DÉPART (comme en prod : predictions.created_at
-                    # < courses.date_heure) + arrivée réelle — sans ça, `/seo/verdicts` et
-                    # `/stats/preuves-recentes` n'ont jamais de ligne à comparer : aucune
-                    # course de dev n'était jamais réglée. Trois scénarios volontairement
-                    # distincts (favori trouvé / dans le top 3 / hors classement) pour
-                    # voir les trois badges de comparaison, le reste tiré au sort pondéré
-                    # par l'ELO comme une vraie course.
-                    sorted_parts = sorted(part_ids_for_course, key=lambda x: -x[1])
-                    for rang, (part_id, elo, cote_pmu, cheval_id, numero) in enumerate(sorted_parts):
-                        elo_norm = (elo - 1000) / 700
-                        proba_top3 = max(0.05, min(0.90, elo_norm * 0.5 + rng.uniform(0.1, 0.4)))
-                        proba_top1 = proba_top3 * rng.uniform(0.25, 0.45)
-                        pred = Prediction(
-                            prediction_id=str(uuid.uuid4()),
-                            participation_id=part_id,
-                            course_id=course_id,
-                            model_version_id=model_version_id,
-                            proba_top1=round(proba_top1, 4),
-                            proba_top3=round(proba_top3, 4),
-                            rang_predit=rang + 1,
-                            confidence_score=round(proba_top3 * 100, 1),
-                            cote_figee=cote_pmu,
-                            created_at=date_heure - timedelta(hours=2),
-                        )
-                        session.add(pred)
-
-                    ordre_predit = sorted_parts  # rang 1 en tête
-                    if c_num == 0:
-                        # Le favori du modèle gagne réellement → "Gagnant trouvé".
-                        arrivee = list(ordre_predit)
-                    elif c_num == 1:
-                        # Le vainqueur était annoncé 2e ou 3e, pas 1er → top 3 sans le top 1.
-                        arrivee = list(ordre_predit)
-                        arrivee[0], arrivee[2 if len(arrivee) > 2 else 1] = arrivee[2 if len(arrivee) > 2 else 1], arrivee[0]
-                    elif c_num == 2:
-                        # Le vainqueur était écarté du podium annoncé → "hors classement".
-                        arrivee = list(ordre_predit)
-                        outsider = min(5, len(arrivee) - 1)
-                        arrivee[0], arrivee[outsider] = arrivee[outsider], arrivee[0]
-                    else:
-                        # Tirage pondéré par l'ELO — un peu de hasard réaliste, sans
-                        # coller exactement à l'ordre prédit ni l'inverser.
-                        arrivee = sorted(
-                            ordre_predit,
-                            key=lambda x: -x[1] + rng.uniform(-120, 120),
-                        )
-
-                    await session.flush()
-
-                    classement = [
-                        {"numero": numero, "nom": cheval_nom_par_id[cheval_id], "position": pos + 1}
-                        for pos, (part_id, elo, cote_pmu, cheval_id, numero) in enumerate(arrivee)
-                    ]
-                    winner_cote_pmu = arrivee[0][2]  # cote_pmu du vainqueur réel
-                    rapport_gagnant = round(max(1.1, winner_cote_pmu) * 0.85, 1)
-                    rapport_place = round(max(1.1, winner_cote_pmu * 0.32), 1)
-
-                    resultat = Resultat(
-                        course_id=course_id,
-                        classement=classement,
-                        rapports={
-                            "e_simple_gagnant": rapport_gagnant,
-                            "e_simple_place": rapport_place,
-                        },
-                        temps_gagnant=None,
-                    )
-                    session.add(resultat)
 
         await session.flush()
 

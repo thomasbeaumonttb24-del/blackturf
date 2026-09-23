@@ -3,7 +3,6 @@ import Link from "next/link";
 import {
   fetchProgramme,
   fetchArriveesDuJour,
-  fetchVerdictsDuJour,
   jourParis,
   jourLong,
   jourCourt,
@@ -15,7 +14,6 @@ import {
   PREMIER_JOUR_ARCHIVE,
   type SeoCourse,
   type SeoResultats,
-  type SeoVerdict,
 
   jsonLd,
 } from "@/lib/seo";
@@ -24,7 +22,6 @@ import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import { PreuvesRecentesCard } from "@/components/courses/insights";
-import { BilanAlgoJour, VerdictAlgoLigne } from "@/components/seo/ComparaisonAlgo";
 
 /**
  * Page « arrivées et rapports » d'une journée PMU.
@@ -59,13 +56,6 @@ export async function ResultatsJour({ jour }: { jour: string }) {
     .map((c) => [c, arrivees?.[c.course_id]] as const)
     .filter((x): x is readonly [SeoCourse, SeoResultats] => !!x[1]?.classement?.length);
   const arriveesIndisponibles = arrivees === null;
-
-  // Ce que l'algorithme avait annoncé, course par course — même appel groupé que
-  // les arrivées, pour la même raison (une requête par course recréerait le 503
-  // en cascade déjà corrigé sur `/seo/arrivees`). Best-effort : une panne de cet
-  // appel n'empêche jamais d'afficher les arrivées elles-mêmes.
-  const verdicts = await fetchVerdictsDuJour(jour, estAujourdhui ? 120 : 21600);
-  const verdictsListe: SeoVerdict[] = verdicts ? Object.values(verdicts) : [];
 
   const quinte = avecArrivee.find(([c]) => c.est_quinte);
   const rapportsQuinte = quinte ? rapportsTries(quinte[1].rapports) : [];
@@ -210,9 +200,6 @@ export async function ResultatsJour({ jour }: { jour: string }) {
               Arrivée :{" "} <strong className="tabular-nums">{quinte[1].classement!.slice(0, 5).map((l) => l.numero).join(" - ")}</strong>
               — <IdentiteCheval numero={quinte[1].classement![0].numero} nom={titleCase(quinte[1].classement![0].nom)} courseId={quinte[0].course_id} /> l&apos;emporte.
             </p>
-            {verdicts?.[quinte[0].course_id] && (
-              <VerdictAlgoLigne v={verdicts[quinte[0].course_id]} courseId={quinte[0].course_id} />
-            )}
             {rapportsQuinte.length ? (
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[380px] text-sm">
@@ -238,8 +225,6 @@ export async function ResultatsJour({ jour }: { jour: string }) {
             )}
           </Section>
         ) : null}
-
-        <BilanAlgoJour verdicts={verdictsListe} nbCoursesJour={avecArrivee.length} />
 
         <Section title={`Toutes les arrivées du ${jourLong(jour)}`}>
           {avecArrivee.length ? (
@@ -272,9 +257,6 @@ export async function ResultatsJour({ jour }: { jour: string }) {
                         .join(" · ")}
                     </div>
                   ) : null}
-                  {verdicts?.[c.course_id] && (
-                    <VerdictAlgoLigne v={verdicts[c.course_id]} courseId={c.course_id} />
-                  )}
                 </li>
               ))}
             </ul>
