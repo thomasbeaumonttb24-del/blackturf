@@ -590,6 +590,38 @@ export async function fetchArriveesDuJour(
   }
 }
 
+/** Ce que le modèle avait dit sur une course, comparé à l'arrivée réelle — une
+ *  entrée par course où une prédiction FIGÉE AVANT LE DÉPART existe. Absente = pas
+ *  de pronostic archivé sur cette course, jamais « le modèle s'est trompé ». */
+export interface SeoVerdict {
+  gagnant_numero: number | null;
+  gagnant_nom: string | null;
+  /** Rang donné par le modèle au cheval qui a réellement gagné. `null` = ce cheval
+   *  n'apparaissait pas dans le pronostic (non-partant au moment du calcul, etc). */
+  rang_predit_gagnant: number | null;
+  gagnant_top1: boolean;
+  gagnant_top3: boolean;
+  /** Le favori du modèle (rang 1 du pronostic) et sa place réelle à l'arrivée. */
+  favori_numero: number | null;
+  favori_nom: string | null;
+  favori_cote: number | null;
+  favori_position: number | null;
+}
+
+export async function fetchVerdictsDuJour(
+  jour: string,
+  revalidate = 300,
+): Promise<Record<string, SeoVerdict> | null> {
+  try {
+    const res = await fetch(`${API}/seo/verdicts?jour=${jour}`, { next: { revalidate } });
+    if (!res.ok) return null;
+    const d = (await res.json()) as { verdicts?: Record<string, SeoVerdict> };
+    return d.verdicts ?? {};
+  } catch {
+    return null;
+  }
+}
+
 /* ─────────────── Profil chiffré des lieux et des disciplines ───────────────
  * Ce que le site sait et que personne d'autre ne publie : ce qui se court réellement à
  * un endroit donné, mesuré sur l'ensemble de sa base. Sert à donner aux fiches
