@@ -138,3 +138,46 @@ jobs:
           echo "API health: OK"
           curl -f https://blackturf.fr
           echo "Frontend: OK"
+
+      # Un site entièrement désindexé répond 200 : le health check ci-dessus le
+      # déclarerait sain. Ces trois contrôles couvrent les pannes silencieuses qui
+      # coûtent des semaines avant d'être remarquées en Search Console.
+      - name: Indexabilité
+        run: |
+          set -euo pipefail
+
+          # 1. L'accueil ne doit jamais être servi en noindex, par la balise
+          #    comme par l'en-tête HTTP.
+          #    La balise est EXTRAITE avant d'etre testee : un motif qui exige
+          #    name="robots" avant le noindex rate `<meta content="noindex"
+          #    name="robots">`, et un simple `grep noindex` sur la page entiere se
+          #    declenche sur le mot present dans un texte. Verifie sur les deux ordres.
+          if curl -fsS https://blackturf.fr \
+               | grep -oiE '<meta[^>]*name="robots"[^>]*>' | grep -qi 'noindex'; then
+            echo "::error::L'accueil est servi avec une balise robots noindex."
+            exit 1
+          fi
+          if curl -fsSI https://blackturf.fr | grep -qiE '^x-robots-tag:.*noindex'; then
+            echo "::error::L'accueil est servi avec un en-tete X-Robots-Tag noindex."
+            exit 1
+          fi
+
+          # 2. L'index de sitemaps doit lister ses enfants.
+          curl -fsS https://blackturf.fr/sitemap.xml | grep -q '<sitemap>' || {
+            echo "::error::L'index de sitemaps ne liste aucun enfant."
+            exit 1
+          }
+
+          # 3. `fetchSeoIndex` renvoie une liste vide quand l'API echoue, par choix :
+          #    une page ne doit jamais tomber en 500 sur une donnee SEO. Le revers est
+          #    qu'un sitemap vide part en cache pour une heure sans rien casser
+          #    d'observable. On exige donc un plancher d'URLs sur `pages.xml`, dont le
+          #    contenu est statique et ne depend d'aucun appel API.
+          N=$(curl -fsS https://blackturf.fr/sitemaps/pages.xml | grep -c '<url>' || true)
+          echo "pages.xml : $N URLs"
+          if [ "$N" -lt 40 ]; then
+            echo "::error::pages.xml ne contient que $N URLs (plancher : 40)."
+            exit 1
+          fi
+
+          echo "Indexabilite : OK"
