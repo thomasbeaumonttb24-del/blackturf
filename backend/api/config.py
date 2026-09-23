@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     stripe_price_pro_monthly: str = ""
     stripe_price_pro_annual: str = ""
     resend_api_key: str = ""
+    resend_webhook_secret: str = ""
     email_from: str = "noreply@blackturf.fr"
     email_from_name: str = "BlackTurf"
     openweather_api_key: str = ""

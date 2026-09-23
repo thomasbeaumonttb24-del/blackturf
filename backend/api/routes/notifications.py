@@ -94,6 +94,8 @@ def _scope_centre():
 # ─── schemas ───────────────────────────────────────────────────
 
 class PrefsUpdate(BaseModel):
+    email_quotidien: bool | None = None
+    email_hebdomadaire: bool | None = None
     vb_niveau_min: int | None = None          # 1/2/3/4
     resultats_suivis: bool | None = None
     alertes_systeme: bool | None = None
@@ -170,6 +172,8 @@ def _rendu(type_alerte: str, p: dict) -> tuple[str, str]:
                 if nb else "Les paris de valeur du jour vous attendent")
 
     if type_alerte == "weekly_best_vb":
+        if p.get("campagne", "").startswith("hebdo-"):
+            return "Le bilan de la semaine", "Les meilleurs plans bénéficiaires et le bilan complet, pertes comprises"
         nom = p.get("nom_cheval")
         if nom:
             return ("Meilleur pari de la semaine",
@@ -436,6 +440,10 @@ async def update_prefs(
         prefs["resultats_suivis"] = bool(body.resultats_suivis)
     if body.alertes_systeme is not None:
         prefs["alertes_systeme"] = bool(body.alertes_systeme)
+
+    for key in ("email_quotidien", "email_hebdomadaire"):
+        if getattr(body, key) is not None:
+            prefs[key] = getattr(body, key)
 
     push_sub["prefs"] = {k: prefs[k] for k in PREFS_DEFAUT}
     # Réaffectation d'un NOUVEAU dict : muter en place un JSON SQLAlchemy ne marque

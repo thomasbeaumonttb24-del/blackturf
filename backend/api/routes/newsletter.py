@@ -26,7 +26,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,33 +86,14 @@ INSTAGRAM_URL = "https://www.instagram.com/blackturf.fr/"
 
 
 def _mail_confirmation_html(lien: str) -> str:
-    return f"""<!doctype html>
-<html lang="fr"><body style="margin:0;background:#f6f6f3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#16181c">
-  <div style="max-width:520px;margin:0 auto;padding:32px 24px">
-    <p style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#9a6b11;margin:0 0 24px">BlackTurf</p>
-    <h1 style="font-size:22px;line-height:1.25;margin:0 0 16px">Confirmez votre inscription</h1>
-    <p style="font-size:15px;line-height:1.6;margin:0 0 24px;color:#4a4e55">
-      Vous recevrez chaque lundi le bilan chiffré de la semaine : ce que le modèle a bien
-      vu, ce qu'il a raté, et le résultat réel — gains comme pertes. Un seul envoi par
-      semaine.
-    </p>
-    <p style="margin:0 0 24px">
-      <a href="{lien}" style="display:inline-block;background:#16181c;color:#fff;text-decoration:none;padding:13px 22px;border-radius:4px;font-size:15px;font-weight:600">Confirmer mon inscription</a>
-    </p>
-    <p style="font-size:13px;line-height:1.6;color:#7c818a;margin:0 0 8px">
-      Si le bouton ne fonctionne pas, copiez cette adresse dans votre navigateur :<br>
-      <span style="word-break:break-all">{lien}</span>
-    </p>
-    <p style="font-size:13px;line-height:1.6;color:#7c818a;margin:24px 0 0;padding-top:16px;border-top:1px solid #dcdcd5">
-      En attendant lundi, le bilan du jour passe aussi sur Instagram :
-      <a href="{INSTAGRAM_URL}" style="color:#9a6b11">{INSTAGRAM_PSEUDO}</a>
-    </p>
-    <p style="font-size:13px;line-height:1.6;color:#7c818a;margin:16px 0 0">
-      Vous n'êtes pas à l'origine de cette demande ? Ignorez ce message : sans
-      confirmation de votre part, aucune lettre ne partira et cette adresse sera oubliée.
-    </p>
-  </div>
-</body></html>"""
+    from services.email_templates import layout, button
+    return layout(
+        "Confirmez votre inscription", "BIENVENUE CHEZ BLACKTURF",
+        "Chaque lundi dès 9 h : les meilleurs plans bénéficiaires et le bilan de la semaine, pertes comprises.",
+        button("Confirmer mon inscription", lien)
+        + "<p>Un seul envoi par semaine. Si les rapports officiels sont incomplets, nous attendons leur validation avant de publier le bilan.</p>"
+        + "<p>Vous n’êtes pas à l’origine de cette demande ? Ignorez ce message : sans confirmation, aucune lettre ne sera envoyée.</p>",
+    )
 
 
 def _mail_confirmation_texte(lien: str) -> str:
@@ -216,6 +198,7 @@ async def confirmer(
     response_model=EtatOut,
     dependencies=[Depends(rate_limit_public)],
 )
+@router.post("/newsletter/desinscription", response_model=EtatOut)
 async def desinscription(
     jeton: str = Query(..., min_length=16, max_length=64),
     db: AsyncSession = Depends(get_db),
@@ -237,3 +220,78 @@ async def desinscription(
         await db.commit()
 
     return EtatOut(ok=True, message="Vous ne recevrez plus la lettre BlackTurf.")
+
+
+@router.post("/newsletter/desabonnement-compte")
+async def desabonnement_compte(jeton: str, db: AsyncSession = Depends(get_db)):
+    """RFC 8058: direct POST, no login, redirect or confirmation page."""
+    from api.routes.notifications import DesabonnementRequest, desabonnement_marketing
+    return await desabonnement_marketing(DesabonnementRequest(token=jeton), db)
+
+
+@router.get("/newsletter/bilans/{periode}", response_class=HTMLResponse)
+async def bilan_public(periode: str, db: AsyncSession = Depends(get_db)):
+    from db.models import EmailEdition
+    from services.email_templates import weekly
+    edition = await db.get(EmailEdition, "hebdo-" + periode)
+    if edition is None:
+        raise HTTPException(404, "Bilan non publié")
+    html, _ = weekly(edition.donnees, archive=f"{SITE}/api/v1/newsletter/bilans/{periode}")
+    return HTMLResponse(html, headers={"Cache-Control": "public, max-age=3600",
+                                     "Content-Security-Policy": "default-src 'none'; img-src https://blackturf.fr; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"})
+
+
+@router.post("/newsletter/resend-webhook")
+async def resend_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time
+    from api.config import get_settings
+    from db.models import EmailLivraison
+    secret = get_settings().resend_webhook_secret
+    if not secret:
+        raise HTTPException(503, "Webhook non configuré")
+    body = await request.body()
+    if len(body) > 262144:
+        raise HTTPException(413, "Événement trop volumineux")
+    timestamp = request.headers.get("svix-timestamp", "")
+    event_id = request.headers.get("svix-id", "")
+    try:
+        if not event_id or abs(time.time() - int(timestamp)) > 300:
+            raise ValueError()
+        key = base64.b64decode(secret.removeprefix("whsec_"), validate=True)
+        signature = base64.b64encode(hmac.new(key, f"{event_id}.{timestamp}.".encode() + body, hashlib.sha256).digest()).decode()
+        candidates = request.headers.get("svix-signature", "").split()
+        if not any(hmac.compare_digest("v1," + signature, candidate) for candidate in candidates):
+            raise ValueError()
+        event = json.loads(body)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Signature invalide") from None
+    provider_id = event.get("data", {}).get("email_id")
+    if not provider_id:
+        return {"ok": True}
+    row = (await db.execute(select(EmailLivraison).where(EmailLivraison.provider_id == provider_id)
+                            .with_for_update())).scalar_one_or_none()
+    if row:
+        kind = event.get("type", "").removeprefix("email.")
+        priority = {"sent": 0, "delivered": 1, "opened": 2, "clicked": 3, "bounced": 4, "complained": 5}
+        if kind in priority and priority[kind] > priority.get(row.statut, -1):
+            row.statut = kind
+            await db.commit()
+    return {"ok": True}
+
+
+from api.routes.auth import require_admin
+
+
+@router.get("/newsletter/suivi", dependencies=[Depends(require_admin)])
+async def suivi_envois(db: AsyncSession = Depends(get_db)):
+    """Aggregate delivery health; no recipient addresses exposed."""
+    from sqlalchemy import func
+    from db.models import EmailLivraison
+    rows = (await db.execute(select(EmailLivraison.campagne, EmailLivraison.statut, func.count())
+                            .group_by(EmailLivraison.campagne, EmailLivraison.statut)
+                            .order_by(EmailLivraison.campagne.desc()).limit(200))).all()
+    return {"campagnes": [{"campagne": c, "statut": s, "nombre": n} for c, s, n in rows]}

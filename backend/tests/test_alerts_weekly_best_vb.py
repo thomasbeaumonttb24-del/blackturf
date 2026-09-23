@@ -44,7 +44,7 @@ async def _seed_value_bet(
 ) -> None:
     hippo_id = f"h-{course_id}"
     hippo_nom = f"Test Hippo {course_id}"
-    db.add(Hippodrome(hippodrome_id=hippo_id, nom=hippo_nom, code=course_id[:3]))
+    db.add(Hippodrome(hippodrome_id=hippo_id, nom=hippo_nom, code=uuid.uuid4().hex[:8]))
     db.add(Reunion(reunion_id=f"R-{course_id}", date=date.today(), hippodrome_id=hippo_id,
                     hippodrome_nom=hippo_nom, numero=1))
     date_heure = date_heure if date_heure is not None else NOW - timedelta(days=days_ago)
@@ -146,8 +146,19 @@ async def test_garde_anti_backfill_value_bet_detecte_apres_le_depart(db: AsyncSe
     assert best is None
 
 
+async def _seed_week_edition(db):
+    from db.models import EmailEdition
+    from services.email_campaigns import period
+    start, end = period(datetime.now(timezone.utc))
+    db.add(EmailEdition(cle="hebdo-" + start.date().isoformat(), donnees={
+        "debut": start.strftime("%d/%m/%Y"), "fin": (end-timedelta(days=1)).strftime("%d/%m/%Y"),
+        "top": [], "profils": [{"label": "Modéré", "n": 1, "mise": 10, "retour": 0, "net": -10}],
+    }))
+    await db.commit()
+
+
 # ─────────────────────────────────────────────
-# Envoi (email + push, ciblage Free/Découverte)
+# Campagne hebdomadaire : comptes et newsletter confirmée
 # ─────────────────────────────────────────────
 async def test_aucun_candidat_ne_rien_envoyer(db: AsyncSession, monkeypatch):
     """Honnêteté avant tout : si aucun value bet ★★★+ n'a gagné la semaine, on
@@ -161,8 +172,8 @@ async def test_aucun_candidat_ne_rien_envoyer(db: AsyncSession, monkeypatch):
     mock_email.assert_not_called()
 
 
-async def test_envoie_uniquement_aux_comptes_free_et_decouverte(db: AsyncSession, monkeypatch):
-    await _seed_value_bet(db, "V8", ev=0.30, rapport_sg=5.0)
+async def test_envoie_le_bilan_aux_comptes_eligibles_tous_plans(db: AsyncSession, monkeypatch):
+    await _seed_week_edition(db)
     mock_email = AsyncMock(return_value=True)
     monkeypatch.setattr("services.alerts.send_email", mock_email)
 
@@ -176,12 +187,12 @@ async def test_envoie_uniquement_aux_comptes_free_et_decouverte(db: AsyncSession
     sent_to = {call.kwargs["to"] for call in mock_email.await_args_list}
     assert free_user.email in sent_to
     assert decouverte_user.email in sent_to
-    assert standard_user.email not in sent_to
-    assert expert_user.email not in sent_to
+    assert standard_user.email in sent_to
+    assert expert_user.email in sent_to
 
 
-async def test_envoie_le_push_si_utilisateur_abonne(db: AsyncSession, monkeypatch):
-    await _seed_value_bet(db, "V9", ev=0.30, rapport_sg=5.0)
+async def test_le_bilan_email_ne_declenche_pas_de_push_promotionnel(db: AsyncSession, monkeypatch):
+    await _seed_week_edition(db)
     monkeypatch.setattr("services.alerts.send_email", AsyncMock(return_value=True))
     mock_push = AsyncMock(return_value=True)
     monkeypatch.setattr("services.alerts.send_web_push", mock_push)
@@ -191,7 +202,7 @@ async def test_envoie_le_push_si_utilisateur_abonne(db: AsyncSession, monkeypatc
 
     await send_weekly_best_value_bet(db)
 
-    assert mock_push.await_count == 1  # seulement l'utilisateur avec push_subscription
+    assert mock_push.await_count == 0
 
 
 # ─────────────────────────────────────────────
@@ -227,7 +238,7 @@ async def test_access_token_ne_sert_pas_de_jeton_desabonnement():
 
 async def test_envoi_exclut_les_desabonnes(db: AsyncSession, monkeypatch):
     """Un opt-out non honoré à l'envoi = pas de désinscription réelle."""
-    await _seed_value_bet(db, "V10", ev=0.30, rapport_sg=5.0)
+    await _seed_week_edition(db)
     mock_email = AsyncMock(return_value=True)
     monkeypatch.setattr("services.alerts.send_email", mock_email)
 
@@ -248,7 +259,7 @@ async def test_envoi_exclut_les_adresses_non_confirmees(db: AsyncSession, monkey
     """C'est dans les comptes gratuits que vivent les adresses bidon : chaque
     rebond abîme la délivrabilité de TOUS les envois, y compris ceux des abonnés
     payants. On n'écrit donc qu'aux adresses confirmées."""
-    await _seed_value_bet(db, "V11", ev=0.30, rapport_sg=5.0)
+    await _seed_week_edition(db)
     mock_email = AsyncMock(return_value=True)
     monkeypatch.setattr("services.alerts.send_email", mock_email)
 
@@ -342,12 +353,15 @@ async def test_digest_quotidien_idempotent(db: AsyncSession, monkeypatch):
         def now(cls, tz=None):
             return _midi.astimezone(tz) if tz else _midi.replace(tzinfo=None)
 
-    monkeypatch.setattr("services.alerts.datetime", _FrozenDatetime)
+    monkeypatch.setattr("services.email_campaigns.datetime", _FrozenDatetime)
 
     await _seed_value_bet(
         db, "DIGEST1", statut="a_venir",
         date_heure=_midi.replace(hour=15).astimezone(timezone.utc),
     )
+    vb = await db.get(ValueBet, "vb-DIGEST1")
+    vb.detecte_a = _midi.astimezone(timezone.utc) - timedelta(minutes=20)
+    await db.commit()
     user = await _make_user(db, "standard")
     mock_email = AsyncMock(return_value=True)
     monkeypatch.setattr("services.alerts.send_email", mock_email)

@@ -39,26 +39,24 @@ export default function NewsletterPage() {
               des rapports théoriques.
             </li>
             <li>
-              <strong className="text-brand-dark">Ce que le modèle a raté.</strong> Les courses
-              où la sélection était à côté, et pourquoi. C&apos;est la partie que personne
-              d&apos;autre ne publie.
+              <strong className="text-brand-dark">Les meilleurs plans bénéficiaires.</strong> Jusqu’à trois
+              plans classés par bénéfice net, avec la mise totale et le retour, mise incluse.
+              Chaque plan a été enregistré avant le départ.
             </li>
             <li>
               <strong className="text-brand-dark">Un enseignement utilisable.</strong> Un point
-              de méthode par semaine : une famille de paris, un type de course, une erreur
-              fréquente.
+              de méthode pour comprendre les résultats, les mises et le bénéfice net.
             </li>
           </ul>
         </Section>
 
         <Section title="Ce qu'il n'y a pas dedans">
           <p className="text-sm leading-relaxed text-brand-charcoal">
-            Aucun pronostic « garanti », aucune promesse de gain, aucun rappel des seules
-            semaines qui se sont bien passées. Le prélèvement du PMU tourne autour de 20 % des
-            enjeux : personne ne peut promettre un gain régulier là-dessus, et quiconque le fait
-            vous ment. Ce que BlackTurf mesure, c&apos;est un écart entre la probabilité réelle
-            d&apos;un cheval et celle qu&apos;implique sa cote — réel, mesurable, et publié tel
-            quel.
+            Aucun pronostic « garanti » ni aucune promesse de gain. Le bilan inclut
+            les plans perdants et distingue les profils, qui sont des stratégies alternatives.
+            Les résultats des plans de référence ne sont pas les gains personnels des utilisateurs.
+            Envoi le lundi dès 9 h, heure de Paris ; si les règlements sont incomplets,
+            le bilan est différé.
           </p>
         </Section>
 

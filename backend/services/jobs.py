@@ -47,7 +47,7 @@ def _enqueue_drift_retrain_once(redis_client, queue):
 # Job functions
 # ─────────────────────────────────────────────
 async def job_morning_digest() -> None:
-    """07:00 Paris — envoie le digest email aux abonnés."""
+    """10:00 Paris — sélection quotidienne ; reprises sans doublon."""
     log.info("jobs.morning_digest.start")
     try:
         from db.database import AsyncSessionLocal
@@ -60,10 +60,7 @@ async def job_morning_digest() -> None:
 
 
 async def job_weekly_best_value_bet() -> None:
-    """Lundi 09:00 Paris — funnel conversion Free (décision produit 2026-08-16) :
-    identifie le meilleur value bet RÉEL de la semaine passée et l'envoie par
-    email/push aux comptes Free/Découverte. N'envoie rien si aucun value bet
-    ★★★+ n'a gagné la semaine passée (honnêteté > relance à tout prix)."""
+    """Lundi dès 09:00 Paris : top des plans réglés et bilan complet."""
     log.info("jobs.weekly_best_value_bet.start")
     try:
         from db.database import AsyncSessionLocal
@@ -480,20 +477,21 @@ async def job_warm_caches() -> None:
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
-    # Digest value bets unique — 10:00 Paris, après la majorité des détections
-    # matinales et avant les premières courses françaises. Un seul e-mail/jour.
+    # Sélection horodatée à partir de 10 h Paris. Les passages suivants reprennent
+    # les échecs transitoires sans refaire un envoi déjà accepté par Resend.
     scheduler.add_job(
         job_morning_digest,
-        CronTrigger(hour=10, minute=0, timezone="Europe/Paris"),
+        CronTrigger(hour=10, minute="0,15,30,45", timezone="Europe/Paris"),
         id="morning_digest",
         replace_existing=True,
         misfire_grace_time=600,
     )
 
-    # Meilleur value bet de la semaine — lundi 09:00 Paris (funnel Free)
+    # Bilan des plans de la semaine précédente : attendre les règlements tardifs.
+    # Mardi couvre les rapports encore incomplets le lundi, sans changer la période.
     scheduler.add_job(
         job_weekly_best_value_bet,
-        CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="Europe/Paris"),
+        CronTrigger(day_of_week="mon,tue", hour="9-20", minute="0,30", timezone="Europe/Paris"),
         id="weekly_best_value_bet",
         replace_existing=True,
         misfire_grace_time=3600,

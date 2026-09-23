@@ -45,6 +45,8 @@ interface NotifsResponse {
 }
 
 interface Prefs {
+  email_quotidien: boolean;
+  email_hebdomadaire: boolean;
   vb_niveau_min: number;
   resultats_suivis: boolean;
   alertes_systeme: boolean;
@@ -441,6 +443,18 @@ export default function NotificationsPage() {
 
             <div className="h-px bg-border/40" />
 
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Vos rendez-vous par e-mail</div>
+            <div className="space-y-4 mb-6">
+              <ToggleSwitch checked={prefs?.email_quotidien ?? true}
+                onChange={(v) => updatePref({ email_quotidien: v })}
+                label="Les valeurs du jour"
+                description="À 10 h (Paris), pour les abonnés : sélection horodatée des courses à venir, si des valeurs sont disponibles." />
+              <ToggleSwitch checked={prefs?.email_hebdomadaire ?? true}
+                onChange={(v) => updatePref({ email_hebdomadaire: v })}
+                label="Le bilan de la semaine"
+                description="Le lundi dès 9 h (Paris) : top 3 des plans bénéficiaires et bilan par profil, pertes comprises. Envoi différé si les résultats sont incomplets." />
+              <p className="text-xs text-muted-foreground">Une désinscription générale reste prioritaire sur ces préférences.</p>
+            </div>
             {/* Other toggles */}
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
               Autres alertes

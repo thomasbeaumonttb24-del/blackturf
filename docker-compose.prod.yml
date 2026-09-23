@@ -149,6 +149,7 @@ services:
       - STRIPE_PRICE_PRO_MONTHLY=${STRIPE_PRICE_PRO_MONTHLY}
       - STRIPE_PRICE_PRO_ANNUAL=${STRIPE_PRICE_PRO_ANNUAL}
       - RESEND_API_KEY=${RESEND_API_KEY}
+      - RESEND_WEBHOOK_SECRET=${RESEND_WEBHOOK_SECRET:-}
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       # Controle de l'adresse a l'inscription (services/adresse_email.py). Les
       # variables de ce fichier sont enumerees une a une : une valeur posee dans

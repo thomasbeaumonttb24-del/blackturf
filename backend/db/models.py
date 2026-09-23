@@ -1494,6 +1494,28 @@ class AssociationJockeyEntraineur(Base):
 # ─────────────────────────────────────────────
 # Lettre d'information
 # ─────────────────────────────────────────────
+class EmailEdition(Base):
+    """Immutable public data for a weekly edition; never stores recipient tokens."""
+    __tablename__ = "email_editions"
+    cle: Mapped[str] = mapped_column(String(64), primary_key=True)
+    donnees: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmailLivraison(Base):
+    """One frozen request per campaign/address, also used for provider events."""
+    __tablename__ = "email_livraisons"
+    cle: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campagne: Mapped[str] = mapped_column(String(64), index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    requete: Mapped[dict] = mapped_column(JSON)
+    statut: Mapped[str] = mapped_column(String(30), default="pending")
+    provider_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    erreur: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    envoye_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class NewsletterAbonne(Base):
     """
     Inscrit à la lettre hebdomadaire, en double opt-in.

@@ -217,7 +217,7 @@ export const notificationsApi = {
   markRead: (id: string) => api.put(`/notifications/${id}/lue`),
   markAllRead: () => api.delete("/notifications/all"),
   getPrefs: () => api.get("/notifications/prefs"),
-  updatePrefs: (data: { vb_niveau_min?: number; resultats_suivis?: boolean; alertes_systeme?: boolean }) =>
+  updatePrefs: (data: { email_quotidien?: boolean; email_hebdomadaire?: boolean; vb_niveau_min?: number; resultats_suivis?: boolean; alertes_systeme?: boolean }) =>
     api.put("/notifications/prefs", data),
 };
 

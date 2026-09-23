@@ -34,6 +34,8 @@ log = structlog.get_logger()
 PREFS_DEFAUT: dict = {
     "vb_niveau_min": 2,       # ne notifier que les value bets de ce niveau ou plus
     "resultats_suivis": True,  # résultats des courses où l'utilisateur a un pari/une alerte
+    "email_quotidien": True,
+    "email_hebdomadaire": True,
     "alertes_systeme": True,   # annonces produit, maintenance
 }
 
@@ -51,6 +53,8 @@ def prefs_utilisateur(user: User) -> dict:
         prefs["vb_niveau_min"] = PREFS_DEFAUT["vb_niveau_min"]
     prefs["resultats_suivis"] = bool(prefs["resultats_suivis"])
     prefs["alertes_systeme"] = bool(prefs["alertes_systeme"])
+    prefs["email_quotidien"] = bool(prefs["email_quotidien"])
+    prefs["email_hebdomadaire"] = bool(prefs["email_hebdomadaire"])
     return prefs
 
 
@@ -100,6 +104,7 @@ class ResultatEnvoi:
     """
     ok: bool
     erreur: Optional[str] = None
+    provider_id: Optional[str] = None
 
     def __bool__(self) -> bool:
         return self.ok
@@ -115,6 +120,9 @@ async def send_email(
     subject: str,
     html: str,
     text: Optional[str] = None,
+    *,
+    idempotency_key: Optional[str] = None,
+    unsubscribe_url: Optional[str] = None,
 ) -> ResultatEnvoi:
     """Envoie un email via Resend API."""
     # Un test ne doit JAMAIS envoyer de vrai e-mail. `backend/.env` porte une
@@ -146,16 +154,24 @@ async def send_email(
     }
     if text:
         payload["text"] = text
+    if unsubscribe_url:
+        payload["headers"] = {
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        }
+    headers = {"Authorization": f"Bearer {settings.resend_api_key}"}
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 "https://api.resend.com/emails",
                 json=payload,
-                headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+                headers=headers,
             )
             resp.raise_for_status()
-            return ResultatEnvoi(True)
+            return ResultatEnvoi(True, provider_id=resp.json().get("id"))
     except Exception as e:
         log.error("alerts.email.failed", to=to, error=str(e))
         return ResultatEnvoi(False, f"{type(e).__name__}: {e}"[:400])
@@ -785,144 +801,12 @@ def _weekly_best_vb_email_html(vb: dict, unsubscribe_url: str) -> str:
 
 
 async def send_weekly_best_value_bet(session: AsyncSession):
-    """
-    Job hebdomadaire (funnel conversion Free, décision produit 2026-08-16) :
-    identifie le meilleur value bet RÉEL de la semaine passée (EV le plus haut
-    parmi les value bets ★★★+ réglés ET gagnants, rapport PMU publié) et
-    l'envoie par email + push aux comptes Free/Découverte, avec CTA d'abonnement.
-
-    Honnêteté stricte : si aucun value bet ★★★+ n'a gagné la semaine passée (ou
-    qu'aucun rapport n'est encore publié), on N'ENVOIE RIEN plutôt que d'inventer
-    un exemple ou de lisser sur une moyenne."""
-    best = await _best_value_bet_last_week(session)
-    if not best:
-        log.info("alerts.weekly_best_vb.no_candidate")
-        return
-
-    # RGPD : on EXCLUT à l'envoi les comptes qui se sont désabonnés des e-mails
-    # marketing (le lien de désinscription du mail précédent doit être réellement
-    # honoré — un opt-out non appliqué vaut absence de lien).
-    users_res = await session.execute(
-        select(User).where(
-            User.plan.in_(["free", "decouverte"]),
-            User.is_active == True,
-            User.marketing_opt_out_at.is_(None),
-            clause_email_utilisable(),
-        )
-    )
-    users = users_res.scalars().all()
-    if not users:
-        log.info("alerts.weekly_best_vb.no_recipients")
-        return
-
-    subject = f"🏇 Le meilleur pari de la semaine : {best['nom_cheval']} à {best.get('cote', '?')}"
-    for user in users:
-        # Le lien de désabonnement est PAR destinataire (jeton signé) → le HTML
-        # est rendu par utilisateur, pas mutualisé.
-        html = _weekly_best_vb_email_html(best, _unsubscribe_url(user.user_id))
-        ok_email = await send_email(to=user.email, subject=subject, html=html)
-        await _log_alerte(session, user.user_id, "weekly_best_vb", "email", best,
-                          ok_email, _raison(ok_email))
-
-        # `_abonnement_push` et non `user.push_subscription` : la colonne est un
-        # fourre-tout qui porte aussi les PRÉFÉRENCES. Un compte n'ayant que des
-        # préférences la rendait vraie, on tentait un envoi vers un abonnement
-        # sans `endpoint`, et l'échec était journalisé comme une panne de canal.
-        # C'est ce qui a produit l'essentiel des 22 349 « échecs push » et masqué
-        # la vraie cause : personne n'a jamais pu s'abonner (cf. Dockerfile).
-        abo_push = _abonnement_push(user)
-        if abo_push:
-            ok_push = await send_web_push(
-                abo_push,
-                title="🏇 Meilleur pari de la semaine",
-                body=f"{best['nom_cheval']} gagnant à {best.get('cote', '?')} — rapport officiel pour 10€ : {best.get('gain_reference_10e', '?')}€ (mise incluse)",
-                data=best,
-            )
-            await _log_alerte(session, user.user_id, "weekly_best_vb", "push", best,
-                              ok_push, _raison(ok_push))
-
-    await session.commit()
-    log.info("alerts.weekly_best_vb", nb_users=len(users), course_id=best["course_id"], cheval=best["nom_cheval"])
+    """Compatibility entry point: weekly top plans and complete profile balances."""
+    from services.email_campaigns import send_weekly
+    return await send_weekly(session)
 
 
 async def send_morning_digest(session: AsyncSession):
-    """
-    Digest matinal — envoyé aux abonnés actifs.
-    Recense les value bets du jour.
-    """
-    from db.models import ValueBet, Course, Participation, Cheval
-
-    now_utc = datetime.now(timezone.utc)
-    now_paris = now_utc.astimezone(ZoneInfo("Europe/Paris"))
-    start_paris = now_paris.replace(hour=0, minute=0, second=0, microsecond=0)
-    end_paris = start_paris + timedelta(days=1)
-    start_utc = start_paris.astimezone(timezone.utc)
-    end_utc = end_paris.astimezone(timezone.utc)
-    q = (
-        select(ValueBet, Participation, Cheval, Course)
-        .join(Participation, Participation.participation_id == ValueBet.participation_id)
-        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .join(Course, Course.course_id == ValueBet.course_id)
-        .where(
-            Course.date_heure >= start_utc,
-            Course.date_heure < end_utc,
-            Course.date_heure > now_utc,
-            # Même règle que la page /value-bets (niveau, zone, actif), à l'heure
-            # de CE module (figée en test) plutôt qu'à l'horloge réelle.
-            *_vb_filtres_sql(None, now_utc),
-        )
-        .order_by(ValueBet.ev_max.desc())
-    )
-    rows = (await session.execute(q)).all()
-    if not rows:
-        return
-
-    courses_list = [
-        {
-            "heure": course.date_heure.strftime("%H:%M"),
-            "hippodrome": course.hippodrome_nom,
-            "nom_cheval": cheval.nom,
-            "numero": part.numero,
-            "ev": vb.ev_max,
-            "niveau": vb.niveau,
-        }
-        for vb, part, cheval, course in rows
-    ]
-
-    # Utilisateurs abonnés
-    users_res = await session.execute(
-        select(User).where(
-            User.plan.in_(["starter", "standard", "expert"]),
-            User.is_active == True,
-            User.marketing_opt_out_at.is_(None),
-            clause_email_utilisable(),
-        )
-    )
-    users = users_res.scalars().all()
-
-    for user in users:
-        # Idempotence persistante : un redémarrage ou un lancement manuel le même
-        # jour ne doit jamais produire un second digest.
-        deja_envoye = await session.scalar(
-            select(AlerteLog.alerte_id).where(
-                AlerteLog.user_id == user.user_id,
-                AlerteLog.type_alerte == "digest_matin",
-                AlerteLog.canal == "email",
-                AlerteLog.envoye == True,
-                AlerteLog.created_at >= start_utc,
-                AlerteLog.created_at < end_utc,
-            ).limit(1)
-        )
-        if deja_envoye:
-            continue
-        html = _digest_email_html(courses_list, _unsubscribe_url(user.user_id))
-        ok = await send_email(
-            to=user.email,
-            subject=f"🏇 BlackTurf — {len(courses_list)} value bets aujourd'hui",
-            html=html,
-        )
-        await _log_alerte(session, user.user_id, "digest_matin", "email",
-                          {"nb_vb": len(courses_list)}, ok, _raison(ok))
-
-    await session.commit()
-    log.info("alerts.morning_digest", nb_users=len(users), nb_vb=len(courses_list))
+    """One daily selection, respecting email preferences and plan visibility."""
+    from services.email_campaigns import send_daily
+    return await send_daily(session)
