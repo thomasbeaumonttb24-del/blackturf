@@ -3143,6 +3143,13 @@ async def get_cheval(cheval_id: str, db: AsyncSession = Depends(get_db)):
 # Portfolio multi-scénarios
 # ─────────────────────────────────────────────
 
+def _portfolio_market_signals(features: dict) -> dict[str, float]:
+    """Transmet les noms produits par features_ml et attendus par DELTA."""
+    return {
+        key: float(features.get(key) or 0)
+        for key in ("spi_score", "mouvement_30min", "valeur_latente", "decote_detectee")
+    }
+
 @router.get("/courses/{course_id}/portfolio")
 async def get_portfolio(
     course_id: str,
@@ -3213,10 +3220,7 @@ async def get_portfolio(
             "cote_geny": float(r[7]) if r[7] else None,
             "cote_min": float(r[8]) if r[8] else None,
             # Signaux DELTA (smart money) depuis features ML
-            "spi": float(features.get("spi", 0) or 0),
-            "mouvement_cote": float(features.get("mouvement_cote_relatif", 0) or 0),
-            "valeur_latente": float(features.get("valeur_latente", 0) or 0),
-            "decote_multi_source": float(features.get("decote_multi_source", 0) or 0),
+            **_portfolio_market_signals(features),
         })
 
     # Contexte course

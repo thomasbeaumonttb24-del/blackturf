@@ -2859,7 +2859,8 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
                      "saison_form": float(saison_form), "market_timing_score": mouvement_30min}
 
     # ── Pace conflict (running style × terrain × adversaires) ──────────────────
-    nb_meneurs = sum(1 for r in batch["partants"] if r[39] == "mene")  # col 39 = running_style
+    nb_meneurs = sum(1 for r in batch["partants"]
+                     if r._mapping["running_style"] == "mene")
     pace_conflict = 0.0
     rs_terrain_fit = 0.5
     if running_style_raw == "mene":
@@ -2910,14 +2911,15 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
             sc = [score_position(p, nb_partants_int) for p in positions]
             decay_score = float(np.average(sc, weights=w[:len(sc)]))
     # opposition_quality RECÂBLÉ 2026-06-17 : force du champ affronté aujourd'hui =
-    # ELO moyen des AUTRES partants (col 42=elo_g, col 2=cheval_id), normalisé comme
+    # ELO moyen des AUTRES partants, normalisé comme
     # la version legacy (avg/1500 - 1, clip [-0.5, 1.0]). Avant = constante 0.5
     # (fantôme). N'impacte PAS le modèle v493 (entraîné constant → aucun split) ;
     # signal réel dès le prochain retrain. Gardé : tout aléa → fallback 0.5.
     opp_quality = 0.5
     try:
-        opp_elos = [r[42] for r in batch["partants"]
-                    if r[2] != cheval_id and r[42] is not None and r[42] > 0]
+        opp_elos = [r._mapping["elo_g"] for r in batch["partants"]
+                    if r._mapping["cheval_id"] != cheval_id
+                    and r._mapping["elo_g"] is not None and r._mapping["elo_g"] > 0]
         if opp_elos:
             opp_quality = float(np.clip(float(np.mean(opp_elos)) / ELO_INITIAL - 1.0, -0.5, 1.0))
     except Exception:

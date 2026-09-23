@@ -114,6 +114,26 @@ def _place_rapport_exact(rapports_detail: Optional[dict], keys: tuple[str, ...],
     return None
 
 
+def _rapport_par_libelle(rapports_detail: Optional[dict], keys: tuple[str, ...],
+                         libelle: str, numeros: set[int], *, exact: bool = True
+                         ) -> Optional[float]:
+    """Lit le rapport du rang payé, sans confondre Ordre, Désordre et Bonus."""
+    for key in keys:
+        for entry in (rapports_detail or {}).get(key, []):
+            name = str(entry.get("libelle") or "").casefold()
+            wanted = libelle.casefold()
+            if not (name.endswith(wanted) if wanted == "bonus" else wanted in name):
+                continue
+            found = {int(n) for n in re.findall(r"\d+", str(entry.get("combinaison") or ""))}
+            if (found == numeros if exact else found.issubset(numeros)) and found:
+                try:
+                    value = float(entry["rapport"])
+                    return value if value > 0 else None
+                except (TypeError, ValueError, KeyError):
+                    continue
+    return None
+
+
 def _multi_rapport_by_n(rapports_detail: Optional[dict], keys: tuple[str, ...],
                         n: int) -> Optional[float]:
     """Rapport Multi/Mini Multi pour la formule « en N » RÉELLEMENT jouée.
@@ -293,9 +313,11 @@ def settle_pari(
     elif type_pari == "Tiercé Désordre":
         gagne = len(sel) == 3 and sel.issubset(top3)  # 3 premiers, ordre indifférent
     elif type_pari in ("Quarté+ Désordre", "Quarté+"):
-        gagne = len(sel) == 4 and sel.issubset(top4)
+        gagne = len(sel) == 4 and (sel.issubset(top4) or
+                                   (len(top3) == 3 and top3.issubset(sel)))
     elif type_pari in ("Quinté+ Désordre", "Quinté+ Flexi", "Quinté+"):
-        gagne = len(sel) == 5 and sel.issubset(top5)
+        gagne = len(sel) == 5 and (sel.issubset(top5) or len(sel & top5) == 4
+                                   or (len(top3) == 3 and top3.issubset(sel)))
     elif tp_norm.startswith("Multi en "):
         # Multi : les 4 PREMIERS (désordre) doivent TOUS être dans la sélection (4→7
         # chevaux). Mise plate → pas de division par combinaisons (gain_mult reste 1).
@@ -356,6 +378,25 @@ def settle_pari(
             if val is None:
                 # en 5/6/7 sans détail re-scrapé → gain en attente plutôt que surpaie.
                 note = f"Rapport « Multi en {n} » non publié — gain en attente."
+        elif type_pari in ("Tiercé Désordre", "Quarté+ Désordre", "Quarté+",
+                           "Quinté+ Désordre", "Quinté+ Flexi", "Quinté+"):
+            # Le rapport agrégé est souvent le premier rapport publié : Ordre.
+            # Pour les tickets désordre, seul le détail de la bonne combinaison
+            # permet de déterminer un gain fiable.
+            if type_pari == "Tiercé Désordre":
+                label, combination = "Désordre", sel
+            elif type_pari in ("Quarté+ Désordre", "Quarté+"):
+                label, combination = (("Désordre", sel) if sel.issubset(top4)
+                                      else ("Bonus", sel & top3))
+            elif sel.issubset(top5):
+                label, combination = "Désordre", sel
+            elif len(sel & top5) == 4:
+                label, combination = "Bonus 4sur5", sel & top5
+            else:
+                label, combination = "Bonus 3", sel & top3
+            val = _rapport_par_libelle(rapports_detail, keys, label, combination)
+            if label.startswith("Bonus"):
+                note = f"Rang de gain : {label}."
         else:
             for k in keys:
                 if rapports.get(k) is not None:

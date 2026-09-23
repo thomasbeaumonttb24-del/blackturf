@@ -6,7 +6,7 @@ steam, forme excellente, ELO > champ, duo J×E, descente de catégorie, terrain 
 draw favorable, SPI…), mesure sur l'HISTORIQUE RÉEL :
   - n          : nb de fois où un partant portait ce signal
   - win_rate   : taux de victoire réel de ces partants
-  - roi        : ROI d'un 1€ Simple Gagnant à la cote PMU réelle (Σpayout−Σstake)/Σstake
+  - roi        : ROI d'un 1€ Simple Gagnant au rapport PMU publié (Σpayout−Σstake)/Σstake
   - roi_shrunk : ROI shrinké vers 0 (break-even) par pseudo-compte K → pas de
                  sur-réaction sur petit échantillon
 
@@ -22,6 +22,7 @@ import math
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from services.bet_settlement import _place_rapport_exact
 
 from ml.prediction_evaluation import (
     MIN_EV_BAND_OBS,
@@ -76,6 +77,9 @@ SIGNALS: dict = {
 K_SHRINK = 40.0   # pseudo-paris (mise) shrinkant le ROI vers 0
 SIG_M_MIN, SIG_M_MAX = 0.6, 1.6   # bornes du multiplicateur d'un signal
 
+_SG_KEYS = ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international")
+_SP_KEYS = ("simple_place", "e_simple_place", "simple_place_international")
+
 
 # ─────────────────────────────────────────────────────────────
 # Un signal se juge par rapport aux AUTRES CHEVAUX, pas par rapport à zéro
@@ -125,15 +129,25 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
     # (mesuré à 1,5 Gio de pic).
     #
     # La fonction n'est qu'un accumulateur de compteurs : elle n'a jamais eu
-    # besoin de voir deux lignes en même temps. Résultat strictement identique.
+    # besoin de voir deux lignes en même temps.
     result = await session.stream(text("""
-        SELECT fm.features, pa.cote_pmu,
-               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
+        SELECT fm.features, ch.cote,
+               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
+               r.rapports_detail, pa.numero
         FROM features_ml fm
         JOIN participations pa ON pa.participation_id = fm.participation_id
         JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pa.course_id
-        WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
+        -- Dernière cote PMU réellement connue au calcul de ces features, fraîche
+        -- de 30 minutes au plus. Une cote actuelle de participation est mutable.
+        JOIN LATERAL (
+            SELECT cote FROM cotes_historique h
+            WHERE h.participation_id = fm.participation_id AND h.source = 'pmu'
+              AND h.time <= fm.computed_at
+              AND h.time >= fm.computed_at - make_interval(mins => 30)
+            ORDER BY h.time DESC LIMIT 1
+        ) ch ON true
+        WHERE ch.cote > 1 AND jsonb_typeof(r.classement) = 'array'
           -- ANTI-LEAKAGE : ne garder que les features FIGÉES AVANT le départ.
           -- Tout backfill/recompute post-course bump computed_at à now() (> date_heure)
           -- → exclu. Sinon on apprend "ce qui rapporte" sur des features reconstruites
@@ -144,10 +158,17 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
     agg = {name: {"n": 0, "wins": 0, "stake": 0.0, "payout": 0.0} for name in SIGNALS}
     n_total = 0
     async for partition in result.partitions(2000):
-        for feats, cote, win in partition:
+        for feats, cote, win, rapports_detail, numero in partition:
+            detail = (rapports_detail if isinstance(rapports_detail, dict)
+                      else json.loads(rapports_detail) if rapports_detail else {})
+            if not any(detail.get(key) for key in _SG_KEYS):
+                continue
+            rapport_gagnant = (_place_rapport_exact(detail, _SG_KEYS, [numero])
+                               if win else None)
+            if win and rapport_gagnant is None:
+                continue
             n_total += 1
             f = feats if isinstance(feats, dict) else json.loads(feats)
-            cote = float(cote)
             for name, pred in SIGNALS.items():
                 try:
                     if pred(f):
@@ -155,7 +176,7 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
                         a["n"] += 1
                         a["wins"] += int(win)
                         a["stake"] += 1.0
-                        a["payout"] += cote if win else 0.0
+                        a["payout"] += rapport_gagnant if win else 0.0
                 except Exception:
                     continue
         # Sans ce `del`, le curseur serveur n'apporte rien : on aurait seulement
@@ -185,22 +206,29 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
     return {"signals": signals, "n_total": n_total, "roi_reference": round(roi_reference, 3)}
 
 
-def _profile_pnl(profil: str, win: int, top3: int, cote: float) -> tuple[float, float]:
+def _profile_pnl(profil: str, win: int, top3: int, cote: float,
+                 rapport_place: float | None = None,
+                 rapport_gagnant: float | None = None) -> tuple[float, float]:
     """(mise, gain) d'un 1€ selon l'OBJECTIF du profil — c'est ce qui différencie
     quels signaux "rapportent" pour chaque profil :
-      - conservateur : Simple Placé (réussite = top-3) ; rapport placé ≈ (cote-1)/4+1.
+      - conservateur : Simple Placé, au rapport PMU publié pour ce cheval.
       - équilibré    : Simple Gagnant (réussite = victoire) ; toutes cotes.
       - agressif     : Simple Gagnant mais GROS GAINS → ne compte que cote ≥ 6
                         (les outsiders qui gagnent), 0 sinon (ne joue pas les favoris)."""
     if profil == "conservateur":
-        rapport_place = max(1.1, (cote - 1) / 4.0 + 1.0)
+        if top3 and rapport_place is None:
+            return 0.0, 0.0  # rapport gagnant absent : rendement inconnu
         return 1.0, (rapport_place if top3 else 0.0)
     if profil == "agressif":
         if cote < 6.0:
             return 0.0, 0.0  # le profil agressif ne parie pas les courtes cotes
-        return 1.0, (cote if win else 0.0)
+        if win and rapport_gagnant is None:
+            return 0.0, 0.0
+        return 1.0, (rapport_gagnant if win else 0.0)
     # équilibré
-    return 1.0, (cote if win else 0.0)
+    if win and rapport_gagnant is None:
+        return 0.0, 0.0
+    return 1.0, (rapport_gagnant if win else 0.0)
 
 
 async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
@@ -213,17 +241,27 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
     # était pire encore — elle construisait `parsed`, une TROISIÈME copie qui
     # cohabitait avec `rows` le temps de la boucle.
     result = await session.stream(text("""
-        SELECT fm.features, pa.cote_pmu,
+        SELECT fm.features, ch.cote,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
                CASE WHEN pa.numero IN (
                     SELECT (e->>'numero')::int FROM jsonb_array_elements(r.classement)
-                    WITH ORDINALITY a(e,o) WHERE o <= 3
-               ) THEN 1 ELSE 0 END AS top3
+                     WITH ORDINALITY a(e,o)
+                     WHERE o <= CASE WHEN c.nb_partants >= 8 THEN 3
+                                     WHEN c.nb_partants >= 4 THEN 2 ELSE 1 END
+                ) THEN 1 ELSE 0 END AS top3,
+               r.rapports_detail, pa.numero
         FROM features_ml fm
         JOIN participations pa ON pa.participation_id = fm.participation_id
         JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pa.course_id
-        WHERE pa.cote_pmu > 1 AND jsonb_typeof(r.classement) = 'array'
+        JOIN LATERAL (
+            SELECT cote FROM cotes_historique h
+            WHERE h.participation_id = fm.participation_id AND h.source = 'pmu'
+              AND h.time <= fm.computed_at
+              AND h.time >= fm.computed_at - make_interval(mins => 30)
+            ORDER BY h.time DESC LIMIT 1
+        ) ch ON true
+        WHERE ch.cote > 1 AND jsonb_typeof(r.classement) = 'array'
           -- ANTI-LEAKAGE (cf. compute_signal_performance) : features pré-départ only.
           AND c.date_heure IS NOT NULL AND fm.computed_at < c.date_heure
     """))
@@ -232,15 +270,29 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
     agg = {p: {name: {"n": 0, "stake": 0.0, "payout": 0.0, "hits": 0} for name in SIGNALS} for p in profils}
     n_total = 0
     async for partition in result.partitions(2000):
-        for feats, cote, win, top3 in partition:
-            n_total += 1
+        for feats, cote, win, top3, rapports_detail, numero in partition:
             f = feats if isinstance(feats, dict) else json.loads(feats)
             cote, win, top3 = float(cote), int(win), int(top3)
+            detail = (rapports_detail if isinstance(rapports_detail, dict)
+                      else json.loads(rapports_detail) if rapports_detail else {})
+            place_disponible = any(detail.get(key) for key in _SP_KEYS)
+            rapport_place = (_place_rapport_exact(detail, _SP_KEYS, [numero])
+                             if top3 and place_disponible else None)
+            gagnant_disponible = any(detail.get(key) for key in _SG_KEYS)
+            rapport_gagnant = (_place_rapport_exact(detail, _SG_KEYS, [numero])
+                               if win and gagnant_disponible else None)
             present = [name for name, pred in SIGNALS.items() if _safe(pred, f)]
+            ligne_exploitable = False
             for p in profils:
-                stake, payout = _profile_pnl(p, win, top3, cote)
+                if p == "conservateur" and not place_disponible:
+                    continue
+                if p != "conservateur" and not gagnant_disponible:
+                    continue
+                stake, payout = _profile_pnl(
+                    p, win, top3, cote, rapport_place, rapport_gagnant)
                 if stake <= 0:
                     continue
+                ligne_exploitable = True
                 success = top3 if p == "conservateur" else win
                 for name in present:
                     a = agg[p][name]
@@ -248,6 +300,8 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
                     a["stake"] += stake
                     a["payout"] += payout
                     a["hits"] += success
+            if ligne_exploitable:
+                n_total += 1
         del partition
 
     out = {}

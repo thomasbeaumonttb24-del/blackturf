@@ -642,13 +642,25 @@ class BlackTurfEnsemble:
             p_cb = self.catboost.predict_proba(X_scaled)[:, 1]
         return p_xgb, p_lgbm, p_cb
 
+    def _aligned_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Aligne le schéma servi, avec compatibilité terrain des anciens modèles."""
+        old_terrain = ("pref_terrain_bon", "pref_terrain_souple", "pref_terrain_lourd")
+        if ("pref_terrain_actuel" in X.columns and "terrain_code" in X.columns
+                and any(name in self.feature_names and name not in X.columns
+                        for name in old_terrain)):
+            X = X.copy()
+            for code, name in enumerate(old_terrain):
+                if name in self.feature_names and name not in X.columns:
+                    X[name] = X["pref_terrain_actuel"].where(X["terrain_code"] == code, 0.0)
+        return X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         """
         Prédictions ensemblées.
         Si stacking entraîné : meta-learner L2 (LightGBM sur OOF L0 + features contextuelles).
         Sinon : fallback poids fixes 50/30/20.
         """
-        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+        X_feat = self._aligned_features(X)
         p_xgb, p_lgbm, p_cb = self._get_l0_predictions(X_feat)
 
         if self._stacking_trained and self.meta_learner is not None:
@@ -710,7 +722,7 @@ class BlackTurfEnsemble:
         Plus un modèle est en accord AVEC lui-même (les 3 modèles convergent)
         ET avec le marché, plus la confidence est élevée.
         """
-        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+        X_feat = self._aligned_features(X)
         p_xgb, p_lgbm, p_cb = self._get_l0_predictions(X_feat)
 
         probas = self.predict_proba(X)
@@ -743,7 +755,7 @@ class BlackTurfEnsemble:
         modèles divergent sur un partant, plus la bande est large. Honnête : mesure
         un vrai désaccord, pas une marge inventée.
         """
-        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+        X_feat = self._aligned_features(X)
         p_xgb, p_lgbm, p_cb = self._get_l0_predictions(X_feat)
         probas, confidence = self.predict_with_confidence(X)
 
@@ -761,7 +773,7 @@ class BlackTurfEnsemble:
         """
         if self.win_model is None:
             return None
-        X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+        X_feat = self._aligned_features(X)
         try:
             return self.win_model.predict_proba(X_feat)[:, 1]
         except Exception as e:
@@ -776,7 +788,7 @@ class BlackTurfEnsemble:
         if rk is None:
             return None
         try:
-            X_feat = X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+            X_feat = self._aligned_features(X)
             return np.asarray(rk.predict(X_feat), dtype=float)
         except Exception as e:
             log.warning("model.ranker.predict_failed", err=str(e)[:120])

@@ -1032,10 +1032,10 @@ def portfolio_predictions():
          "proba_top1": max(0.02, 0.30 - i * 0.03),
          "cote_pmu": 2.0 + i * 1.5,
          "cote_geny": 2.1 + i * 1.5,
-         "spi": 0.3 if i == 5 else 0.0,
-         "mouvement_cote": 0.25 if i == 5 else 0.0,
-         "valeur_latente": 0.2 if i == 5 else 0.0,
-         "decote_multi_source": 0.1 if i == 5 else 0.0,
+          "spi_score": 0.3 if i == 5 else 0.0,
+          "mouvement_30min": 0.25 if i == 5 else 0.0,
+          "valeur_latente": 0.2 if i == 5 else 0.0,
+          "decote_detectee": 0.1 if i == 5 else 0.0,
          "confidence_score": 0.7 - i * 0.05,
          }
         for i in range(10)
@@ -1115,12 +1115,13 @@ def test_portfolio_alpha_only_conservative(portfolio_predictions, portfolio_cour
 
 
 def test_portfolio_delta_detects_outsider_signal(portfolio_predictions, portfolio_course_info):
-    """DELTA doit détecter le signal fort sur cheval #5 (spi=0.3)."""
+    """DELTA doit détecter le signal fort sur cheval #5 (spi_score=0.3)."""
     from ml.portfolio import BetPortfolioEngine
     engine = BetPortfolioEngine()
     result = engine.build_portfolio(portfolio_predictions, portfolio_course_info, bankroll=200.0)
-    # Outsider signal devrait être détecté
-    assert result.get("outsiders_signal") is not None or result.get("nb_scenarios_actifs", 0) >= 1
+    outsiders = engine._detect_delta_candidates(portfolio_predictions)
+    assert [o["numero"] for o in outsiders] == [6]
+    assert outsiders[0]["force_signal"] == 0.235
 
 
 def test_portfolio_paris_immediats_present(portfolio_predictions, portfolio_course_info):

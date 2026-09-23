@@ -58,8 +58,19 @@ class _FausseSession:
         )
 
 
-def _ligne(features, cote, win, top3=None):
-    return (features, cote, win) if top3 is None else (features, cote, win, top3)
+def _ligne(features, cote, win, top3=None, rapport_gagnant=None, rapport_place=None):
+    detail = {
+        "e_simple_gagnant": [{"combinaison": "1" if win else "99",
+                               "rapport": rapport_gagnant or cote}],
+        "e_simple_place": [{"combinaison": "1" if top3 else "99",
+                             "rapport": rapport_place or 1.8}],
+    }
+    return ((features, cote, win, detail, 1) if top3 is None
+            else (features, cote, win, top3, detail, 1))
+
+
+def _ligne_edge(features, cote, win):
+    return features, cote, win
 
 
 # `elo_vs_moyenne > 50` déclenche `elo_superieur` et lui seul parmi les signaux
@@ -84,8 +95,8 @@ def test_roi_par_signal_identique_au_calcul_a_la_main():
     assert sig["win_rate"] == round(1 / 3, 3)
     assert sig["roi"] == round((4.0 - 3.0) / 3.0, 3)
     assert sig["roi_shrunk"] == round((4.0 - 3.0) / (3.0 + K_SHRINK), 3)
-    # n_total comptait `len(rows)` : il doit rester le nombre de lignes LUES,
-    # pas le nombre de lignes retenues par un signal.
+    # n_total compte les lignes avec cote et rapport exploitables,
+    # sans filtrer selon le signal choisi.
     assert out["n_total"] == 4
 
 
@@ -94,6 +105,12 @@ def test_signal_absent_reste_neutre():
         [_ligne(FEAT_NEUTRE, 3.0, 0)])))
     assert out["signals"]["elo_superieur"] == {
         "n": 0, "win_rate": None, "roi": None, "roi_shrunk": 0.0, "multiplier": 1.0}
+
+
+def test_roi_global_prend_le_rapport_pmu_et_non_la_cote_figee():
+    ligne = _ligne(FEAT_ELO_FORT, 8.0, 1, rapport_gagnant=5.0)
+    out = asyncio.run(compute_signal_performance(_FausseSession([ligne])))
+    assert out["signals"]["elo_superieur"]["roi"] == 4.0
 
 
 def test_roi_par_profil_identique_au_calcul_a_la_main():
@@ -111,6 +128,25 @@ def test_roi_par_profil_identique_au_calcul_a_la_main():
     assert agressif["n"] == 1          # seule la ligne à 8.0 est jouée
     assert equilibre["n"] == 3
     assert out["n_total"] == 3
+
+
+def test_roi_utilise_les_rapports_pmu_reels_et_la_cote_pre_course_pour_la_tranche():
+    ligne = _ligne(FEAT_ELO_FORT, 8.0, 1, 1,
+                   rapport_gagnant=5.0, rapport_place=2.4)
+    session = _FausseSession([ligne])
+    out = asyncio.run(compute_signal_performance_by_profile(session))
+    assert out["profils"]["conservateur"]["elo_superieur"]["roi"] == 1.4
+    assert out["profils"]["equilibre"]["elo_superieur"]["roi"] == 4.0
+    assert out["profils"]["agressif"]["elo_superieur"]["roi"] == 4.0
+
+
+def test_rapport_place_absent_ne_devient_pas_un_gain_invente():
+    features, cote, win, top3, detail, numero = _ligne(FEAT_ELO_FORT, 8.0, 1, 1)
+    detail["e_simple_place"] = []
+    out = asyncio.run(compute_signal_performance_by_profile(
+        _FausseSession([(features, cote, win, top3, detail, numero)])))
+    assert out["profils"]["conservateur"]["elo_superieur"]["n"] == 0
+    assert out["profils"]["equilibre"]["elo_superieur"]["n"] == 1
 
 
 def test_les_agregats_ne_materialisent_jamais_tout_le_resultat():
@@ -132,7 +168,7 @@ def test_edge_monitor_ne_garde_pas_les_features_brutes():
     """`compute_edge_monitor` a besoin des lignes (découpage train/test temporel)
     mais JAMAIS des features autrement qu'à travers les prédicats : il ne doit
     donc conserver que les booléens, pas les dicts de 173 clés."""
-    lignes = [_ligne(dict(FEAT_ELO_FORT), 2.0, i % 2) for i in range(600)]
+    lignes = [_ligne_edge(dict(FEAT_ELO_FORT), 2.0, i % 2) for i in range(600)]
     session = _FausseSession(lignes)
     out = asyncio.run(compute_edge_monitor(session))
 
@@ -143,6 +179,6 @@ def test_edge_monitor_ne_garde_pas_les_features_brutes():
 
 
 def test_edge_monitor_echantillon_trop_petit():
-    lignes = [_ligne(FEAT_NEUTRE, 2.0, 0) for _ in range(10)]
+    lignes = [_ligne_edge(FEAT_NEUTRE, 2.0, 0) for _ in range(10)]
     out = asyncio.run(compute_edge_monitor(_FausseSession(lignes)))
     assert out == {"n_total": 10, "insufficient": True}

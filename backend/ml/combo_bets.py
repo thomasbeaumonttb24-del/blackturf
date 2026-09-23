@@ -748,12 +748,13 @@ def enumerate_bet_candidates(
         # « gagne souvent » du prudent (DONNÉE : favori marché se place ~72% vs ~60% pick
         # modèle vs ~29% mid-cote). Sans ça le placé favori est jeté (modèle sous-cote le
         # favori → edge<0, + marge PMU → -EV). L'ancre reste PRUDENTE (bande ×1.8-4) : en
-        # modéré le rapport <4 la filtre (seul un placé d'outsider ≥×4 y entre). Proba affichée = max(modèle, marché) : le
-        # marché est PLUS JUSTE sur les favoris (mesuré).
+        # modéré le rapport <4 la filtre (seul un placé d'outsider ≥×4 y entre).
+        # La probabilité du ticket reste celle du modèle : prendre le maximum du
+        # modèle et du marché gonflerait la conviction sans calibration.
         is_anchor = p_pl_m >= 0.50
         if edge_pl <= 0 and ev <= 0 and not is_anchor:
             continue
-        p_aff = max(p_pl, p_pl_m) if is_anchor else p_pl
+        p_aff = p_pl
         key = ("Simple Placé", (i,))
         if key in seen:
             continue
@@ -763,11 +764,11 @@ def enumerate_bet_candidates(
             "proba_gain": round(p_aff, 4), "rapport_estime": round(rapport, 1),
             "ev": round(ev, 3), "edge": round(float(edge_pl), 4), "_anchor": is_anchor,
             "texte_explication": (
-                (f"N°{numeros[i]} {noms[i]} FAVORI — {p_aff*100:.0f}% d'être dans les 3 "
+                 (f"N°{numeros[i]} {noms[i]} FAVORI — {p_aff*100:.0f}% d'être dans les {sim._place_k} "
                  f"(cote {cotes[i]:.1f}, rapport ~{rapport:.1f}×) : le placé qui tombe souvent.")
                 if is_anchor else
-                (f"N°{numeros[i]} {noms[i]} placé à VALEUR — {p_aff*100:.0f}% d'être dans "
-                 f"les 3 (cote {cotes[i]:.1f}, rapport ~{rapport:.1f}×) : le modèle le place "
+                 (f"N°{numeros[i]} {noms[i]} placé à VALEUR — {p_aff*100:.0f}% d'être dans "
+                  f"les {sim._place_k} (cote {cotes[i]:.1f}, rapport ~{rapport:.1f}×) : le modèle le place "
                  f"plus haut que le marché.")
             ),
         })
@@ -778,9 +779,8 @@ def enumerate_bet_candidates(
     # PLUS susceptible de se placer PARMI ceux dont le placé paie ≥1.8× (typiquement cote ~5).
     # Backtest : 44% de réussite (vs 28%), chaque gain ≥1.8×. Sans cette ancre, ce placé est
     # jeté (sans edge/EV). Bande de rapport ×1.8-4 → cette ancre ne touche que le prudent.
-    # On ne se base PAS QUE sur la cote (user) : on classe par proba_top3 du MODÈLE → un cheval
-    # à grosse cote (jusqu'à 20) n'est ancré QUE si le modèle le « sent » vraiment (proba_top3
-    # la plus haute parmi les placés ≥1.8). + bonus VALUE : si proba_top3 > implicite marché,
+    # On ne se base PAS QUE sur la cote : on classe par probabilité réelle de placé
+    # du modèle. + bonus VALUE : si cette probabilité dépasse celle du marché,
     # le modèle voit un placé sous-coté (outsider à valeur) → on le privilégie.
     best_i, best_p = None, -1.0
     for i in range(len(cotes)):
@@ -790,15 +790,15 @@ def enumerate_bet_candidates(
         _rap = float(min(max(TRJ_PLACE / _ppm, 1.1), 50.0))
         if _rap < 1.9:                               # buffer → multiplicateur réel ≥1.8 garanti
             continue
-        _p3 = float(parts[i].get("proba_top3") or 0.0)   # proba PLACÉ du MODÈLE (analyse, pas cote)
-        _value = 1.0 + 0.5 * max(0.0, _p3 - _ppm)    # bonus si modèle > marché (placé à valeur)
-        _score = _p3 * _value
+        _pp = float(sim.p_simple_place(i))
+        _value = 1.0 + 0.5 * max(0.0, _pp - _ppm)
+        _score = _pp * _value
         if _score > best_p:
             best_p, best_i = _score, i
     if best_i is not None and ("Simple Placé", (best_i,)) not in seen:
         _ppm = max(float(sim_m.p_simple_place(best_i)), 1e-3)
         _rap = float(min(max(TRJ_PLACE / _ppm, 1.1), 50.0))
-        _pp = max(float(parts[best_i].get("proba_top3") or 0.0), float(sim.p_simple_place(best_i)))
+        _pp = float(sim.p_simple_place(best_i))
         seen.add(("Simple Placé", (best_i,)))
         cands.append({
             "niveau": "securite", "type_pari": "Simple Placé", "chevaux": [H(best_i)],
@@ -806,7 +806,7 @@ def enumerate_bet_candidates(
             "ev": round(_pp * _rap - 1.0, 3),
             "edge": round(float(_pp - _ppm), 4), "_anchor": True,
             "texte_explication": (
-                f"N°{numeros[best_i]} {noms[best_i]} placé — {_pp*100:.0f}% d'être dans les 3 "
+                f"N°{numeros[best_i]} {noms[best_i]} placé — {_pp*100:.0f}% d'être dans les {sim._place_k} "
                 f"(cote {cotes[best_i]:.1f}, rapport ~{_rap:.1f}×) : le placé le plus SÛR qui paie ≥1.8×."
             ),
         })
