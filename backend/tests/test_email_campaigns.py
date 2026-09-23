@@ -89,7 +89,7 @@ async def test_weekly_algorithm_numbers_use_latest_complete_pre_race_run(db):
     await db.commit()
     start, end = campaign.period(NOW)
     assert await campaign.weekly_algorithm_numbers(db, start, end) == {
-        "courses": 2, "gagnant_top3": 2, "premier_gagnant": 1}
+        "courses": 2, "gagnant_top3": 2, "premier_gagnant": 1, "hasard_top3": 37.5}
     cid = "16092026R1C2"
     db.add(PredictionSnapshot(snapshot_id="latest-incomplete", prediction_run_id="later-run",
         prediction_id=f"pred-{cid}", participation_id=f"part-{cid}", course_id=cid,
@@ -99,7 +99,7 @@ async def test_weekly_algorithm_numbers_use_latest_complete_pre_race_run(db):
         is_pre_course=True, origin="live", is_replayable=True))
     await db.commit()
     assert await campaign.weekly_algorithm_numbers(db, start, end) == {
-        "courses": 1, "gagnant_top3": 1, "premier_gagnant": 1}
+        "courses": 1, "gagnant_top3": 1, "premier_gagnant": 1, "hasard_top3": 37.5}
 
 
 @pytest.mark.asyncio
@@ -222,6 +222,7 @@ def test_render_escapes_and_limits_email_size():
     assert "viewport" in html and "table-layout:fixed" in html
     assert "★★★★" in html and "Niveau 4/4" in html
     assert "galop-lutte.jpg" in html and "Photo d’illustration" in html
+    assert "img/email/instagram-glyph.png" in html
     assert "https://example.com/unsub" in plain
 
 
@@ -235,8 +236,11 @@ def test_three_star_signal_and_weekly_photo():
     assert "galop-foule.jpg" in html and "sans lien avec les courses" in html
     assert "Toute la semaine" not in html
     html, plain = weekly({"debut": "14/09/2026", "fin": "20/09/2026", "top": [],
-                          "algo": {"courses": 7, "gagnant_top3": 4, "premier_gagnant": 2}})
+                          "algo": {"courses": 7, "gagnant_top3": 4, "premier_gagnant": 2,
+                                   "hasard_top3": 30.2}})
     assert "4/7" in html and "2/7" in plain
+    assert "57,1 %" in html and "28,6 %" in plain
+    assert "30,2 %" in html and "au hasard" in plain
     assert "courses évaluables" in html and "Prudent" not in html
 
 

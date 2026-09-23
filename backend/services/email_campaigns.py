@@ -89,12 +89,12 @@ async def insert_once(session, model, values):
 
 async def weekly_algorithm_numbers(session, start, end):
     """Compare the last complete live pre-race ranking with the official winner."""
-    races = (await session.execute(select(Course.course_id, Course.date_heure, Resultat.classement)
+    races = (await session.execute(select(Course.course_id, Course.date_heure, Course.nb_partants, Resultat.classement)
         .join(Resultat, Resultat.course_id == Course.course_id)
         .where(Course.date_heure >= start.astimezone(timezone.utc),
                Course.date_heure < end.astimezone(timezone.utc), Course.statut == "termine"))).all()
     eligible = {}
-    for course_id, departure, classement in races:
+    for course_id, departure, nb_partants, classement in races:
         winners = []
         for row in classement or []:
             try:
@@ -103,9 +103,9 @@ async def weekly_algorithm_numbers(session, start, end):
             except (TypeError, ValueError, KeyError, AttributeError):
                 continue
         if len(winners) == 1:
-            eligible[course_id] = (utc(departure), winners[0])
+            eligible[course_id] = (utc(departure), winners[0], nb_partants)
     if not eligible:
-        return {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0}
+        return {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0, "hasard_top3": None}
     snapshots = (await session.execute(select(
         PredictionSnapshot.course_id, PredictionSnapshot.prediction_run_id,
         PredictionSnapshot.observed_at, PredictionSnapshot.rang_predit,
@@ -123,7 +123,9 @@ async def weekly_algorithm_numbers(session, start, end):
         run["observed"] = max(run["observed"], utc(observed))
         if rank in (1, 2, 3) and not non_partant:
             run["ranks"].setdefault(rank, []).append(numero)
-    metrics = {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0}
+    metrics = {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0, "hasard_top3": None}
+    chance_total = 0.0
+    chance_count = 0
     for course_id, by_run in runs.items():
         latest = max(by_run.values(), key=lambda row: row["observed"])
         ranks = latest["ranks"]
@@ -136,6 +138,12 @@ async def weekly_algorithm_numbers(session, start, end):
         metrics["courses"] += 1
         metrics["gagnant_top3"] += int(winner in predicted)
         metrics["premier_gagnant"] += int(winner == predicted[0])
+        field_size = eligible[course_id][2]
+        if isinstance(field_size, int) and field_size >= 3:
+            chance_total += 3 / field_size
+            chance_count += 1
+    if chance_count == metrics["courses"] and chance_count:
+        metrics["hasard_top3"] = round(chance_total / chance_count * 100, 1)
     return metrics
 
 

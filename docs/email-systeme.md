@@ -26,6 +26,10 @@ Le top et le bilan proviennent de la même règle que les visuels publics : dern
 
 Les modèles vivent dans `backend/services/email_templates.py`. Ils utilisent le logo public, un seul axe de lecture, des cartes et des styles intégrés compatibles avec les clients mail courants, plus une version texte. Le lien Instagram est présent dans les deux lettres. Générer des aperçus **fictifs**, sans base ni envoi :
 
+Le bilan IA affiche les pourcentages à une décimale et les comptes bruts entre parenthèses. L'icône Instagram est servie depuis `frontend/public/img/email/instagram-glyph.png` ; sa [source est le glyphe Meta publié sur Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Instagram_Glyph_Gradient_RGB_logo.svg). L'image et le texte voisin renvoient au compte `@blackturf.fr`.
+
+Comme la publication Instagram du dimanche, la lettre situe le taux Top 3 face au repère d'un choix aléatoire de trois chevaux, pondéré course par course par le nombre de partants. Le mail utilise sa propre période **lundi–dimanche**, tandis que la mosaïque Instagram du dimanche couvre **dimanche–samedi** : leurs chiffres peuvent donc différer sans contradiction. Le repère n'est affiché que si la taille du champ est connue pour chaque course évaluable.
+
 ```bash
 python backend/scripts/preview_emails.py
 ```
