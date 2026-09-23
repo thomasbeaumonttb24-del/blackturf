@@ -157,6 +157,10 @@ class PariRec:
     # du profil : le multiplicateur visé n'est pas tenu et l'interface doit le dire
     # ticket par ticket, pas seulement dans une note de bas de plan.
     hors_tranche: bool = False
+    # Traçabilité horse_context : contributions/objections par cheval du ticket +
+    # chevaux écartés à profil supérieur. None si horse_contexts n'a pas été fourni
+    # à generer_plan (comportement inchangé pour tout appelant qui ne le passe pas).
+    contexte_traceabilite: Optional[dict] = None
 
 
 @dataclass
@@ -843,6 +847,10 @@ def generer_plan(
     # Zone de marché — banc de mesure uniquement, aucun appelant produit ne la passe
     # (cf. le commentaire de la calibration plus bas).
     zone: Optional[str] = None,
+    # horse_context par numéro {numero: dict} — cf. ml.horse_context. Additif et
+    # optionnel : absent (None) => comportement strictement identique à avant ce
+    # correctif (aucun `contexte_traceabilite` sur les candidats).
+    horse_contexts: Optional[dict] = None,
 ) -> MisePlan:
     """Plan de mise INTELLIGENT & ADAPTATIF — relie analyse, apprentissage, résultats.
 
@@ -907,6 +915,13 @@ def generer_plan(
             # décision : sert à ce que le plan et la page « Value bets » se citent
             # au lieu de parler des mêmes chevaux sans se connaître.
             "value_bet": p.get("value_bet"),
+            # Contexte traçable (forme/terrain/jockey/ferrure/cote/presse) pour ce
+            # cheval sur CETTE course. Clé additive : ignorée par tout code qui ne
+            # la lit pas explicitement (H() dans combo_bets.py ne reprend que
+            # numero/nom/cote). N'influence PAS combo_bets.enumerate_bet_candidates
+            # (non modifié) ; sert uniquement à l'annotation de traçabilité
+            # ci-dessous, sur les candidats déjà générés.
+            "horse_context": (horse_contexts or {}).get(int(p["numero"])) if p.get("numero") is not None else None,
         })
         lo, hi = p.get("proba_top1_low"), p.get("proba_top1_high")
         if lo is not None and hi is not None:
@@ -931,6 +946,12 @@ def generer_plan(
     cands = enumerate_bet_candidates(preds, course_info)
     if not cands:
         return _plan_vide(montant, profil)
+    # Traçabilité horse_context : purement additive (clé `contexte_traceabilite`
+    # par candidat), n'écrit aucune des clés lues par le sélecteur de conviction ou
+    # par les filtres/gates plus bas → n'affecte ni le gating ni la sélection finale.
+    if horse_contexts:
+        from ml.horse_context import annotate_candidates_with_traceability
+        annotate_candidates_with_traceability(cands, horse_contexts, preds)
     # Le point d'appui des combinaisons (cf. _filtrer_ancrage et le bloc « ANCRAGE
     # SUR LE RANG 1 ») : le rang 1 du classement. `_ancre_top2` (les deux premiers)
     # reste calculé pour le banc de mesure et l'ancien mode.
@@ -3366,6 +3387,7 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             raisons=_raisons_pari(c, profil, facteurs_chevaux, montant=_montant_joue),
             rapport_estime=round(float(c.get("rapport_estime") or 0.0), 2),
             hors_tranche=bool(c.get("_hors_bande")),
+            contexte_traceabilite=c.get("contexte_traceabilite"),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
         ev_pondere += mise * c["ev"]            # espérance de profit net (€)
@@ -3657,6 +3679,7 @@ def plan_to_dict(plan: MisePlan) -> dict:
                         "raisons": p.raisons,
                         "rapport_estime": p.rapport_estime,
                         "hors_tranche": p.hors_tranche,
+                        "contexte_traceabilite": p.contexte_traceabilite,
                     }
                     for p in n.paris
                 ],
