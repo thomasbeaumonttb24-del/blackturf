@@ -947,8 +947,8 @@ def generer_plan(
     if not cands:
         return _plan_vide(montant, profil)
     # Traçabilité horse_context : purement additive (clé `contexte_traceabilite`
-    # par candidat), n'écrit aucune des clés lues par `_select_conviction` ou par
-    # les filtres/gates plus bas → n'affecte ni le gating ni la sélection finale.
+    # par candidat), n'écrit aucune des clés lues par le sélecteur de conviction ou
+    # par les filtres/gates plus bas → n'affecte ni le gating ni la sélection finale.
     if horse_contexts:
         from ml.horse_context import annotate_candidates_with_traceability
         annotate_candidates_with_traceability(cands, horse_contexts, preds)
