@@ -105,7 +105,11 @@ async def weekly_algorithm_numbers(session, start, end):
         if len(winners) == 1:
             eligible[course_id] = (utc(departure), winners[0], nb_partants)
     if not eligible:
-        return {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0, "hasard_top3": None}
+        return {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0, "hasard_top3": None, "hasard_courses": 0}
+    field_counts = dict((await session.execute(
+        select(Participation.course_id, func.count(Participation.participation_id))
+        .where(Participation.course_id.in_(eligible), Participation.non_partant == False)
+        .group_by(Participation.course_id))).all())
     snapshots = (await session.execute(select(
         PredictionSnapshot.course_id, PredictionSnapshot.prediction_run_id,
         PredictionSnapshot.observed_at, PredictionSnapshot.rang_predit,
@@ -123,7 +127,7 @@ async def weekly_algorithm_numbers(session, start, end):
         run["observed"] = max(run["observed"], utc(observed))
         if rank in (1, 2, 3) and not non_partant:
             run["ranks"].setdefault(rank, []).append(numero)
-    metrics = {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0, "hasard_top3": None}
+    metrics = {"courses": 0, "gagnant_top3": 0, "premier_gagnant": 0, "hasard_top3": None, "hasard_courses": 0}
     chance_total = 0.0
     chance_count = 0
     for course_id, by_run in runs.items():
@@ -139,11 +143,14 @@ async def weekly_algorithm_numbers(session, start, end):
         metrics["gagnant_top3"] += int(winner in predicted)
         metrics["premier_gagnant"] += int(winner == predicted[0])
         field_size = eligible[course_id][2]
+        if not isinstance(field_size, int) or field_size < 3:
+            field_size = field_counts.get(course_id)
         if isinstance(field_size, int) and field_size >= 3:
             chance_total += 3 / field_size
             chance_count += 1
-    if chance_count == metrics["courses"] and chance_count:
+    if chance_count:
         metrics["hasard_top3"] = round(chance_total / chance_count * 100, 1)
+        metrics["hasard_courses"] = chance_count
     return metrics
 
 

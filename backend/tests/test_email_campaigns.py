@@ -89,7 +89,7 @@ async def test_weekly_algorithm_numbers_use_latest_complete_pre_race_run(db):
     await db.commit()
     start, end = campaign.period(NOW)
     assert await campaign.weekly_algorithm_numbers(db, start, end) == {
-        "courses": 2, "gagnant_top3": 2, "premier_gagnant": 1, "hasard_top3": 37.5}
+        "courses": 2, "gagnant_top3": 2, "premier_gagnant": 1, "hasard_top3": 37.5, "hasard_courses": 2}
     cid = "16092026R1C2"
     db.add(PredictionSnapshot(snapshot_id="latest-incomplete", prediction_run_id="later-run",
         prediction_id=f"pred-{cid}", participation_id=f"part-{cid}", course_id=cid,
@@ -99,7 +99,7 @@ async def test_weekly_algorithm_numbers_use_latest_complete_pre_race_run(db):
         is_pre_course=True, origin="live", is_replayable=True))
     await db.commit()
     assert await campaign.weekly_algorithm_numbers(db, start, end) == {
-        "courses": 1, "gagnant_top3": 1, "premier_gagnant": 1, "hasard_top3": 37.5}
+        "courses": 1, "gagnant_top3": 1, "premier_gagnant": 1, "hasard_top3": 37.5, "hasard_courses": 1}
 
 
 @pytest.mark.asyncio

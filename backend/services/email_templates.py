@@ -93,12 +93,14 @@ def weekly(data, unsubscribe=None, archive=None):
         top3_pct = f"{top3 / n * 100:.1f}".replace(".", ",")
         top1_pct = f"{top1 / n * 100:.1f}".replace(".", ",")
         chance = algo.get("hasard_top3")
-        benchmark = (f'<p style="margin:0 0 16px;padding:10px 12px;background:#f5f3eb;border-left:3px solid #b89a50;color:#515952;font-size:13px;line-height:20px">Repère : choisir 3 chevaux au hasard dans chaque course aurait trouvé le gagnant dans <strong>{e(str(chance).replace(".", ","))} %</strong> des cas en moyenne.</p>' if chance is not None else "")
+        chance_n = int(algo.get("hasard_courses") or n)
+        chance_scope = f" Sur {chance_n} courses dont le nombre de partants est connu." if chance_n != n else ""
+        benchmark = (f'<p style="margin:0 0 16px;padding:10px 12px;background:#f5f3eb;border-left:3px solid #b89a50;color:#515952;font-size:13px;line-height:20px">Repère : choisir 3 chevaux au hasard dans chaque course aurait trouvé le gagnant dans <strong>{e(str(chance).replace(".", ","))} %</strong> des cas en moyenne.{e(chance_scope)}</p>' if chance is not None else "")
         body += '<h2 style="font-size:21px;line-height:27px;margin:28px 0 12px;color:#142b23">Les chiffres de l’algorithme</h2>'
         body += card(f'<p style="margin:0 0 16px;color:#515952;font-size:13px">Sur <strong>{n} courses évaluables</strong> de cette semaine :</p><p style="margin:0 0 12px;font-size:19px;line-height:27px;color:#142b23"><strong style="color:#80612b">{top3_pct} %</strong> <span style="color:#5c665e;font-size:14px">({top3}/{n})</span><br>gagnants figuraient dans notre top 3</p><p style="margin:0 0 16px;font-size:19px;line-height:27px;color:#142b23"><strong style="color:#80612b">{top1_pct} %</strong> <span style="color:#5c665e;font-size:14px">({top1}/{n})</span><br>premiers choix de l’IA ont gagné</p>{benchmark}<p style="margin:0;color:#5c665e;font-size:12px;line-height:19px">Classement IA figé avant le départ et comparé à l’arrivée officielle. Les courses sans classement complet vérifiable sont exclues.</p>')
         text.extend(["Les chiffres de l’algorithme", f"{top3_pct} % ({top3}/{n}) : gagnants dans notre top 3", f"{top1_pct} % ({top1}/{n}) : premiers choix de l’IA gagnants", "Classements IA figés avant le départ ; courses sans classement complet exclues."])
         if chance is not None:
-            text.append(f"Repère : 3 chevaux choisis au hasard auraient trouvé le gagnant dans {str(chance).replace('.', ',')} % des cas en moyenne.")
+            text.append(f"Repère : 3 chevaux choisis au hasard auraient trouvé le gagnant dans {str(chance).replace('.', ',')} % des cas en moyenne.{chance_scope}")
     body += button("Lire et partager le bilan", archive or SITE + "/palmares")
     body += '<p style="font-size:13px;color:#515952"><strong>À retenir</strong><br>Le retour inclut la mise. Le bénéfice net est ce qu’il reste une fois toutes les mises du plan déduites. Les meilleurs résultats ne représentent pas à eux seuls la performance de la semaine.</p>'
     text.extend([archive or SITE + "/palmares", INSTAGRAM, RESPONSABLE])
