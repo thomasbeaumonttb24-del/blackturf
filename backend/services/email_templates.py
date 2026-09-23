@@ -85,11 +85,6 @@ def weekly(data, unsubscribe=None, archive=None):
         amounts = f"Mise totale : {euro(plan['mise'])} · Retour, mise incluse : {euro(plan['retour'])}"
         body += card(f'<p style="margin:0 0 10px;font-size:12px;color:#80612b;font-weight:bold;letter-spacing:1px">#{rank:02d} &nbsp;·&nbsp; PROFIL {e(plan["profil"]).upper()}</p><h2 style="margin:0 0 12px;font-size:20px;line-height:27px;color:#142b23">{e(description)}</h2><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin:0 0 14px;background:#eff5ed;border-left:3px solid #3d7658"><tr><td style="padding:12px"><div style="color:#515952;font-size:13px">Bénéfice net du plan</div><div style="font-size:32px;line-height:40px;color:#24513d;font-weight:bold">+{e(euro(plan["net"]))}</div></td></tr></table><p style="margin:0 0 16px;color:#515952;font-size:14px">Mise totale : <strong>{e(euro(plan["mise"]))}</strong><br>Retour, mise incluse : <strong>{e(euro(plan["retour"]))}</strong></p><a href="{e(url)}" style="color:#244e3d;font-weight:bold">Voir la course →</a>')
         text.extend([f"N° {rank} — {description} — {plan['profil']}", f"Bénéfice net : +{euro(plan['net'])}", amounts, url])
-    body += '<h2 style="font-size:21px;margin:28px 0 12px">Toute la semaine, pertes comprises</h2><p style="font-size:13px;color:#515952">Chaque profil est une stratégie alternative : leurs résultats ne s’additionnent pas en un portefeuille.</p>'
-    for p in data["profils"]:
-        detail = f"{p['n']} plans · Mises : {euro(p['mise'])} · Retours : {euro(p['retour'])} · Bilan net : {euro(p['net'])}"
-        body += card(f'<strong>{e(p["label"])}</strong><p style="margin:8px 0 0;font-size:14px">{p["n"]} plans<br>Mises : {e(euro(p["mise"]))}<br>Retours : {e(euro(p["retour"]))}<br><strong>Bilan net : {e(euro(p["net"]))}</strong></p>')
-        text.extend([p["label"], detail])
     body += button("Lire et partager le bilan", archive or SITE + "/palmares")
     body += '<p style="font-size:13px;color:#515952"><strong>À retenir</strong><br>Le retour inclut la mise. Le bénéfice net est ce qu’il reste une fois toutes les mises du plan déduites. Les meilleurs résultats ne représentent pas à eux seuls la performance de la semaine.</p>'
     text.extend([archive or SITE + "/palmares", INSTAGRAM, RESPONSABLE])

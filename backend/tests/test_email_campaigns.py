@@ -176,6 +176,7 @@ def test_three_star_signal_and_weekly_photo():
     assert "Niveau 3/4" in plain
     html, _ = weekly({"debut": "14/09/2026", "fin": "20/09/2026", "top": [], "profils": []})
     assert "galop-foule.jpg" in html and "sans lien avec les courses" in html
+    assert "Toute la semaine" not in html
 
 
 @pytest.mark.parametrize("date", [datetime(2026, 3, 30, 7, tzinfo=timezone.utc), datetime(2026, 10, 26, 8, tzinfo=timezone.utc)])
@@ -195,7 +196,7 @@ async def test_public_archive_and_one_click(client, db):
     from services.alerts import make_unsubscribe_token
     response = await client.get("/api/v1/newsletter/bilans/2026-09-14")
     assert response.status_code == 200
-    assert "pertes comprises" in response.text and "token=" not in response.text
+    assert "pertes comprises" not in response.text and "token=" not in response.text
     response = await client.post("/api/v1/newsletter/desabonnement-compte", params={"jeton": make_unsubscribe_token(user.user_id)}, content="List-Unsubscribe=One-Click")
     assert response.status_code == 200
     await db.refresh(user)
