@@ -41,6 +41,15 @@ function aujourdHui(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function memoriser(courseId: string) {
+  try {
+    localStorage.setItem(clefStockage(courseId), String(Date.now()));
+    localStorage.setItem(CLE_JOUR, aujourdHui());
+  } catch {
+    // pas grave : au pire le popup peut réapparaître à la prochaine visite
+  }
+}
+
 /**
  * Popup de capture e-mail sur la fiche course, inspiré de Boturfers.fr : propose
  * d'envoyer le pronostic IA de CETTE course précise (pas la newsletter hebdo
@@ -83,6 +92,10 @@ export function PronosticEmailPopup({
     const declencher = () => {
       if (declenche.current) return;
       declenche.current = true;
+      // Verrou posé dès l'AFFICHAGE, pas seulement à la fermeture : un visiteur qui
+      // voyait le popup puis passait à une autre course sans le fermer (lien,
+      // retour arrière) le revoyait sur chaque fiche ouverte dans la journée.
+      memoriser(courseId);
       setVisible(true);
     };
 
@@ -103,17 +116,8 @@ export function PronosticEmailPopup({
     };
   }, [courseId, actif]);
 
-  function memoriser() {
-    try {
-      localStorage.setItem(clefStockage(courseId), String(Date.now()));
-      localStorage.setItem(CLE_JOUR, aujourdHui());
-    } catch {
-      // pas grave : au pire le popup peut réapparaître à la prochaine visite
-    }
-  }
-
   function fermer() {
-    memoriser();
+    memoriser(courseId);
     setVisible(false);
   }
 
@@ -123,7 +127,7 @@ export function PronosticEmailPopup({
     setEtat("envoi");
     try {
       const res = await pronosticEmailApi.envoyer(courseId, email.trim(), "fiche_course_popup");
-      memoriser();
+      memoriser(courseId);
       setMessageServeur(res.data.message || null);
       setEtat(res.data.ok ? "envoye" : "indisponible");
     } catch {

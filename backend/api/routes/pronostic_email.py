@@ -22,6 +22,7 @@ encore de pronostic calculé, on le dit — on n'enregistre rien et on n'envoie 
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -43,6 +44,15 @@ log = structlog.get_logger()
 router = APIRouter()
 
 SITE = "https://blackturf.fr"
+PARIS = ZoneInfo("Europe/Paris")
+
+
+def _debut_jour_paris(maintenant: Optional[datetime] = None) -> datetime:
+    """Minuit du jour calendaire de Paris : la journée du visiteur, pas celle d'UTC
+    (qui repartait à 2 h du matin l'été et laissait passer un second envoi).
+    Rendu en UTC pour être comparé tel quel à `envoye_at`, stocké en UTC."""
+    return (maintenant or datetime.now(timezone.utc)).astimezone(PARIS).replace(
+        hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
 # Mêmes seuils que `ClassementAlgo`/`LecturePrix` côté site
 # (frontend/src/components/courses/classement.tsx) : l'e-mail doit lire le même
@@ -345,38 +355,43 @@ async def envoyer_pronostic(
             PronosticEmailEnvoi.course_id == course_id,
         ))
     )
-    envoi = existant.scalar_one_or_none()
-    if envoi is not None:
+    envoi = existant.scalars().first()
+    if envoi is not None and envoi.envoye_at is not None:
         # Déjà envoyé pour cette adresse et cette course : pas de doublon.
         return reponse
 
-    # Un envoi par adresse et par JOUR CALENDAIRE, toutes courses confondues :
-    # sans ce verrou, rien n'empêchait de redemander le classement IA complet
-    # course après course, gratuitement, toute la journée. Le popup n'est
+    # Un envoi par adresse et par JOUR CALENDAIRE (Paris), toutes courses
+    # confondues : sans ce verrou, rien n'empêchait de redemander le classement IA
+    # complet course après course, gratuitement, toute la journée. Le popup n'est
     # censé donner qu'UN aperçu par jour (cf. verrou identique côté front,
     # `PronosticEmailPopup.tsx`) — la contrainte est répétée ici pour rester
     # vraie même si le stockage local du navigateur est vidé ou absent.
-    debut_jour = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # `.first()` et non `scalar_one_or_none()` : deux envois déjà présents le même
+    # jour (demandes simultanées, données antérieures au verrou) levaient une
+    # erreur 500 au lieu du message de quota.
     deja_aujourdhui = await db.execute(
-        select(PronosticEmailEnvoi).where(and_(
+        select(PronosticEmailEnvoi.envoi_id).where(and_(
             PronosticEmailEnvoi.email == email,
             PronosticEmailEnvoi.envoye_at.isnot(None),
-            PronosticEmailEnvoi.envoye_at >= debut_jour,
-        ))
+            PronosticEmailEnvoi.envoye_at >= _debut_jour_paris(),
+        )).limit(1)
     )
-    if deja_aujourdhui.scalar_one_or_none() is not None:
+    if deja_aujourdhui.first() is not None:
         return DemandeOut(
             ok=False,
             message="Votre envoi gratuit de la journée vous a déjà été envoyé aujourd'hui — revenez demain.",
         )
 
-    envoi = PronosticEmailEnvoi(
-        email=email,
-        course_id=course_id,
-        token_desinscription=_token(),
-        source=payload.source,
-    )
-    db.add(envoi)
+    if envoi is None:
+        envoi = PronosticEmailEnvoi(
+            email=email,
+            course_id=course_id,
+            token_desinscription=_token(),
+            source=payload.source,
+        )
+        db.add(envoi)
+    # Sinon : demande précédente pour cette course dont l'envoi avait échoué
+    # (`envoye_at` vide) — on réessaie au lieu d'annoncer un e-mail jamais parti.
 
     lien_course = f"{SITE}/courses/{course_id}"
     lien_desinscription = f"{SITE}/api/v1/pronostic-email/desinscription?jeton={envoi.token_desinscription}"
@@ -392,6 +407,12 @@ async def envoyer_pronostic(
         log.warning("pronostic_email.echec_envoi", course_id=course_id, raison=getattr(resultat, "erreur", None))
 
     await db.commit()
+    if not resultat:
+        # Ne jamais annoncer « parti » pour un e-mail qui n'est pas parti. La ligne
+        # reste sans `envoye_at` : ne compte pas dans le quota, et une nouvelle
+        # demande sur cette course réessaie l'envoi. 503 plutôt que ok=False : le
+        # popup garde alors son formulaire affiché pour permettre ce nouvel essai.
+        raise HTTPException(status_code=503, detail="L'envoi n'a pas abouti. Réessayez dans un instant.")
     return reponse
 
 
