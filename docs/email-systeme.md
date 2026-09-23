@@ -1,6 +1,6 @@
 # Mails éditoriaux BlackTurf
 
-**Envoi suspendu pour revue.** `EMAIL_EDITORIAL_ENABLED` vaut `0` par défaut en production. Les campagnes quotidiennes et hebdomadaires ne partent pas tant que cette variable n'est pas passée explicitement à `1` après validation des aperçus et des audiences. Les e-mails transactionnels déclenchés par une action du client (vérification d'adresse, réinitialisation de mot de passe, etc.) continuent de fonctionner.
+**Envoi activé le 23/09/2026 après validation de l'exploitant.** `EMAIL_EDITORIAL_ENABLED` vaut `0` par défaut dans le code ; la production le fixe explicitement à `1`. Les campagnes quotidiennes et hebdomadaires sont donc planifiées. Les e-mails transactionnels déclenchés par une action du client (vérification d'adresse, réinitialisation de mot de passe, etc.) fonctionnent indépendamment.
 
 Le compte de contrôle `thomas.beaumont.tb24@gmail.com` reçoit **un exemplaire par édition éditoriale réellement envoyée**, même s'il est en formule Free. S'il est déjà dans les destinataires normaux de l'hebdomadaire, il ne reçoit pas de doublon. La copie de contrôle n'inclut aucun lien de désabonnement d'un autre destinataire. Les e-mails de vérification d'adresse et de réinitialisation de mot de passe ne sont jamais copiés : ils contiennent des jetons personnels donnant accès aux comptes. Leur existence et leur statut doivent être contrôlés dans les journaux techniques, sans transmettre ces jetons.
 
