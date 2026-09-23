@@ -666,6 +666,113 @@ async def get_seo_arrivees(
     return result
 
 
+@router.get("/seo/verdicts")
+async def get_seo_verdicts(
+    jour: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Ce que l'algorithme avait dit, course par course, sur toute une journée.
+
+    Même raison d'être que `/stats/preuves-recentes` (le pronostic doit être
+    FIGÉ AVANT LE DÉPART : `predictions.created_at < courses.date_heure`, sinon
+    on comparerait l'arrivée à une prédiction écrite après coup) mais borné à
+    UN jour plutôt qu'aux 6 dernières courses — c'est la page `/resultats` qui
+    en a besoin, pour comparer chaque arrivée publiée à ce que le modèle avait
+    annoncé, pas seulement les toutes dernières.
+
+    Même pattern qu'`/seo/arrivees` : une seule requête groupée pour toute la
+    journée plutôt qu'un appel par course, qui aurait recréé le 503 en cascade
+    déjà corrigé là-bas (nginx plafonne l'API à 30 connexions par IP).
+    """
+    import json
+
+    cache_key = f"seo:verdicts:{jour.isoformat()}"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        log.debug("courses.seo_verdicts_cache_read_failed", error=str(e))
+
+    rows = (await db.execute(text("""
+        WITH courues AS (
+            SELECT c.course_id, c.date_heure,
+                   (SELECT (e->>'numero')::int
+                      FROM jsonb_array_elements(r.classement::jsonb) e
+                     WHERE (e->>'position') = '1' LIMIT 1) AS gagnant_numero,
+                   (SELECT e->>'nom'
+                      FROM jsonb_array_elements(r.classement::jsonb) e
+                     WHERE (e->>'position') = '1' LIMIT 1) AS gagnant_nom
+              FROM courses c
+              JOIN resultats r ON r.course_id = c.course_id
+             WHERE c.statut = 'termine'
+               AND jsonb_typeof(r.classement::jsonb) = 'array'
+               AND date(c.date_heure) = :jour
+        )
+        SELECT k.course_id,
+               k.gagnant_numero, k.gagnant_nom,
+               pg.rang_predit  AS rang_predit_gagnant,
+               p1.numero       AS favori_numero,
+               ch1.nom         AS favori_nom,
+               p1.cote_figee   AS favori_cote,
+               (SELECT (e->>'position')::int
+                  FROM resultats rr, jsonb_array_elements(rr.classement::jsonb) e
+                 WHERE rr.course_id = k.course_id
+                   AND (e->>'numero')::int = p1.numero LIMIT 1) AS favori_position
+          FROM courues k
+          -- rang que le modèle donnait au vainqueur réel
+          LEFT JOIN LATERAL (
+              SELECT pr.rang_predit
+                FROM predictions pr
+                JOIN participations pa ON pa.participation_id = pr.participation_id
+               WHERE pr.course_id = k.course_id
+                 AND pa.numero = k.gagnant_numero
+                 AND pr.created_at < k.date_heure
+               LIMIT 1
+          ) pg ON TRUE
+          -- le n°1 du modèle sur cette course
+          LEFT JOIN LATERAL (
+              SELECT pa.numero, pa.cheval_id, pr.cote_figee
+                FROM predictions pr
+                JOIN participations pa ON pa.participation_id = pr.participation_id
+               WHERE pr.course_id = k.course_id
+                 AND pr.rang_predit = 1
+                 AND pr.created_at < k.date_heure
+               LIMIT 1
+          ) p1 ON TRUE
+          LEFT JOIN chevaux ch1 ON ch1.cheval_id = p1.cheval_id
+         WHERE pg.rang_predit IS NOT NULL
+    """), {"jour": jour})).mappings().all()
+
+    verdicts = {}
+    for r in rows:
+        rang = r["rang_predit_gagnant"]
+        verdicts[r["course_id"]] = {
+            "gagnant_numero": r["gagnant_numero"],
+            "gagnant_nom": r["gagnant_nom"],
+            "rang_predit_gagnant": rang,
+            "gagnant_top1": rang == 1,
+            "gagnant_top3": rang is not None and rang <= 3,
+            "favori_numero": r["favori_numero"],
+            "favori_nom": r["favori_nom"],
+            "favori_cote": float(r["favori_cote"]) if r["favori_cote"] is not None else None,
+            "favori_position": r["favori_position"],
+        }
+
+    result = {"jour": jour.isoformat(), "verdicts": verdicts}
+
+    try:
+        redis = await get_redis()
+        ttl = 120 if jour >= jour_courses() else 21600
+        await redis.setex(cache_key, ttl, json.dumps(result, default=str))
+    except Exception as e:
+        log.debug("courses.seo_verdicts_cache_write_failed", error=str(e))
+
+    return result
+
+
 @router.get("/seo/profil-lieux")
 async def get_seo_profil_lieux(
     db: AsyncSession = Depends(get_db),
