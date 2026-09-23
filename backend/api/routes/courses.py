@@ -1840,16 +1840,25 @@ async def get_mise_plan(
     # Les features chargées servent aussi aux JUSTIFICATIFS par pari (facteurs réels).
     signal_mults: dict = {}
     facteurs_chevaux: dict = {}
+    # horse_context : contexte traçable par cheval (forme/terrain/jockey/ferrure/
+    # cote/presse), construit à partir de ce MÊME vecteur de features déjà
+    # chargé ci-dessous — aucune requête supplémentaire. Cf. audit 2026-09-23,
+    # section P0 « Les données de forme et d'équipement ne parviennent presque
+    # pas directement au choix du ticket » : avant ce correctif, seuls numéro,
+    # nom, proba_top1/3, cote et value_bet (hors décision) atteignaient
+    # `combo_bets.enumerate_bet_candidates`.
+    horse_contexts: dict = {}
     try:
         from ml.signal_performance import load_signal_performance, signal_multiplier
         from ml.narrative import explain_prediction
+        from ml.horse_context import build_horse_context
         from db.models import FeatureML as _FM
         perf = await load_signal_performance(db)
-        fq = (_s(Participation.numero, _FM.features)
+        fq = (_s(Participation.numero, _FM.features, _FM.computed_at)
               .join(_FM, _FM.participation_id == Participation.participation_id)
               .where(Participation.course_id == course_id))
         probas_by_num = {int(p["numero"]): p for p in preds}
-        for numero, feats in (await db.execute(fq)).all():
+        for numero, feats, computed_at in (await db.execute(fq)).all():
             n = int(numero)
             if perf:
                 signal_mults[n] = signal_multiplier(feats or {}, perf, profil)
@@ -1860,9 +1869,11 @@ async def get_mise_plan(
                 "positifs": exp.get("facteurs_positifs", []),
                 "negatifs": exp.get("facteurs_negatifs", []),
             }
+            horse_contexts[n] = build_horse_context(feats or {}, computed_at)
     except Exception:
         signal_mults = {}
         facteurs_chevaux = {}
+        horse_contexts = {}
 
     # respect_montant : le montant du plan — saisi par l'utilisateur ou montant de
     # référence du système — est joué EN ENTIER. On ne le rabote ni par le cap bankroll
@@ -1871,7 +1882,8 @@ async def get_mise_plan(
     try:
         plan = generer_plan(montant, profil, preds, course_info, bankroll, roi_weights, heat,
                             signal_mults, facteurs_chevaux=facteurs_chevaux, respect_montant=True,
-                            rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
+                            rapport_calib=rapport_calib, ev_band_perf=ev_band_perf,
+                            horse_contexts=horse_contexts)
         out = plan_to_dict(plan)
     except HTTPException:
         raise
