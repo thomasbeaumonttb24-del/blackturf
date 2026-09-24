@@ -144,3 +144,17 @@ def test_recalcul_et_direct_donnent_les_memes_chiffres():
         assert etat.notes[cid]["elo_score_trot"] == attendu[cid]["disc_apres"]
     assert len(snaps) == 3 and snaps[1][3] == 1500.0     # snapshot PRÉ-course
     assert {h[2] for h in hist} == {datetime(2026, 9, 1).date()}
+
+
+def test_features_inedit_amorce_sur_les_seuls_partants_notes():
+    from types import SimpleNamespace
+    from ml.features import _amorces_elo
+
+    def row(cid, t, np_=False):
+        return SimpleNamespace(_mapping={"cheval_id": cid, "elo_t": t, "elo_p": 1500.0,
+                                         "elo_o": 1500.0, "non_partant": np_})
+    partants = [row("a", 1600.0), row("b", 1500.0), row("c", 1400.0),
+                row("np", 2000.0, np_=True), row("neuf", 1500.0)]
+    notes = {("a", "trot"), ("b", "trot"), ("c", "trot"), ("np", "trot")}
+    am = _amorces_elo(partants, notes)
+    assert am == {"trot": 1500.0}          # non-partant et inédit exclus ; pas de plat

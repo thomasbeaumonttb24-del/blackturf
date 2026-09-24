@@ -1664,6 +1664,24 @@ def compute_spi_from_cotes_history(cotes_history: list[float], window_minutes: i
     return 0.0
 
 
+def _amorces_elo(partants, elo_notes: set) -> dict:
+    """Rating de départ d'un inédit, par discipline : moyenne des partants DÉJÀ
+    notés dans cette discipline (au moins AMORCE_MIN_NOTES), sinon absent.
+    Même règle que `ml.elo.amorcer_inedits`, sur les ELO pré-course du champ."""
+    from ml.elo import AMORCE_MIN_NOTES
+    out = {}
+    for cle, col in (("plat", "elo_p"), ("trot", "elo_t"), ("obstacle", "elo_o")):
+        notes = []
+        for r in partants:
+            m = r._mapping
+            if (not m.get("non_partant") and (m["cheval_id"], cle) in elo_notes
+                    and m.get(col) is not None):
+                notes.append(float(m[col]))
+        if len(notes) >= AMORCE_MIN_NOTES:
+            out[cle] = sum(notes) / len(notes)
+    return out
+
+
 async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict:
     """
     Charge en 6 requêtes toutes les données nécessaires pour une course entière.
@@ -1809,8 +1827,8 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     # `ROW_NUMBER()` numérote les courses de CHAQUE cheval : le plafond s'applique
     # par cheval, et le coût reste borné (12 × nb de partants).
     elo_r = await session.execute(text("""
-        SELECT cheval_id, delta_elo, date_course FROM (
-            SELECT cheval_id, delta_elo, date_course,
+        SELECT cheval_id, delta_elo, date_course, discipline FROM (
+            SELECT cheval_id, delta_elo, date_course, discipline,
                    ROW_NUMBER() OVER (PARTITION BY cheval_id
                                       ORDER BY date_course DESC) AS rang
             FROM elo_historique
@@ -1821,8 +1839,12 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         ORDER BY cheval_id, date_course DESC
     """), {"cids": cheval_ids, "cid": course_id, "n": ELO_DELTAS_PAR_CHEVAL})
     elo_by_cheval: dict = {}
+    # (cheval, colonne ELO) déjà notés avant cette course : un cheval absent est un
+    # INÉDIT dans la discipline, dont le 1500 n'est qu'une valeur par défaut.
+    elo_notes: set = set()
     for row in elo_r.fetchall():
         elo_by_cheval.setdefault(row[0], []).append(row[1])
+        elo_notes.add((row[0], _cle_discipline(row[3])))
 
     # 4. Cotes historique (last 45 min, pour mouvement)
     cotes_hist_r = await session.execute(text("""
@@ -1890,9 +1912,18 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     }
 
     # 8. ELO stats de la course (moyenne, max, min)
+    # POINT-IN-TIME, comme l'ELO du cheval lui-même (`elo_avant_*`, figé avant le
+    # départ). Lire `chevaux.elo_score_*` donnait, pour une course PASSÉE recalculée
+    # (retrain, recompute_features_prerace), la moyenne et le max du champ AUJOURD'HUI :
+    # des ratings qui contiennent le résultat de cette course et des suivantes.
+    # Pour une course à venir, elo_avant est NULL → rating courant, inchangé.
     elo_course_r = await session.execute(text("""
-        SELECT AVG(ch.elo_score_global), MAX(ch.elo_score_global), MIN(ch.elo_score_global),
-               AVG(ch.elo_score_plat), AVG(ch.elo_score_trot), AVG(ch.elo_score_obstacle)
+        SELECT AVG(COALESCE(p.elo_avant_global, ch.elo_score_global)),
+               MAX(COALESCE(p.elo_avant_global, ch.elo_score_global)),
+               MIN(COALESCE(p.elo_avant_global, ch.elo_score_global)),
+               AVG(COALESCE(p.elo_avant_plat, ch.elo_score_plat)),
+               AVG(COALESCE(p.elo_avant_trot, ch.elo_score_trot)),
+               AVG(COALESCE(p.elo_avant_obstacle, ch.elo_score_obstacle))
         FROM participations p
         JOIN chevaux ch ON p.cheval_id = ch.cheval_id
         WHERE p.course_id = :cid AND p.non_partant = false
@@ -2276,6 +2307,8 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
         "hist_by_cheval": hist_by_cheval,
         "confrontations": compute_confrontation_features(hist_by_cheval, cheval_ids),
         "elo_by_cheval": elo_by_cheval,
+        "elo_amorce": _amorces_elo(partants_raw, elo_notes),
+        "elo_notes": elo_notes,
         "cotes_hist_by_pid": cotes_hist_by_pid,
         "cotes_7j_by_pid": cotes_7j_by_pid,
         "meteo_row": meteo_row,
@@ -2488,6 +2521,14 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         elo_score = float(elo_obstacle or ELO_INITIAL)
     else:
         elo_score = float(elo_plat or ELO_INITIAL)
+
+    # Inédit dans la discipline : même amorçage que la mise à jour ELO (ml/elo
+    # `amorcer_inedits`) — la moyenne des partants déjà notés, pas un 1500 fictif
+    # qui le classait au niveau d'un cheval moyen quel que soit le lot.
+    _amorce = (batch.get("elo_amorce") or {}).get(_cle_discipline(discipline))
+    if (_amorce is not None and elo_score == ELO_INITIAL
+            and (cheval_id, _cle_discipline(discipline)) not in batch.get("elo_notes", set())):
+        elo_score = float(_amorce)
 
     delta_elos = batch["elo_by_cheval"].get(cheval_id, [])
     delta_elo_5 = float(np.mean(delta_elos[:5])) if delta_elos else 0.0
