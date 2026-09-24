@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare, Wallet, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -13,6 +13,7 @@ import { peutDemarrerEssai } from "@/lib/auth";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { chatApi, notificationsApi } from "@/lib/api";
 import { planLabel, cn } from "@/lib/utils";
+import { RUBRIQUES, type Rubrique } from "@/lib/navigation";
 
 /**
  * `prive` → `rel="nofollow"`, même raison qu'au pied de page : ces destinations sont
@@ -21,26 +22,27 @@ import { planLabel, cn } from "@/lib/utils";
  * marque, revient à insister auprès de Google sur des adresses qu'il n'a pas le droit de
  * lire — c'est ainsi qu'une URL finit « indexée malgré le blocage », sans contenu.
  */
-type NavLink = { href: string; label: string; description: string; icon?: LucideIcon; prive?: boolean };
+type NavLink = Rubrique & { icon?: LucideIcon; prive?: boolean };
 
+const R = RUBRIQUES;
 const NAV_LINKS_PUBLIC: NavLink[] = [
-  { href: "/programme", label: "Courses du jour", description: "Réunions, horaires et partants" },
-  { href: "/quinte-du-jour", label: "Quinté+", description: "La course du jour en détail" },
-  { href: "/resultats", label: "Résultats", description: "Arrivées et rapports officiels" },
-  { href: "/value-bets", label: "Paris repérés", description: "Sélections selon les cotes", prive: true },
-  { href: "/track-record", label: "Nos performances", description: "Bilan de nos pronostics" },
-  { href: "/tarifs", label: "Offres", description: "Comparer les abonnements" },
+  R.coursesDuJour,
+  R.quinte,
+  R.resultats,
+  { ...R.parisDeValeur, prive: true },
+  R.performances,
+  R.tarifs,
 ];
 
 // Jamais rendu pour un visiteur anonyme — donc jamais vu par un robot — mais marqué de
 // la même façon pour que les deux listes ne divergent pas.
 const NAV_LINKS_AUTH: NavLink[] = [
-  { href: "/dashboard", label: "Mon espace", description: "Votre tableau de bord", icon: LayoutDashboard, prive: true },
-  { href: "/programme", label: "Courses du jour", description: "Réunions, horaires et partants" },
-  { href: "/quinte-du-jour", label: "Quinté+", description: "La course du jour en détail" },
-  { href: "/resultats", label: "Résultats", description: "Arrivées et rapports officiels" },
-  { href: "/value-bets", label: "Paris repérés", description: "Sélections selon les cotes", prive: true },
-  { href: "/track-record", label: "Nos performances", description: "Bilan de nos pronostics" },
+  { ...R.monEspace, icon: LayoutDashboard, prive: true },
+  R.coursesDuJour,
+  R.quinte,
+  R.resultats,
+  { ...R.parisDeValeur, prive: true },
+  R.performances,
 ];
 
 // ── Search palette ──────────────────────────────────────────────────────────
@@ -229,8 +231,12 @@ export function Navbar() {
                       : "text-gray-600 hover:bg-[#f5f6f2] hover:text-[#17231f]"
                   )}
                 >
-                  {Icon && <Icon className="h-3.5 w-3.5" />}
-                  {link.label}
+                  {Icon && <Icon className="hidden xl:block h-3.5 w-3.5" />}
+                  {/* Entre 1 024 et 1 280 px, les noms complets se chevauchaient : la
+                      forme courte (celle de la barre du bas sur téléphone) prend le
+                      relais, le nom complet revient dès qu'il y a la place. */}
+                  <span className="xl:hidden">{link.court}</span>
+                  <span className="hidden xl:inline">{link.label}</span>
                 </Link>
               );
             })}
@@ -347,20 +353,20 @@ export function Navbar() {
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <User className="h-4 w-4 text-gray-600" /> Mon profil
+                          <User className="h-4 w-4 text-gray-600" /> {R.profil.label}
                         </Link>
                         <Link
                           href="/statistiques"
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <BarChart2 className="h-4 w-4 text-blue-400" /> Mes statistiques
+                          <BarChart2 className="h-4 w-4 text-blue-400" /> {R.statistiques.label}
                         </Link>
                         <Link href="/bankroll" rel="nofollow" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
-                          <Gauge className="h-4 w-4 text-gray-600" /> Suivi du capital
+                          <Wallet className="h-4 w-4 text-gray-600" /> {R.suiviCapital.label}
                         </Link>
                         <Link href="/assistant" rel="nofollow" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
-                          <MessagesSquare className="h-4 w-4 text-gray-600" /> Poser une question
+                          <Bot className="h-4 w-4 text-gray-600" /> {R.assistant.label}
                         </Link>
                         <Link
                           href="/chat"
@@ -368,7 +374,7 @@ export function Navbar() {
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <MessagesSquare className="h-4 w-4 text-brand-gold-dark" /> Communauté
+                          <MessagesSquare className="h-4 w-4 text-brand-gold-dark" /> {R.communaute.label}
                           {nbChat > 0 && (
                             <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold text-white">
                               {nbChat > 9 ? "9+" : nbChat}
@@ -380,7 +386,7 @@ export function Navbar() {
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <Bell className="h-4 w-4 text-gray-600" /> Notifications
+                          <Bell className="h-4 w-4 text-gray-600" /> {R.notifications.label}
                           {nbNonLues > 0 && (
                             <span className="ml-auto h-4 w-4 rounded-full bg-amber-500 text-[9px] font-bold text-brand-dark flex items-center justify-center">
                               {nbNonLues > 9 ? "9+" : nbNonLues}
@@ -504,8 +510,8 @@ export function Navbar() {
           {user && (
             <div className="mt-3 border-t border-gray-100 pt-3">
               <p className="px-4 pb-2 text-[10px] font-bold uppercase tracking-[.14em] text-gray-500">Mes outils</p>
-              <Link href="/bankroll" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>Suivi du capital</Link>
-              <Link href="/assistant" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>Poser une question</Link>
+              <Link href="/bankroll" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.suiviCapital.label}</Link>
+              <Link href="/assistant" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.assistant.label}</Link>
             </div>
           )}
           {peutDemarrerEssai(user) && (

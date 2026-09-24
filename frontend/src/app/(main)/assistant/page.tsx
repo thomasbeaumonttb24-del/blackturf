@@ -154,7 +154,7 @@ export default function AssistantPage() {
           <Bot className="h-9 w-9 text-white" />
         </div>
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">BlackTurf IA</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Assistant IA</h1>
           <p className="text-gray-600 leading-relaxed">
             Posez vos questions en langage naturel. L&apos;IA accède aux données en temps réel :
             programme du jour, paris de valeur, prédictions, indicateurs de mouvement.
@@ -196,7 +196,7 @@ export default function AssistantPage() {
             <Bot className="h-4.5 w-4.5 text-white" />
           </div>
           <div>
-            <h1 className="font-bold text-gray-900 text-sm">BlackTurf IA</h1>
+            <h1 className="font-bold text-gray-900 text-sm">Assistant IA</h1>
             <div className="flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-xs text-gray-600">Moteur BlackTurf · Données en direct</span>

@@ -137,7 +137,7 @@ export default function Body() {
         Ces facteurs — ferrure, recul, réduc, régularité d&apos;allure, driver — comptent parmi ceux
         que le modèle de BlackTurf pondère, avec la cote du marché comme point de comparaison.{" "}
         <Link href="/disciplines/trot">Les courses de trot du jour</Link> sont analysées une par une,
-        et <Link href="/track-record">le palmarès mesuré</Link> publie ce que ces analyses ont donné à
+        et la page <Link href="/track-record">Nos performances</Link> publie ce que ces analyses ont donné à
         l&apos;arrivée, pertes comprises.
       </p>
       <p className="text-sm">

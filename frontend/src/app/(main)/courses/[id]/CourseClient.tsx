@@ -2201,19 +2201,19 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
                   Sur cette course, le profil <strong>{best.profil_label}</strong> ressort à{" "}
                   <strong className="tabular-nums text-emerald-700">+{eur(best.bilan.net)}</strong>{" "}
                   pour {data.montant}€ misés. Une course ne fait pas un rendement — le détail
-                  course par course est dans le palmarès public.
+                  course par course est sur la page Nos performances.
                 </>
               ) : best ? (
                 <>
                   Sur cette course, le meilleur profil (<strong>{best.profil_label}</strong>) finit à{" "}
                   <strong className="tabular-nums text-rose-700">{eur(best.bilan.net)}</strong>{" "}
                   pour {data.montant}€ misés. On affiche les plans perdants comme les gagnants :
-                  c&apos;est le même bilan que celui du palmarès public.
+                  c&apos;est le même bilan que sur la page Nos performances.
                 </>
               ) : (
                 <>
                   Le règlement de ce plan attend encore des rapports PMU. Les bilans complets,
-                  course par course, sont dans le palmarès public.
+                  course par course, sont sur la page Nos performances.
                 </>
               )}
             </p>
@@ -2230,7 +2230,7 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
                 href="/track-record"
                 className="text-[12.5px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-700"
               >
-                Voir le palmarès complet
+                Voir nos performances
               </Link>
             </div>
           </div>
@@ -2811,7 +2811,7 @@ export default function CoursePage({
       <div className="cx-wrap" style={{ maxWidth: 1120, margin: "0 auto", padding: "22px 20px 90px" }}>
       {/* Back */}
       <Link href="/programme" className="inline-flex items-center gap-2 text-sm font-medium mb-4 transition-colors hover:opacity-70" style={{ color: CX.gray500, textDecoration: "none" }}>
-        <ArrowLeft className="h-4 w-4" /> Programme
+        <ArrowLeft className="h-4 w-4" /> Courses du jour
       </Link>
 
       {/* ── EN-TÊTE DE COURSE ────────────────────────────────────────────────

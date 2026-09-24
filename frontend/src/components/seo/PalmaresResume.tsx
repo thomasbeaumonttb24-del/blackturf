@@ -30,7 +30,7 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
     <section className="mx-auto max-w-4xl px-4 pb-16 sm:px-6">
       <div className="rounded-2xl border border-gray-200 bg-white p-5 sm:p-7">
         <h2 className="font-display text-xl font-bold tracking-tight text-brand-dark sm:text-2xl">
-          Ce que mesure ce palmarès
+          Ce que mesure cette page
         </h2>
 
         <p className="mt-3 text-sm leading-relaxed text-brand-charcoal">
@@ -132,11 +132,11 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
 
         <nav className="mt-5 flex flex-wrap gap-2 text-[12.5px]">
           {[
-            { href: "/programme", txt: "Programme PMU du jour" },
-            { href: "/resultats", txt: "Arrivées et rapports du jour" },
-            { href: "/pronostics-ia", txt: "Comment fonctionne l'IA" },
+            { href: "/programme", txt: "Courses du jour" },
+            { href: "/resultats", txt: "Résultats" },
+            { href: "/pronostics-ia", txt: "Comment marche l’IA" },
             { href: "/guides/pari-de-valeur", txt: "Ce qu'est un pari de valeur" },
-            { href: "/tarifs", txt: "Formules et tarifs" },
+            { href: "/tarifs", txt: "Tarifs" },
           ].map((l) => (
             <Link
               key={l.href}

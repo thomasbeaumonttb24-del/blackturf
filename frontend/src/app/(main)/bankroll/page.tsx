@@ -215,9 +215,10 @@ export default function BankrollPage() {
         <div className="relative p-6 sm:p-8">
           <div className="flex flex-col lg:flex-row lg:items-center gap-6">
             <div className="flex-1">
-              <div className="flex items-center gap-2 text-amber-300 text-xs font-semibold uppercase tracking-wider">
-                <Wallet className="w-4 h-4" /> Suivi du capital
-              </div>
+              {/* Seul titre de la page : c'est le `h1`, sous le nom que portent les menus. */}
+              <h1 className="flex items-center gap-2 text-amber-300 text-xs font-semibold uppercase tracking-wider">
+                <Wallet className="w-4 h-4" aria-hidden="true" /> Suivi du capital
+              </h1>
               <div className="mt-2 flex items-end gap-3 flex-wrap">
                 <span className="text-4xl sm:text-5xl font-black tabular-nums leading-none">
                   {formatEuro(analytics?.currentBalance ?? (stats?.bankroll_initiale ?? 0))}

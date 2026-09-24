@@ -177,8 +177,8 @@ export default function Body() {
       </p>
       <p>
         Le même principe s&apos;applique à tout ce que nous publions : les analyses du{" "}
-        <Link href="/programme">programme du jour</Link> sont notées aux rapports réels, et le{" "}
-        <Link href="/track-record">palmarès</Link> en porte le détail, pertes comprises.
+        <Link href="/programme">programme du jour</Link> sont notées aux rapports réels, et la page{" "}
+        <Link href="/track-record">Nos performances</Link> en porte le détail, pertes comprises.
       </p>
     </>
   );

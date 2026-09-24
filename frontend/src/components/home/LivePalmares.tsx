@@ -291,7 +291,7 @@ export function LivePalmares() {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <Link href="/track-record" className="text-xs font-semibold text-gray-600 hover:text-gray-900 underline underline-offset-2">
-                  Palmarès complet
+                  Voir nos performances
                 </Link>
                 <Link
                   href="/inscription"

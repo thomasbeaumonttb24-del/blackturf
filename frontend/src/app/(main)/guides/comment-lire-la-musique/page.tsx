@@ -122,7 +122,7 @@ export default function GuideMusique() {
           </p>
         </Section>
 
-        <Callout href="/programme" cta="Voir le programme">
+        <Callout href="/programme" cta="Voir les courses du jour">
           Voir la musique décodée et colorée de chaque partant sur le programme du jour.
         </Callout>
       </Container>

@@ -928,7 +928,7 @@ export default function ProgrammeClient({
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.16em] text-amber-700">
                 <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                Programme du jour
+                Programme PMU
               </div>
               {!isToday && (
                 <button
@@ -953,6 +953,10 @@ export default function ProgrammeClient({
               </a>
             )}
 
+            {/* « Courses du jour » : le nom de la rubrique dans toutes les barres de
+                navigation (`@/lib/navigation`). « Programme PMU », le terme que tapent
+                les internautes, reste dans le `<title>` et le sur-titre juste au-dessus.
+                Un autre jour que celui-ci devient « Courses du mardi 23 septembre ». */}
             {/* Le titre de la page ne disait que la date — « Mercredi 26 août 2026 » —
                 sans nommer ce qu'on y trouve. Le `<title>` annonçait bien « Programme
                 PMU », mais le `h1`, qui est le titre du CONTENU, ne le reprenait nulle
@@ -960,8 +964,8 @@ export default function ProgrammeClient({
                 cherche le sujet de la page. Le dégradé porte désormais l'intitulé, la
                 date reste en gris à sa suite. */}
             <h1 className="text-[27px] sm:text-[38px] font-bold leading-[1.08] sm:leading-[1.04] tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
-              <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>Programme PMU</span>
-              <span className="text-gray-800"> — {dayName.toLowerCase()} {restDate}</span>
+              <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>{isToday ? "Courses du jour" : "Courses"}</span>
+              <span className="text-gray-800">{isToday ? " — " : " du "}{dayName.toLowerCase()} {restDate}</span>
             </h1>
 
             {programme && programme.nb_courses > 0 && (
@@ -1092,7 +1096,7 @@ export default function ProgrammeClient({
              « aucune course » quand c'est l'API qui n'a pas répondu. */
           <div className="flex flex-col items-center justify-center gap-3 py-24">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50"><Radio className="h-7 w-7 text-amber-600" /></div>
-            <p className="font-semibold text-gray-700">Programme momentanément indisponible</p>
+            <p className="font-semibold text-gray-700">Courses momentanément indisponibles</p>
             <p className="text-sm text-gray-600">La connexion au service a échoué. Nouvelle tentative automatique dans une minute.</p>
             <button onClick={() => window.location.reload()} className="mt-1 text-sm font-medium text-amber-700 hover:underline">Réessayer maintenant</button>
           </div>

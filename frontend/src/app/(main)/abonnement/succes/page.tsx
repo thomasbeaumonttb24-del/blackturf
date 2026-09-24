@@ -92,7 +92,7 @@ function AbonnementSuccesContent() {
                 size="lg"
               >
                 <Link href="/programme">
-                  Voir le programme <ArrowRight className="h-4 w-4" />
+                  Voir les courses du jour <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
               {plan === "expert" && (
@@ -103,7 +103,7 @@ function AbonnementSuccesContent() {
                 </Button>
               )}
               <Button variant="outline" size="lg" asChild>
-                <Link href="/value-bets">Paris de valeur en direct</Link>
+                <Link href="/value-bets">Paris de valeur</Link>
               </Button>
             </div>
 

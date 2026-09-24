@@ -103,7 +103,7 @@ export default function GuideValeur() {
           </p>
         </Section>
 
-        <Callout href="/programme" cta="Voir le programme">
+        <Callout href="/programme" cta="Voir les courses du jour">
           Voir les paris de valeur détectés aujourd&apos;hui, course par course.
         </Callout>
       </Container>

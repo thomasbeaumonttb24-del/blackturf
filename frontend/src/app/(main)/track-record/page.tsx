@@ -639,7 +639,7 @@ function HeroPalmares({ courses, depuis, stats }: {
       <div className="relative mx-auto w-full max-w-5xl px-5 pb-16 pt-28 text-center sm:px-6 lg:px-8">
         <p className="flex items-center justify-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-300">
           <span className="h-px w-7 bg-amber-400/70" aria-hidden="true" />
-          Palmarès public
+          Nos performances
           <span className="h-px w-7 bg-amber-400/70" aria-hidden="true" />
         </p>
 
@@ -760,7 +760,7 @@ export default function TrackRecordPage() {
     return (
       <div className="min-h-screen bg-[#FCFBF8]">
         <HeroPalmares courses={null} depuis={null} />
-        <div className="mx-auto max-w-6xl animate-pulse space-y-8 px-4 py-16 sm:px-6" aria-busy="true" aria-label="Chargement des chiffres du palmarès">
+        <div className="mx-auto max-w-6xl animate-pulse space-y-8 px-4 py-16 sm:px-6" aria-busy="true" aria-label="Chargement de nos performances">
           <div className="grid gap-4 sm:grid-cols-4"><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /><div className="h-32 rounded-2xl bg-white" /></div>
           <div className="h-80 rounded-3xl bg-white" />
         </div>
@@ -774,7 +774,7 @@ export default function TrackRecordPage() {
       <div className="flex min-h-screen items-center justify-center bg-[#FCFBF8] px-4">
         <div role="alert" className="w-full max-w-md rounded-3xl border border-border bg-white p-8 text-center shadow-sm">
           <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-800"><BarChart3 className="h-5 w-5" aria-hidden="true" /></span>
-          <h1 className="mt-4 font-display text-xl font-bold text-foreground">Palmarès temporairement indisponible</h1>
+          <h1 className="mt-4 font-display text-xl font-bold text-foreground">Nos performances sont temporairement indisponibles</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">Les données n&apos;ont pas pu être chargées. Aucun résultat en cache n&apos;est affiché.</p>
           <Button onClick={() => mutate()} variant="brand" className="mt-6 min-h-11"><RefreshCw className="h-4 w-4" /> Réessayer</Button>
         </div>
@@ -1144,7 +1144,7 @@ export default function TrackRecordPage() {
                 </li>
                 <li className="flex gap-2">
                   <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
-                  C&apos;est en revanche vérifiable course par course : chaque ligne du palmarès renvoie
+                  C&apos;est en revanche vérifiable course par course : chaque ligne de ce bilan renvoie
                   vers la course concernée et son rapport officiel.
                 </li>
               </ul>
@@ -1275,7 +1275,7 @@ export default function TrackRecordPage() {
         <section aria-label="Ce que débloque l'abonnement" className="space-y-6">
           <SectionHeading
             eyebrow="Passer à l'action"
-            title="Le palmarès est public. Les pronostics du jour ne le sont pas."
+            title="Nos performances sont publiques. Les pronostics du jour ne le sont pas."
             description="Ici, vous voyez ce qui s'est déjà joué. L'abonnement donne les pronostics des courses de tout à l'heure."
             icon={Crown}
           />
@@ -1318,7 +1318,7 @@ export default function TrackRecordPage() {
               <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-300"><Crown className="h-3.5 w-3.5" aria-hidden="true" /> BlackTurf Pro</div>
               <h2 id="cta-pro-title" className="mt-4 max-w-2xl font-display text-3xl font-bold tracking-tight sm:text-4xl">Passez des résultats aux décisions.</h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                Retrouvez les analyses complètes, les probabilités et les plans de mise qui ont produit ce palmarès.
+                Retrouvez les analyses complètes, les probabilités et les plans de mise qui ont produit ces performances.
                 7 jours d&apos;essai : carte requise, aucun prélèvement avant la fin de l&apos;essai, annulable à tout moment. Les performances passées ne garantissent pas les résultats futurs.
               </p>
               <ul className="mt-6 grid gap-2 text-sm text-slate-200 sm:grid-cols-3">

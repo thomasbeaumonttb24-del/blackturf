@@ -403,7 +403,7 @@ export default function ValueBetsPage() {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center">
         <Lock className="h-12 w-12 mx-auto mb-4 text-muted-foreground" aria-hidden="true" />
-        <h1 className="text-2xl font-bold mb-2">Paris de valeur IA</h1>
+        <h1 className="text-2xl font-bold mb-2">Paris de valeur</h1>
         <p className="text-muted-foreground mb-6">
           Créez votre compte gratuit, puis démarrez 7 jours d&apos;essai Standard pour voir
           les paris de valeur détectés en temps réel.

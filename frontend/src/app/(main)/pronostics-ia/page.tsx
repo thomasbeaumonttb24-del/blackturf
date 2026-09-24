@@ -285,9 +285,9 @@ export default async function PronosticsIaPage() {
               à votre budget et à votre profil de risque, qui décide de quoi jouer et pour combien.
             </DefCard>
             <DefCard term="Pourquoi publier les pertes ?">
-              Parce qu&apos;un palmarès qui ne montre que ses réussites ne mesure rien. Le{" "}
+              Parce qu&apos;un palmarès qui ne montre que ses réussites ne mesure rien. La page{" "}
               <Link href="/track-record" className="font-medium text-brand-gold-dark underline">
-                palmarès complet
+                Nos performances
               </Link>{" "}
               porte toutes les courses analysées, sans sélection.
             </DefCard>
@@ -302,7 +302,7 @@ export default async function PronosticsIaPage() {
           <ul className="space-y-2 text-sm text-brand-charcoal">
             <li>
               <Link href="/track-record" className="font-medium text-brand-gold-dark hover:underline">
-                Le palmarès mesuré
+                Nos performances
               </Link>{" "}
               — ce que l&apos;algorithme a produit course après course, pertes comprises.
             </li>

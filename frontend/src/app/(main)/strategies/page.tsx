@@ -197,7 +197,7 @@ export default function StrategiesPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-6 sm:mb-8">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold">Stratégies</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Mes stratégies</h1>
           <p className="text-muted-foreground text-sm mt-1">Filtres + simulation historique</p>
         </div>
         <Button variant="brand" className="flex-shrink-0" onClick={() => setShowForm(!showForm)}>
