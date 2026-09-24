@@ -53,7 +53,9 @@ def _gains_vs_total(plan_d):
 
     TOUS les tickets sont concernés, sans exception (décision produit 2026-08-20) : un
     ticket affiché dans un plan respecte la tranche du profil, quelle que soit sa mise."""
-    total = plan_d["montant_total"] or 1
+    # Course Quinté+ : le coût du module est PRIS SUR le montant (arbitrage du
+    # 2026-09-24) et la tranche porte sur le PLAN PRINCIPAL = montant − Quinté+.
+    total = (plan_d["montant_total"] - plan_d.get("montant_quinte", 0.0)) or 1
     out = []
     for niv in plan_d["niveaux"]:
         for p in niv["paris"]:
@@ -230,8 +232,9 @@ class TestTranchesRespectees:
                                          respect_montant=True))
         paris = [p for niv in plan["niveaux"] for p in niv["paris"]]
         assert paris, "plan vide inattendu"
+        base = montant - plan["montant_quinte"]   # plan principal (Quinté+ pris sur le montant)
         for p in paris:
-            assert p["gain_potentiel"] >= mult * montant * 0.95, (
+            assert p["gain_potentiel"] >= mult * base * 0.95, (
                 f"{profil}/{p['type']} gain {p['gain_potentiel']}€ "
                 f"< ×{mult} du plan ({montant}€, {len(paris)} tickets)"
             )
@@ -338,7 +341,7 @@ class TestEvBandStaking:
         plan = plan_to_dict(generer_plan(20, "equilibre", _field(10), COURSE,
                                          respect_montant=True,
                                          ev_band_perf=_all_bands(0.5)))
-        assert plan["montant_joue"] == 20
+        assert plan["montant_joue"] + plan["montant_quinte"] == 20
 
     def test_gate_bande_toxique_course_toujours_jouee(self):
         """Gate bande d'EV (audit ROI 2026-07-02) : bandes toutes toxiques (mult ≤0.80)
@@ -351,7 +354,7 @@ class TestEvBandStaking:
                                              ev_band_perf=_all_bands(0.5)))
             paris = [p for n in plan["niveaux"] for p in n["paris"]]
             assert paris, f"plan {profil} vide avec bandes toxiques"
-            assert plan["montant_joue"] == 10
+            assert plan["montant_joue"] + plan["montant_quinte"] == 10
 
     def test_raison_bande_ev_exposee(self):
         """Le facteur bande-EV est appliqué ET justifié dans les raisons du pari."""
@@ -396,7 +399,8 @@ def test_montant_saisi_est_toujours_integralement_joue(montant, profil):
         montant, profil, _field(10), COURSE, respect_montant=True,
     ))
 
-    assert plan["montant_joue"] == montant
+    # Course Quinté+ : plan principal + Quinté+ = montant saisi (arbitrage 2026-09-24).
+    assert plan["montant_joue"] + plan["montant_quinte"] == montant
     assert plan["montant_reserve"] == 0
 
 

@@ -117,12 +117,23 @@ def _place_rapport_exact(rapports_detail: Optional[dict], keys: tuple[str, ...],
 def _rapport_par_libelle(rapports_detail: Optional[dict], keys: tuple[str, ...],
                          libelle: str, numeros: set[int], *, exact: bool = True
                          ) -> Optional[float]:
-    """Lit le rapport du rang payé, sans confondre Ordre, Désordre et Bonus."""
+    """Lit le rapport du rang payé, sans confondre Ordre, Désordre et Bonus.
+
+    « ordre » est une sous-chaîne de « désordre » : le rang Ordre exige donc un
+    libellé qui contient « ordre » SANS « désordre » (ex. « e-Quinté+ Ordre » ou
+    « e-Quinté+ Ordre + e-Tirelire »).
+    """
     for key in keys:
         for entry in (rapports_detail or {}).get(key, []):
             name = str(entry.get("libelle") or "").casefold()
             wanted = libelle.casefold()
-            if not (name.endswith(wanted) if wanted == "bonus" else wanted in name):
+            if wanted == "bonus":
+                ok = name.endswith(wanted)
+            elif wanted == "ordre":
+                ok = "ordre" in name and "désordre" not in name
+            else:
+                ok = wanted in name
+            if not ok:
                 continue
             found = {int(n) for n in re.findall(r"\d+", str(entry.get("combinaison") or ""))}
             if (found == numeros if exact else found.issubset(numeros)) and found:
@@ -131,6 +142,32 @@ def _rapport_par_libelle(rapports_detail: Optional[dict], keys: tuple[str, ...],
                     return value if value > 0 else None
                 except (TypeError, ValueError, KeyError):
                     continue
+    return None
+
+
+def _rapport_bonus_4sur5(rapports_detail: Optional[dict], keys: tuple[str, ...],
+                         top5: set[int]) -> Optional[float]:
+    """Rapport Bonus 4sur5 quand le 4-uplet EXACT du ticket n'est pas dans le détail.
+
+    Règle PMU du e-Quinté+ : le Bonus 4sur5 paie tout ticket qui contient 4 des 5
+    premiers, quels qu'ils soient. Le PMU publie une entrée par 4-uplet (les cinq
+    sous-ensembles de l'arrivée, même rapport — vérifié en base sur 97 courses sur
+    98, la 98ᵉ ayant un ex æquo : 9 entrées). Un détail incomplet (collecte tronquée)
+    ne doit pas laisser en attente un ticket gagnant : on prend le rapport d'une
+    entrée « Bonus 4sur5 » qui est bien un 4-uplet de l'arrivée réelle.
+    """
+    for key in keys:
+        for entry in (rapports_detail or {}).get(key, []):
+            if "bonus 4sur5" not in str(entry.get("libelle") or "").casefold():
+                continue
+            found = {int(n) for n in re.findall(r"\d+", str(entry.get("combinaison") or ""))}
+            if len(found) == 4 and found.issubset(top5):
+                try:
+                    value = float(entry["rapport"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if value > 0:
+                    return value
     return None
 
 
@@ -178,9 +215,16 @@ def settle_pari(
     nb_partants: int,
     rapports_detail: Optional[dict] = None,
     non_partants: Optional[set[int]] = None,
+    ordre_joue: bool = True,
 ) -> dict:
     """
     Règle un pari unique.
+
+    `ordre_joue` (Quinté+ seulement) : le ticket a été joué dans l'ordre de
+    `numeros` — cas d'un ticket unitaire. Cinq sur cinq dans cet ordre exact paient
+    alors le rapport Ordre. False pour une combinaison issue d'un champ, réglée au
+    Désordre (on ne suppose pas un ordre que la formule n'a pas forcément couvert :
+    jamais de surpaiement).
 
     Retourne :
         {
@@ -389,13 +433,23 @@ def settle_pari(
                 label, combination = (("Désordre", sel) if sel.issubset(top4)
                                       else ("Bonus", sel & top3))
             elif sel.issubset(top5):
-                label, combination = "Désordre", sel
+                # Règle PMU du e-Quinté+ : Ordre = les 5 premiers dans l'ordre exact
+                # du ticket, Désordre = les 5 premiers dans un autre ordre.
+                ordre_exact = (ordre_joue and len(numeros) == 5 and all(
+                    num_by_pos.get(i + 1) == int(numeros[i]) for i in range(5)))
+                label, combination = ("Ordre" if ordre_exact else "Désordre"), sel
             elif len(sel & top5) == 4:
+                # Bonus 4sur5 : 4 chevaux QUELCONQUES du ticket parmi les 5 premiers.
                 label, combination = "Bonus 4sur5", sel & top5
             else:
+                # Bonus 3 : les 3 PREMIERS de l'arrivée (publié sur la seule
+                # combinaison du podium) — 3 chevaux sur 5 hors podium ne paient rien,
+                # c'est la condition de `gagne` plus haut.
                 label, combination = "Bonus 3", sel & top3
             val = _rapport_par_libelle(rapports_detail, keys, label, combination)
-            if label.startswith("Bonus"):
+            if val is None and label == "Bonus 4sur5":
+                val = _rapport_bonus_4sur5(rapports_detail, keys, top5)
+            if label.startswith("Bonus") or label == "Ordre":
                 note = f"Rang de gain : {label}."
         else:
             for k in keys:
@@ -415,6 +469,84 @@ def settle_pari(
         "gain_mult": float(gain_mult),
         "rapport_approximatif": approx,
         "note": note,
+    }
+
+
+def settle_module_quinte(module: Optional[dict], classement: list[dict],
+                         rapports: Optional[dict], nb_partants: int,
+                         rapports_detail: Optional[dict] = None,
+                         non_partants: Optional[set[int]] = None) -> Optional[dict]:
+    """Règle le module Quinté+ d'un plan, À PART du plan principal.
+
+    Le module est un champ de N chevaux joué en C(N, 5) combinaisons, chacune à
+    `cout_total / C(N, 5)` € (mise de base × Flexi). Chaque combinaison est réglée
+    par `settle_pari` — donc au rapport détaillé du rang exact (Désordre, Bonus
+    4sur5, Bonus 3), jamais à l'agrégat Ordre — et rapporte mise × rapport pour 1 €.
+    Plusieurs combinaisons d'un même champ peuvent gagner (un Désordre et des
+    Bonus 4sur5, par exemple) : c'est la règle du champ réduit.
+
+    Limites connues : dans un CHAMP, une combinaison arrivée dans l'ordre exact
+    est payée au Désordre (sous-estime, jamais surpaie) — seul le tendu, ticket
+    unitaire joué dans l'ordre affiché, peut toucher l'Ordre ; une combinaison
+    contenant un non-partant est remboursée (la règle PMU du cheval de complément
+    n'est pas représentée).
+
+    None si le plan n'a pas de module joué (course non Quinté+, module
+    indisponible ou non finançable).
+    """
+    if not module or not module.get("disponible"):
+        return None
+    try:
+        cout = float(module.get("cout_total") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    numeros = [int(c["numero"]) for c in (module.get("chevaux") or [])
+               if c.get("numero") is not None]
+    if cout <= 0 or len(numeros) < 5:
+        return None
+    from itertools import combinations
+    combis = list(combinations(numeros, 5))
+    mise_combi = cout / len(combis)
+    mise = gain = 0.0
+    nb_gagnantes = nb_attente = nb_rembourse = 0
+    gagnantes: list[dict] = []
+    for combi in combis:
+        res = settle_pari(module.get("type_pari") or "Quinté+ Désordre", list(combi),
+                          classement, rapports, nb_partants, rapports_detail, non_partants,
+                          # Tendu = ticket unitaire joué dans l'ordre affiché (Ordre
+                          # possible) ; champ = combinaisons réglées au Désordre.
+                          ordre_joue=len(combis) == 1)
+        if res.get("rembourse"):
+            nb_rembourse += 1          # neutre, comme dans settle_plan
+            continue
+        mise += mise_combi
+        if not res["gagne"]:
+            continue
+        if res["rapport_reel"] is None:
+            nb_attente += 1
+            continue
+        g = mise_combi * res["rapport_reel"] * res.get("gain_mult", 1.0)
+        gain += g
+        nb_gagnantes += 1
+        gagnantes.append({"combinaison": sorted(combi), "rapport_reel": res["rapport_reel"],
+                          "gain": round(g, 2), "note": res.get("note")})
+    mise, gain = round(mise, 2), round(gain, 2)
+    net = round(gain - mise, 2)
+    return {
+        "type": module.get("type_pari") or "Quinté+ Désordre",
+        "couverture": module.get("couverture"),
+        "chevaux": numeros,
+        "nb_combinaisons": len(combis),
+        "mise_par_combinaison": round(mise_combi, 4),
+        "total_mise": mise,
+        "total_gain": gain,
+        "net": net,
+        "roi": round(net / mise * 100, 1) if mise > 0 else 0.0,
+        "nb_gagnantes": nb_gagnantes,
+        "nb_en_attente": nb_attente,
+        "nb_rembourse": nb_rembourse,
+        "en_attente": nb_attente > 0,
+        "gagnantes": gagnantes,
     }
 
 
@@ -480,7 +612,30 @@ def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],
     roi = round(net / total_mise * 100, 1) if total_mise > 0 else 0.0
     nb_gagnes = sum(1 for p in paris_bilan if p["statut"] == "gagne")
 
+    # Module Quinté+ : réglé À PART. Il n'entre ni dans `paris` (que
+    # bet_plan_performance recale par index sur les tickets du plan, et dont
+    # l'apprentissage par type se nourrit) ni dans total_mise/net/roi (ROI du plan
+    # principal, inchangé) : son ROI se lit dans `module_quinte`, et l'argent
+    # réellement engagé au total dans `total_avec_quinte`. Un rapport Quinté+ en
+    # attente ne rend pas le plan principal provisoire.
+    quinte = settle_module_quinte(plan.get("module_quinte"), classement, rapports,
+                                  nb_partants, rapports_detail, non_partants)
+    extra: dict = {}
+    if quinte is not None:
+        mise_t = round(total_mise + quinte["total_mise"], 2)
+        gain_t = round(total_gain + quinte["total_gain"], 2)
+        extra = {
+            "module_quinte": quinte,
+            "total_avec_quinte": {
+                "total_mise": mise_t, "total_gain": gain_t,
+                "net": round(gain_t - mise_t, 2),
+                "roi": round((gain_t - mise_t) / mise_t * 100, 1) if mise_t > 0 else 0.0,
+                "provisoire": nb_en_attente > 0 or quinte["en_attente"],
+            },
+        }
+
     return {
+        **extra,
         "paris": paris_bilan,
         "nb_paris": len(paris_bilan),
         "nb_gagnes": nb_gagnes,

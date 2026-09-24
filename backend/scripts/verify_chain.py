@@ -118,11 +118,13 @@ async def main():
                 # AUTO, le cap `staking_safe` limite l'exposition a bankroll_cap_frac
                 # du bankroll (ici 3 % de 200 EUR = 6 EUR). L'invariant porte donc sur
                 # le montant RETENU, et le cap ne peut que reduire.
-                chk(f"{prof}/{m}E joue+reserve==montant_total",
-                    abs(plan["montant_joue"] + plan["montant_reserve"]
-                        - plan["montant_total"]) < 0.01,
-                    f'{plan["montant_joue"]}+{plan["montant_reserve"]}'
-                    f'!={plan["montant_total"]}')
+                # Sur une course Quinté+, le coût du module est PRIS SUR le montant
+                # (montant_quinte) : joue + quinte + reserve == montant_total.
+                chk(f"{prof}/{m}E joue+quinte+reserve==montant_total",
+                    abs(plan["montant_joue"] + plan.get("montant_quinte", 0.0)
+                        + plan["montant_reserve"] - plan["montant_total"]) < 0.01,
+                    f'{plan["montant_joue"]}+{plan.get("montant_quinte", 0.0)}'
+                    f'+{plan["montant_reserve"]}!={plan["montant_total"]}')
                 chk(f"{prof}/{m}E cap staking ne fait que reduire",
                     plan["montant_total"] <= m, f'{plan["montant_total"]}>{m}')
                 tot_force = sum(
