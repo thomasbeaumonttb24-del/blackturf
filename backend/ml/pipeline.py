@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, date, timezone
 from pathlib import Path
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.database import AsyncSessionLocal
@@ -1170,6 +1170,7 @@ async def run_post_course(course_id: str) -> None:
             niveau_course=course.niveau_course,
             dotation=course.allocation,
             classement=classement_with_ids,
+            date_course=course.date_heure.date() if course.date_heure else None,
         )
         log.info("pipeline.post_course.elo_updated", course_id=course_id)
 
@@ -3624,6 +3625,16 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
             continue
 
         cheval_id, jockey_id = part
+        # Œillères portées CE jour-là → `equipement_course`, que les features lisent
+        # pour la réussite « même configuration qu'aujourd'hui ». Les lignes PMU
+        # externes l'avaient déjà ; les courses internes ne l'écrivaient pas.
+        from ml.features import oeilleres_portees
+        _oeil = oeilleres_portees((await session.execute(text("""
+            SELECT e.oeilleres FROM equipements e JOIN participations p
+              ON p.participation_id = e.participation_id
+            WHERE p.course_id = :cid AND p.numero = :num LIMIT 1
+        """), {"cid": course.course_id, "num": entry.get("numero")})).scalar())
+        equipement_course = {"oeilleres": _oeil} if _oeil is not None else None
         jockey_nom = None
         if jockey_id:
             j = await session.get(Jockey, jockey_id)
@@ -3635,7 +3646,16 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
         # NULL si données absentes ou aberrantes — jamais fabriqué.
         from ml.race_dynamics import compute_reduction_km, compute_acceleration
         temps_indiv = entry.get("temps")
-        reduction_km = compute_reduction_km(temps_indiv, course.distance)
+        # La réduction kilométrique OFFICIELLE du PMU (`reductionKilometrique`) prime :
+        # c'est le chrono publié du cheval. Le recalcul depuis `tempsObtenu` n'est
+        # qu'un repli — et il rend None dès que l'unité du temps brut ne tombe pas
+        # dans les bornes plausibles, ce qui laissait des chronos connus en NULL.
+        from ml.race_dynamics import REDUCTION_KM_MIN_S, REDUCTION_KM_MAX_S
+        rk_pmu = entry.get("reduction_km")
+        if isinstance(rk_pmu, (int, float)) and REDUCTION_KM_MIN_S <= rk_pmu <= REDUCTION_KM_MAX_S:
+            reduction_km = round(float(rk_pmu), 2)
+        else:
+            reduction_km = compute_reduction_km(temps_indiv, course.distance)
         accel_idx = accel_label = None
         tp_row = await session.execute(text("""
             SELECT passage_dernier_400m FROM temps_passage
@@ -3669,6 +3689,10 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
             reduction_km=reduction_km,
             acceleration_index=accel_idx,
             acceleration_label=accel_label,
+            # Déroulé post-course (/participants) : seule source des 4 features
+            # `commentaire_*`, mortes tant qu'il n'était pas écrit ici.
+            commentaire_course=(entry.get("commentaire") or None),
+            equipement_course=equipement_course,
         ).on_conflict_do_update(
             # index unique partiel (cheval_id, course_id) WHERE course_id IS NOT NULL
             # → un seul historique par cheval & course interne (pas de doublon au re-run)
@@ -3682,6 +3706,9 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
                 "reduction_km": reduction_km,
                 "acceleration_index": accel_idx,
                 "acceleration_label": accel_label,
+                "commentaire_course": func.coalesce(
+                    entry.get("commentaire") or None,
+                    HistoriqueCourse.commentaire_course),
             },
         )
         await session.execute(stmt)

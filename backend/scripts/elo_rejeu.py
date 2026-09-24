@@ -11,10 +11,10 @@ async def main():
         await s.execute(text("UPDATE chevaux SET elo_score_global=:e, elo_score_plat=:e, elo_score_trot=:e, elo_score_obstacle=:e"), {"e": ELO_INITIAL})
         await s.execute(text("DELETE FROM elo_historique"))
         await s.commit()
-        courses = (await s.execute(text("SELECT course_id, discipline, niveau_course, allocation FROM courses WHERE statut='termine' ORDER BY date_heure"))).all()
+        courses = (await s.execute(text("SELECT course_id, discipline, niveau_course, allocation, date_heure FROM courses WHERE statut='termine' ORDER BY date_heure"))).all()
         print(f"[elo] {len(courses)} courses a rejouer", flush=True)
         n = 0
-        for cid, disc, niv, dot in courses:
+        for cid, disc, niv, dot, dh in courses:
             await s.execute(text("UPDATE participations p SET elo_avant_global=ch.elo_score_global, elo_avant_plat=ch.elo_score_plat, elo_avant_trot=ch.elo_score_trot, elo_avant_obstacle=ch.elo_score_obstacle FROM chevaux ch WHERE ch.cheval_id=p.cheval_id AND p.course_id=:cid"), {"cid": cid})
             res = (await s.execute(text("SELECT classement FROM resultats WHERE course_id=:cid"), {"cid": cid})).scalar()
             if not res:
@@ -27,11 +27,14 @@ async def main():
                 except Exception:
                     continue
                 ch = num2ch.get(num)
-                if ch and pos is not None:
-                    classement.append({"cheval_id": ch, "position": int(pos), "incident": e.get("incident")})
+                # Les disqualifiés (position nulle + incident) sont gardés : c'est
+                # `classement_elo` qui les range derrière les classés.
+                if ch and (pos is not None or e.get("incident")):
+                    classement.append({"cheval_id": ch, "position": pos, "incident": e.get("incident")})
             if classement:
                 try:
-                    await update_elo_after_race(s, cid, disc or "plat", niv, dot, classement)
+                    await update_elo_after_race(s, cid, disc or "plat", niv, dot, classement,
+                                                date_course=dh.date() if dh else None)
                 except Exception as ex:
                     print("[elo] skip", cid, str(ex)[:80], flush=True)
             n += 1

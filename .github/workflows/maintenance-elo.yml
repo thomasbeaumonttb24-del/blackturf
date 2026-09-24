@@ -1,0 +1,98 @@
+name: Maintenance ELO
+
+# Lancement MANUEL (onglet Actions → Maintenance ELO → Run workflow).
+#
+#   elo_a_blanc      recalcule tous les ELO en mémoire, mesure ancien vs nouveau
+#                    sur 180 jours, N'ÉCRIT RIEN.
+#   elo_grille       compare les variantes de l'algorithme sur l'historique réel,
+#                    N'ÉCRIT RIEN.
+#   elo_appliquer    même calcul, puis bascule en UNE transaction (ratings,
+#                    elo_historique, snapshots participations.elo_avant_*).
+#   features_12_mois recalcule features_ml des 400 derniers jours (fenêtre du
+#                    retrain), les plus récentes d'abord. Long : tourne en
+#                    arrière-plan sur le serveur, suivi avec l'action `statut`.
+#   retrain          réentraînement complet (même fonction et même verrou que celui
+#                    de 02:00 UTC ; promotion seulement si le gate le valide).
+#                    Arrière-plan, suivi avec `statut`.
+#   statut           dernières lignes des journaux de maintenance.
+#
+# Chaque action tourne dans un conteneur JETABLE du service worker
+# (`compose run --rm --no-deps`) : même image, mêmes variables, sa propre limite
+# mémoire, sans toucher au worker RQ ni au retrain de nuit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action"
+        required: true
+        type: choice
+        options: [elo_a_blanc, elo_grille, elo_appliquer, features_12_mois, retrain, statut]
+
+concurrency:
+  group: maintenance-elo
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Exécution sur le VPS
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 90m
+          script: |
+            set -e
+            cd /opt/blackturf
+            DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+            LOGS=/opt/blackturf/backups
+            mkdir -p "$LOGS"
+            ACTION="${{ inputs.action }}"
+            case "$ACTION" in
+              elo_a_blanc|elo_grille|elo_appliquer)
+                OPT=""
+                if [ "$ACTION" = elo_appliquer ]; then OPT="--appliquer"; fi
+                if [ "$ACTION" = elo_grille ]; then OPT="--grille"; fi
+                echo "=== $(date -u) $ACTION ($(git rev-parse --short HEAD))" >> "$LOGS/maintenance-elo.log"
+                RC=0
+                $DC run --rm --no-deps -T worker python -m scripts.elo_recalcul $OPT \
+                  > /tmp/maintenance-elo.out 2>&1 || RC=$?
+                grep -v '^\[elo\] [0-9]*/' /tmp/maintenance-elo.out | grep -v '^20[0-9-]* ' \
+                  | tee -a "$LOGS/maintenance-elo.log" || true
+                echo "code retour : $RC"
+                exit $RC
+                ;;
+              features_12_mois)
+                if docker ps --format '{{.Names}}' | grep -q '^bt_recompute_features$'; then
+                  echo "Recalcul déjà en cours."; exit 0
+                fi
+                $DC run -d --rm --no-deps --name bt_recompute_features worker \
+                  sh -c "python -m scripts.recompute_features_prerace --depuis-jours 400 >> /app/models/recompute-features.log 2>&1"
+                sleep 60
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_recompute_features || echo "ATTENTION : conteneur absent après 60 s"
+                $DC exec -T worker sh -c "grep recompute-prerace /app/models/recompute-features.log | tail -n 3" || true
+                ;;
+              retrain)
+                if docker ps --format '{{.Names}}' | grep -q '^bt_retrain_manuel$'; then
+                  echo "Réentraînement déjà en cours."; exit 0
+                fi
+                $DC run -d --rm --no-deps --name bt_retrain_manuel worker \
+                  sh -c "python -c 'import asyncio; from ml.pipeline import run_nightly_retraining; asyncio.run(run_nightly_retraining())' >> /app/models/retrain-manuel.log 2>&1"
+                sleep 30
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_retrain_manuel || echo "ATTENTION : conteneur absent après 30 s"
+                ;;
+              statut)
+                echo "── ELO ──"; tail -n 30 "$LOGS/maintenance-elo.log" 2>/dev/null || true
+                echo "── features ──"
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_recompute_features || echo "(aucun recalcul en cours)"
+                $DC exec -T worker sh -c "grep recompute-prerace /app/models/recompute-features.log | tail -n 5" || true
+                echo "── retrain manuel ──"
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_retrain_manuel || echo "(aucun retrain manuel en cours)"
+                $DC exec -T worker sh -c "grep -E 'retrain|promu|rejete|issue|Traceback|Error' /app/models/retrain-manuel.log | tail -n 8" 2>/dev/null || true
+                ;;
+            esac

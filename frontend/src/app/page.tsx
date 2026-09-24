@@ -325,15 +325,12 @@ export default async function HomePage() {
       <section id="fonctionnement" className="py-24 bg-white scroll-mt-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
-            <div className="text-center mb-12">
-              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
-                <Zap className="h-3.5 w-3.5" /> Comment ça marche
-              </span>
-              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
-                Le travail est déjà fait{" "}
-                <span className="text-gradient">quand vous arrivez</span>
+            <div className="text-center mb-16">
+              <p className="mb-4 text-sm text-stone-500">Comment ça marche</p>
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-medium tracking-tight text-stone-900">
+                Le travail est déjà fait quand vous arrivez
               </h2>
-              <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
+              <p className="text-stone-500 text-base mt-4 max-w-2xl mx-auto">
                 Vous n&apos;avez ni base de données à monter, ni modèle à entraîner : trois gestes suffisent.
               </p>
             </div>
@@ -349,13 +346,11 @@ export default async function HomePage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="mb-12 text-center">
-              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
-                <Shield className="h-3.5 w-3.5" /> Performances vérifiables
-              </span>
-              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
+              <p className="mb-4 text-sm text-stone-500">Performances vérifiables</p>
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-medium tracking-tight text-stone-900">
                 Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
               </h2>
-              <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
+              <p className="text-stone-500 text-base mt-4 max-w-2xl mx-auto">
                 Aucun pronostic n'est réécrit après la course. Voici la précision réelle de BlackTurf sur les
                 courses déjà réglées, mise en regard de ce que ferait un tirage au sort sur les mêmes courses.
               </p>
