@@ -2,7 +2,9 @@
    Partants, Marché, Plan de mise, Résultats). Une seule source pour le relief
    des cartes, le bandeau d'onglet et les titres : sinon chaque onglet dérive
    au premier ajustement. Aucune logique métier ici. */
-import type { CSSProperties, ReactNode } from "react";
+"use client";
+
+import { useId, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -159,5 +161,74 @@ export function LienOnglet({ children, onClick, className }: { children: ReactNo
     >
       {children}<span aria-hidden="true">›</span>
     </button>
+  );
+}
+
+/** Jauge circulaire de la chance de victoire : l'arc est la VRAIE probabilité
+ *  (25 % = un quart de tour), pas une échelle relative au favori. */
+export function Anneau({ v, rang, taille }: { v: number; rang: number | undefined; taille: number }) {
+  const id = useId();
+  const r = taille / 2 - 4;
+  const c = 2 * Math.PI * r;
+  const couleurs = rang === 1 ? ["#FCD34D", "#D97706"] : rang != null && rang <= 3 ? ["#94A3B8", "#334155"] : ["#D6D3D1", "#78716C"];
+  const txt = v < 0.005 ? "<1" : String(Math.round(v * 100));
+  return (
+    <span
+      className="relative inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-white to-stone-100 shadow-[inset_0_1px_0_#fff,0_1px_1px_rgba(17,24,39,.06),0_6px_14px_-8px_rgba(17,24,39,.35)]"
+      style={{ width: taille, height: taille }}
+      role="img"
+      aria-label={`${txt} % de chance de victoire`}
+    >
+      <svg width={taille} height={taille} className="absolute inset-0 -rotate-90" aria-hidden="true">
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={couleurs[0]} />
+            <stop offset="100%" stopColor={couleurs[1]} />
+          </linearGradient>
+        </defs>
+        <circle cx={taille / 2} cy={taille / 2} r={r} fill="none" stroke="#F1EEE6" strokeWidth="4" />
+        <circle
+          cx={taille / 2} cy={taille / 2} r={r} fill="none" stroke={`url(#${id})`} strokeWidth="4" strokeLinecap="round"
+          strokeDasharray={`${Math.max(0.02, Math.min(1, v)) * c} ${c}`}
+          className="transition-[stroke-dasharray] duration-700"
+        />
+      </svg>
+      <span className={cn("relative font-bold tabular-nums leading-none", rang === 1 ? "text-amber-700" : "text-stone-900")} style={{ ...SG, fontSize: taille >= 52 ? 14 : 13 }}>
+        {txt}<span className="text-[0.75em]">%</span>
+      </span>
+    </span>
+  );
+}
+
+
+/** Inclinaison 3D qui suit la souris (ordinateur seulement ; coupée en mouvement
+ *  réduit). Écrit des variables CSS sur l'élément survolé — aucun rendu React. */
+export function inclinerCarte(e: PointerEvent<HTMLElement>, force = 1) {
+  const el = e.currentTarget;
+  if (e.pointerType !== "mouse") return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const r = el.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  el.style.setProperty("--rx", `${((0.5 - y) * 6 * force).toFixed(2)}deg`);
+  el.style.setProperty("--ry", `${((x - 0.5) * 7 * force).toFixed(2)}deg`);
+  el.style.setProperty("--mx", `${(x * 100).toFixed(1)}%`);
+  el.style.setProperty("--my", `${(y * 100).toFixed(1)}%`);
+  el.style.setProperty("--lift", "-4px");
+}
+export function redresserCarte(e: PointerEvent<HTMLElement>) {
+  const el = e.currentTarget;
+  el.style.setProperty("--rx", "0deg");
+  el.style.setProperty("--ry", "0deg");
+  el.style.setProperty("--lift", "0px");
+}
+
+/** Classes de la carte inclinable (à combiner avec useInclinaison). */
+export const INCLINABLE_CLS =
+  "[transform:perspective(900px)_translateY(var(--lift,0px))_rotateX(var(--rx,0deg))_rotateY(var(--ry,0deg))] transition-[transform,box-shadow] duration-300 ease-out motion-reduce:transition-none";
+
+/** Reflet doré qui suit la souris, à placer dans une carte `relative group/reflet`. */
+export function Reflet() {
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover/reflet:opacity-100 [background:radial-gradient(360px_circle_at_var(--mx,50%)_var(--my,50%),rgba(251,191,36,.16),transparent_50%)]" />
   );
 }
