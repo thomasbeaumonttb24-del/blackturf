@@ -1776,6 +1776,13 @@ async def get_mise_plan(
     profil = body.get("profil_risque") or (user.profil_risque or "equilibre")
     bankroll = body.get("bankroll") or user.bankroll_initiale
 
+    # Charger la course (avant le plafond d'exposition : le coût réel du plan en
+    # dépend — sur une course Quinté+, le ticket peut s'ajouter au montant saisi).
+    course_res = await db.execute(select(Course).where(Course.course_id == course_id))
+    course = course_res.scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+
     # EXPOSITION MAXIMALE PAR JOUR (Point 12) — uniquement quand un bankroll RÉEL est
     # renseigné (même seuil ≥10€ que kelly_warn/staking_safe : le défaut 1.0 n'est pas
     # un vrai bankroll, on ne bloque jamais dessus). Le cumul se lit sur les plans
@@ -1783,14 +1790,20 @@ async def get_mise_plan(
     # utilisateur qui a déjà beaucoup joué aujourd'hui est freiné AVANT de générer un
     # nouveau plan, avec un message clair (pas un montant silencieusement raboté, qui
     # trahirait le contrat « montant saisi = tout joué »).
+    # Le ticket Quinté+ est de l'argent misé (2026-09-24) : le cumul compte celui des
+    # plans déjà émis (`daily_exposure_total`), et le plan demandé compte le sien
+    # quand il s'AJOUTE au montant saisi (sous 4 €) — pris sur le montant, il y est déjà.
     if bankroll and bankroll >= 10:
         try:
             from services.bet_plan_snapshots import daily_exposure_total, subject_hash as _subj
+            from services.mise_calculator import supplement_quinte
+            from services.bet_catalog import course_info_bets as _cib
             from api.config import get_settings as _get_settings
             _subj_hash = _subj(getattr(user, "user_id", None), _get_settings().secret_key)
             _deja_joue = await daily_exposure_total(db, _subj_hash)
             _cap = bankroll * DAILY_EXPOSURE_CAP_FRAC
-            if _deja_joue + montant > _cap:
+            _engage = montant + supplement_quinte(montant, profil, _cib(course))
+            if _deja_joue + _engage > _cap:
                 from fastapi import HTTPException as _H
                 _reste = max(0.0, round(_cap - _deja_joue, 2))
                 raise _H(
@@ -1805,12 +1818,6 @@ async def get_mise_plan(
         except Exception as e:
             log.warning("mise_plan.daily_exposure_check_skip", user_id=getattr(user, "user_id", None),
                        err=str(e)[:140])
-
-    # Charger la course
-    course_res = await db.execute(select(Course).where(Course.course_id == course_id))
-    course = course_res.scalar_one_or_none()
-    if not course:
-        raise HTTPException(status_code=404, detail="Course introuvable")
 
     # ── PRONO FIGÉ (T-10) → plan figé tel quel, UNIQUEMENT à la mise de référence 10€ ──
     # Le plan figé (profil_run_log) est journalisé à 10€ = celui qui apparaîtra dans le
@@ -2112,7 +2119,7 @@ async def enregistrer_paris(
     """
     import uuid as _uuid
     from datetime import datetime as _dt
-    from sqlalchemy import delete as _delete, and_ as _and
+    from sqlalchemy import delete as _delete, and_ as _and, or_ as _or
     from services.mise_calculator import generer_plan, plan_to_dict
     from db.models import BankrollEntry, Bankroll, Prediction as _Pred
 
@@ -2216,37 +2223,84 @@ async def enregistrer_paris(
     # Remplace un éventuel plan déjà enregistré (non réglé) DU MÊME PROFIL pour
     # cette course — on peut donc cumuler Prudent + Modéré + Risqué sur une même
     # course (avant : tout plan IA non réglé était écrasé, seul le dernier restait).
+    # Le ticket Quinté+ du même profil est remplacé avec lui.
+    from services.bet_settlement import note_ligne_module_quinte
     note_profil = f"Plan de mise IA · {profil}"
     await db.execute(_delete(BankrollEntry).where(_and(
         BankrollEntry.user_id == user.user_id,
         BankrollEntry.course_id == course_id,
         BankrollEntry.resultat.is_(None),
         BankrollEntry.suivi_reco_ia == True,
-        BankrollEntry.notes.in_([note_profil, "Plan de mise IA"]),  # legacy sans profil
+        _or(
+            BankrollEntry.notes.in_([note_profil, "Plan de mise IA"]),  # legacy sans profil
+            BankrollEntry.notes.like(note_ligne_module_quinte(profil) + "%"),
+        ),
     )))
 
     now = _dt.now()
-    nb = 0
-    for niveau in plan.get("niveaux", []):
-        for pari in niveau.get("paris", []):
-            chevaux = " + ".join(f"N°{c['numero']}" for c in pari.get("chevaux", []))
-            db.add(BankrollEntry(
-                entry_id=str(_uuid.uuid4()),
-                user_id=user.user_id,
-                bankroll_id=bankroll_id,
-                course_id=course_id,
-                date=now,
-                type_pari=pari["type"],
-                chevaux=chevaux,
-                mise=float(pari.get("mise", 0) or 0),
-                suivi_reco_ia=True,
-                resultat=None,
-                gain_perte=None,
-                notes=note_profil,
-            ))
-            nb += 1
+    lignes = lignes_capital_du_plan(plan, profil)
+    for ligne in lignes:
+        db.add(BankrollEntry(
+            entry_id=str(_uuid.uuid4()),
+            user_id=user.user_id,
+            bankroll_id=bankroll_id,
+            course_id=course_id,
+            date=now,
+            suivi_reco_ia=True,
+            resultat=None,
+            gain_perte=None,
+            **{k: v for k, v in ligne.items() if not k.startswith("_")},
+        ))
     await db.commit()
-    return {"enregistres": nb, "montant_total": plan.get("montant_joue", montant)}
+    montant_quinte = sum(l["mise"] for l in lignes if l.get("_quinte"))
+    return {
+        "enregistres": len(lignes),
+        # Argent réellement engagé : plan principal + ticket Quinté+.
+        "montant_total": round(float(plan.get("montant_joue", montant) or 0) + montant_quinte, 2),
+        "montant_quinte": montant_quinte,
+        "quinte_enregistre": montant_quinte > 0,
+    }
+
+
+def lignes_capital_du_plan(plan: dict, profil: str) -> list[dict]:
+    """Lignes `bankroll_entries` d'un plan enregistré : une par pari du plan
+    principal, plus UNE ligne pour le ticket Quinté+ quand le plan en porte un.
+
+    Le Quinté+ est de l'argent réellement misé (décision du 2026-09-24) : il entre
+    dans le capital comme n'importe quel ticket, au coût total du ticket, avec tous
+    les chevaux du champ. Il est réglé par `bankroll.settle_pending_bets` →
+    `bet_settlement.regler_ligne_quinte` (C(N, 5) combinaisons, Bonus compris), et
+    sa note le tient hors de l'apprentissage des poids par type
+    (`ml.bet_performance.compute_type_roi_weights`).
+
+    La clé `_quinte` n'est pas une colonne : elle est retirée avant l'insertion.
+    """
+    from services.bet_settlement import note_ligne_module_quinte
+    note_profil = f"Plan de mise IA · {profil}"
+    lignes: list[dict] = []
+    for niveau in plan.get("niveaux", []) or []:
+        for pari in niveau.get("paris", []) or []:
+            lignes.append({
+                "type_pari": pari["type"],
+                "chevaux": " + ".join(f"N°{c['numero']}" for c in pari.get("chevaux", [])),
+                "mise": float(pari.get("mise", 0) or 0),
+                "notes": note_profil,
+            })
+    module = plan.get("module_quinte") or {}
+    try:
+        cout = float(module.get("cout_total") or 0.0)
+    except (TypeError, ValueError):
+        cout = 0.0
+    numeros = [c["numero"] for c in (module.get("chevaux") or []) if c.get("numero") is not None]
+    if module.get("disponible") and cout > 0 and len(numeros) >= 5:
+        lignes.append({
+            "type_pari": module.get("type_pari") or "Quinté+ Désordre",
+            "chevaux": " + ".join(f"N°{n}" for n in numeros),
+            "mise": cout,
+            "notes": note_ligne_module_quinte(profil, module.get("couverture")),
+            "_quinte": True,
+        })
+    return lignes
 
 
 @router.get("/courses/{course_id}/bilan-pronostic")

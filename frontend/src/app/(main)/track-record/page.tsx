@@ -16,6 +16,7 @@ import type { PointTendance } from "@/components/track-record/TendanceChart";
 import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
 import { TicketsGrid, Podium, PROFIL_LABELS, ecartVise, type WinningBet } from "@/components/track-record/BetsShowcase";
 import { JaugeHasard, JaugeBrier } from "@/components/track-record/Jauges";
+import { QuinteLigne, type QuintePalmaresData } from "@/components/track-record/QuinteLigne";
 import { statsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
@@ -554,6 +555,7 @@ export default function TrackRecordPage() {
   const { data: gagnantsData, error: gagnantsError, mutate: mutateGagnants } = useSWR<{
     gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
     profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
+    quinte?: QuintePalmaresData | null;   // ligne Quinté+ à part (hors de tous les totaux)
     updated_at?: string;
   }>(
     // Tant que l'auth n'a pas tranché, on n'appelle rien : la clé `null` suspend SWR.
@@ -578,6 +580,7 @@ export default function TrackRecordPage() {
           top_gains: pub.top_gains ?? [],
           n: pub.nb_paris_gagnes ?? 0,
           n_courses: pub.nb_courses_reglees ?? 0,
+          quinte: pub.quinte ?? null,
           updated_at: pub.updated_at,
         };
       };
@@ -917,6 +920,8 @@ export default function TrackRecordPage() {
                   </div>
                 );
               })()}
+
+              <QuinteLigne quinte={gagnantsData.quinte} />
 
               <p className="flex items-start gap-2 rounded-2xl bg-white px-4 py-3 text-xs leading-5 text-muted-foreground ring-1 ring-stone-200">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />

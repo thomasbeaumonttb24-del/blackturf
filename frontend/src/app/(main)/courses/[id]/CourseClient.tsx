@@ -951,7 +951,7 @@ function MiseCalculatorWidget({
         montant: m, profil_risque: profilChoisi,
       });
       const n = res.data?.enregistres ?? 0;
-      toast.success(`${n} pari${n > 1 ? "s" : ""} enregistré${n > 1 ? "s" : ""} dans votre capital`);
+      toast.success(`${n} pari${n > 1 ? "s" : ""} enregistré${n > 1 ? "s" : ""} dans votre capital${res.data?.quinte_enregistre ? ", dont le ticket Quinté+" : ""}`);
       return n;
     } catch {
       toast.error("Erreur lors de l'enregistrement");
