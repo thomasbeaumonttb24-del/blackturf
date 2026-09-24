@@ -172,6 +172,17 @@ def temporal_holdout_mask(X: "pd.DataFrame", frac_train: float = 0.8) -> "np.nda
     return mask
 
 
+def chemin_evaluation(version_num: int) -> Path:
+    """Fichier du modèle d'ÉVALUATION d'une version refit (`model_vNNNN_eval.pkl`).
+
+    N'existe que pour les versions promues avec le drapeau refit_full. Son absence
+    signifie que le modèle servi EST le modèle d'évaluation (comportement
+    historique), jamais qu'il faut en inventer un. `MODELS_DIR` est lu à l'appel :
+    les tests le redirigent vers un répertoire temporaire.
+    """
+    return MODELS_DIR / f"model_v{int(version_num):04d}_eval.pkl"
+
+
 class BlackTurfEnsemble:
     """
     Ensemble calibré XGBoost + LightGBM + CatBoost.
@@ -223,9 +234,36 @@ class BlackTurfEnsemble:
         # UNIQUEMENT à ordonner le classement affiché (rang_predit), jamais les
         # probas/EV. None si non entraîné / LightGBM indispo.
         self.ranker = None
+        # ── Refit final (drapeau refit_full) ──────────────────────────────────
+        # `est_refit` : ce modèle a appris TOUT le jeu, hold-out compris ; ses
+        # mesures sont RECOPIÉES du modèle d'évaluation (cf. `reprendre_mesures`),
+        # il n'en a mesuré aucune lui-même.
+        # `fin_apprentissage` : date de la dernière course apprise, posée par le
+        # pipeline. Sur un modèle d'ÉVALUATION archivé (`model_vNNNN_eval.pkl`),
+        # c'est la borne de l'arbitrage champion/challenger de la nuit suivante.
+        # Les anciens pickles n'ont aucun des deux : lire par `getattr`.
+        self.est_refit: bool = False
+        self.fin_apprentissage: Optional[datetime] = None
+
+    # Attributs portant une mesure HORS ÉCHANTILLON. Un modèle refit n'a plus de
+    # hold-out : il reprend ceux du modèle d'évaluation dont il rejoue la
+    # procédure (cf. `reprendre_mesures`). `auc_roc` est lu au service
+    # (ml.pipeline, confiance de la fiche) : le laisser à 0.0 dégraderait le
+    # produit, lui donner une mesure du refit sur ses propres données mentirait.
+    MESURES_HORS_ECHANTILLON = (
+        "auc_roc", "brier_score", "precision_top3", "roi_simule",
+        "rank_auc", "market_rank_auc", "wf_rank_auc", "wf_market_rank_auc",
+        "win_auc", "win_brier",
+    )
+
+    def reprendre_mesures(self, evaluation: "BlackTurfEnsemble") -> None:
+        """Recopie les mesures hors échantillon du modèle d'évaluation."""
+        for nom in self.MESURES_HORS_ECHANTILLON:
+            setattr(self, nom, getattr(evaluation, nom, getattr(self, nom, None)))
 
     def train(self, X: pd.DataFrame, y: pd.Series, y_win: Optional[pd.Series] = None,
-              frac_train: float = 0.8) -> dict:
+              frac_train: float = 0.8, *, refit: bool = False,
+              feature_names: Optional[list[str]] = None) -> dict:
         """
         Entraîne l'ensemble (top-3). Split temporel 80/20.
         Walk-forward validation sur 6 fenêtres.
@@ -237,6 +275,20 @@ class BlackTurfEnsemble:
         rend en revanche mesurable la question que ce découpage pose : le modèle
         déployé n'apprend rien des 20 % de courses les plus récentes — 78 jours
         depuis que la fenêtre est passée à douze mois.
+
+        `refit=True` (drapeau refit_full, cf. ml.pipeline._modele_a_servir) :
+        rejoue EXACTEMENT la même procédure sur TOUTES les lignes de X, sans
+        hold-out. Mêmes hyperparamètres (ils sont écrits ici, pas cherchés), mêmes
+        plis de calibration groupés par course, même empilement hors pli, même
+        modèle de victoire, même ranker — chacun ajusté sur l'ensemble du jeu.
+        Rien n'y est mesuré : ni walk-forward (il mesure le DATASET, pas le
+        modèle, et coûte ~17 min), ni `_evaluate` (il n'y a plus d'échantillon
+        non vu). Les mesures viennent du modèle d'évaluation (`reprendre_mesures`).
+
+        `feature_names` fige le vecteur d'entrée sur celui du modèle d'évaluation :
+        une colonne constante sur les 80 % anciens mais vivante dans le hold-out
+        n'entre pas au refit, parce qu'aucune mesure hors échantillon ne l'a
+        jamais validée.
         """
         n_samples = len(X)
         from ml.algo_flags import FLAGS as _AF0
@@ -264,14 +316,30 @@ class BlackTurfEnsemble:
         # Sans effet de bord à l'inférence : `predict` fait un `reindex` sur
         # `feature_names`, donc une colonne exclue est simplement ignorée — et une
         # colonne attendue mais absente reste comblée comme avant.
-        holdout_mask = temporal_holdout_mask(X, frac_train=frac_train)
-        _train_rows = X.loc[~holdout_mask, candidates]
-        # Part d'apprentissage vide (jeu minuscule) : on n'exclut rien. Un vecteur de
-        # features vide serait pire que des colonnes mortes.
-        self.constant_features = sorted(
-            c for c in candidates if _train_rows[c].nunique(dropna=False) <= 1
-        ) if len(_train_rows) else []
-        self.feature_names = [c for c in candidates if c not in set(self.constant_features)]
+        self.est_refit = bool(refit)
+        if refit:
+            # Aucun hold-out : c'est tout l'objet du refit.
+            holdout_mask = np.zeros(n_samples, dtype=bool)
+        else:
+            holdout_mask = temporal_holdout_mask(X, frac_train=frac_train)
+        if feature_names is not None:
+            # Vecteur FIGÉ sur celui du modèle d'évaluation (cf. docstring). Une
+            # colonne attendue et absente est une erreur : combler par 0 ferait
+            # apprendre au refit une constante que l'évaluation n'a jamais vue.
+            _absentes = [c for c in feature_names if c not in X.columns]
+            if _absentes:
+                raise ValueError(f"refit : colonnes absentes du jeu : {_absentes[:10]}")
+            self.feature_names = list(feature_names)
+            _gardees = set(self.feature_names)
+            self.constant_features = sorted(c for c in candidates if c not in _gardees)
+        else:
+            _train_rows = X.loc[~holdout_mask, candidates]
+            # Part d'apprentissage vide (jeu minuscule) : on n'exclut rien. Un vecteur de
+            # features vide serait pire que des colonnes mortes.
+            self.constant_features = sorted(
+                c for c in candidates if _train_rows[c].nunique(dropna=False) <= 1
+            ) if len(_train_rows) else []
+            self.feature_names = [c for c in candidates if c not in set(self.constant_features)]
         if self.constant_features:
             log.warning("model.constant_features_excluded",
                         n=len(self.constant_features), n_apprises=len(self.feature_names),
@@ -459,6 +527,16 @@ class BlackTurfEnsemble:
             log.warning("model.stacking.failed", err=str(e), fallback="fixed weights")
             self._stacking_trained = False
 
+        if refit:
+            # Le refit ne mesure rien : ni walk-forward, ni hold-out (cf. docstring).
+            self._ajuster_annexes(X, X_train, X_test, y_train, y_win, n_samples,
+                                  _groupes_tr, shap_sample=X_train.iloc[-500:])
+            self.trained_at = datetime.now()
+            log.info("model.refit_trained", n_lignes=len(X_train),
+                     stacking=self._stacking_trained, win_model=self.win_model is not None,
+                     ranker=self.ranker is not None)
+            return {"refit": True, "n_lignes": int(len(X_train))}
+
         # ── Walk-forward validation (6 fenêtres) ──────────
         _wf_groups = X["course_id"] if (_AF.group_split and "course_id" in X.columns) else None
         _wf_cotes = (X["cote_pmu"].to_numpy(dtype=float)
@@ -515,6 +593,44 @@ class BlackTurfEnsemble:
         self.roi_simule = metrics.get("roi_simule", 0.0)
         self.trained_at = datetime.now()
 
+        # Importances, SHAP, modèle de victoire, ranker : même code pour le refit
+        # (cf. `_ajuster_annexes`). SHAP sur les 500 PREMIERS partants du hold-out,
+        # comme avant.
+        self._ajuster_annexes(X, X_train, X_test, y_train, y_win, n_samples,
+                              _groupes_tr, shap_sample=X_test.iloc[:min(500, len(X_test))])
+
+        # Brier threshold check
+        if self.brier_score > BRIER_THRESHOLD:
+            log.warning("model.brier_too_high", brier=self.brier_score, threshold=BRIER_THRESHOLD)
+
+        log.info(
+            "model.trained",
+            auc=round(self.auc_roc, 4),
+            brier=round(self.brier_score, 4),
+            prec_top3=round(self.precision_top3, 4),
+            roi=round(self.roi_simule, 4),
+            stacking=self._stacking_trained,
+            catboost=self._catboost_available,
+            win_model=self.win_model is not None,
+            win_auc=round(self.win_auc, 4),
+        )
+        metrics["win_auc"] = self.win_auc
+        metrics["win_brier"] = self.win_brier
+        return metrics
+
+    def _ajuster_annexes(self, X: pd.DataFrame, X_train: pd.DataFrame, X_test: pd.DataFrame,
+                         y_train: pd.Series, y_win: Optional[pd.Series], n_samples: int,
+                         _groupes_tr, *, shap_sample: pd.DataFrame) -> None:
+        """Importances (gain + SHAP), modèle de VICTOIRE et ranker.
+
+        Extrait tel quel de `train` pour servir aussi au refit : l'évaluation et le
+        refit doivent ajuster ces trois objets par LE MÊME code, sinon le modèle
+        servi ne serait plus celui dont on a mesuré la procédure. Au refit,
+        `X_test` est vide : le modèle de victoire n'est alors pas mesuré (ses
+        mesures viennent du modèle d'évaluation), et `shap_sample` porte les
+        partants les plus récents du jeu.
+        """
+        from ml.algo_flags import FLAGS as _AF
         # ── Feature importance (XGBoost gain-based) ───────
         try:
             xgb_inner = self.xgb.calibrated_classifiers_[0].estimator
@@ -531,7 +647,6 @@ class BlackTurfEnsemble:
             import shap
             xgb_inner_shap = self.xgb.calibrated_classifiers_[0].estimator
             explainer = shap.TreeExplainer(xgb_inner_shap)
-            shap_sample = X_test.iloc[:min(500, len(X_test))]
             shap_vals = explainer.shap_values(shap_sample)
             if isinstance(shap_vals, list):
                 shap_vals = shap_vals[1]  # classe 1
@@ -611,25 +726,6 @@ class BlackTurfEnsemble:
             except Exception as e:
                 log.warning("model.ranker_failed", err=str(e)[:160])
                 self.ranker = None
-
-        # Brier threshold check
-        if self.brier_score > BRIER_THRESHOLD:
-            log.warning("model.brier_too_high", brier=self.brier_score, threshold=BRIER_THRESHOLD)
-
-        log.info(
-            "model.trained",
-            auc=round(self.auc_roc, 4),
-            brier=round(self.brier_score, 4),
-            prec_top3=round(self.precision_top3, 4),
-            roi=round(self.roi_simule, 4),
-            stacking=self._stacking_trained,
-            catboost=self._catboost_available,
-            win_model=self.win_model is not None,
-            win_auc=round(self.win_auc, 4),
-        )
-        metrics["win_auc"] = self.win_auc
-        metrics["win_brier"] = self.win_brier
-        return metrics
 
     def _get_l0_predictions(self, X_feat: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Retourne les 3 prédictions L0 CALIBRÉES : (p_xgb, p_lgbm, p_cb)."""
@@ -1041,6 +1137,20 @@ class BlackTurfEnsemble:
             json.dump(self.feature_names, f)
 
         log.info("model.saved", path=str(path))
+        return path
+
+    def save_evaluation(self, version_num: int) -> Path:
+        """Archive le modèle d'ÉVALUATION d'une version refit (drapeau refit_full).
+
+        C'est lui, et non le modèle servi, que l'arbitrage de la nuit suivante
+        confronte au challenger : le servi a appris le hold-out commun et y
+        gagnerait mécaniquement. N'écrit PAS `feature_names.json` (qui décrit le
+        modèle servi) ni `current_model.pkl`.
+        """
+        path = chemin_evaluation(version_num)
+        with open(path, "wb") as f:
+            pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+        log.info("model.evaluation_saved", path=str(path))
         return path
 
     @classmethod
