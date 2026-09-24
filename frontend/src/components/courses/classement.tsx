@@ -86,6 +86,9 @@ const SENS = {
  *  cosmétiques entre des chevaux que le modèle sépare d'un facteur 3. */
 const COTE_JUSTE_MAX = 999;
 
+/** Formats partagés avec la section Partants : mêmes cotes, même écriture. */
+export { cote as formatCoteFr, coteJuste as formatCoteJusteFr };
+
 /** Écart minimal entre la cote affichée et la cote du pronostic pour rappeler
  *  cette dernière. En dessous, le rappel n'apprend rien et alourdit la ligne. */
 const ECART_RAPPEL_COTE = 0.2;
@@ -218,7 +221,7 @@ function BarreProba({
  *  Le pourcentage est l'écart relatif entre les deux cotes AFFICHÉES, rien de
  *  plus. Il ne remplace pas l'espérance de gain du modèle (badge « valeur »),
  *  qui, elle, tient compte de la calibration et des garde-fous. */
-function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
+export function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
   const ecart = ecartPrix(marche, juste);
   if (marche == null || !Number.isFinite(marche) || marche <= 0 || juste == null || !Number.isFinite(juste) || juste <= 0) {
     return <span className="text-[13px] text-stone-300">—</span>;
