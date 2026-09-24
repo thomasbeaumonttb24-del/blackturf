@@ -85,7 +85,10 @@ def test_les_quatre_modeles_calibres_utilisent_les_plis_groupes():
 
     from ml.models import BlackTurfEnsemble
 
-    src = inspect.getsource(BlackTurfEnsemble.train)
+    # Le modèle de victoire vit dans `_ajuster_annexes` depuis le refit final
+    # (même code pour l'évaluation et le refit) : les deux sources comptent.
+    src = (inspect.getsource(BlackTurfEnsemble.train)
+           + inspect.getsource(BlackTurfEnsemble._ajuster_annexes))
     assert 'cv=3' not in src, "plus aucun découpage par ligne"
     assert src.count("cv=_cv_calib") == 4, (
         "XGBoost, LightGBM, CatBoost et son repli logistique")

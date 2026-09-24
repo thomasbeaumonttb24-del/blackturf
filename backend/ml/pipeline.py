@@ -778,6 +778,8 @@ async def _head_to_head_auc(
             # Une borne inventée serait pire que pas de test (cf. docstring).
             log.warning("pipeline.h2h.evaluation_sans_borne", chemin=str(_chemin_eval))
             return None
+        log.info("pipeline.h2h.champion_evaluation", chemin=str(_chemin_eval),
+                 borne=str(borne))
     else:
         borne, borne_source = _borne_hors_echantillon(current_mv)
 
@@ -932,9 +934,8 @@ async def _head_to_head_auc(
                              if servi_champion is not None else None),
              delta_servi=round(delta_servi, 4) if delta_servi is not None else None,
              alpha_max=_alpha_max,
-             n_rows=n_rows, n_courses=n_courses, borne_source=borne_source)
+             n_rows=n_rows, n_courses=n_courses)
     return {
-        "borne_source": borne_source,
         "auc_challenger": auc_challenger,
         "auc_champion": auc_champion,
         "rank_challenger": rank_challenger,
@@ -2211,7 +2212,6 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 "dette": round(_dette_apres, 4),
                 "victoire": _arrondir_victoire(_victoire),
-                "retard_apprentissage": retard_apprentissage(_train_fin, refit_actif=_refit),
             }
             if _refit:
                 _issue["refit"] = {"ok": _refit_ok, **(_refit_info or {})}
@@ -2262,10 +2262,6 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 "dette": round(_dette, 4),
                 "victoire": _arrondir_victoire(_victoire),
-                # Le champion reste en service : SON retard continue de courir.
-                "retard_apprentissage": retard_apprentissage(
-                    getattr(current_mv, "train_fin", None) if current_mv else None,
-                    refit_actif=_refit),
             }
             log.warning(
                 "pipeline.retrain.rollback",
@@ -2285,8 +2281,12 @@ async def _do_retraining(mois: int, label: str) -> dict:
 
         # RETARD D'APPRENTISSAGE du modèle servi (`maintenant − train_fin`). Il
         # valait ~77 jours toutes les nuits depuis le passage à douze mois, sans
-        # qu'aucune ligne de journal ne le dise (audit 2026-09-23).
-        _retard = _issue.get("retard_apprentissage") or {}
+        # qu'aucune ligne de journal ne le dise (audit 2026-09-23). Après un rejet,
+        # le champion reste en service : c'est SON retard qui continue de courir.
+        _tf_servi = (_train_fin if _issue.get("issue") == "promu"
+                     else (getattr(current_mv, "train_fin", None) if current_mv else None))
+        _issue["retard_apprentissage"] = retard_apprentissage(_tf_servi, refit_actif=_refit)
+        _retard = _issue["retard_apprentissage"]
         (log.warning if _retard.get("alerte") else log.info)(
             "pipeline.retrain.retard_apprentissage", **_retard)
 

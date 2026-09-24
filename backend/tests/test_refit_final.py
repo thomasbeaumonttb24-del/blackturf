@@ -327,7 +327,6 @@ async def test_l_arbitre_confronte_le_modele_d_evaluation_du_champion_refit(tmp_
     res = await pl._head_to_head_auc(session, _Modele(0.95), X, y, champion)
     assert res is not None
     assert res["delta"] > 0, "jugé contre le modèle d'évaluation, pas le refit"
-    assert res["borne_source"] == "evaluation"
     assert session.dernier_cutoff == borne_eval, "borne du modèle d'évaluation, pas train_fin"
 
 
@@ -345,7 +344,7 @@ async def test_sans_fichier_d_evaluation_le_chemin_historique_est_inchange(tmp_p
     res = await pl._head_to_head_auc(session, _Modele(0.95), X, y,
                                      _MV(543, pd.Timestamp("2026-09-23", tz="UTC"), fin))
     assert res is not None and res["delta"] > 0
-    assert res["borne_source"] == "train_fin" and session.dernier_cutoff == fin
+    assert session.dernier_cutoff == fin
 
 
 @pytest.mark.asyncio
