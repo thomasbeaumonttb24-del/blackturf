@@ -178,6 +178,30 @@ def calculer_deltas_course(valides: list[dict], ratings: dict, nb_notees: dict,
             for cid, d in deltas.items()}
 
 
+def resoudre_course(valides: list[dict], disc_bruts: dict, glob_bruts: dict,
+                    nb_disc: dict, nb_total: dict, k: float) -> dict:
+    """Nouveaux ratings de tous les partants d'une course — fonction PURE.
+
+    Partagée par la mise à jour en direct (`update_elo_after_race`) et le recalcul
+    complet (`scripts/elo_recalcul.py`) : les deux produisent exactement les mêmes
+    chiffres. `valides` sort de `classement_elo`. Retourne, par cheval :
+    disc_avant (après amorçage éventuel), disc_apres, glob_apres, delta_disc.
+    """
+    disc_avant = amorcer_inedits(disc_bruts, nb_disc)
+    glob_avant = amorcer_inedits(glob_bruts, nb_total)
+    deltas_disc = calculer_deltas_course(valides, disc_avant, nb_disc, k)
+    # Global : même course, ratings globaux, demi-K (plus stable, multi-discipline).
+    deltas_glob = calculer_deltas_course(valides, glob_avant, nb_total, k * 0.5)
+    out = {}
+    for cid in disc_bruts:
+        # Clamp pour empêcher la divergence (saturation de expected_prob à 0/1)
+        d = round(min(ELO_MAX, max(ELO_MIN, disc_avant[cid] + deltas_disc.get(cid, 0.0))), 2)
+        g = round(min(ELO_MAX, max(ELO_MIN, glob_avant[cid] + deltas_glob.get(cid, 0.0))), 2)
+        out[cid] = {"disc_avant": disc_avant[cid], "disc_apres": d, "glob_apres": g,
+                    "delta_disc": round(d - disc_avant[cid], 2)}
+    return out
+
+
 async def update_elo_after_race(
     session: AsyncSession,
     course_id: str,
@@ -246,31 +270,20 @@ async def update_elo_after_race(
 
     disc_bruts = {cid: getattr(c, elo_field, None) or ELO_INITIAL for cid, c in chevaux.items()}
     glob_bruts = {cid: c.elo_score_global or ELO_INITIAL for cid, c in chevaux.items()}
-    disc_avant = amorcer_inedits(disc_bruts, nb_disc)
-    glob_avant = amorcer_inedits(glob_bruts, nb_total)
-
     valides = [r for r in classement if r["cheval_id"] in chevaux]
-    deltas_disc = calculer_deltas_course(valides, disc_avant, nb_disc, k)
-    # Global : même course, ratings globaux, demi-K (plus stable, multi-discipline).
-    deltas_glob = calculer_deltas_course(valides, glob_avant, nb_total, k * 0.5)
-
-    elos = {cid: {"disc_avant": disc_avant[cid], "global_avant": glob_avant[cid],
-                  "delta_disc": deltas_disc.get(cid, 0.0),
-                  "delta_global": deltas_glob.get(cid, 0.0)}
-            for cid in chevaux}
+    resultats = resoudre_course(valides, disc_bruts, glob_bruts, nb_disc, nb_total, k)
 
     # Sauvegarder les nouveaux ELO
     nouveaux_elos = {}
 
-    for cid, data in elos.items():
+    for cid, res in resultats.items():
         cheval = chevaux.get(cid)
         if not cheval:
             continue
-
-        # Clamp pour empêcher la divergence (saturation de expected_prob à 0/1)
-        nouveau_disc = round(min(ELO_MAX, max(ELO_MIN, data["disc_avant"] + data["delta_disc"])), 2)
-        nouveau_global = round(min(ELO_MAX, max(ELO_MIN, data["global_avant"] + data["delta_global"])), 2)
-        delta_disc = round(nouveau_disc - data["disc_avant"], 2)
+        data = {"disc_avant": res["disc_avant"]}
+        nouveau_disc = res["disc_apres"]
+        nouveau_global = res["glob_apres"]
+        delta_disc = res["delta_disc"]
 
         # Update cheval
         setattr(cheval, elo_field, nouveau_disc)

@@ -102,3 +102,45 @@ def test_champ_elo_toutes_graphies():
     assert champ_elo("Attelé") == champ_elo("TROT_ATTELE") == champ_elo("Monté") == "elo_score_trot"
     assert champ_elo("Steeple") == champ_elo("HAIES") == "elo_score_obstacle"
     assert champ_elo("plat") == champ_elo(None) == "elo_score_plat"
+
+
+# ── Recalcul complet (scripts/elo_recalcul) ──────────────────────────────────
+def test_recalcul_lit_le_classement_stocke_disqualifies_compris():
+    from scripts.elo_recalcul import classement_course
+    num2ch = {1: "a", 2: "b", 3: "c", 4: "d"}
+    cl = classement_course([
+        {"numero": 2, "position": 1}, {"numero": 1, "position": 2},
+        {"numero": 3, "position": None, "incident": "DISQUALIFIE", "disqualifie": True},
+        {"numero": 4, "position": None, "incident": "NON_PARTANT"},
+        {"numero": 9, "position": 3},                 # numéro inconnu : ignoré
+    ], num2ch)
+    assert [(r["cheval_id"], r["position"]) for r in cl] == [("b", 1), ("a", 2), ("c", 3)]
+
+
+def test_recalcul_et_direct_donnent_les_memes_chiffres():
+    """Le rejeu en mémoire passe par `resoudre_course`, comme la mise à jour en
+    direct : même course, mêmes ratings de départ → mêmes ratings d'arrivée."""
+    from datetime import datetime
+    from ml.elo import get_k_factor, resoudre_course
+    from scripts.elo_recalcul import Etat, jouer_course
+    etat = Etat()
+    for cid, r in (("a", 1600.0), ("b", 1500.0), ("c", 1400.0)):
+        etat.note(cid)["elo_score_trot"] = r
+        etat.nb[cid]["elo_score_trot"] = etat.nb[cid]["total"] = 10
+    course = {"course_id": "X", "date_heure": datetime(2026, 9, 1), "discipline": "Attelé",
+              "niveau_course": None, "allocation": 2_000_000,
+              "classement": [{"numero": 3, "position": 1}, {"numero": 1, "position": 2},
+                             {"numero": 2, "position": None, "incident": "DAI"}]}
+    parts = [("p1", 1, "a"), ("p2", 2, "b"), ("p3", 3, "c")]
+    hist, snaps = [], []
+    jouer_course(etat, course, parts, hist, snaps)
+    attendu = resoudre_course(
+        [{"cheval_id": "c", "position": 1}, {"cheval_id": "a", "position": 2},
+         {"cheval_id": "b", "position": 3}],
+        {"a": 1600.0, "b": 1500.0, "c": 1400.0}, {"a": 1500.0, "b": 1500.0, "c": 1500.0},
+        {"a": 10, "b": 10, "c": 10}, {"a": 10, "b": 10, "c": 10},
+        get_k_factor(None, 2_000_000))
+    for cid in "abc":
+        assert etat.notes[cid]["elo_score_trot"] == attendu[cid]["disc_apres"]
+    assert len(snaps) == 3 and snaps[1][3] == 1500.0     # snapshot PRÉ-course
+    assert {h[2] for h in hist} == {datetime(2026, 9, 1).date()}

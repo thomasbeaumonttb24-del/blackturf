@@ -25,15 +25,21 @@ from db.models import FeatureML
 from ml.features import compute_all_features_for_course
 
 
-async def main() -> int:
+async def main(depuis_jours: int | None = None) -> int:
+    # `depuis_jours` : ne recalcule que la fenêtre utile au retrain (12 mois par
+    # défaut côté pipeline), la plus RÉCENTE d'abord — si le calcul est interrompu,
+    # ce qui est fait est ce qui compte le plus. Sans option : tout, comme avant.
+    fenetre = ("AND c.date_heure > NOW() - make_interval(days => :j)"
+               if depuis_jours else "")
+    ordre = "c.date_heure DESC" if depuis_jours else "c.course_id"
     async with AsyncSessionLocal() as session:
-        r = await session.execute(text("""
+        r = await session.execute(text(f"""
             SELECT DISTINCT c.course_id, c.date_heure
             FROM courses c
             JOIN participations p ON p.course_id = c.course_id AND p.non_partant = false
-            WHERE c.statut = 'termine' AND c.date_heure IS NOT NULL
-            ORDER BY c.course_id
-        """))
+            WHERE c.statut = 'termine' AND c.date_heure IS NOT NULL {fenetre}
+            ORDER BY {ordre}
+        """), {"j": depuis_jours} if depuis_jours else {})
         rows = r.fetchall()
         course_dates = {row[0]: row[1] for row in rows}
         course_ids = [row[0] for row in rows]
@@ -73,4 +79,7 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--depuis-jours", type=int, default=None)
+    asyncio.run(main(ap.parse_args().depuis_jours))
