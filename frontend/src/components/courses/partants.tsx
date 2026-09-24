@@ -6,9 +6,9 @@
    cheval. Le travail est de rendre chaque chiffre lisible sans légende externe :
    libellés en clair, verdicts en mots (« bon prix », « en progression »), et une
    mise en page propre au téléphone plutôt que des colonnes masquées. */
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import {
-  Activity, ArrowDownUp, ChevronDown, Gauge, HelpCircle, MapPin, Trophy,
+  Activity, ArrowDownUp, ChevronDown, Crown, Gauge, HelpCircle, MapPin, Trophy,
   TrendingDown, TrendingUp, Users,
 } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
@@ -234,10 +234,6 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
     };
   }, [partants]);
 
-  // Toutes les barres de victoire partagent la MÊME échelle (le favori du
-  // modèle = barre pleine), sinon deux barres égales porteraient deux probas.
-  const probaMax = Math.max(...(predictions ?? []).map((p) => p.proba_top1 || 0), 0.01);
-
   const coteDe = (p: PartantFiche) => liveCoteMap[p.numero] ?? p.cote_pmu;
   const lignes = useMemo(() => {
     const cle = (p: PartantFiche) =>
@@ -255,6 +251,10 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
     : confGlobal >= 70 ? { txt: "Favori clair", cls: "bg-emerald-50 text-emerald-800 ring-emerald-200" }
     : confGlobal >= 50 ? { txt: "Course ouverte", cls: "bg-amber-50 text-amber-800 ring-amber-200" }
     : { txt: "Course serrée", cls: "bg-rose-50 text-rose-800 ring-rose-200" };
+  const favori = avecPreds
+    ? partants.find((p) => !p.non_partant && predPar.get(p.participation_id)?.rang_predit === 1)
+    : undefined;
+  const probaFavori = favori ? predPar.get(favori.participation_id)?.proba_top1 : undefined;
 
   const TRIS: { cle: Tri; txt: string }[] = [
     { cle: "numero", txt: "N°" },
@@ -263,23 +263,45 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
   ];
 
   return (
-    <section aria-labelledby="partants-titre" className="overflow-hidden rounded-[20px] border border-[#ECE7DC] bg-white shadow-[0_1px_2px_rgba(0,0,0,.03),0_18px_40px_-32px_rgba(17,24,39,.35)]">
-      {/* ── En-tête ── */}
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-3 px-4 pb-3 pt-4 sm:px-5">
-        <div className="min-w-0">
-          <h2 id="partants-titre" className="text-[17px] font-bold leading-tight text-stone-900" style={SG}>Partants</h2>
-          <p className="mt-0.5 text-xs text-stone-500">
-            {partants.length - nbNP} au départ{nbNP > 0 ? ` · ${nbNP} non-partant${nbNP > 1 ? "s" : ""}` : ""}
-            <span className="hidden sm:inline"> · touchez un cheval pour sa fiche complète</span>
-          </p>
+    <section aria-labelledby="partants-titre" className="space-y-3">
+      {/* ── En-tête : crème, halo or, piste en filigrane ── */}
+      <header className="relative isolate overflow-hidden rounded-[22px] bg-gradient-to-br from-white via-[#FFFCF4] to-[#FDF3DC] px-4 pb-4 pt-5 text-stone-900 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.04),0_22px_44px_-30px_rgba(146,64,14,.45)] ring-1 ring-[#EFE3C8] sm:px-6 sm:pt-6">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-28 -z-10 h-72 w-72 rounded-full bg-amber-300/40 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 -left-16 -z-10 h-64 w-64 rounded-full bg-amber-100/60 blur-3xl" />
+        <svg aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 h-full w-full opacity-[.35]" preserveAspectRatio="none" viewBox="0 0 400 120">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <ellipse key={i} cx="330" cy="160" rx={120 + i * 42} ry={70 + i * 26} fill="none" stroke="#E9C77A" strokeWidth="1" />
+          ))}
+        </svg>
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <div className="min-w-0">
+            <p className="text-[10.5px] font-bold uppercase tracking-[.18em] text-amber-700">Le champ</p>
+            <h2 id="partants-titre" className="mt-1 text-[24px] font-bold leading-none tracking-tight sm:text-[28px]" style={SG}>Partants</h2>
+            <p className="mt-2 text-[12.5px] text-stone-500">
+              <b className="font-semibold text-stone-900">{partants.length - nbNP}</b> au départ
+              {nbNP > 0 ? <> · <b className="font-semibold text-stone-700">{nbNP}</b> non-partant{nbNP > 1 ? "s" : ""}</> : null}
+              <span className="hidden sm:inline"> · touchez un cheval pour sa fiche</span>
+            </p>
+          </div>
+          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:flex-col sm:items-end">
+            {difficulte && (
+              <Pastille className={difficulte.cls} title={`Confiance du modèle sur son favori : ${Math.round(confGlobal!)} %`}>
+                {difficulte.txt}
+              </Pastille>
+            )}
+            {favori && probaFavori != null && (
+              <span className="items-center gap-2 rounded-xl bg-white/80 px-3 py-1.5 shadow-[0_6px_16px_-10px_rgba(146,64,14,.5)] ring-1 ring-inset ring-amber-200 inline-flex" title="Le cheval que le modèle voit gagner">
+                <Crown className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
+                <span className="text-[11px] text-stone-500">Favori</span>
+                <span className="text-[13px] font-bold" style={SG}>N°{favori.numero} {favori.nom_cheval}</span>
+                <span className="text-[13px] font-bold text-amber-700 tabular-nums" style={SG}>{Math.round(probaFavori * 100)} %</span>
+              </span>
+            )}
+          </div>
         </div>
-        {difficulte && (
-          <Pastille className={cn("ml-auto", difficulte.cls)} title={`Confiance du modèle sur son favori : ${Math.round(confGlobal!)} %`}>
-            {difficulte.txt}
-          </Pastille>
-        )}
-        <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <div role="group" aria-label="Trier les partants" className="inline-flex items-center gap-1 rounded-xl bg-stone-100 p-1">
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <div role="group" aria-label="Trier les partants" className="inline-flex items-center gap-1 rounded-xl bg-stone-900/[.05] p-1 ring-1 ring-inset ring-stone-900/[.06]">
             <ArrowDownUp className="ml-1.5 mr-0.5 h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
             {TRIS.map((t) => (
               <button
@@ -288,8 +310,10 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
                 aria-pressed={tri === t.cle}
                 onClick={() => setTri(t.cle)}
                 className={cn(
-                  "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
-                  tri === t.cle ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-800",
+                  "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
+                  tri === t.cle
+                    ? "bg-gradient-to-b from-white to-stone-50 text-stone-900 shadow-[0_2px_6px_-2px_rgba(17,24,39,.25),inset_0_1px_0_#fff]"
+                    : "text-stone-500 hover:text-stone-900",
                 )}
               >
                 {t.txt}
@@ -302,8 +326,8 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
 
       {/* ── En-tête des colonnes (ordinateur) ── */}
       <div className={cn(
-        "hidden items-end gap-4 border-y border-[#F3EFE6] bg-[#FCFAF5] px-5 py-2 text-[10.5px] font-bold uppercase tracking-[.07em] text-stone-400 md:grid",
-        avecPreds ? "md:grid-cols-[72px_minmax(0,1fr)_84px_96px_128px_20px]" : "md:grid-cols-[72px_minmax(0,1fr)_84px_20px]",
+        "hidden items-end gap-4 px-5 pt-1 text-[10.5px] font-bold uppercase tracking-[.1em] text-stone-400 md:grid",
+        avecPreds ? COLS_PREDS : COLS_SANS,
       )}>
         <span className="text-center">N°</span>
         <span>Cheval</span>
@@ -317,7 +341,7 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
         <span />
       </div>
 
-      <ul className="divide-y divide-[#F3EFE6]">
+      <ul className="space-y-2.5 [perspective:1600px]">
         {lignes.map((p) => (
           <LignePartant
             key={p.participation_id}
@@ -326,7 +350,6 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
             cote={coteDe(p)}
             live={liveCoteMap[p.numero] != null}
             avecPreds={avecPreds}
-            probaMax={probaMax}
             eloChamp={eloChamp}
             ouvert={ouvert === p.participation_id}
             onToggle={() => setOuvert(ouvert === p.participation_id ? null : p.participation_id)}
@@ -337,14 +360,18 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
   );
 }
 
+/** Gabarit de colonnes partagé par l'en-tête et les cartes (ordinateur). */
+const COLS_PREDS = "md:grid-cols-[72px_minmax(0,1fr)_92px_96px_132px_20px]";
+const COLS_SANS = "md:grid-cols-[72px_minmax(0,1fr)_92px_20px]";
+
 // ─── Légende ─────────────────────────────────────────────────────────────────
 function Legende({ avecPreds }: { avecPreds: boolean }) {
   return (
     <details className="group relative w-full sm:w-auto">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700 [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700 [&::-webkit-details-marker]:hidden">
         <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire ?
       </summary>
-      <div className="mt-2 rounded-2xl border border-[#ECE7DC] bg-white p-4 text-xs leading-relaxed text-stone-600 sm:absolute sm:right-0 sm:z-20 sm:w-[340px] sm:shadow-xl">
+      <div className="mt-2 rounded-2xl border border-[#ECE7DC] bg-white p-4 text-xs shadow-xl leading-relaxed text-stone-600 sm:absolute sm:right-0 sm:z-20 sm:w-[340px] sm:shadow-xl">
         <dl className="space-y-2.5">
           <div><dt className="font-bold text-stone-800">Cote</dt><dd>Ce que paie le PMU pour 1 € joué gagnant. La flèche indique si le cheval est joué (cote en baisse) ou délaissé.</dd></div>
           {avecPreds && (
@@ -373,42 +400,137 @@ function Legende({ avecPreds }: { avecPreds: boolean }) {
 }
 
 // ─── Ligne ───────────────────────────────────────────────────────────────────
-function LignePartant({ partant: p, pred, cote, live, avecPreds, probaMax, eloChamp, ouvert, onToggle }: {
+/** Médaille du podium du pronostic : or, argent, bronze. */
+const PODIUM: Record<number, { txt: string; piece: string; barre: string; fond: string }> = {
+  1: { txt: "1er du prono", piece: "radial-gradient(circle at 32% 28%,#FFF7D6 0%,#FCD34D 32%,#D97706 72%,#92400E 100%)", barre: "from-amber-300 via-amber-500 to-amber-700", fond: "bg-gradient-to-r from-amber-50 via-white to-white" },
+  2: { txt: "2ᵉ du prono", piece: "radial-gradient(circle at 32% 28%,#FFFFFF 0%,#E2E8F0 34%,#94A3B8 74%,#475569 100%)", barre: "from-slate-200 via-slate-400 to-slate-600", fond: "bg-gradient-to-r from-slate-50 via-white to-white" },
+  3: { txt: "3ᵉ du prono", piece: "radial-gradient(circle at 32% 28%,#FFEAD5 0%,#FDBA74 34%,#C2410C 76%,#7C2D12 100%)", barre: "from-orange-200 via-orange-400 to-orange-700", fond: "bg-gradient-to-r from-orange-50/70 via-white to-white" },
+};
+
+function Medaille({ rang }: { rang: number }) {
+  const m = PODIUM[rang];
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-0.5 pl-0.5 pr-2 text-[11px] font-bold text-stone-800 shadow-[0_1px_2px_rgba(17,24,39,.08)] ring-1 ring-inset ring-stone-200" title={`Classé ${m.txt.replace(" du prono", "")} par le pronostic`}>
+      <span
+        aria-hidden="true"
+        className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-full text-[10px] font-extrabold text-white shadow-[inset_0_-1px_1px_rgba(0,0,0,.25),inset_0_1px_1px_rgba(255,255,255,.7),0_1px_2px_rgba(0,0,0,.25)] [text-shadow:0_1px_1px_rgba(0,0,0,.35)]"
+        style={{ background: m.piece }}
+      >
+        {rang}
+      </span>
+      {m.txt}
+    </span>
+  );
+}
+
+/** Jauge circulaire de la chance de victoire : l'arc est la VRAIE probabilité
+ *  (25 % = un quart de tour), pas une échelle relative au favori. */
+function Anneau({ v, rang, taille }: { v: number; rang: number | undefined; taille: number }) {
+  const id = useId();
+  const r = taille / 2 - 4;
+  const c = 2 * Math.PI * r;
+  const couleurs = rang === 1 ? ["#FCD34D", "#D97706"] : rang != null && rang <= 3 ? ["#94A3B8", "#334155"] : ["#D6D3D1", "#78716C"];
+  const txt = v < 0.005 ? "<1" : String(Math.round(v * 100));
+  return (
+    <span
+      className="relative inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-white to-stone-100 shadow-[inset_0_1px_0_#fff,0_1px_1px_rgba(17,24,39,.06),0_6px_14px_-8px_rgba(17,24,39,.35)]"
+      style={{ width: taille, height: taille }}
+      role="img"
+      aria-label={`${txt} % de chance de victoire`}
+    >
+      <svg width={taille} height={taille} className="absolute inset-0 -rotate-90" aria-hidden="true">
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={couleurs[0]} />
+            <stop offset="100%" stopColor={couleurs[1]} />
+          </linearGradient>
+        </defs>
+        <circle cx={taille / 2} cy={taille / 2} r={r} fill="none" stroke="#F1EEE6" strokeWidth="4" />
+        <circle
+          cx={taille / 2} cy={taille / 2} r={r} fill="none" stroke={`url(#${id})`} strokeWidth="4" strokeLinecap="round"
+          strokeDasharray={`${Math.max(0.02, Math.min(1, v)) * c} ${c}`}
+          className="transition-[stroke-dasharray] duration-700"
+        />
+      </svg>
+      <span className={cn("relative font-bold tabular-nums leading-none", rang === 1 ? "text-amber-700" : "text-stone-900")} style={{ ...SG, fontSize: taille >= 52 ? 14 : 13 }}>
+        {txt}<span className="text-[0.75em]">%</span>
+      </span>
+    </span>
+  );
+}
+
+/** Cote façon ticket : chiffre en relief, flèche de mouvement dessous. */
+function TicketCote({ cote, live, mv, compact = false }: { cote: number | null; live: boolean; mv: number | null; compact?: boolean }) {
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-white to-[#F7F3EA] ring-1 ring-inset ring-[#E7E1D3] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.06)]",
+      compact ? "px-2 py-1" : "flex-col items-end gap-0.5 px-2.5 py-1.5",
+    )}>
+      <span className="inline-flex items-center gap-1.5">
+        {compact && <span className="text-[10.5px] font-semibold uppercase tracking-wide text-stone-400">Cote</span>}
+        {live && (
+          <span className="relative flex h-1.5 w-1.5" title="Cote en direct">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60 motion-reduce:animate-none" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          </span>
+        )}
+        <span className={cn("font-bold tabular-nums leading-none text-stone-900", compact ? "text-[14px]" : "text-[17px]")} style={SG}>{formatCote(cote)}</span>
+      </span>
+      <MouvementCote mv={mv} compact />
+    </span>
+  );
+}
+
+function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouvert, onToggle }: {
   partant: PartantFiche;
   pred: PredictionFiche | undefined;
   cote: number | null;
   live: boolean;
   avecPreds: boolean;
-  probaMax: number;
   eloChamp: EloChamp | null;
   ouvert: boolean;
   onToggle: () => void;
 }) {
   const panneauId = useId();
+  const carte = useRef<HTMLLIElement>(null);
   const np = !!p.non_partant;
   const rang = pred?.rang_predit;
+  const podium = !np && rang != null && rang <= 3 ? PODIUM[rang] : null;
   const ind = np ? null : indicateurs(p.analyse, p.elo_global, eloChamp);
   const rep = repos(p.jours_depuis_derniere);
   // Espérance pour 1 € joué : cote × proba − 1 (affichée seulement si le cheval
   // n'est pas déjà signalé comme value bet, qui porte sa propre espérance).
   const ev = !pred?.value_bet && pred && cote && cote > 1 && pred.proba_top1 > 0 ? cote * pred.proba_top1 - 1 : null;
-  const probaTxt = pred ? (pred.proba_top1 < 0.005 ? "< 1" : (pred.proba_top1 * 100).toFixed(0)) : null;
-  const probaLarg = pred ? clamp((pred.proba_top1 / Math.max(probaMax, 0.01)) * 100, 3) : 0;
-  const barreProba = rang === 1 ? "bg-amber-500" : rang != null && rang <= 3 ? "bg-slate-500" : "bg-stone-300";
+
+  // Inclinaison 3D qui suit la souris — ordinateur uniquement (au doigt, la carte
+  // s'enfonce légèrement à la pression), coupée carte ouverte et si l'utilisateur
+  // demande moins d'animations. Écrit directement les variables CSS : aucun rendu.
+  const incliner = (e: PointerEvent<HTMLLIElement>) => {
+    const el = carte.current;
+    if (!el || e.pointerType !== "mouse" || ouvert) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const r = el.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    el.style.setProperty("--rx", `${((0.5 - y) * 3).toFixed(2)}deg`);
+    el.style.setProperty("--ry", `${((x - 0.5) * 2.4).toFixed(2)}deg`);
+    el.style.setProperty("--mx", `${(x * 100).toFixed(1)}%`);
+    el.style.setProperty("--my", `${(y * 100).toFixed(1)}%`);
+    el.style.setProperty("--lift", "-3px");
+  };
+  const redresser = () => {
+    const el = carte.current;
+    if (!el) return;
+    el.style.setProperty("--rx", "0deg");
+    el.style.setProperty("--ry", "0deg");
+    el.style.setProperty("--lift", "0px");
+  };
 
   const badges = (
     <>
       {np && <Pastille className="bg-stone-200 text-stone-600 ring-stone-300" title="Déclaré non-partant — retiré du pronostic">Non partant</Pastille>}
-      {!np && rang != null && rang <= 3 && (
-        <Pastille
-          className={rang === 1 ? "bg-amber-100 text-amber-900 ring-amber-300" : "bg-slate-100 text-slate-700 ring-slate-200"}
-          title={`Classé ${rang === 1 ? "1er" : `${rang}ᵉ`} par le pronostic`}
-        >
-          {rang === 1 ? "1er" : `${rang}ᵉ`} du prono
-        </Pastille>
-      )}
+      {podium && <Medaille rang={rang!} />}
       {pred?.value_bet && (
-        <Pastille className="bg-emerald-50 text-emerald-800 ring-emerald-200" title="Value bet : le marché paie plus que la chance réelle du cheval">
+        <Pastille className="bg-gradient-to-b from-emerald-50 to-emerald-100/70 text-emerald-800 ring-emerald-200 shadow-[0_1px_2px_rgba(4,120,87,.12)]" title="Value bet : le marché paie plus que la chance réelle du cheval">
           ★ Value +{Math.round(pred.value_bet.ev_max * 100)} %
         </Pastille>
       )}
@@ -426,13 +548,6 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, probaMax, eloCh
       {p.premier_deferre && <Pastille className="bg-amber-50 text-amber-800 ring-amber-200" title="Déferré pour la première fois : souvent un signe d'ambition">1ʳᵉ fois déferré</Pastille>}
       {p.premieres_oeilleres && <Pastille className="hidden bg-amber-50 text-amber-800 ring-amber-200 sm:inline-flex" title="Porte des œillères pour la première fois">1ʳᵉˢ œillères</Pastille>}
       {!np && p.running_style && <span className="hidden sm:inline-flex"><RunningStyleBadge style={p.running_style} /></span>}
-      {/* Téléphone : la lecture du prix remplace la colonne « Cote juste ». */}
-      {!np && pred?.cote_juste && (
-        <span className="inline-flex items-center gap-1 text-[11.5px] text-stone-500 md:hidden" title="Cote juste du modèle et écart avec la cote du PMU">
-          Cote juste <b className="font-semibold tabular-nums text-stone-700">{formatCoteJuste(pred.cote_juste)}</b>
-          <LecturePrix marche={cote} juste={pred.cote_juste} />
-        </span>
-      )}
     </>
   );
 
@@ -461,101 +576,74 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, probaMax, eloCh
     </span>
   );
 
-  const blocCote = np ? (
-    <span className="text-sm font-semibold text-stone-400">NP</span>
-  ) : (
-    <>
-      <div className="flex items-center justify-end gap-1.5">
-        {live && (
-          <span className="relative flex h-1.5 w-1.5" title="Cote en direct">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60 motion-reduce:animate-none" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          </span>
-        )}
-        <span className="text-[17px] font-bold tabular-nums leading-none text-stone-900" style={SG}>{formatCote(cote)}</span>
-      </div>
-      <div className="mt-1 flex justify-end"><MouvementCote mv={p.mouvement_cote_pct} compact /></div>
-    </>
-  );
-
-  const blocCoteJuste = !pred?.cote_juste ? <span className="text-stone-300">—</span> : (
-    <>
-      <div className="text-[15px] font-semibold tabular-nums leading-none text-stone-600" style={SG}>
-        {formatCoteJuste(pred.cote_juste)}
-      </div>
-      {!np && (
-        <div className="mt-1 flex justify-end">
-          <LecturePrix marche={cote} juste={pred.cote_juste} />
-        </div>
-      )}
-    </>
-  );
-
-  const blocVictoire = !pred || np ? <span className="text-stone-300">—</span> : (
-    <>
-      <div className={cn("text-[17px] font-bold tabular-nums leading-none", rang === 1 ? "text-amber-700" : "text-stone-900")} style={SG}>
-        {probaTxt} %
-      </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-stone-100">
-        <div className={cn("h-full rounded-full", barreProba)} style={{ width: `${probaLarg}%` }} />
-      </div>
-      <div className="mt-1 text-[11px] text-stone-500" title="Probabilité de finir dans les trois premiers">
-        Top 3 : <b className="font-semibold text-stone-700">{(pred.proba_top3 * 100).toFixed(0)} %</b>
-      </div>
-    </>
-  );
-
   return (
-    <li className={cn(np && "opacity-60")}>
+    <li
+      ref={carte}
+      onPointerMove={incliner}
+      onPointerLeave={redresser}
+      className={cn(
+        "group/carte relative overflow-hidden rounded-2xl ring-1 transition-[transform,box-shadow] duration-300 ease-out [transform-style:preserve-3d]",
+        "[transform:translateY(var(--lift,0px))_rotateX(var(--rx,0deg))_rotateY(var(--ry,0deg))] motion-reduce:transition-none",
+        "shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_12px_28px_-22px_rgba(17,24,39,.45)] hover:shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.05),0_26px_44px_-26px_rgba(146,64,14,.45)]",
+        podium ? cn(podium.fond, "ring-[#EADFC6]") : "bg-white ring-[#ECE7DC]",
+        np && "opacity-60 saturate-50",
+      )}
+    >
+      {/* Reflet qui suit la souris */}
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover/carte:opacity-100 [background:radial-gradient(420px_circle_at_var(--mx,50%)_var(--my,50%),rgba(251,191,36,.10),transparent_45%)]" />
+      {podium && <span aria-hidden="true" className={cn("absolute inset-y-3 left-0 w-1 rounded-r-full bg-gradient-to-b", podium.barre)} />}
+
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={ouvert}
         aria-controls={panneauId}
         className={cn(
-          "group block w-full px-4 py-3.5 text-left transition-colors sm:px-5 md:grid md:items-center md:gap-4",
-          avecPreds ? "md:grid-cols-[72px_minmax(0,1fr)_84px_96px_128px_20px]" : "md:grid-cols-[72px_minmax(0,1fr)_84px_20px]",
-          ouvert ? "bg-[#FAF7EF]" : "hover:bg-[#FCFAF5]",
-          "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700",
+          "relative block w-full px-3.5 py-3.5 text-left transition-transform active:scale-[.985] sm:px-5 md:grid md:items-center md:gap-4 md:active:scale-100",
+          avecPreds ? COLS_PREDS : COLS_SANS,
+          "rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700",
         )}
       >
-        {/* Identité : casaque + n° (+ nom sur mobile) */}
+        {/* Identité : casaque + n° + nom (+ jauge sur téléphone) */}
         <div className="flex items-start gap-3 md:contents">
           <div className="flex shrink-0 justify-center md:w-full">
             <CasaqueNumero numero={p.numero} imgUrl={p.casaque_image_url} vertical />
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-2">
+            <div className="flex items-start gap-2.5">
               <span className="block min-w-0 flex-1">
-                <span className={cn("block text-[15.5px] font-bold leading-snug text-stone-900", np && "text-stone-500 line-through")} style={SG}>
+                <span className={cn("block text-[16px] font-bold leading-snug tracking-tight text-stone-900", np && "text-stone-500 line-through")} style={SG}>
                   {p.nom_cheval}
                 </span>
                 {meta}
               </span>
-              {/* Téléphone : les deux chiffres qu'on cherche d'abord, sans ouvrir la fiche. */}
-              <span className="shrink-0 text-right md:hidden">
-                {avecPreds && pred && !np && (
-                  <span className="block leading-none" title={`Chance de victoire selon le modèle · top 3 : ${(pred.proba_top3 * 100).toFixed(0)} %`}>
-                    <b className={cn("text-[18px] font-bold tabular-nums", rang === 1 ? "text-amber-700" : "text-stone-900")} style={SG}>{probaTxt} %</b>
-                    <span className="ml-1 text-[10.5px] text-stone-500">victoire</span>
-                  </span>
-                )}
-                <span className={cn("flex items-center justify-end gap-1 text-[12px] text-stone-500", avecPreds && pred && !np && "mt-1")}>
-                  {np ? "NP" : (
-                    <>
-                      {live && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" title="Cote en direct" />}
-                      cote <b className="text-[14px] font-bold tabular-nums text-stone-900" style={SG}>{formatCote(cote)}</b>
-                    </>
-                  )}
+              {/* Téléphone : la chance de victoire en jauge, lisible d'un coup d'œil. */}
+              {avecPreds && pred && !np && (
+                <span className="flex shrink-0 flex-col items-center md:hidden">
+                  <Anneau v={pred.proba_top1} rang={rang} taille={50} />
+                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-stone-400">Victoire</span>
                 </span>
-                {!np && <span className="mt-1 flex justify-end"><MouvementCote mv={p.mouvement_cote_pct} compact /></span>}
-              </span>
+              )}
               <ChevronDown
                 aria-hidden="true"
                 className={cn("mt-0.5 h-4 w-4 shrink-0 text-stone-400 transition-transform md:hidden", ouvert && "rotate-180")}
               />
             </div>
+
+            {/* Téléphone : la ligne du prix — cote du PMU puis lecture du prix. */}
+            {!np && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-2 md:hidden">
+                <TicketCote cote={cote} live={live} mv={p.mouvement_cote_pct} compact />
+                {pred?.cote_juste && (
+                  <span className="inline-flex items-center gap-1 text-[11.5px] text-stone-500" title="Cote juste du modèle et écart avec la cote du PMU">
+                    juste <b className="font-semibold tabular-nums text-stone-700">{formatCoteJuste(pred.cote_juste)}</b>
+                    <LecturePrix marche={cote} juste={pred.cote_juste} />
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="mt-2 flex flex-wrap items-center gap-1.5">{badges}</div>
 
             {(ind || p.musique) && (
@@ -563,7 +651,7 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, probaMax, eloCh
                 {ind && (
                   <div className="flex flex-wrap gap-1.5">
                     {ind.map((i) => (
-                      <Pastille key={i.cle} className={TON_PASTILLE[tonDe(i.v)]} title={`${i.aide}${i.v != null ? ` : ${i.v} %` : " : non disponible"}`}>
+                      <Pastille key={i.cle} className={cn(TON_PASTILLE[tonDe(i.v)], "shadow-[inset_0_1px_0_rgba(255,255,255,.8)]")} title={`${i.aide}${i.v != null ? ` : ${i.v} %` : " : non disponible"}`}>
                         <span className="font-medium opacity-80">{i.cle}</span>
                         <span className="tabular-nums">{i.v != null ? i.v : "—"}</span>
                       </Pastille>
@@ -581,18 +669,40 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, probaMax, eloCh
         </div>
 
         {/* Colonnes chiffrées — ordinateur */}
-        <div className="hidden text-right md:block">{blocCote}</div>
-        {avecPreds && <div className="hidden text-right md:block">{blocCoteJuste}</div>}
-        {avecPreds && <div className="hidden text-right md:block">{blocVictoire}</div>}
+        <div className="hidden text-right md:block">
+          {np ? <span className="text-sm font-semibold text-stone-400">NP</span> : <TicketCote cote={cote} live={live} mv={p.mouvement_cote_pct} />}
+        </div>
+        {avecPreds && (
+          <div className="hidden text-right md:block">
+            {!pred?.cote_juste ? <span className="text-stone-300">—</span> : (
+              <>
+                <div className="text-[15px] font-semibold tabular-nums leading-none text-stone-600" style={SG}>{formatCoteJuste(pred.cote_juste)}</div>
+                {!np && <div className="mt-1.5 flex justify-end"><LecturePrix marche={cote} juste={pred.cote_juste} /></div>}
+              </>
+            )}
+          </div>
+        )}
+        {avecPreds && (
+          <div className="hidden md:flex md:items-center md:justify-end md:gap-3">
+            {!pred || np ? <span className="text-stone-300">—</span> : (
+              <>
+                <span className="text-right text-[11px] leading-tight text-stone-500" title="Probabilité de finir dans les trois premiers">
+                  Top 3<br /><b className="text-[13px] font-bold tabular-nums text-stone-800" style={SG}>{(pred.proba_top3 * 100).toFixed(0)} %</b>
+                </span>
+                <Anneau v={pred.proba_top1} rang={rang} taille={56} />
+              </>
+            )}
+          </div>
+        )}
         <ChevronDown
           aria-hidden="true"
-          className={cn("hidden h-5 w-5 text-stone-400 transition-transform group-hover:text-stone-600 md:block", ouvert && "rotate-180")}
+          className={cn("hidden h-5 w-5 text-stone-400 transition-transform group-hover/carte:text-stone-600 md:block", ouvert && "rotate-180")}
         />
       </button>
 
       <div id={panneauId} hidden={!ouvert}>
         {ouvert && (
-          <div className="border-t border-[#F3EFE6] bg-[#FAF7EF] px-3 pb-5 pt-4 sm:px-5">
+          <div className="relative border-t border-[#EFE8D8] bg-[#FAF7EF]/80 px-3 pb-5 pt-4 sm:px-5">
             <FichePartant partant={p} cote={cote} eloChamp={eloChamp} />
           </div>
         )}
@@ -613,9 +723,9 @@ function Carte({ icone: Icone, titre, children, className }: {
   icone: typeof Activity; titre: string; children: ReactNode; className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl border border-[#ECE7DC] bg-white p-4", className)}>
+    <section className={cn("rounded-2xl bg-gradient-to-b from-white to-[#FDFBF6] p-4 ring-1 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.04),0_14px_26px_-22px_rgba(17,24,39,.4)]", className)}>
       <h4 className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.08em] text-stone-500">
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-b from-amber-50 to-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_2px_4px_-1px_rgba(146,64,14,.25)]">
           <Icone className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
         {titre}
