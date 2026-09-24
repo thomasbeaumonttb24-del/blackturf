@@ -264,44 +264,36 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
 
   return (
     <section aria-labelledby="partants-titre" className="space-y-3">
-      {/* ── En-tête : crème, halo or, piste en filigrane ── */}
-      <header className="relative isolate overflow-hidden rounded-[22px] bg-gradient-to-br from-white via-[#FFFCF4] to-[#FDF3DC] px-4 pb-4 pt-5 text-stone-900 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.04),0_22px_44px_-30px_rgba(146,64,14,.45)] ring-1 ring-[#EFE3C8] sm:px-6 sm:pt-6">
-        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-28 -z-10 h-72 w-72 rounded-full bg-amber-300/40 blur-3xl" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 -left-16 -z-10 h-64 w-64 rounded-full bg-amber-100/60 blur-3xl" />
-        <svg aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 h-full w-full opacity-[.35]" preserveAspectRatio="none" viewBox="0 0 400 120">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <ellipse key={i} cx="330" cy="160" rx={120 + i * 42} ry={70 + i * 26} fill="none" stroke="#E9C77A" strokeWidth="1" />
-          ))}
-        </svg>
+      {/* ── En-tête : sobre, blanc ── */}
+      <header className="rounded-[20px] bg-white px-4 py-4 ring-1 ring-[#ECE7DC] shadow-[0_1px_2px_rgba(17,24,39,.04)] sm:px-5">
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="min-w-0">
-            <p className="text-[10.5px] font-bold uppercase tracking-[.18em] text-amber-700">Le champ</p>
-            <h2 id="partants-titre" className="mt-1 text-[24px] font-bold leading-none tracking-tight sm:text-[28px]" style={SG}>Partants</h2>
-            <p className="mt-2 text-[12.5px] text-stone-500">
+            <h2 id="partants-titre" className="text-[18px] font-bold leading-tight tracking-tight text-stone-900" style={SG}>Partants</h2>
+            <p className="mt-0.5 text-[12.5px] text-stone-500">
               <b className="font-semibold text-stone-900">{partants.length - nbNP}</b> au départ
               {nbNP > 0 ? <> · <b className="font-semibold text-stone-700">{nbNP}</b> non-partant{nbNP > 1 ? "s" : ""}</> : null}
               <span className="hidden sm:inline"> · touchez un cheval pour sa fiche</span>
             </p>
           </div>
-          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:flex-col sm:items-end">
+          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:items-center">
             {difficulte && (
               <Pastille className={difficulte.cls} title={`Confiance du modèle sur son favori : ${Math.round(confGlobal!)} %`}>
                 {difficulte.txt}
               </Pastille>
             )}
             {favori && probaFavori != null && (
-              <span className="items-center gap-2 rounded-xl bg-white/80 px-3 py-1.5 shadow-[0_6px_16px_-10px_rgba(146,64,14,.5)] ring-1 ring-inset ring-amber-200 inline-flex" title="Le cheval que le modèle voit gagner">
+              <span className="items-center gap-2 rounded-lg bg-stone-50 px-2.5 py-1 ring-1 ring-inset ring-stone-200 inline-flex" title="Le cheval que le modèle voit gagner">
                 <Crown className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
                 <span className="text-[11px] text-stone-500">Favori</span>
-                <span className="text-[13px] font-bold" style={SG}>N°{favori.numero} {favori.nom_cheval}</span>
-                <span className="text-[13px] font-bold text-amber-700 tabular-nums" style={SG}>{Math.round(probaFavori * 100)} %</span>
+                <span className="text-[12.5px] font-semibold text-stone-900">N°{favori.numero} {favori.nom_cheval}</span>
+                <span className="text-[12.5px] font-bold text-amber-700 tabular-nums">{Math.round(probaFavori * 100)} %</span>
               </span>
             )}
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-          <div role="group" aria-label="Trier les partants" className="inline-flex items-center gap-1 rounded-xl bg-stone-900/[.05] p-1 ring-1 ring-inset ring-stone-900/[.06]">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-3">
+          <div role="group" aria-label="Trier les partants" className="inline-flex items-center gap-1 rounded-lg bg-stone-100 p-0.5">
             <ArrowDownUp className="ml-1.5 mr-0.5 h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
             {TRIS.map((t) => (
               <button
@@ -310,9 +302,9 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
                 aria-pressed={tri === t.cle}
                 onClick={() => setTri(t.cle)}
                 className={cn(
-                  "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
+                  "rounded-md px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
                   tri === t.cle
-                    ? "bg-gradient-to-b from-white to-stone-50 text-stone-900 shadow-[0_2px_6px_-2px_rgba(17,24,39,.25),inset_0_1px_0_#fff]"
+                    ? "bg-white text-stone-900 shadow-sm"
                     : "text-stone-500 hover:text-stone-900",
                 )}
               >
