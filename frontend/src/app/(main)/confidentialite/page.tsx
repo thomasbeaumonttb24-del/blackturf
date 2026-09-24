@@ -19,8 +19,8 @@ export default function ConfidentialitePage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">1. Responsable du traitement</h2>
         <p className="text-sm text-muted-foreground">
-          Thomas BEAUMONT — entrepreneur individuel exploitant sous le nom commercial « BlackTurf »,
-          10 rue Alix d&apos;Unienville, 33100 Bordeaux (SIREN 907&nbsp;548&nbsp;184).<br />
+          L&apos;éditeur de BlackTurf — entrepreneur individuel exploitant sous le nom commercial
+          « BlackTurf » (SIREN 907&nbsp;548&nbsp;184).<br />
           Contact données personnelles : <strong>privacy@blackturf.fr</strong><br />
           Hébergement : Union Européenne (Hetzner Online GmbH, Allemagne).
         </p>

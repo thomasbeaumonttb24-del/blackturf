@@ -20,9 +20,7 @@ export default function MentionsLegalesPage() {
         <h2 className="text-lg font-bold mb-3">Éditeur du site</h2>
         <p className="text-muted-foreground">
           Le site <strong>BlackTurf</strong> (blackturf.fr) est édité par :<br />
-          <strong>Thomas BEAUMONT</strong> — Entrepreneur individuel (micro-entreprise)<br />
-          Exploité sous le nom commercial « BlackTurf »<br />
-          Siège : 10 rue Alix d&apos;Unienville, 33100 Bordeaux, France<br />
+          Un entrepreneur individuel (micro-entreprise) exploitant sous le nom commercial « BlackTurf »<br />
           SIREN : 907&nbsp;548&nbsp;184 — SIRET (siège) : 907&nbsp;548&nbsp;184&nbsp;00023<br />
           RCS Bordeaux — immatriculé le 01/04/2025<br />
           TVA : non applicable, article 293&nbsp;B du CGI (franchise en base)<br />
@@ -33,7 +31,7 @@ export default function MentionsLegalesPage() {
       <section className="mb-8">
         <h2 className="text-lg font-bold mb-3">Directeur de la publication</h2>
         <p className="text-muted-foreground">
-          Thomas BEAUMONT, en qualité d&apos;entrepreneur individuel.
+          L&apos;éditeur du site, en qualité d&apos;entrepreneur individuel. Contact : contact@blackturf.fr.
         </p>
       </section>
 
@@ -74,7 +72,7 @@ export default function MentionsLegalesPage() {
         <h2 className="text-lg font-bold mb-3">Propriété intellectuelle</h2>
         <p className="text-muted-foreground">
           L&apos;ensemble des contenus du site (textes, algorithmes, interface, marque et nom commercial
-          BlackTurf) est la propriété exclusive de Thomas BEAUMONT. Toute reproduction, représentation ou
+          BlackTurf) est la propriété exclusive de l&apos;éditeur de BlackTurf. Toute reproduction, représentation ou
           exploitation, totale ou partielle, sans autorisation écrite préalable est interdite.
         </p>
       </section>

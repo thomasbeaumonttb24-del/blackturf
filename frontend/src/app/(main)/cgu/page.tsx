@@ -21,7 +21,7 @@ export default function CguPage() {
         <p className="text-sm text-muted-foreground">
           Les présentes CGU régissent l'utilisation de la plateforme BlackTurf (blackturf.fr),
           outil d'aide à la décision basé sur l'intelligence artificielle pour les paris hippiques.
-          BlackTurf (Thomas BEAUMONT, entrepreneur individuel) se réserve le droit de modifier ces CGU à tout moment.
+          BlackTurf (entrepreneur individuel) se réserve le droit de modifier ces CGU à tout moment.
         </p>
       </section>
 
@@ -83,7 +83,7 @@ export default function CguPage() {
         <h2 className="text-lg font-semibold">7. Propriété intellectuelle</h2>
         <p className="text-sm text-muted-foreground">
           L'ensemble du contenu (modèles ML, interface, algorithmes, données agrégées) est la propriété
-          exclusive de BlackTurf (Thomas BEAUMONT, entrepreneur individuel). Toute reproduction, distribution ou exploitation commerciale
+          exclusive de BlackTurf (entrepreneur individuel). Toute reproduction, distribution ou exploitation commerciale
           sans autorisation écrite est interdite.
         </p>
       </section>
@@ -99,7 +99,7 @@ export default function CguPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">9. Contact</h2>
         <p className="text-sm text-muted-foreground">
-          contact@blackturf.fr — BlackTurf (Thomas BEAUMONT, entrepreneur individuel), France
+          contact@blackturf.fr — BlackTurf (entrepreneur individuel), France
         </p>
       </section>
     </div>

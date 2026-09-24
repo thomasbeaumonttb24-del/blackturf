@@ -38,7 +38,7 @@ export default function BlogIndex() {
       dateModified: a.updated,
       // Même auteur que sur la fiche de l'article : deux déclarations divergentes pour
       // un même contenu se contredisent au lieu de se renforcer.
-      author: { "@type": "Person", name: "Thomas Beaumont" },
+      author: { "@type": "Organization", name: "BlackTurf" },
       url: `https://blackturf.fr/blog/${a.slug}`,
     })),
   };

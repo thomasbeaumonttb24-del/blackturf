@@ -100,30 +100,19 @@ export const metadata: Metadata = {
 
 // Données structurées globales (organisation + site) → éligibilité rich results / sitelinks.
 //
-// L'entité était réduite au nom, à l'URL et au logo, alors que /mentions-legales publie
-// déjà l'éditeur nommé, son SIREN, son adresse et son contact. Sur un sujet d'argent, ces
-// éléments sont précisément ce qui permet à Google de rattacher le site à une entité
-// réelle et identifiable plutôt qu'à une marque anonyme. Tout ce qui est déclaré ici est
-// visible sur la page des mentions légales : rien n'est balisé qui ne soit publié.
+// Tout ce qui est déclaré ici est visible sur la page des mentions légales : rien n'est
+// balisé qui ne soit publié. Ni nom de personne ni adresse postale : l'éditeur ne publie
+// pas son identité personnelle ni son domicile.
 const orgJsonLd = {
   "@context": "https://schema.org",
   "@type": "Organization",
   name: "BlackTurf",
-  legalName: "Thomas Beaumont (entreprise individuelle)",
   url: "https://blackturf.fr",
   logo: "https://blackturf.fr/logo.png",
   image: `https://blackturf.fr${OG_IMAGE.url}`,
   description:
     "Conseiller IA en paris hippiques PMU : plan de mise personnalisé et paris de valeur, réentraîné après chaque course.",
   foundingDate: "2025-04-01",
-  founder: { "@type": "Person", name: "Thomas Beaumont" },
-  address: {
-    "@type": "PostalAddress",
-    streetAddress: "10 rue Alix d'Unienville",
-    postalCode: "33100",
-    addressLocality: "Bordeaux",
-    addressCountry: "FR",
-  },
   contactPoint: {
     "@type": "ContactPoint",
     contactType: "customer support",
