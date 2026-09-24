@@ -15,7 +15,8 @@ import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { MusiqueDisplay, RunningStyleBadge } from "@/components/courses/badges";
 import { formatMontantDevise, cn } from "@/lib/utils";
 import { LecturePrix, formatCoteFr, formatCoteJusteFr } from "@/components/courses/classement";
-import { BandeauOnglet, LienOnglet, Pastille, SG, difficulteCourse } from "@/components/courses/course-ui";
+import { Anneau, BandeauOnglet, LienOnglet, Pastille, SG, difficulteCourse } from "@/components/courses/course-ui";
+export { Anneau };
 
 const formatCote = (c: number | null | undefined) => (c ? formatCoteFr(c) : "—");
 const formatCoteJuste = (c: number | null | undefined) => (c ? formatCoteJusteFr(c) : "—");
@@ -428,42 +429,6 @@ function Medaille({ rang }: { rang: number }) {
         {rang}
       </span>
       {m.txt}
-    </span>
-  );
-}
-
-/** Jauge circulaire de la chance de victoire : l'arc est la VRAIE probabilité
- *  (25 % = un quart de tour), pas une échelle relative au favori. */
-export function Anneau({ v, rang, taille }: { v: number; rang: number | undefined; taille: number }) {
-  const id = useId();
-  const r = taille / 2 - 4;
-  const c = 2 * Math.PI * r;
-  const couleurs = rang === 1 ? ["#FCD34D", "#D97706"] : rang != null && rang <= 3 ? ["#94A3B8", "#334155"] : ["#D6D3D1", "#78716C"];
-  const txt = v < 0.005 ? "<1" : String(Math.round(v * 100));
-  return (
-    <span
-      className="relative inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-white to-stone-100 shadow-[inset_0_1px_0_#fff,0_1px_1px_rgba(17,24,39,.06),0_6px_14px_-8px_rgba(17,24,39,.35)]"
-      style={{ width: taille, height: taille }}
-      role="img"
-      aria-label={`${txt} % de chance de victoire`}
-    >
-      <svg width={taille} height={taille} className="absolute inset-0 -rotate-90" aria-hidden="true">
-        <defs>
-          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor={couleurs[0]} />
-            <stop offset="100%" stopColor={couleurs[1]} />
-          </linearGradient>
-        </defs>
-        <circle cx={taille / 2} cy={taille / 2} r={r} fill="none" stroke="#F1EEE6" strokeWidth="4" />
-        <circle
-          cx={taille / 2} cy={taille / 2} r={r} fill="none" stroke={`url(#${id})`} strokeWidth="4" strokeLinecap="round"
-          strokeDasharray={`${Math.max(0.02, Math.min(1, v)) * c} ${c}`}
-          className="transition-[stroke-dasharray] duration-700"
-        />
-      </svg>
-      <span className={cn("relative font-bold tabular-nums leading-none", rang === 1 ? "text-amber-700" : "text-stone-900")} style={{ ...SG, fontSize: taille >= 52 ? 14 : 13 }}>
-        {txt}<span className="text-[0.75em]">%</span>
-      </span>
     </span>
   );
 }
