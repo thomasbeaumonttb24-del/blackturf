@@ -85,6 +85,8 @@ COLONNES_PARIEURS = frozenset({
     "pool_gagnant_ratio", "pool_gagnant_evolution", "tendance_cote_force",
     "market_timing_score", "field_hhi", "nb_outsiders", "ecart_proba_top2",
     "signal_agreement", "composite_confidence", "momentum_3j",
+    # Mouvement depuis la cote de référence PMU (branché le 2026-09-24) : marché.
+    "mouvement_ouverture",
 })
 
 # Réglages retenus à l'expérience (900 arbres, profondeur 6) : +0,005 de

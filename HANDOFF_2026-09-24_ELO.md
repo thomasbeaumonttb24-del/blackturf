@@ -25,6 +25,31 @@ Validation :
 - En simulation (valeur réelle connue), l'ancien ELO atteint une corrélation de rang de 0,09 et le nouveau 0,88. L'essentiel du gain vient de l'amorçage, puis des disqualifications. Sur les vraies courses, le gain sera plus faible.
 - Suite de tests : 14 nouveaux tests verts ; les 14 échecs restants existent déjà sur main (f-string Python 3.12 et SQLite).
 
+## Données dormantes branchées (2ᵉ passe)
+
+Nouvelles features, toutes point-in-time et **neutres quand la donnée manque** :
+
+| Feature | Donnée réveillée | Pourquoi |
+|---|---|---|
+| `jockey_hist_nb`, `jockey_hist_score`, `jockey_hist_delta`, `jockey_hist_inedit` | `historique_courses.jockey_course` (historique PMU complet) | réussite du cheval AVEC le jockey du jour vs en général ; la synergie existante ne lisait que les courses internes |
+| `oeilleres_jour`, `oeilleres_meme_config_nb`, `oeilleres_delta` | `equipement_course` passé + `equipements.oeilleres` du jour | certains chevaux ne courent bien qu'avec (ou sans) œillères |
+| `depart_volte`, `depart_autostart`, `risque_galop_volte` | `courses.type_depart` | au trot, la volte multiplie les fautes : le risque de galop n'a pas le même poids |
+| `jument_pleine` | `participations.jument_pleine` | signal trot connu |
+| `mouvement_ouverture` | `participations.cote_reference` | ln(cote de référence / cote actuelle) ; classée MARCHÉ (exclue du modèle technique et de `market_residual`) |
+| speed figures | `historique_courses.temps_officiel` | temps propre du cheval prioritaire sur la reconstitution vainqueur + écart (garde-fou ±25 % de la vitesse de référence) |
+| `elo_vs_champ`, `class_drop_ratio_reel` | — | versions à échelle homogène **réintégrées** au modèle |
+
+Écritures post-course ajoutées (`ml/pipeline._save_historical_course`) :
+- `commentaire_course` depuis `/participants`, ce qui réveille les 4 features `commentaire_*`. Un rejeu ne l'efface pas.
+- `equipement_course` (œillères du jour) pour les courses internes.
+
+Non branché, et pourquoi :
+- `gains_rapportes` : aucune source. Le résultat PMU ne publie pas de gain par partant dans ce qu'on lit. Les gains de carrière sont déjà utilisés.
+- `temps_passage` et les taux d'accélération : aucune source de temps de passage.
+- Cotes Bet365 / Ladbrokes : aucun scraper ne les écrit.
+
+Les nouvelles features n'entrent dans le modèle qu'**au prochain réentraînement**, une fois `recompute_features_prerace` passé. D'ici là, `predict` les ignore (reindex sur `feature_names`).
+
 ## À faire en production (dans l'ordre)
 
 Depuis `/opt/blackturf` :

@@ -1664,6 +1664,124 @@ def compute_spi_from_cotes_history(cotes_history: list[float], window_minutes: i
     return 0.0
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Données stockées mais jamais lues — branchées le 2026-09-24
+# ─────────────────────────────────────────────────────────────────────────────
+def _nom_cle(nom) -> str:
+    """Nom de jockey comparable entre sources : sans accents, ponctuation ni espaces."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(nom or "")).encode("ascii", "ignore").decode()
+    return "".join(ch for ch in t.upper() if ch.isalpha())
+
+
+def _score_sortie(pos, nb_partants: int) -> Optional[float]:
+    """Note d'une sortie passée : place → score, incident (99) → 0, inconnue → None."""
+    if not pos:
+        return None
+    return score_position(int(pos), nb_partants)
+
+
+def traits_jockey_historique(historique, jockey_nom, nb_partants: int) -> dict:
+    """Le cheval avec le jockey / driver DU JOUR, sur TOUTE sa carrière connue.
+
+    `jockey_cheval_synergy_*` ne lit que les courses internes (participations) ;
+    ici on lit `historique_courses.jockey_course`, rempli aussi par l'historique
+    PMU externe — bien plus de sorties. `jockey_hist_delta` : réussite avec ce
+    jockey moins réussite générale (>0 = le couple lui réussit). 0 si inconnu.
+    """
+    cle = _nom_cle(jockey_nom)
+    tous = [x for x in (_score_sortie(h[0], nb_partants) for h in historique) if x is not None]
+    avec = [x for x in (_score_sortie(h[0], nb_partants) for h in historique
+                        if cle and len(h) > 16 and h[16] and _nom_cle(h[16]) == cle)
+            if x is not None]
+    deja_monte = any(len(h) > 16 and h[16] for h in historique)
+    return {
+        "jockey_hist_nb": len(avec),
+        "jockey_hist_score": float(np.mean(avec)) if avec else 0.0,
+        "jockey_hist_delta": (float(np.mean(avec) - np.mean(tous))
+                              if avec and len(tous) >= 3 else 0.0),
+        # Jamais associé au cheval alors qu'on connaît ses jockeys passés.
+        "jockey_hist_inedit": 1.0 if (cle and deja_monte and not avec) else 0.0,
+    }
+
+
+def oeilleres_portees(raw) -> Optional[bool]:
+    """Œillères du jour depuis le libellé PMU (« SANS_OEILLERES », « OEILLERES_
+    AUSTRALIENNES », « Standard »…). None si inconnu — jamais deviné."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    t = str(raw).strip().upper()
+    if not t:
+        return None
+    return not ("SANS" in t or t in ("NON", "AUCUNE", "FALSE", "0"))
+
+
+def traits_oeilleres(historique, oeilleres_jour_raw, nb_partants: int) -> dict:
+    """Réussite passée du cheval DANS LA MÊME CONFIGURATION d'œillères qu'aujourd'hui.
+
+    `historique_courses.equipement_course` ({"oeilleres": bool}) était stocké pour
+    chaque sortie PMU et jamais relu. Certains chevaux ne courent bien qu'avec (ou
+    sans) : `oeilleres_delta` = réussite dans la config du jour − réussite générale.
+    """
+    jour = oeilleres_portees(oeilleres_jour_raw)
+    neutre = {"oeilleres_jour": -1.0 if jour is None else float(jour),
+              "oeilleres_meme_config_nb": 0, "oeilleres_delta": 0.0}
+    if jour is None:
+        return neutre
+    tous, meme = [], []
+    for h in historique:
+        sc = _score_sortie(h[0], nb_partants)
+        eq = h[17] if len(h) > 17 else None
+        if sc is None:
+            continue
+        tous.append(sc)
+        if isinstance(eq, dict) and isinstance(eq.get("oeilleres"), bool) \
+                and eq["oeilleres"] == jour:
+            meme.append(sc)
+    neutre["oeilleres_meme_config_nb"] = len(meme)
+    if len(meme) >= 2 and len(tous) >= 3:
+        neutre["oeilleres_delta"] = float(np.mean(meme) - np.mean(tous))
+    return neutre
+
+
+def traits_depart(type_depart, taux_faute: float, est_trot: bool) -> dict:
+    """Type de départ au trot. Le départ À LA VOLTE provoque bien plus de fautes que
+    l'autostart : le risque de galop d'un cheval fautif n'a pas le même poids selon
+    le départ. `courses.type_depart` était scrapé et stocké, jamais lu."""
+    t = str(type_depart or "").upper()
+    volte = 1.0 if (est_trot and "VOLTE" in t) else 0.0
+    autostart = 1.0 if (est_trot and "AUTO" in t) else 0.0
+    return {"depart_volte": volte, "depart_autostart": autostart,
+            "risque_galop_volte": float(taux_faute) * volte}
+
+
+def mouvement_ouverture(cote_reference, cote_pmu) -> float:
+    """ln(cote de référence PMU / cote actuelle). >0 : la cote a BAISSÉ depuis
+    l'ouverture (l'argent arrive), <0 : elle a monté. 0 si l'une manque."""
+    try:
+        ref, act = float(cote_reference or 0), float(cote_pmu or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if ref <= 1.0 or act <= 1.0:
+        return 0.0
+    return float(np.clip(math.log(ref / act), -1.5, 1.5))
+
+
+def vitesse_propre_depuis_temps(temps_officiel, distance) -> Optional[float]:
+    """Vitesse du cheval (m/s) depuis SON temps officiel (courses internes)."""
+    from ml.race_dynamics import parse_temps_to_seconds
+    try:
+        secs = (float(temps_officiel) if isinstance(temps_officiel, (int, float))
+                else parse_temps_to_seconds(str(temps_officiel)) if temps_officiel else None)
+    except (TypeError, ValueError):
+        secs = None
+    if not secs or secs <= 0 or not distance:
+        return None
+    return float(distance) / secs
+
+
 def _amorces_elo(partants, elo_notes: set) -> dict:
     """Rating de départ d'un inédit, par discipline : moyenne des partants DÉJÀ
     notés dans cette discipline (au moins AMORCE_MIN_NOTES), sinon absent.
@@ -1742,7 +1860,12 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             -- equipements.deferre, jamais exploitée (seuls les flags _change l'étaient).
             eq.deferre AS deferre_detail,
             -- Valeur de handicap (#10) — note du handicapeur (courses à handicap).
-            p.valeur_handicap
+            p.valeur_handicap,
+            -- Données scrapées et stockées mais jamais lues (audit du 24/09), EN FIN :
+            -- œillères du jour (texte PMU), type de départ (autostart / volte),
+            -- jument pleine, cote de référence PMU (ouverture du marché).
+            eq.oeilleres AS oeilleres_jour, c.type_depart, p.jument_pleine,
+            p.cote_reference
         FROM participations p
         JOIN courses c ON c.course_id = p.course_id
         JOIN chevaux ch ON ch.cheval_id = p.cheval_id
@@ -1784,6 +1907,10 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
                h.ecart_longueurs,
                -- Déroulé / trip note de la course passée (#9). EN FIN → index 15.
                h.commentaire_course,
+               -- 16 jockey de CETTE sortie, 17 équipement porté (clé "oeilleres" booléenne),
+               -- 18 temps officiel du cheval (courses internes), 19 course_id (NULL =
+               -- historique externe PMU). Stockés, jamais lus jusqu'au 24/09.
+               h.jockey_course, h.equipement_course, h.temps_officiel, h.course_id,
                -- ALLOCATION NORMALISÉE EN EUROS — DERNIÈRE colonne, lue par h[-1].
                -- Voir le commentaire de la requête mono-cheval : la table mélange
                -- centimes (lignes PMU) et euros (scraper d'historique externe).
@@ -1804,7 +1931,8 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
             # (0 position, 1 distance, 2 terrain, 3 hippodrome, 4 date, 5 nb_partants,
             #  6 cote, 7 discipline, 8 allocation, 9 acceleration_label, 10 reduction_km,
             #  11 corde, 12 poids_porte_course, 13 indice_vitesse, 14 ecart_longueurs,
-            #  15 commentaire_course)
+            #  15 commentaire_course, 16 jockey_course, 17 equipement_course,
+            #  18 temps_officiel, 19 course_id, -1 allocation_eur)
             hist_by_cheval[cid].append(row[1:])
 
     # 3. ELO history — POINT-IN-TIME : uniquement les deltas ELO des courses
@@ -2264,20 +2392,23 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     except Exception as e:  # noqa: BLE001
         log.warning("features.draw_bias_failed", err=str(e)[:120])
 
-    # 18. STATS DU CHAMP sur les colonnes ajoutées EN FIN du SELECT. Ordre final des
-    #     dernières colonnes : …, handicap_distance (r[-3]), deferre_detail (r[-2]),
-    #     valeur_handicap (r[-1]). (Référencées par index négatif → si on en rajoute,
-    #     mettre à jour ces offsets.)
+    # 18. STATS DU CHAMP sur handicap_distance et valeur_handicap, lues PAR NOM.
     # `handicapDistance` du PMU n'est PAS un recul : c'est la DISTANCE que court le
     # cheval (2 950 m, pas 25 m). Mesuré le 2026-09-06 sur 60 jours : 1 623 courses
     # la publient, et 362 seulement ont un écart entre partants — dans les autres,
     # tout le monde a la distance de la course. Le recul réel est donc l'écart à la
     # PREMIÈRE LIGNE du jour, d'où `recul_min`.
-    field_recul = [int(r[-3]) for r in partants_raw if r[-3] is not None and int(r[-3]) > 0]
+    # Lus PAR NOM : des colonnes ont été ajoutées après elles (24/09), un index
+    # négatif pointerait désormais sur le type de départ.
+    field_recul = [int(r._mapping["handicap_distance"]) for r in partants_raw
+                   if r._mapping["handicap_distance"] is not None
+                   and int(r._mapping["handicap_distance"]) > 0]
     recul_mean = float(np.mean(field_recul)) if field_recul else 0.0
     recul_max = float(max(field_recul)) if field_recul else 0.0
     recul_min = float(min(field_recul)) if field_recul else 0.0
-    field_valeur = [int(r[-1]) for r in partants_raw if r[-1] is not None and int(r[-1]) > 0]
+    field_valeur = [int(r._mapping["valeur_handicap"]) for r in partants_raw
+                    if r._mapping["valeur_handicap"] is not None
+                    and int(r._mapping["valeur_handicap"]) > 0]
     valeur_mean = float(np.mean(field_valeur)) if field_valeur else 0.0
     valeur_max = float(max(field_valeur)) if field_valeur else 0.0
 
@@ -2473,6 +2604,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         indicateur_inedit_raw, nb_places_2_raw, nb_places_3_raw,
         cheval_nom, jockey_nom, entraineur_nom,
         handicap_distance_raw, deferre_detail_raw, valeur_handicap_raw,
+        oeilleres_jour_raw, type_depart_raw, jument_pleine_raw, cote_reference_raw,
     ) = row
 
     # ── ANTI-FUITE : taux J/E/asso POINT-IN-TIME (trailing, date<départ) ──────
@@ -3042,8 +3174,16 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         if rk and rk > 0 and ("trot" in h_disc_l or "attel" in h_disc_l or "mont" in h_disc_l):
             own_ms = 1000.0 / float(rk)            # reduction_km = sec/km → m/s
         else:
+            # Temps officiel PROPRE du cheval (courses internes) avant la
+            # reconstitution vainqueur + écart : c'est une mesure, pas une estimation.
+            # Gardé seulement s'il tombe dans ±25 % de la vitesse de référence — le
+            # temps brut PMU a une unité non vérifiée, un facteur 10 serait écarté.
+            _own_t = vitesse_propre_depuis_temps(h[18] if len(h) > 18 else None, h_dist)
+            _ref_t = get_vitesse_ref(h_disc, h_dist) if _own_t else None
+            if _own_t and _ref_t and 0.8 <= _own_t / _ref_t <= 1.25:
+                own_ms = _own_t
             winner_ms = h[13] if len(h) > 13 else None
-            if winner_ms and winner_ms > 0 and h_dist > 0:
+            if own_ms is None and winner_ms and winner_ms > 0 and h_dist > 0:
                 ecart_m = (float(h[14]) * LONGUEUR_M) if (len(h) > 14 and h[14] is not None) else 0.0
                 own_ms = float(winner_ms) * h_dist / (h_dist + ecart_m)
         if own_ms and h_dist > 0:
@@ -3263,6 +3403,15 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         0.0, 1.0
     ))
 
+    # ── Données stockées mais jamais lues (branchées le 2026-09-24) ─────────────
+    feat_donnees_reveillees = {
+        **traits_jockey_historique(historique, jockey_nom, nb_partants_int),
+        **traits_oeilleres(historique, oeilleres_jour_raw, nb_partants_int),
+        **traits_depart(type_depart_raw, taux_faute, _is_trot_allure),
+        "jument_pleine": 1.0 if jument_pleine_raw else 0.0,
+        "mouvement_ouverture": mouvement_ouverture(cote_reference_raw, cote_pmu),
+    }
+
     feat_confidence = {
         "data_completeness": float(data_completeness),
         "signal_agreement": float(signal_agreement),
@@ -3308,6 +3457,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         **feat_cheval, **feat_course, **feat_populaire, **feat_signal,
         **feat_field, **feat_temporal, **feat_pace_conflict, **feat_pedigree,
         **feat_synergy, **feat_fingerprint, **feat_advanced, **feat_pace, **feat_speed,
+        **feat_donnees_reveillees,
         **feat_class, **feat_recul, **feat_valeur, **feat_bounce, **feat_draw, **feat_trainer,
         **feat_career, **feat_confidence, **feat_pmu, **feat_dormant,
     }

@@ -68,14 +68,12 @@ META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "lab
              #     365j, date<départ) dans features.py et CONSERVÉS.
              "jockey_victoires_saison", "entraineur_victoires_saison",
              "jockey_montes_30j", "jockey_roi", "entraineur_roi",
-             # (c) VERSIONS CORRIGÉES, calculées pour l'AFFICHAGE seul. Elles
-             #     rejouent `class_drop_ratio` / `elo_vs_moyenne` sur des échelles
-             #     homogènes (allocations toutes en euros, ELO comparé au champ de la
-             #     même discipline). Le modèle en production a été entraîné sur les
-             #     versions d'origine : les garder hors du jeu d'entraînement évite un
-             #     doublon quasi colinéaire et tout écart train/serve. À réintégrer
-             #     sciemment lors d'un retrain dédié, en retirant ces deux noms.
-             "class_drop_ratio_reel", "elo_vs_champ"}
+             # (c) `class_drop_ratio_reel` et `elo_vs_champ` — les versions à échelle
+             #     homogène (allocations en euros, ELO comparé au champ de la MÊME
+             #     discipline) — sont RÉINTÉGRÉES le 2026-09-24, avec le recalcul ELO
+             #     et le recompute des features : le retrain qui suit les apprend.
+             #     Jusque-là `predict` les ignore (reindex sur `feature_names`).
+             }
 
 # Colonnes de MARCHÉ — retirées du vecteur d'entraînement quand le drapeau
 # `market_residual` est actif (cf. ml.algo_flags). Elles restent calculées et
@@ -84,6 +82,7 @@ META_COLS = {"participation_id", "course_id", "cheval_id", "numero", "nom", "lab
 COLONNES_MARCHE = {
     "cote_pmu", "prob_implicite", "rang_cote", "est_favori",
     "rang_popularite", "rang_cote_relatif", "indice_valeur",
+    "mouvement_ouverture",
 }
 
 # Brier score minimum requis avant déploiement

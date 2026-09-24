@@ -674,6 +674,9 @@ class PmuScraper(BaseScraper):
                     "temps": round(temps_ms / 1000, 2) if temps_ms else None,
                     "reduction_km": round(rk / 1000, 2) if rk else None,
                     "incident": p.get("incident"),
+                    # Déroulé publié par /participants APRÈS la course — la seule
+                    # source du commentaire (absent de /performances-detaillees).
+                    "commentaire": _extract_commentaire({}, p),
                 })
         if not ordre:
             return None  # course pas encore arrivée
@@ -698,6 +701,7 @@ class PmuScraper(BaseScraper):
                     "reduction_km": None,
                     "incident": incident,
                     "disqualifie": True,
+                    "commentaire": _extract_commentaire({}, p),
                 })
 
         # 2) Rapports (dividendes) via /rapports-definitifs (liste de typePari)
