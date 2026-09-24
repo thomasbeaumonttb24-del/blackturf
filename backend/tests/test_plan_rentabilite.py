@@ -341,9 +341,9 @@ def test_le_filet_refuse_la_loterie_pure_quand_il_a_le_choix():
     # plutôt que de le maquiller : le plancher reste câblé (il ferme le seul chemin du
     # moteur sans borne d'EV), mais il n'est plus la raison pour laquelle ce champ est
     # propre. L'invariant qui compte, lui, est vérifié inconditionnellement ci-dessous.
-    # SPEC_EV_FLOOR est local à `_select_conviction` : on répète sa valeur ici plutôt
-    # que d'exposer une constante uniquement pour le test.
-    PLANCHER = -0.40
+    # Le plancher est une constante de module depuis le 2026-09-24 (rejeu P0-A).
+    PLANCHER = mc._SPEC_EV_FLOOR
+    assert PLANCHER == -0.40
     assert avec is not None, "le filet ne rend plus aucun pari sur ce champ"
     assert avec >= PLANCHER, (
         "pari de filet à EV %.3f, sous le plancher de loterie pure (%.2f)"
