@@ -113,8 +113,13 @@ PONDERATION_ECART = False
 # Poids d'un duel perdu sur incident (disqualifié, tombé…) : 1 = une défaite
 # pleine, 0 = l'incident est ignoré (ancienne règle).
 POIDS_DUEL_INCIDENT = 1.0
-# Multiplicateur global de K (réactivité). 1 = barème `get_k_factor` tel quel.
-K_MULTIPLICATEUR = 1.0
+# Multiplicateur global de K (réactivité), retenu sur l'historique RÉEL (grille du
+# 2026-09-24, 20 284 courses, mesure sur les 9 839 des 180 derniers jours) :
+#   ×1 : concordance 0,5739 · log-vrais. gagnant −2,194
+#   ×2 : 0,5786 · −2,161      ×4 : 0,5848 · −2,147 (meilleure)      ×8 : 0,5887 · −2,233
+# Au-delà de ×4 le classement gagne encore un peu, mais les écarts de notes ne
+# veulent plus dire la même chose (vraisemblance qui rechute) : ×4.
+K_MULTIPLICATEUR = 4.0
 
 
 def champ_elo(discipline: Optional[str]) -> str:

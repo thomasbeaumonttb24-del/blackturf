@@ -117,6 +117,10 @@ class Mesure:
         # la probabilité que l'ELO lui-même donne à chaque partant. Plus haut = mieux.
         self.ll = {"ancien": [0.0, 0], "nouveau": [0.0, 0]}
         self.top3 = {"ancien": [0, 0], "nouveau": [0, 0]}
+        # Taux « meilleur ELO gagnant » PAR MOIS : un avantage concentré sur une
+        # période (ex. snapshots rétro-remplis) trahit un artefact, pas un signal.
+        self.par_mois: dict = {}
+        self.mois_courant = None
 
     def ajouter(self, cle, valides, rating):
         rangs = [(r["position"], rating[r["cheval_id"]]) for r in valides
@@ -132,6 +136,10 @@ class Mesure:
                 self.ok[cle] += 1.0 if devant > derriere else (0.5 if devant == derriere else 0.0)
                 self.n[cle] += 1
         meilleur = max(rangs, key=lambda x: x[1])
+        if self.mois_courant:
+            m = self.par_mois.setdefault(self.mois_courant, {"ancien": [0, 0], "nouveau": [0, 0]})
+            m[cle][0] += 1 if meilleur[0] == 1 else 0
+            m[cle][1] += 1
         self.gagnant[cle][0] += 1 if meilleur[0] == 1 else 0
         self.gagnant[cle][1] += 1
         self.top3[cle][0] += 1 if meilleur[0] <= 3 else 0
@@ -143,6 +151,13 @@ class Mesure:
             z = sum(10 ** ((r - mx) / 400.0) for _, r in rangs)
             self.ll[cle][0] += (vainqueurs[0] - mx) / 400.0 * math.log(10) - math.log(z)
             self.ll[cle][1] += 1
+
+    def rapport_mensuel(self):
+        for mois in sorted(self.par_mois):
+            m = self.par_mois[mois]
+            a, n = m["ancien"], m["nouveau"]
+            print(f"[mois] {mois} : meilleur ELO gagnant ancien {a[0] / max(a[1], 1):.3f}"
+                  f" · nouveau {n[0] / max(n[1], 1):.3f} ({n[1]} courses)", flush=True)
 
     def rapport(self):
         for cle in ("ancien", "nouveau"):
@@ -208,6 +223,7 @@ async def rejouer(session, etat, courses, hist, snaps, mesure=None, depuis=None,
             valides, avant = jouer_course(etat, c, p, hist, snaps)
             c.pop("classement", None)
             if mesure is not None and depuis and c["date_heure"] >= depuis and len(valides) >= 2:
+                mesure.mois_courant = c["date_heure"].strftime("%Y-%m")
                 idx = {"elo_score_plat": 4, "elo_score_trot": 5, "elo_score_obstacle": 6}[
                     champ_elo(c["discipline"] or "plat")]
                 ancien = {r[2]: r[idx] for r in p}
@@ -326,12 +342,27 @@ async def main(appliquer: bool):
         await rejouer(s, etat, courses, hist, snaps, mesure, depuis,
                       vider if appliquer else None, jeter=not appliquer)
         mesure.rapport()
+        mesure.rapport_mensuel()
         await fautifs(s, etat)
 
         if not appliquer:
             print("[elo] À BLANC : rien n'a été écrit. Relancer avec --appliquer.", flush=True)
             return
         await vider()
+
+        # ── Sauvegarde de l'existant (réversibilité), hors transaction de bascule ─
+        suffixe = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+        for sql in (
+            f"CREATE TABLE elo_sauvegarde_chevaux_{suffixe} AS SELECT cheval_id, "
+            "elo_score_global, elo_score_plat, elo_score_trot, elo_score_obstacle FROM chevaux",
+            f"CREATE TABLE elo_sauvegarde_participations_{suffixe} AS SELECT participation_id, "
+            "elo_avant_global, elo_avant_plat, elo_avant_trot, elo_avant_obstacle "
+            "FROM participations WHERE elo_avant_global IS NOT NULL",
+            f"CREATE TABLE elo_sauvegarde_historique_{suffixe} AS SELECT * FROM elo_historique",
+        ):
+            await s.execute(text(sql))
+        await s.commit()
+        print(f"[elo] sauvegarde de l'existant : tables elo_sauvegarde_*_{suffixe}", flush=True)
 
         # ── Bascule : une transaction, tout ou rien ──────────────────────────
         await s.execute(text("SET LOCAL lock_timeout = '120s'"))
