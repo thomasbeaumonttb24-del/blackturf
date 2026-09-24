@@ -5,11 +5,10 @@ fausse. Un test par défaut, et chacun échoue sur le code d'avant.
 """
 import pytest
 from datetime import datetime, timedelta
-from sqlalchemy import text
 
-from db.models import Cheval, Course, Participation, Equipement, HistoriqueCourse
+from db.models import Cheval, Course, Participation, Equipement
 import ml.features as tr
-from ml.features import SQL_DRAW_BIAS, cle_hippodrome, corde_zone
+from ml.features import corde_zone
 from scraper.base import PartantScrape
 from scraper.db_writer import champs_reecrits_participation, equipement_precedent
 
@@ -105,46 +104,10 @@ async def test_une_course_posterieure_n_est_pas_la_course_precedente(db):
     assert await equipement_precedent(db, "CH", "AUJOURDHUI") is None
 
 
-# ── 3. Les deux libellés d'hippodrome ne s'apparient que dans un sens ─────────
-
-async def _hist(db, hid, hippo, corde, position):
-    db.add(HistoriqueCourse(historique_id=hid, cheval_id="CH", hippodrome=hippo,
-                            date_course=datetime(2026, 5, 1).date(), pays="AR",
-                            discipline="Plat", distance=2000, corde=corde,
-                            position_arrivee=position))
-
-
-@pytest.mark.asyncio
-async def test_le_libelle_court_se_retrouve_dans_le_libelle_long(db):
-    """1 896 journalisations en 30 h, toutes « aucune valeur de corde en base ».
-
-    `courses.hippodrome_nom` dit « HIPPODROME DE SAN ISIDRO ARG », tandis que
-    `historique_courses.hippodrome` dit « SAN ISIDRO ». Le `ILIKE '%' || long || '%'`
-    d'origine cherchait le LONG dans le COURT : il ne pouvait matcher pour aucun
-    hippodrome, et les 83 311 lignes de corde de la table n'ont jamais servi.
-    """
-    db.add(Cheval(cheval_id="CH", nom="PEGASE"))
-    await _hist(db, "h1", "SAN ISIDRO", "3", 1)
-    await _hist(db, "h2", "SAN ISIDRO", "11", 8)
-    await db.commit()
-
-    rows = (await db.execute(text(SQL_DRAW_BIAS), {
-        "hippo": cle_hippodrome("HIPPODROME DE SAN ISIDRO ARG"), "dist": 2000,
-    })).fetchall()
-    assert {r[0] for r in rows} == {"3", "11"}
-
-
-@pytest.mark.asyncio
-async def test_l_appariement_se_fait_en_mots_entiers(db):
-    """Sans les espaces de garde, « MONS » se retrouverait dans « SIMONSTOWN »."""
-    db.add(Cheval(cheval_id="CH", nom="PEGASE"))
-    await _hist(db, "h1", "MONS", "2", 1)
-    await db.commit()
-
-    rows = (await db.execute(text(SQL_DRAW_BIAS), {
-        "hippo": cle_hippodrome("HIPPODROME DE SIMONSTOWN"), "dist": 2000,
-    })).fetchall()
-    assert rows == []
+# ── 3. La zone de corde se lit sur la stalle ─────────────────────────────────
+# (Le biais de corde par hippodrome est testé dans tests/test_biais_corde.py :
+#  il ne lit plus `historique_courses`, dont la colonne `corde` porte le sens du
+#  virage et non une stalle.)
 
 
 def test_la_zone_se_lit_sur_la_stalle_pas_sur_le_dossard():

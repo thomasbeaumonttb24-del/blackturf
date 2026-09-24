@@ -257,27 +257,218 @@ def get_terrain_famille(terrain: Optional[str]) -> str:
     return "inconnu"
 
 
-# ── Appariement des deux libellés d'hippodrome ───────────────────────────────
-# `courses.hippodrome_nom` porte le libellé long du programme (« HIPPODROME DE SAN
-# ISIDRO ARG ») ; `historique_courses.hippodrome` porte le libellé court des
-# performances (« SAN ISIDRO »). On cherche donc le COURT dans le LONG, en MOTS
-# ENTIERS — sans les espaces de garde, « MONS » matcherait « SIMONSTOWN ».
-SQL_DRAW_BIAS = """
-    SELECT h.corde,
-           COUNT(*) AS n,
-           COUNT(*) FILTER (WHERE h.position_arrivee <= 3) AS top3
-    FROM historique_courses h
-    WHERE h.corde IS NOT NULL
-      AND h.position_arrivee IS NOT NULL
-      AND h.distance IS NOT NULL AND ABS(h.distance - :dist) <= 400
-      AND :hippo LIKE '% ' || UPPER(h.hippodrome) || ' %'
-    GROUP BY h.corde
+# ── Biais de corde : STALLES RÉELLES × ARRIVÉES RÉELLES, point-in-time ────────
+# Jusqu'au 2026-09-24 le biais se lisait dans `historique_courses.corde`. Cette
+# colonne texte porte le SENS DU VIRAGE (« CORDE_GAUCHE »), pas une stalle : tout
+# était jeté comme illisible et `draw_bias_score` sortait constant (une des 37
+# variables mortes de l'entraînement). La stalle vit dans
+# `participations.numero_corde` (PMU `placeCorde`, rattrapée sur 12 mois par
+# scripts/backfill_numero_corde.py) et l'arrivée dans `resultats.classement`.
+#
+# Même hippodrome = même libellé long `courses.hippodrome_nom`, comparé via la
+# même clé `cle_hippodrome` (majuscules, espaces de garde) que partout ailleurs.
+# Même discipline, distance ±400 m, courses TERMINÉES STRICTEMENT ANTÉRIEURES à la
+# course calculée (`c.date_heure < :dref`) : aucune arrivée future n'entre dans
+# le calcul, même en recalcul d'historique.
+_SQL_DRAW_BIAS_FILTRE = """
+      ' ' || UPPER(c.hippodrome_nom) || ' ' = :hippo
+      AND c.discipline = :disc
+      AND c.distance IS NOT NULL AND ABS(c.distance - :dist) <= 400
+      AND c.date_heure < :dref
+      AND c.statut = 'termine'
 """
+SQL_DRAW_BIAS = """
+    SELECT p.course_id, p.numero, p.numero_corde
+    FROM participations p
+    JOIN courses c ON c.course_id = p.course_id
+    WHERE """ + _SQL_DRAW_BIAS_FILTRE + """
+      AND p.numero_corde IS NOT NULL
+      AND COALESCE(p.non_partant, false) = false
+"""
+SQL_DRAW_BIAS_ARRIVEES = """
+    SELECT r.course_id, r.classement
+    FROM resultats r
+    JOIN courses c ON c.course_id = r.course_id
+    WHERE """ + _SQL_DRAW_BIAS_FILTRE + """
+      AND EXISTS (SELECT 1 FROM participations p
+                  WHERE p.course_id = c.course_id AND p.numero_corde IS NOT NULL)
+"""
+
+# Seuils anti-bruit (inchangés) : 30 sorties par zone, 100 au total.
+DRAW_BIAS_MIN_ZONE = 30
+DRAW_BIAS_MIN_TOTAL = 100
 
 
 def cle_hippodrome(nom) -> str:
     """Libellé long encadré d'espaces, prêt pour un appariement en mots entiers."""
     return f" {str(nom or '').upper()} "
+
+
+def _positions_classement(classement) -> dict[int, int]:
+    """`resultats.classement` → {numéro: position}. Tolère JSON texte ou déjà
+    décodé ; une position absente (non classé, arrêté) n'est simplement pas là."""
+    import json as _json
+    if isinstance(classement, (str, bytes)):
+        try:
+            classement = _json.loads(classement)
+        except (TypeError, ValueError):
+            return {}
+    out: dict[int, int] = {}
+    for e in classement or []:
+        if not isinstance(e, dict):
+            continue
+        try:
+            num, pos = int(e.get("numero")), e.get("position")
+            if pos is not None:
+                out[num] = int(pos)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def rang_stalle_relatif(stalle: int | None, stalles_du_champ: list[int]) -> float | None:
+    """Position relative de la stalle dans le champ RÉEL : 0 = la plus à la corde,
+    1 = la plus à l'extérieur. Rang parmi les stalles des partants (et non
+    stalle / nb_partants) : un non-partant laisse une stalle vide, et la stalle 16
+    d'un champ de 14 partants reste la plus extérieure, pas « 1,07 »."""
+    if not stalle or not stalles_du_champ:
+        return None
+    s = sorted(set(int(x) for x in stalles_du_champ if x))
+    if int(stalle) not in s:
+        return None
+    if len(s) < 2:
+        return 0.5
+    return s.index(int(stalle)) / (len(s) - 1)
+
+
+def sorties_corde(stalles_rows, arrivees_rows) -> list[tuple[int, int, float, int]]:
+    """Assemble les sorties passées : [(stalle, taille du champ, rang relatif, top3)].
+
+    `stalles_rows` = [(course_id, numero, numero_corde)] (SQL_DRAW_BIAS),
+    `arrivees_rows` = [(course_id, classement)] (SQL_DRAW_BIAS_ARRIVEES). Une course
+    sans arrivée publiée (ou sans gagnant) est ignorée : on ne compte pas de
+    « non-placé » par défaut."""
+    positions = {cid: _positions_classement(cl) for cid, cl in arrivees_rows}
+    par_course: dict[str, list[tuple[int, int]]] = {}
+    for cid, num, cor in stalles_rows:
+        if cor is None or num is None:
+            continue
+        par_course.setdefault(cid, []).append((int(num), int(cor)))
+    out = []
+    for cid, partants in par_course.items():
+        pos = positions.get(cid)
+        if not pos or 1 not in pos.values():
+            continue
+        n = len(partants)
+        if n < 2:
+            continue
+        stalles = [c for _, c in partants]
+        for num, cor in partants:
+            p = pos.get(num)
+            top3 = 1 if (p is not None and 1 <= p <= 3) else 0
+            out.append((cor, n, rang_stalle_relatif(cor, stalles), top3))
+    return out
+
+
+def biais_corde(sorties) -> dict:
+    """Biais de corde mesuré sur des sorties PASSÉES. Fonction PURE.
+
+    Le top-3 se juge contre l'ATTENDU du champ (min(3, n) / n), pas contre le taux
+    global de l'échantillon : l'ancienne formule `taux_zone − taux_global` punissait
+    l'extérieur d'office, puisque les stalles 9+ n'existent que dans les grands
+    champs, où tout le monde se place moins. Mesuré sur 561 courses de plat
+    (sept. 2026) : l'écart int./ext. brut valait 11 pts, dont 3,4 pts seulement
+    d'effet de corde une fois la taille du champ neutralisée.
+
+    Retour : {"zones": {zone: écart}, "pente": écart par unité de rang relatif,
+    "n": sorties}. Zone retenue à ≥ 30 sorties, tout le biais à ≥ 100 ; sinon vide
+    (→ 0,0 neutre en aval, jamais une valeur inventée)."""
+    acc: dict[str, list[float]] = {}
+    sxy = sxx = 0.0
+    n_tot = 0
+    for stalle, n, rel, top3 in sorties:
+        z = corde_zone(stalle)
+        if z == "inconnu" or not n:
+            continue
+        ecart = float(top3) - min(3, n) / n
+        a = acc.setdefault(z, [0.0, 0])
+        a[0] += ecart
+        a[1] += 1
+        n_tot += 1
+        if rel is not None:
+            x = rel - 0.5
+            sxy += x * ecart
+            sxx += x * x
+    res: dict = {"zones": {}, "pente": 0.0, "n": n_tot}
+    if n_tot < DRAW_BIAS_MIN_TOTAL:
+        return res
+    for z, (s, k) in acc.items():
+        if k >= DRAW_BIAS_MIN_ZONE:
+            res["zones"][z] = float(np.clip(s / k, -0.3, 0.3))
+    if sxx > 0:
+        res["pente"] = float(np.clip(sxy / sxx, -1.0, 1.0))
+    return res
+
+
+def _discipline_sans_stalle(discipline) -> bool:
+    d = (discipline or "").lower()
+    return "trot" in d or "attelé" in d or "monté" in d
+
+
+async def charger_biais_corde(session, hippodrome, discipline, distance, date_ref
+                              ) -> tuple[dict, float]:
+    """Biais de corde de (hippodrome, discipline, distance ±400 m) mesuré sur les
+    courses terminées STRICTEMENT antérieures à `date_ref`. → (zones, pente).
+
+    Seul chemin de calcul : le chargeur de features (#17) et le rattrapage des
+    vecteurs historiques (scripts/patch_features_corde.py) l'appellent tous deux,
+    pour qu'une valeur recalculée soit exactement celle que le live aurait servie.
+    Trot / données absentes / échantillon insuffisant → ({}, 0.0), journalisé
+    `draw_bias_indisponible` avec sa raison."""
+    if _discipline_sans_stalle(discipline) or not hippodrome or not distance or date_ref is None:
+        return {}, 0.0
+    try:
+        params = {"hippo": cle_hippodrome(hippodrome), "disc": discipline,
+                  "dist": int(distance), "dref": date_ref}
+        stalles = (await session.execute(text(SQL_DRAW_BIAS), params)).fetchall()
+        arrivees = (await session.execute(text(SQL_DRAW_BIAS_ARRIVEES), params)).fetchall() \
+            if stalles else []
+        sorties = sorties_corde(stalles, arrivees)
+        b = biais_corde(sorties)
+        if b["zones"]:
+            return b["zones"], b["pente"]
+        log.info(
+            "features.draw_bias_indisponible",
+            hippodrome=str(hippodrome)[:40],
+            n_stalles=len(stalles), n_sorties=b["n"],
+            raison=("aucune stalle en base" if not stalles
+                    else "aucune arrivée publiée" if not sorties
+                    else "échantillon insuffisant"),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("features.draw_bias_failed", err=str(e)[:120])
+    return {}, 0.0
+
+
+def traits_corde(stalle: int | None, stalles_partants: list[int],
+                 biais_zones: dict, pente: float) -> dict:
+    """Variables de corde d'UN partant. Fonction PURE.
+
+    Pas de stalle connue (trot, obstacle, donnée absente) → valeurs neutres, jamais
+    un numéro de programme en repli : en plat le numéro suit le poids ou l'ordre
+    d'engagement, la stalle est tirée au sort.
+
+      • draw_bias_score  : écart de top-3 (vs attendu du champ) de la ZONE de la
+                           stalle sur cet hippodrome/distance, dans le passé ;
+      • draw_bias_relatif: la même mesure lue en continu — pente locale × rang
+                           relatif centré (0 = milieu du champ)."""
+    if not stalle:
+        return {"draw_bias_score": 0.0, "draw_bias_relatif": 0.0}
+    z = corde_zone(int(stalle))
+    score = float(biais_zones.get(z, 0.0))
+    rel = rang_stalle_relatif(stalle, stalles_partants)
+    relatif = float(np.clip(pente * (rel - 0.5), -0.3, 0.3)) if (rel is not None and biais_zones) else 0.0
+    return {"draw_bias_score": float(np.clip(score, -1, 1)), "draw_bias_relatif": relatif}
 
 
 def traits_recul(distance_hcp, recul_min, recul_mean, recul_max, distance_course) -> dict:
@@ -2140,75 +2331,15 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     except Exception as e:  # noqa: BLE001
         log.warning("features.nb_courses_reunion_failed", err=str(e)[:120])
 
-    # 17. DRAW BIAS data-driven — avantage réel d'une ZONE DE CORDE sur CET hippodrome
-    #     à cette distance (±400m), mesuré sur tout l'historique. Remplace l'heuristique
-    #     en dur (numero<=4 → +0.15…). On agrège le top3-rate par zone (int 1-4 /
-    #     milieu 5-8 / ext 9+) et on le centre sur le top3-rate global de l'échantillon :
-    #     biais = rate_zone − rate_global (positif = zone avantagée ici). Plat/obstacle
-    #     seulement (le trot n'a pas de corde). Min 30 sorties/zone et 100 au total
-    #     sinon zone absente → fallback 0.0 neutre (no-fake).
-    draw_bias_by_zone: dict = {}
-    try:
-        _disc_l = (course_disc or "").lower()
-        _is_trot = "trot" in _disc_l or "attelé" in _disc_l or "monté" in _disc_l
-        course_hippo = partants_raw[0][27]
-        if not _is_trot and course_hippo and course_dist:
-            # APPARIEMENT DES DEUX NOMS D'HIPPODROME, DANS CE SENS-LÀ.
-            # `courses.hippodrome_nom` porte le libellé long du programme
-            # (« HIPPODROME DE SAN ISIDRO ARG ») ; `historique_courses.hippodrome`
-            # porte le libellé court des performances (« SAN ISIDRO »). Le
-            # `ILIKE '%' || long || '%'` d'origine cherchait donc le LONG dans le
-            # COURT : il ne pouvait matcher pour aucun hippodrome, et les 83 311
-            # lignes de corde de la table n'ont jamais servi (mesuré 2026-09-06 :
-            # 1 896 journalisations `draw_bias_indisponible` en 30 h, toutes avec
-            # « aucune valeur de corde en base »).
-            # On cherche donc le COURT dans le LONG, et en MOTS ENTIERS : sans les
-            # espaces de garde, « MONS » matcherait « SIMONSTOWN ».
-            draw_r = await session.execute(
-                text(SQL_DRAW_BIAS),
-                {"hippo": cle_hippodrome(course_hippo),
-                 "dist": int(course_dist or 2000)})
-            zone_acc: dict = {}  # zone -> [top3, n]
-            tot_top3 = tot_n = 0
-            # `historique_courses.corde` est une COLONNE TEXTE : selon ce que publie
-            # le PMU, elle peut porter un numéro de stalle (« 7 », exploitable) ou un
-            # sens de rail (« CORDE_GAUCHE », inexploitable ici). Les deux cas étaient
-            # avalés par le même `continue` muet — et `draw_bias_score` sort constant
-            # à 0 sans que rien ne dise si la donnée manque ou si elle est d'un autre
-            # type. On compte donc les deux, et on le dit : c'est la seule façon que
-            # la prochaine feature morte n'attende pas un audit manuel.
-            n_illisibles = n_lignes = 0
-            for corde_val, n, top3 in draw_r.fetchall():
-                n_lignes += 1
-                try:
-                    z = corde_zone(int(corde_val))
-                except (TypeError, ValueError):
-                    n_illisibles += 1
-                    continue
-                if z == "inconnu":
-                    n_illisibles += 1
-                    continue
-                a = zone_acc.setdefault(z, [0, 0])
-                a[0] += int(top3 or 0)
-                a[1] += int(n or 0)
-                tot_top3 += int(top3 or 0)
-                tot_n += int(n or 0)
-            if tot_n >= 100:
-                base_rate = tot_top3 / tot_n
-                for z, (t3, n) in zone_acc.items():
-                    if n >= 30:
-                        draw_bias_by_zone[z] = float(np.clip((t3 / n) - base_rate, -0.3, 0.3))
-            if not draw_bias_by_zone:
-                log.info(
-                    "features.draw_bias_indisponible",
-                    hippodrome=str(course_hippo)[:40],
-                    n_valeurs_corde=n_lignes, n_illisibles=n_illisibles, n_sorties=tot_n,
-                    raison=("aucune valeur de corde en base" if not n_lignes
-                            else "valeurs de corde non numériques" if n_illisibles == n_lignes
-                            else "échantillon insuffisant"),
-                )
-    except Exception as e:  # noqa: BLE001
-        log.warning("features.draw_bias_failed", err=str(e)[:120])
+    # 17. DRAW BIAS data-driven — avantage réel de la STALLE sur CET hippodrome, à
+    #     cette distance (±400 m), dans cette discipline, mesuré sur les courses
+    #     TERMINÉES ANTÉRIEURES (cf. SQL_DRAW_BIAS / biais_corde). Plat/obstacle
+    #     seulement : en trot le PMU renvoie le numéro lui-même comme `placeCorde`
+    #     (vérifié le 2026-09-24), il n'y a pas de stalle tirée au sort à mesurer.
+    #     En obstacle le PMU ne publie aucune stalle : le calcul y tombe en
+    #     « aucune stalle en base » et rend 0,0 neutre.
+    draw_bias_by_zone, draw_bias_pente = await charger_biais_corde(
+        session, partants_raw[0][27], course_disc, course_dist, date_heure)
 
     # 18. STATS DU CHAMP sur les colonnes ajoutées EN FIN du SELECT. Ordre final des
     #     dernières colonnes : …, handicap_distance (r[-3]), deferre_detail (r[-2]),
@@ -2244,7 +2375,12 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     return {
         "partants": partants_raw,
         "draw_bias_by_zone": draw_bias_by_zone,
+        "draw_bias_pente": draw_bias_pente,
         "corde_by_numero": corde_by_numero,
+        # Stalles des seuls PARTANTS (les non-partants laissent leur stalle vide) :
+        # base du rang relatif de chaque stalle dans le champ réel.
+        "stalles_partants": sorted(corde_by_numero[int(r[5])] for r in partants_raw
+                                   if r[5] is not None and int(r[5]) in corde_by_numero),
         "recul_mean": recul_mean,
         "recul_max": recul_max,
         "recul_min": recul_min,
@@ -3122,13 +3258,13 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # revenait à chercher le biais de la stalle 3 sous le dossard 3.
     # Pas de stalle connue → 0.0 neutre, jamais un numéro de repli : une valeur
     # fausse est pire qu'une valeur absente (le modèle apprend le repli).
-    draw_bias = 0.0
-    _corde_jour = (batch.get("corde_by_numero") or {}).get(int(numero)) if numero else None
-    if not _is_trot_allure and _corde_jour:
-        _zone_jour = corde_zone(int(_corde_jour))
-        draw_bias = float(batch.get("draw_bias_by_zone", {}).get(_zone_jour, 0.0))
-
-    feat_draw = {"draw_bias_score": float(np.clip(draw_bias, -1, 1))}
+    feat_draw = traits_corde(
+        None if _is_trot_allure else
+        ((batch.get("corde_by_numero") or {}).get(int(numero)) if numero else None),
+        batch.get("stalles_partants") or [],
+        batch.get("draw_bias_by_zone") or {},
+        float(batch.get("draw_bias_pente") or 0.0),
+    )
 
     # ── BB. Trainer return specialist ─────────────────────────────────────────
     # Entraîneur avec fort taux de victoire quand retour de longue absence (60j+)
