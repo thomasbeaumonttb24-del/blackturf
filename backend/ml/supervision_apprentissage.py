@@ -430,7 +430,29 @@ async def _issue_retrain(session: AsyncSession, etapes: list[dict]) -> dict:
         await session.rollback()
         log.warning("supervision.issue_retrain.lecture_impossible", err=str(e)[:160])
 
+    # RETARD D'APPRENTISSAGE du modèle actif : `maintenant − train_fin`. Distinct
+    # de `jours_sans_promotion` : v544, promu le 24/09 (zéro jour sans promotion),
+    # n'avait rien appris après le 08/07. Calculé en direct, parce que les nuits
+    # de rejet le font grandir sans qu'aucune issue ne l'écrive.
+    from ml.pipeline import retard_apprentissage
+    train_fin_actif = None
+    try:
+        train_fin_actif = (await session.execute(text("""
+            SELECT train_fin FROM model_versions
+            WHERE est_actif = true ORDER BY version_num DESC LIMIT 1
+        """))).scalar()
+    except Exception as e:  # pragma: no cover - lecture best-effort
+        await session.rollback()
+        log.warning("supervision.retard_apprentissage.lecture_impossible", err=str(e)[:160])
+    retard = retard_apprentissage(train_fin_actif)
+
     return {
+        "retard_apprentissage_jours": retard["jours"],
+        "retard_apprentissage_seuil_jours": retard["seuil_jours"],
+        "retard_apprentissage_alerte": retard["alerte"],
+        "refit_actif": retard["refit_actif"],
+        "train_fin_actif": (train_fin_actif.isoformat()
+                            if hasattr(train_fin_actif, "isoformat") else train_fin_actif),
         # `None` quand la colonne `detail` n'a pas encore été écrite par une nuit :
         # une absence d'issue n'est pas une promotion.
         "issue_derniere_nuit": issue,
@@ -481,5 +503,6 @@ async def etat_outils_apprentissage(session: AsyncSession) -> dict:
     # jours par des rejets successifs n'en périme aucune : l'alerte le couvre
     # désormais, sinon le gel reste invisible tant que les nuits « réussissent ».
     outils["alerte"] = bool(outils["etapes_perimees"]) or bool(
-        outils["retrain"].get("gel_suspect"))
+        outils["retrain"].get("gel_suspect")) or bool(
+        outils["retrain"].get("retard_apprentissage_alerte"))
     return outils

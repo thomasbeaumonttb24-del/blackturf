@@ -258,6 +258,22 @@ class AlgoFlags:
     vb_confirmation_technique: bool = field(
         default_factory=lambda: _env_bool("BT_VB_CONFIRMATION_TECHNIQUE", True))
 
+    # ── Refit final sur tout le jeu (P0 audit 2026-09-23) — DÉFAUT OFF ───────
+    # `BlackTurfEnsemble.train()` réserve les 20 % de courses les plus récentes
+    # en hold-out, et c'est l'artefact entraîné sur les 80 % anciens qui était
+    # servi : v544 (promu le 24/09) porte `train_fin = 2026-07-08`, soit ~77 jours
+    # de résultats que les arbres n'ont jamais appris.
+    #
+    # Activé : la DÉCISION ne change pas — le challenger est mesuré sur le même
+    # hold-out, contre le modèle d'ÉVALUATION du champion (`model_vNNNN_eval.pkl`).
+    # Une fois la promotion décidée, la même procédure (mêmes hyperparamètres,
+    # même vecteur de features) est rejouée sur TOUTES les courses du jeu, et
+    # c'est ce refit qui est servi. Les métriques stockées restent celles du
+    # hold-out. Détail et justification : ml.pipeline._modele_a_servir.
+    #
+    # DÉFAUT OFF : l'activation est une décision de Thomas (P0_B_retrain_2026-09-24.md).
+    refit_full: bool = field(default_factory=lambda: _env_bool("BT_REFIT_FULL", False))
+
     def as_dict(self) -> dict:
         return {
             "train_prerace_only": self.train_prerace_only,
@@ -285,6 +301,7 @@ class AlgoFlags:
             "melange_arrivees": self.melange_arrivees,
             "modele_technique": self.modele_technique,
             "vb_confirmation_technique": self.vb_confirmation_technique,
+            "refit_full": self.refit_full,
         }
 
 

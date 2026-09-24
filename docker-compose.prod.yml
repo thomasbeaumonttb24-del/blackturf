@@ -180,6 +180,9 @@ services:
       # ── Flags algo (audit edge 2026-06-14) — cf. backend/ml/algo_flags.py + ALGO_FIXES_2026-06-14.md.
       # TOUT activé (2026-06-14, "active tout") : anti-leakage + dé-vig + calibration honnête
       # + dashboards vrais + combos EV honnête + STAKING-SAFE (cap bankroll + no gain-target dump).
+      # Refit final du modèle servi (P0 2026-09-24, défaut OFF) : l'API ne l'utilise que
+      # pour le seuil d'alerte du retard d'apprentissage (ml.supervision_apprentissage).
+      - BT_REFIT_FULL=${BT_REFIT_FULL:-0}
       - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
       - BT_TRAIN_PRERACE_ONLY=${BT_TRAIN_PRERACE_ONLY:-1}
       - BT_CALIB_GUARD=${BT_CALIB_GUARD:-1}
@@ -340,6 +343,9 @@ services:
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ENVIRONMENT=production
       # ── Flags algo (cf. api) — le retrain nightly + calibrations + gate ROI tournent ici (rq).
+      # Refit final sur tout le jeu après la décision de promotion (P0 2026-09-24).
+      # DÉFAUT OFF : activation = décision de Thomas (cf. P0_B_retrain_2026-09-24.md).
+      - BT_REFIT_FULL=${BT_REFIT_FULL:-0}
       - BT_GROUP_SPLIT=${BT_GROUP_SPLIT:-1}
       - BT_TRAIN_PRERACE_ONLY=${BT_TRAIN_PRERACE_ONLY:-1}
       - BT_CALIB_GUARD=${BT_CALIB_GUARD:-1}

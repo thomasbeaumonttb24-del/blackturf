@@ -580,6 +580,144 @@ def _borne_hors_echantillon(current_mv) -> tuple[object, str]:
     return current_mv.created_at, "created_at"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Refit final du modèle servi (drapeau `refit_full`, P0 audit 2026-09-23)
+# ─────────────────────────────────────────────────────────────────────────────
+# Le modèle servi était celui entraîné sur les 80 % de courses les plus
+# anciennes : v544, promu le 24/09, porte `train_fin = 2026-07-08`. Le drapeau
+# garde la DÉCISION intacte (même hold-out, même arbitre) et ne change que
+# l'artefact servi après la décision.
+#
+# Seuils d'alerte du retard d'apprentissage (`maintenant − train_fin` du modèle
+# actif). Avec refit, le retard normal vaut ~1 jour plus les nuits de rejet :
+# une semaine signale un gel. Sans refit, il vaut PAR CONSTRUCTION la largeur du
+# hold-out (~73-78 jours sur douze mois) : alerter à 14 jours alerterait toutes
+# les nuits pour un fait connu, et une alerte permanente ne se lit plus. Le seuil
+# à 100 jours garde la détection d'un gel réel (trois semaines de rejets au-delà
+# du retard structurel). Le retard lui-même est TOUJOURS exposé, quel que soit le
+# seuil : c'est le chiffre que l'audit a dû aller chercher à la main.
+RETARD_APPRENTISSAGE_SEUIL_REFIT_J = 7.0
+RETARD_APPRENTISSAGE_SEUIL_SANS_REFIT_J = 100.0
+
+
+def retard_apprentissage(train_fin, maintenant: Optional[datetime] = None,
+                         refit_actif: Optional[bool] = None) -> dict:
+    """`maintenant − train_fin` du modèle servi, en jours, et le verdict d'alerte.
+
+    Fonction pure (hors lecture du drapeau quand `refit_actif` est None).
+    `train_fin` absent → jours None et PAS d'alerte : une mesure impossible n'est
+    pas un retard, et les versions antérieures à la migration 0043 n'en ont pas.
+    """
+    if refit_actif is None:
+        from ml.algo_flags import FLAGS as _AF
+        refit_actif = _AF.refit_full
+    seuil = (RETARD_APPRENTISSAGE_SEUIL_REFIT_J if refit_actif
+             else RETARD_APPRENTISSAGE_SEUIL_SANS_REFIT_J)
+    if train_fin is None:
+        return {"jours": None, "seuil_jours": seuil, "alerte": False,
+                "refit_actif": bool(refit_actif)}
+    if isinstance(train_fin, str):
+        train_fin = datetime.fromisoformat(train_fin)
+    if train_fin.tzinfo is None:
+        train_fin = train_fin.replace(tzinfo=timezone.utc)
+    maintenant = maintenant or datetime.now(timezone.utc)
+    if maintenant.tzinfo is None:
+        maintenant = maintenant.replace(tzinfo=timezone.utc)
+    jours = round((maintenant - train_fin).total_seconds() / 86400, 1)
+    return {"jours": jours, "seuil_jours": seuil, "alerte": jours > seuil,
+            "refit_actif": bool(refit_actif)}
+
+
+def _derniere_course(X: pd.DataFrame, masque: Optional[np.ndarray] = None) -> Optional[str]:
+    """`course_id` de la dernière ligne (X est trié chronologiquement) du masque."""
+    if "course_id" not in X.columns or len(X) == 0:
+        return None
+    ids = X["course_id"] if masque is None else X.loc[masque, "course_id"]
+    return ids.iloc[-1] if len(ids) else None
+
+
+async def _date_course(session: AsyncSession, course_id: Optional[str]):
+    """`date_heure` d'une course, ou None. Best-effort : une colonne
+    d'observabilité ne fait jamais échouer un retrain."""
+    if course_id is None:
+        return None
+    try:
+        return (await session.execute(
+            text("SELECT date_heure FROM courses WHERE course_id = :cid"),
+            {"cid": course_id},
+        )).scalar()
+    except Exception as _e:
+        log.warning("pipeline.retrain.train_fin_indisponible", err=str(_e)[:160])
+        return None
+
+
+def _modele_a_servir(evaluation: BlackTurfEnsemble, X: pd.DataFrame, y: pd.Series,
+                     y_win: Optional[pd.Series], *, refit: bool) -> BlackTurfEnsemble:
+    """Le modèle à DÉPLOYER, une fois la promotion décidée sur `evaluation`.
+
+    Drapeau éteint : `evaluation` lui-même — comportement historique, au même
+    objet près.
+
+    Drapeau allumé : la même procédure rejouée sur TOUT X (train + hold-out),
+    mêmes hyperparamètres, même vecteur de features, et les mesures du hold-out
+    recopiées. Ce qui se réajuste, et pourquoi il n'y a pas de fuite :
+
+    - Estimateurs de base XGBoost / LightGBM / CatBoost : réappris sur tout le
+      jeu. C'est l'objet du refit.
+    - Calibration isotone interne (`CalibratedClassifierCV`) : RÉAJUSTÉE. Elle
+      est croisée — chaque calibrateur est ajusté sur le pli qu'aucun des arbres
+      qu'il calibre n'a vu, plis groupés par course (`plis_calibration`). Elle
+      n'est donc jamais apprise sur les données d'entraînement de son propre
+      estimateur, au refit pas plus qu'à l'évaluation. La figer serait pire :
+      une isotone apprise sur les sorties des anciens arbres, appliquée aux
+      sorties des nouveaux, calibre une distribution qui n'existe plus.
+    - Méta-apprenant de stacking : RÉAJUSTÉ, sur des prédictions HORS PLI
+      (StratifiedGroupKFold par course) recalculées sur tout le jeu — même
+      garantie. Le figer l'aurait fait combiner des L0 qu'il n'a jamais vues.
+    - Modèle de victoire : RÉAJUSTÉ, calibration croisée groupée comme ci-dessus.
+      Sa mesure (`win_auc`, `win_brier`) et le contrôle `victoire` du duel
+      restent ceux du modèle d'évaluation.
+    - Ranker : RÉAJUSTÉ (aucune calibration). Coupé en production
+      (BT_RANKER_BLEND=0), réappris pour rester cohérent avec les L0.
+    - Vecteur de features : FIGÉ sur celui de l'évaluation (cf. `train`).
+    - Ce qui reste FIGÉ hors du modèle : l'alpha du mélange marché, les β de
+      `melange_arrivees`, les isotones top1/top3, la température, Harville,
+      la netteté. Ils sont appris chaque nuit sur les prédictions RÉELLEMENT
+      servies avant départ (tables de prédictions), jamais sur le jeu
+      d'entraînement : le refit ne les touche pas et ne peut pas les biaiser.
+
+    Aucune mesure du refit sur ses propres données n'est produite ni stockée :
+    `auc_roc`, `rank_auc`, `market_rank_auc`… restent celles du hold-out
+    honnête (`reprendre_mesures`), en base comme dans le pickle.
+    """
+    if not refit:
+        return evaluation
+    servi = BlackTurfEnsemble()
+    servi.train(X, y, y_win, refit=True, feature_names=list(evaluation.feature_names))
+    servi.reprendre_mesures(evaluation)
+    return servi
+
+
+def _champion_evaluation(current_mv) -> Optional[Path]:
+    """Chemin du modèle d'ÉVALUATION du champion s'il a été refit, sinon None.
+
+    Le champion refit a appris le hold-out du challenger : le confronter tel quel
+    lui donnerait un avantage mécanique, et sa `train_fin` (la veille) ne laisse
+    aucune course que les deux n'aient pas vue. L'arbitre compare donc les deux
+    modèles d'ÉVALUATION — exactement le duel d'avant le refit. None = champion
+    sans refit : `current_model.pkl` EST son modèle d'évaluation.
+    """
+    num = getattr(current_mv, "version_num", None)
+    if num is None:
+        return None
+    try:
+        from ml.models import chemin_evaluation
+        chemin = chemin_evaluation(int(num))
+    except Exception:
+        return None
+    return chemin if chemin.exists() else None
+
+
 async def _head_to_head_auc(
     session: AsyncSession,
     challenger: BlackTurfEnsemble,
@@ -622,7 +760,28 @@ async def _head_to_head_auc(
     if "course_id" not in X_hold.columns or len(X_hold) == 0:
         return None
 
-    borne, borne_source = _borne_hors_echantillon(current_mv)
+    # Champion REFIT (drapeau refit_full) : on arbitre avec son modèle
+    # d'ÉVALUATION et la borne de CE modèle (cf. `_champion_evaluation`). Sans ce
+    # fichier, le champion servi est son propre modèle d'évaluation et
+    # `train_fin` est sa borne — le chemin historique, inchangé.
+    champion_eval = None
+    _chemin_eval = _champion_evaluation(current_mv)
+    if _chemin_eval is not None:
+        try:
+            champion_eval = BlackTurfEnsemble.load(_chemin_eval)
+        except Exception as e:
+            log.warning("pipeline.h2h.evaluation_illisible", err=str(e)[:160])
+            return None
+        borne = getattr(champion_eval, "fin_apprentissage", None)
+        borne_source = "evaluation"
+        if borne is None:
+            # Une borne inventée serait pire que pas de test (cf. docstring).
+            log.warning("pipeline.h2h.evaluation_sans_borne", chemin=str(_chemin_eval))
+            return None
+        log.info("pipeline.h2h.champion_evaluation", chemin=str(_chemin_eval),
+                 borne=str(borne))
+    else:
+        borne, borne_source = _borne_hors_echantillon(current_mv)
 
     try:
         rows = await session.execute(
@@ -700,7 +859,9 @@ async def _head_to_head_auc(
             return None
 
     try:
-        champion = BlackTurfEnsemble.load_current()
+        champion = (champion_eval if champion_eval is not None
+                    else BlackTurfEnsemble.load_current())
+        champion_eval = None
         if champion is None:
             return None
         # predict_proba reindexe sur ses propres feature_names → tolère une dérive
@@ -1748,6 +1909,11 @@ async def _do_retraining(mois: int, label: str) -> dict:
         # worker comme victime de l'OOM global bien après la fin du calcul.
         _release_memory(f"{label}.dataset_freed")
 
+        # Drapeau refit_full lu UNE fois pour toute la nuit : la décision, le refit
+        # et l'issue persistée doivent parler du même régime.
+        from ml.algo_flags import FLAGS as _AF_REFIT
+        _refit = bool(_AF_REFIT.refit_full)
+
         # Entraîner l'ensemble (top-3) + le modèle de victoire dédié (top-1)
         model = BlackTurfEnsemble()
         metrics = model.train(X, y, y_win)
@@ -1767,25 +1933,31 @@ async def _do_retraining(mois: int, label: str) -> dict:
         # X est trié chronologiquement (le dataset sort en ORDER BY c.date_heure), donc
         # le dernier course_id du côté entraînement est bien le plus récent appris. La
         # date elle-même n'est pas dans X (le dataset ne porte que les features et les
-        # identifiants) : une requête d'une ligne la donne.
-        _train_fin = None
-        try:
-            _dernier = X.loc[~_hm, "course_id"].iloc[-1] if "course_id" in X.columns else None
-            if _dernier is not None:
-                _train_fin = (await session.execute(
-                    text("SELECT date_heure FROM courses WHERE course_id = :cid"),
-                    {"cid": _dernier},
-                )).scalar()
-        except Exception as _e:
-            # Best-effort : sans cette date le head-to-head retombe sur la borne
-            # stricte, exactement le comportement d'avant. Ne jamais faire échouer un
-            # retrain pour une colonne d'observabilité.
-            log.warning("pipeline.retrain.train_fin_indisponible", err=str(_e)[:160])
-        log.info(f"pipeline.{label}.train_fin", train_fin=str(_train_fin) if _train_fin else None)
+        # identifiants) : une requête d'une ligne la donne. Best-effort : sans cette
+        # date le head-to-head retombe sur la borne stricte, exactement le
+        # comportement d'avant (cf. `_date_course`).
+        #
+        # Drapeau refit_full : c'est la fin d'apprentissage du modèle d'ÉVALUATION
+        # (borne du duel de la nuit suivante, archivée dans son pickle), et la
+        # colonne `train_fin` reçoit celle du modèle SERVI — la dernière course du
+        # jeu entier, puisque le refit l'a apprise.
+        _train_fin_eval = await _date_course(session, _derniere_course(X, ~_hm))
+        _train_fin_complet = (await _date_course(session, _derniere_course(X))
+                              if _refit else None)
+        _train_fin = _train_fin_eval
+        log.info(f"pipeline.{label}.train_fin",
+                 train_fin=str(_train_fin_eval) if _train_fin_eval else None,
+                 train_fin_refit=str(_train_fin_complet) if _train_fin_complet else None,
+                 refit=_refit)
         # X/y/y_win ne servent plus à la décision de promotion (métriques déjà calculées)
         # → on libère avant la phase métriques/edge_monitor pour ne pas cumuler le pic RAM.
+        # Sauf drapeau refit_full : le refit en aura besoin si la promotion est
+        # décidée. Le jeu en float32 pèse quelques centaines de Mo, rien à côté du
+        # pic de l'entraînement qui vient de se terminer.
         n_train_rows = len(X)
-        del X, y, y_win, _hm
+        if not _refit:
+            del X, y, y_win
+        del _hm
         _release_memory(f"{label}.matrices_freed")
 
         # Récupérer le modèle actif EN BASE pour une comparaison HONNÊTE.
@@ -1905,7 +2077,41 @@ async def _do_retraining(mois: int, label: str) -> dict:
             victoire_bloque=_victoire_bloquee,
         ):
             version_num = await _get_next_version_num(session)
-            model.deploy(version_num)
+            # Drapeau refit_full : la décision est prise, on sert le refit sur tout
+            # le jeu (cf. `_modele_a_servir`) et on archive le modèle d'évaluation
+            # pour l'arbitre de demain. Un refit qui échoue ne coûte JAMAIS la
+            # promotion : on sert alors le modèle d'évaluation, comme avant.
+            _refit_ok = False
+            _refit_info: Optional[dict] = None
+            _importance_servie = model.feature_importance
+            if _refit:
+                _t_refit = datetime.now()
+                _log_rss(f"{label}.refit.start", n_rows=n_train_rows)
+                try:
+                    servi = _modele_a_servir(model, X, y, y_win, refit=True)
+                    model.fin_apprentissage = _train_fin_eval
+                    servi.fin_apprentissage = _train_fin_complet
+                    model.save_evaluation(version_num)
+                    servi.deploy(version_num)
+                    _refit_ok = True
+                    _train_fin = _train_fin_complet
+                    _importance_servie = servi.feature_importance
+                    _refit_info = {
+                        "duree_s": round((datetime.now() - _t_refit).total_seconds(), 1),
+                        "train_fin_evaluation": (_train_fin_eval.isoformat()
+                                                 if hasattr(_train_fin_eval, "isoformat")
+                                                 else _train_fin_eval),
+                    }
+                    del servi
+                except Exception as _e:
+                    log.error("pipeline.retrain.refit_echec", err=str(_e)[:200],
+                              repli="modele_evaluation_servi")
+                    _refit_info = {"echec": str(_e)[:160]}
+                _log_rss(f"{label}.refit.done", ok=_refit_ok)
+                del X, y, y_win
+                _release_memory(f"{label}.refit_freed")
+            if not _refit_ok:
+                model.deploy(version_num)
 
             # Enregistrer en DB
             mv = ModelVersion(
@@ -1935,11 +2141,18 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 # (MIN_RELIABLE_TRAIN, data_jump) s'y comparent. On ne change
                 # donc pas l'unité, on a corrigé les libellés qui l'affichaient.
                 nb_courses_train=n_train_rows,
-                # Borne de l'arbitrage champion/challenger de la nuit suivante.
+                # Dernière course apprise par le modèle SERVI. Sans refit, c'est
+                # aussi la borne de l'arbitrage champion/challenger de la nuit
+                # suivante ; avec refit, cette borne-là vit dans le pickle
+                # d'évaluation (`fin_apprentissage`) et `train_fin` mesure le
+                # retard réel du produit (cf. `retard_apprentissage`).
                 train_fin=_train_fin,
                 est_actif=True,
                 est_synthetique=False,  # entraîné sur de vraies courses
-                feature_importance=model.feature_importance,
+                # Importances du modèle SERVI : elles décrivent ce qui produit les
+                # probabilités, pas une performance (les mesures de performance
+                # ci-dessus restent celles du hold-out).
+                feature_importance=_importance_servie,
             )
             session.add(mv)
 
@@ -1985,6 +2198,8 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 dette_record_version=_record_version,
                 dette_ecrite=_dette_ecrite,
                 rank_source=_rank_source,
+                refit=_refit_ok,
+                train_fin=str(_train_fin) if _train_fin else None,
             )
             # Issue PERSISTÉE (cf. docstring). Écrite ici et non après la purge
             # d'archives : cette purge est best-effort, elle ne doit pas pouvoir
@@ -1998,21 +2213,30 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 "dette": round(_dette_apres, 4),
                 "victoire": _arrondir_victoire(_victoire),
             }
+            if _refit:
+                _issue["refit"] = {"ok": _refit_ok, **(_refit_info or {})}
 
             # AUTO-PURGE : garder seulement les N derniers .pkl archivés (model_v*.pkl
             # ~18 Mo chacun) pour que models/ ne grossisse pas indéfiniment (était 7,1 Go
             # / 493 fichiers). current_model.pkl / meta_learner.pkl ne matchent pas le
             # motif → jamais touchés. Les lignes DB model_versions sont conservées (FK
             # recommandations + taille négligeable), seules les archives disque sont purgées.
+            # Les modèles d'ÉVALUATION (`model_vNNNN_eval.pkl`, drapeau refit_full)
+            # sont purgés À PART : mêlés au tri, ils décaleraient la fenêtre des
+            # servis. Le plus récent — celui qu'arbitrera la nuit prochaine — est
+            # toujours conservé. Sans drapeau il n'y en a aucun : purge inchangée.
             try:
                 from ml.models import MODELS_DIR
                 _KEEP = 5
-                archives = sorted(MODELS_DIR.glob("model_v*.pkl"))
-                for _old in archives[:-_KEEP]:
+                _tous = sorted(MODELS_DIR.glob("model_v*.pkl"))
+                archives = [p for p in _tous if not p.stem.endswith("_eval")]
+                evaluations = [p for p in _tous if p.stem.endswith("_eval")]
+                for _old in archives[:-_KEEP] + evaluations[:-_KEEP]:
                     _old.unlink(missing_ok=True)
                 log.info("pipeline.retrain.pruned_archives",
                          kept=min(_KEEP, len(archives)),
-                         removed=max(0, len(archives) - _KEEP))
+                         removed=max(0, len(archives) - _KEEP),
+                         evaluations_gardees=min(_KEEP, len(evaluations)))
             except Exception as _e:  # purge best-effort : ne jamais faire échouer un deploy
                 log.warning("pipeline.retrain.prune_failed", err=str(_e)[:120])
         else:
@@ -2054,6 +2278,17 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 dette=round(_dette, 4),
                 reason=_raison_rejet,
             )
+
+        # RETARD D'APPRENTISSAGE du modèle servi (`maintenant − train_fin`). Il
+        # valait ~77 jours toutes les nuits depuis le passage à douze mois, sans
+        # qu'aucune ligne de journal ne le dise (audit 2026-09-23). Après un rejet,
+        # le champion reste en service : c'est SON retard qui continue de courir.
+        _tf_servi = (_train_fin if _issue.get("issue") == "promu"
+                     else (getattr(current_mv, "train_fin", None) if current_mv else None))
+        _issue["retard_apprentissage"] = retard_apprentissage(_tf_servi, refit_actif=_refit)
+        _retard = _issue["retard_apprentissage"]
+        (log.warning if _retard.get("alerte") else log.info)(
+            "pipeline.retrain.retard_apprentissage", **_retard)
 
         await session.commit()
 
