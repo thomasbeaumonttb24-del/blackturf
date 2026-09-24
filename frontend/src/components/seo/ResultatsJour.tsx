@@ -316,7 +316,7 @@ export async function ResultatsJour({ jour }: { jour: string }) {
           />
         </div>
 
-        <Callout href="/programme" cta="Voir le programme">
+        <Callout href="/programme" cta="Voir les courses du jour">
           Les rapports d&apos;une course passée disent ce qu&apos;elle a payé — pas ce que paiera la
           suivante. BlackTurf note chaque pronostic aux rapports réels du PMU et publie le bilan,
           gains comme pertes.

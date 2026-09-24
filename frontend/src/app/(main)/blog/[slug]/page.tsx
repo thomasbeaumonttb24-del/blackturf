@@ -47,14 +47,11 @@ export default async function BlogArticle({ params }: { params: Promise<{ slug: 
     datePublished: a.date,
     dateModified: a.updated,
     keywords: a.tags.join(", "),
-    // L'auteur était déclaré comme l'organisation elle-même, et n'apparaissait nulle part
-    // sur la page. Sur un sujet d'argent, un contenu sans auteur identifiable ne dit pas
-    // qui répond de ce qui est écrit. La personne qui édite le site — nommée dans les
-    // mentions légales — signe désormais les articles, et cette signature est AFFICHÉE
-    // sous le titre : un balisage qui n'a pas de contrepartie visible n'a pas lieu d'être.
+    // Signé « l'équipe BlackTurf » : l'éditeur ne publie pas son nom. La signature est
+    // AFFICHÉE sous le titre — un balisage sans contrepartie visible n'a pas lieu d'être.
     author: {
-      "@type": "Person",
-      name: "Thomas Beaumont",
+      "@type": "Organization",
+      name: "BlackTurf",
       url: "https://blackturf.fr/mentions-legales",
     },
     publisher: {
@@ -94,7 +91,7 @@ export default async function BlogArticle({ params }: { params: Promise<{ slug: 
                 structurées, et information que le lecteur est en droit d'avoir. */}
             <Chip>
               <Link href="/mentions-legales" className="hover:underline">
-                Par Thomas Beaumont
+                Par l&apos;équipe BlackTurf
               </Link>
             </Chip>
             <Chip><time dateTime={a.date}>{formatDateFr(a.date)}</time></Chip>

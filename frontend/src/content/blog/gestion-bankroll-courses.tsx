@@ -169,8 +169,8 @@ export default function Body() {
         ne distingue pas une méthode d&apos;une série de chance. C&apos;est le même principe que
         pour un{" "}
         <Link href="/blog/chatgpt-pronostic-hippique">pronostic annoncé « par IA »</Link> : sans
-        dénominateur ni horodatage, un taux de réussite ne veut rien dire. Notre propre{" "}
-        <Link href="/track-record">palmarès</Link> est publié sous cette contrainte, périodes
+        dénominateur ni horodatage, un taux de réussite ne veut rien dire. Nos{" "}
+        <Link href="/track-record">performances</Link> sont publiées sous cette contrainte, périodes
         perdantes comprises.
       </p>
 
@@ -197,7 +197,7 @@ export default function Body() {
         </li>
       </ul>
 
-      <Suite href="/track-record" cta="Voir le palmarès">
+      <Suite href="/track-record" cta="Voir nos performances">
         Un plan de mise ne vaut que branché sur un avantage réel. Le nôtre est publié en continu :
         réussite, calibration, valeur à la clôture, et les mois perdants avec le reste.
       </Suite>

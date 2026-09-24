@@ -1,4 +1,5 @@
 "use client";
+import { CARTE_CLS, IconeTuile, SG } from "@/components/courses/course-ui";
 import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
 
 /**
@@ -44,10 +45,8 @@ function EnteteCarte({ title, icon: Icon, aside, chevron }: {
 }) {
   return (
     <>
-      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-800 ring-1 ring-amber-200">
-        <Icon className="h-4 w-4" aria-hidden="true" />
-      </span>
-      <h2 className="font-display text-[15px] font-bold text-slate-900">{title}</h2>
+      <IconeTuile icone={Icon} />
+      <h2 className="text-[15px] font-bold text-stone-900" style={SG}>{title}</h2>
       {aside && <div className="ml-auto text-[11px] text-muted-foreground">{aside}</div>}
       {chevron && (
         <ChevronDown
@@ -72,7 +71,7 @@ function Card({ title, icon: Icon, aside, children, className, repliable, ouvert
   repliable?: boolean;
   ouvertParDefaut?: boolean;
 }) {
-  const cadre = cn("rounded-2xl border border-stone-200 bg-white", className);
+  const cadre = cn(CARTE_CLS, className);
 
   if (repliable) {
     return (

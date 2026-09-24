@@ -112,7 +112,7 @@ export default async function QuinteDuJourPage() {
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Accueil", item: "https://blackturf.fr" },
-      { "@type": "ListItem", position: 2, name: "Programme", item: "https://blackturf.fr/programme" },
+      { "@type": "ListItem", position: 2, name: "Courses du jour", item: "https://blackturf.fr/programme" },
       {
         "@type": "ListItem",
         position: 3,
@@ -139,7 +139,7 @@ export default async function QuinteDuJourPage() {
         eyebrow="Mis à jour chaque jour"
         breadcrumbs={[
           { label: "Accueil", href: "/" },
-          { label: "Programme", href: "/programme" },
+          { label: "Courses du jour", href: "/programme" },
           { label: "Quinté+ du jour" },
         ]}
         title={`Quinté+ du ${jourCourt(jour)}`}

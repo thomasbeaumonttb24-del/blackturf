@@ -42,7 +42,7 @@ const breadcrumbJsonLd = {
   "@type": "BreadcrumbList",
   itemListElement: [
     { "@type": "ListItem", position: 1, name: "Accueil", item: "https://blackturf.fr" },
-    { "@type": "ListItem", position: 2, name: "Palmarès", item: "https://blackturf.fr/track-record" },
+    { "@type": "ListItem", position: 2, name: "Nos performances", item: "https://blackturf.fr/track-record" },
   ],
 };
 

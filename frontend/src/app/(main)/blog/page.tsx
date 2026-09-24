@@ -38,7 +38,7 @@ export default function BlogIndex() {
       dateModified: a.updated,
       // Même auteur que sur la fiche de l'article : deux déclarations divergentes pour
       // un même contenu se contredisent au lieu de se renforcer.
-      author: { "@type": "Person", name: "Thomas Beaumont" },
+      author: { "@type": "Organization", name: "BlackTurf" },
       url: `https://blackturf.fr/blog/${a.slug}`,
     })),
   };
@@ -120,7 +120,7 @@ export default function BlogIndex() {
           ))}
         </div>
 
-        <Callout href="/programme" cta="Voir le programme">
+        <Callout href="/programme" cta="Voir les courses du jour">
           Envie de passer à la pratique ? Le programme PMU du jour est analysé course par course par
           l&apos;IA BlackTurf — partants, cotes en direct et paris de valeur.
         </Callout>

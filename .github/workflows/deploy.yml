@@ -109,6 +109,14 @@ jobs:
 
             # Build + (re)start des images locales
             docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+
+            # Pour recréer un conteneur, compose renomme l'ancien en `<id>_<nom>` avant
+            # de créer le nouveau. Un déploiement interrompu laisse ce conteneur
+            # renommé derrière lui, et le suivant échoue alors sur « Conflict. The
+            # container name … is already in use » (vu le 2026-09-24, frontend arrêté).
+            # Ces restes ne servent jamais : on les retire avant de redémarrer.
+            docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]{12}_blackturf_' | xargs -r docker rm -f
+
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
             # Migrations en attente (idempotentes)

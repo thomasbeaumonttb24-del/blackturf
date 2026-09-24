@@ -209,10 +209,10 @@ export default function Body() {
         Les chiffres ci-dessus disent où le marché se trompe en moyenne. Ils ne disent pas quel
         cheval battre aujourd&apos;hui :{" "}
         <Link href="/programme">le programme du jour</Link> porte l&apos;analyse course par
-        course, et <Link href="/track-record">le palmarès mesuré</Link> publie ce que ces analyses
+        course, et la page <Link href="/track-record">Nos performances</Link> publie ce que ces analyses
         ont donné à l&apos;arrivée, pertes comprises.
       </p>
-      <Suite href="/programme" cta="Voir le programme">
+      <Suite href="/programme" cta="Voir les courses du jour">
         Pour chaque course du jour : la probabilité calculée de chaque cheval face à la cote du
         marché — exactement l&apos;écart dont parle cet article.
       </Suite>

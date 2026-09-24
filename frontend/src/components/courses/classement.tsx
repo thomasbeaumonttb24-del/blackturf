@@ -20,8 +20,9 @@
  * rapproché de l'arrivée réelle. Jamais une appréciation inventée.
  */
 
+import { Anneau, CARTE_CLS, INCLINABLE_CLS, IconeTuile, Reflet, SG, inclinerCarte, redresserCarte } from "@/components/courses/course-ui";
 import { useEffect, useState } from "react";
-import { ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
+import { Brain, ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { cn } from "@/lib/utils";
 import type { ApercuAnalyse, ApercuSignal } from "@/components/courses/insights";
@@ -86,6 +87,9 @@ const SENS = {
  *  cosmétiques entre des chevaux que le modèle sépare d'un facteur 3. */
 const COTE_JUSTE_MAX = 999;
 
+/** Formats partagés avec la section Partants : mêmes cotes, même écriture. */
+export { cote as formatCoteFr, coteJuste as formatCoteJusteFr };
+
 /** Écart minimal entre la cote affichée et la cote du pronostic pour rappeler
  *  cette dernière. En dessous, le rappel n'apprend rien et alourdit la ligne. */
 const ECART_RAPPEL_COTE = 0.2;
@@ -110,8 +114,8 @@ const CLE_SIGNAUX = "bt.classement.signaux";
 /** Gabarit de colonnes partagé par l'en-tête et les lignes : une seule source,
  *  sinon les deux dérivent au premier ajustement. */
 const COLS = {
-  avecJuste: "sm:grid-cols-[40px_minmax(0,1fr)_74px_74px_104px_196px]",
-  sansJuste: "sm:grid-cols-[40px_minmax(0,1fr)_74px_196px]",
+  avecJuste: "sm:grid-cols-[40px_minmax(0,1fr)_64px_70px_92px_200px]",
+  sansJuste: "sm:grid-cols-[40px_minmax(0,1fr)_64px_200px]",
 } as const;
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -218,7 +222,7 @@ function BarreProba({
  *  Le pourcentage est l'écart relatif entre les deux cotes AFFICHÉES, rien de
  *  plus. Il ne remplace pas l'espérance de gain du modèle (badge « valeur »),
  *  qui, elle, tient compte de la calibration et des garde-fous. */
-function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
+export function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
   const ecart = ecartPrix(marche, juste);
   if (marche == null || !Number.isFinite(marche) || marche <= 0 || juste == null || !Number.isFinite(juste) || juste <= 0) {
     return <span className="text-[13px] text-stone-300">—</span>;
@@ -368,67 +372,217 @@ function Synthese({
     ? new Date(calculeA).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
     : null;
 
-  return (
-    <div className="grid gap-px border-b border-stone-100 bg-stone-100 sm:grid-cols-3">
-      <div className="bg-white px-4 py-3 sm:px-5">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Favori du modèle</p>
-        {fav ? (
-          <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate">
-            <Identite numero={fav.numero} nom={fav.nom_cheval} taille="grand" />
-            <span className="shrink-0 text-[13px] font-semibold tabular-nums text-amber-700">{pct(fav.proba_top1)}</span>
-          </p>
-        ) : (
-          <p className="mt-1 text-[13px] text-stone-600">—</p>
-        )}
-      </div>
+  const top3 = lignes.slice(0, 3);
+  const TEINTE_SEG = ["from-amber-300 to-amber-500", "from-slate-300 to-slate-500", "from-orange-300 to-orange-600"];
+  const TUILE = "rounded-2xl bg-white px-3.5 py-3 ring-1 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_10px_22px_-18px_rgba(17,24,39,.4)]";
 
-      <div className="bg-white px-4 py-3 sm:px-5">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Concentration du top 3</p>
-        <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
-          {pct(concentration)}
-          <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">
-            des chances de victoire pour les 3 premiers
-            {/* Lecture : plus les 3 premiers pèsent, plus la course est jouée d'avance. */}
-            {concentration >= 0.6 ? " · course serrée" : concentration >= 0.45 ? " · course disputée" : " · course ouverte"}
+  return (
+    <div className="grid gap-2.5 px-4 pb-4 sm:grid-cols-3 sm:px-5">
+      {/* Concentration du top 3 : la part des chances de victoire des trois premiers,
+          dessinée en trois segments — le lecteur voit d'un coup si la course est jouée
+          d'avance ou ouverte. */}
+      <div className={TUILE}>
+        <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Concentration du top 3</p>
+        <p className="mt-1 flex items-baseline gap-1.5">
+          <span className="text-[22px] font-bold leading-none tabular-nums text-stone-900" style={SG}>{pct(concentration)}</span>
+          <span className="text-[11.5px] text-stone-500">
+            {concentration >= 0.6 ? "course serrée" : concentration >= 0.45 ? "course disputée" : "course ouverte"}
           </span>
+        </p>
+        <div className="mt-2.5 flex h-2.5 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(0,0,0,.08)]" aria-hidden="true">
+          {top3.map((p, i) => (
+            <span
+              key={p.numero}
+              title={`N°${p.numero} : ${pct(p.proba_top1)}`}
+              className={cn("h-full bg-gradient-to-b", TEINTE_SEG[i], i > 0 && "border-l border-white/80")}
+              style={{ width: `${Math.max(1, p.proba_top1 * 100)}%` }}
+            />
+          ))}
+        </div>
+        <p className="mt-1.5 flex flex-wrap gap-x-2.5 text-[10.5px] tabular-nums text-stone-500">
+          {top3.map((p, i) => (
+            <span key={p.numero} className="inline-flex items-center gap-1">
+              <span className={cn("h-2 w-2 rounded-full bg-gradient-to-b", TEINTE_SEG[i])} />N°{p.numero} {pct(p.proba_top1)}
+            </span>
+          ))}
         </p>
       </div>
 
-      <div className="bg-white px-4 py-3 sm:px-5">
+      <div className={TUILE}>
         {gagnant ? (
           <>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Vainqueur</p>
-            <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate">
+            <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Vainqueur</p>
+            <p className="mt-1.5 flex min-w-0 items-center gap-1.5 truncate">
               <Identite numero={gagnant.numero} nom={gagnant.nom_cheval} taille="grand" />
-              <span
-                className={cn(
-                  "ml-1.5 text-[12px] font-semibold tabular-nums",
-                  gagnant.rang_predit === 1 ? "text-emerald-700" : gagnant.rang_predit <= 3 ? "text-slate-600" : "text-stone-600",
-                )}
-              >
-                classé {ordinal(gagnant.rang_predit)}
-              </span>
+            </p>
+            <p className={cn("mt-1 text-[12px] font-semibold", gagnant.rang_predit === 1 ? "text-emerald-700" : gagnant.rang_predit <= 3 ? "text-slate-600" : "text-stone-600")}>
+              classé {ordinal(gagnant.rang_predit)} par le modèle
             </p>
           </>
         ) : (
           <>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-600">Écarts de prix détectés</p>
-            <p className="mt-1 font-display text-[14px] font-bold tabular-nums text-slate-900">
-              {ecarts.length ? nbEcarts : "—"}
-              <span className="ml-1.5 text-[11.5px] font-normal text-stone-600">
-                {!ecarts.length ? "cotes indisponibles" : nbEcarts > 1 ? "chevaux payés au-dessus de leur chance" : nbEcarts === 1 ? "cheval payé au-dessus de sa chance" : "— aucun écart positif d’au moins 8 %"}
+            <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Écarts de prix détectés</p>
+            <p className="mt-1 flex items-baseline gap-1.5">
+              <span className={cn("text-[22px] font-bold leading-none tabular-nums", nbEcarts > 0 ? "text-emerald-700" : "text-stone-900")} style={SG}>
+                {ecarts.length ? nbEcarts : "—"}
+              </span>
+              <span className="text-[11.5px] leading-snug text-stone-500">
+                {!ecarts.length ? "cotes indisponibles" : nbEcarts > 1 ? "chevaux payés au-dessus de leur chance" : nbEcarts === 1 ? "cheval payé au-dessus de sa chance" : "aucun écart positif d’au moins 8 %"}
               </span>
             </p>
           </>
         )}
+      </div>
+
+      <div className={TUILE}>
+        <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Favori du modèle</p>
+        {fav ? (
+          <p className="mt-1.5 flex min-w-0 items-center gap-1.5 truncate">
+            <Identite numero={fav.numero} nom={fav.nom_cheval} taille="grand" />
+            <span className="shrink-0 text-[13px] font-bold tabular-nums text-amber-700">{pct(fav.proba_top1)}</span>
+          </p>
+        ) : <p className="mt-1 text-[13px] text-stone-600">—</p>}
         {horodatage && (
-          <p className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-stone-600">
+          <p className="mt-1.5 inline-flex items-center gap-1 text-[10.5px] text-stone-500">
             <Clock3 className="h-3 w-3" aria-hidden="true" />
-            calculé le {horodatage}
-            {cotesFigees ? " · cotes figées" : " · modèle calculé à cette date · comparaison avec les cotes affichées"}
+            calculé le {horodatage}{cotesFigees ? " · cotes figées" : ""}
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/*  Podium du modèle                                                          */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+const PODIUM = {
+  1: { piece: "radial-gradient(circle at 32% 28%,#FFF7D6 0%,#FCD34D 32%,#D97706 72%,#92400E 100%)", fond: "from-amber-50 via-white to-white", ring: "ring-amber-200", libelle: "1er" },
+  2: { piece: "radial-gradient(circle at 32% 28%,#FFFFFF 0%,#E2E8F0 34%,#94A3B8 74%,#475569 100%)", fond: "from-slate-50 via-white to-white", ring: "ring-slate-200", libelle: "2e" },
+  3: { piece: "radial-gradient(circle at 32% 28%,#FFEAD5 0%,#FDBA74 34%,#C2410C 76%,#7C2D12 100%)", fond: "from-orange-50/80 via-white to-white", ring: "ring-orange-200", libelle: "3e" },
+} as const;
+
+/** Pièce de podium en relief (or / argent / bronze). */
+function Piece({ rang, taille = 30 }: { rang: 1 | 2 | 3; taille?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex shrink-0 items-center justify-center rounded-full font-extrabold text-white shadow-[inset_0_-2px_2px_rgba(0,0,0,.25),inset_0_2px_2px_rgba(255,255,255,.7),0_4px_10px_-3px_rgba(0,0,0,.35)] [text-shadow:0_1px_1px_rgba(0,0,0,.35)]"
+      style={{ width: taille, height: taille, fontSize: taille * 0.45, background: PODIUM[rang].piece }}
+    >
+      {rang}
+    </span>
+  );
+}
+
+/** Barre fine en relief (top 3). */
+function BarreFine({ v, ton }: { v: number; ton: "or" | "podium" | "neutre" | "place" }) {
+  return (
+    <span className="relative block h-1.5 w-full overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_1px_rgba(0,0,0,.08)]" aria-hidden="true">
+      <span
+        className={cn("absolute inset-y-0 left-0 rounded-full bg-gradient-to-r",
+          ton === "or" ? "from-amber-300 to-amber-600" : ton === "podium" ? "from-slate-300 to-slate-600" : ton === "place" ? "from-sky-300 to-sky-600" : "from-stone-300 to-stone-500")}
+        style={{ width: `${Math.max(2, Math.min(100, v * 100))}%` }}
+      />
+    </span>
+  );
+}
+
+/** Carte d'un cheval du podium : médaille, jauge victoire, top 3, prix, signaux. */
+function CartePodium({ p, marche, signaux, position, grand = false }: {
+  p: ClassementPrediction;
+  marche: number | null;
+  signaux: ClassementSignal[];
+  position?: number;
+  grand?: boolean;
+}) {
+  const rang = p.rang_predit as 1 | 2 | 3;
+  const m = PODIUM[rang];
+  return (
+    <div
+      onPointerMove={(e) => inclinerCarte(e, grand ? 0.8 : 1)}
+      onPointerLeave={redresserCarte}
+      className={cn(
+        "group/reflet relative flex w-full flex-col overflow-hidden rounded-2xl bg-gradient-to-b p-3.5 ring-1 sm:p-4",
+        m.fond, m.ring, INCLINABLE_CLS,
+        "shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.05),0_18px_36px_-24px_rgba(17,24,39,.55)] hover:shadow-[inset_0_1px_0_#fff,0_4px_8px_rgba(17,24,39,.06),0_28px_48px_-26px_rgba(146,64,14,.55)]",
+      )}
+    >
+      <Reflet />
+      <div className="relative flex items-start gap-2.5">
+        <Piece rang={rang} taille={grand ? 34 : 30} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-[.12em] text-stone-500">{m.libelle} du modèle</p>
+          <div className="mt-1 min-w-0"><Identite numero={p.numero} nom={p.nom_cheval} taille="grand" /></div>
+        </div>
+        {position != null && <BadgeArrivee position={position} />}
+      </div>
+
+      <div className="relative mb-3 mt-3 flex items-center gap-3">
+        <Anneau v={p.proba_top1} rang={rang} taille={grand ? 64 : 56} />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <p className="flex items-baseline justify-between text-[10.5px] text-stone-500">
+              <span>Victoire</span>
+              <b className="text-[12.5px] font-bold tabular-nums text-stone-900">{pct(p.proba_top1)}</b>
+            </p>
+            <BarreFine v={p.proba_top1} ton={rang === 1 ? "or" : "podium"} />
+          </div>
+          <div>
+            <p className="flex items-baseline justify-between text-[10.5px] text-stone-500">
+              <span>Top 3</span>
+              <b className="text-[12.5px] font-bold tabular-nums text-stone-900">{pct(p.proba_top3)}</b>
+            </p>
+            <BarreFine v={p.proba_top3} ton="place" />
+          </div>
+        </div>
+      </div>
+
+      <div className="relative mt-auto flex flex-wrap items-center gap-1.5 border-t border-black/[.05] pt-2.5 text-[11.5px] text-stone-500">
+        <span>Cote <b className="font-bold tabular-nums text-stone-900">{marche != null ? cote(marche) : "—"}</b></span>
+        {p.cote_juste != null && (
+          <span>· juste <b className="font-semibold tabular-nums text-stone-700">{coteJuste(p.cote_juste)}</b></span>
+        )}
+        <LecturePrix marche={marche} juste={p.cote_juste} />
+        {p.value_bet && <BadgeValeur ev={p.value_bet.ev_max} niveau={p.value_bet.niveau} />}
+      </div>
+      {signaux.length > 0 && <div className="relative mt-2"><PuceSignaux signaux={signaux} max={2} /></div>}
+    </div>
+  );
+}
+
+/** Signaux en pastilles (atout / réserve / vigilance), `max` visibles puis « +N ». */
+function PuceSignaux({ signaux, max = 2 }: { signaux: ClassementSignal[]; max?: number }) {
+  const [ouvert, setOuvert] = useState(false);
+  if (!signaux.length) return null;
+  const visibles = ouvert ? signaux : signaux.slice(0, max);
+  const reste = signaux.length - visibles.length;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {visibles.map((s, i) => {
+        const st = SENS[s.sens] ?? SENS.neutre;
+        return (
+          <span
+            key={`${s.label}-${i}`}
+            title={s.detail || undefined}
+            className={cn("inline-flex cursor-help items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 ring-inset", st.bg, st.fg, st.ring)}
+          >
+            <span className="text-[7px]" aria-hidden="true">{st.fleche}</span>
+            {nettoie(s.label)}
+          </span>
+        );
+      })}
+      {reste > 0 && (
+        <button type="button" onClick={() => setOuvert(true)} className="rounded-full bg-white px-2 py-0.5 text-[10.5px] font-bold text-stone-600 ring-1 ring-inset ring-stone-200 hover:text-stone-900">
+          +{reste}
+        </button>
+      )}
+      {ouvert && signaux.length > max && (
+        <button type="button" onClick={() => setOuvert(false)} className="text-[10.5px] font-semibold text-stone-500 underline decoration-dotted underline-offset-2 hover:text-stone-800">
+          réduire
+        </button>
+      )}
     </div>
   );
 }
@@ -500,19 +654,25 @@ export function ClassementAlgo({
     });
   };
 
+  const podium = lignes.filter((p) => p.rang_predit <= 3 && !nonPartants?.has(p.numero)).slice(0, 3);
+  const signauxDe = (n: number) => (signauxParNumero[n] ?? []).filter((s) => nettoie(s.label));
+
   return (
-    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(28,25,23,.04)]">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 pb-3 pt-4 sm:px-5">
-        <div className="min-w-0">
-          <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">
-            Le classement de l&apos;algorithme
-          </h3>
-          <p
-            className="mt-0.5 text-[11.5px] text-stone-600"
-            title="Le rang suit la probabilité de victoire : le n°1 est le cheval le plus probable, donc celui dont la cote juste est la plus basse. Cette probabilité combine le modèle et le marché, avec des poids réappris chaque nuit sur les arrivées réelles."
-          >
-            {lignes.length} chevaux notés · du plus probable au moins probable
-          </p>
+    <section className={cn("overflow-hidden", CARTE_CLS)}>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-3 pt-4 sm:px-5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <IconeTuile icone={Brain} />
+          <div className="min-w-0">
+            <h3 className="text-[16px] font-bold leading-tight text-stone-900" style={SG}>
+              Le classement de l&apos;algorithme
+            </h3>
+            <p
+              className="mt-0.5 text-[11.5px] text-stone-500"
+              title="Le rang suit la probabilité de victoire : le n°1 est le cheval le plus probable, donc celui dont la cote juste est la plus basse. Cette probabilité combine le modèle et le marché, avec des poids réappris chaque nuit sur les arrivées réelles."
+            >
+              {lignes.length} chevaux notés · du plus probable au moins probable
+            </p>
+          </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {nbSignaux > 0 && (
@@ -520,21 +680,42 @@ export function ClassementAlgo({
               type="button"
               onClick={basculeSignaux}
               aria-pressed={signauxOuverts}
-              className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 text-[11.5px] font-semibold text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50/60 hover:text-amber-900"
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-white px-3 text-[11.5px] font-semibold text-slate-600 ring-1 ring-stone-200 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.06)] transition-colors hover:bg-amber-50/60 hover:text-amber-900 hover:ring-amber-300"
             >
               <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", signauxOuverts && "rotate-180")} aria-hidden="true" />
-              {signauxOuverts ? "Masquer les signaux" : "Signaux"}
+              {signauxOuverts ? "Moins de signaux" : "Tous les signaux"}
             </button>
           )}
           <button
             type="button"
             onClick={onLegende}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 text-[11.5px] font-semibold text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50/60 hover:text-amber-900"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-white px-3 text-[11.5px] font-semibold text-slate-600 ring-1 ring-stone-200 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.06)] transition-colors hover:bg-amber-50/60 hover:text-amber-900 hover:ring-amber-300"
           >
             <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire
           </button>
         </div>
       </header>
+
+      {/* ── Podium du modèle : le 1er au centre et plus haut sur ordinateur ── */}
+      {podium.length === 3 && (
+        <div className="px-4 pb-4 sm:px-5">
+          <p className="mb-2.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-amber-700">Podium du modèle</p>
+          {/* Ordre de lecture : 1er à gauche, puis 2e et 3e. Cartes de même hauteur. */}
+          <div className="grid grid-cols-1 gap-2.5 min-[480px]:grid-cols-2 sm:grid-cols-3 [perspective:1200px]">
+            {podium.map((p) => (
+              <div key={p.prediction_id} className={cn("flex", p.rang_predit === 1 && "min-[480px]:col-span-2 sm:col-span-1")}>
+                <CartePodium
+                  p={p}
+                  marche={coteLive?.[p.numero] ?? p.cote_pmu}
+                  signaux={signauxDe(p.numero)}
+                  position={positionsReelles?.[p.numero]}
+                  grand={p.rang_predit === 1}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Synthese
         lignes={lignes}
@@ -545,16 +726,16 @@ export function ClassementAlgo({
         nonPartants={nonPartants}
       />
 
-      <div className="max-h-[36rem] overflow-y-auto">
-        {/* En-tête de colonnes — collant, masqué sur mobile où chaque ligne se lit en bloc */}
+      {/* ── Classement complet ── */}
+      <div className="border-t border-stone-100">
         <div
           className={cn(
-            "sticky top-0 z-10 hidden items-end gap-3 border-b border-stone-200 bg-stone-50/95 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-600 backdrop-blur sm:grid",
+            "hidden items-end gap-3 border-b border-stone-200/70 bg-[#FCFAF5] px-5 py-2 text-[10px] font-bold uppercase tracking-[.1em] text-stone-500 sm:grid",
             grille,
           )}
         >
           <span className="text-center">#</span>
-          <span>Cheval</span>
+          <span>Cheval · signaux</span>
           <span className="text-right">Cote</span>
           {aCoteJuste && (
             <span className="text-right leading-tight" title="Cote à partir de laquelle le pari devient rentable selon le modèle">
@@ -566,18 +747,17 @@ export function ClassementAlgo({
               Lecture<br />du prix
             </span>
           )}
-          <span className="text-right">Chances de victoire</span>
+          <span className="text-right">Victoire · Top 3</span>
         </div>
 
         <ol className="divide-y divide-stone-100">
           {lignes.map((p) => {
             const fav = p.rang_predit === 1;
-            const podium = p.rang_predit <= 3;
-            const signaux = (signauxParNumero[p.numero] ?? []).filter((s) => nettoie(s.label));
+            const podiumRang = p.rang_predit <= 3;
+            const signaux = signauxDe(p.numero);
             const position = positionsReelles?.[p.numero];
             const marche = coteLive?.[p.numero] ?? p.cote_pmu;
             const absent = nonPartants?.has(p.numero);
-            const ton = absent ? "neutre" : fav ? "or" : podium ? "podium" : "neutre";
             // La cote du prono n'est rappelée que si elle diffère nettement de celle
             // affichée : sinon c'est du bruit. Au-delà du seuil, l'écart change la
             // lecture du prix, donc il doit être visible.
@@ -586,30 +766,33 @@ export function ClassementAlgo({
                 && Math.abs(p.cote_figee / marche - 1) > ECART_RAPPEL_COTE
                 ? p.cote_figee
                 : null;
-            // Présent dans l'arrivée SANS position = disqualifié, tombé, arrêté. Le
-            // taire laissait croire à une donnée manquante — sur le favori du modèle
-            // qui plus est, c'est-à-dire exactement là où le lecteur veut savoir.
+            // Présent dans l'arrivée SANS position = disqualifié, tombé, arrêté.
             const nonClasse = nonClasses?.has(p.numero);
+            const fourchette = p.proba_top1_low != null && p.proba_top1_high != null
+              ? `fourchette du modèle ${Math.round(p.proba_top1_low * 100)}–${Math.round(p.proba_top1_high * 100)} %`
+              : undefined;
 
             return (
               <li
                 key={p.prediction_id}
                 className={cn(
-                  "relative px-4 py-3.5 transition-colors hover:bg-stone-50/70 sm:px-5",
-                  fav && !absent && "bg-amber-50/50",
+                  "relative px-4 py-3 transition-colors hover:bg-[#FCFAF5] sm:px-5",
+                  fav && !absent && "bg-amber-50/40",
                   absent && "opacity-60",
                 )}
               >
-                {/* Liseré de rang : repère le podium du modèle sans ajouter de texte */}
-                {podium && !absent && (
+                {podiumRang && !absent && (
                   <span
-                    className={cn("absolute inset-y-0 left-0 w-[3px]", fav ? "bg-amber-400" : "bg-slate-300")}
+                    className={cn("absolute inset-y-2 left-0 w-1 rounded-r-full bg-gradient-to-b",
+                      p.rang_predit === 1 ? "from-amber-300 to-amber-600" : p.rang_predit === 2 ? "from-slate-300 to-slate-500" : "from-orange-300 to-orange-600")}
                     aria-hidden="true"
                   />
                 )}
 
-                <div className={cn("grid items-center gap-x-3 gap-y-2 grid-cols-[40px_minmax(0,1fr)]", grille)}>
-                  <Rang rang={p.rang_predit} absent={absent} />
+                <div className={cn("grid items-center gap-x-3 gap-y-2 grid-cols-[40px_minmax(0,1fr)_auto]", grille)}>
+                  {podiumRang && !absent ? (
+                    <span className="flex justify-center"><Piece rang={p.rang_predit as 1 | 2 | 3} taille={30} /></span>
+                  ) : <Rang rang={p.rang_predit} absent={absent} />}
 
                   {/* Cheval + signaux réels */}
                   <div className="min-w-0">
@@ -631,18 +814,24 @@ export function ClassementAlgo({
                         </span>
                       )}
                     </div>
-
-                    {signauxOuverts && <Signaux signaux={signaux} />}
+                    {signaux.length > 0 && !absent && (
+                      <div className="mt-1.5"><PuceSignaux signaux={signaux} max={signauxOuverts ? 8 : 2} /></div>
+                    )}
                   </div>
+
+                  {/* Téléphone : jauge de victoire à droite du nom */}
+                  <span className="flex flex-col items-center sm:hidden">
+                    {!absent && <Anneau v={p.proba_top1} rang={p.rang_predit} taille={46} />}
+                  </span>
 
                   {/* Cote de marché */}
                   <div className="hidden text-right sm:block">
-                    <span className="font-display text-[14px] font-semibold tabular-nums text-slate-900">
+                    <span className="text-[14px] font-semibold tabular-nums text-slate-900" style={SG}>
                       {marche != null ? cote(marche) : "—"}
                     </span>
                     {coteProno != null && (
                       <span
-                        className="block text-[10px] tabular-nums text-stone-600"
+                        className="block text-[10px] tabular-nums text-stone-500"
                         title="Cote de marché au moment où le modèle a calculé sa probabilité"
                       >
                         {cote(coteProno)} au prono
@@ -654,9 +843,10 @@ export function ClassementAlgo({
                   {aCoteJuste && (
                     <span
                       className={cn(
-                        "hidden text-right font-display text-[14px] tabular-nums sm:block",
+                        "hidden text-right text-[14px] tabular-nums sm:block",
                         p.value_bet && !absent ? "font-bold text-emerald-700" : "text-slate-600",
                       )}
+                      style={SG}
                       title={
                         p.cote_juste != null
                           ? `Cote juste du modèle : ${coteJuste(p.cote_juste)} — le prix à partir duquel le pari devient rentable si la probabilité est exacte.`
@@ -683,51 +873,38 @@ export function ClassementAlgo({
                     </span>
                   )}
 
-                  {/* Chances de victoire : barre + valeur + top-3 */}
-                  <div className="col-span-2 sm:col-span-1">
-                    <div className="flex items-center gap-2.5">
-                      <BarreProba
-                        p={p.proba_top1}
-                        low={p.proba_top1_low}
-                        high={p.proba_top1_high}
-                        ton={ton}
-                      />
-                      <span className="w-11 shrink-0 text-right font-display text-[14px] font-bold tabular-nums text-slate-900">
-                        {pct(p.proba_top1)}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex items-baseline justify-between gap-2 text-[10.5px] tabular-nums text-stone-600">
-                      <span>
-                        {p.proba_top1_low != null && p.proba_top1_high != null
-                          ? `fourchette ${Math.round(p.proba_top1_low * 100)}–${Math.round(p.proba_top1_high * 100)} %`
-                          : ""}
-                      </span>
-                      <span className="text-stone-600" title="Probabilité de terminer dans les trois premiers">
-                        top-3 <strong className="font-semibold text-slate-700">{pct(p.proba_top3)}</strong>
-                      </span>
+                  {/* Victoire · Top 3 (ordinateur) */}
+                  <div className="hidden items-center gap-3 sm:flex" title={fourchette}>
+                    {!absent && <Anneau v={p.proba_top1} rang={p.rang_predit} taille={44} />}
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="flex items-baseline justify-between text-[10px] text-stone-500">
+                        <span>Victoire</span><b className="text-[12px] font-bold tabular-nums text-stone-900">{pct(p.proba_top1)}</b>
+                      </p>
+                      <BarreFine v={p.proba_top1} ton={absent ? "neutre" : fav ? "or" : podiumRang ? "podium" : "neutre"} />
+                      <p className="flex items-baseline justify-between text-[10px] text-stone-500">
+                        <span>Top 3</span><b className="text-[12px] font-bold tabular-nums text-stone-900">{pct(p.proba_top3)}</b>
+                      </p>
+                      <BarreFine v={p.proba_top3} ton="place" />
                     </div>
                   </div>
 
-                  {/* Chiffres repliés sous le nom sur mobile */}
-                  <dl className="col-span-2 grid grid-cols-3 gap-2 rounded-lg bg-stone-50 px-2.5 py-2 text-[11px] tabular-nums sm:hidden">
-                    <div>
-                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Cote</dt>
-                      <dd className="font-semibold text-slate-900">{marche != null ? cote(marche) : "—"}</dd>
+                  {/* Téléphone : chiffres en tuiles sous le nom */}
+                  <dl className="col-span-3 grid grid-cols-3 gap-1.5 text-[11px] tabular-nums sm:hidden">
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Cote</dt>
+                      <dd className="text-[13px] font-bold text-slate-900" style={SG}>{marche != null ? cote(marche) : "—"}</dd>
                     </div>
-                    <div>
-                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Cote juste</dt>
-                      <dd className="font-semibold text-slate-700">
-                        {p.cote_juste != null ? coteJuste(p.cote_juste) : "—"}
-                        {meilleurPrix?.numero === p.numero && (
-                          <span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-wider text-emerald-700">
-                            meilleur écart
-                          </span>
-                        )}
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Juste · prix</dt>
+                      <dd className="flex flex-wrap items-center gap-1">
+                        <span className="text-[13px] font-semibold text-slate-700" style={SG}>{p.cote_juste != null ? coteJuste(p.cote_juste) : "—"}</span>
+                        {!absent && <LecturePrix marche={marche} juste={p.cote_juste} />}
                       </dd>
                     </div>
-                    <div>
-                      <dt className="text-[9.5px] uppercase tracking-wide text-stone-600">Prix</dt>
-                      <dd>{absent ? "—" : <LecturePrix marche={marche} juste={p.cote_juste} />}</dd>
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Top 3</dt>
+                      <dd className="text-[13px] font-bold text-slate-900" style={SG}>{pct(p.proba_top3)}</dd>
+                      <BarreFine v={p.proba_top3} ton="place" />
                     </div>
                   </dl>
                 </div>
@@ -737,11 +914,9 @@ export function ClassementAlgo({
         </ol>
       </div>
 
-      {/* Pied minimal : la légende des pastilles et le détail du modèle vivent
-          dans « Comment lire » (même contenu, en plus complet). Les répéter sous
-          chaque table ajoutait un pavé que personne ne lit. Seule la mention
+      {/* Pied minimal : la légende vit dans « Comment lire ». Seule la mention
           obligatoire reste à vue. */}
-      <footer className="border-t border-stone-100 bg-stone-50/60 px-4 py-2.5 text-[10.5px] text-stone-500 sm:px-5">
+      <footer className="border-t border-stone-100 bg-[#FCFAF5] px-4 py-2.5 text-[10.5px] text-stone-500 sm:px-5">
         Aide à la décision — aucune garantie de gain.
       </footer>
     </section>
@@ -751,7 +926,7 @@ export function ClassementAlgo({
 /** État verrouillé, affiché à la place de la table selon le plan de l'abonné. */
 export function ClassementVerrouille({ titre, texte, action }: { titre: string; texte: string; action: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-7 text-center">
+    <section className={cn("p-7 text-center", CARTE_CLS)}>
       <span className="mx-auto mb-3 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50 text-amber-800 ring-1 ring-amber-200">
         <Lock className="h-4 w-4" aria-hidden="true" />
       </span>
@@ -830,7 +1005,7 @@ export function ClassementApercu({
   const GRILLE = "grid-cols-[36px_minmax(0,1fr)_112px] sm:grid-cols-[36px_minmax(0,1fr)_74px_74px_180px]";
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(28,25,23,.04)]">
+    <section className={cn("overflow-hidden", CARTE_CLS)}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 pb-3 pt-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">

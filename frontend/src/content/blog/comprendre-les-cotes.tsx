@@ -226,7 +226,7 @@ export default function Body() {
       </p>
       <p>
         Prendre régulièrement un prix supérieur à la clôture, c&apos;est avoir vu avant le marché —
-        et c&apos;est la chose la plus difficile à obtenir par chance. Sur le <Link href="/track-record">palmarès public</Link>,{" "}
+        et c&apos;est la chose la plus difficile à obtenir par chance. Sur la page <Link href="/track-record">Nos performances</Link>,{" "}
         <strong>58,2 %</strong> des paris enregistrés l&apos;ont été au-dessus de la cote de
         clôture, avec un écart médian de +22,2 %.
       </p>

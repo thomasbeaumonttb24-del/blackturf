@@ -16,11 +16,12 @@
  * (fournis dans ce même paquet, sous /public)
  */
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useMemo, useCallback, useRef } from "react";
 import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
-  ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter,
+  ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter, Timer, CalendarClock,
+  Sparkles, Users, Calculator,
 } from "lucide-react";
 import Link from "next/link";
 import { TrendingUp as IconeMarcheDirect } from "lucide-react";
@@ -32,6 +33,7 @@ import { coursesApi, predictionsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime, cn } from "@/lib/utils";
 import { jourParis } from "@/lib/seo";
+import { BandeauOnglet, CARTE_CLS, IconeTuile, Pastille, PastilleDirect, SG } from "@/components/courses/course-ui";
 
 /* ─── Types ─────────────────────────────────────────────── */
 interface CourseSummary {
@@ -120,6 +122,87 @@ function DiscIcon({ discipline, w = 46, h = 30, color }: { discipline: string; w
       }}
     />
   );
+}
+
+/* ─── Compteur animé ──────────────────────────────────────
+ * Le HTML serveur porte la vraie valeur (robots, visiteurs sans JavaScript). Côté
+ * navigateur, on repart de 0 avant la première peinture puis on monte jusqu'à elle —
+ * sauf si le visiteur a demandé moins d'animations. */
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+function useCompteur(cible: number, dureeMs = 900): number {
+  const [v, setV] = useState(cible);
+  const deja = useRef(false);
+  useIsoLayoutEffect(() => {
+    if (deja.current) { setV(cible); return; }
+    deja.current = true;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || cible <= 0) { setV(cible); return; }
+    let raf = 0;
+    const t0 = performance.now();
+    setV(0);
+    const pas = (t: number) => {
+      const k = Math.min(1, (t - t0) / dureeMs);
+      setV(Math.round(cible * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(pas);
+    };
+    raf = requestAnimationFrame(pas);
+    return () => cancelAnimationFrame(raf);
+  }, [cible, dureeMs]);
+  return v;
+}
+
+function TuileCompteur({ n, libelle, ton }: { n: number; libelle: string; ton?: string }) {
+  const v = useCompteur(n);
+  return (
+    <div className="bt-pop rounded-2xl bg-white/85 px-2.5 py-2.5 ring-1 ring-[#E6DCC6] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_10px_22px_-18px_rgba(146,64,14,.5)] backdrop-blur sm:px-4 sm:py-3">
+      <div className={cn("text-[22px] font-bold leading-none tabular-nums text-stone-900 sm:text-[28px]", ton)} style={SG}>{v}</div>
+      <div className="mt-1 text-[11px] font-medium text-stone-500 sm:text-xs">{libelle}</div>
+    </div>
+  );
+}
+
+/* Minutes avant le départ (null au-delà d'une heure ou course partie) — sert à
+ * l'anneau qui se vide autour de l'heure de départ. */
+function useMinutesAvant(targetDate: string, statut: string): number | null {
+  const [m, setM] = useState<number | null>(null);
+  useEffect(() => {
+    if (statut !== "programme" && statut !== "a_venir") { setM(null); return; }
+    const tick = () => {
+      const s = differenceInSeconds(new Date(targetDate), new Date());
+      setM(s > 0 && s < 3600 ? s / 60 : null);
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, [targetDate, statut]);
+  return m;
+}
+
+/* Secondes avant le départ, rafraîchies chaque seconde (null une fois parti ou
+ * pour une course qui n'est plus à venir). Null au premier rendu : l'heure du
+ * serveur et celle du navigateur ne doivent pas diverger à l'hydratation. */
+function useSecondesAvant(targetDate: string, statut: string): number | null {
+  const [s, setS] = useState<number | null>(null);
+  useEffect(() => {
+    if (statut !== "programme" && statut !== "a_venir") { setS(null); return; }
+    const tick = () => {
+      const d = differenceInSeconds(new Date(targetDate), new Date());
+      setS(d > 0 ? d : null);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [targetDate, statut]);
+  return s;
+}
+
+/* « 07:42 » sous une heure, « 1 h 12 » au-delà. */
+function formatRebours(sec: number): string {
+  if (sec >= 3600) {
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return `${h} h ${String(m).padStart(2, "0")}`;
+  }
+  const m = Math.floor(sec / 60), r = sec % 60;
+  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
 }
 
 /* ─── Countdown hook ────────────────────────────────────── */
@@ -227,7 +310,7 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
     if (el) el.scrollLeft = el.scrollWidth;
   }, []);
   return (
-    <div ref={scrollRef} className={cn("flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-0.5", HIDE_SCROLLBAR)}>
+    <div ref={scrollRef} className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 pt-0.5 sm:mx-0 sm:px-0", HIDE_SCROLLBAR)}>
       {days.map((d) => {
         const key = format(d, "yyyy-MM-dd");
         const isSel = key === selKey;
@@ -238,12 +321,12 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
             key={key}
             onClick={() => onSelect(d)}
             className={cn(
-              "group flex flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 min-w-[58px] shrink-0 border transition-all hover:-translate-y-0.5",
+              "group flex min-w-[58px] shrink-0 flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 ring-1 transition-all hover:-translate-y-0.5 active:scale-[.97]",
               isSel
-                ? "bg-gray-900 text-white border-gray-900 shadow-md shadow-gray-900/10"
+                ? "bg-stone-900 text-white ring-stone-900 shadow-[0_8px_18px_-10px_rgba(17,24,39,.7)]"
                 : isToday
-                ? "bg-white text-gray-800 border-amber-300 ring-1 ring-amber-200 hover:border-amber-400"
-                : "bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+                ? "bg-white text-gray-800 ring-amber-300 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_8px_18px_-14px_rgba(146,64,14,.5)]"
+                : "bg-white text-gray-700 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_8px_18px_-14px_rgba(17,24,39,.4)] hover:ring-stone-300",
             )}
           >
             <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-white/70" : isToday ? "text-amber-700" : "text-gray-600")}>
@@ -265,65 +348,119 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
   const { course, reunionNum } = item;
   const m = discMeta(course.discipline);
   const isLive = course.statut === "en_cours";
-  const countdown = useCountdown(course.date_heure, course.statut);
-  const url = `/img/disciplines/${m.mask}`;
+  const fiche = `/courses/${course.course_id}`;
+  const minutes = useMinutesAvant(course.date_heure, course.statut);
+  const secondes = useSecondesAvant(course.date_heure, course.statut);
+  // Anneau : plein à une heure du départ, vide au départ.
+  const R = 44, C = 2 * Math.PI * R;
+  const part = minutes == null ? (isLive ? 1 : 0) : Math.max(0.02, Math.min(1, minutes / 60));
+  const pool = enjeux(course.pool_total_eur);
+  const ACCES: Array<[string, string, string, typeof Timer]> = [
+    ["synthese", "Pronostic", "le classement de l'IA", Sparkles],
+    ["partants", "Partants", "la fiche de chaque cheval", Users],
+    ["plan", "Plan de mise", "vos paris selon le budget", Calculator],
+  ];
   return (
-    <div
-      className="relative overflow-hidden rounded-[22px]"
-      style={{ border: "1px solid rgba(255,255,255,.08)", background: "linear-gradient(135deg,#0F1520 0%,#1A2230 100%)", boxShadow: "0 18px 40px -24px rgba(15,21,32,.7)" }}
-    >
-      <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: "linear-gradient(180deg,#F59E0B,#D97706)" }} />
-      <span
-        aria-hidden
-        className="pointer-events-none absolute max-[767px]:hidden"
-        style={{
-          // la silhouette reste entièrement dans la carte : aucun sabot rogné par l'overflow
-          right: 200, bottom: 10, width: 300, height: 132, background: "rgba(255,255,255,.07)",
-          WebkitMaskImage: `url(${url})`, maskImage: `url(${url})`,
-          WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
-          WebkitMaskPosition: "center", maskPosition: "center",
-          WebkitMaskSize: "contain", maskSize: "contain",
-        }}
-      />
-      <div className="relative flex flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-5">
-        <div className="flex-1 min-w-[230px]">
-          <div className="flex items-center gap-2.5 mb-3">
-            <span className="text-[10.5px] font-bold uppercase tracking-[.16em] text-slate-600">Prochaine course</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-              {isLive ? "En piste" : "À venir"}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="rounded-md px-2 py-0.5 text-[12px] font-bold tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif", color: "#0F1520", background: "#E2E8F0" }}>
-              R{reunionNum}C{course.numero}
-            </span>
-            <span className="text-lg sm:text-[22px] font-bold text-white tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{course.hippodrome_nom}</span>
-          </div>
-          {course.nom && <div className="mt-1.5 text-sm font-medium text-slate-300">{course.nom}</div>}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {[titleCase(course.discipline), `${course.distance} m`, `${course.nb_partants} partants`].map((t) => (
-              <span key={t} className="inline-flex items-center rounded-lg px-3 py-1.5 text-[12px] font-semibold text-slate-200" style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)" }}>{t}</span>
-            ))}
-          </div>
+    // Cercle doré : un dégradé conique tourne derrière la carte et n'apparaît que
+    // sur 2 px de bord. Toutes ses teintes sont dorées — le tour reste doré et
+    // d'épaisseur égale partout, seul le reflet clair se déplace.
+    <div className="bt-lisere relative rounded-[18px] p-[2px] shadow-[0_22px_44px_-26px_rgba(146,64,14,.6)]">
+    <section aria-label="Prochaine course" className="overflow-hidden rounded-[16px] bg-white">
+      {/* Bandeau doré : il porte l'identité de la course et l'action principale */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-200 px-4 py-3 sm:px-5">
+        <IconeTuile icone={Timer} className="bg-white from-white to-white ring-white/80" />
+        <div className="min-w-0 flex-1">
+          <p className="m-0 flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[.14em] text-amber-950/70">
+            Prochaine course
+            {isLive && <PastilleDirect libelle="En piste" />}
+          </p>
+          <h2 className="m-0 mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[17px] font-bold leading-tight text-stone-900 sm:text-[19px]" style={SG}>
+            <span className="rounded-md bg-stone-900 px-1.5 py-0.5 text-[11.5px] font-bold tabular-nums text-white">R{reunionNum}C{course.numero}</span>
+            <span className="min-w-0">{course.hippodrome_nom}</span>
+          </h2>
         </div>
-        <div className="flex w-full flex-row items-end justify-between gap-3.5 border-t border-white/10 pt-4 sm:w-auto sm:flex-col sm:items-end sm:border-t-0 sm:border-l sm:border-white/10 sm:pt-0 sm:pl-6">
-          <div className="text-left sm:text-right">
-            <div className="text-[10px] font-bold uppercase tracking-[.16em] text-slate-600">Départ</div>
-            <div className="mt-1 text-[26px] sm:text-[30px] font-bold leading-none tracking-tight text-white tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{formatTime(course.date_heure)}</div>
-            {countdown && (
-              <div className="mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>{countdown}</div>
-            )}
-          </div>
-          <Link
-            href={`/courses/${course.course_id}`}
-            className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-[13px] font-bold transition-transform hover:-translate-y-0.5"
-            style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)", color: "#0F1520", boxShadow: "0 8px 22px -10px rgba(245,158,11,.6)" }}
-          >
-            Voir la course <ChevronRight className="h-4 w-4" />
-          </Link>
-        </div>
+        <Link
+          href={fiche}
+          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-stone-900 px-3.5 py-2.5 text-[13px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.15),0_8px_18px_-8px_rgba(17,24,39,.6)] transition-transform hover:-translate-y-0.5 active:scale-[.98] max-[479px]:w-full max-[479px]:justify-center"
+        >
+          Voir la course <ChevronRight className="h-4 w-4" />
+        </Link>
       </div>
+
+      {/* Corps : compte à rebours · la course · accès directs */}
+      <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-[auto_minmax(0,1fr)_minmax(0,15rem)] md:items-center md:gap-6">
+        <div className="flex items-center gap-4 md:contents">
+          {/* Compte à rebours : l'anneau se vide sur la dernière heure, le chiffre
+              défile à la seconde. */}
+          <div
+            className="relative flex h-[112px] w-[112px] shrink-0 items-center justify-center md:h-[124px] md:w-[124px]"
+            role="timer"
+            aria-live="off"
+            aria-label={secondes != null ? `Départ dans ${formatRebours(secondes)}` : isLive ? "Course en piste" : `Départ à ${formatTime(course.date_heure)}`}
+          >
+            <svg viewBox="0 0 104 104" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden>
+              <defs>
+                <linearGradient id="bt-anneau" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor={isLive ? "#34D399" : "#FCD34D"} />
+                  <stop offset="100%" stopColor={isLive ? "#059669" : "#D97706"} />
+                </linearGradient>
+              </defs>
+              <circle cx="52" cy="52" r={R} fill="none" stroke="#F1EEE6" strokeWidth="6" />
+              <circle cx="52" cy="52" r={R} fill="none" stroke="url(#bt-anneau)" strokeWidth="6" strokeLinecap="round"
+                strokeDasharray={`${part * C} ${C}`} className="transition-[stroke-dasharray] duration-1000 ease-out" />
+            </svg>
+            <div className="relative flex h-[78%] w-[78%] flex-col items-center justify-center rounded-full bg-gradient-to-b from-white to-stone-50 shadow-[inset_0_1px_0_#fff,0_6px_14px_-8px_rgba(17,24,39,.35)]">
+              {secondes != null ? (
+                <>
+                  <span className="text-[10.5px] font-semibold text-stone-500">départ dans</span>
+                  <span className={cn("font-bold leading-none tracking-tight tabular-nums", secondes < 300 ? "text-amber-700" : "text-stone-900", secondes >= 3600 ? "text-[18px]" : "text-[23px]")} style={SG}>
+                    {formatRebours(secondes)}
+                  </span>
+                  <span className="mt-1 text-[10px] font-semibold tabular-nums text-stone-500">à {formatTime(course.date_heure)}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-[10.5px] font-semibold text-stone-500">{isLive ? "en piste" : "départ"}</span>
+                  <span className="text-[22px] font-bold leading-none tracking-tight text-stone-900 tabular-nums" style={SG}>{formatTime(course.date_heure)}</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* La course */}
+          <div className="min-w-0">
+            {course.nom && <p className="m-0 text-[15px] font-semibold leading-snug text-stone-800" style={SG}>{course.nom}</p>}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-semibold" style={{ color: m.color, background: m.bg, boxShadow: `inset 0 0 0 1px ${m.ring}` }}>
+                <DiscIcon discipline={course.discipline} w={26} h={18} />{titleCase(course.discipline)}
+              </span>
+              {[`${course.distance} m`, `${course.nb_partants} partants`, ...(pool ? [`Enjeux ${pool}`] : [])].map((t) => (
+                <span key={t} className="inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-[12px] font-semibold tabular-nums text-stone-700 ring-1 ring-inset ring-[#ECE7DC]">{t}</span>
+              ))}
+              {course.est_quinte && <Pastille className="bg-amber-50 text-amber-800 ring-amber-200">Quinté+</Pastille>}
+            </div>
+          </div>
+        </div>
+
+        {/* Accès directs aux onglets de la fiche */}
+        <nav aria-label="Accès rapide à la course" className="grid grid-cols-3 gap-2 md:grid-cols-1">
+          {ACCES.map(([cle, lib, desc, Icone]) => (
+            <Link
+              key={cle}
+              href={`${fiche}#${cle}`}
+              className="group flex flex-col items-center gap-1 rounded-xl bg-amber-50/70 px-2 py-2.5 text-center ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(146,64,14,.1)] transition-all hover:-translate-y-0.5 hover:bg-amber-50 md:flex-row md:gap-2.5 md:px-3 md:py-2 md:text-left"
+            >
+              <Icone className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
+              <span className="min-w-0 md:flex-1">
+                <span className="block text-[12.5px] font-bold text-amber-900">{lib}</span>
+                <span className="hidden text-[11px] leading-tight text-stone-500 md:block">{desc}</span>
+              </span>
+              <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-amber-600 transition-transform group-hover:translate-x-0.5 md:block" aria-hidden />
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </section>
     </div>
   );
 }
@@ -398,14 +535,14 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
       id={`course-${course.course_id}`}
       onClick={onOuvrir}
       className={cn(
-        "group relative flex scroll-mt-28 items-center gap-2.5 rounded-2xl border px-3 py-2.5 no-underline transition-all duration-200 sm:gap-3 sm:px-4 sm:py-3",
+        "bt-apparition group relative flex scroll-mt-28 items-center gap-2.5 overflow-hidden rounded-2xl px-3 py-3 no-underline ring-1 transition-all duration-200 active:scale-[.99] sm:gap-3 sm:px-4",
         isDone
-          ? "border-[#E9E6DC] hover:border-gray-300"
-          : "border-[#ECE7DC] shadow-[0_1px_2px_rgba(0,0,0,.03)] hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-[0_16px_32px_-14px_rgba(180,83,9,.28)]",
+          ? "ring-[#E9E6DC] hover:ring-stone-300"
+          : "ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_12px_28px_-22px_rgba(17,24,39,.45)] hover:-translate-y-0.5 hover:ring-amber-300 hover:shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.05),0_22px_40px_-24px_rgba(146,64,14,.45)]",
       )}
-      style={{ background: isLive ? "#F0FDF8" : isDone ? "#F5F4EF" : "#FFFFFF", animation: `fadeUp .5s cubic-bezier(.16,1,.3,1) ${delay}s both` }}
+      style={{ background: isLive ? "#F0FDF8" : isDone ? "#F5F4EF" : "#FFFFFF", ["--bt-delai" as string]: `${delay}s` }}
     >
-      <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : !isDone && course.est_quinte ? "#F59E0B" : "transparent" }} />
+      <span className="absolute inset-y-3 left-0 w-1 rounded-r-full" style={{ background: isLive ? "linear-gradient(180deg,#34D399,#059669)" : !isDone && course.est_quinte ? "linear-gradient(180deg,#FCD34D,#D97706)" : "transparent" }} />
       <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
         <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-700" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
           {formatTime(course.date_heure)}
@@ -448,13 +585,14 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
             Pas de pastille « Analysée » : toutes les courses le sont, elle
             n'apprenait rien et volait la place des deux chiffres qui varient. */}
         {apercu?.analysee && (
-          <div className="mt-1.5 hidden flex-wrap items-center gap-1.5 sm:flex">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {apercu.confiance != null && (
               <span
                 className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 tabular-nums"
                 title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
               >
-                accord des modèles {apercu.confiance}/100
+                <span className="sm:hidden">accord {apercu.confiance}/100</span>
+                <span className="hidden sm:inline">accord des modèles {apercu.confiance}/100</span>
               </span>
             )}
             {apercu.accord_marche === false && (
@@ -462,7 +600,8 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
                 title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
                 className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
               >
-                ne suit pas le marché
+                <span className="sm:hidden">≠ marché</span>
+                <span className="hidden sm:inline">ne suit pas le marché</span>
               </span>
             )}
           </div>
@@ -870,7 +1009,7 @@ export default function ProgrammeClient({
           <div className="mb-3.5 flex items-center gap-3.5">
             <div
               className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
-              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 4px 12px -4px rgba(217,119,6,.4)" }}
+              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(180deg,#FBBF24,#D97706)", boxShadow: "inset 0 1px 0 rgba(255,255,255,.45), 0 6px 14px -6px rgba(217,119,6,.6)" }}
             >
               {hour}
             </div>
@@ -903,21 +1042,43 @@ export default function ProgrammeClient({
       }}
     >
       {/* @keyframes local (fadeUp) */}
-      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}@media (prefers-reduced-motion:reduce){*{animation:none!important}}`}</style>
+      <style>{`
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+@keyframes btDerive1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,18px) scale(1.12)}}
+@keyframes btDerive2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-36px,-14px) scale(1.08)}}
+@keyframes btDerive3{0%,100%{transform:translate(0,0)}50%{transform:translate(24px,-20px)}}
+@keyframes btTour{to{transform:rotate(360deg)}}
+@keyframes btBrille{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes btPop{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes btPouls{0%{box-shadow:0 0 0 0 rgba(217,119,6,.45)}70%{box-shadow:0 0 0 10px rgba(217,119,6,0)}100%{box-shadow:0 0 0 0 rgba(217,119,6,0)}}
+.bt-halo-a{animation:btDerive1 14s ease-in-out infinite}
+.bt-halo-b{animation:btDerive2 17s ease-in-out infinite}
+.bt-halo-c{animation:btDerive3 12s ease-in-out infinite}
+.bt-brillance{background-image:linear-gradient(90deg,#92400E 0%,#D97706 25%,#F59E0B 50%,#D97706 75%,#92400E 100%);background-size:200% 100%;animation:btBrille 6s linear infinite}
+.bt-pop{animation:btPop .6s cubic-bezier(.16,1,.3,1) both}
+.bt-lisere{isolation:isolate;overflow:hidden}
+.bt-lisere::before{content:"";position:absolute;left:50%;top:50%;width:200vmax;height:200vmax;margin:-100vmax 0 0 -100vmax;z-index:-1;background:conic-gradient(from 0deg,#FDE68A,#F59E0B 18%,#D97706 30%,#FBBF24 45%,#FFF7D6 50%,#FBBF24 55%,#D97706 70%,#F59E0B 82%,#FDE68A);animation:btTour 6s linear infinite}
+.bt-pop:nth-child(2){animation-delay:.07s}.bt-pop:nth-child(3){animation-delay:.14s}.bt-pop:nth-child(4){animation-delay:.21s}
+.bt-apparition{animation:fadeUp .5s cubic-bezier(.16,1,.3,1) var(--bt-delai,0s) both}
+@supports (animation-timeline: view()){
+  .bt-apparition{animation:fadeUp linear both;animation-timeline:view();animation-range:entry 0% entry 55%}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}.bt-lisere::before{background:#F59E0B}}
+`}</style>
 
       <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8 lg:px-8">
 
-        {/* ── HERO ── */}
-        <div
-          className="relative overflow-hidden rounded-[28px] px-5 pb-5 pt-6 sm:px-7 sm:pb-6 sm:pt-7"
-          style={{ border: "1px solid rgba(245,158,11,.18)", background: "linear-gradient(180deg,#FFFBF0 0%,#FFFFFF 100%)", boxShadow: "0 1px 3px rgba(0,0,0,.04),0 16px 44px -20px rgba(180,83,9,.18)" }}
-        >
-          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 60% at 12% 8%,rgba(245,158,11,.10),transparent 62%),radial-gradient(55% 55% at 94% 20%,rgba(217,119,6,.07),transparent 60%)" }} />
+        {/* ── EN-TÊTE : panneau teinté et plat, comme les bandeaux de la fiche course ── */}
+        <header className="relative isolate overflow-hidden rounded-[22px] bg-[#F3EDE0] px-4 pb-4 pt-5 ring-1 ring-inset ring-[#E6DCC6] sm:px-6 sm:pb-5 sm:pt-6">
+          {/* Halos dorés qui dérivent lentement : de la vie, sans fond sombre. */}
+          <span aria-hidden className="bt-halo-a pointer-events-none absolute -left-16 -top-20 -z-10 h-56 w-56 rounded-full bg-amber-300/45 blur-3xl" />
+          <span aria-hidden className="bt-halo-b pointer-events-none absolute -bottom-24 right-10 -z-10 h-60 w-60 rounded-full bg-orange-200/60 blur-3xl" />
+          <span aria-hidden className="bt-halo-c pointer-events-none absolute left-1/3 top-6 -z-10 h-40 w-40 rounded-full bg-yellow-200/50 blur-3xl" />
           <span
             aria-hidden
             className="pointer-events-none absolute max-[479px]:hidden"
             style={{
-              right: 30, top: 16, width: 172, height: 104, opacity: 0.11, background: "linear-gradient(120deg,#D97706,#92400E)",
+              right: 26, top: 14, width: 150, height: 92, opacity: 0.1, background: "#92400E",
               WebkitMaskImage: "url(/img/logo-horse.png)", maskImage: "url(/img/logo-horse.png)",
               WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
               WebkitMaskPosition: "center", maskPosition: "center",
@@ -925,16 +1086,15 @@ export default function ProgrammeClient({
             }}
           />
           <div className="relative">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-2.5 flex items-center justify-between gap-3">
               <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.16em] text-amber-700">
                 <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                Programme du jour
+                Programme PMU
               </div>
               {!isToday && (
                 <button
                   onClick={() => selectDate(new Date(`${jourCourant}T12:00:00`))}
-                  className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors"
-                  style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)" }}
+                  className="shrink-0 rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-2 text-sm font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45),0_6px_14px_-6px_rgba(217,119,6,.6)]"
                 >
                   Aujourd&apos;hui
                 </button>
@@ -947,35 +1107,40 @@ export default function ProgrammeClient({
             {format(selectedDate, "yyyy-MM-dd") < jourCourant && (
               <a
                 href={`/resultats/${format(selectedDate, "yyyy-MM-dd")}`}
-                className="mb-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12.5px] font-medium text-amber-800 transition-colors hover:border-amber-400"
+                className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[12.5px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 transition-colors hover:bg-amber-50"
               >
                 Arrivées et rapports du {format(selectedDate, "d MMMM yyyy", { locale: fr })} →
               </a>
             )}
 
-            {/* Le titre de la page ne disait que la date — « Mercredi 26 août 2026 » —
-                sans nommer ce qu'on y trouve. Le `<title>` annonçait bien « Programme
-                PMU », mais le `h1`, qui est le titre du CONTENU, ne le reprenait nulle
-                part : ni pour un lecteur arrivant par un lien, ni pour un moteur qui y
-                cherche le sujet de la page. Le dégradé porte désormais l'intitulé, la
-                date reste en gris à sa suite. */}
-            <h1 className="text-[27px] sm:text-[38px] font-bold leading-[1.08] sm:leading-[1.04] tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
-              <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>Programme PMU</span>
-              <span className="text-gray-800"> — {dayName.toLowerCase()} {restDate}</span>
+            {/* « Courses du jour » : le nom de la rubrique dans toutes les barres de
+                navigation (`@/lib/navigation`). « Programme PMU », le terme que tapent
+                les internautes, reste dans le `<title>` et le sur-titre juste au-dessus.
+                Un autre jour que celui-ci devient « Courses du mardi 23 septembre ». */}
+            <h1 className="text-[26px] font-bold leading-[1.08] tracking-tight sm:text-[34px] sm:leading-[1.04]" style={SG}>
+              <span className="bt-brillance bg-clip-text text-transparent">{isToday ? "Courses du jour" : "Courses"}</span>
+              <span className="text-stone-800">{isToday ? " — " : " du "}{dayName.toLowerCase()} {restDate}</span>
             </h1>
 
-            {programme && programme.nb_courses > 0 && (
-              <div className="mt-5 flex flex-wrap gap-2.5">
-                {[{ n: programme.nb_courses, l: "Courses" }, { n: programme.reunions.length, l: "Réunions" }].map((s) => (
-                  <div key={s.l} className="min-w-[118px] flex-1 rounded-2xl px-4 py-3.5" style={{ background: "rgba(255,255,255,.72)", backdropFilter: "blur(4px)", border: "1px solid rgba(0,0,0,.06)" }}>
-                    <div className="text-[29px] font-bold leading-none text-gray-900 tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{s.n}</div>
-                    <div className="mt-1.5 text-xs font-medium text-gray-600">{s.l}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {programme && programme.nb_courses > 0 && (() => {
+              const enDirect = allCourses.filter((c) => c.statut === "en_cours").length;
+              const aVenir = allCourses.filter((c) => !estPassee(c) && c.statut !== "en_cours").length;
+              const tuiles: Array<{ n: number; l: string; ton?: string }> = [
+                { n: programme.nb_courses, l: "Courses" },
+                { n: programme.reunions.length, l: "Réunions" },
+                ...(isToday ? [
+                  { n: enDirect, l: "En direct", ton: enDirect > 0 ? "text-emerald-700" : undefined },
+                  { n: aVenir, l: "À venir", ton: "text-amber-700" },
+                ] : []),
+              ];
+              return (
+                <div className={cn("mt-4 grid gap-2", tuiles.length === 4 ? "grid-cols-2 min-[360px]:grid-cols-4" : "grid-cols-2")}>
+                  {tuiles.map((t) => <TuileCompteur key={t.l} n={t.n} libelle={t.l} ton={t.ton} />)}
+                </div>
+              );
+            })()}
           </div>
-        </div>
+        </header>
 
         {/* ── Sélecteur de jour ── */}
         <DayStrip selected={selectedDate} jourCourant={jourCourant} onSelect={selectDate} />
@@ -996,7 +1161,16 @@ export default function ProgrammeClient({
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (
-          <div className="space-y-3">
+          <div className={cn(CARTE_CLS, "space-y-3 p-3.5 sm:p-4")}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <IconeTuile icone={Filter} />
+                <h2 className="m-0 text-[15px] font-bold text-stone-900" style={SG}>Filtrer les courses</h2>
+              </div>
+              {(discFilter !== "Tous" || reunionFilter !== "all" || hippoSearch || vbOnly) && (
+                <button onClick={resetFilters} className="text-[12px] font-semibold text-amber-700 hover:underline">Tout effacer</button>
+              )}
+            </div>
             {/* Recherche + valeur */}
             <div className="flex flex-wrap items-center gap-2.5">
               {isPaid && isToday && (
@@ -1016,7 +1190,7 @@ export default function ProgrammeClient({
                   value={hippoSearch}
                   onChange={(e) => setHippoSearch(e.target.value)}
                   placeholder="Rechercher un hippodrome…"
-                  className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-8 text-[13px] outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                  className="w-full rounded-xl border border-[#E6DCC6] bg-[#FCFAF5] py-2.5 pl-9 pr-8 text-[13px] outline-none transition-all focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-100"
                 />
                 {hippoSearch && (
                   <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -1027,8 +1201,11 @@ export default function ProgrammeClient({
             </div>
 
             {/* Filtre par réunion */}
+            {/* Sur ordinateur les réunions passent à la ligne : en défilement horizontal,
+                la dernière était coupée net par le bord de la carte. Sur mobile le
+                défilement reste, avec un fondu à droite qui signale la suite. */}
             {reunionOptions.length > 1 && (
-              <div className={cn("flex gap-2 overflow-x-auto pb-1.5", HIDE_SCROLLBAR)}>
+              <div className={cn("flex gap-2 overflow-x-auto pb-1.5 pr-6 [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] sm:flex-wrap sm:overflow-visible sm:pr-0 sm:[mask-image:none]", HIDE_SCROLLBAR)}>
                 <button
                   onClick={() => setReunionFilter("all")}
                   className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
@@ -1059,7 +1236,7 @@ export default function ProgrammeClient({
             )}
 
             {/* Filtre par discipline */}
-            <div className={cn("flex gap-2 overflow-x-auto pb-1.5", HIDE_SCROLLBAR)}>
+            <div className={cn("flex gap-2 overflow-x-auto pb-1.5 sm:flex-wrap sm:overflow-visible", HIDE_SCROLLBAR)}>
               {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
                 const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
                 if (d !== "Tous" && count === 0) return null;
@@ -1092,7 +1269,7 @@ export default function ProgrammeClient({
              « aucune course » quand c'est l'API qui n'a pas répondu. */
           <div className="flex flex-col items-center justify-center gap-3 py-24">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50"><Radio className="h-7 w-7 text-amber-600" /></div>
-            <p className="font-semibold text-gray-700">Programme momentanément indisponible</p>
+            <p className="font-semibold text-gray-700">Courses momentanément indisponibles</p>
             <p className="text-sm text-gray-600">La connexion au service a échoué. Nouvelle tentative automatique dans une minute.</p>
             <button onClick={() => window.location.reload()} className="mt-1 text-sm font-medium text-amber-700 hover:underline">Réessayer maintenant</button>
           </div>
@@ -1112,7 +1289,26 @@ export default function ProgrammeClient({
         ) : (
           /* ── TIMELINE ── */
           <div className="relative">
-            <div className="absolute left-[19px] sm:left-[22px] top-4 bottom-4 w-0.5 rounded hidden sm:block" style={{ background: "linear-gradient(180deg,#FCD34D,#F59E0B,#D97706)", opacity: 0.35 }} />
+            <BandeauOnglet
+              icone={CalendarClock}
+              titre="Courses du jour"
+              className="mb-5"
+              sousTitre={
+                <>
+                  <b className="font-semibold text-stone-900">{flatAVenir.length}</b> à venir
+                  {flatTermines.length > 0 && <> · <b className="font-semibold text-stone-700">{flatTermines.length}</b> déjà courue{flatTermines.length > 1 ? "s" : ""}</>}
+                </>
+              }
+              droite={isToday && maintenant ? (
+                <Pastille className="bg-white text-amber-800 ring-amber-200">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-60 motion-reduce:animate-none" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  </span>
+                  Maintenant · <span className="tabular-nums">{format(maintenant, "HH:mm")}</span>
+                </Pastille>
+              ) : undefined}
+            />
             {/* Courses déjà courues — au-DESSUS de la timeline, repliées. Elles étaient
                 en bas jusqu'au 2026-09-08 : y accéder demandait de faire défiler toute
                 la fin de journée à venir, alors qu'on les consulte pour l'arrivée et le
@@ -1132,7 +1328,7 @@ export default function ProgrammeClient({
                   onClick={() => setTerminesOuverts((v) => !v)}
                   aria-expanded={terminesOuverts}
                   aria-controls="courses-terminees"
-                  className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[#E9E6DC] bg-white/70 px-4 py-3 text-left text-[13px] font-semibold text-gray-700 transition-colors hover:border-gray-300"
+                  className={cn(CARTE_CLS, "flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-[13px] font-semibold text-gray-700 transition-transform active:scale-[.99]")}
                 >
                   <span>
                     {flatTermines.length} course{flatTermines.length > 1 ? "s" : ""} déjà courue{flatTermines.length > 1 ? "s" : ""}

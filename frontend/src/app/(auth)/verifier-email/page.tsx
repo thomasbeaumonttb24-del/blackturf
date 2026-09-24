@@ -60,7 +60,7 @@ function VerifierEmailContent() {
     <div className="min-h-screen gradient-hero flex items-center justify-center p-4">
       <div className="w-full max-w-md text-center">
         <Link href="/" className="inline-flex items-center gap-2 mb-8 justify-center">
-          <Image src="/logo.png" alt="BlackTurf" width={40} height={40} priority className="rounded-xl object-contain" />
+          <Image src="/logo-transparent.png" alt="BlackTurf" width={40} height={40} priority className="object-contain" />
           <span className="text-2xl font-bold">Black<span className="text-brand-gold-dark">Turf</span></span>
         </Link>
 

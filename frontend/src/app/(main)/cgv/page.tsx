@@ -20,9 +20,8 @@ export default function CGVPage() {
         <h2 className="text-lg font-bold mb-3">1. Identification du vendeur</h2>
         <p className="text-muted-foreground">
           Les présentes CGV régissent la vente des abonnements au service BlackTurf, édité par
-          <strong> Thomas BEAUMONT</strong>, entrepreneur individuel (micro-entreprise), exploitant sous le
-          nom commercial « BlackTurf », 10 rue Alix d&apos;Unienville, 33100 Bordeaux — SIREN 907&nbsp;548&nbsp;184,
-          RCS Bordeaux. TVA non applicable, art. 293&nbsp;B du CGI. Contact : contact@blackturf.fr.
+          un entrepreneur individuel (micro-entreprise) exploitant sous le
+          nom commercial « BlackTurf ». TVA non applicable, art. 293&nbsp;B du CGI. Contact : contact@blackturf.fr.
         </p>
       </section>
 

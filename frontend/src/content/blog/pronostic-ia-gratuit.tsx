@@ -70,8 +70,8 @@ export default function Body() {
       </p>
       <p>
         <strong>Le palmarès intégral.</strong> C&apos;est la partie qu&apos;un site qui vend des
-        pronostics a le plus intérêt à cacher, et c&apos;est la plus utile : le{" "}
-        <Link href="/track-record">palmarès</Link> publie le taux de réussite mesuré course après
+        pronostics a le plus intérêt à cacher, et c&apos;est la plus utile : la page{" "}
+        <Link href="/track-record">Nos performances</Link> publie le taux de réussite mesuré course après
         course, sa comparaison avec le classement par les cotes, le score de calibration et le
         rendement réel — <strong>y compris quand il est négatif</strong>. Aucune sélection, aucune
         période retirée.
@@ -122,7 +122,7 @@ export default function Body() {
       <p>
         Pour comprendre ce que fait exactement le modèle et sur quelles données il apprend :{" "}
         <Link href="/pronostics-ia">comment fonctionne l&apos;algorithme</Link>. Pour vérifier ce
-        qu&apos;il a produit : le <Link href="/track-record">palmarès mesuré</Link>. Pour voir les
+        qu&apos;il a produit : la page <Link href="/track-record">Nos performances</Link>. Pour voir les
         analyses du jour : le <Link href="/programme">programme PMU</Link>.
       </p>
     </>

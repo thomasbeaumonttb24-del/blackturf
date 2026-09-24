@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ShieldCheck, Database, Mail, Instagram } from "lucide-react";
 import { INSTAGRAM } from "@/lib/social";
+import { RUBRIQUES as R } from "@/lib/navigation";
 
 /**
  * `rel="nofollow"` sur les liens vers des espaces privés.
@@ -20,16 +21,18 @@ const COLUMNS: Array<{
   {
     title: "Produit",
     links: [
-      { href: "/programme", label: "Programme du jour" },
-      { href: "/pronostics-ia", label: "Comment marche l’IA" },
-      { href: "/track-record", label: "Palmarès mesuré" },
-      { href: "/value-bets", label: "Paris de valeur", prive: true },
-      { href: "/bankroll", label: "Suivi du capital", prive: true },
-      { href: "/assistant", label: "Assistant IA", prive: true },
+      R.coursesDuJour,
+      R.quinte,
+      R.resultats,
+      { ...R.parisDeValeur, prive: true },
+      R.performances,
+      R.methode,
+      { ...R.suiviCapital, prive: true },
+      { ...R.assistant, prive: true },
     ],
   },
   {
-    title: "Plans",
+    title: "Tarifs",
     links: [
       { href: "/tarifs", label: "Gratuit" },
       { href: "/tarifs", label: "Standard — 12€/mois" },
@@ -40,8 +43,6 @@ const COLUMNS: Array<{
     title: "Ressources",
     links: [
       { href: "/newsletter", label: "La lettre du lundi" },
-      { href: "/quinte-du-jour", label: "Quinté+ du jour" },
-      { href: "/resultats", label: "Résultats et rapports" },
       // Ces deux entrées manquaient. Le pied de page est ce qui donne à une rubrique un
       // lien depuis CHAQUE page du site : sans elle, « lire la musique » n'était atteint
       // que depuis deux pages sur quinze, et les archives depuis trois.
@@ -82,11 +83,11 @@ export function Footer() {
                   alt qui le répète fait lire « BlackTurf BlackTurf » à un lecteur
                   d'écran (règle axe « image-redundant-alt »). L'image est décorative. */}
               <Image
-                src="/logo.png"
+                src="/logo-transparent.png"
                 alt=""
                 width={30}
                 height={30}
-                className="rounded-md object-contain ring-1 ring-amber-200/60"
+                className="object-contain"
               />
               <span className="font-display text-lg font-bold text-gray-900">
                 Black<span className="text-gradient">Turf</span>

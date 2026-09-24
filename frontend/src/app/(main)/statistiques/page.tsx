@@ -203,7 +203,7 @@ export default function StatistiquesPage() {
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
               <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-amber-700" />
-              Mes Statistiques
+              Mes statistiques
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               {data.nb_paris} paris
@@ -438,7 +438,7 @@ export default function StatistiquesPage() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border/60 text-sm text-muted-foreground hover:text-foreground hover:border-brand-gold/40 transition-all"
           >
             <Wallet className="w-4 h-4" />
-            Gérer mon capital
+            Suivi du capital
             <ChevronRight className="w-3 h-3" />
           </Link>
           <Link
@@ -446,7 +446,7 @@ export default function StatistiquesPage() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border/60 text-sm text-muted-foreground hover:text-foreground hover:border-brand-gold/40 transition-all"
           >
             <TrendingUp className="w-4 h-4" />
-            Palmarès de l&apos;IA
+            Nos performances
             <ChevronRight className="w-3 h-3" />
           </Link>
         </div>

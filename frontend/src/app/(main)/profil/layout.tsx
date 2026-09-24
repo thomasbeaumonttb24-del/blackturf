@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 // Espace privé : `noindex`. Voir `assistant/layout.tsx` pour le détail.
 export const metadata: Metadata = {
-  title: "Mon compte",
+  title: "Mon profil",
   description: "Vos informations, votre abonnement et vos préférences de notification.",
   robots: { index: false, follow: true },
 };
