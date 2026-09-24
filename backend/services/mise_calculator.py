@@ -867,6 +867,24 @@ def _regle_budget_quinte(montant: int, profil: str, n_max: int = 7) -> dict:
             "budget": int(QUINTE_MISE_BASE), "champ": 5}
 
 
+def supplement_quinte(montant: float, profil: str, course_info: dict) -> float:
+    """Euros que le ticket Quinté+ AJOUTE au montant saisi — 0 hors course Quinté+
+    ou quand il est pris sur le montant. Sert au plafond d'exposition quotidienne
+    (api/routes/courses) : l'argent engagé par le plan est montant + supplément.
+
+    Même arrondi que `_avec_module_quinte` (montant entier, 2 € minimum). Un module
+    finalement indisponible (moins de 5 chevaux à cote exploitable) est compté
+    quand même : le plafond se trompe alors de 2 € dans le sens prudent.
+    """
+    from ml.combo_bets import _bet_flags
+    if not _bet_flags(course_info or {}).get("est_quinte"):
+        return 0.0
+    profil = profil if profil in PROFIL_CONFIG else "equilibre"
+    montant_saisi = max(2, int(round(float(montant or 0))))
+    regle = _regle_budget_quinte(montant_saisi, profil)
+    return float(regle["budget"]) if regle.get("en_supplement") else 0.0
+
+
 def _quantile_pondere(valeurs: list[float], poids: list[float], q: float) -> float:
     paires = sorted(zip(valeurs, poids))
     total = sum(max(w, 0.0) for _, w in paires)
