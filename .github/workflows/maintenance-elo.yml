@@ -4,6 +4,8 @@ name: Maintenance ELO
 #
 #   elo_a_blanc      recalcule tous les ELO en mémoire, mesure ancien vs nouveau
 #                    sur 180 jours, N'ÉCRIT RIEN.
+#   elo_grille       compare les variantes de l'algorithme sur l'historique réel,
+#                    N'ÉCRIT RIEN.
 #   elo_appliquer    même calcul, puis bascule en UNE transaction (ratings,
 #                    elo_historique, snapshots participations.elo_avant_*).
 #   features_12_mois recalcule features_ml des 400 derniers jours (fenêtre du
@@ -22,7 +24,7 @@ on:
         description: "Action"
         required: true
         type: choice
-        options: [elo_a_blanc, elo_appliquer, features_12_mois, statut]
+        options: [elo_a_blanc, elo_grille, elo_appliquer, features_12_mois, statut]
 
 concurrency:
   group: maintenance-elo
@@ -49,9 +51,10 @@ jobs:
             mkdir -p "$LOGS"
             ACTION="${{ inputs.action }}"
             case "$ACTION" in
-              elo_a_blanc|elo_appliquer)
+              elo_a_blanc|elo_grille|elo_appliquer)
                 OPT=""
                 if [ "$ACTION" = elo_appliquer ]; then OPT="--appliquer"; fi
+                if [ "$ACTION" = elo_grille ]; then OPT="--grille"; fi
                 echo "=== $(date -u) $ACTION ($(git rev-parse --short HEAD))" >> "$LOGS/maintenance-elo.log"
                 RC=0
                 $DC run --rm --no-deps -T worker python -m scripts.elo_recalcul $OPT \
