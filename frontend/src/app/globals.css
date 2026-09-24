@@ -777,19 +777,45 @@
   .tr-ring, .tr-bar, .tr-slide { transition: none !important; }
 }
 
-/* ════════ ACCUEIL — « Comment ça marche » : écrans d'étape ════════ */
-@keyframes etapeScan { from { top: -4rem; } to { top: 100%; } }
-.etape-scan {
-  background: linear-gradient(180deg, transparent, rgba(251,191,36,.07), transparent);
-  animation: etapeScan 4.5s linear infinite;
+/* ════════ ACCUEIL — « Comment ça marche » : scènes en relief ════════
+   `--p` (0 → 1) suit la montée de la scène dans l'écran ; `--px` / `--py`
+   (-1 → 1) suivent le pointeur. Valeurs par défaut = état final, à plat. */
+.scene3d { --p: 1; --px: 0; --py: 0; perspective: 1800px; }
+.scene3d-plan {
+  position: relative;
+  transform-style: preserve-3d;
+  transform:
+    translateY(calc((1 - var(--p)) * 80px))
+    rotateX(calc((1 - var(--p)) * 24deg + 4deg - var(--py) * 4deg))
+    rotateY(calc(var(--sens) * ((1 - var(--p)) * -20deg - 7deg) + var(--px) * 5deg))
+    scale(calc(.9 + var(--p) * .1));
+  transition: transform .5s cubic-bezier(.16,1,.3,1);
+  will-change: transform;
 }
-@keyframes etapeCaret { 50% { opacity: 0; } }
-.etape-caret { animation: etapeCaret 1s steps(1) infinite; }
-@keyframes etapeImpulsion { from { left: -4rem; } to { left: 100%; } }
-.etape-impulsion { animation: etapeImpulsion 3.2s cubic-bezier(.45,0,.55,1) infinite; }
-@keyframes etapeFleche { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(2px); } }
-.etape-fleche { animation: etapeFleche 1.6s ease-in-out infinite; }
+.scene3d-halo { opacity: calc(.35 + var(--p) * .65); }
+.scene3d-sol { opacity: calc(var(--p)); }
+.scene3d-reflet {
+  background: linear-gradient(115deg, rgba(255,255,255,0) 30%, rgba(255,255,255,.55) 48%, rgba(255,255,255,0) 62%);
+  background-size: 250% 100%;
+  background-position: calc(100% - var(--p) * 100% + var(--px) * 12%) 0;
+  mix-blend-mode: soft-light;
+}
+.scene3d-puce { transform: translateZ(var(--z)); animation: scenePuce 6s ease-in-out infinite; }
+@keyframes scenePuce {
+  0%, 100% { transform: translateZ(var(--z)) translateY(0); }
+  50%      { transform: translateZ(var(--z)) translateY(-10px); }
+}
+.scene3d-ticket {
+  transform: translateY(calc((1 - var(--p)) * (40px + var(--i) * 50px)));
+  opacity: calc(var(--p) * 1.4 - var(--i) * .3);
+  transition: transform .6s cubic-bezier(.16,1,.3,1);
+}
 @media (prefers-reduced-motion: reduce) {
-  .etape-scan, .etape-caret, .etape-impulsion, .etape-fleche { animation: none !important; }
-  .etape-scan, .etape-impulsion { display: none; }
+  .scene3d-plan { transform: none !important; transition: none !important; }
+  .scene3d-puce { animation: none !important; transform: none !important; }
+  .scene3d-ticket { transform: none !important; opacity: 1 !important; }
 }
+
+/* Colonnes en relief « Face au hasard » : montée à l'entrée dans l'écran. */
+.colonne3d { transition: height 1.6s cubic-bezier(0.16,1,0.3,1); }
+@media (prefers-reduced-motion: reduce) { .colonne3d { transition: none !important; } }
