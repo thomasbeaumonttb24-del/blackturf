@@ -112,7 +112,7 @@ export default function DashboardPage() {
               Bonjour{user?.prenom ? `, ${user.prenom}` : ""} 👋
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {format(new Date(), "EEEE d MMMM", { locale: fr })}
+              Mon espace · {format(new Date(), "EEEE d MMMM", { locale: fr })}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -122,7 +122,7 @@ export default function DashboardPage() {
             <Button asChild variant="brand" size="sm">
               <Link href="/programme">
                 <Calendar className="w-4 h-4 mr-2" />
-                Programme
+                Courses du jour
               </Link>
             </Button>
           </div>
@@ -380,7 +380,7 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-blue-700" />
-                    {aDesProchaines ? "Prochaines courses" : "Programme du jour"}
+                    {aDesProchaines ? "Prochaines courses" : "Courses du jour"}
                   </CardTitle>
                   <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
                     <Link href="/programme">
@@ -458,7 +458,7 @@ export default function DashboardPage() {
                 {[
                   { href: "/bankroll", label: "Suivi du capital", icon: Wallet },
                   { href: "/strategies", label: "Mes stratégies", icon: BarChart3 },
-                  { href: "/assistant", label: "Assistant algorithme", icon: Cpu },
+                  { href: "/assistant", label: "Assistant IA", icon: Cpu },
                 ].map(({ href, label, icon: Icon }) => (
                   <Link
                     key={href}

@@ -202,7 +202,7 @@ export default function Body() {
             b: (
               <>
                 chaque pronostic horodaté avant le départ, puis noté —{" "}
-                <Link href="/track-record">palmarès public</Link>
+                <Link href="/track-record">Nos performances</Link>
               </>
             ),
           },
@@ -370,7 +370,7 @@ export default function Body() {
         résultats tombent, et noté sur ce qu&apos;il a annoncé — y compris quand la note est mauvaise.
       </p>
 
-      <Suite href="/track-record" cta="Voir le palmarès">
+      <Suite href="/track-record" cta="Voir nos performances">
         Tous les chiffres de cet article sortent de la même page, recalculée en continu : réussite,
         calibration, valeur à la clôture, et les périodes perdantes avec le reste.
       </Suite>

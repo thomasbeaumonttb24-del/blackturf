@@ -58,11 +58,13 @@ function RechercheContent() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8">
+      <h1 className="mb-4 text-2xl font-bold text-gray-900">Recherche</h1>
       {/* Search input */}
       <div className="relative mb-8">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-600" />
         <input
           autoFocus
+          aria-label="Rechercher un cheval, un jockey ou un hippodrome"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Rechercher un cheval, jockey, hippodrome..."

@@ -158,8 +158,8 @@ export default function Body() {
         Le détail de la méthode — les données sur lesquelles le modèle apprend, la façon dont il est
         réentraîné chaque nuit et les mesures qui servent à vérifier sa justesse — est exposé sur la
         page <Link href="/pronostics-ia">comment fonctionne l&apos;algorithme</Link>. Les résultats
-        obtenus course après course, gains comme pertes, sont publiés dans le{" "}
-        <Link href="/track-record">palmarès</Link>.{" "}
+        obtenus course après course, gains comme pertes, sont publiés sur la page{" "}
+        <Link href="/track-record">Nos performances</Link>.{" "}
         <Link href="/programme">Voir l&apos;analyse du jour →</Link>
       </p>
     </>

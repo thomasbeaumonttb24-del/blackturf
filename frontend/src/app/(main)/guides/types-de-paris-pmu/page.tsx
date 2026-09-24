@@ -115,7 +115,7 @@ export default function GuideTypesParis() {
           </div>
         </Section>
 
-        <Callout href="/programme" cta="Voir le programme">
+        <Callout href="/programme" cta="Voir les courses du jour">
           BlackTurf calcule pour chaque course les paris au meilleur rapport probabilité/cote.
         </Callout>
 

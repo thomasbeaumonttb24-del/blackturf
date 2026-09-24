@@ -61,7 +61,7 @@ export default function DisciplinesIndex() {
           ))}
         </div>
 
-        <Callout href="/programme" cta="Voir le programme">
+        <Callout href="/programme" cta="Voir les courses du jour">
           Voir toutes les réunions du jour, toutes disciplines confondues, sur le programme PMU.
         </Callout>
       </Container>

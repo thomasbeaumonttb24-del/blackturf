@@ -262,7 +262,7 @@ export default function Body() {
         <Link href="/blog/gestion-bankroll-courses">gestion de capital</Link>.
       </p>
 
-      <Suite href="/programme" cta="Voir le programme">
+      <Suite href="/programme" cta="Voir les courses du jour">
         Les courses qui proposent le 2sur4 sont signalées sur le programme du jour, avec la
         probabilité calculée pour chaque cheval et la cote du marché en face.
       </Suite>

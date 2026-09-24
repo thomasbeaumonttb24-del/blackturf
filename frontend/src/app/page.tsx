@@ -284,7 +284,7 @@ export default async function HomePage() {
             </Button>
             <Button variant="outline" size="xl" asChild
               className="press bg-white/10 backdrop-blur-sm border-white/25 text-white hover:bg-white/20 hover:text-white">
-              <Link href="/programme">Voir le programme du jour</Link>
+              <Link href="/programme">Voir les courses du jour</Link>
             </Button>
           </div>
           <p className="mt-5 text-[11px] text-white/55">7 jours gratuits · aucun prélèvement avant la fin de l&apos;essai · annulation à tout moment</p>

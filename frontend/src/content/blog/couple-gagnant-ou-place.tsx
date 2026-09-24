@@ -205,7 +205,7 @@ export default function Body() {
         avec quatre places ouvertes.
       </p>
 
-      <Suite href="/programme" cta="Voir le programme">
+      <Suite href="/programme" cta="Voir les courses du jour">
         Pour chaque course du jour : la probabilité calculée de chaque cheval, la cote du marché en
         face, et l&apos;écart entre les deux — de quoi choisir la formule en connaissance de cause.
       </Suite>

@@ -236,7 +236,7 @@ export default async function CoursePage({ params }: Props) {
   // archivée remonte désormais vers sa journée d'arrivées, qui la liste réellement.
   const parent = course
     ? estAujourdhui || !jour
-      ? { name: "Programme du jour", item: "https://blackturf.fr/programme" }
+      ? { name: "Courses du jour", item: "https://blackturf.fr/programme" }
       : { name: `Résultats du ${jourCourtAnnee(jour)}`, item: `https://blackturf.fr/resultats/${jour}` }
     : null;
 
@@ -549,12 +549,12 @@ export default async function CoursePage({ params }: Props) {
                       },
                     ]
                   : []),
-                { href: "/programme", txt: "Programme PMU du jour" },
+                { href: "/programme", txt: "Courses du jour" },
                 { href: "/quinte-du-jour", txt: "Quinté+ du jour" },
-                { href: "/resultats", txt: "Arrivées et rapports du jour" },
+                { href: "/resultats", txt: "Résultats" },
                 { href: "/guides/types-de-paris-pmu", txt: "Comprendre les types de paris" },
                 { href: "/pronostics-ia", txt: "Comment l'IA analyse une course" },
-                { href: "/track-record", txt: "Les résultats mesurés de l'IA" },
+                { href: "/track-record", txt: "Nos performances" },
               ].map((l) => (
                 <a
                   key={l.href}

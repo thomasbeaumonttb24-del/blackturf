@@ -151,7 +151,7 @@ export default function Body() {
         BlackTurf applique cette logique automatiquement : une probabilité par cheval, comparée à la
         cote PMU en direct.{" "}
         <Link href="/quinte-du-jour">Voir le Quinté+ du jour analysé →</Link> Et{" "}
-        <Link href="/track-record">le palmarès mesuré</Link> publie ce que ces analyses ont donné à
+        la page <Link href="/track-record">Nos performances</Link> publie ce que ces analyses ont donné à
         l&apos;arrivée, pertes comprises.
       </p>
       <p className="text-sm">

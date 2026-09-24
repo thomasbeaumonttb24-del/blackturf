@@ -76,7 +76,7 @@ export default function GuidesIndex() {
           ))}
         </div>
 
-        <Callout href="/programme" cta="Voir le programme">
+        <Callout href="/programme" cta="Voir les courses du jour">
           Passez à la pratique : le programme PMU du jour est analysé course par course par l&apos;IA
           BlackTurf — partants, cotes en direct et paris de valeur.
         </Callout>

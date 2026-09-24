@@ -93,7 +93,7 @@ export default async function ProgrammePage() {
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Accueil", item: "https://blackturf.fr" },
-      { "@type": "ListItem", position: 2, name: "Programme du jour", item: "https://blackturf.fr/programme" },
+      { "@type": "ListItem", position: 2, name: "Courses du jour", item: "https://blackturf.fr/programme" },
     ],
   };
 
@@ -139,12 +139,12 @@ export default async function ProgrammePage() {
           >
             Comment l&apos;IA analyse une course
           </a>{" "}
-          détaille les données utilisées, et{" "}
+          détaille les données utilisées, et la page{" "}
           <a
             href="/track-record"
             className="font-medium text-brand-gold-dark underline-offset-2 hover:underline"
           >
-            le palmarès mesuré
+            Nos performances
           </a>{" "}
           publie ce que ces analyses ont donné à l&apos;arrivée, pertes comprises.
         </p>
