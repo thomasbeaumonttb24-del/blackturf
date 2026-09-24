@@ -6,12 +6,12 @@
    cheval. Le travail est de rendre chaque chiffre lisible sans légende externe :
    libellés en clair, verdicts en mots (« bon prix », « en progression »), et une
    mise en page propre au téléphone plutôt que des colonnes masquées. */
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-/* eslint-disable @next/next/no-img-element -- casaques PMU externes, déjà légères */
+import { useId, useMemo, useState, type ReactNode } from "react";
 import {
   Activity, ArrowDownUp, ChevronDown, Gauge, HelpCircle, MapPin, Trophy,
   TrendingDown, TrendingUp, Users,
 } from "lucide-react";
+import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { MusiqueDisplay, RunningStyleBadge } from "@/components/courses/badges";
 import { formatMontantDevise, cn } from "@/lib/utils";
 import { LecturePrix, formatCoteFr, formatCoteJusteFr } from "@/components/courses/classement";
@@ -522,7 +522,7 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, probaMax, eloCh
         {/* Identité : casaque + n° (+ nom sur mobile) */}
         <div className="flex items-start gap-3 md:contents">
           <div className="flex shrink-0 justify-center md:w-full">
-            <Casaque numero={p.numero} url={p.casaque_image_url} np={np} />
+            <CasaqueNumero numero={p.numero} imgUrl={p.casaque_image_url} vertical />
           </div>
 
           <div className="min-w-0 flex-1">
@@ -598,57 +598,6 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, probaMax, eloCh
         )}
       </div>
     </li>
-  );
-}
-
-/** Casaque en vignette, numéro en pastille dans le coin : le numéro reste ce
- *  qu'on coche sur un ticket, la casaque ce qu'on reconnaît pendant la course.
- *  Sans image (ou si elle ne charge pas), seul le numéro s'affiche, en grand. */
-function Casaque({ numero, url, np }: { numero: number; url: string | null; np: boolean }) {
-  const [echec, setEchec] = useState<string | null>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-  // Une image en échec AVANT l'hydratation ne déclenche jamais `onError` côté
-  // React : on la détecte au montage, sinon le texte alternatif s'affiche.
-  useEffect(() => {
-    const el = imgRef.current;
-    if (el && url && el.complete && el.naturalWidth === 0) setEchec(url);
-  }, [url]);
-  const image = !!url && echec !== url;
-  if (!image) {
-    return (
-      <span
-        aria-label={`Numéro ${numero}`}
-        className={cn("inline-flex h-11 w-11 items-center justify-center rounded-xl text-[17px] font-bold tabular-nums text-white md:h-12 md:w-12",
-          np ? "bg-stone-400" : "bg-[#172033]")}
-        style={SG}
-      >
-        {numero}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex flex-col items-center">
-      <span className={cn("inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-b from-white to-stone-100 ring-1 ring-inset ring-[#ECE7DC] md:h-14 md:w-14", np && "grayscale")}>
-        <img
-          ref={imgRef}
-          src={url!}
-          alt={`Casaque du n°${numero}`}
-          width={40}
-          height={40}
-          loading="lazy"
-          onError={() => setEchec(url)}
-          className="h-10 w-10 object-contain drop-shadow-[0_1px_1px_rgba(0,0,0,.18)] md:h-11 md:w-11"
-        />
-      </span>
-      <span
-        aria-label={`Numéro ${numero}`}
-        className={cn("relative -mt-2 inline-flex h-6 min-w-7 items-center justify-center rounded-lg px-1.5 text-[13px] font-bold tabular-nums text-white ring-2 ring-white",
-          np ? "bg-stone-400" : "bg-[#172033]")}
-        style={SG}
-      >
-        {numero}
-      </span>
-    </span>
   );
 }
 
