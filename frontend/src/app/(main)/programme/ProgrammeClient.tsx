@@ -389,14 +389,14 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
           </div>
           <Link
             href={fiche}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-2.5 text-[13px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45),0_8px_18px_-8px_rgba(217,119,6,.65)] transition-transform hover:-translate-y-0.5 active:scale-[.98]"
+            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-3.5 py-2.5 text-[13px] font-bold sm:px-4 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45),0_8px_18px_-8px_rgba(217,119,6,.65)] transition-transform hover:-translate-y-0.5 active:scale-[.98]"
           >
             Voir la course <ChevronRight className="h-4 w-4" />
           </Link>
         </div>
       </div>
       {/* Accès directs aux onglets de la fiche : le pronostic, les partants, le plan. */}
-      <nav aria-label="Accès rapide à la course" className="relative flex gap-2 overflow-x-auto border-t border-[#EFE8D8] bg-white/60 px-4 py-2.5 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav aria-label="Accès rapide à la course" className="relative flex flex-wrap gap-2 border-t border-[#EFE8D8] bg-white/60 px-4 py-2.5 sm:px-6">
         {[["synthese", "Pronostic"], ["partants", "Partants"], ["plan", "Plan de mise"]].map(([cle, lib]) => (
           <Link
             key={cle}
@@ -1080,7 +1080,7 @@ export default function ProgrammeClient({
                 ] : []),
               ];
               return (
-                <div className={cn("mt-4 grid gap-2", tuiles.length === 4 ? "grid-cols-4" : "grid-cols-2")}>
+                <div className={cn("mt-4 grid gap-2", tuiles.length === 4 ? "grid-cols-2 min-[360px]:grid-cols-4" : "grid-cols-2")}>
                   {tuiles.map((t) => <TuileCompteur key={t.l} n={t.n} libelle={t.l} ton={t.ton} />)}
                 </div>
               );
