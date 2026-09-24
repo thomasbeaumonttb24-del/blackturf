@@ -1170,6 +1170,7 @@ async def run_post_course(course_id: str) -> None:
             niveau_course=course.niveau_course,
             dotation=course.allocation,
             classement=classement_with_ids,
+            date_course=course.date_heure.date() if course.date_heure else None,
         )
         log.info("pipeline.post_course.elo_updated", course_id=course_id)
 

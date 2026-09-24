@@ -57,3 +57,48 @@ def test_place_pmu_non_numerique_devient_un_incident():
     assert _place_ou_incident({"statusArrivee": "DISQUALIFIE"}) == (None, "DISQUALIFIE")
     assert _place_ou_incident({"statusArrivee": "NON_PARTANT"}) == (None, None)
     assert _place_ou_incident(None) == (None, None)
+
+
+# ── ELO : calcul d'une course ───────────────────────────────────────────────
+from ml.elo import (  # noqa: E402
+    ELO_INITIAL, amorcer_inedits, calculer_deltas_course, champ_elo,
+    multiplicateur_provisoire,
+)
+
+
+def test_elo_somme_nulle_et_vainqueur_gagne():
+    valides = [{"cheval_id": c, "position": p} for c, p in (("a", 1), ("b", 2), ("c", 3))]
+    r = {"a": 1500.0, "b": 1500.0, "c": 1500.0}
+    d = calculer_deltas_course(valides, r, {"a": 20, "b": 20, "c": 20}, 32)
+    assert d["a"] > 0 > d["c"]
+    assert abs(sum(d.values())) < 1e-9
+
+
+def test_elo_disqualifie_recule():
+    cl = classement_elo([
+        {"cheval_id": "a", "position": 1}, {"cheval_id": "b", "position": 2},
+        {"cheval_id": "dq", "position": None, "incident": "DISQUALIFIE"},
+    ])
+    r = {"a": 1400.0, "b": 1400.0, "dq": 1600.0}
+    d = calculer_deltas_course(cl, r, {c: 20 for c in r}, 32)
+    assert d["dq"] < 0
+
+
+def test_elo_k_provisoire_decroit_jusqu_a_un():
+    assert multiplicateur_provisoire(0) == 2.5
+    assert 1.0 < multiplicateur_provisoire(4) < 2.5
+    assert multiplicateur_provisoire(8) == multiplicateur_provisoire(50) == 1.0
+
+
+def test_elo_inedit_amorce_a_la_moyenne_du_champ():
+    r = {"a": 1700.0, "b": 1650.0, "c": 1600.0, "new": ELO_INITIAL}
+    seed = amorcer_inedits(r, {"a": 5, "b": 5, "c": 5})
+    assert seed["new"] == 1650.0 and seed["a"] == 1700.0
+    # Trop peu de chevaux notés : pas d'amorçage.
+    assert amorcer_inedits({"a": 1700.0, "new": ELO_INITIAL}, {"a": 5})["new"] == ELO_INITIAL
+
+
+def test_champ_elo_toutes_graphies():
+    assert champ_elo("Attelé") == champ_elo("TROT_ATTELE") == champ_elo("Monté") == "elo_score_trot"
+    assert champ_elo("Steeple") == champ_elo("HAIES") == "elo_score_obstacle"
+    assert champ_elo("plat") == champ_elo(None) == "elo_score_plat"

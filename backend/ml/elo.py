@@ -4,9 +4,10 @@ Calcul ELO hippique — BlackTurf.
 
 Algorithme :
 - ELO initial : 1500
-- Duels 2-à-2 pour chaque paire (i, j) dans la course
-- Poids du duel décroit avec l'écart de position
-- Facteur K variable selon prestige de la course
+- Duels 2-à-2 pour chaque paire (i, j) dans la course, tous de même poids
+- Disqualifiés / tombés / arrêtés : battus par tous les classés
+- Facteur K variable selon prestige de la course, majoré pour les chevaux
+  peu notés (K provisoire), inédits amorcés à la moyenne du champ
 """
 import uuid
 import math
@@ -78,7 +79,7 @@ def classement_elo(classement: list[dict]) -> list[dict]:
     """
     classes, fautifs = [], []
     for r in classement:
-        if not r.get("cheval_id"):
+        if r.get("cheval_id") is None:
             continue
         pos = r.get("position")
         try:
@@ -96,6 +97,87 @@ def classement_elo(classement: list[dict]) -> list[dict]:
     return classes + [{**r, "position": derniere} for r in fautifs]
 
 
+# ── Cheval peu noté : K PROVISOIRE ─────────────────────────────────────────
+# Un ELO sans historique est une supposition. Avec le même K qu'un cheval à 40
+# courses, un bon cheval mettait des dizaines de sorties à rejoindre sa vraie
+# valeur — et tant qu'il n'y était pas, il faussait aussi les duels de ses
+# adversaires. Le K est multiplié par PROVISOIRE_K_MAX au premier passage, puis
+# décroît linéairement jusqu'à 1 après PROVISOIRE_NB_COURSES courses notées.
+PROVISOIRE_K_MAX = 2.5
+PROVISOIRE_NB_COURSES = 8
+# Nombre minimal de partants DÉJÀ notés pour amorcer un inédit à leur moyenne.
+AMORCE_MIN_NOTES = 3
+
+
+def champ_elo(discipline: Optional[str]) -> str:
+    """Colonne ELO d'une discipline, quelle que soit sa graphie (« Attelé »,
+    « TROT_ATTELE », « attele », « Steeple »…). Défaut : plat."""
+    brut = DISCIPLINE_ELO_FIELD.get(discipline or "")
+    if brut:
+        return brut
+    d = (discipline or "").lower()
+    if "trot" in d or "attel" in d or "mont" in d:
+        return "elo_score_trot"
+    if "haie" in d or "steeple" in d or "obstacle" in d or "cross" in d:
+        return "elo_score_obstacle"
+    return "elo_score_plat"
+
+
+def multiplicateur_provisoire(nb_courses_notees: int) -> float:
+    """K × [PROVISOIRE_K_MAX → 1] selon l'expérience du cheval dans la discipline."""
+    reste = max(0.0, 1.0 - max(0, nb_courses_notees) / PROVISOIRE_NB_COURSES)
+    return 1.0 + (PROVISOIRE_K_MAX - 1.0) * reste
+
+
+def amorcer_inedits(ratings: dict, nb_notees: dict) -> dict:
+    """Rating de départ des chevaux JAMAIS notés : la moyenne des partants notés.
+
+    Les conditions de course (catégorie, gains, allocation) réunissent des chevaux
+    de niveau voisin : le champ est le meilleur a priori disponible. Démarrer tout
+    le monde à 1500 plaçait un débutant de Groupe au niveau d'un réclamer, et
+    faisait gagner/perdre des points à ses adversaires sur une valeur fictive.
+    Faute d'au moins AMORCE_MIN_NOTES chevaux notés, on garde le rating courant.
+    """
+    notes = [r for cid, r in ratings.items() if nb_notees.get(cid, 0) > 0]
+    if len(notes) < AMORCE_MIN_NOTES:
+        return dict(ratings)
+    moyenne = sum(notes) / len(notes)
+    return {cid: (moyenne if nb_notees.get(cid, 0) == 0 and r == ELO_INITIAL else r)
+            for cid, r in ratings.items()}
+
+
+def calculer_deltas_course(valides: list[dict], ratings: dict, nb_notees: dict,
+                           k: float) -> dict:
+    """Deltas ELO d'une course (fonction pure, testable sans base).
+
+    valides : [{cheval_id, position}] — cf. `classement_elo` (incidents derniers,
+    à égalité). Chaque paire de partants est un duel : le mieux classé gagne,
+    même position = nul. Tous les duels PÈSENT PAREIL : l'ancien poids décroissant
+    avec l'écart de places faisait compter trois fois moins « battre le dernier »
+    que « battre le 2ᵉ », alors que c'est l'information la plus sûre de la course.
+
+    K est divisé par (n-1) pour que le gain total d'une course reste de l'ordre de
+    K quel que soit le nombre de partants, puis modulé par l'expérience de chaque
+    cheval (`multiplicateur_provisoire`). Les probabilités attendues sont calculées
+    sur les ratings AVANT course : le résultat ne dépend pas de l'ordre des duels.
+    """
+    n = len(valides)
+    deltas = {r["cheval_id"]: 0.0 for r in valides}
+    if n < 2:
+        return deltas
+    k_eff = k / (n - 1)
+    ordre = sorted(valides, key=lambda r: r["position"])
+    for i in range(n):
+        for j in range(i + 1, n):
+            ci, cj = ordre[i]["cheval_id"], ordre[j]["cheval_id"]
+            p_i = expected_prob(ratings[ci], ratings[cj])
+            score_i = 0.5 if ordre[i]["position"] == ordre[j]["position"] else 1.0
+            deltas[ci] += score_i - p_i
+            deltas[cj] += (1.0 - score_i) - (1.0 - p_i)
+    return {cid: k_eff * multiplicateur_provisoire(nb_notees.get(cid, 0)) * d
+            for cid, d in deltas.items()}
+
+
 async def update_elo_after_race(
     session: AsyncSession,
     course_id: str,
@@ -103,6 +185,7 @@ async def update_elo_after_race(
     niveau_course: Optional[str],
     dotation: Optional[int],
     classement: list[dict],
+    date_course: Optional[date] = None,
 ) -> dict[str, float]:
     """
     Met à jour les ELO de tous les partants après une course.
@@ -110,7 +193,10 @@ async def update_elo_after_race(
     classement : [{cheval_id, position, incident}, ...]
     Retourne {cheval_id: nouveau_elo}.
     Les incidents (disqualifié, tombé…) comptent comme battus par tous les
-    classés — cf. `classement_elo`.
+    classés — cf. `classement_elo`. Calcul : `calculer_deltas_course`.
+    date_course : date de la course (défaut : lue dans `courses`). Elle date les
+    lignes d'`elo_historique`, que les features filtrent en point-in-time — la
+    date du CALCUL les rendait fausses à chaque rejeu ou rattrapage.
     """
     # ── IDEMPOTENCE (anti-inflation) ─────────────────────────────────────────
     # L'ELO est INCRÉMENTAL (on lit le rating courant, on ajoute le delta, on
@@ -129,78 +215,51 @@ async def update_elo_after_race(
         return {}
 
     k = get_k_factor(niveau_course, dotation)
-    elo_field = DISCIPLINE_ELO_FIELD.get(discipline, "elo_score_plat")
+    elo_field = champ_elo(discipline)
+
+    if date_course is None:
+        from db.models import Course
+        dh = await session.scalar(select(Course.date_heure).where(Course.course_id == course_id))
+        date_course = dh.date() if hasattr(dh, "date") else (dh or date.today())
 
     classement = classement_elo(classement)
-
-    # Charger les ELO actuels
     cheval_ids = [r["cheval_id"] for r in classement]
     result = await session.execute(
         select(Cheval).where(Cheval.cheval_id.in_(cheval_ids))
     )
     chevaux = {c.cheval_id: c for c in result.scalars().all()}
 
-    # ELO actuels (global + discipline) — snapshot AVANT course.
-    # On accumule les deltas séparément et on les applique en une fois après
-    # la double boucle, pour que le résultat ne dépende pas de l'ordre
-    # d'itération (calcul commutatif sur les ratings pré-course).
-    elos = {}
-    for cid in cheval_ids:
-        cheval = chevaux.get(cid)
-        if cheval:
-            elo_disc = getattr(cheval, elo_field, None) or ELO_INITIAL
-            elo_glob = cheval.elo_score_global or ELO_INITIAL
-            elos[cid] = {
-                "global_avant": elo_glob,
-                "disc_avant": elo_disc,
-                "delta_disc": 0.0,
-                "delta_global": 0.0,
-            }
+    # Expérience de chaque cheval : courses déjà notées dans CETTE colonne ELO
+    # (pour le K provisoire et l'amorçage) et toutes colonnes (pour le global).
+    nb_disc: dict[str, int] = {}
+    nb_total: dict[str, int] = {}
+    if chevaux:
+        rows = await session.execute(
+            select(EloHistorique.cheval_id, EloHistorique.discipline, func.count())
+            .where(EloHistorique.cheval_id.in_(list(chevaux)))
+            .group_by(EloHistorique.cheval_id, EloHistorique.discipline)
+        )
+        for cid, disc, nb in rows.all():
+            nb_total[cid] = nb_total.get(cid, 0) + nb
+            if champ_elo(disc) == elo_field:
+                nb_disc[cid] = nb_disc.get(cid, 0) + nb
 
-    # Duels 2-à-2 entre partants valides
-    valides = [r for r in classement if r["cheval_id"] in elos]
-    valides.sort(key=lambda x: x["position"] if x.get("position") is not None else 999)
+    disc_bruts = {cid: getattr(c, elo_field, None) or ELO_INITIAL for cid, c in chevaux.items()}
+    glob_bruts = {cid: c.elo_score_global or ELO_INITIAL for cid, c in chevaux.items()}
+    disc_avant = amorcer_inedits(disc_bruts, nb_disc)
+    glob_avant = amorcer_inedits(glob_bruts, nb_total)
 
-    n_valides = len(valides)
-    # Normaliser K par le nombre d'adversaires : un cheval dispute N-1 duels
-    # par course et encaissait la SOMME des deltas → explosion (+200/+400 pts
-    # en une course). k_eff borne le gain total ~ K, comme un ELO 1v1.
-    k_eff = k / max(1, n_valides - 1)
+    valides = [r for r in classement if r["cheval_id"] in chevaux]
+    deltas_disc = calculer_deltas_course(valides, disc_avant, nb_disc, k)
+    # Global : même course, ratings globaux, demi-K (plus stable, multi-discipline).
+    deltas_glob = calculer_deltas_course(valides, glob_avant, nb_total, k * 0.5)
 
-    for i in range(n_valides):
-        for j in range(i + 1, n_valides):
-            ci = valides[i]["cheval_id"]
-            cj = valides[j]["cheval_id"]
-
-            # Probabilité attendue sur les ELO AVANT course (commutatif)
-            elo_i = elos[ci]["disc_avant"]
-            elo_j = elos[cj]["disc_avant"]
-            p_i = expected_prob(elo_i, elo_j)
-            p_j = 1.0 - p_i
-
-            # Poids décroissant selon écart de position
-            ecart = j - i
-            poids = max(0.3, 1.0 - (ecart - 1) * 0.07)
-
-            # Score réel : i est devant j (tri par position croissante),
-            # sauf ex-aequo (même position : dead-heat/photo-finish) → nul 0.5
-            pos_i = valides[i].get("position")
-            pos_j = valides[j].get("position")
-            if pos_i is not None and pos_j is not None and pos_i == pos_j:
-                score_i = 0.5
-            else:
-                score_i = 1.0
-
-            delta_i = k_eff * poids * (score_i - p_i)
-            delta_j = k_eff * poids * ((1.0 - score_i) - p_j)
-
-            elos[ci]["delta_disc"] += delta_i
-            elos[cj]["delta_disc"] += delta_j
-            elos[ci]["delta_global"] += delta_i * 0.5  # Global plus stable
-            elos[cj]["delta_global"] += delta_j * 0.5
+    elos = {cid: {"disc_avant": disc_avant[cid], "global_avant": glob_avant[cid],
+                  "delta_disc": deltas_disc.get(cid, 0.0),
+                  "delta_global": deltas_glob.get(cid, 0.0)}
+            for cid in chevaux}
 
     # Sauvegarder les nouveaux ELO
-    today = date.today()
     nouveaux_elos = {}
 
     for cid, data in elos.items():
@@ -222,7 +281,7 @@ async def update_elo_after_race(
             elo_id=str(uuid.uuid4()),
             cheval_id=cid,
             course_id=course_id,
-            date_course=today,
+            date_course=date_course,
             discipline=discipline,
             elo_avant=data["disc_avant"],
             elo_apres=nouveau_disc,
