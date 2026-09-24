@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { statsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { Tilt } from "@/components/track-record/effets";
 
 // Valeurs initiales (rendu serveur) pour un premier paint instantané + SEO.
 // Ensuite le composant rafraîchit en LIVE (SWR) → mêmes chiffres sur toutes
@@ -140,17 +141,20 @@ export function HeroStats({ fallback }: { fallback?: HeroStatsFallback }) {
   ];
 
   return (
-    <div className="mt-10 grid grid-cols-3 gap-2 sm:gap-4 max-w-xl mx-auto">
-      {items.map((s) => (
-        <div
+    <div className="mx-auto mt-5 grid max-w-2xl grid-cols-3 gap-2 sm:mt-10 sm:gap-4">
+      {items.map((s, i) => (
+        <Tilt
           key={s.label}
-          className="rounded-2xl bg-white/10 backdrop-blur-md ring-1 ring-white/15 px-2 py-4 sm:px-4 sm:py-5"
+          max={10}
+          className="tr-rise rounded-2xl bg-gradient-to-b from-white/[0.16] to-white/[0.05] px-2 py-3 ring-1 ring-white/20 shadow-[0_20px_40px_-24px_rgba(0,0,0,.8)] backdrop-blur-md sm:px-4 sm:py-5"
+          style={{ animationDelay: `${250 + i * 110}ms` }}
         >
-          <div className={cn("text-2xl sm:text-4xl font-black tabular-nums", s.cls)}>
+          <span className="absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/70 to-transparent" aria-hidden="true" />
+          <div className={cn("tr-pop font-display text-[1.35rem] font-black leading-tight tabular-nums sm:text-4xl", s.cls)}>
             <Stat {...s} />
           </div>
-          <div className="text-[10px] sm:text-xs text-white/65 mt-1.5 leading-tight">{s.label}</div>
-        </div>
+          <div className="mt-1 text-[10px] font-medium leading-tight text-white/75 sm:mt-1.5 sm:text-xs">{s.label}</div>
+        </Tilt>
       ))}
     </div>
   );

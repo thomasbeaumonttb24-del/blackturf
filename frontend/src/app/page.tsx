@@ -3,8 +3,10 @@ import Link from "next/link";
 import {
   ArrowRight, TrendingUp, Zap, Shield, Trophy,
   Bell, Calculator, ChevronRight, Check, Target,
-  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search, Star, Users,
+  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search, Star, Users, ChevronDown,
 } from "lucide-react";
+import { Reveal, Tilt } from "@/components/track-record/effets";
+import { JaugeHasard } from "@/components/track-record/Jauges";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
@@ -248,7 +250,12 @@ export default async function HomePage() {
       <main id="contenu">
 
       {/* ═══════════ HERO (image plein cadre + dynamisme, style palmarès) ═══════════ */}
-      <section className="relative overflow-hidden border-b border-border/40 min-h-[88vh] flex items-center">
+      {/* Hauteur : EXACTEMENT l'écran visible sous la barre de navigation (64 px).
+          L'ancienne version (88vh + 112 px de marge haute) débordait sur téléphone :
+          il fallait faire défiler pour atteindre les boutons et les chiffres. Sur
+          petit écran, titre, chapeau, boutons et cartes sont resserrés pour tenir
+          dans le premier écran, centrés. */}
+      <section className="relative isolate flex min-h-[calc(100svh_-_4rem)] flex-col overflow-hidden">
         {/* Image plein cadre + Ken Burns */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/img/hero-1600.webp" width={1600} height={1067} alt="Départ d'une course de chevaux aux portes numérotées"
@@ -256,38 +263,44 @@ export default async function HomePage() {
           sizes="100vw"
           fetchPriority="high" decoding="async"
           className="absolute inset-0 h-full w-full object-cover object-[68%_center] ken-burns" />
-        {/* Dégradés sombres (lisibilité texte blanc) */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/35" />
+        {/* Dégradés sombres (lisibilité texte blanc) + halo or pour la profondeur */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-black/40" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-transparent" />
+        <div className="tr-glow pointer-events-none absolute left-1/2 top-1/3 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-amber-500/15 blur-[90px]" aria-hidden="true" />
 
-        <div className="relative mx-auto max-w-5xl w-full px-5 sm:px-6 lg:px-8 pt-28 pb-16 text-center">
+        <div className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-4 py-5 text-center sm:px-6 sm:py-16 lg:px-8">
+          <p className="flex items-center justify-center gap-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-300 sm:text-[11px]">
+            <span className="h-px w-6 bg-amber-400/70 sm:w-7" aria-hidden="true" />
+            Pronostics hippiques IA
+            <span className="h-px w-6 bg-amber-400/70 sm:w-7" aria-hidden="true" />
+          </p>
           {/* Le titre de la page ne nommait pas ce qui analyse les courses, alors que
               c'est tout le sujet du site et que le champ lexical revient trente-cinq fois
               plus bas. « par l'IA » n'est pas un ajout décoratif : un modèle statistique
               réentraîné chaque nuit calcule bien la probabilité de chaque partant. */}
-          <h1 className="font-display text-[2.4rem] leading-[1.04] sm:text-[4.25rem] sm:leading-[1.02] font-extrabold tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)]">
+          <h1 className="mt-3 font-display text-[1.9rem] font-extrabold leading-[1.08] tracking-tight text-white [text-shadow:0_2px_24px_rgba(0,0,0,0.55)] sm:mt-6 sm:text-[4.25rem] sm:leading-[1.02]">
             Chaque course du PMU,{" "}
             <span className="text-gradient-animated">analysée par l&apos;IA avant le départ.</span>
           </h1>
 
-          <p className="mt-6 text-base sm:text-lg text-white/85 leading-relaxed max-w-2xl mx-auto">
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-white/85 sm:mt-6 sm:text-lg">
             80 critères par cheval, une probabilité par partant, et un{" "}
             <span className="font-semibold text-white">plan de mise</span> calculé sur votre budget.
-            Nos pronostics sont notés à l&apos;arrivée, aux rapports PMU officiels —{" "}
-            <span className="font-semibold text-white">tout le palmarès est public</span>.
+            <span className="hidden sm:inline"> Nos pronostics sont notés à l&apos;arrivée, aux rapports PMU officiels —</span>{" "}
+            <span className="font-semibold text-white"><span className="sm:hidden">Palmarès</span><span className="hidden sm:inline">tout le palmarès est</span> public</span>.
           </p>
 
-          <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
+          <div className="mx-auto mt-5 grid w-full max-w-md grid-cols-2 gap-2 sm:mt-8 sm:flex sm:max-w-none sm:justify-center sm:gap-3">
             <Button size="xl" asChild
-              className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-bold text-base shadow-lg shadow-amber-500/30">
-              <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
+              className="press btn-shimmer h-12 rounded-xl bg-brand-gold px-3 text-sm font-bold text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep sm:h-14 sm:px-10 sm:text-base">
+              <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="ml-1 hidden h-5 w-5 sm:inline" /></Link>
             </Button>
             <Button variant="outline" size="xl" asChild
-              className="press bg-white/10 backdrop-blur-sm border-white/25 text-white hover:bg-white/20 hover:text-white">
-              <Link href="/programme">Voir les courses du jour</Link>
+              className="press h-12 rounded-xl border-white/25 bg-white/10 px-3 text-sm text-white backdrop-blur-sm hover:bg-white/20 hover:text-white sm:h-14 sm:px-10 sm:text-base">
+              <Link href="/programme"><span className="sm:hidden">Courses du jour</span><span className="hidden sm:inline">Voir les courses du jour</span></Link>
             </Button>
           </div>
-          <p className="mt-5 text-[11px] text-white/55">7 jours gratuits · aucun prélèvement avant la fin de l&apos;essai · annulation à tout moment</p>
+          <p className="mt-3 text-[11px] text-white/60 sm:mt-5">7 jours gratuits · aucun prélèvement avant la fin de l&apos;essai<span className="hidden sm:inline"> · annulation à tout moment</span></p>
 
           {/* Stats clés — cartes verre + count-up (live, mêmes chiffres que le palmarès) */}
           <HeroStats
@@ -298,6 +311,14 @@ export default async function HomePage() {
             }}
           />
         </div>
+
+        <a
+          href="#fonctionnement"
+          className="relative mx-auto mb-5 hidden flex-col items-center gap-1 text-[11px] font-medium uppercase tracking-[0.2em] text-white/60 transition-colors hover:text-amber-300 md:flex"
+        >
+          Découvrir
+          <ChevronDown className="h-5 w-5 animate-bounce" aria-hidden="true" />
+        </a>
       </section>
 
       <LiveTicker />
@@ -307,10 +328,10 @@ export default async function HomePage() {
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-2">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Zap className="h-3.5 w-3.5" /> Comment ça marche
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
                 Le travail est déjà fait{" "}
                 <span className="text-gradient">quand vous arrivez</span>
               </h2>
@@ -327,12 +348,12 @@ export default async function HomePage() {
             ].map((s, i) => (
               <ScrollReveal key={s.step} delay={i * 100}>
                 <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
-                  <div className="glass-card tilt-card rounded-2xl p-7 h-full">
-                    <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5"
+                  <Tilt max={7} className="glass-card rounded-3xl p-7 h-full shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)]">
+                    <div className="icon-box tr-pop h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5 shadow-[0_12px_22px_-12px_rgba(180,83,9,.6)]"
                       style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
                     <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
                     <p className="text-sm text-gray-600 leading-relaxed">{s.desc}</p>
-                  </div>
+                  </Tilt>
                 </div>
               </ScrollReveal>
             ))}
@@ -362,38 +383,40 @@ export default async function HomePage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="mb-12 text-center">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Shield className="h-3.5 w-3.5" /> Performances vérifiables
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
                 Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
               </h2>
               <p className="text-gray-600 text-sm mt-3 max-w-2xl mx-auto">
                 Aucun pronostic n'est réécrit après la course. Voici la précision réelle de BlackTurf sur les
-                courses déjà réglées, mise en regard du seul comparateur qui compte : le classement par la cote.
+                courses déjà réglées, mise en regard de ce que ferait un tirage au sort sur les mêmes courses.
               </p>
             </div>
           </ScrollReveal>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             {[
               // `accuracy_top3` mesure la présence du GAGNANT RÉEL dans notre top-3.
               // L'ancien sous-titre (« un de nos 3 favoris finit dans les 3 ») décrivait
               // un tout autre évènement, bien plus facile, sous le même pourcentage — et
               // il contredisait le bloc « Face au hasard » juste en dessous.
-              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Gagnant dans le Top-3", sub: "le cheval qui gagne est parmi nos 3 premiers choix", accent: true, icon: Target },
-              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers", icon: Shield },
-              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course", icon: Trophy },
-              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels", icon: Database },
+              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Gagnant dans le Top-3", sub: "le cheval qui gagne est parmi nos 3 premiers choix", cls: "text-amber-700", tile: "from-amber-300 to-amber-600 text-slate-950", icon: Target },
+              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers", cls: "text-emerald-700", tile: "from-emerald-400 to-emerald-700 text-white", icon: Shield },
+              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course", cls: "text-gray-900", tile: "from-slate-700 to-slate-950 text-amber-300", icon: Trophy },
+              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels", cls: "text-gray-900", tile: "from-sky-400 to-blue-700 text-white", icon: Database },
             ].map((m, i) => (
-              <ScrollReveal key={m.label} delay={i * 70}>
-                <div className="tilt-card relative overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm h-full">
-                  <m.icon className="absolute right-3 top-3 h-5 w-5 text-amber-300" />
-                  <div className="num-display text-3xl sm:text-[2.1rem] font-extrabold" style={{ color: m.accent ? "#B45309" : "#111827" }}>{m.value}</div>
-                  <p className="text-sm font-semibold text-gray-900 mt-1">{m.label}</p>
-                  <p className="text-xs text-gray-600 mt-0.5">{m.sub}</p>
-                </div>
-              </ScrollReveal>
+              <Reveal key={m.label} delay={i * 80}>
+                <Tilt max={8} className="h-full rounded-3xl bg-white p-4 ring-1 ring-stone-200/80 shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)] sm:p-5">
+                  <span className={`tr-pop inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_10px_18px_-10px_rgba(0,0,0,.5)] sm:h-11 sm:w-11 ${m.tile}`}>
+                    <m.icon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <div className={`tr-pop mt-3 font-display text-[1.7rem] font-black tabular-nums sm:text-[2.1rem] ${m.cls}`}>{m.value}</div>
+                  <p className="mt-0.5 text-sm font-semibold text-gray-900">{m.label}</p>
+                  <p className="mt-0.5 text-xs leading-snug text-gray-600">{m.sub}</p>
+                </Tilt>
+              </Reveal>
             ))}
           </div>
 
@@ -408,152 +431,114 @@ export default async function HomePage() {
               (3/nb_partants et 1/nb_partants, moyennés) : un pourcentage seul ne
               dit rien tant qu'on ne sait pas ce qu'un tirage au sort obtiendrait
               sur les mêmes partants. Le facteur qui en sort est donc une mesure,
-              pas une figure de style — et il est affiché ici parce que c'est le
-              point où l'analyse se voit. Rien n'est rendu si la mesure manque. */}
-          {tr && tr.hasard_top3 != null && (
-            <ScrollReveal>
-              <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6">
-                <h3 className="font-semibold text-gray-900 text-sm">
-                  Face au hasard{" "}
-                  <span className="font-normal text-gray-600">
-                    Sur le champ réel de chaque course, pas sur un repère arrondi.
-                  </span>
-                </h3>
-
-                <div className="mt-5 space-y-6">
-                  {[
-                    {
-                      k: "Le gagnant est dans notre Top-3",
-                      nous: tr.accuracy_top3,
-                      hasard: tr.hasard_top3,
-                      aide: "un tirage au sort de 3 chevaux sur le champ réel",
-                    },
-                    {
-                      k: "Notre favori gagne la course",
-                      nous: tr.favori_win_rate,
-                      hasard: tr.hasard_top1,
-                      aide: "un cheval tiré au sort dans le champ réel",
-                    },
-                  ].map((r) => {
-                    const facteur = r.nous != null && r.hasard ? r.nous / r.hasard : null;
-                    return (
-                      <div key={r.k}>
-                        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                          <span className="text-sm font-semibold text-gray-900">{r.k}</span>
-                          {facteur != null && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200">
-                              <TrendingUp className="h-3 w-3" aria-hidden="true" />
-                              {facteur.toFixed(1).replace(".", ",")} fois mieux que le hasard
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="mt-2.5 space-y-1.5">
-                          <div className="flex items-center gap-3">
-                            <span className="w-16 shrink-0 text-[11px] font-semibold text-gray-900">BlackTurf</span>
-                            <div className="h-3 flex-1 overflow-hidden rounded-full bg-gray-100">
-                              <div
-                                className="h-full rounded-full"
-                                style={{ width: `${Math.min(r.nous ?? 0, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }}
-                              />
-                            </div>
-                            <span className="num-display w-14 shrink-0 text-right text-sm font-bold text-gray-900">
-                              {fmtPct(r.nous)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="w-16 shrink-0 text-[11px] text-gray-600">Hasard</span>
-                            <div className="h-3 flex-1 overflow-hidden rounded-full bg-gray-100">
-                              <div className="h-full rounded-full bg-gray-300" style={{ width: `${Math.min(r.hasard ?? 0, 100)}%` }} />
-                            </div>
-                            <span className="num-display w-14 shrink-0 text-right text-sm font-semibold text-gray-600">
-                              {fmtPct(r.hasard)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <p className="mt-1.5 text-[11px] text-gray-600">{r.aide}.</p>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <p className="mt-5 text-xs leading-relaxed text-gray-600">
-                  Le repère « hasard » est recalculé sur le nombre réel de partants de chaque course :
-                  dans un champ de huit il vaut plus que dans un champ de seize. C&apos;est ce qui rend
-                  la comparaison honnête — et ce qui fait que l&apos;écart ci-dessus mesure bien
-                  l&apos;analyse, pas la taille des pelotons.
+              pas une figure de style. Rien n'est rendu si la mesure manque. */}
+          {tr && tr.hasard_top3 != null && tr.accuracy_top3 != null && (
+            <div className="mt-10">
+              <Reveal className="mb-5 text-center">
+                <h3 className="font-display text-xl font-bold text-gray-900 sm:text-2xl">Face au hasard</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  L&apos;anneau coloré, c&apos;est nous ; l&apos;anneau gris, un tirage au sort sur le champ réel de chaque course.
                 </p>
+              </Reveal>
+              <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
+                <Reveal>
+                  <JaugeHasard
+                    label="Le gagnant est dans notre Top-3"
+                    aide="Comparé à un tirage au sort de 3 chevaux sur le champ réel."
+                    nous={tr.accuracy_top3}
+                    hasard={tr.hasard_top3}
+                    facteur={tr.hasard_top3 > 0 ? tr.accuracy_top3 / tr.hasard_top3 : null}
+                  />
+                </Reveal>
+                {tr.favori_win_rate != null && (
+                  <Reveal delay={140}>
+                    <JaugeHasard
+                      label="Notre favori gagne la course"
+                      aide="Comparé à un cheval tiré au sort dans le champ réel."
+                      nous={tr.favori_win_rate}
+                      hasard={tr.hasard_top1}
+                      facteur={tr.hasard_top1 ? tr.favori_win_rate / tr.hasard_top1 : null}
+                      teinte="emeraude"
+                    />
+                  </Reveal>
+                )}
               </div>
-            </ScrollReveal>
+              <p className="mx-auto mt-4 max-w-3xl text-center text-xs leading-relaxed text-gray-600">
+                Le repère « hasard » est recalculé sur le nombre réel de partants de chaque course :
+                dans un champ de huit il vaut plus que dans un champ de seize. C&apos;est ce qui rend
+                la comparaison honnête — et ce qui fait que l&apos;écart mesure bien
+                l&apos;analyse, pas la taille des pelotons.
+              </p>
+            </div>
           )}
 
-          <div className="mt-4 grid lg:grid-cols-2 gap-4">
+          <div className="mt-8 grid gap-4 lg:grid-cols-2">
             {tr && tr.by_discipline.length > 0 && (
-              <ScrollReveal>
-                <div className="glass-card rounded-2xl p-6 h-full">
-                  <div className="flex items-center gap-2 mb-5">
-                    <BarChart3 className="h-4 w-4 text-brand-gold-dark" />
-                    <h3 className="font-semibold text-gray-900 text-sm">Gagnant dans le Top-3, par discipline</h3>
+              <Reveal>
+                <Tilt max={4} className="h-full rounded-3xl bg-white p-5 ring-1 ring-stone-200/80 shadow-[0_30px_60px_-44px_rgba(17,24,39,.5)] sm:p-6">
+                  <div className="mb-5 flex items-center gap-2">
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950 shadow-[inset_0_1px_0_rgba(255,255,255,.35)]">
+                      <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <h3 className="font-display text-base font-bold text-gray-900">Gagnant dans le Top-3, par discipline</h3>
                   </div>
                   <div className="space-y-4">
                     {tr.by_discipline.map((d) => (
                       <div key={d.discipline}>
-                        <div className="flex items-center justify-between text-xs mb-1.5">
-                          <span className="font-semibold text-gray-700">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
-                          <span className="num-display font-bold text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")}%
-                            <span className="text-gray-600 font-normal ml-1.5">· {d.nb_courses} courses</span>
+                        <div className="mb-1.5 flex items-center justify-between text-xs">
+                          <span className="font-semibold text-gray-800">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
+                          <span className="font-display text-sm font-black tabular-nums text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")} %
+                            <span className="ml-1.5 font-sans text-xs font-normal text-gray-600">· {d.nb_courses} courses</span>
                           </span>
                         </div>
-                        <div className="relative h-3 rounded-full bg-gray-100 overflow-hidden">
-                          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(d.accuracy_top3, 100)}%`, background: "linear-gradient(90deg,#D97706,#F59E0B)" }} />
-                          {/* repère 33% (hasard) */}
+                        <div className="relative h-3.5 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(0,0,0,.08)]">
+                          <div className="bar-grow absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-amber-300 via-amber-500 to-amber-700 shadow-[inset_0_1px_0_rgba(255,255,255,.5)]" style={{ ["--bar-pct" as string]: `${Math.min(d.accuracy_top3, 100)}%` }} />
                           {tr.hasard_top3 != null && (
-                            <div className="absolute top-0 bottom-0 w-px bg-gray-500/40" style={{ left: `${Math.min(tr.hasard_top3, 100)}%` }} />
+                            <div className="absolute bottom-0 top-0 w-0.5 bg-slate-700/70" style={{ left: `${Math.min(tr.hasard_top3, 100)}%` }} />
                           )}
                         </div>
                       </div>
                     ))}
                   </div>
                   <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-600">
-                    <span className="inline-block w-px h-3 bg-gray-400/60" />
+                    <span className="inline-block h-3 w-0.5 bg-slate-700/70" />
                     {tr.hasard_top3 != null
-                      ? `Repère « hasard » à ${tr.hasard_top3.toFixed(0)} % — l'espérance d'un tirage au sort sur ces mêmes courses. Chaque discipline est au-dessus, et l'écart se lit barre par barre.`
+                      ? `Repère « hasard » à ${tr.hasard_top3.toFixed(0)} % — l'espérance d'un tirage au sort sur ces mêmes courses.`
                       : "Le trait vertical marque ce qu'obtiendrait un tirage au sort sur ces mêmes courses."}
                   </div>
-                </div>
-              </ScrollReveal>
+                </Tilt>
+              </Reveal>
             )}
 
             {tr && tr.by_day.length > 0 && (() => {
               const avg = tr.by_day.reduce((s, d) => s + d.accuracy_top3, 0) / tr.by_day.length;
               return (
-              <ScrollReveal delay={80}>
-                <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
-                  <div className="flex items-center justify-between mb-5">
+              <Reveal delay={80}>
+                <Tilt max={4} className="flex h-full flex-col rounded-3xl bg-white p-5 ring-1 ring-stone-200/80 shadow-[0_30px_60px_-44px_rgba(17,24,39,.5)] sm:p-6">
+                  <div className="mb-5 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-emerald-700" />
-                      <h3 className="font-semibold text-gray-900 text-sm">Gagnant dans le Top-3 · 7 derniers jours</h3>
+                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-700 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.35)]">
+                        <TrendingUp className="h-4 w-4" aria-hidden="true" />
+                      </span>
+                      <h3 className="font-display text-base font-bold text-gray-900">Top-3 · 7 derniers jours</h3>
                     </div>
-                    <span className="text-[11px] text-gray-600">moy. <span className="num-display font-bold text-gray-700">{avg.toFixed(0)}%</span></span>
+                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] text-emerald-800 ring-1 ring-emerald-200">moy. <span className="font-bold tabular-nums">{avg.toFixed(0)} %</span></span>
                   </div>
 
                   {/* Aire de chart à hauteur FIXE → barres % fiables */}
                   <div className="relative h-44">
-                    {/* lignes repères */}
                     {[25, 50, 75].map((g) => (
                       <div key={g} className="absolute left-0 right-0 border-t border-dashed border-gray-100" style={{ bottom: `${g}%` }} />
                     ))}
-                    {/* ligne moyenne */}
-                    <div className="absolute left-0 right-0 border-t border-dashed border-emerald-300" style={{ bottom: `${Math.min(avg, 100)}%` }}>
-                      <span className="absolute right-0 -top-3.5 text-[9px] font-semibold text-emerald-700 bg-white px-1">moyenne</span>
-                    </div>
+                    {/* Ligne de moyenne : sa valeur est dans la pastille « moy. » de
+                        l'en-tête — un libellé posé ici chevauchait le chiffre d'une barre. */}
+                    <div className="absolute left-0 right-0 z-10 border-t-2 border-dashed border-emerald-400" style={{ bottom: `${Math.min(avg, 100)}%` }} aria-hidden="true" />
                     <div className="absolute inset-0 flex items-end justify-between gap-2.5">
-                      {tr.by_day.map((d) => (
+                      {tr.by_day.map((d, i) => (
                         <div key={d.jour} className="group relative flex h-full flex-1 flex-col items-center justify-end">
-                          <span className="num-display text-[10px] font-bold text-gray-700 mb-1">{Math.round(d.accuracy_top3)}%</span>
-                          <div className="w-full max-w-[40px] rounded-t-lg bg-gradient-to-t from-amber-300 to-amber-500 shadow-sm transition-all duration-300 group-hover:from-amber-400 group-hover:to-amber-600"
-                            style={{ height: `${Math.max(4, Math.min(d.accuracy_top3, 100))}%` }}
+                          <span className="mb-1 font-display text-[10px] font-bold tabular-nums text-gray-800">{Math.round(d.accuracy_top3)}%</span>
+                          <div className="tr-rise w-full max-w-[40px] rounded-t-xl bg-gradient-to-t from-amber-600 via-amber-400 to-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,.6),0_10px_18px_-10px_rgba(180,83,9,.7)] transition-transform duration-300 group-hover:-translate-y-1"
+                            style={{ height: `${Math.max(4, Math.min(d.accuracy_top3, 100))}%`, animationDelay: `${i * 70}ms` }}
                             title={`${d.jour} · ${d.accuracy_top3.toFixed(1)}% · ${d.nb_predictions} pronostics`} />
                         </div>
                       ))}
@@ -565,10 +550,16 @@ export default async function HomePage() {
                     ))}
                   </div>
                   <p className="mt-4 text-[11px] text-gray-600">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
-                </div>
-              </ScrollReveal>
+                </Tilt>
+              </Reveal>
               );
             })()}
+          </div>
+
+          <div className="mt-8 text-center">
+            <Link href="/track-record" className="press inline-flex min-h-12 items-center gap-1.5 rounded-full bg-slate-950 px-6 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition-transform hover:-translate-y-0.5">
+              Voir toutes nos performances <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
           </div>
 
           <p className="mt-6 text-center text-[11px] text-gray-600 max-w-2xl mx-auto leading-relaxed">
@@ -588,10 +579,10 @@ export default async function HomePage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Target className="h-3.5 w-3.5" /> Le cœur de BlackTurf
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
                 Un plan de mise{" "}
                 <span className="text-gradient">selon votre profil</span>
               </h2>
@@ -605,7 +596,7 @@ export default async function HomePage() {
           {/* Course exemple + portrait */}
           <div className="grid lg:grid-cols-3 gap-5 mb-6">
             <ScrollReveal className="lg:col-span-1">
-              <div className="glass-card rounded-2xl p-5 h-full">
+              <Tilt max={5} className="glass-card rounded-3xl p-5 h-full shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)]">
                 <div className="flex items-center justify-between">
                   <span className="eyebrow text-amber-700 text-[10px] font-bold">
                     <span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> Pronostic BlackTurf
@@ -630,7 +621,7 @@ export default async function HomePage() {
                   <span className="flex items-center gap-1.5 font-semibold text-emerald-700"><Zap className="h-3 w-3" /> Valeur ★★★ détectée</span>
                   <span className="text-gray-600">EV <span className="num-display font-bold text-emerald-700">+14,2%</span></span>
                 </div>
-              </div>
+              </Tilt>
             </ScrollReveal>
 
             {/* Portrait photo */}
@@ -650,7 +641,7 @@ export default async function HomePage() {
           <div className="grid md:grid-cols-3 gap-5">
             {PROFILS.map((pr, i) => (
               <ScrollReveal key={pr.key} delay={i * 90}>
-                <div className={`tilt-card rounded-3xl p-6 h-full bg-white ${pr.popular ? "border-2 border-amber-300 shadow-md" : "border border-gray-200 shadow-sm"}`}>
+                <Tilt max={8} className={`rounded-3xl p-6 h-full bg-white ${pr.popular ? "ring-2 ring-amber-300 shadow-[0_30px_60px_-36px_rgba(180,83,9,.6)]" : "ring-1 ring-gray-200 shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)]"}`}>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xl">{pr.emoji}</span>
                     <h3 className="font-display text-lg font-bold text-gray-900">{pr.name}</h3>
@@ -672,7 +663,7 @@ export default async function HomePage() {
                     ))}
                   </div>
                   <p className="mt-3 text-[10px] text-gray-600">Gain potentiel si le pari est gagnant.</p>
-                </div>
+                </Tilt>
               </ScrollReveal>
             ))}
           </div>
@@ -699,10 +690,10 @@ export default async function HomePage() {
             </ScrollReveal>
             <ScrollReveal direction="left" className="order-1 lg:order-2">
               <div>
-                <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+                <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                   <Calculator className="h-3.5 w-3.5" /> Essayez maintenant
                 </span>
-                <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+                <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900 mb-4">
                   Votre mise, répartie au{" "}
                   <span className="text-gradient">centime près</span>
                 </h2>
@@ -762,10 +753,10 @@ export default async function HomePage() {
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <ScrollReveal direction="right">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Zap className="h-3.5 w-3.5" /> Paris de valeur
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900 mb-4">
                 Miser quand la cote{" "}
                 <span className="text-gradient">se trompe</span>
               </h2>
@@ -789,7 +780,7 @@ export default async function HomePage() {
                   corresponde à ce que l'abonné voit vraiment.
                   Chiffres cohérents entre eux : cote 8,5 → proba marché 1/8,5 = 11,8 % ;
                   proba modèle 15 % → espérance = 8,5 × 0,15 − 1 = +27,5 %. */}
-              <div className="glass-card rounded-3xl p-6">
+              <Tilt max={6} className="glass-card rounded-3xl p-6 shadow-[0_30px_60px_-40px_rgba(180,83,9,.5)]">
                 <div className="flex items-center justify-between mb-4">
                   <span className="eyebrow text-amber-700 text-[10px] font-bold"><Zap className="h-3 w-3" /> Pari de valeur détecté</span>
                   <span className="text-[9px] font-bold uppercase tracking-wider text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
@@ -840,7 +831,7 @@ export default async function HomePage() {
                   À 8,5, le marché lui donne ~11,8% de chances ; le modèle en voit 15%.
                   L&apos;espérance <span className="font-mono">(8,5 × 0,15) − 1 = +27,5%</span> : la cote paie plus que le risque réel.
                 </p>
-              </div>
+              </Tilt>
             </ScrollReveal>
           </div>
         </div>
@@ -876,7 +867,7 @@ export default async function HomePage() {
             </ScrollReveal>
 
             <ScrollReveal direction="left">
-              <div className="rounded-3xl bg-white/95 backdrop-blur p-5 shadow-2xl">
+              <Tilt max={6} className="rounded-3xl bg-white/95 backdrop-blur p-5 shadow-2xl">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-gray-700">Suivi du capital</span>
                   <span className="text-[9px] font-bold uppercase tracking-wider text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
@@ -906,7 +897,7 @@ export default async function HomePage() {
                   <span className="text-gray-600"><span className="font-semibold text-gray-700">{CAPITAL_WINS}/{CAPITAL_DEMO.length}</span> gagnés · réglé aux vrais rapports PMU</span>
                   <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> temps réel</span>
                 </div>
-              </div>
+              </Tilt>
             </ScrollReveal>
           </div>
         </div>
@@ -917,10 +908,10 @@ export default async function HomePage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Target className="h-3.5 w-3.5" /> Ce que vous obtenez
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
                 Pourquoi nos analyses{" "}
                 <span className="text-gradient">tapent juste</span>
               </h2>
@@ -929,7 +920,7 @@ export default async function HomePage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:auto-rows-fr">
             <ScrollReveal className="lg:col-span-2 lg:row-span-2">
-              <div className="glass-card bento-feature rounded-3xl h-full p-8 flex flex-col">
+              <Tilt max={3} className="glass-card bento-feature rounded-3xl h-full p-8 flex flex-col">
                 <div className="icon-box h-14 w-14 rounded-2xl flex items-center justify-center mb-5"
                   style={{ background: "#FFFBEB", border: "1px solid rgba(217,119,6,0.2)" }}>
                   <FEATURE_MAIN.icon className="h-7 w-7" style={{ color: "#D97706" }} strokeWidth={2} />
@@ -951,19 +942,19 @@ export default async function HomePage() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </Tilt>
             </ScrollReveal>
 
             {FEATURES.map((f, i) => (
               <ScrollReveal key={f.title} delay={i * 70}>
-                <div className="glass-card tilt-card rounded-3xl h-full p-6">
-                  <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center mb-4"
+                <Tilt max={9} className="glass-card rounded-3xl h-full p-6 shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)]">
+                  <div className="icon-box tr-pop h-11 w-11 rounded-xl flex items-center justify-center mb-4 shadow-[0_10px_18px_-10px_rgba(180,83,9,.55)]"
                     style={{ background: f.bg, border: `1px solid ${f.border}` }}>
                     <f.icon className="h-5 w-5" style={{ color: f.color }} strokeWidth={2} />
                   </div>
                   <h3 className="font-semibold text-gray-900 text-[15px] leading-snug mb-2">{f.title}</h3>
                   <p className="text-[13px] text-gray-600 leading-relaxed">{f.desc}</p>
-                </div>
+                </Tilt>
               </ScrollReveal>
             ))}
           </div>
@@ -977,10 +968,10 @@ export default async function HomePage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Users className="h-3.5 w-3.5" /> Pour qui
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
                 Trois façons de jouer,{" "}
                 <span className="text-gradient">un outil pour chacune</span>
               </h2>
@@ -1033,8 +1024,8 @@ export default async function HomePage() {
               },
             ].map((p, i) => (
               <ScrollReveal key={p.titre} delay={i * 90}>
-                <div className={`rounded-3xl h-full p-6 flex flex-col ${p.populaire ? "bg-white border-2 border-amber-300 shadow-md" : "bg-white border border-gray-200 shadow-sm tilt-card"}`}>
-                  <div className="icon-box h-11 w-11 rounded-xl flex items-center justify-center mb-4"
+                <Tilt max={7} className={`rounded-3xl h-full p-6 flex flex-col bg-white ${p.populaire ? "ring-2 ring-amber-300 shadow-[0_30px_60px_-36px_rgba(180,83,9,.6)]" : "ring-1 ring-gray-200 shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)]"}`}>
+                  <div className="icon-box tr-pop h-11 w-11 rounded-xl flex items-center justify-center mb-4 shadow-[0_10px_18px_-10px_rgba(180,83,9,.55)]"
                     style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.16)" }}>
                     <p.icon className="h-5 w-5 text-brand-gold-dark" strokeWidth={2} />
                   </div>
@@ -1051,7 +1042,7 @@ export default async function HomePage() {
                     className="press mt-5 inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-all hover:border-brand-gold/40 hover:bg-amber-50 hover:text-brand-gold-dark">
                     {p.plan} <ChevronRight className="h-4 w-4" />
                   </Link>
-                </div>
+                </Tilt>
               </ScrollReveal>
             ))}
           </div>
@@ -1063,10 +1054,10 @@ export default async function HomePage() {
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-16">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Sparkles className="h-3.5 w-3.5" /> Tarifs
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900 mb-3">
                 Moins cher qu&apos;un{" "}
                 <span className="text-gradient">ticket perdu par semaine</span>
               </h2>
@@ -1080,7 +1071,7 @@ export default async function HomePage() {
           <div className="grid md:grid-cols-3 gap-6 items-start">
             {PLANS.map((plan, i) => (
               <ScrollReveal key={plan.name} delay={i * 100}>
-                <div className={`relative rounded-3xl p-7 h-full ${plan.popular ? "plan-popular bg-white border border-amber-300 md:-translate-y-2" : "bg-white border border-gray-200 shadow-sm tilt-card"}`}>
+                <Tilt max={7} className={`rounded-3xl p-7 h-full ${plan.popular ? "plan-popular bg-white border border-amber-300" : "bg-white border border-gray-200 shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)]"}`}>
                   {plan.badge && (
                     <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
                       <span className="inline-block text-xs bg-gradient-gold text-brand-dark font-bold px-4 py-1 rounded-full shadow-md shadow-amber-400/30">{plan.badge}</span>
@@ -1106,7 +1097,7 @@ export default async function HomePage() {
                     className={`press flex items-center justify-center gap-1.5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-all ${plan.popular ? "btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-brand-dark shadow-md shadow-amber-400/25" : "border border-gray-300 text-gray-700 hover:border-brand-gold/40 hover:text-brand-gold-dark hover:bg-amber-50"}`}>
                     {plan.cta} <ChevronRight className="h-4 w-4" />
                   </Link>
-                </div>
+                </Tilt>
               </ScrollReveal>
             ))}
           </div>
@@ -1125,10 +1116,10 @@ export default async function HomePage() {
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-10">
-              <span className="eyebrow text-amber-700 text-[11px] font-semibold mb-3">
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
                 <Shield className="h-3.5 w-3.5" /> Questions fréquentes
               </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-gray-900">
+              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-extrabold tracking-tight text-gray-900">
                 Les réponses{" "}
                 <span className="text-gradient">sans détour</span>
               </h2>
@@ -1138,8 +1129,8 @@ export default async function HomePage() {
           <div className="space-y-3">
             {FAQ.map((f, i) => (
               <ScrollReveal key={f.q} delay={i * 60}>
-                <details className="group rounded-2xl border border-gray-200 bg-white px-5 py-4 open:border-amber-300 open:bg-amber-50/30">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-gray-900 marker:content-none">
+                <details className="group rounded-2xl bg-white px-5 py-4 ring-1 ring-gray-200 transition-shadow hover:shadow-[0_16px_36px_-28px_rgba(17,24,39,.5)] open:bg-amber-50/40 open:ring-amber-300">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 text-[15px] font-semibold text-gray-900 marker:content-none">
                     {f.q}
                     <ChevronRight className="h-4 w-4 shrink-0 text-brand-gold-dark transition-transform group-open:rotate-90" />
                   </summary>
