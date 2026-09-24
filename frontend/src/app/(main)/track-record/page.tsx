@@ -177,7 +177,7 @@ function CountUp({ value, decimals = 0, suffix = "", prefix = "", className }: {
 }
 
 function CountUpEuro({ value, className, decimals = 0, prefix = "" }: { value: number; className?: string; decimals?: number; prefix?: string }) {
-  return <CountUp value={value} decimals={decimals} prefix={prefix} suffix="€" className={className} />;
+  return <CountUp value={value} decimals={decimals} prefix={prefix} suffix={"\u00a0€"} className={className} />;
 }
 
 function SectionHeading({ eyebrow, title, description, icon: Icon, tone = "clair", aside }: {
@@ -346,11 +346,11 @@ function HeroStatCard({ value, label, note, cls, i }: {
   return (
     <Tilt
       max={10}
-      className="tr-rise rounded-2xl bg-gradient-to-b from-white/[0.16] to-white/[0.05] px-3 py-2.5 text-left ring-1 ring-white/20 shadow-[0_20px_40px_-24px_rgba(0,0,0,.8)] backdrop-blur-md sm:px-5 sm:py-5 sm:text-center"
+      className="tr-rise rounded-2xl [container-type:inline-size] bg-gradient-to-b from-white/[0.16] to-white/[0.05] px-3 py-2.5 text-left ring-1 ring-white/20 shadow-[0_20px_40px_-24px_rgba(0,0,0,.8)] backdrop-blur-md sm:px-5 sm:py-5 sm:text-center"
       style={{ animationDelay: `${250 + i * 110}ms` }}
     >
       <span className="absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/70 to-transparent" aria-hidden="true" />
-      <div className={cn("tr-pop font-display text-[1.45rem] font-black leading-tight tabular-nums sm:text-[2.1rem]", cls ?? "text-white")}>{value}</div>
+      <div className={cn("tr-pop whitespace-nowrap font-display text-[clamp(1rem,16cqi,2.1rem)] font-black leading-tight tabular-nums", cls ?? "text-white")}>{value}</div>
       <div className="mt-0.5 text-[11px] font-medium leading-tight text-white/80 sm:mt-1.5 sm:text-xs">{label}</div>
       {note && <div className="mt-0.5 text-[10px] leading-tight text-white/55 sm:mt-1">{note}</div>}
     </Tilt>
@@ -482,7 +482,7 @@ function HeroPalmares({ courses, depuis, stats, barreBas = false }: {
           <span className="hidden items-center gap-1.5 sm:inline-flex"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" /> Aucun prélèvement pendant l&apos;essai</span>
         </p>
 
-        <div className="mx-auto mt-5 grid w-full max-w-3xl grid-cols-2 gap-2 sm:mt-10 sm:grid-cols-4 sm:gap-4">
+        <div className="mx-auto mt-5 grid w-full max-w-4xl grid-cols-2 gap-2 sm:mt-10 sm:grid-cols-4 sm:gap-4">
           {cartes.map((c, i) => <HeroStatCard key={c.label} i={i} {...c} />)}
         </div>
       </div>
