@@ -10,6 +10,10 @@ pour les trois profils.
 Arbitrage produit du 2026-09-24 : son coût est PRIS SUR le montant du plan, il
 ne s'y ajoute plus. Le plan principal se construit sur le reste et
 plan principal + Quinté+ = exactement le montant saisi.
+
+Second arbitrage du même jour : le Quinté+ du jour est proposé sur TOUS les
+plans, et chaque combinaison est jouée à la mise de base de 2 € (pas de Flexi
+réducteur). Sous 4 €, le ticket tendu de 2 € s'ajoute au montant saisi.
 """
 import math
 
@@ -81,10 +85,23 @@ def test_module_quinte_present_pour_les_trois_profils():
 
 
 def test_couverture_s_elargit_avec_le_profil_quand_le_budget_le_permet():
-    """Prudent = tendu (le moins cher), risqué = champ 7 (la plus grosse couverture)."""
-    couv = {p: _plan(20, p).module_quinte["couverture"] for p in PROFILS}
+    """Prudent = tendu (le moins cher), risqué = champ 7 (la plus grosse couverture).
+    À 2 € la combinaison, un champ 7 (21 combinaisons) coûte 42 € : il faut 200 €."""
+    couv = {p: _plan(200, p).module_quinte["couverture"] for p in PROFILS}
     assert couv == {"conservateur": "tendue", "equilibre": "champ 6 chevaux",
                     "agressif": "champ 7 chevaux"}
+
+
+@pytest.mark.parametrize("profil", PROFILS)
+@pytest.mark.parametrize("montant", [1, 2, 3, 4, 7, 10, 20, 50, 100, 200])
+def test_quinte_toujours_propose_a_deux_euros_la_combinaison(profil, montant):
+    """Tous les plans d'une course Quinté+ proposent des combinaisons Quinté+, et
+    chaque combinaison est jouée au moins à 2 €."""
+    mq = _plan(montant, profil).module_quinte
+    assert mq is not None and mq["disponible"] is True, f"{profil}/{montant} €"
+    assert mq["mise_unitaire"] >= 2.0
+    assert mq["flexi_pct"] == 100
+    assert mq["cout_total"] == mq["nb_combinaisons"] * 2.0
 
 
 def test_honnetete_aucune_ev_affichee():
@@ -149,69 +166,71 @@ def test_tranche_du_plan_principal_respectee(profil, montant):
 
 
 @pytest.mark.parametrize("montant,profil,budget,champ", [
-    (4, "conservateur", 2, 5), (4, "equilibre", 2, 6), (4, "agressif", 2, 6),
-    (10, "conservateur", 2, 5), (10, "equilibre", 2, 6), (10, "agressif", 3, 6),
-    (20, "conservateur", 2, 5), (20, "equilibre", 4, 6), (20, "agressif", 5, 7),
-    (50, "equilibre", 10, 6), (50, "agressif", 13, 7),
-    (100, "equilibre", 12, 6), (100, "agressif", 25, 7),
+    (4, "conservateur", 2, 5), (4, "equilibre", 2, 5), (4, "agressif", 2, 5),
+    (10, "conservateur", 2, 5), (10, "equilibre", 2, 5), (10, "agressif", 2, 5),
+    (20, "conservateur", 2, 5), (20, "equilibre", 2, 5), (20, "agressif", 2, 5),
+    (50, "equilibre", 2, 5), (50, "agressif", 12, 6),
+    (60, "equilibre", 12, 6),
+    (100, "conservateur", 2, 5), (100, "equilibre", 12, 6), (100, "agressif", 12, 6),
+    (200, "conservateur", 2, 5), (200, "equilibre", 12, 6), (200, "agressif", 42, 7),
 ])
 def test_regle_de_budget(montant, profil, budget, champ):
-    """Part 15/20/25 %, plancher 2 €, plafond = moitié et 2 € gardés au plan principal ;
-    le champ se réduit plutôt que le budget ne gonfle ; jamais au-delà du prix plein."""
+    """Part 15/20/25 %, plafond = moitié et 2 € gardés au plan principal ; chaque
+    combinaison à 2 € : le champ se réduit tant que son prix plein dépasse la part,
+    le budget ne gonfle jamais et le reliquat retourne au plan principal."""
     regle = mc._regle_budget_quinte(montant, profil)
-    assert regle["financable"] is True
+    assert regle["financable"] is True and regle["en_supplement"] is False
     assert (regle["budget"], regle["champ"]) == (budget, champ)
-    assert regle["budget"] <= mc._cout_plein_quinte(champ)
-    assert regle["budget"] >= mc._cout_min_quinte(champ)
+    assert regle["budget"] == mc._cout_plein_quinte(champ)
     assert montant - regle["budget"] >= mc.QUINTE_PRINCIPAL_MIN
 
 
-def test_couts_minimaux_d_un_ticket_valide():
-    assert mc._cout_min_quinte(5) == 2.0          # tendu : mise de base, pas de Flexi
-    assert mc._cout_min_quinte(6) == 2.0          # 6 × 2 € × 10 % = 1,20 € → 2 €
-    assert mc._cout_min_quinte(7) == 5.0          # 21 × 2 € × 10 % = 4,20 € → 5 €
-    assert mc._cout_plein_quinte(7) == 42.0
+def test_prix_plein_a_deux_euros_la_combinaison():
+    assert mc._cout_plein_quinte(5) == 2.0      # tendu : 1 combinaison
+    assert mc._cout_plein_quinte(6) == 12.0     # champ 6 : 6 combinaisons
+    assert mc._cout_plein_quinte(7) == 42.0     # champ 7 : 21 combinaisons
 
 
 def test_constantes_alignees_sur_combo_bets_et_le_catalogue_pmu():
-    from ml.combo_bets import _FLEXI_MIN, _JACKPOT_UNIT
+    from ml.combo_bets import _JACKPOT_UNIT
     from services.pmu_paris_reference import mise_base
-    assert mc.QUINTE_FLEXI_MIN == _FLEXI_MIN
     assert mc.QUINTE_MISE_BASE == _JACKPOT_UNIT == mise_base("Quinté+")
 
 
 @pytest.mark.parametrize("profil", PROFILS)
-@pytest.mark.parametrize("montant", [4, 10, 20, 50, 100])
-def test_flexi_et_prix_coherents(profil, montant):
+@pytest.mark.parametrize("montant", [4, 10, 20, 50, 100, 200])
+def test_prix_coherents(profil, montant):
     mq = _plan(montant, profil).module_quinte
     n_comb = math.comb(mq["nb_chevaux"], 5)
     assert mq["nb_combinaisons"] == n_comb
-    assert mq["cout_total"] == pytest.approx(n_comb * mq["mise_unitaire"], abs=0.01)
-    assert mc.QUINTE_FLEXI_MIN * 100 <= mq["flexi_pct"] <= 100
-    if mq["nb_chevaux"] == 5:
-        assert mq["flexi_pct"] == 100 and mq["cout_total"] == 2.0
+    assert mq["mise_unitaire"] == 2.0 and mq["flexi_pct"] == 100
+    assert mq["cout_total"] == n_comb * 2.0
 
 
 def test_champ_reduit_explique_quand_le_budget_ne_suffit_pas():
     mq = _plan(10, "agressif").module_quinte
-    assert mq["couverture"] == "champ 6 chevaux" and mq["couverture_visee"] == "champ 7 chevaux"
+    assert mq["couverture"] == "tendue" and mq["couverture_visee"] == "champ 7 chevaux"
     assert mq["couverture_reduite"] is True
-    assert "5 €" in mq["motif_couverture"]
+    assert "42 €" in mq["motif_couverture"]
 
 
 # ── Montant trop faible / module indisponible ────────────────────────────────
 
 @pytest.mark.parametrize("profil", PROFILS)
-@pytest.mark.parametrize("montant", [2, 3])
-def test_montant_trop_faible_le_dit_en_chiffres(profil, montant):
+@pytest.mark.parametrize("montant", [1, 2, 3])
+def test_montant_trop_faible_quinte_ajoute_en_supplement(profil, montant):
+    """Sous 4 € : le Quinté+ reste proposé (ticket tendu de 2 €), ajouté au montant ;
+    le plan principal garde tout le montant saisi et son pari, et le plan le dit."""
     plan = _plan(montant, profil)
     mq = plan.module_quinte
-    assert mq["disponible"] is False and mq["financable"] is False
-    assert mq["cout_total"] == 0.0 and plan.montant_quinte == 0.0
-    assert mq["montant_minimum"] == 4 and mq["cout_minimum"] == 2.0
-    assert "4 €" in mq["motif"] and "2 €" in mq["motif"]
-    # Tout le montant reste au plan principal, qui garde son pari.
-    assert plan.montant_joue == montant and plan.montant_reserve == 0
+    saisi = max(2, montant)
+    assert mq["disponible"] is True and mq["en_supplement"] is True
+    assert mq["couverture"] == "tendue" and mq["cout_total"] == 2.0
+    assert plan.montant_quinte == 2.0
+    assert plan.montant_joue == saisi and plan.montant_total == saisi + 2
+    assert plan.montant_reserve == 0
+    assert "4 €" in mq["motif_supplement"] and "ajouté" in mq["motif_supplement"]
+    assert "ajouté" in plan.resume_ia
     assert [p for n in plan.niveaux for p in n.paris]
 
 
@@ -235,7 +254,7 @@ def test_non_partants_exclus_de_la_selection():
 # ── Incertitude ──────────────────────────────────────────────────────────────
 
 def test_rapport_estime_avec_fourchette_et_bonus():
-    mq = _plan(20, "agressif").module_quinte
+    mq = _plan(200, "agressif").module_quinte
     f = mq["rapport_fourchette"]
     assert f and f["bas"] <= f["median"] <= f["haut"]
     assert f["haut"] > f["bas"], "un champ couvre des arrivées aux rapports différents"
@@ -270,21 +289,21 @@ def test_reglement_tendu_au_rapport_desordre_jamais_a_l_ordre():
 
 
 def test_reglement_champ_combinaison_par_combinaison_avec_bonus():
-    """Champ 6 à 2 € : 6 combinaisons à 0,33 €. Deux Bonus 4sur5, un Bonus 3."""
-    res = settle_module_quinte(_module([1, 4, 3, 10, 11, 12], 2.0), ARRIVEE, AGREGAT, 16, DETAIL)
+    """Champ 6 à 12 € : 6 combinaisons à 2 €. Deux Bonus 4sur5, un Bonus 3."""
+    res = settle_module_quinte(_module([1, 4, 3, 10, 11, 12], 12.0), ARRIVEE, AGREGAT, 16, DETAIL)
     assert res["nb_combinaisons"] == 6
-    assert res["total_mise"] == 2.0
+    assert res["total_mise"] == 12.0
     assert res["nb_gagnantes"] == 3
-    assert res["total_gain"] == pytest.approx(2 / 6 * 4.8 * 2 + 2 / 6 * 4.0, abs=0.01)
-    assert res["net"] == pytest.approx(res["total_gain"] - 2.0, abs=0.01)
+    assert res["total_gain"] == pytest.approx(2 * 4.8 * 2 + 2 * 4.0, abs=0.01)
+    assert res["net"] == pytest.approx(res["total_gain"] - 12.0, abs=0.01)
 
 
 def test_reglement_non_partant_rembourse_ses_seules_combinaisons():
-    res = settle_module_quinte(_module([1, 4, 3, 10, 8, 12], 2.0), ARRIVEE, AGREGAT, 16,
+    res = settle_module_quinte(_module([1, 4, 3, 10, 8, 12], 12.0), ARRIVEE, AGREGAT, 16,
                                DETAIL, non_partants={12})
     assert res["nb_rembourse"] == 5
-    assert res["total_mise"] == pytest.approx(2 / 6, abs=0.01)
-    assert res["total_gain"] == pytest.approx(2 / 6 * 138.2, abs=0.01)
+    assert res["total_mise"] == pytest.approx(2.0, abs=0.01)
+    assert res["total_gain"] == pytest.approx(2 * 138.2, abs=0.01)
 
 
 def test_settle_plan_separe_le_quinte_du_plan_principal():
@@ -304,7 +323,7 @@ def test_settle_plan_separe_le_quinte_du_plan_principal():
 def test_settle_plan_sans_module_n_ajoute_rien():
     plan = {"niveaux": [{"niveau": "securite", "paris": [{
         "type": "Simple Gagnant", "mise": 10, "chevaux": [{"numero": 1}]}]}],
-        "module_quinte": {"disponible": False, "financable": False, "cout_total": 0.0}}
+        "module_quinte": {"disponible": False, "cout_total": 0.0}}
     bilan = settle_plan(plan, ARRIVEE, {"simple_gagnant": 2.0}, 16, None)
     assert "module_quinte" not in bilan and "total_avec_quinte" not in bilan
 
@@ -314,10 +333,14 @@ def test_plan_genere_puis_regle_bout_a_bout():
     = montant saisi, et le Quinté+ a son propre bilan."""
     plan = mc.plan_to_dict(_plan(10, "equilibre"))
     arrivee = [{"numero": n, "position": i} for i, n in enumerate((1, 2, 3, 4, 5), 1)]
+    # Le PMU publie l'Ordre ET le Désordre : un tendu arrivé dans l'ordre joué est
+    # payé à l'Ordre ; sans ce rapport il resterait en attente (jamais inventé).
     detail = {"e_quinte_plus": [
+        {"libelle": "e-Quinté+ Ordre", "combinaison": "1-2-3-4-5", "rapport": 900.0},
         {"libelle": "e-Quinté+ Désordre", "combinaison": "1-2-3-4-5", "rapport": 50.0},
         {"libelle": "e-Bonus 4sur5", "combinaison": "1-2-3-4", "rapport": 3.0},
         {"libelle": "e-Bonus 3", "combinaison": "1-2-3", "rapport": 2.0}]}
     bilan = settle_plan(plan, arrivee, {}, 16, detail)
     assert bilan["total_mise"] + bilan["module_quinte"]["total_mise"] == pytest.approx(10.0)
     assert bilan["module_quinte"]["nb_gagnantes"] >= 1
+    assert bilan["module_quinte"]["en_attente"] is False

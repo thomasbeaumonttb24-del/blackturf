@@ -28,7 +28,8 @@ export interface ModuleQuinteData {
   montant_saisi?: number;
   montant_plan_principal?: number;
   montant_minimum?: number;
-  cout_minimum?: number;
+  en_supplement?: boolean;         // montant < 4 € : le ticket de 2 € s'ajoute au montant
+  motif_supplement?: string | null;
   proba_gain?: number | null;      // les 5 premiers dans la sélection
   proba_bonus?: number | null;     // retour partiel (Bonus) sans les 5
   rapport_estime?: number;
@@ -77,9 +78,11 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
           Quinté+{module.disponible && module.couverture ? ` · ${module.couverture}` : ""}
         </div>
         <div style={{ fontSize: 10.5, color: CX.gray500 }}>
-          {module.disponible
-            ? `${Math.round((module.cout_total / (montantTotal || 1)) * 100)}% du budget · pris sur le montant`
-            : module.financable === false ? "Non finançable avec ce montant" : "Indisponible sur cette course"}
+          {!module.disponible
+            ? "Indisponible sur cette course"
+            : module.en_supplement
+              ? "Ajouté à votre montant · 2 € par combinaison"
+              : `${Math.round((module.cout_total / (montantTotal || 1)) * 100)}% du budget · pris sur le montant · 2 € par combinaison`}
         </div>
       </div>
     </div>
@@ -93,12 +96,6 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
         <p style={{ margin: 0, padding: "11px 14px", fontSize: 11.5, lineHeight: 1.5, color: CX.gray600 }}>
           {module.motif || "Aucun ticket Quinté+ n'a pu être construit pour cette course."}
         </p>
-        {module.financable === false && module.montant_minimum != null && (
-          <p style={{ margin: 0, padding: "0 14px 12px", fontSize: 10.5, color: CX.gray500 }}>
-            Montant minimum pour ajouter un Quinté+ : <strong style={{ color: CX.ink2 }}>{module.montant_minimum}€</strong>
-            {module.cout_minimum != null && <> (ticket à {eur(module.cout_minimum)} + plan principal)</>}.
-          </p>
-        )}
       </section>
     );
   }
@@ -142,10 +139,8 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 6 }}>
           <Stat label="Formule" value={tendu ? "Tendu" : `Champ ${module.nb_chevaux ?? chevaux.length}`}
             sub={`${module.nb_combinaisons ?? 1} combinaison${(module.nb_combinaisons ?? 1) > 1 ? "s" : ""}`} />
-          <Stat label="Flexi" value={tendu ? "Sans" : module.flexi_pct != null ? `${module.flexi_pct} %` : "—"}
-            sub={module.mise_unitaire != null
-              ? (tendu ? `mise de base ${eur(module.mise_unitaire)}` : `${eur(module.mise_unitaire)} par combinaison`)
-              : undefined} />
+          <Stat label="Mise par combinaison" value={module.mise_unitaire != null ? eur(module.mise_unitaire) : "—"}
+            sub={tendu ? "mise de base PMU" : `${module.nb_combinaisons ?? 1} × ${eur(module.mise_unitaire ?? 2)}, sans Flexi`} />
           <Stat label="Chance de toucher les 5" value={module.proba_gain != null ? pct(module.proba_gain) : "—"}
             sub={module.proba_bonus != null ? `+ ${pct(module.proba_bonus)} de retour partiel (Bonus)` : undefined} />
           <Stat label="Si les 5 arrivent"
@@ -158,8 +153,14 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
 
         {/* Partage du montant : l'égalité doit se lire, pas se deviner. */}
         <div style={{ fontSize: 11, lineHeight: 1.45, color: CX.gray600, fontVariantNumeric: "tabular-nums" }}>
-          Pris sur votre montant : plan principal {eur(principal)} + Quinté+ {eur(module.cout_total)} = <strong style={{ color: CX.ink2 }}>{eur(principal + module.cout_total)}</strong>
+          {module.en_supplement ? "Ajouté à votre montant" : "Pris sur votre montant"} : plan principal {eur(principal)} + Quinté+ {eur(module.cout_total)} = <strong style={{ color: CX.ink2 }}>{eur(principal + module.cout_total)}</strong>
         </div>
+
+        {module.en_supplement && module.motif_supplement && (
+          <div style={{ fontSize: 10.5, lineHeight: 1.45, color: CX.goldDeep, borderRadius: 8, border: `1px solid ${CX.goldBd}`, background: CX.goldBg, padding: "6px 9px" }}>
+            {module.motif_supplement}
+          </div>
+        )}
 
         {module.motif_couverture && (
           <div style={{ fontSize: 10.5, lineHeight: 1.45, color: CX.goldDeep, borderRadius: 8, border: `1px solid ${CX.goldBd}`, background: CX.goldBg, padding: "6px 9px" }}>

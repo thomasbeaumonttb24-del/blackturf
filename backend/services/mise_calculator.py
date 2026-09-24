@@ -797,17 +797,20 @@ def _mode_label(heat: float) -> str:
 #   3. plafond : la moitié du montant, et le plan principal garde toujours au
 #      moins MISE_PLANCHER (2 €) — le plus petit plan que le produit sert déjà
 #      sur n'importe quelle course, donc un pari dans sa tranche ;
-#   4. le champ visé par le profil (5/6/7 chevaux) est RÉDUIT tant que son coût
-#      minimal (Flexi au plancher) dépasse ce budget. Le budget ne gonfle jamais
-#      pour financer un champ plus large ;
-#   5. sous 4 € rien n'est finançable : tout le montant va au plan principal et
-#      le module l'annonce en chiffres.
+#   4. CHAQUE combinaison est jouée à la mise de base (2 €), jamais sous Flexi —
+#      arbitrage produit du 2026-09-24 : « mise minimale de 2 € par pari ». Le
+#      champ visé par le profil (5/6/7 chevaux) est donc RÉDUIT tant que son prix
+#      plein (C(n,5) × 2 €) dépasse ce budget ; le budget ne gonfle jamais pour
+#      financer un champ plus large, et le reliquat retourne au plan principal ;
+#   5. le Quinté+ du jour est TOUJOURS proposé, sur tous les plans (même
+#      arbitrage). Sous 4 € le montant ne finance pas à la fois un ticket de 2 € et
+#      un plan principal de 2 € : le ticket tendu est alors AJOUTÉ au montant saisi,
+#      et le plan le dit en chiffres.
 # Un ticket Quinté+ systématique est un contrat de COUVERTURE / divertissement,
 # pas un pari à valeur établie (audit P1 : l'EV de portefeuille du champ n'est
 # pas calculée de façon fiable, le prélèvement du pool dépasse 25 %). D'où une
 # part modeste, et aucune EV affichée.
-QUINTE_MISE_BASE = 2.0       # mise de base PMU du Quinté+ (pmu_paris_reference)
-QUINTE_FLEXI_MIN = 0.10      # même plancher que combo_bets._FLEXI_MIN (verrou : test)
+QUINTE_MISE_BASE = 2.0       # mise de base PMU du Quinté+ = mise de chaque combinaison
 QUINTE_PART_PAR_PROFIL = {"conservateur": 0.15, "equilibre": 0.20, "agressif": 0.25}
 QUINTE_PART_MAX = 0.5
 QUINTE_PRINCIPAL_MIN = MISE_PLANCHER
@@ -822,22 +825,8 @@ def _libelle_couverture(n_chevaux: int) -> str:
 
 
 def _cout_plein_quinte(n_chevaux: int) -> float:
-    """Prix sans Flexi : C(n, 5) combinaisons à la mise de base."""
+    """Prix du ticket : C(n, 5) combinaisons, chacune à la mise de base (2 €)."""
     return math.comb(n_chevaux, 5) * QUINTE_MISE_BASE
-
-
-def _cout_min_quinte(n_chevaux: int) -> float:
-    """Ticket le moins cher réellement achetable pour ce champ.
-
-    Tendu (une combinaison) : la mise de base, le Flexi ne s'appliquant qu'aux
-    formules combinées. Champ : Flexi au plancher, jamais sous la mise de base,
-    arrondi à l'euro supérieur (champ 7 : 21 × 2 € × 10 % = 4,20 € → 5 €).
-    """
-    n_comb = math.comb(n_chevaux, 5)
-    if n_comb <= 1:
-        return QUINTE_MISE_BASE
-    return float(max(QUINTE_MISE_BASE,
-                     math.ceil(n_comb * QUINTE_MISE_BASE * QUINTE_FLEXI_MIN - 1e-9)))
 
 
 def _montant_minimum_quinte() -> int:
@@ -852,7 +841,8 @@ def _regle_budget_quinte(montant: int, profil: str, n_max: int = 7) -> dict:
     """Budget du Quinté+ et champ retenu pour ce montant — fonction PURE.
 
     `n_max` : nombre de chevaux réellement utilisables (cote exploitable), qui
-    borne le champ comme le budget le borne.
+    borne le champ comme le budget le borne. Toujours un ticket : sous le montant
+    minimum, le ticket tendu est ajouté au montant (`en_supplement`).
     """
     montant = int(montant)
     part = QUINTE_PART_PAR_PROFIL.get(profil, QUINTE_PART_PAR_PROFIL["equilibre"])
@@ -865,13 +855,16 @@ def _regle_budget_quinte(montant: int, profil: str, n_max: int = 7) -> dict:
         "plancher": QUINTE_MISE_BASE, "plafond": plafond,
         "champ_vise": champ_vise, "montant_minimum": _montant_minimum_quinte(),
     }
-    vise = max(cible, int(QUINTE_MISE_BASE))
-    if plafond >= QUINTE_MISE_BASE:
-        for n in range(min(champ_vise, int(n_max)), 4, -1):
-            budget = int(min(vise, plafond, _cout_plein_quinte(n)))
-            if budget >= _cout_min_quinte(n):
-                return {**regle, "financable": True, "budget": budget, "champ": n}
-    return {**regle, "financable": False, "budget": 0, "champ": None}
+    if plafond < QUINTE_MISE_BASE:
+        return {**regle, "financable": True, "en_supplement": True,
+                "budget": int(QUINTE_MISE_BASE), "champ": 5}
+    vise = min(max(cible, int(QUINTE_MISE_BASE)), plafond)
+    for n in range(min(champ_vise, int(n_max)), 4, -1):
+        if _cout_plein_quinte(n) <= vise:
+            return {**regle, "financable": True, "en_supplement": False,
+                    "budget": int(_cout_plein_quinte(n)), "champ": n}
+    return {**regle, "financable": True, "en_supplement": False,
+            "budget": int(QUINTE_MISE_BASE), "champ": 5}
 
 
 def _quantile_pondere(valeurs: list[float], poids: list[float], q: float) -> float:
@@ -981,15 +974,7 @@ def _construire_module_quinte(predictions: list[dict], course_info: dict, profil
                           "cette course. Tout le montant va au plan principal.")}
 
     regle = _regle_budget_quinte(montant, profil, n_max=min(7, n_exploitables))
-    if not regle["financable"]:
-        return {**base, "disponible": False, "financable": False, "budget": regle,
-                "cout_minimum": QUINTE_MISE_BASE,
-                "montant_minimum": regle["montant_minimum"],
-                "motif": (f"Montant de {montant} € trop faible pour y ajouter un Quinté+ : "
-                          f"le ticket le moins cher coûte {QUINTE_MISE_BASE:g} € (mise de base "
-                          f"PMU) et le plan principal garde au moins {QUINTE_PRINCIPAL_MIN:g} €, "
-                          f"soit {regle['montant_minimum']} € au minimum. Tout le montant va "
-                          "au plan principal.")}
+    en_supplement = bool(regle.get("en_supplement"))
 
     try:
         # Le budget passé ici ne sert qu'à la sélection et aux probabilités : le prix
@@ -1014,8 +999,8 @@ def _construire_module_quinte(predictions: list[dict], course_info: dict, profil
     prop = props[n]
     n_comb = math.comb(n, 5)
     cout = float(regle["budget"])
-    mise_comb = cout / n_comb
-    flexi = cout / _cout_plein_quinte(n)
+    mise_comb = QUINTE_MISE_BASE
+    flexi = 1.0
     rapport = float(prop.get("rapport_estime") or 0.0)
     rang_par_num = {int(p["numero"]): i for i, p in enumerate(
         sorted(preds, key=lambda x: float(x.get("proba_top1") or 0.0), reverse=True), start=1)}
@@ -1032,10 +1017,11 @@ def _construire_module_quinte(predictions: list[dict], course_info: dict, profil
                                 "ont une cote exploitable.")
         else:
             motif_couverture = (f"{_libelle_couverture(champ_vise).capitalize()} visé, ramené à "
-                                f"{_libelle_couverture(n)} : il coûterait au moins "
-                                f"{_cout_min_quinte(champ_vise):g} € (Flexi "
-                                f"{round(QUINTE_FLEXI_MIN * 100)} %), au-delà de la part "
-                                f"réservée au Quinté+ ({cout:g} €).")
+                                f"{_libelle_couverture(n)} : il coûterait "
+                                f"{_cout_plein_quinte(champ_vise):g} € "
+                                f"({math.comb(champ_vise, 5)} combinaisons à "
+                                f"{QUINTE_MISE_BASE:g} €), au-delà de la part réservée au "
+                                f"Quinté+ sur ce montant.")
 
     return {
         **base,
@@ -1054,7 +1040,14 @@ def _construire_module_quinte(predictions: list[dict], course_info: dict, profil
         "mise_unitaire": round(mise_comb, 4),
         "cout_total": cout,
         "budget_alloue": cout,
-        "montant_plan_principal": montant - cout,
+        "montant_plan_principal": montant if en_supplement else montant - cout,
+        "en_supplement": en_supplement,
+        "motif_supplement": (
+            f"Montant de {montant} € trop faible pour prendre le Quinté+ dessus (il faut "
+            f"{regle['montant_minimum']} € : {QUINTE_MISE_BASE:g} € de Quinté+ et "
+            f"{QUINTE_PRINCIPAL_MIN:g} € de plan principal) : le ticket de "
+            f"{cout:g} € est ajouté, total {montant + cout:g} €."
+        ) if en_supplement else None,
         "budget": regle,
         # Probabilité, selon le modèle, que les cinq premiers soient tous dans la
         # sélection (rapport Désordre ; l'Ordre n'est pas estimé séparément).
@@ -1083,16 +1076,23 @@ def _joindre_module_quinte(plan: "MisePlan", module: Optional[dict], montant_sai
     plan.module_quinte = module
     if not cout:
         return plan
+    en_supplement = bool(module.get("en_supplement"))
+    total = montant_saisi + cout if en_supplement else montant_saisi
     plan.montant_quinte = float(cout)
-    plan.montant_total = montant_saisi
-    plan.montant_reserve = round(montant_saisi - plan.montant_joue - cout, 2)
-    # « x % du budget » : le budget affiché est le montant saisi, pas le reliquat.
+    plan.montant_total = total
+    plan.montant_reserve = round(total - plan.montant_joue - cout, 2)
+    # « x % du budget » : le budget affiché est le total engagé, pas le reliquat.
     for niv in plan.niveaux:
-        niv.pct = round(niv.montant / montant_saisi * 100) if montant_saisi else niv.pct
-    plan.resume_ia = (plan.resume_ia or "") + (
-        f" Quinté+ : {cout:g} € pris sur les {montant_saisi} € "
-        f"({module.get('couverture')}), le plan principal se joue sur "
-        f"{montant_saisi - cout:g} €.")
+        niv.pct = round(niv.montant / total * 100) if total else niv.pct
+    if en_supplement:
+        plan.resume_ia = (plan.resume_ia or "") + (
+            f" Quinté+ : ticket de {cout:g} € ajouté aux {montant_saisi} € "
+            f"(montant trop faible pour le prendre dessus), total {total:g} €.")
+    else:
+        plan.resume_ia = (plan.resume_ia or "") + (
+            f" Quinté+ : {cout:g} € pris sur les {montant_saisi} € "
+            f"({module.get('couverture')}), le plan principal se joue sur "
+            f"{montant_saisi - cout:g} €.")
     return plan
 
 
@@ -1135,7 +1135,8 @@ def _avec_module_quinte(generer):
             module = None
         cout = (float(module.get("cout_total") or 0.0)
                 if module and module.get("disponible") else 0.0)
-        arguments["montant"] = int(montant_saisi - cout) if cout else arguments["montant"]
+        if cout and not module.get("en_supplement"):
+            arguments["montant"] = int(montant_saisi - cout)
         plan = generer(*lie.args, **lie.kwargs)
         return _joindre_module_quinte(plan, module, montant_saisi, cout)
 
