@@ -149,8 +149,7 @@ def _should_deploy(
     h2h_tolerance: float = H2H_TOLERANCE,
     dette_h2h: float = 0.0,
     market_gate_enabled: bool = False,
-    rank_delta_market: Optional[float] = None,
-    market_gate_margin: float = 0.0,
+    marche_servi_bloque: bool = False,
     victoire_bloque: bool = False,
 ) -> bool:
     """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
@@ -179,13 +178,18 @@ def _should_deploy(
     edge durablement négatif (audit -52%) figerait le modèle À VIE — exactement le blocage
     du 2026-06-19 (wf 0.8165>0.8141 rejeté à tort en `worse_wf`).
 
-    FLAG market_gate : `rank_delta_market` = AUC de classement intra-course du
-    challenger MOINS celle d'un simple `ORDER BY cote_pmu`, sur le même hold-out.
-    Négatif, le produit ferait mieux sans modèle. Ce gate court-circuite TOUT, y
-    compris un remplacement structurel : promouvoir un modèle sous la cote au motif
-    que l'actif est synthétique reviendrait à remplacer un mauvais classeur par un
-    autre. Défaut OFF, le temps que l'entraînement sur le résidu du marché rende le
-    delta positif (cf. ml/algo_flags.market_gate).
+    FLAG market_gate (rebranché le 2026-09-24 sur le produit SERVI) :
+    `marche_servi_bloque` = le classement que le challenger ferait SERVIR (proba de
+    victoire mélangée à la cote, cf. `ml.avantage_marche.mesure_gate_servi`) recule
+    PROUVABLEMENT, face à la cote, par rapport à celui du champion, sur les mêmes
+    courses du hold-out. Il n'exige pas de battre la cote : il interdit de reculer.
+    L'ancien critère — `rank_delta_market` du modèle NU ≥ marge — aurait bloqué
+    toutes les promotions depuis v528, le nu étant sous la cote sur chaque hold-out
+    alors que le produit servi est à parité. Comme le contrôle du modèle de
+    victoire, il cède devant un remplacement structurel (champion synthétique /
+    absent / non fiable / saut de données), cas où comparer au champion n'a pas de
+    sens. Défaut de l'environnement OFF (`BT_MARKET_GATE=0`) : l'activation reste
+    une décision humaine.
 
     Ensuite seulement : on déploie si l'actif est synthétique / absent / non fiable, OU
     saut de données massif, OU mérite de ranking (tolérance régression).
@@ -211,20 +215,6 @@ def _should_deploy(
     if new_wf < min_auc:
         return False
 
-    # GATE MARCHÉ (FLAG market_gate, défaut OFF) — le classement du challenger
-    # bat-il un simple `ORDER BY cote_pmu` sur le même hold-out ?
-    #
-    # C'est la question que rien ne posait : le gate ne confrontait le challenger
-    # qu'au champion précédent, si bien que 513 versions ont pu se succéder sous
-    # le niveau de la cote sans qu'aucune alerte ne se déclenche.
-    #
-    # `rank_delta_market is None` = mesure impossible (pas de cote sur le hold-out).
-    # On NE bloque PAS : une absence de mesure n'est pas une preuve d'échec, et
-    # bloquer dessus figerait le modèle sur une panne de données.
-    if market_gate_enabled and rank_delta_market is not None:
-        if rank_delta_market < market_gate_margin:
-            return False
-
     # Remplacement STRUCTUREL de l'actif : actif synthetique / absent / non fiable
     # (trop peu de courses) / saut de donnees massif (nouveau modele entraine sur
     # >=1.5x plus de donnees). Ces cas justifient la promotion independamment du
@@ -235,6 +225,11 @@ def _should_deploy(
     # MODÈLE DE VICTOIRE (cf. `_victoire_bloque`) : un challenger dont la cote juste
     # servie est prouvée moins juste n'est pas promu, sauf remplacement structurel.
     if victoire_bloque and not structural_replace:
+        return False
+    # GATE MARCHÉ (FLAG market_gate) — le produit SERVI recule-t-il face à la cote ?
+    # Verdict calculé par `ml.avantage_marche.mesure_gate_servi` ; une mesure
+    # absente ou trop courte vaut False (on ne gèle pas sur une panne de cotes).
+    if market_gate_enabled and marche_servi_bloque and not structural_replace:
         return False
     # Mérite de ranking : head-to-head si mesuré, sinon walk-forward (repli).
     if h2h_delta is not None:
@@ -324,6 +319,52 @@ def _victoire_bloque(ecart: Optional[dict], tolerance: float = VICTOIRE_TOLERANC
     if not ecart:
         return False
     return ecart["ic95"][1] < 0.0 and ecart["moyenne"] < -tolerance
+
+
+# ── GATE MARCHÉ sur le produit SERVI (FLAG market_gate) ──────────────────────
+# Calcul et verdict vivent dans `ml.avantage_marche` (mesure_gate_servi) ; ces
+# trois fonctions ne font que les brancher sur l'arbitrage champion/challenger.
+
+def _mesure_marche_servi(servis: dict, y_win, groupes, cotes) -> Optional[dict]:
+    """Mesure du gate à partir des AUC servies par course des deux modèles.
+
+    Fonction TOTALE (renvoie None plutôt que de lever) : appelée depuis
+    `_head_to_head_auc`, dont l'exception vaudrait « head-to-head impossible ».
+    """
+    if y_win is None or "champion" not in servis or "challenger" not in servis:
+        return None
+    try:
+        from ml.algo_flags import FLAGS as _AFg
+        from ml.avantage_marche import auc_marche_par_course, mesure_gate_servi
+        mesure = mesure_gate_servi(servis["champion"], servis["challenger"],
+                                   auc_marche_par_course(y_win, groupes, cotes),
+                                   tolerance=_AFg.market_gate_tolerance)
+    except Exception as e:                                       # noqa: BLE001
+        log.warning("pipeline.h2h.marche_servi_impossible", err=str(e)[:160])
+        return None
+    if mesure is not None:
+        log.info("pipeline.h2h.marche_servi",
+                 n_courses=mesure["n_courses"],
+                 avantage_challenger=mesure["avantage_challenger"],
+                 avantage_champion=mesure["avantage_champion"],
+                 regression=mesure["regression"], ic95=mesure["ic95_regression"],
+                 sous_la_cote=mesure["sous_la_cote"], bloque=mesure["bloque"])
+    return mesure
+
+
+def _marche_servi_bloque(h2h: Optional[dict]) -> bool:
+    from ml.avantage_marche import gate_servi_bloque
+    return gate_servi_bloque((h2h or {}).get("marche_servi"))
+
+
+def _arrondir_marche_servi(h2h: Optional[dict]) -> Optional[dict]:
+    """Résumé persisté dans l'issue de la nuit (déjà arrondi à 4 décimales)."""
+    m = (h2h or {}).get("marche_servi")
+    if not m:
+        return None
+    return {k: m.get(k) for k in ("n_courses", "avantage_challenger", "avantage_champion",
+                                  "regression", "ic95_regression", "sous_la_cote",
+                                  "bloque")}
 
 
 def _motif_promotion(
@@ -846,13 +887,23 @@ async def _head_to_head_auc(
         except Exception as e:                                   # noqa: BLE001
             log.warning("pipeline.h2h.melange_indisponible", err=str(e)[:160])
 
-    def _ll_victoire(modele) -> Optional[dict]:
+    # GATE MARCHÉ (chantier C, 24/09) : classement SERVI de chaque modèle, course
+    # par course, calculé sur la même proba de victoire que la vraisemblance.
+    _servis: dict = {}
+
+    def _ll_victoire(modele, role: str = "") -> Optional[dict]:
         if _yw_oos is None:
             return None
         try:
             pw = modele.predict_win_proba(X_oos)
             if pw is None:
                 return None
+            try:
+                from ml.avantage_marche import auc_servie_par_course
+                _servis[role] = auc_servie_par_course(
+                    pw, _yw_oos, _groupes, _cotes, _betas, _alpha_max)
+            except Exception as e:                               # noqa: BLE001
+                log.warning("pipeline.h2h.servi_impossible", err=str(e)[:160])
             return _vraisemblance_victoire(pw, _yw_oos, _groupes, _cotes, _betas)
         except Exception as e:                                   # noqa: BLE001
             log.warning("pipeline.h2h.victoire_scoring_failed", err=str(e)[:160])
@@ -868,7 +919,7 @@ async def _head_to_head_auc(
         # du schéma de features entre les deux générations.
         auc_champion, rank_champion, servi_champion = _mesures(
             champion.predict_proba(X_oos))
-        ll_win_champion = _ll_victoire(champion)
+        ll_win_champion = _ll_victoire(champion, "champion")
     except Exception as e:
         log.warning("pipeline.h2h.champion_scoring_failed", err=str(e)[:160])
         return None
@@ -882,7 +933,7 @@ async def _head_to_head_auc(
     except Exception as e:
         log.warning("pipeline.h2h.challenger_scoring_failed", err=str(e)[:160])
         return None
-    ll_win_challenger = _ll_victoire(challenger)
+    ll_win_challenger = _ll_victoire(challenger, "challenger")
     victoire = (_ecart_victoire(ll_win_champion, ll_win_challenger)
                 if ll_win_champion is not None and ll_win_challenger is not None else None)
     log.info("pipeline.h2h.victoire",
@@ -920,6 +971,7 @@ async def _head_to_head_auc(
                    if (servi_challenger is not None and servi_champion is not None)
                    else None)
     n_courses = int(_groupes.nunique())
+    marche_servi = _mesure_marche_servi(_servis, _yw_oos, _groupes, _cotes)
     log.info("pipeline.h2h.measured",
              rank_challenger=round(rank_challenger, 4), rank_champion=round(rank_champion, 4),
              rank_marche=round(rank_marche, 4) if rank_marche is not None else None,
@@ -950,6 +1002,7 @@ async def _head_to_head_auc(
         "n_rows": n_rows,
         "n_courses": n_courses,
         "victoire": victoire,
+        "marche_servi": marche_servi,
     }
 
 
@@ -1832,10 +1885,11 @@ async def _run_nightly_retraining_unlocked() -> None:
     # IC [−0,0051 ; +0,0014]) et que la chaîne de correction apporte +0,0146
     # (IC [+0,0108 ; +0,0185]).
     #
-    # Cette mesure est le PRÉALABLE à tout branchement de `BT_MARKET_GATE` : câbler
-    # le gate sur le delta du modèle nu — négatif par construction, puisque le
-    # drapeau `market_residual` a retiré la cote du vecteur appris — figerait le
-    # modèle à vie.
+    # Cette mesure était le PRÉALABLE au rebranchement de `BT_MARKET_GATE` (fait le
+    # 2026-09-24, cf. `ml.avantage_marche.mesure_gate_servi`) : câbler le gate sur
+    # le delta du modèle nu — négatif sur chaque version depuis v528, bien que le
+    # modèle apprenne AVEC la cote (`BT_MARKET_RESIDUAL` absent en production) —
+    # figerait le modèle à vie.
     #
     # Purement observationnelle : elle ne modifie aucun paramètre servi.
     async with etape(AsyncSessionLocal, "avantage_marche_servi") as _e_avantage:
@@ -2072,8 +2126,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
             h2h_delta=_h2h_delta,
             dette_h2h=_dette,
             market_gate_enabled=_AF.market_gate,
-            rank_delta_market=_rank_delta_market,
-            market_gate_margin=_AF.market_gate_margin,
+            marche_servi_bloque=_marche_servi_bloque(_h2h),
             victoire_bloque=_victoire_bloquee,
         ):
             version_num = await _get_next_version_num(session)
@@ -2212,6 +2265,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 "dette": round(_dette_apres, 4),
                 "victoire": _arrondir_victoire(_victoire),
+                "marche_servi": _arrondir_marche_servi(_h2h),
             }
             if _refit:
                 _issue["refit"] = {"ok": _refit_ok, **(_refit_info or {})}
@@ -2247,6 +2301,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
             _raison_rejet = (
                 "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
                 else "victoire" if _victoire_bloquee
+                else "marche_servi" if (_AF.market_gate and _marche_servi_bloque(_h2h))
                 else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
                                     and not (_h2h_delta is not None and _h2h_delta >= 0)
                                     and new_wf < current_wf)
@@ -2262,6 +2317,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
                 "h2h_delta": round(_h2h_delta, 4) if _h2h_delta is not None else None,
                 "dette": round(_dette, 4),
                 "victoire": _arrondir_victoire(_victoire),
+                "marche_servi": _arrondir_marche_servi(_h2h),
             }
             log.warning(
                 "pipeline.retrain.rollback",

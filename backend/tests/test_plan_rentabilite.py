@@ -3,9 +3,8 @@
 1. Le filet « chaque course est jouée » ignorait le PLAFOND DE RANG du profil. Un
    pari de secours pouvait porter un cheval que le modèle classe 12e — précisément
    ce que le plafond interdit dans la sélection normale.
-2. Le gate MARCHÉ, qui refuse un modèle ne battant pas la simple cote, était
-   désactivé. Sa condition de réactivation (delta positif) est remplie depuis huit
-   versions consécutives.
+2. Le gate MARCHÉ — rebranché le 2026-09-24 sur le produit SERVI : il refuse un
+   modèle qui ferait reculer, face à la cote, le classement réellement servi.
 """
 import pytest
 
@@ -362,44 +361,37 @@ def test_le_plancher_dev_ne_vide_pas_le_plan():
         assert sum(len(niv.paris) for niv in plan.niveaux) >= 1
 
 
-# ── 3. Le gate marché ────────────────────────────────────────────────────────
+# ── 3. Le gate marché (rebranché sur le produit SERVI le 2026-09-24) ─────────
+# Tests détaillés : tests/test_gate_marche_servi.py. On garde ici le contrat que
+# ce fichier documentait : le gate ne gèle pas le modèle sur le régime actuel.
 
-def test_le_gate_marche_est_actif_par_defaut():
-    """Sa condition de réactivation est remplie : l'avantage sur le marché est
-    positif sur v520 à v527 (min +0.0188)."""
+def test_le_gate_marche_est_actif_par_defaut_dans_le_code():
+    """Défaut du CODE à ON ; la production le fixe à 0 (compose), l'activation
+    restant une décision humaine."""
     assert algo_flags.FLAGS.market_gate is True
-    assert algo_flags.FLAGS.market_gate_margin == 0.0
+    assert algo_flags.FLAGS.market_gate_tolerance == 0.002
 
 
-def test_un_modele_sous_le_marche_nest_pas_promu():
+def test_un_produit_servi_qui_recule_nest_pas_promu():
     assert _should_deploy(
         0.80, 0.70, current_is_synth=False, no_current=False,
         current_unreliable=False, data_jump=False,
-        market_gate_enabled=True, rank_delta_market=-0.001) is False
+        market_gate_enabled=True, marche_servi_bloque=True) is False
 
 
-def test_un_modele_au_dessus_du_marche_reste_promu():
+def test_un_produit_servi_qui_ne_recule_pas_reste_promu():
     assert _should_deploy(
         0.80, 0.70, current_is_synth=False, no_current=False,
         current_unreliable=False, data_jump=False,
-        market_gate_enabled=True, rank_delta_market=0.0188) is True
+        market_gate_enabled=True, marche_servi_bloque=False) is True
 
 
-def test_le_gate_ne_bloque_pas_quand_la_mesure_est_impossible():
-    """Une absence de mesure n'est pas une preuve d'échec : sans cote sur le
-    hold-out, bloquer figerait le modèle sur une panne de données."""
-    assert _should_deploy(
-        0.80, 0.70, current_is_synth=False, no_current=False,
-        current_unreliable=False, data_jump=False,
-        market_gate_enabled=True, rank_delta_market=None) is True
-
-
-@pytest.mark.parametrize("delta", [0.0198, 0.0197, 0.0200, 0.0199,
-                                   0.0192, 0.0201, 0.0188, 0.0190])
-def test_aucune_des_huit_versions_recentes_naurait_ete_bloquee(delta):
-    """Preuve que l'activation est sans effet sur le régime actuel : les deltas
-    réellement mesurés de v520 à v527 passent tous."""
+@pytest.mark.parametrize("version", range(528, 545))
+def test_le_modele_nu_sous_la_cote_ne_gele_plus_le_modele(version):
+    """v528 à v544 portent toutes un `rank_delta_market` NÉGATIF (modèle nu sous
+    la cote, −0,035 à −0,017) : l'ancien gate les aurait toutes bloquées. Le
+    nouveau ne lit plus ce chiffre — seul le recul du produit servi bloque."""
     assert _should_deploy(
         0.7868, 0.7869, current_is_synth=False, no_current=False,
         current_unreliable=False, data_jump=False,
-        market_gate_enabled=True, rank_delta_market=delta) is True
+        market_gate_enabled=True) is True

@@ -12,12 +12,20 @@ mesuré le 2026-09-07 sur 1 024 courses réelles, le modèle nu classe à 0,7326
 la cote seule classe à 0,7486 — il est DESSOUS de 0,0160 — pendant que le produit
 servi classe à 0,7519, soit AU-DESSUS de 0,0033.
 
-Les deux chiffres sont vrais, et ils disent des choses opposées. Le modèle est
-entraîné sur le RÉSIDU du marché (drapeau `market_residual` : la cote a été retirée
-de son vecteur d'apprentissage), il n'a donc jamais eu pour mission de battre la
-cote tout seul. Confondre les deux mène à une décision précise et fausse : câbler
-`BT_MARKET_GATE` sur le delta du modèle nu — structurellement négatif par
-construction — figerait le modèle À VIE.
+Les deux chiffres sont vrais, et ils disent des choses opposées. Ce n'est pas le
+modèle nu qu'on sert : il n'a jamais eu pour mission de battre la cote tout seul.
+Confondre les deux mène à une décision précise et fausse : câbler `BT_MARKET_GATE`
+sur le delta du modèle nu — négatif sur chaque version depuis v528 — figerait le
+modèle À VIE.
+
+CORRECTION du 2026-09-24 : on a longtemps écrit ici que le nu était sous la cote
+« par construction », le drapeau `market_residual` ayant retiré la cote de son
+apprentissage. C'est faux en production : `BT_MARKET_RESIDUAL` n'y est défini dans
+aucun conteneur, le modèle apprend AVEC la cote (34 % de l'importance de v544) et
+reste pourtant sous elle. L'ablation hors temps du 24/09
+(`scripts/ablation_cote_servi.py`) situe l'essentiel de ce déficit dans l'âge du
+modèle servi, pas dans la cote. Le gate de promotion porte désormais sur le
+produit SERVI (cf. `mesure_gate_servi` plus bas).
 
 Ce module mesure donc la seule grandeur qui autorise un verdict produit, sur les
 prédictions RÉELLEMENT SERVIES, et il la mesure comme on la lit : AUC de classement
@@ -239,3 +247,159 @@ async def mesurer_avantage_servi(session: AsyncSession,
              delta=resultat["delta_servi_vs_marche"],
              conclut=resultat["conclut"], apport=resultat["apport_de_la_chaine"])
     return resultat
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GATE DE PROMOTION sur le produit SERVI (`BT_MARKET_GATE`, chantier C, 24/09)
+# ──────────────────────────────────────────────────────────────────────────────
+# L'ancien gate comparait `rank_delta_market` — le classement de l'ensemble NU —
+# à la cote, et exigeait qu'il la batte. Rejoué sur l'historique, il aurait
+# bloqué TOUTES les promotions depuis v528 (07/09) : le nu est sous la cote sur
+# chaque hold-out (−0,017 à −0,035), et ce n'est pas lui qu'on sert. Actif, il
+# aurait gelé le modèle sur v527.
+#
+# Le gate ci-dessous pose la seule question qui engage l'abonné : sur les mêmes
+# courses du hold-out, jamais vues par les deux modèles, le classement que le
+# CHALLENGER ferait servir recule-t-il, face à la cote, par rapport à celui que
+# le CHAMPION sert aujourd'hui ? Il n'exige PAS de battre la cote — le produit est
+# à parité et un gate « servi > cote » gèlerait aussi —, il interdit de reculer.
+#
+# « Servi » = ce que `predict_course` affiche : la proba de VICTOIRE du modèle,
+# passée par le mélange appris sur les arrivées (`melange_arrivees`, β en
+# service) ; à défaut de β, le mélange linéaire historique (`blend_calibration`).
+# L'avantage de chacun sur la cote se mesure course par course ; comme la cote
+# est la même des deux côtés, la différence des deux avantages est exactement
+# l'écart apparié challenger − champion, dont on prend l'intervalle à 95 %.
+#
+# Bloque seulement si la régression est PROUVÉE (borne haute de l'IC < 0) ET
+# matérielle (< −GATE_TOLERANCE), sur au moins GATE_MIN_COURSES courses : un gate
+# qui bloquerait sur du bruit gèlerait le modèle, comme en juin-août. Même
+# construction que le contrôle du modèle de victoire (`pipeline._victoire_bloque`).
+GATE_TOLERANCE = 0.002
+GATE_MIN_COURSES = 300
+
+
+def _auc_gagnant(scores: np.ndarray, g: int) -> Optional[float]:
+    """Part des perdants classés sous le gagnant (ex æquo = 0,5)."""
+    autres = np.delete(scores, g)
+    if autres.size == 0 or not np.isfinite(scores).all():
+        return None
+    return float(((scores[g] > autres).sum() + 0.5 * (scores[g] == autres).sum())
+                 / autres.size)
+
+
+def _par_course(groupes, y_win):
+    """Itère (clé, indices, index du gagnant) sur les courses à gagnant unique."""
+    g = np.asarray(groupes)
+    y = np.asarray(y_win, dtype=float)
+    ordre = np.argsort(g, kind="stable")
+    bornes = np.flatnonzero(np.r_[True, g[ordre][1:] != g[ordre][:-1], True])
+    for a, b in zip(bornes[:-1], bornes[1:]):
+        idx = ordre[a:b]
+        yy = y[idx]
+        if len(idx) < 2 or yy.sum() != 1:
+            continue
+        yield g[idx[0]], idx, int(np.argmax(yy))
+
+
+def proba_servie(p_win, cotes, betas: Optional[tuple] = None,
+                 alpha_max: Optional[float] = None) -> Optional[np.ndarray]:
+    """Proba de victoire SERVIE d'une course à partir de la proba brute. Pure.
+
+    `melange_arrivees` quand β est en service (chaîne actuelle), sinon le mélange
+    linéaire historique. None si la course n'a pas de cotes exploitables : sans
+    cote il n'y a ni produit servi comparable ni référence marché.
+    """
+    p = np.asarray(p_win, dtype=float)
+    if cotes is None or p.size < 2 or not np.isfinite(p).all() or p.sum() <= 0:
+        return None
+    c = np.asarray(cotes, dtype=float)
+    if betas is not None:
+        from ml import melange_arrivees as ma
+        return ma.appliquer(p, c, betas[0], betas[1])
+    from ml.blend_calibration import ALPHA_MAX_DEFAUT, melange
+    if not np.isfinite(c).all() or (c <= 1.0).any():
+        return None
+    return np.asarray(melange(p / p.sum(), c, alpha_max=alpha_max or ALPHA_MAX_DEFAUT),
+                      dtype=float)
+
+
+def auc_servie_par_course(p_win, y_win, groupes, cotes, betas: Optional[tuple] = None,
+                          alpha_max: Optional[float] = None) -> dict:
+    """{course: AUC du gagnant} du classement SERVI issu de `p_win`. Pure.
+
+    Une course sans gagnant unique ou sans cotes exploitables est ABSENTE, jamais
+    comptée 0,5 (cf. `_auc_par_course`).
+    """
+    if cotes is None:
+        return {}
+    p_all = np.asarray(p_win, dtype=float)
+    c_all = np.asarray(cotes, dtype=float)
+    out: dict = {}
+    for cle, idx, g in _par_course(groupes, y_win):
+        servie = proba_servie(p_all[idx], c_all[idx], betas, alpha_max)
+        if servie is None:
+            continue
+        auc = _auc_gagnant(np.asarray(servie, dtype=float), g)
+        if auc is not None:
+            out[cle] = auc
+    return out
+
+
+def auc_marche_par_course(y_win, groupes, cotes) -> dict:
+    """{course: AUC du gagnant} d'un simple tri par cote croissante. Pure."""
+    if cotes is None:
+        return {}
+    c_all = np.asarray(cotes, dtype=float)
+    out: dict = {}
+    for cle, idx, g in _par_course(groupes, y_win):
+        c = c_all[idx]
+        if not np.isfinite(c).all() or (c <= 1.0).any():
+            continue
+        auc = _auc_gagnant(1.0 / c, g)
+        if auc is not None:
+            out[cle] = auc
+    return out
+
+
+def mesure_gate_servi(auc_champion: dict, auc_challenger: dict, auc_marche: dict,
+                      tolerance: float = GATE_TOLERANCE,
+                      min_courses: int = GATE_MIN_COURSES) -> Optional[dict]:
+    """Avantage SERVI sur la cote du champion et du challenger, sur les MÊMES
+    courses, et la régression de l'un à l'autre. None si rien n'est mesurable.
+
+    `bloque` est le verdict du gate ; `sous_la_cote` (challenger prouvé sous la
+    cote) est une ALERTE, pas un blocage : le champion l'est peut-être aussi, et
+    bloquer dessus reviendrait à exiger de battre la cote.
+    """
+    communes = set(auc_champion) & set(auc_challenger) & set(auc_marche)
+    if len(communes) < 2:
+        return None
+    challenger = _ecart_apparie(auc_challenger, auc_marche, communes)
+    champion = _ecart_apparie(auc_champion, auc_marche, communes)
+    regression = _ecart_apparie(auc_challenger, auc_champion, communes)
+    n = regression["n"]
+    suffisant = n >= min_courses
+    bloque = bool(suffisant and regression["ic95"] is not None
+                  and regression["ic95"][1] < 0.0
+                  and regression["ecart"] < -abs(tolerance))
+    return {
+        "n_courses": n,
+        "suffisant": suffisant,
+        "avantage_challenger": challenger["ecart"],
+        "ic95_avantage_challenger": challenger["ic95"],
+        "avantage_champion": champion["ecart"],
+        "ic95_avantage_champion": champion["ic95"],
+        "regression": regression["ecart"],
+        "ic95_regression": regression["ic95"],
+        "sous_la_cote": bool(suffisant and challenger["ic95"] is not None
+                             and challenger["ic95"][1] < 0.0),
+        "tolerance": abs(tolerance),
+        "bloque": bloque,
+    }
+
+
+def gate_servi_bloque(mesure: Optional[dict]) -> bool:
+    """Verdict du gate. Une mesure absente ou insuffisante ne bloque JAMAIS :
+    bloquer sur une panne de cotes figerait le modèle."""
+    return bool(mesure and mesure.get("bloque"))
