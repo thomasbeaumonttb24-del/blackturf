@@ -1201,8 +1201,11 @@ export default function ProgrammeClient({
             </div>
 
             {/* Filtre par réunion */}
+            {/* Sur ordinateur les réunions passent à la ligne : en défilement horizontal,
+                la dernière était coupée net par le bord de la carte. Sur mobile le
+                défilement reste, avec un fondu à droite qui signale la suite. */}
             {reunionOptions.length > 1 && (
-              <div className={cn("flex gap-2 overflow-x-auto pb-1.5", HIDE_SCROLLBAR)}>
+              <div className={cn("flex gap-2 overflow-x-auto pb-1.5 pr-6 [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] sm:flex-wrap sm:overflow-visible sm:pr-0 sm:[mask-image:none]", HIDE_SCROLLBAR)}>
                 <button
                   onClick={() => setReunionFilter("all")}
                   className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
@@ -1233,7 +1236,7 @@ export default function ProgrammeClient({
             )}
 
             {/* Filtre par discipline */}
-            <div className={cn("flex gap-2 overflow-x-auto pb-1.5", HIDE_SCROLLBAR)}>
+            <div className={cn("flex gap-2 overflow-x-auto pb-1.5 sm:flex-wrap sm:overflow-visible", HIDE_SCROLLBAR)}>
               {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
                 const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
                 if (d !== "Tous" && count === 0) return null;

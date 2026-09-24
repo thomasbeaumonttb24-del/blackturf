@@ -672,3 +672,107 @@
   }
   .bp-comparatif tbody td:first-of-type::before { color: #9CA3AF; }
 }
+
+/* ════════ PALMARÈS (/track-record) — relief, 3D et apparitions ════════
+   Tout est décoratif : sans JavaScript, ou avec « réduire les animations »,
+   le contenu s'affiche à plat et complet. */
+
+/* Apparition au défilement : la classe `tr-armed` n'est posée par le script
+   que sur un bloc encore SOUS la ligne de flottaison — jamais au rendu serveur. */
+.tr-reveal {
+  transition: opacity .8s cubic-bezier(0.16,1,0.3,1), transform .9s cubic-bezier(0.16,1,0.3,1);
+  transition-delay: var(--tr-delay, 0ms);
+}
+.tr-reveal.tr-armed {
+  opacity: 0;
+  transform: perspective(1000px) translateY(34px) rotateX(10deg) scale(.98);
+}
+
+/* Carte inclinable : le script pose --rx / --ry (degrés) et --mx / --my (reflet). */
+.tr-tilt {
+  --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 50%; --lift: 0px;
+  transform: perspective(1100px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift));
+  transform-style: preserve-3d;
+  transition: transform .45s cubic-bezier(0.16,1,0.3,1), box-shadow .45s ease;
+  will-change: transform;
+}
+.tr-tilt.tr-tilting { transition: transform .08s linear, box-shadow .3s ease; }
+.tr-tilt:hover { --lift: -4px; }
+.tr-glare {
+  pointer-events: none;
+  position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(420px circle at var(--mx) var(--my), rgba(255,255,255,.55), transparent 42%);
+  opacity: 0; transition: opacity .35s ease; mix-blend-mode: soft-light;
+}
+.tr-tilt:hover .tr-glare { opacity: 1; }
+.tr-pop { transform: translateZ(28px); }
+
+/* Reflet qui balaie les cartes du podium. */
+@keyframes trShine {
+  0%   { transform: translateX(-130%) skewX(-18deg); }
+  55%, 100% { transform: translateX(260%) skewX(-18deg); }
+}
+.tr-shine { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.tr-shine::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.22), transparent);
+  animation: trShine 5.5s ease-in-out infinite;
+}
+
+/* Médaille en lévitation, qui tourne légèrement sur elle-même. */
+@keyframes trMedal {
+  0%, 100% { transform: translateY(0) rotateY(-14deg); }
+  50%      { transform: translateY(-7px) rotateY(14deg); }
+}
+.tr-medal { animation: trMedal 4.5s ease-in-out infinite; transform-style: preserve-3d; }
+
+/* Sol quadrillé en perspective (scène sombre des records). */
+.tr-floor {
+  position: absolute; left: -20%; right: -20%; bottom: -8%; height: 55%;
+  background-image:
+    linear-gradient(rgba(245,158,11,.22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245,158,11,.22) 1px, transparent 1px);
+  background-size: 46px 46px;
+  transform: perspective(520px) rotateX(62deg);
+  transform-origin: bottom center;
+  -webkit-mask-image: linear-gradient(to top, #000 10%, transparent 85%);
+          mask-image: linear-gradient(to top, #000 10%, transparent 85%);
+  animation: trFloor 9s linear infinite;
+}
+@keyframes trFloor { to { background-position: 0 46px, 0 0; } }
+
+/* Halo qui respire derrière un chiffre clé. */
+@keyframes trGlow {
+  0%, 100% { opacity: .55; transform: scale(1); }
+  50%      { opacity: .9;  transform: scale(1.08); }
+}
+.tr-glow { animation: trGlow 5s ease-in-out infinite; }
+
+/* Anneaux de jauge : le tracé se remplit quand il entre à l'écran. */
+.tr-ring { transition: stroke-dashoffset 1.6s cubic-bezier(0.16,1,0.3,1); }
+.tr-bar  { transition: width 1.4s cubic-bezier(0.16,1,0.3,1); }
+.tr-slide { transition: left 1.4s cubic-bezier(0.16,1,0.3,1); }
+
+/* Encoches du ticket (demi-cercles découpés sur la ligne pointillée). */
+.tr-notch::before, .tr-notch::after {
+  content: ""; position: absolute; right: -9px; width: 18px; height: 18px;
+  border-radius: 999px; background: var(--tr-notch-bg, #FCFBF8);
+}
+.tr-notch::before { top: -9px; }
+.tr-notch::after  { bottom: -9px; }
+
+/* Entrée des cartes du hero. `backwards` et non `both` : une fois jouée,
+   l'animation rend la main au `transform` de l'inclinaison. */
+@keyframes trRise {
+  from { opacity: 0; transform: perspective(900px) translateY(22px) rotateX(18deg) scale(.96); }
+  to   { opacity: 1; transform: perspective(900px) translateY(0) rotateX(0) scale(1); }
+}
+.tr-rise { animation: trRise .9s cubic-bezier(0.16,1,0.3,1) backwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tr-rise { animation: none !important; }
+  .tr-reveal, .tr-reveal.tr-armed { opacity: 1 !important; transform: none !important; transition: none !important; }
+  .tr-tilt { transform: none !important; transition: none !important; }
+  .tr-shine::after, .tr-medal, .tr-floor, .tr-glow { animation: none !important; }
+  .tr-ring, .tr-bar, .tr-slide { transition: none !important; }
+}

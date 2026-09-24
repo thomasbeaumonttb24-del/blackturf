@@ -21,6 +21,7 @@ import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { axisTick, GRID, ChartTooltip } from "@/components/charts/chart-kit";
+import { useReveal } from "./effets";
 
 export type PointTendance = { jour: string; top3: number | null; nb: number };
 
@@ -30,15 +31,29 @@ const nf = (n: number, d = 0) =>
 export default function TendanceChart({ data, moyenne, hasard }: {
   data: PointTendance[]; moyenne: number; hasard: number | null;
 }) {
+  // La courbe se trace quand elle entre à l'écran, pas au montage : chargée en
+  // bas de page, son animation se jouait avant que quiconque ne la voie.
+  const { ref, hidden } = useReveal<HTMLDivElement>(0.3);
   return (
-    <div className="h-[260px] w-full sm:h-[300px]">
-      <ResponsiveContainer width="100%" height="100%">
+    <div ref={ref} className="h-[260px] w-full sm:h-[300px]">
+      {!hidden && <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 12, right: 8, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="tendanceFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="#F59E0B" stopOpacity={0.02} />
+              <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.45} />
+              <stop offset="60%" stopColor="#FBBF24" stopOpacity={0.12} />
+              <stop offset="100%" stopColor="#FBBF24" stopOpacity={0} />
             </linearGradient>
+            <linearGradient id="tendanceStroke" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#FBBF24" />
+              <stop offset="55%" stopColor="#D97706" />
+              <stop offset="100%" stopColor="#92400E" />
+            </linearGradient>
+            {/* Lueur sous la courbe : donne du relief sans ajouter d'information. */}
+            <filter id="tendanceGlow" x="-5%" y="-20%" width="110%" height="140%">
+              <feGaussianBlur stdDeviation="3" result="b" />
+              <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
           </defs>
           <CartesianGrid {...GRID} />
           <XAxis
@@ -84,16 +99,19 @@ export default function TendanceChart({ data, moyenne, hasard }: {
             type="monotone"
             dataKey="top3"
             name="Top-3"
-            stroke="#B45309"
-            strokeWidth={2}
+            stroke="url(#tendanceStroke)"
+            strokeWidth={3}
             fill="url(#tendanceFill)"
+            filter="url(#tendanceGlow)"
             connectNulls={false}
-            isAnimationActive={false}
-            dot={false}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }}
+            isAnimationActive
+            animationDuration={1600}
+            animationEasing="ease-out"
+            dot={{ r: 2.5, fill: "#fff", stroke: "#D97706", strokeWidth: 1.5 }}
+            activeDot={{ r: 6, strokeWidth: 3, stroke: "#fff", fill: "#D97706" }}
           />
         </AreaChart>
-      </ResponsiveContainer>
+      </ResponsiveContainer>}
     </div>
   );
 }
