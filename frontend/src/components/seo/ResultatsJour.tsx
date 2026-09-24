@@ -1,4 +1,4 @@
-import { IdentiteCheval } from "@/components/courses/identite-cheval";
+import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import Link from "next/link";
 import {
   fetchProgramme,
@@ -184,51 +184,40 @@ export async function ResultatsJour({ jour }: { jour: string }) {
          * tous les jours — mesuré le 2026-09-21, elles n'en avaient qu'un, depuis
          * `/hippodromes`, et sept d'entre elles n'avaient jamais été explorées. */}
         {lieuxDuJour.length > 0 && (
-          <p className="mb-6 text-sm text-brand-charcoal">
-            Hippodromes du jour :{" "}
-            {lieuxDuJour.map(({ nom, slug }, i) => (
-              <span key={nom}>
-                {i > 0 && " · "}
-                {slug ? (
-                  <Link
-                    href={`/hippodromes/${slug}`}
-                    className="font-medium text-brand-gold-dark underline-offset-2 hover:underline"
-                  >
-                    {nom}
-                  </Link>
-                ) : (
-                  nom
-                )}
-              </span>
-            ))}
-          </p>
+          <div className="mb-8">
+            <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-stone-400">
+              Hippodromes du jour
+            </p>
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {lieuxDuJour.map(({ nom, slug }) => (
+                <li key={nom}>
+                  {slug ? (
+                    <Link
+                      href={`/hippodromes/${slug}`}
+                      className="inline-block rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[12.5px] font-medium text-brand-gold-dark transition-colors hover:border-brand-gold-deep"
+                    >
+                      {nom}
+                    </Link>
+                  ) : (
+                    <span className="inline-block rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[12.5px] text-stone-600">
+                      {nom}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {quinte ? (
           <Section title={`Arrivée du Quinté+ — ${titleCase(quinte[0].hippodrome_nom)}`}>
-            <p className="text-sm text-brand-charcoal">
-              Arrivée :{" "} <strong className="tabular-nums">{quinte[1].classement!.slice(0, 5).map((l) => l.numero).join(" - ")}</strong>
-              — <IdentiteCheval numero={quinte[1].classement![0].numero} nom={titleCase(quinte[1].classement![0].nom)} courseId={quinte[0].course_id} /> l&apos;emporte.
-            </p>
-            {verdicts?.[quinte[0].course_id] && (
-              <VerdictAlgoLigne v={verdicts[quinte[0].course_id]} courseId={quinte[0].course_id} />
-            )}
-            {rapportsQuinte.length ? (
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[380px] text-sm">
-                  <tbody>
-                    {rapportsQuinte.map(([code, val]) => (
-                      <tr key={code} className="border-b border-amber-50">
-                        <td className="py-2 pr-3 text-brand-charcoal">{libellePari(code)}</td>
-                        <td className="py-2 text-right font-semibold tabular-nums text-brand-dark">
-                          {formatRapport(val)} €
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
+            <CarteArrivee
+              course={quinte[0]}
+              resultats={quinte[1]}
+              verdict={verdicts?.[quinte[0].course_id]}
+              rapportsMax={rapportsQuinte.length}
+              vedette
+            />
             {estAujourdhui && (
               <p className="mt-3 text-sm">
                 <Link href="/quinte-du-jour" className="font-medium text-brand-gold-dark hover:underline">
@@ -243,38 +232,10 @@ export async function ResultatsJour({ jour }: { jour: string }) {
 
         <Section title={`Toutes les arrivées du ${jourLong(jour)}`}>
           {avecArrivee.length ? (
-            <ul className="space-y-4">
+            <ul className="grid gap-4 md:grid-cols-2 md:gap-5">
               {avecArrivee.map(([c, r]) => (
-                <li key={c.course_id} className="border-b border-amber-50 pb-4 last:border-0">
-                  <Link
-                    href={`/courses/${c.course_id}`}
-                    className="font-display text-[15px] font-semibold text-brand-dark hover:text-brand-gold-dark"
-                  >
-                    {codeReunionCourse(c.course_id)} · {titleCase(c.hippodrome_nom)} —{" "}
-                    {titleCase(c.nom ?? "")}
-                  </Link>
-                  <div className="mt-0.5 text-[12px] text-brand-charcoal">
-                    {heureParis(c.date_heure)} · {disciplineLabel(c.discipline)} · {c.distance} m ·{" "}
-                    {c.nb_partants} partants
-                    {c.est_quinte ? " · Quinté+" : c.est_quarte ? " · Quarté+" : ""}
-                  </div>
-                  <div className="mt-1.5 text-sm text-brand-charcoal">
-                    Arrivée :{" "}
-                    <span className="text-brand-charcoal">
-                      {r.classement!.slice(0, 5).map((l) => <span key={l.numero} className="mr-3 inline-flex mt-2"><IdentiteCheval numero={l.numero} nom={titleCase(l.nom)} courseId={c.course_id} /></span>)}
-                    </span>
-                  </div>
-                  {rapportsTries(r.rapports).length ? (
-                    <div className="mt-1 text-[12.5px] text-brand-charcoal">
-                      {rapportsTries(r.rapports)
-                        .slice(0, 5)
-                        .map(([code, val]) => `${libellePari(code)} ${formatRapport(val)} €`)
-                        .join(" · ")}
-                    </div>
-                  ) : null}
-                  {verdicts?.[c.course_id] && (
-                    <VerdictAlgoLigne v={verdicts[c.course_id]} courseId={c.course_id} />
-                  )}
+                <li key={c.course_id} className="min-w-0">
+                  <CarteArrivee course={c} resultats={r} verdict={verdicts?.[c.course_id]} rapportsMax={6} />
                 </li>
               ))}
             </ul>
@@ -360,6 +321,129 @@ export async function ResultatsJour({ jour }: { jour: string }) {
         </Callout>
       </Container>
     </>
+  );
+}
+
+/**
+ * Une arrivée = une carte. Les cinq premiers sont sur UNE ligne, en colonnes égales
+ * (place, numéro, casaque, nom) : l'ancienne liste en ligne laissait les chevaux
+ * passer à la ligne au hasard de la longueur des noms, et l'œil ne retrouvait plus
+ * l'ordre d'arrivée. Les rapports suivent en tuiles, le verdict de l'algo en pied.
+ */
+function CarteArrivee({
+  course: c,
+  resultats: r,
+  verdict,
+  rapportsMax,
+  vedette = false,
+}: {
+  course: SeoCourse;
+  resultats: SeoResultats;
+  verdict?: SeoVerdict;
+  rapportsMax: number;
+  vedette?: boolean;
+}) {
+  const top = r.classement!.slice(0, 5);
+  const rapports = rapportsTries(r.rapports).slice(0, rapportsMax);
+  const typeCourse = c.est_quinte ? "Quinté+" : c.est_quarte ? "Quarté+" : null;
+
+  return (
+    <article
+      className={`flex h-full flex-col overflow-hidden rounded-2xl border bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] ${
+        vedette ? "border-amber-200" : "border-stone-200"
+      }`}
+    >
+      {/* En-tête : repère R/C + heure, puis la course */}
+      <header className="px-4 pb-3 pt-4 sm:px-5">
+        <div className="flex items-center gap-2 text-[11.5px] font-semibold text-stone-500">
+          <span className="rounded-md bg-brand-dark px-1.5 py-0.5 font-display text-[11px] font-bold tracking-wide text-white">
+            {codeReunionCourse(c.course_id)}
+          </span>
+          <span className="tabular-nums">{heureParis(c.date_heure)}</span>
+          {typeCourse && (
+            <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-800">
+              {typeCourse}
+            </span>
+          )}
+        </div>
+        <Link
+          href={`/courses/${c.course_id}`}
+          className="mt-2 block font-display text-[15px] font-semibold leading-snug text-brand-dark hover:text-brand-gold-dark"
+        >
+          {titleCase(c.hippodrome_nom)}
+          <span className="font-normal text-stone-400"> — </span>
+          <span className="font-medium">{titleCase(c.nom ?? "")}</span>
+        </Link>
+        <p className="mt-1 text-[12px] text-stone-500">
+          {disciplineLabel(c.discipline)} · {c.distance} m · {c.nb_partants} partants
+        </p>
+      </header>
+
+      {/* Arrivée : cinq colonnes égales, toujours sur une ligne */}
+      <ol
+        aria-label="Arrivée"
+        className="grid grid-cols-5 gap-1 border-y border-stone-100 bg-stone-50/70 px-2 py-3 sm:gap-2 sm:px-3"
+      >
+        {top.map((l, i) => (
+          <li
+            key={l.numero}
+            className={`flex min-w-0 flex-col items-center gap-1.5 rounded-xl px-0.5 py-2 text-center ${
+              i === 0 ? "bg-amber-50 ring-1 ring-amber-200" : ""
+            }`}
+          >
+            <span
+              className={`text-[11px] font-bold tabular-nums ${
+                i === 0 ? "text-amber-700" : "text-stone-400"
+              }`}
+            >
+              {l.position === 1 ? "1er" : `${l.position}e`}
+            </span>
+            <CasaqueNumero numero={l.numero} courseId={c.course_id} vertical />
+            <span
+              className="line-clamp-2 w-full break-words px-0.5 text-[10.5px] font-medium leading-tight text-stone-700 sm:text-[11.5px]"
+              title={titleCase(l.nom)}
+            >
+              {titleCase(l.nom)}
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      {/* Rapports PMU pour 1 € */}
+      {rapports.length > 0 && (
+        <div className="px-4 pt-3 sm:px-5">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-stone-400">
+            Rapports pour 1 €
+          </p>
+          <dl className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {rapports.map(([code, val]) => (
+              <div key={code} className="min-w-0 rounded-lg border border-stone-100 bg-stone-50 px-2.5 py-1.5">
+                <dt className="truncate text-[10.5px] text-stone-500">{libellePari(code)}</dt>
+                <dd className="font-display text-[14px] font-bold tabular-nums text-brand-dark">
+                  {formatRapport(val)} €
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+
+      {/* Verdict de l'algo, poussé en pied pour aligner les cartes voisines */}
+      <footer className="mt-auto px-4 pb-4 pt-2 sm:px-5">
+        {verdict ? (
+          <div className="border-t border-stone-100 pt-1.5">
+            <VerdictAlgoLigne v={verdict} courseId={c.course_id} />
+          </div>
+        ) : (
+          <Link
+            href={`/courses/${c.course_id}`}
+            className="mt-1.5 inline-block text-[11.5px] font-medium text-brand-gold-dark hover:underline"
+          >
+            Voir le détail →
+          </Link>
+        )}
+      </footer>
+    </article>
   );
 }
 
