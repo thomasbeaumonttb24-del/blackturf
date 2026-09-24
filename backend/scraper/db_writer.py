@@ -85,6 +85,7 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
         hippo = _t(c.get("hippodrome"), 100) or "?"
 
         ecart = c.get("ecart")
+        incident = _t(c.get("incident"), 100)
 
         # Dédup — mais PAS un simple « on saute ».
         #
@@ -98,7 +99,8 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
         # On enrichit donc les lignes existantes DONT LA COLONNE EST VIDE. Jamais
         # d'écrasement : une valeur déjà là est une observation, pas un brouillon.
         exist = await session.execute(text("""
-            SELECT historique_id, ecart_longueurs FROM historique_courses
+            SELECT historique_id, ecart_longueurs, position_arrivee, incident
+            FROM historique_courses
             WHERE cheval_id = :cid AND date_course = :d AND hippodrome = :h LIMIT 1
         """), {"cid": cheval_id, "d": d_course, "h": hippo})
         deja = exist.first()
@@ -108,6 +110,16 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
                     UPDATE historique_courses SET ecart_longueurs = :e
                     WHERE historique_id = :hid AND ecart_longueurs IS NULL
                 """), {"e": float(ecart), "hid": deja.historique_id})
+                enrichies += 1
+            # Même logique pour l'incident : les disqualifications passées ont été
+            # enregistrées sans position NI incident, donc invisibles des features.
+            if (incident and deja.position_arrivee is None
+                    and deja.incident is None):
+                await session.execute(text("""
+                    UPDATE historique_courses SET incident = :i
+                    WHERE historique_id = :hid
+                      AND position_arrivee IS NULL AND incident IS NULL
+                """), {"i": incident, "hid": deja.historique_id})
                 enrichies += 1
             continue
 
@@ -120,6 +132,7 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
             discipline=_t(c.get("discipline"), 20) or "?",
             **_historique_numeric(c),
             ecart_longueurs=float(ecart) if isinstance(ecart, (int, float)) else None,
+            incident=incident,
             allocation=c.get("allocation"),
             jockey_course=_t(c.get("jockey"), 100),
             reduction_km=c.get("reduction_km"),

@@ -217,6 +217,35 @@ def _ecart_en_longueurs(valeur):
     return _ecart_texte_en_longueurs(valeur.get("rawValue"))
 
 
+def _place_ou_incident(place) -> tuple:
+    """(position, incident) d'un partant d'une course passée (`place` du PMU).
+
+    Une place numérique → (place, None). Sinon le cheval n'a pas été classé : on
+    garde le statut PMU (« DISQUALIFIE », « DAI », « TOMBE »…) comme incident, pour
+    que la sortie compte comme une faute au lieu de disparaître de l'historique.
+    Un « NON_PLACE » sans rang est gardé aussi : les features le notent 0,
+    comme un « 0 » de musique, plutôt que de ne retenir que les bonnes sorties.
+    Un non-partant n'a pas couru : (None, None).
+    """
+    if not isinstance(place, dict):
+        return None, None
+    brut = place.get("place")
+    try:
+        rang = int(brut)
+    except (TypeError, ValueError):
+        rang = None
+    if rang is not None and rang >= 1:
+        return rang, None
+    statut = str(place.get("statusArrivee") or "").strip()
+    if not statut and isinstance(brut, str):
+        statut = brut.strip()
+    if not statut or "NON_PARTANT" in statut.upper().replace(" ", "_"):
+        return None, None
+    if statut.upper() in ("PLACE", "CLASSE", "ARRIVE"):
+        return None, None      # dit « classé » sans rang : pas d'invention
+    return None, statut[:100]
+
+
 def _ecart_au_vainqueur(course_obj: dict, moi: dict | None):
     """Longueurs CUMULÉES entre le vainqueur et `moi`.
 
@@ -587,7 +616,8 @@ class PmuScraper(BaseScraper):
                     "distance": c.get("distance"),
                     "allocation": _allocation_vraisemblable(c.get("allocation")),
                     "nb_partants": c.get("nbParticipants"),
-                    "position": place.get("place") if isinstance(place, dict) else None,
+                    "position": _place_ou_incident(place)[0],
+                    "incident": _place_ou_incident(place)[1],
                     # Longueurs CUMULÉES depuis le vainqueur (pas la marge sur le
                     # cheval précédent) : c'est ce que lit la feature. Cf.
                     # `_ecart_au_vainqueur` pour le pourquoi et les garde-fous.
@@ -644,6 +674,9 @@ class PmuScraper(BaseScraper):
                     "temps": round(temps_ms / 1000, 2) if temps_ms else None,
                     "reduction_km": round(rk / 1000, 2) if rk else None,
                     "incident": p.get("incident"),
+                    # Déroulé publié par /participants APRÈS la course — la seule
+                    # source du commentaire (absent de /performances-detaillees).
+                    "commentaire": _extract_commentaire({}, p),
                 })
         if not ordre:
             return None  # course pas encore arrivée
@@ -668,6 +701,7 @@ class PmuScraper(BaseScraper):
                     "reduction_km": None,
                     "incident": incident,
                     "disqualifie": True,
+                    "commentaire": _extract_commentaire({}, p),
                 })
 
         # 2) Rapports (dividendes) via /rapports-definitifs (liste de typePari)

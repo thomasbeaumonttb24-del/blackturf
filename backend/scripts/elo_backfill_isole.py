@@ -10,6 +10,7 @@ import itertools
 import json
 import math
 import os
+from datetime import date
 from pathlib import Path
 
 FIELDS = ("global", "plat", "trot", "obstacle")
@@ -121,12 +122,14 @@ async def replay(path):
                 ranked = []
                 for r in classement:
                     horse = numbers.get(int(r["numero"]))
-                    if horse is not None and r.get("position") is not None:
-                        ranked.append({"cheval_id": horse, "position": int(r["position"]),
+                    # Disqualifiés gardés : `classement_elo` les range derniers.
+                    if horse is not None and (r.get("position") is not None or r.get("incident")):
+                        ranked.append({"cheval_id": horse, "position": r.get("position"),
                                        "incident": r.get("incident")})
                 if len({r["cheval_id"] for r in ranked}) != len(ranked):
                     raise ValueError("Duplicate result horse: " + cid)
-                await update_elo_after_race(s, cid, disc or "plat", level, allocation, ranked)
+                await update_elo_after_race(s, cid, disc or "plat", level, allocation, ranked,
+                                            date_course=date.fromisoformat(when[:10]))
                 count += 1
                 if count % 500 == 0:
                     await s.commit()
