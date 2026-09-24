@@ -113,6 +113,10 @@ class Mesure:
         self.ok = {"ancien": 0.0, "nouveau": 0.0}
         self.n = {"ancien": 0, "nouveau": 0}
         self.gagnant = {"ancien": [0, 0], "nouveau": [0, 0]}
+        # Log-vraisemblance moyenne du vainqueur sous P(i gagne) ∝ 10^(r_i/400) :
+        # la probabilité que l'ELO lui-même donne à chaque partant. Plus haut = mieux.
+        self.ll = {"ancien": [0.0, 0], "nouveau": [0.0, 0]}
+        self.top3 = {"ancien": [0, 0], "nouveau": [0, 0]}
 
     def ajouter(self, cle, valides, rating):
         rangs = [(r["position"], rating[r["cheval_id"]]) for r in valides
@@ -130,14 +134,26 @@ class Mesure:
         meilleur = max(rangs, key=lambda x: x[1])
         self.gagnant[cle][0] += 1 if meilleur[0] == 1 else 0
         self.gagnant[cle][1] += 1
+        self.top3[cle][0] += 1 if meilleur[0] <= 3 else 0
+        self.top3[cle][1] += 1
+        import math
+        vainqueurs = [r for p, r in rangs if p == 1]
+        if len(vainqueurs) == 1:
+            mx = max(r for _, r in rangs)
+            z = sum(10 ** ((r - mx) / 400.0) for _, r in rangs)
+            self.ll[cle][0] += (vainqueurs[0] - mx) / 400.0 * math.log(10) - math.log(z)
+            self.ll[cle][1] += 1
 
     def rapport(self):
         for cle in ("ancien", "nouveau"):
             if self.n[cle]:
                 g, t = self.gagnant[cle]
+                t3, n3 = self.top3[cle]
+                ll, nll = self.ll[cle]
                 print(f"[mesure] ELO {cle:7s}: concordance des paires {self.ok[cle] / self.n[cle]:.4f}"
                       f" sur {self.n[cle]} paires · meilleur ELO gagnant {g / max(t, 1):.3f}"
-                      f" ({g}/{t} courses)", flush=True)
+                      f" ({g}/{t} courses) · meilleur ELO dans les 3 {t3 / max(n3, 1):.3f}"
+                      f" · log-vrais. gagnant {ll / max(nll, 1):.4f}", flush=True)
 
 
 async def lire_courses(session, deja: set | None = None) -> list[dict]:
@@ -181,7 +197,7 @@ async def ecrire_travail(session, hist: list, snaps: list):
 
 
 async def rejouer(session, etat, courses, hist, snaps, mesure=None, depuis=None,
-                  vider=None):
+                  vider=None, jeter=False):
     t0 = time.time()
     for i in range(0, len(courses), LOT_COURSES):
         lot = courses[i:i + LOT_COURSES]
@@ -199,6 +215,9 @@ async def rejouer(session, etat, courses, hist, snaps, mesure=None, depuis=None,
                 mesure.ajouter("nouveau", valides, avant)
         if vider and len(hist) + len(snaps) >= LOT_ECRITURE:
             await vider()
+        elif jeter:          # à blanc : rien ne sera écrit, inutile de tout garder
+            hist.clear()
+            snaps.clear()
         print(f"[elo] {min(i + LOT_COURSES, len(courses))}/{len(courses)} courses"
               f" ({time.time() - t0:.0f}s)", flush=True)
 
@@ -238,6 +257,43 @@ async def fautifs(session, etat: Etat):
             print(f"[fautifs]   {nom:25s} {mus[:14]:14s} percentile {a:.2f} → {n:.2f}", flush=True)
 
 
+VARIANTES = {
+    # nom : réglages de ml.elo (le reste reste à sa valeur par défaut)
+    "nouveau": {},
+    "sans_amorce": {"AMORCE_MIN_NOTES": 10 ** 9},
+    "sans_k_provisoire": {"PROVISOIRE_K_MAX": 1.0},
+    "ponderation_ecart": {"PONDERATION_ECART": True},
+    "incident_demi": {"POIDS_DUEL_INCIDENT": 0.5},
+    "incident_ignore": {"POIDS_DUEL_INCIDENT": 0.0},
+    "type_ancien": {"AMORCE_MIN_NOTES": 10 ** 9, "PROVISOIRE_K_MAX": 1.0,
+                    "PONDERATION_ECART": True, "POIDS_DUEL_INCIDENT": 0.0},
+}
+
+
+async def grille():
+    """Rejoue l'historique RÉEL une fois par variante, à blanc, et compare les
+    mesures. Ne crée ni n'écrit aucune table."""
+    import ml.elo as E
+    defauts = {k: getattr(E, k) for v in VARIANTES.values() for k in v}
+    async with AsyncSessionLocal() as s:
+        await s.execute(text("SET statement_timeout = 0"))
+        depuis = datetime.now(timezone.utc) - timedelta(days=FENETRE_MESURE_JOURS)
+        base = await lire_courses(s)
+        print(f"[grille] {len(base)} courses, {len(VARIANTES)} variantes", flush=True)
+        for nom, reglages in VARIANTES.items():
+            for k, v in defauts.items():
+                setattr(E, k, v)
+            for k, v in reglages.items():
+                setattr(E, k, v)
+            mesure = Mesure()
+            await rejouer(s, Etat(), [dict(c) for c in base], [], [], mesure, depuis,
+                          jeter=True)
+            print(f"[grille] ── {nom} {reglages}", flush=True)
+            mesure.rapport()
+        for k, v in defauts.items():
+            setattr(E, k, v)
+
+
 async def main(appliquer: bool):
     async with AsyncSessionLocal() as s:
         await s.execute(text("SET statement_timeout = 0"))
@@ -264,7 +320,7 @@ async def main(appliquer: bool):
         courses = await lire_courses(s)
         print(f"[elo] {len(courses)} courses terminées à rejouer", flush=True)
         await rejouer(s, etat, courses, hist, snaps, mesure, depuis,
-                      vider if appliquer else None)
+                      vider if appliquer else None, jeter=not appliquer)
         mesure.rapport()
         await fautifs(s, etat)
 
@@ -318,4 +374,7 @@ async def main(appliquer: bool):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--appliquer", action="store_true")
-    asyncio.run(main(ap.parse_args().appliquer))
+    ap.add_argument("--grille", action="store_true",
+                    help="compare les variantes de l'algorithme, à blanc")
+    args = ap.parse_args()
+    asyncio.run(grille() if args.grille else main(args.appliquer))

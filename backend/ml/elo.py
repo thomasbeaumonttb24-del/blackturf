@@ -94,7 +94,7 @@ def classement_elo(classement: list[dict]) -> list[dict]:
         elif incident or r.get("disqualifie") or (pos is not None and pos >= 90):
             fautifs.append(r)
     derniere = max((r["position"] for r in classes), default=0) + 1
-    return classes + [{**r, "position": derniere} for r in fautifs]
+    return classes + [{**r, "position": derniere, "fautif": True} for r in fautifs]
 
 
 # ── Cheval peu noté : K PROVISOIRE ─────────────────────────────────────────
@@ -107,6 +107,12 @@ PROVISOIRE_K_MAX = 2.5
 PROVISOIRE_NB_COURSES = 8
 # Nombre minimal de partants DÉJÀ notés pour amorcer un inédit à leur moyenne.
 AMORCE_MIN_NOTES = 3
+# Poids d'un duel selon l'écart de places (ancienne règle : max(0,3 ; 1 − 0,07 ×
+# (écart − 1))) — False = tous les duels pèsent pareil.
+PONDERATION_ECART = False
+# Poids d'un duel perdu sur incident (disqualifié, tombé…) : 1 = une défaite
+# pleine, 0 = l'incident est ignoré (ancienne règle).
+POIDS_DUEL_INCIDENT = 1.0
 
 
 def champ_elo(discipline: Optional[str]) -> str:
@@ -172,8 +178,11 @@ def calculer_deltas_course(valides: list[dict], ratings: dict, nb_notees: dict,
             ci, cj = ordre[i]["cheval_id"], ordre[j]["cheval_id"]
             p_i = expected_prob(ratings[ci], ratings[cj])
             score_i = 0.5 if ordre[i]["position"] == ordre[j]["position"] else 1.0
-            deltas[ci] += score_i - p_i
-            deltas[cj] += (1.0 - score_i) - (1.0 - p_i)
+            poids = max(0.3, 1.0 - (j - i - 1) * 0.07) if PONDERATION_ECART else 1.0
+            if ordre[i].get("fautif") or ordre[j].get("fautif"):
+                poids *= POIDS_DUEL_INCIDENT
+            deltas[ci] += poids * (score_i - p_i)
+            deltas[cj] += poids * ((1.0 - score_i) - (1.0 - p_i))
     return {cid: k_eff * multiplicateur_provisoire(nb_notees.get(cid, 0)) * d
             for cid, d in deltas.items()}
 
