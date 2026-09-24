@@ -620,21 +620,23 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "start", gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: CX.ink2 }}>{p.type}</div>
-                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map((c, i) => <span key={c.numero} className="inline-flex items-center gap-1">{i > 0 && "+"}<CasaqueNumero numero={c.numero} /></span>)}</div>
+                      <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, fontFamily: CX.sg, fontSize: 15, fontWeight: 650, color: CX.ink }}>{p.chevaux.map((c, i) => <span key={c.numero} className="inline-flex items-center gap-1">{i > 0 && "+"}<CasaqueNumero numero={c.numero} /></span>)}</div>
                       {/* Prix utilisé par le moteur vs prix du marché — affiché
                           UNIQUEMENT quand les deux divergent. Le reste du temps la ligne
                           n'apprendrait rien et alourdirait la page ; quand ils divergent,
                           la taire revient à laisser deux cotes se contredire d'un onglet
-                          à l'autre sans explication. */}
+                          à l'autre sans explication. La casaque est déjà sur la ligne du
+                          dessus : ici le numéro seul, une ligne par cheval, texte qui peut
+                          passer à la ligne (sur mobile le `nowrap` + casaque débordait). */}
                       {p.chevaux.some(c => c.cote != null && c.cote_live != null
                         && Math.abs(c.cote_live / c.cote - 1) >= 0.1) && (
-                        <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: "3px 8px" }}>
+                        <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 2 }}>
                           {p.chevaux.map((c) => (
                             c.cote != null && c.cote_live != null
                               && Math.abs(c.cote_live / c.cote - 1) >= 0.1 ? (
-                              <span key={c.numero} style={{ fontSize: 10.5, color: CX.gray500, whiteSpace: "nowrap" }}>
-                                <span style={{ fontWeight: 650, color: CX.ink2 }}><CasaqueNumero numero={c.numero} /></span>
-                                <span> joué à {c.cote.toFixed(1)} · cote actuelle {c.cote_live.toFixed(1)}</span>
+                              <span key={c.numero} style={{ fontSize: 10.5, lineHeight: 1.4, color: CX.gray500, fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" }}>
+                                <span style={{ fontWeight: 700, color: CX.ink2 }}>n°{c.numero}</span>
+                                {" "}joué à {c.cote.toFixed(1)} · cote actuelle {c.cote_live.toFixed(1)}
                               </span>
                             ) : null
                           ))}
