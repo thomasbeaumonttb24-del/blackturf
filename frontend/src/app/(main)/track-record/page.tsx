@@ -16,6 +16,7 @@ import type { PointTendance } from "@/components/track-record/TendanceChart";
 import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
 import { TicketsGrid, Podium, PROFIL_LABELS, ecartVise, type WinningBet } from "@/components/track-record/BetsShowcase";
 import { JaugeHasard, JaugeBrier } from "@/components/track-record/Jauges";
+import { QuinteLigne, type QuintePalmaresData } from "@/components/track-record/QuinteLigne";
 import { statsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
@@ -554,6 +555,7 @@ export default function TrackRecordPage() {
   const { data: gagnantsData, error: gagnantsError, mutate: mutateGagnants } = useSWR<{
     gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
     profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
+    quinte?: QuintePalmaresData | null;   // ligne Quinté+ à part (hors de tous les totaux)
     updated_at?: string;
   }>(
     // Tant que l'auth n'a pas tranché, on n'appelle rien : la clé `null` suspend SWR.
@@ -578,6 +580,7 @@ export default function TrackRecordPage() {
           top_gains: pub.top_gains ?? [],
           n: pub.nb_paris_gagnes ?? 0,
           n_courses: pub.nb_courses_reglees ?? 0,
+          quinte: pub.quinte ?? null,
           updated_at: pub.updated_at,
         };
       };
@@ -590,6 +593,24 @@ export default function TrackRecordPage() {
     },
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
+
+  // Arrivée par `/track-record#records` (lien « Voir les 30 records » de l'accueil) :
+  // la section n'existe qu'une fois le palmarès chargé par SWR, bien après la
+  // tentative de défilement du navigateur — l'ancre seule tombait dans le vide et
+  // laissait le visiteur en haut de page. On déplie donc les 30 records et on
+  // défile nous-mêmes, une seule fois, dès que la section est rendue.
+  const ancreRecordsFaite = useRef(false);
+  const recordsPrets = !!data && !!gagnantsData?.top_gains?.length;
+  useEffect(() => {
+    if (ancreRecordsFaite.current || window.location.hash !== "#records") return;
+    setRecordsLimit(30);
+    if (!recordsPrets) return;
+    ancreRecordsFaite.current = true;
+    // Deux images : la grille dépliée doit être peinte avant de mesurer.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById("records")?.scrollIntoView({ block: "start" });
+    }));
+  }, [recordsPrets]);
 
   // Série 30 j complétée + moyenne pondérée par le volume de courses du jour
   // (une moyenne simple donnerait autant de poids à un jour de 3 courses qu'à un
@@ -764,8 +785,9 @@ export default function TrackRecordPage() {
         {/* ── 30 meilleurs gains : scène sombre + podium ─────────────────────── */}
         {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
           <section
+            id="records"
             aria-label="Plus gros gains"
-            className="relative isolate -mx-4 overflow-hidden bg-[#0b1020] px-4 py-12 sm:mx-0 sm:rounded-[2rem] sm:px-8 sm:py-16 lg:px-12"
+            className="relative isolate -mx-4 scroll-mt-20 overflow-hidden bg-[#0b1020] px-4 py-12 sm:mx-0 sm:rounded-[2rem] sm:px-8 sm:py-16 lg:px-12"
           >
             <div className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
               <span className="tr-glow absolute -left-24 top-10 h-80 w-80 rounded-full bg-amber-500/20 blur-[100px]" />
@@ -917,6 +939,8 @@ export default function TrackRecordPage() {
                   </div>
                 );
               })()}
+
+              <QuinteLigne quinte={gagnantsData.quinte} />
 
               <p className="flex items-start gap-2 rounded-2xl bg-white px-4 py-3 text-xs leading-5 text-muted-foreground ring-1 ring-stone-200">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />

@@ -273,13 +273,14 @@ async def test_daily_exposure_total_zero_si_table_absente():
 
 def test_route_applique_bien_le_cap_documente():
     """Vérification statique : le seuil DAILY_EXPOSURE_CAP_FRAC et le comparatif
-    `_deja_joue + montant > _cap` sont bien présents dans la route (même précédent
-    que test_prediction_temporal_guards.py pour auditer une requête sans DB réelle)."""
+    `_deja_joue + _engage > _cap` sont bien présents dans la route (même précédent
+    que test_prediction_temporal_guards.py pour auditer une requête sans DB réelle).
+    `_engage` = montant saisi + ticket Quinté+ quand il s'y ajoute (2026-09-24)."""
     from pathlib import Path
     import api.routes.courses as courses_mod
     source = Path(courses_mod.__file__).read_text(encoding="utf-8")
     assert "DAILY_EXPOSURE_CAP_FRAC = 0.30" in source
-    assert "_deja_joue + montant > _cap" in source
+    assert "_deja_joue + _engage > _cap" in source
     assert "daily_exposure_total" in source
 
 

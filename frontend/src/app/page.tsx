@@ -6,7 +6,8 @@ import {
   Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search, Star, Users, ChevronDown,
 } from "lucide-react";
 import { Reveal, Tilt } from "@/components/track-record/effets";
-import { JaugeHasard } from "@/components/track-record/Jauges";
+import { PreuvesCockpit } from "@/components/home/PreuvesCockpit";
+import { EtapesFonctionnement } from "@/components/home/EtapesFonctionnement";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
@@ -15,7 +16,6 @@ import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
 import { LivePalmares } from "@/components/home/LivePalmares";
 import { HeroStats } from "@/components/home/HeroStats";
-import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
 // Le canonical n'est plus hérité de la racine (il y désignait "/" pour TOUTES les pages) :
@@ -230,8 +230,6 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
 
 export default async function HomePage() {
   const tr = await fetchTrackRecord();
-  const fmtPct = (x: number | null, dec = 1) => (x == null ? "—" : `${x.toFixed(dec).replace(".", ",")}%`);
-  const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString("fr-FR"));
   const FAQ = buildFaq(tr);
 
   return (
@@ -325,7 +323,7 @@ export default async function HomePage() {
 
       {/* ═══════════ COMMENT ÇA MARCHE ═══════════ */}
       <section id="fonctionnement" className="py-24 bg-white scroll-mt-20">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
             <div className="text-center mb-12">
               <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
@@ -340,39 +338,7 @@ export default async function HomePage() {
               </p>
             </div>
           </ScrollReveal>
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              { step: "01", title: "Ouvrez la course", desc: "Tout le programme PMU du jour est déjà analysé : classement des partants, probabilité de chacun, score de confiance de la course." },
-              { step: "02", title: "Donnez votre budget", desc: "Vous entrez un montant, nous répartissons : une ligne sécurité, une ligne rendement, une ligne coup — selon votre profil de risque." },
-              { step: "03", title: "Pariez où vous voulez", desc: "Vous jouez chez votre opérateur. À l'arrivée, chaque pari est réglé au rapport officiel et votre capital est mis à jour." },
-            ].map((s, i) => (
-              <ScrollReveal key={s.step} delay={i * 100}>
-                <div className={`relative h-full ${i < 2 ? "step-connector" : ""}`}>
-                  <Tilt max={7} className="glass-card rounded-3xl p-7 h-full shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)]">
-                    <div className="icon-box tr-pop h-14 w-14 rounded-2xl flex items-center justify-center font-mono font-black text-lg mb-5 shadow-[0_12px_22px_-12px_rgba(180,83,9,.6)]"
-                      style={{ background: "#FFFBEB", border: "1px solid rgba(180,83,9,0.18)", color: "#B45309" }}>{s.step}</div>
-                    <h3 className="font-semibold text-gray-900 text-base mb-2">{s.title}</h3>
-                    <p className="text-sm text-gray-600 leading-relaxed">{s.desc}</p>
-                  </Tilt>
-                </div>
-              </ScrollReveal>
-            ))}
-          {/* La page pilier de la méthode n'était atteignable que depuis le pied de page :
-              un lien de bas de site ne dit à personne, moteur compris, qu'elle porte le
-              sujet principal du site. Elle est citée ici, là où la question se pose. */}
-          <ScrollReveal>
-            <p className="mt-10 text-center text-sm text-gray-600">
-              <Link
-                href="/pronostics-ia"
-                className="font-semibold text-brand-gold-dark underline-offset-4 hover:underline"
-              >
-                Comment l&apos;IA calcule une probabilité par cheval
-              </Link>{" "}
-              — les données sur lesquelles le modèle apprend, son réentraînement quotidien, et la
-              façon dont sa justesse est vérifiée.
-            </p>
-          </ScrollReveal>
-          </div>
+          <EtapesFonctionnement />
         </div>
       </section>
 
@@ -396,80 +362,13 @@ export default async function HomePage() {
             </div>
           </ScrollReveal>
 
-          <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-            {[
-              // `accuracy_top3` mesure la présence du GAGNANT RÉEL dans notre top-3.
-              // L'ancien sous-titre (« un de nos 3 favoris finit dans les 3 ») décrivait
-              // un tout autre évènement, bien plus facile, sous le même pourcentage — et
-              // il contredisait le bloc « Face au hasard » juste en dessous.
-              { value: fmtPct(tr?.accuracy_top3 ?? null), label: "Gagnant dans le Top-3", sub: "le cheval qui gagne est parmi nos 3 premiers choix", cls: "text-amber-700", tile: "from-amber-300 to-amber-600 text-slate-950", icon: Target },
-              { value: fmtPct(tr?.favori_place_rate ?? null), label: "Notre favori placé", sub: "notre n°1 dans les 3 premiers", cls: "text-emerald-700", tile: "from-emerald-400 to-emerald-700 text-white", icon: Shield },
-              { value: fmtPct(tr?.favori_win_rate ?? null), label: "Notre favori gagnant", sub: "notre n°1 remporte la course", cls: "text-gray-900", tile: "from-slate-700 to-slate-950 text-amber-300", icon: Trophy },
-              { value: fmtInt(tr?.nb_courses ?? null), label: "Courses vérifiées", sub: "réglées aux résultats PMU officiels", cls: "text-gray-900", tile: "from-sky-400 to-blue-700 text-white", icon: Database },
-            ].map((m, i) => (
-              <Reveal key={m.label} delay={i * 80}>
-                <Tilt max={8} className="h-full rounded-3xl bg-white p-4 ring-1 ring-stone-200/80 shadow-[0_24px_50px_-36px_rgba(17,24,39,.5)] sm:p-5">
-                  <span className={`tr-pop inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_10px_18px_-10px_rgba(0,0,0,.5)] sm:h-11 sm:w-11 ${m.tile}`}>
-                    <m.icon className="h-5 w-5" aria-hidden="true" />
-                  </span>
-                  <div className={`tr-pop mt-3 font-display text-[1.7rem] font-black tabular-nums sm:text-[2.1rem] ${m.cls}`}>{m.value}</div>
-                  <p className="mt-0.5 text-sm font-semibold text-gray-900">{m.label}</p>
-                  <p className="mt-0.5 text-xs leading-snug text-gray-600">{m.sub}</p>
-                </Tilt>
-              </Reveal>
-            ))}
-          </div>
-
-          {/* Les taux ci-dessus ne portent que sur la cohorte rejouable (snapshots
-              pre-course). Tant qu'elle est petite, on le dit plutot que de laisser
-              lire un pourcentage comme un acquis. */}
-          <EchantillonNotice nbCourses={tr?.nb_courses} mesureDepuis={tr?.mesure_depuis} />
-
-          {/* ── Ce que vaut le classement, face au hasard ──────────────────────
-              Le repère n'est PAS un chiffre rond posé à la main. `hasard_top3` et
-              `hasard_top1` sont calculés course par course sur le CHAMP RÉEL
-              (3/nb_partants et 1/nb_partants, moyennés) : un pourcentage seul ne
-              dit rien tant qu'on ne sait pas ce qu'un tirage au sort obtiendrait
-              sur les mêmes partants. Le facteur qui en sort est donc une mesure,
-              pas une figure de style. Rien n'est rendu si la mesure manque. */}
-          {tr && tr.hasard_top3 != null && tr.accuracy_top3 != null && (
-            <div className="mt-10">
-              <Reveal className="mb-5 text-center">
-                <h3 className="font-display text-xl font-bold text-gray-900 sm:text-2xl">Face au hasard</h3>
-                <p className="mt-1 text-sm text-gray-600">
-                  L&apos;anneau coloré, c&apos;est nous ; l&apos;anneau gris, un tirage au sort sur le champ réel de chaque course.
-                </p>
-              </Reveal>
-              <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
-                <Reveal>
-                  <JaugeHasard
-                    label="Le gagnant est dans notre Top-3"
-                    aide="Comparé à un tirage au sort de 3 chevaux sur le champ réel."
-                    nous={tr.accuracy_top3}
-                    hasard={tr.hasard_top3}
-                    facteur={tr.hasard_top3 > 0 ? tr.accuracy_top3 / tr.hasard_top3 : null}
-                  />
-                </Reveal>
-                {tr.favori_win_rate != null && (
-                  <Reveal delay={140}>
-                    <JaugeHasard
-                      label="Notre favori gagne la course"
-                      aide="Comparé à un cheval tiré au sort dans le champ réel."
-                      nous={tr.favori_win_rate}
-                      hasard={tr.hasard_top1}
-                      facteur={tr.hasard_top1 ? tr.favori_win_rate / tr.hasard_top1 : null}
-                      teinte="emeraude"
-                    />
-                  </Reveal>
-                )}
-              </div>
-              <p className="mx-auto mt-4 max-w-3xl text-center text-xs leading-relaxed text-gray-600">
-                Le repère « hasard » est recalculé sur le nombre réel de partants de chaque course :
-                dans un champ de huit il vaut plus que dans un champ de seize. C&apos;est ce qui rend
-                la comparaison honnête — et ce qui fait que l&apos;écart mesure bien
-                l&apos;analyse, pas la taille des pelotons.
-              </p>
-            </div>
+          {/* Mesures + duel face au hasard : les règles (repère hasard calculé course
+              par course sur le champ réel, état servi = état final) sont dans le
+              composant. Rien n'est rendu sans palmarès. */}
+          {tr && (
+            <Reveal>
+              <PreuvesCockpit m={tr} />
+            </Reveal>
           )}
 
           <div className="mt-8 grid gap-4 lg:grid-cols-2">

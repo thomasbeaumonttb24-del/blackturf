@@ -1568,6 +1568,140 @@ async def _palmares_rows(db: AsyncSession) -> dict:
     }
 
 
+# Le module Quinté+ n'est AFFICHÉ aux utilisateurs que depuis le déploiement du
+# 2026-09-24 17:08 UTC (6f46776). Les plans figés avant portaient un module calculé
+# mais invisible : un ticket que personne n'a vu ne compte pas au palmarès.
+QUINTE_MODULE_DEPUIS = datetime(2026, 9, 24, 17, 8, 10, tzinfo=timezone.utc)
+
+# Version publique du bloc : comptages seulement. Le ROI et les agrégats d'argent
+# restent réservés à l'admin (règle produit de `/stats/public` et du palmarès) —
+# mise + retour publiés suffiraient à recalculer le ROI.
+_QUINTE_CHAMPS_PUBLICS = ("disponible", "nb_tickets", "nb_courses", "nb_en_attente",
+                          "nb_tickets_gagnants", "nb_bonus", "nb_cinq_sur_cinq", "depuis")
+
+
+def _quinte_public(bloc: dict) -> dict:
+    return {k: bloc.get(k) for k in _QUINTE_CHAMPS_PUBLICS}
+
+
+async def _quinte_palmares(db: AsyncSession) -> dict:
+    """Bloc « Quinté+ » du palmarès — sur une ligne À PART, jamais dans le ROI du
+    plan principal (décision du 2026-09-24).
+
+    Source : les plans FIGÉS du site (`profil_run_log`, mise de référence), avec les
+    mêmes garde-fous que `_palmares_rows` (figé avant le départ, backfill exclu),
+    dont le plan porte un `module_quinte` joué. Chaque ticket est réglé ICI aux vrais
+    rapports PMU par `settle_module_quinte` — le même code que le bilan du plan — et
+    non lu dans `resultat` : les runs réglés avant le 2026-09-24 n'y ont pas de
+    `module_quinte`, et un Bonus publié après le règlement du plan principal y
+    resterait « en attente » pour toujours.
+
+    Un ticket dont un rapport gagnant manque encore est compté à part
+    (`nb_en_attente`), jamais dans la mise ni le retour. Aucun ticket réglé →
+    `disponible = False` : le front affiche « premiers résultats à venir ».
+    """
+    from sqlalchemy import text as _text
+    from services.bet_settlement import settle_module_quinte
+
+    vide = {"disponible": False, "nb_tickets": 0, "nb_courses": 0, "nb_en_attente": 0,
+            "mise_totale": 0.0, "retour": 0.0, "net": 0.0, "roi": None,
+            "nb_tickets_gagnants": 0, "nb_bonus": 0, "nb_cinq_sur_cinq": 0,
+            "par_profil": {}, "depuis": None}
+    try:
+        rows = (await db.execute(_text("""
+            SELECT r.course_id, r.profil, r.plan, c.nb_partants, c.date_heure,
+                   res.classement, res.rapports, res.rapports_detail
+            FROM profil_run_log r
+            JOIN courses c ON c.course_id = r.course_id
+            JOIN resultats res ON res.course_id = r.course_id
+            WHERE r.statut = 'settled'
+              -- Aucun plan n'a de module Quinté+ avant cette date : la borne évite
+              -- de décompresser tous les plans (1,7 s → 21 ms mesurés en prod).
+              AND r.created_at >= :depuis
+              AND c.date_heure IS NOT NULL
+              AND r.created_at < c.date_heure
+              AND COALESCE(r.meta->>'backfill', '') <> 'true'
+              AND r.plan->>'module_quinte' IS NOT NULL
+        """), {"depuis": QUINTE_MODULE_DEPUIS})).all()
+        cids = sorted({row[0] for row in rows})
+        non_partants: dict[str, set[int]] = {}
+        if cids:
+            np_rows = (await db.execute(_text("""
+                SELECT course_id, numero FROM participations
+                WHERE non_partant = true AND course_id IN :cids
+            """).bindparams(bindparam("cids", expanding=True)), {"cids": cids})).all()
+            for cid, num in np_rows:
+                if num is not None:
+                    non_partants.setdefault(cid, set()).add(int(num))
+    except Exception as exc:
+        log.warning("palmares.quinte_indisponible", err=str(exc)[:160])
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return vide
+
+    def _json(v):
+        if isinstance(v, (dict, list)) or v is None:
+            return v
+        try:
+            return json.loads(v)
+        except (TypeError, ValueError):
+            return None
+
+    out = dict(vide, par_profil={})
+    courses: set = set()
+    depuis = None
+    for cid, profil, plan, nb_part, dh, classement, rapports, detail in rows:
+        module = (_json(plan) or {}).get("module_quinte")
+        classement = _json(classement) or []
+        if not isinstance(module, dict) or not classement:
+            continue
+        bilan = settle_module_quinte(module, classement, _json(rapports) or {},
+                                     nb_part or len(classement), _json(detail),
+                                     non_partants.get(cid))
+        if bilan is None:
+            continue
+        if bilan["en_attente"]:
+            out["nb_en_attente"] += 1
+            continue
+        if bilan["total_mise"] <= 0:       # toutes combinaisons remboursées
+            continue
+        courses.add(cid)
+        if dh and (depuis is None or dh < depuis):
+            depuis = dh
+        rangs = [g.get("rang") or "" for g in bilan["gagnantes"]]
+        nb_bonus = sum(1 for r in rangs if r.startswith("Bonus"))
+        out["nb_tickets"] += 1
+        out["mise_totale"] += bilan["total_mise"]
+        out["retour"] += bilan["total_gain"]
+        out["nb_bonus"] += nb_bonus
+        out["nb_cinq_sur_cinq"] += len(rangs) - nb_bonus
+        out["nb_tickets_gagnants"] += 1 if bilan["nb_gagnantes"] else 0
+        p = out["par_profil"].setdefault(profil, {"nb_tickets": 0, "mise_totale": 0.0,
+                                                  "retour": 0.0, "nb_bonus": 0})
+        p["nb_tickets"] += 1
+        p["mise_totale"] += bilan["total_mise"]
+        p["retour"] += bilan["total_gain"]
+        p["nb_bonus"] += nb_bonus
+
+    mise, retour = round(out["mise_totale"], 2), round(out["retour"], 2)
+    for p in out["par_profil"].values():
+        p["mise_totale"], p["retour"] = round(p["mise_totale"], 2), round(p["retour"], 2)
+        p["roi"] = (round((p["retour"] - p["mise_totale"]) / p["mise_totale"] * 100, 1)
+                    if p["mise_totale"] > 0 else None)
+    out.update({
+        "disponible": out["nb_tickets"] > 0,
+        "nb_courses": len(courses),
+        "mise_totale": mise,
+        "retour": retour,
+        "net": round(retour - mise, 2),
+        "roi": round((retour - mise) / mise * 100, 1) if mise > 0 else None,
+        "depuis": (depuis.isoformat() if hasattr(depuis, "isoformat") else depuis) if depuis else None,
+    })
+    return out
+
+
 _PALMARES_INTEGRITE = (
     "Tous les paris affichés ont été figés AVANT le départ de la course "
     "puis réglés aux vrais rapports PMU à l'arrivée. Aucune reconstruction "
@@ -1751,6 +1885,10 @@ async def stats_palmares_public(
         "nb_paris_gagnes": data["n"],
         "nb_courses_gagnantes": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
+        # Ticket Quinté+ : ligne SÉPARÉE, jamais mêlée aux paris ni aux totaux
+        # ci-dessus. Version publique = comptages seulement (pas de ROI ni de
+        # montants agrégés, cf. _quinte_public) ; l'admin a le bloc complet.
+        "quinte": _quinte_public(await _quinte_palmares(db)),
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1888,6 +2026,7 @@ async def stats_palmares_gagnants(
         "total_gain": data["total_gain"],
         "total_benefice": round(data["total_gain"] - data["total_mise"], 2),
         "profils": profils,
+        "quinte": await _quinte_palmares(db),   # ligne à part, hors totaux ci-dessus
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

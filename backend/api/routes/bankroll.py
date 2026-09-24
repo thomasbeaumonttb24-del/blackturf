@@ -140,7 +140,7 @@ async def settle_pending_bets(db: AsyncSession, user_id: Optional[str] = None) -
     """
     import re
     from db.models import Resultat as _Res, Course as _Cou
-    from services.bet_settlement import settle_pari
+    from services.bet_settlement import TYPES_QUINTE, regler_ligne_quinte, settle_pari
 
     conds = [BankrollEntry.resultat.is_(None), BankrollEntry.course_id.isnot(None)]
     if user_id is not None:
@@ -173,6 +173,19 @@ async def settle_pending_bets(db: AsyncSession, user_id: Optional[str] = None) -
         for e in entries:
             nums = [int(n) for n in re.findall(r"\d+", e.chevaux or "")]
             if not nums:
+                continue
+            if e.type_pari in TYPES_QUINTE and len(set(nums)) >= 5:
+                # Ticket Quinté+ (tendu OU champ, dont celui enregistré avec le plan) :
+                # réglé combinaison par combinaison aux vrais rapports, Bonus compris.
+                q = regler_ligne_quinte(e.type_pari, nums, e.mise, res.classement,
+                                        res.rapports, nb_part,
+                                        getattr(res, "rapports_detail", None), non_partants)
+                if q is not None:          # None = rapport gagnant pas encore publié
+                    e.resultat = q["resultat"]
+                    e.gain_perte = q["gain_perte"]
+                    if q["cote"] is not None:
+                        e.cote = q["cote"]
+                    changed = True
                 continue
             r = settle_pari(e.type_pari, nums, res.classement, res.rapports, nb_part,
                             getattr(res, "rapports_detail", None), non_partants)

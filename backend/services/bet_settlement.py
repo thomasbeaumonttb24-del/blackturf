@@ -529,7 +529,8 @@ def settle_module_quinte(module: Optional[dict], classement: list[dict],
         gain += g
         nb_gagnantes += 1
         gagnantes.append({"combinaison": sorted(combi), "rapport_reel": res["rapport_reel"],
-                          "gain": round(g, 2), "note": res.get("note")})
+                          "gain": round(g, 2), "note": res.get("note"),
+                          "rang": _rang_quinte(res.get("note"))})
     mise, gain = round(mise, 2), round(gain, 2)
     net = round(gain - mise, 2)
     return {
@@ -543,11 +544,86 @@ def settle_module_quinte(module: Optional[dict], classement: list[dict],
         "net": net,
         "roi": round(net / mise * 100, 1) if mise > 0 else 0.0,
         "nb_gagnantes": nb_gagnantes,
+        # Combinaisons payées à un rang Bonus (4sur5 ou 3) — un retour partiel,
+        # pas les cinq premiers.
+        "nb_bonus": sum(1 for g in gagnantes if g["rang"].startswith("Bonus")),
         "nb_en_attente": nb_attente,
         "nb_rembourse": nb_rembourse,
         "en_attente": nb_attente > 0,
         "gagnantes": gagnantes,
     }
+
+
+def _rang_quinte(note: Optional[str]) -> str:
+    """Rang payé d'une combinaison Quinté+ gagnante, lu dans la note de settle_pari
+    (« Rang de gain : Bonus 4sur5. ») — sans note, c'est le Désordre."""
+    m = re.search(r"Rang de gain : ([^.]+)\.", note or "")
+    return m.group(1).strip() if m else "Désordre"
+
+
+# ─────────────────────────────────────────────────────────────
+# Ticket Quinté+ ENREGISTRÉ dans le capital (bankroll_entries)
+# ─────────────────────────────────────────────────────────────
+# « Enregistrer ce plan » écrit le ticket Quinté+ du plan comme UNE ligne de
+# capital : type « Quinté+ Désordre », tous les chevaux du champ, mise = coût
+# total du ticket. Le préfixe de `notes` le distingue des lignes du plan
+# principal : `ml.bet_performance.compute_type_roi_weights` exclut ces lignes de
+# l'apprentissage des poids par type (le Quinté+ systématique est une couverture
+# de divertissement, pas une recommandation apprise du plan principal).
+MARQUEUR_MODULE_QUINTE = "Plan de mise IA · Quinté+"
+TYPES_QUINTE = frozenset({"Quinté+ Désordre", "Quinté+ Flexi", "Quinté+"})
+
+
+def note_ligne_module_quinte(profil: str, couverture: Optional[str] = None) -> str:
+    base = f"{MARQUEUR_MODULE_QUINTE} · {profil}"
+    return f"{base} · {couverture}" if couverture else base
+
+
+def est_ligne_module_quinte(notes: Optional[str]) -> bool:
+    return bool(notes) and str(notes).startswith(MARQUEUR_MODULE_QUINTE)
+
+
+def regler_ligne_quinte(type_pari: str, numeros: list[int], mise: float,
+                        classement: list[dict], rapports: Optional[dict],
+                        nb_partants: int, rapports_detail: Optional[dict] = None,
+                        non_partants: Optional[set[int]] = None) -> Optional[dict]:
+    """Règle une ligne de capital Quinté+ — tendu (5 chevaux) ou champ (6, 7…).
+
+    `settle_pari` ne sait régler qu'UNE combinaison de 5 : un champ de 6 chevaux
+    y serait toujours perdant. On passe donc par `settle_module_quinte` (le même
+    règlement que le bilan du plan) : C(N, 5) combinaisons à `mise / C(N, 5)`,
+    chacune au rapport de son rang réel (Ordre pour le seul tendu, Désordre,
+    Bonus 4sur5, Bonus 3). Pour un tendu, le résultat est identique à settle_pari.
+
+    Retourne {"resultat", "gain_perte" (net), "cote" (retour / mise engagée),
+    "bilan"}, ou None tant qu'un rapport gagnant n'est pas publié (jamais inventé)
+    ou si la ligne n'est pas réglable comme un Quinté+.
+    """
+    if type_pari not in TYPES_QUINTE or len(set(numeros)) < 5:
+        return None
+    try:
+        mise = float(mise or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if mise <= 0:
+        return None
+    module = {"disponible": True, "type_pari": type_pari, "cout_total": mise,
+              "chevaux": [{"numero": int(n)} for n in dict.fromkeys(numeros)]}
+    bilan = settle_module_quinte(module, classement, rapports, nb_partants,
+                                 rapports_detail, non_partants)
+    if bilan is None or bilan["en_attente"]:
+        return None
+    engage = bilan["total_mise"]
+    if engage <= 0:
+        # Toutes les combinaisons contiennent un non-partant : mise rendue.
+        return {"resultat": "rembourse", "gain_perte": 0.0, "cote": 1.0, "bilan": bilan}
+    # Net = retour − part réellement engagée : les combinaisons remboursées
+    # (non-partant) reviennent au joueur, elles ne sont ni perdues ni gagnées.
+    gain_perte = round(bilan["total_gain"] - engage, 2)
+    if bilan["nb_gagnantes"] > 0:
+        return {"resultat": "gagne", "gain_perte": gain_perte,
+                "cote": round(bilan["total_gain"] / engage, 2), "bilan": bilan}
+    return {"resultat": "perd", "gain_perte": gain_perte, "cote": None, "bilan": bilan}
 
 
 def settle_plan(plan: dict, classement: list[dict], rapports: Optional[dict],

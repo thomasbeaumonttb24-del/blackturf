@@ -376,12 +376,19 @@ async def daily_exposure_total(session, subject: str) -> float:
 
     0.0 si la table n'existe pas encore (migration 0031 pas appliquée) — n'échoue
     jamais, le plafond devient alors un no-op plutôt qu'une erreur 500.
+
+    Le ticket Quinté+ est de l'argent misé (2026-09-24) : son coût
+    (``plan.montant_quinte``, hors ``montant_joue`` qui reste le plan principal
+    seul) s'ajoute au cumul. ``->>`` + CAST : même SQL sous PostgreSQL (jsonb) et
+    SQLite ≥ 3.38 (tests) ; un plan sans Quinté+ (ou antérieur) compte 0.
     """
     if not subject or subject == SYSTEM_SUBJECT:
         return 0.0
     try:
         total = (await session.execute(text("""
-            SELECT COALESCE(SUM(montant_joue), 0) FROM bet_plan_snapshots
+            SELECT COALESCE(SUM(montant_joue), 0)
+                   + COALESCE(SUM(CAST(plan->>'montant_quinte' AS FLOAT)), 0)
+            FROM bet_plan_snapshots
             WHERE subject_hash = :sub AND is_pre_course = true
               AND emitted_at >= :day_start
         """), {"sub": subject,

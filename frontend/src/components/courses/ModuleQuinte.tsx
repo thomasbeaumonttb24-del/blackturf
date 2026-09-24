@@ -178,7 +178,7 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
             <li>{module.note || "Aucune espérance de gain positive n'est établie pour un Quinté+ joué systématiquement."}</li>
             <li>Le rapport est estimé à partir des cotes : le rapport réel dépend des mises de tous les parieurs et peut sortir de la fourchette.</li>
             <li>La chance de toucher vient du classement de l&apos;IA ; elle n&apos;a pas encore été vérifiée sur les arrivées des Quinté+ passés.</li>
-            <li>Ce ticket n&apos;est pas ajouté par « Enregistrer ce plan » : notez-le à part si vous le jouez.</li>
+            <li>« Enregistrer ce plan » ajoute ce ticket à votre capital avec le plan principal : il y est réglé aux rapports officiels, Bonus compris, sur sa propre ligne.</li>
           </ul>
         </details>
       </div>

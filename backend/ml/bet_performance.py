@@ -35,7 +35,14 @@ async def compute_type_roi_weights(session: AsyncSession, only_ia: bool = True) 
 
     only_ia : ne compter que les paris issus des plans IA (suivi_reco_ia) — c'est
     le track-record du système sur ses propres recommandations.
+
+    Le ticket Quinté+ enregistré AVEC le plan (« Enregistrer ce plan », 2026-09-24)
+    est exclu, TOUJOURS : c'est une couverture de divertissement jouée à chaque
+    course Quinté+, pas un pari que le plan principal a choisi. Le compter ici
+    déplacerait le poids appris du type « Quinté+ Désordre » du plan principal
+    (profil risqué) sur un ticket que personne n'a sélectionné pour sa valeur.
     """
+    from services.bet_settlement import MARQUEUR_MODULE_QUINTE
     where_ia = "AND suivi_reco_ia = true" if only_ia else ""
     rows = (await session.execute(text(f"""
         SELECT type_pari,
@@ -46,9 +53,10 @@ async def compute_type_roi_weights(session: AsyncSession, only_ia: bool = True) 
         WHERE resultat IN ('gagne', 'perd')
           AND gain_perte IS NOT NULL
           AND mise > 0
+          AND COALESCE(notes, '') NOT LIKE :marqueur_quinte
           {where_ia}
         GROUP BY type_pari
-    """))).fetchall()
+    """), {"marqueur_quinte": MARQUEUR_MODULE_QUINTE + "%"})).fetchall()
 
     weights: dict[str, float] = {}
     for type_pari, n, somme_mise, somme_net in rows:
