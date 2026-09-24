@@ -99,37 +99,76 @@ DISTANCE_BUCKET = {
 }
 
 
+# Position fictive d'un « 0 » de musique : le PMU note 0 un cheval NON PLACÉ
+# (arrivé au-delà de la 9ᵉ place). Le lire comme « position 0 » donnait à
+# `score_position` 1 - (0-1)/(n-1) > 1 : un non-placé valait PLUS qu'une victoire.
+POSITION_NON_PLACE = 10
+# Position sentinelle d'une sortie terminée sur incident (disqualifié, tombé,
+# arrêté…), même convention que `historique_courses.position_arrivee` (99).
+POSITION_INCIDENT = 99
+
+
+def _iter_musique(musique_str: Optional[str]):
+    """Jetons d'une musique PMU, du plus récent au plus ancien.
+
+    Rend ("pos", n) pour une course classée (0 = non placé) et ("incident", L)
+    pour une faute standalone MAJUSCULE (D/T/A/R). Les lettres de discipline
+    minuscules sont ignorées, et les marqueurs d'année entre parenthèses —
+    « 1a2a(25)3a » — sautés : leur « 25 » n'est pas une 25ᵉ place.
+    """
+    if not musique_str:
+        return
+    s = str(musique_str)
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "(":
+            fin = s.find(")", i)
+            i = len(s) if fin < 0 else fin + 1
+        elif ch.isdigit():
+            j = i + 1
+            while j < len(s) and s[j].isdigit():
+                j += 1
+            yield "pos", int(s[i:j])
+            if j < len(s) and s[j].isalpha() and s[j].islower():
+                j += 1  # lettre de discipline
+            i = j
+        elif ch in ("T", "A", "R", "D"):
+            yield "incident", ch
+            i += 1
+            if i < len(s) and s[i].isalpha() and s[i].islower():
+                i += 1  # « Da » : D(isqualifié) en a(ttelé)
+        else:
+            i += 1
+
+
 def parse_musique(musique_str: Optional[str]) -> list[int]:
     """
     Extrait positions de la musique PMU.
     Format: chiffre(s) + lettre_discipline (ex: "1a2h3s5p")
     Incidents standalone MAJUSCULES (T/A/R/D) → 20 (pénalité).
-    Lettres discipline minuscules (a/p/h/s/m) après un chiffre → ignorées.
+    « 0 » = non placé → POSITION_NON_PLACE (et surtout pas 0, cf. plus haut).
+    Lettres discipline minuscules (a/p/h/s/m) et années « (25) » → ignorées.
     """
-    if not musique_str:
-        return []
     positions = []
-    s = str(musique_str)
-    i = 0
-    while i < len(s):
-        ch = s[i]
-        if ch.isdigit():
-            # Lire tous les chiffres consécutifs (ex: "12" = 12ème)
-            j = i + 1
-            while j < len(s) and s[j].isdigit():
-                j += 1
-            positions.append(int(s[i:j]))
-            # Sauter la lettre de discipline optionnelle (a/p/h/s/m)
-            if j < len(s) and s[j].isalpha():
-                j += 1
-            i = j
-        elif ch in ("T", "A", "R", "D"):
-            # Incident standalone MAJUSCULE → pénalité 20
+    for kind, val in _iter_musique(musique_str):
+        if kind == "incident":
             positions.append(20)
-            i += 1
         else:
-            i += 1
+            positions.append(val if val > 0 else POSITION_NON_PLACE)
     return positions[:10]
+
+
+# Position lue dans `historique_courses` par les features. Une sortie terminée
+# sur INCIDENT (disqualifié, tombé, arrêté…) y a une position NULL : filtrée
+# par les `if h[0]` des features, elle disparaissait purement et simplement.
+# Un trotteur disqualifié quatre fois sur cinq à la distance du jour y affichait
+# ainsi la réussite de sa SEULE sortie classée. On la ramène à 99 (convention
+# de la colonne) : `score_position` la note 0, comme une faute doit l'être.
+POSITION_HISTORIQUE_SQL = f"""
+    CASE WHEN h.position_arrivee IS NULL AND h.incident IS NOT NULL
+              AND UPPER(h.incident) NOT LIKE '%NON%PARTANT%'
+         THEN {POSITION_INCIDENT} ELSE h.position_arrivee END AS position_arrivee"""
 
 
 def score_position(pos: int, nb_partants: int = 10) -> float:
@@ -150,26 +189,9 @@ def compute_allure_regularite(musique_str: Optional[str], max_courses: int = 10)
     Lettres discipline minuscules (a/p/h/s/m) après un chiffre → ignorées.
     Même logique de parsing que parse_musique (casse préservée : incidents en
     MAJUSCULE, discipline en minuscule)."""
-    if not musique_str:
-        return 0.0, 0.0, 0
-    s = str(musique_str)
-    incidents: list[bool] = []  # True = sortie terminée sur faute disqualifiante
-    i = 0
-    while i < len(s):
-        ch = s[i]
-        if ch.isdigit():
-            j = i + 1
-            while j < len(s) and s[j].isdigit():
-                j += 1
-            incidents.append(False)  # course classée (0 inclus = non-placé ≠ faute)
-            if j < len(s) and s[j].isalpha():
-                j += 1  # saute la lettre de discipline
-            i = j
-        elif ch in ("T", "A", "R", "D"):
-            incidents.append(True)   # incident disqualifiant standalone
-            i += 1
-        else:
-            i += 1
+    # True = sortie terminée sur faute disqualifiante ; un chiffre (0 inclus =
+    # non-placé) est une course classée, PAS une faute.
+    incidents: list[bool] = [kind == "incident" for kind, _ in _iter_musique(musique_str)]
     incidents = incidents[:max_courses]
     if not incidents:
         return 0.0, 0.0, 0
@@ -565,8 +587,8 @@ async def compute_features_for_participation(
     }
 
     # ── B. Forme récente ──────────────────────────────────────────────────
-    hist_courses = await session.execute(text("""
-        SELECT h.position_arrivee, h.distance, h.terrain, h.hippodrome, h.date_course,
+    hist_courses = await session.execute(text(f"""
+        SELECT {POSITION_HISTORIQUE_SQL}, h.distance, h.terrain, h.hippodrome, h.date_course,
                h.nb_partants, h.cote_depart, h.discipline, h.allocation,
                h.acceleration_label, h.reduction_km,
                -- ALLOCATION NORMALISÉE EN EUROS, en DERNIÈRE colonne (lue par h[-1])
@@ -669,8 +691,9 @@ async def compute_features_for_participation(
     dist_cat = get_dist_cat(dist_int)
 
     dist_hist = [h for h in historique if h[1] and abs(h[1] - dist_int) <= 200]
-    dist_scores = [score_position(parse_musique("")[0] if not h[0] else h[0], nb_partants_int)
-                   for h in dist_hist if h[0] and h[0] < 20]
+    # Les sorties sur incident (position 99) comptent, notées 0 : les écarter
+    # affichait la réussite des seules sorties classées (cf. POSITION_HISTORIQUE_SQL).
+    dist_scores = [score_position(h[0], nb_partants_int) for h in dist_hist if h[0]]
     pref_dist = float(np.mean(dist_scores)) if dist_scores else 0.5
 
     dist_moyennes = [h[1] for h in historique if h[1]]
@@ -687,7 +710,7 @@ async def compute_features_for_participation(
     # ── E. Terrain ────────────────────────────────────────────────────────
     terrain_cat = get_terrain_cat(terrain)
     terrain_hist = [h for h in historique if get_terrain_cat(h[2]) == terrain_cat and h[0]]
-    terrain_scores = [score_position(h[0], nb_partants_int) for h in terrain_hist if h[0] < 20]
+    terrain_scores = [score_position(h[0], nb_partants_int) for h in terrain_hist]
     pref_terrain = float(np.mean(terrain_scores)) if terrain_scores else 0.5
 
     # humidite_piste — depuis meteo_courses si disponible
@@ -733,7 +756,7 @@ async def compute_features_for_participation(
     # ── F. Hippodrome ─────────────────────────────────────────────────────
     hippo_hist = [h for h in historique
                   if h[3] and hippodrome and h[3].upper() == hippodrome.upper() and h[0]]
-    hippo_scores = [score_position(h[0], nb_partants_int) for h in hippo_hist if h[0] < 20]
+    hippo_scores = [score_position(h[0], nb_partants_int) for h in hippo_hist]
     pref_hippo = float(np.mean(hippo_scores)) if hippo_scores else 0.5
 
     # record_hippodrome — ratio de victoires sur cet hippodrome
@@ -1730,8 +1753,8 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     date_heure = partants_raw[0][32]  # date_heure de la course (index aligné sur le SELECT)
 
     # 2. Historique des courses (max 20 par cheval) — une seule requête
-    hist_r = await session.execute(text("""
-        SELECT h.cheval_id, h.position_arrivee, h.distance, h.terrain,
+    hist_r = await session.execute(text(f"""
+        SELECT h.cheval_id, {POSITION_HISTORIQUE_SQL}, h.distance, h.terrain,
                h.hippodrome, h.date_course, h.nb_partants, h.cote_depart,
                h.discipline, h.allocation,
                h.acceleration_label, h.reduction_km,
@@ -2602,7 +2625,8 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     dist_int = int(distance or 2000)
     dist_cat = get_dist_cat(dist_int)
     dist_hist = [h for h in historique if h[1] and abs(int(h[1]) - dist_int) <= 200]
-    dist_scores = [score_position(h[0], nb_partants_int) for h in dist_hist if h[0] and h[0] < 20]
+    # Sorties sur incident (99) incluses, notées 0 — cf. POSITION_HISTORIQUE_SQL.
+    dist_scores = [score_position(h[0], nb_partants_int) for h in dist_hist if h[0]]
     pref_dist = float(np.mean(dist_scores)) if dist_scores else 0.5
     dist_moyennes = [h[1] for h in historique if h[1]]
     delta_dist = abs(dist_int - float(np.mean(dist_moyennes))) if dist_moyennes else 0.0
@@ -2613,7 +2637,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # Terrain
     terrain_cat = get_terrain_cat(terrain)
     terrain_hist = [h for h in historique if get_terrain_cat(h[2]) == terrain_cat and h[0]]
-    terrain_scores = [score_position(h[0], nb_partants_int) for h in terrain_hist if h[0] < 20]
+    terrain_scores = [score_position(h[0], nb_partants_int) for h in terrain_hist]
     pref_terrain = float(np.mean(terrain_scores)) if terrain_scores else 0.5
     meteo_row = batch["meteo_row"]
     humidite_piste = 0.0
@@ -2628,7 +2652,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
 
     # Hippodrome
     hippo_hist = [h for h in historique if h[3] and hippodrome and h[3].upper() == hippodrome.upper() and h[0]]
-    hippo_scores = [score_position(h[0], nb_partants_int) for h in hippo_hist if h[0] < 20]
+    hippo_scores = [score_position(h[0], nb_partants_int) for h in hippo_hist]
     pref_hippo = float(np.mean(hippo_scores)) if hippo_scores else 0.5
     hippo_wins = sum(1 for h in hippo_hist if h[0] == 1)
     record_hippodrome = hippo_wins / len(hippo_hist) if hippo_hist else 0.0

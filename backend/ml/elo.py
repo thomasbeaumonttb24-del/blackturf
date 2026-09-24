@@ -64,6 +64,38 @@ def calculer_delta_elo(elo_a: float, elo_b: float, score_a: float, k: int = ELO_
     return k * (score_a - expected_prob(elo_a, elo_b))
 
 
+def classement_elo(classement: list[dict]) -> list[dict]:
+    """Partants qui comptent dans les duels, avec leur position de duel.
+
+    Un cheval classé garde sa place. Un cheval PARTI mais non classé sur incident
+    (disqualifié, tombé, arrêté…) est rangé DERRIÈRE tous les classés, à égalité
+    entre eux : il a perdu contre chaque cheval qui a fini la course.
+
+    Avant, les incidents étaient simplement retirés des duels : une disqualification
+    ne coûtait AUCUN point. Un trotteur fautif cinq fois de suite gardait l'ELO de
+    ses rares bonnes sorties et pouvait être présenté « au-dessus du lot ».
+    Les non-partants, eux, n'ont pas couru : ils restent hors du calcul.
+    """
+    classes, fautifs = [], []
+    for r in classement:
+        if not r.get("cheval_id"):
+            continue
+        pos = r.get("position")
+        try:
+            pos = int(pos) if pos is not None else None
+        except (TypeError, ValueError):
+            pos = None
+        incident = str(r.get("incident") or "").upper()
+        if pos is not None and 1 <= pos < 90:
+            classes.append({**r, "position": pos})
+        elif "NON_PARTANT" in incident or "NON PARTANT" in incident:
+            continue
+        elif incident or r.get("disqualifie") or (pos is not None and pos >= 90):
+            fautifs.append(r)
+    derniere = max((r["position"] for r in classes), default=0) + 1
+    return classes + [{**r, "position": derniere} for r in fautifs]
+
+
 async def update_elo_after_race(
     session: AsyncSession,
     course_id: str,
@@ -77,6 +109,8 @@ async def update_elo_after_race(
 
     classement : [{cheval_id, position, incident}, ...]
     Retourne {cheval_id: nouveau_elo}.
+    Les incidents (disqualifié, tombé…) comptent comme battus par tous les
+    classés — cf. `classement_elo`.
     """
     # ── IDEMPOTENCE (anti-inflation) ─────────────────────────────────────────
     # L'ELO est INCRÉMENTAL (on lit le rating courant, on ajoute le delta, on
@@ -97,8 +131,10 @@ async def update_elo_after_race(
     k = get_k_factor(niveau_course, dotation)
     elo_field = DISCIPLINE_ELO_FIELD.get(discipline, "elo_score_plat")
 
+    classement = classement_elo(classement)
+
     # Charger les ELO actuels
-    cheval_ids = [r["cheval_id"] for r in classement if not r.get("incident")]
+    cheval_ids = [r["cheval_id"] for r in classement]
     result = await session.execute(
         select(Cheval).where(Cheval.cheval_id.in_(cheval_ids))
     )
@@ -122,7 +158,7 @@ async def update_elo_after_race(
             }
 
     # Duels 2-à-2 entre partants valides
-    valides = [r for r in classement if not r.get("incident") and r["cheval_id"] in elos]
+    valides = [r for r in classement if r["cheval_id"] in elos]
     valides.sort(key=lambda x: x["position"] if x.get("position") is not None else 999)
 
     n_valides = len(valides)

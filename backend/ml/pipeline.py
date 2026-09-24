@@ -3635,7 +3635,16 @@ async def _save_historical_course(session: AsyncSession, course: Course, resulta
         # NULL si données absentes ou aberrantes — jamais fabriqué.
         from ml.race_dynamics import compute_reduction_km, compute_acceleration
         temps_indiv = entry.get("temps")
-        reduction_km = compute_reduction_km(temps_indiv, course.distance)
+        # La réduction kilométrique OFFICIELLE du PMU (`reductionKilometrique`) prime :
+        # c'est le chrono publié du cheval. Le recalcul depuis `tempsObtenu` n'est
+        # qu'un repli — et il rend None dès que l'unité du temps brut ne tombe pas
+        # dans les bornes plausibles, ce qui laissait des chronos connus en NULL.
+        from ml.race_dynamics import REDUCTION_KM_MIN_S, REDUCTION_KM_MAX_S
+        rk_pmu = entry.get("reduction_km")
+        if isinstance(rk_pmu, (int, float)) and REDUCTION_KM_MIN_S <= rk_pmu <= REDUCTION_KM_MAX_S:
+            reduction_km = round(float(rk_pmu), 2)
+        else:
+            reduction_km = compute_reduction_km(temps_indiv, course.distance)
         accel_idx = accel_label = None
         tp_row = await session.execute(text("""
             SELECT passage_dernier_400m FROM temps_passage

@@ -27,8 +27,10 @@ async def main():
                 except Exception:
                     continue
                 ch = num2ch.get(num)
-                if ch and pos is not None:
-                    classement.append({"cheval_id": ch, "position": int(pos), "incident": e.get("incident")})
+                # Les disqualifiés (position nulle + incident) sont gardés : c'est
+                # `classement_elo` qui les range derrière les classés.
+                if ch and (pos is not None or e.get("incident")):
+                    classement.append({"cheval_id": ch, "position": pos, "incident": e.get("incident")})
             if classement:
                 try:
                     await update_elo_after_race(s, cid, disc or "plat", niv, dot, classement)
