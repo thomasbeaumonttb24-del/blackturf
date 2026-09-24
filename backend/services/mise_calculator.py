@@ -40,6 +40,32 @@ _REPLI_RESPECTE_TYPE = True
 # Le filet refuse-t-il la loterie pure (EV sous `SPEC_EV_FLOOR`) quand il a le choix ?
 # False = comportement d'avant le 2026-09-02 (aucune borne d'EV sur ce chemin).
 _REPLI_PLANCHER_EV = True
+# Plancher d'EV même pour un coup assumé (relevé de −0,80 : −80 % = loterie pure ;
+# −40 % laisse passer les vrais gros rapports à edge>0 via _is_credible_coup). Lu par
+# la sélection, le filet et le complément manuel de `_select_conviction`.
+#
+# AUDIT P0 DU 2026-09-24 — « le filet sert des tickets à EV négative ». Rejeu du
+# moteur sur 1 958 courses réglées (18/08 → 23/09, prédictions figées avant le
+# départ, entrées apprises de production, 10 €), chaque candidat de la tranche réglé
+# aussi à 1 € aux vrais rapports :
+#   • le filet ne se déclenche que sur 2,4 % / 3,9 % / 1,1 % des courses (prudent /
+#     modéré / risqué) et ne porte que 2 à 3 % de la mise à EV<0 : ce n'est PAS lui
+#     qui fait la part de 94 / 73 / 88 % de la mise à EV annoncée négative. Elle vient
+#     de la sélection normale, dont les gates admettent l'EV négative par construction
+#     (ev_min, placé prudent, coups du risqué) sur un marché où l'EV calibrée n'est
+#     presque jamais positive dans la tranche ;
+#   • l'EV annoncée ne trie pas le rendement réel À L'INTÉRIEUR d'une course : prendre
+#     le candidat de meilleure EV du vivier au lieu du premier en conviction rend
+#     −2,5 / −1,8 / −18,7 points (le dernier significatif) ;
+#   • relever ce plancher à −0,30 ou −0,20 coûte ~9 points au risqué (IC95 hors de
+#     zéro) sans rien changer ailleurs ; élargir l'énumération (Couplé Placé du top-6,
+#     Simple Gagnant du top-6, Simple Placé du top-8) est neutre ou négatif (Simple
+#     Gagnant top-6 en modéré : −2,7 points, IC95 [−5,3 ; −0,3]).
+# Aucune règle n'a donc été changée. Une seule course sur 1 958 n'avait AUCUN
+# candidat dans la tranche du profil prudent (28082026R6C1, six partants dont deux
+# favoris à 1,8 et 2,0) : le filet y sert un pari hors tranche, marqué comme tel.
+# Rapport complet : P0_A_filet_ev_2026-09-24.md.
+_SPEC_EV_FLOOR = -0.40
 
 # ─────────────────────────────────────────────────────────────
 # ANCRAGE SUR LE RANG 1 + DÉSACCORD MARCHÉ (2026-09-12)
@@ -1980,7 +2006,7 @@ def _select_conviction(
     allowed_types = cfg.get("types")                         # None = toutes
     objectif = cfg.get("objectif", "ev")
     spec_ok = cfg.get("spec_coup", False)                     # profil loterie : coups -EV assumés
-    SPEC_EV_FLOOR = -0.40                                     # plancher d'EV même pour un coup assumé (relevé de -0.80 : -80% = loterie pure, ruine garantie ; -40% laisse passer les vrais gros rapports à edge>0 via _is_credible_coup)
+    SPEC_EV_FLOOR = _SPEC_EV_FLOOR                            # cf. constante de module
     # Gate bande d'EV (audit ROI 2026-07-02) : actif par défaut, rollback BT_EV_BAND_GATE=0.
     try:
         from ml.algo_flags import FLAGS as _AF_GATE
