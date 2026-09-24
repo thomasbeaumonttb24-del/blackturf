@@ -260,6 +260,10 @@ async def fautifs(session, etat: Etat):
 VARIANTES = {
     # nom : réglages de ml.elo (le reste reste à sa valeur par défaut)
     "nouveau": {},
+    "k_x2": {"K_MULTIPLICATEUR": 2.0},
+    "k_x4": {"K_MULTIPLICATEUR": 4.0},
+    "k_x8": {"K_MULTIPLICATEUR": 8.0},
+    "k_x4_sans_provisoire": {"K_MULTIPLICATEUR": 4.0, "PROVISOIRE_K_MAX": 1.0},
     "sans_amorce": {"AMORCE_MIN_NOTES": 10 ** 9},
     "sans_k_provisoire": {"PROVISOIRE_K_MAX": 1.0},
     "ponderation_ecart": {"PONDERATION_ECART": True},

@@ -113,6 +113,8 @@ PONDERATION_ECART = False
 # Poids d'un duel perdu sur incident (disqualifié, tombé…) : 1 = une défaite
 # pleine, 0 = l'incident est ignoré (ancienne règle).
 POIDS_DUEL_INCIDENT = 1.0
+# Multiplicateur global de K (réactivité). 1 = barème `get_k_factor` tel quel.
+K_MULTIPLICATEUR = 1.0
 
 
 def champ_elo(discipline: Optional[str]) -> str:
@@ -171,7 +173,7 @@ def calculer_deltas_course(valides: list[dict], ratings: dict, nb_notees: dict,
     deltas = {r["cheval_id"]: 0.0 for r in valides}
     if n < 2:
         return deltas
-    k_eff = k / (n - 1)
+    k_eff = k * K_MULTIPLICATEUR / (n - 1)
     ordre = sorted(valides, key=lambda r: r["position"])
     for i in range(n):
         for j in range(i + 1, n):
