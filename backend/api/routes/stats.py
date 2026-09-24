@@ -1568,8 +1568,20 @@ async def _palmares_rows(db: AsyncSession) -> dict:
     }
 
 
-# Premier plan figé portant un module Quinté+ : 2026-09-23 22:05 UTC (mesuré en prod).
-QUINTE_MODULE_DEPUIS = datetime(2026, 9, 23, tzinfo=timezone.utc)
+# Le module Quinté+ n'est AFFICHÉ aux utilisateurs que depuis le déploiement du
+# 2026-09-24 17:08 UTC (6f46776). Les plans figés avant portaient un module calculé
+# mais invisible : un ticket que personne n'a vu ne compte pas au palmarès.
+QUINTE_MODULE_DEPUIS = datetime(2026, 9, 24, 17, 8, 10, tzinfo=timezone.utc)
+
+# Version publique du bloc : comptages seulement. Le ROI et les agrégats d'argent
+# restent réservés à l'admin (règle produit de `/stats/public` et du palmarès) —
+# mise + retour publiés suffiraient à recalculer le ROI.
+_QUINTE_CHAMPS_PUBLICS = ("disponible", "nb_tickets", "nb_courses", "nb_en_attente",
+                          "nb_tickets_gagnants", "nb_bonus", "nb_cinq_sur_cinq", "depuis")
+
+
+def _quinte_public(bloc: dict) -> dict:
+    return {k: bloc.get(k) for k in _QUINTE_CHAMPS_PUBLICS}
 
 
 async def _quinte_palmares(db: AsyncSession) -> dict:
@@ -1874,9 +1886,9 @@ async def stats_palmares_public(
         "nb_courses_gagnantes": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
         # Ticket Quinté+ : ligne SÉPARÉE, jamais mêlée aux paris ni aux totaux
-        # ci-dessus (décision du 2026-09-24 : c'est de l'argent réellement misé,
-        # son rendement se montre à part).
-        "quinte": await _quinte_palmares(db),
+        # ci-dessus. Version publique = comptages seulement (pas de ROI ni de
+        # montants agrégés, cf. _quinte_public) ; l'admin a le bloc complet.
+        "quinte": _quinte_public(await _quinte_palmares(db)),
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

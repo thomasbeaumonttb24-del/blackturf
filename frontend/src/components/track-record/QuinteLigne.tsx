@@ -21,10 +21,11 @@ export interface QuintePalmaresData {
   nb_tickets: number;
   nb_courses: number;
   nb_en_attente: number;
-  mise_totale: number;
-  retour: number;
-  net: number;
-  roi: number | null;
+  // Montants et ROI : vue admin seulement (le public ne reçoit que les comptages).
+  mise_totale?: number;
+  retour?: number;
+  net?: number;
+  roi?: number | null;
   nb_tickets_gagnants: number;
   nb_bonus: number;
   nb_cinq_sur_cinq: number;
@@ -74,14 +75,20 @@ export function QuinteLigne({ quinte }: { quinte?: QuintePalmaresData | null }) 
         </p>
       ) : (
         <>
-          <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className={`mt-5 grid grid-cols-2 gap-3 ${quinte!.mise_totale != null ? "lg:grid-cols-5" : "lg:grid-cols-3"}`}>
             <Chiffre label="Tickets" value={nf(quinte!.nb_tickets)}
               sub={`sur ${nf(quinte!.nb_courses)} course${quinte!.nb_courses > 1 ? "s" : ""} Quinté+`} />
-            <Chiffre label="Mise totale" value={eur(quinte!.mise_totale)} />
-            <Chiffre label="Retour" value={eur(quinte!.retour)}
-              sub={`${nf(quinte!.nb_tickets_gagnants)} ticket${quinte!.nb_tickets_gagnants > 1 ? "s" : ""} avec un retour`} />
-            <Chiffre label="ROI" value={quinte!.roi == null ? "—" : `${quinte!.roi > 0 ? "+" : ""}${nf(quinte!.roi, 1)} %`}
-              ton={quinte!.roi != null && quinte!.roi >= 0 ? "text-emerald-700" : "text-rose-700"} />
+            {quinte!.mise_totale != null && <Chiffre label="Mise totale" value={eur(quinte!.mise_totale)} />}
+            {quinte!.retour != null ? (
+              <Chiffre label="Retour" value={eur(quinte!.retour)}
+                sub={`${nf(quinte!.nb_tickets_gagnants)} ticket${quinte!.nb_tickets_gagnants > 1 ? "s" : ""} avec un retour`} />
+            ) : (
+              <Chiffre label="Tickets avec un retour" value={nf(quinte!.nb_tickets_gagnants)} />
+            )}
+            {quinte!.roi !== undefined && (
+              <Chiffre label="ROI" value={quinte!.roi == null ? "—" : `${quinte!.roi > 0 ? "+" : ""}${nf(quinte!.roi, 1)} %`}
+                ton={quinte!.roi != null && quinte!.roi >= 0 ? "text-emerald-700" : "text-rose-700"} />
+            )}
             <Chiffre label="Bonus" value={nf(quinte!.nb_bonus)}
               sub={`combinaison${quinte!.nb_bonus > 1 ? "s" : ""} payée${quinte!.nb_bonus > 1 ? "s" : ""} en Bonus · ${nf(quinte!.nb_cinq_sur_cinq)} aux 5 premiers`} />
           </div>

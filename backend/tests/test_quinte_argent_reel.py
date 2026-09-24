@@ -392,8 +392,12 @@ def _module(numeros, cout):
 
 
 @pytest.mark.asyncio
-async def test_palmares_quinte_premiers_resultats_a_venir_sans_ticket_regle(db):
+async def test_palmares_quinte_premiers_resultats_a_venir_sans_ticket_regle(db, monkeypatch):
+    from api.routes import stats as _stats
     from api.routes.stats import _quinte_palmares
+    # Mécanique du règlement sur les plans réels du 24/09, figés avant l'affichage
+    # du module : on recule la borne d'affichage pour les compter ici.
+    monkeypatch.setattr(_stats, "QUINTE_MODULE_DEPUIS", _stats.datetime(2026, 9, 23, tzinfo=_stats.timezone.utc))
     await db.execute(text(_DDL_PROFIL_RUN_LOG))
     await _course_terminee(db)
     await _run(db, "r0", "equilibre", {"niveaux": [], "module_quinte": None})
@@ -403,8 +407,12 @@ async def test_palmares_quinte_premiers_resultats_a_venir_sans_ticket_regle(db):
 
 
 @pytest.mark.asyncio
-async def test_palmares_quinte_ligne_separee_reglee_aux_vrais_rapports(db):
+async def test_palmares_quinte_ligne_separee_reglee_aux_vrais_rapports(db, monkeypatch):
+    from api.routes import stats as _stats
     from api.routes.stats import _quinte_palmares
+    # Mécanique du règlement sur les plans réels du 24/09, figés avant l'affichage
+    # du module : on recule la borne d'affichage pour les compter ici.
+    monkeypatch.setattr(_stats, "QUINTE_MODULE_DEPUIS", _stats.datetime(2026, 9, 23, tzinfo=_stats.timezone.utc))
     await db.execute(text(_DDL_PROFIL_RUN_LOG))
     await _course_terminee(db)
     # Les trois plans réellement figés du 24/09 (tendu / champ 6 / champ 7).
@@ -431,8 +439,12 @@ async def test_palmares_quinte_ligne_separee_reglee_aux_vrais_rapports(db):
 
 
 @pytest.mark.asyncio
-async def test_palmares_quinte_ticket_en_attente_hors_chiffres(db):
+async def test_palmares_quinte_ticket_en_attente_hors_chiffres(db, monkeypatch):
+    from api.routes import stats as _stats
     from api.routes.stats import _quinte_palmares
+    # Mécanique du règlement sur les plans réels du 24/09, figés avant l'affichage
+    # du module : on recule la borne d'affichage pour les compter ici.
+    monkeypatch.setattr(_stats, "QUINTE_MODULE_DEPUIS", _stats.datetime(2026, 9, 23, tzinfo=_stats.timezone.utc))
     from db.models import Resultat
     await db.execute(text(_DDL_PROFIL_RUN_LOG))
     await _course_terminee(db)
@@ -449,3 +461,26 @@ async def test_palmares_public_expose_le_bloc_quinte_a_part(client):
     data = (await client.get("/api/v1/stats/palmares-public")).json()
     assert "quinte" in data
     assert data["quinte"]["disponible"] is False     # base vide : premiers résultats à venir
+
+
+@pytest.mark.asyncio
+async def test_palmares_quinte_exclut_les_tickets_jamais_affiches(db):
+    """Les plans figés avant l'affichage du module (2026-09-24 17:08 UTC) portaient
+    un Quinté+ calculé mais invisible : ils ne comptent pas au palmarès."""
+    from api.routes.stats import _quinte_palmares
+    await db.execute(text(_DDL_PROFIL_RUN_LOG))
+    await _course_terminee(db)
+    await _run(db, "r1", "conservateur", {"niveaux": [], "module_quinte": _module([8, 7, 4, 16, 10], 2.0)})
+    await db.commit()
+    q = await _quinte_palmares(db)
+    assert q["disponible"] is False and q["nb_tickets"] == 0
+
+
+@pytest.mark.asyncio
+async def test_palmares_public_quinte_sans_roi_ni_montants(client):
+    """Le public reçoit des comptages : ni ROI, ni mise/retour agrégés (qui
+    permettraient de le recalculer), ni détail par profil — réservés à l'admin."""
+    q = (await client.get("/api/v1/stats/palmares-public")).json()["quinte"]
+    for champ in ("roi", "net", "mise_totale", "retour", "par_profil"):
+        assert champ not in q, champ
+    assert {"nb_tickets", "nb_bonus", "nb_tickets_gagnants"} <= set(q)
