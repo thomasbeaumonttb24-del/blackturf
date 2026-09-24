@@ -502,10 +502,15 @@ def settle_module_quinte(module: Optional[dict], classement: list[dict],
         return None
     numeros = [int(c["numero"]) for c in (module.get("chevaux") or [])
                if c.get("numero") is not None]
-    if cout <= 0 or len(numeros) < 5:
+    # Combinaisons EXPLICITES (profil risqué : plusieurs tickets tendus distincts) :
+    # chacune est un ticket unitaire joué dans l'ordre affiché — Ordre possible.
+    explicites = [[int(x) for x in c] for c in (module.get("combinaisons") or [])
+                  if len(set(c)) == 5]
+    if cout <= 0 or (not explicites and len(numeros) < 5):
         return None
     from itertools import combinations
-    combis = list(combinations(numeros, 5))
+    combis = [tuple(c) for c in explicites] if explicites else list(combinations(numeros, 5))
+    tendus = bool(explicites) or len(combis) == 1
     mise_combi = cout / len(combis)
     mise = gain = 0.0
     nb_gagnantes = nb_attente = nb_rembourse = 0
@@ -515,7 +520,7 @@ def settle_module_quinte(module: Optional[dict], classement: list[dict],
                           classement, rapports, nb_partants, rapports_detail, non_partants,
                           # Tendu = ticket unitaire joué dans l'ordre affiché (Ordre
                           # possible) ; champ = combinaisons réglées au Désordre.
-                          ordre_joue=len(combis) == 1)
+                          ordre_joue=tendus)
         if res.get("rembourse"):
             nb_rembourse += 1          # neutre, comme dans settle_plan
             continue
@@ -536,7 +541,7 @@ def settle_module_quinte(module: Optional[dict], classement: list[dict],
     return {
         "type": module.get("type_pari") or "Quinté+ Désordre",
         "couverture": module.get("couverture"),
-        "chevaux": numeros,
+        "chevaux": numeros or sorted({x for c in combis for x in c}),
         "nb_combinaisons": len(combis),
         "mise_par_combinaison": round(mise_combi, 4),
         "total_mise": mise,

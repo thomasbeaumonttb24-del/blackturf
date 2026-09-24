@@ -31,6 +31,8 @@ _INFO_QUINTE = {
 
 _INFO_SANS_QUINTE = dict(_INFO_QUINTE, est_quinte=False)
 PROFILS = ("conservateur", "equilibre", "agressif")
+# Profils à UN ticket (tendu ou champ) ; le risqué joue cinq tickets tendus distincts.
+PROFILS_TICKET_UNIQUE = ("conservateur", "equilibre")
 
 
 def _preds(n=16):
@@ -89,7 +91,7 @@ def test_couverture_s_elargit_avec_le_profil_quand_le_budget_le_permet():
     À 2 € la combinaison, un champ 7 (21 combinaisons) coûte 42 € : il faut 200 €."""
     couv = {p: _plan(200, p).module_quinte["couverture"] for p in PROFILS}
     assert couv == {"conservateur": "tendue", "equilibre": "champ 6 chevaux",
-                    "agressif": "champ 7 chevaux"}
+                    "agressif": "5 tickets tendus"}
 
 
 @pytest.mark.parametrize("profil", PROFILS)
@@ -122,8 +124,9 @@ def test_plan_to_dict_expose_le_module_et_son_cout():
 
 # ── Budget : pris SUR le montant ─────────────────────────────────────────────
 
-@pytest.mark.parametrize("profil", PROFILS)
-@pytest.mark.parametrize("montant", [4, 5, 7, 10, 13, 20, 50, 100])
+@pytest.mark.parametrize("profil,montant", [
+    (p, m) for p in PROFILS_TICKET_UNIQUE for m in (4, 5, 7, 10, 13, 20, 50, 100)
+] + [("agressif", m) for m in (12, 13, 20, 50, 100)])
 def test_somme_exacte_egale_au_montant_saisi(profil, montant):
     plan = _plan(montant, profil)
     mq = plan.module_quinte
@@ -137,8 +140,9 @@ def test_somme_exacte_egale_au_montant_saisi(profil, montant):
         "coût en euros entiers : le plan principal garde un montant entier")
 
 
-@pytest.mark.parametrize("profil", PROFILS)
-@pytest.mark.parametrize("montant", [4, 10, 20, 50])
+@pytest.mark.parametrize("profil,montant", [
+    (p, m) for p in PROFILS_TICKET_UNIQUE for m in (4, 10, 20, 50)
+] + [("agressif", m) for m in (12, 20, 50)])
 def test_plan_principal_construit_sur_le_montant_moins_le_quinte(profil, montant):
     plan = mc.plan_to_dict(_plan(montant, profil))
     principal = mc.plan_to_dict(_corps(int(montant - plan["montant_quinte"]), profil))
@@ -197,7 +201,7 @@ def test_constantes_alignees_sur_combo_bets_et_le_catalogue_pmu():
     assert mc.QUINTE_MISE_BASE == _JACKPOT_UNIT == mise_base("Quinté+")
 
 
-@pytest.mark.parametrize("profil", PROFILS)
+@pytest.mark.parametrize("profil", PROFILS_TICKET_UNIQUE)
 @pytest.mark.parametrize("montant", [4, 10, 20, 50, 100, 200])
 def test_prix_coherents(profil, montant):
     mq = _plan(montant, profil).module_quinte
@@ -208,15 +212,15 @@ def test_prix_coherents(profil, montant):
 
 
 def test_champ_reduit_explique_quand_le_budget_ne_suffit_pas():
-    mq = _plan(10, "agressif").module_quinte
-    assert mq["couverture"] == "tendue" and mq["couverture_visee"] == "champ 7 chevaux"
+    mq = _plan(50, "equilibre").module_quinte
+    assert mq["couverture"] == "tendue" and mq["couverture_visee"] == "champ 6 chevaux"
     assert mq["couverture_reduite"] is True
-    assert "42 €" in mq["motif_couverture"]
+    assert "12 €" in mq["motif_couverture"]
 
 
 # ── Montant trop faible / module indisponible ────────────────────────────────
 
-@pytest.mark.parametrize("profil", PROFILS)
+@pytest.mark.parametrize("profil", PROFILS_TICKET_UNIQUE)
 @pytest.mark.parametrize("montant", [1, 2, 3])
 def test_montant_trop_faible_quinte_ajoute_en_supplement(profil, montant):
     """Sous 4 € : le Quinté+ reste proposé (ticket tendu de 2 €), ajouté au montant ;
@@ -344,3 +348,74 @@ def test_plan_genere_puis_regle_bout_a_bout():
     assert bilan["total_mise"] + bilan["module_quinte"]["total_mise"] == pytest.approx(10.0)
     assert bilan["module_quinte"]["nb_gagnantes"] >= 1
     assert bilan["module_quinte"]["en_attente"] is False
+
+
+# ── Profil risqué : cinq tickets Quinté+ différents, 2 € chacun ────────────────
+
+@pytest.mark.parametrize("montant", [1, 2, 5, 10, 11, 12, 20, 50, 100, 200])
+def test_risque_cinq_tickets_differents_a_deux_euros(montant):
+    """Arbitrage du 2026-09-24 : le plan risqué propose cinq tickets Quinté+
+    différents, 2 € chacun, à chaque fois."""
+    mq = _plan(montant, "agressif").module_quinte
+    assert mq["disponible"] is True
+    combis = mq["combinaisons"]
+    assert len(combis) == 5 and len({tuple(sorted(c)) for c in combis}) == 5
+    assert all(len(set(c)) == 5 for c in combis)
+    assert mq["nb_combinaisons"] == 5 and mq["mise_unitaire"] == 2.0
+    assert mq["cout_total"] == 10.0
+    assert [t["numeros"] for t in mq["tickets"]] == combis
+    assert all(0 < t["proba_gain"] < 1 and t["rapport_estime"] > 1 for t in mq["tickets"])
+
+
+def test_risque_les_cinq_quintes_les_plus_probables_dans_l_ordre_du_classement():
+    """Les cinq combinaisons sont les plus probables selon le modèle, parmi le haut
+    du classement, et chaque ticket est joué dans l'ordre du rang IA."""
+    mq = _plan(50, "agressif").module_quinte
+    probas = [t["proba_gain"] for t in mq["tickets"]]
+    assert probas == sorted(probas, reverse=True)
+    assert mq["combinaisons"][0] == [1, 2, 3, 4, 5]
+    for c in mq["combinaisons"]:
+        assert c == sorted(c), "ordre joué = rang IA (numéros croissants dans _preds)"
+        assert max(c) <= mc.QUINTE_RISQUE_VIVIER
+
+
+@pytest.mark.parametrize("montant", [12, 20, 50])
+def test_risque_cout_pris_sur_le_montant_des_12_euros(montant):
+    plan = _plan(montant, "agressif")
+    assert plan.module_quinte["en_supplement"] is False
+    assert plan.montant_joue + plan.montant_quinte == montant == plan.montant_total
+    assert plan.montant_joue >= mc.QUINTE_PRINCIPAL_MIN
+
+
+@pytest.mark.parametrize("montant", [1, 2, 5, 10, 11])
+def test_risque_sous_12_euros_les_tickets_sont_ajoutes(montant):
+    """Sous 12 €, prendre 10 € laisserait moins de 2 € au plan principal : les cinq
+    tickets restent proposés, ajoutés au montant, et le plan le dit."""
+    plan = _plan(montant, "agressif")
+    mq = plan.module_quinte
+    saisi = max(2, montant)
+    assert mq["en_supplement"] is True and mq["cout_total"] == 10.0
+    assert plan.montant_joue == saisi and plan.montant_total == saisi + 10
+    assert "ajoutés" in mq["motif_supplement"]
+    assert [p for n in plan.niveaux for p in n.paris]
+
+
+def test_reglement_tickets_explicites_chacun_comme_un_tendu():
+    """Cinq tickets explicites : chacun réglé seul (2 €), l'Ordre pour le ticket
+    arrivé dans l'ordre joué, le Bonus 4sur5 pour ceux qui ont 4 des 5."""
+    module = {"disponible": True, "type_pari": "Quinté+ Désordre", "cout_total": 10.0,
+              "combinaisons": [[1, 4, 3, 10, 8], [1, 4, 3, 10, 12], [1, 4, 3, 8, 12],
+                               [1, 4, 10, 8, 12], [2, 5, 6, 7, 9]],
+              "chevaux": []}
+    detail = {"e_quinte_plus": [
+        {"libelle": "e-Quinté+ Ordre", "combinaison": "1-4-3-10-8", "rapport": 11652.4},
+        {"libelle": "e-Quinté+ Désordre", "combinaison": "1-4-3-10-8", "rapport": 138.2},
+        {"libelle": "e-Bonus 4sur5", "combinaison": "1-4-3-10", "rapport": 4.8},
+        {"libelle": "e-Bonus 4sur5", "combinaison": "1-4-3-8", "rapport": 4.8},
+        {"libelle": "e-Bonus 4sur5", "combinaison": "1-4-10-8", "rapport": 4.8},
+        {"libelle": "e-Bonus 3", "combinaison": "1-4-3", "rapport": 4.0}]}
+    res = settle_module_quinte(module, ARRIVEE, AGREGAT, 16, detail)
+    assert res["nb_combinaisons"] == 5 and res["mise_par_combinaison"] == 2.0
+    assert res["total_mise"] == 10.0
+    assert res["nb_gagnantes"] == 4
+    assert res["total_gain"] == pytest.approx(2 * 11652.4 + 3 * 2 * 4.8, abs=0.01)

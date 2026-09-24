@@ -354,7 +354,7 @@ class TestEvBandStaking:
                                              ev_band_perf=_all_bands(0.5)))
             paris = [p for n in plan["niveaux"] for p in n["paris"]]
             assert paris, f"plan {profil} vide avec bandes toxiques"
-            assert plan["montant_joue"] + plan["montant_quinte"] == 10
+            _montant_entierement_joue(plan, 10)
 
     def test_raison_bande_ev_exposee(self):
         """Le facteur bande-EV est appliqué ET justifié dans les raisons du pari."""
@@ -392,16 +392,28 @@ def test_filet_agressif_ne_choisit_pas_le_plus_gros_rapport_aveuglement():
     assert selected[0]["chevaux"][0]["numero"] == 1
 
 
+def _montant_entierement_joue(plan: dict, montant: int) -> None:
+    """Course Quinté+ (arbitrages du 2026-09-24) : le Quinté+ est pris SUR le montant
+    saisi, sauf quand il ne laisserait pas 2 € au plan principal — il est alors
+    AJOUTÉ (tendu de 2 € sous 4 €, cinq tickets de 10 € pour le risqué sous 12 €).
+    Dans les deux cas rien n'est mis en réserve."""
+    mq = plan.get("module_quinte") or {}
+    assert plan["montant_joue"] + plan["montant_quinte"] == plan["montant_total"]
+    if mq.get("en_supplement"):
+        assert plan["montant_joue"] == montant
+        assert plan["montant_total"] == montant + plan["montant_quinte"]
+    else:
+        assert plan["montant_total"] == montant
+    assert plan["montant_reserve"] == 0
+
+
 @pytest.mark.parametrize("montant", [6, 30])
 @pytest.mark.parametrize("profil", ["conservateur", "equilibre", "agressif"])
 def test_montant_saisi_est_toujours_integralement_joue(montant, profil):
     plan = plan_to_dict(generer_plan(
         montant, profil, _field(10), COURSE, respect_montant=True,
     ))
-
-    # Course Quinté+ : plan principal + Quinté+ = montant saisi (arbitrage 2026-09-24).
-    assert plan["montant_joue"] + plan["montant_quinte"] == montant
-    assert plan["montant_reserve"] == 0
+    _montant_entierement_joue(plan, montant)
 
 
 def test_le_montant_change_la_strategie_et_pas_seulement_un_ratio():

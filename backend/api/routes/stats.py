@@ -1672,15 +1672,19 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
             depuis = dh
         rangs = [g.get("rang") or "" for g in bilan["gagnantes"]]
         nb_bonus = sum(1 for r in rangs if r.startswith("Bonus"))
-        out["nb_tickets"] += 1
+        # Profil risqué : plusieurs tickets tendus distincts (une combinaison chacun) ;
+        # un tendu ou un champ reste UN ticket.
+        n_tickets = len(module.get("combinaisons") or []) or 1
+        out["nb_tickets"] += n_tickets
         out["mise_totale"] += bilan["total_mise"]
         out["retour"] += bilan["total_gain"]
         out["nb_bonus"] += nb_bonus
         out["nb_cinq_sur_cinq"] += len(rangs) - nb_bonus
-        out["nb_tickets_gagnants"] += 1 if bilan["nb_gagnantes"] else 0
+        out["nb_tickets_gagnants"] += (bilan["nb_gagnantes"] if n_tickets > 1
+                                       else (1 if bilan["nb_gagnantes"] else 0))
         p = out["par_profil"].setdefault(profil, {"nb_tickets": 0, "mise_totale": 0.0,
                                                   "retour": 0.0, "nb_bonus": 0})
-        p["nb_tickets"] += 1
+        p["nb_tickets"] += n_tickets
         p["mise_totale"] += bilan["total_mise"]
         p["retour"] += bilan["total_gain"]
         p["nb_bonus"] += nb_bonus

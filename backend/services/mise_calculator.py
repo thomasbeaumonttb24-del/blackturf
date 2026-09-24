@@ -985,6 +985,131 @@ def _quinte_incertitude(preds: list[dict], sel_nums: list[int]) -> dict:
         return {}
 
 
+# Profil RISQUÉ — arbitrage produit du 2026-09-24 : cinq tickets Quinté+ DIFFÉRENTS
+# à 2 € chacun sur chaque course Quinté+, plutôt qu'un seul ticket (tendu ou champ).
+# Les cinq combinaisons sont les cinq quintés les plus probables selon le modèle,
+# choisies parmi les QUINTE_RISQUE_VIVIER premiers du classement ; chacune est un
+# ticket tendu joué dans l'ordre du classement (Ordre possible au règlement).
+QUINTE_RISQUE_NB_TICKETS = 5
+QUINTE_RISQUE_VIVIER = 8
+
+
+def _combinaisons_quinte_risque(preds: list[dict]) -> Optional[dict]:
+    """Les QUINTE_RISQUE_NB_TICKETS combinaisons de 5 les plus probables selon le
+    modèle, avec probabilité et rapport estimé de chacune — mêmes forces et même
+    formule de rapport que `build_coverage_bets` (TRJ / probabilité marché)."""
+    try:
+        from itertools import combinations
+        import numpy as np
+        from ml.combo_bets import (N_SIMS, TRJ, _RAPPORT_MAX_JACKPOT, _Sim,
+                                   _cap_model_probas, _exposants_harville,
+                                   simulate_orderings)
+        parts = [p for p in preds if (p.get("cote_pmu") or 0) > 1.0]
+        if len(parts) < 5:
+            return None
+        p1 = np.array([max(float(p.get("proba_top1") or 0.0), 1e-4) for p in parts])
+        p1 = p1 / p1.sum()
+        cotes = np.array([float(p.get("cote_pmu") or 10.0) for p in parts])
+        pm = 1.0 / np.clip(cotes, 1.01, None)
+        pm = pm / pm.sum()
+        p1 = _cap_model_probas(p1, pm, cotes)
+        exp = _exposants_harville()
+        sim = _Sim(simulate_orderings(p1, n_sims=N_SIMS, seed=12345), len(parts),
+                   forces=p1, exposants=exp)
+        sim_m = _Sim(simulate_orderings(pm, n_sims=N_SIMS, seed=67890), len(parts),
+                     forces=pm, exposants=exp)
+        vivier = [int(i) for i in np.argsort(-p1)[:max(5, min(QUINTE_RISQUE_VIVIER, len(parts)))]]
+        notes = sorted(((float(sim.p_topk_exact(list(c), 5)), list(c))
+                        for c in combinations(vivier, 5)), key=lambda x: -x[0])
+        choisies = [c for _, c in notes[:QUINTE_RISQUE_NB_TICKETS]]
+        tickets = []
+        for c in choisies:
+            c = sorted(c, key=lambda i: -p1[i])          # ordre joué = rang IA
+            p_mkt = max(float(sim_m.p_topk_exact(c, 5)), 1e-5)
+            tickets.append({
+                "numeros": [int(parts[i]["numero"]) for i in c],
+                "proba_gain": round(float(sim.p_topk_exact(c, 5)), 4),
+                "rapport_estime": round(float(min(max(TRJ["Quinté+ Désordre"] / p_mkt, 1.1),
+                                                  _RAPPORT_MAX_JACKPOT)), 1),
+            })
+        cinq = np.zeros(sim.in_top5.shape[0], dtype=bool)
+        retour = np.zeros_like(cinq)
+        for c in choisies:
+            k5 = sim.in_top5[:, c].sum(axis=1)
+            k3 = sim.in_top3[:, c].sum(axis=1)
+            cinq |= k5 == 5
+            retour |= (k5 >= 4) | (k3 == 3)
+        return {"tickets": tickets, "proba_gain": round(float(cinq.mean()), 4),
+                "proba_bonus": round(float((retour & ~cinq).mean()), 4)}
+    except Exception:
+        return None
+
+
+def _module_quinte_risque(preds: list[dict], montant: int, base: dict) -> dict:
+    """Module Quinté+ du profil risqué : cinq tickets tendus distincts à 2 €.
+
+    Coût pris sur le montant tant que le plan principal garde au moins
+    QUINTE_PRINCIPAL_MIN ; en dessous (montant < 12 €), les cinq tickets sont
+    AJOUTÉS au montant saisi — ils sont proposés à chaque fois."""
+    res = _combinaisons_quinte_risque(preds)
+    if not res or not res["tickets"]:
+        return {**base, "disponible": False, "financable": True,
+                "motif": ("aucune combinaison Quinté+ calculable pour cette course : "
+                          "tout le montant va au plan principal")}
+    tickets = res["tickets"]
+    n = len(tickets)
+    cout = float(n * QUINTE_MISE_BASE)
+    en_supplement = montant - cout < QUINTE_PRINCIPAL_MIN
+    rang_par_num = {int(p["numero"]): i for i, p in enumerate(
+        sorted(preds, key=lambda x: float(x.get("proba_top1") or 0.0), reverse=True), start=1)}
+    par_num = {int(p["numero"]): p for p in preds}
+    joues = list(dict.fromkeys(n_ for t in tickets for n_ in t["numeros"]))
+    chevaux = [{"numero": n_, "nom": par_num[n_]["nom"],
+                "cote": round(float(par_num[n_].get("cote_pmu") or 0.0), 1),
+                "rang": rang_par_num.get(n_)} for n_ in joues]
+    rapports = sorted(t["rapport_estime"] for t in tickets)
+    return {
+        **base,
+        "disponible": True,
+        "financable": True,
+        "couverture": f"{n} tickets tendus",
+        "couverture_visee": f"{QUINTE_RISQUE_NB_TICKETS} tickets tendus",
+        "couverture_reduite": n < QUINTE_RISQUE_NB_TICKETS,
+        "motif_couverture": None,
+        "nb_chevaux": len(joues),
+        "chevaux": chevaux,
+        # Combinaisons EXPLICITES : le règlement joue celles-ci, pas C(N, 5).
+        "combinaisons": [t["numeros"] for t in tickets],
+        "tickets": [{**t, "chevaux": [{"numero": x, "nom": par_num[x]["nom"],
+                                        "rang": rang_par_num.get(x)} for x in t["numeros"]]}
+                    for t in tickets],
+        "nb_combinaisons": n,
+        "flexi_pct": 100,
+        "mise_unitaire": QUINTE_MISE_BASE,
+        "cout_total": cout,
+        "budget_alloue": cout,
+        "montant_plan_principal": montant if en_supplement else montant - cout,
+        "en_supplement": en_supplement,
+        "motif_supplement": (
+            f"Montant de {montant} € trop faible pour prendre les {n} tickets Quinté+ "
+            f"({cout:g} €) dessus en gardant {QUINTE_PRINCIPAL_MIN:g} € au plan principal : "
+            f"ils sont ajoutés, total {montant + cout:g} €."
+        ) if en_supplement else None,
+        "proba_gain": res["proba_gain"],
+        "proba_bonus": res["proba_bonus"],
+        "rapport_estime": rapports[len(rapports) // 2],
+        "rapport_fourchette": {"bas": rapports[0], "median": rapports[len(rapports) // 2],
+                               "haut": rapports[-1]},
+        "gain_potentiel": round(rapports[len(rapports) // 2] * QUINTE_MISE_BASE, 2),
+        "gain_fourchette": {"bas": round(rapports[0] * QUINTE_MISE_BASE, 2),
+                            "haut": round(rapports[-1] * QUINTE_MISE_BASE, 2)},
+        "note": ("Couverture de divertissement : aucune espérance de gain positive n'est "
+                 "établie pour un Quinté+ joué systématiquement (prélèvement du pool "
+                 "supérieur à 25 %, rapports estimés sans les mises réelles des autres "
+                 "parieurs, Bonus non chiffrés)."),
+    }
+
+
 def _construire_module_quinte(predictions: list[dict], course_info: dict, profil: str,
                               montant: float) -> Optional[dict]:
     """Module Quinté+ explicite pour ce profil, ou None si la course n'offre pas
@@ -1016,6 +1141,9 @@ def _construire_module_quinte(predictions: list[dict], course_info: dict, profil
                 "motif": (f"Seulement {n_exploitables} cheva{'l' if n_exploitables < 2 else 'ux'} "
                           "à cote exploitable : aucune combinaison Quinté+ calculable pour "
                           "cette course. Tout le montant va au plan principal.")}
+
+    if profil == "agressif":
+        return _module_quinte_risque(preds, montant, base)
 
     regle = _regle_budget_quinte(montant, profil, n_max=min(7, n_exploitables))
     en_supplement = bool(regle.get("en_supplement"))

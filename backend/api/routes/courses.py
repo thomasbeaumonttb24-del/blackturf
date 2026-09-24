@@ -2264,7 +2264,8 @@ async def enregistrer_paris(
 
 def lignes_capital_du_plan(plan: dict, profil: str) -> list[dict]:
     """Lignes `bankroll_entries` d'un plan enregistré : une par pari du plan
-    principal, plus UNE ligne pour le ticket Quinté+ quand le plan en porte un.
+    principal, plus une ligne par ticket Quinté+ (une seule pour un tendu ou un
+    champ, cinq pour les tickets tendus du profil risqué).
 
     Le Quinté+ est de l'argent réellement misé (décision du 2026-09-24) : il entre
     dans le capital comme n'importe quel ticket, au coût total du ticket, avec tous
@@ -2292,7 +2293,20 @@ def lignes_capital_du_plan(plan: dict, profil: str) -> list[dict]:
     except (TypeError, ValueError):
         cout = 0.0
     numeros = [c["numero"] for c in (module.get("chevaux") or []) if c.get("numero") is not None]
-    if module.get("disponible") and cout > 0 and len(numeros) >= 5:
+    combinaisons = [c for c in (module.get("combinaisons") or []) if len(set(c)) == 5]
+    if module.get("disponible") and cout > 0 and combinaisons:
+        # Profil risqué : plusieurs tickets tendus distincts — une ligne par ticket,
+        # chacune réglée comme un tendu (ordre affiché, Bonus compris).
+        mise_ticket = round(cout / len(combinaisons), 2)
+        for c in combinaisons:
+            lignes.append({
+                "type_pari": module.get("type_pari") or "Quinté+ Désordre",
+                "chevaux": " + ".join(f"N°{n}" for n in c),
+                "mise": mise_ticket,
+                "notes": note_ligne_module_quinte(profil, module.get("couverture")),
+                "_quinte": True,
+            })
+    elif module.get("disponible") and cout > 0 and len(numeros) >= 5:
         lignes.append({
             "type_pari": module.get("type_pari") or "Quinté+ Désordre",
             "chevaux": " + ".join(f"N°{n}" for n in numeros),

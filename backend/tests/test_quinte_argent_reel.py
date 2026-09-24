@@ -82,7 +82,7 @@ def test_enregistrer_le_plan_ecrit_aussi_le_ticket_quinte():
     assert sum(l["mise"] for l in lignes) == pytest.approx(100.0)
 
 
-@pytest.mark.parametrize("profil", ("conservateur", "equilibre", "agressif"))
+@pytest.mark.parametrize("profil", ("conservateur", "equilibre"))
 def test_ticket_quinte_ajoute_au_montant_sous_4_euros_est_enregistre(profil):
     from api.routes.courses import lignes_capital_du_plan
     plan = _plan_dict(3, profil)
@@ -484,3 +484,42 @@ async def test_palmares_public_quinte_sans_roi_ni_montants(client):
     for champ in ("roi", "net", "mise_totale", "retour", "par_profil"):
         assert champ not in q, champ
     assert {"nb_tickets", "nb_bonus", "nb_tickets_gagnants"} <= set(q)
+
+
+@pytest.mark.parametrize("montant,total", [(3, 13.0), (20, 20.0)])
+def test_risque_cinq_lignes_de_capital_une_par_ticket(montant, total):
+    """Plan risqué enregistré : cinq lignes Quinté+ (une par ticket tendu, 2 €),
+    chacune avec ses cinq chevaux, réglables comme un tendu."""
+    from api.routes.courses import lignes_capital_du_plan
+    plan = _plan_dict(montant, "agressif")
+    lignes = lignes_capital_du_plan(plan, "agressif")
+    q = [l for l in lignes if l.get("_quinte")]
+    assert len(q) == 5 and all(l["mise"] == 2.0 for l in q)
+    assert [l["chevaux"] for l in q] == [
+        " + ".join(f"N°{n}" for n in c) for c in plan["module_quinte"]["combinaisons"]]
+    assert all(est_ligne_module_quinte(l["notes"]) for l in q)
+    assert sum(l["mise"] for l in lignes) == pytest.approx(plan["montant_total"]) == total
+
+
+@pytest.mark.asyncio
+async def test_palmares_quinte_compte_les_cinq_tickets_du_risque(db, monkeypatch):
+    """Un plan risqué = cinq tickets tendus : le palmarès en compte cinq, et compte
+    gagnant chaque ticket payé (Ordre, Bonus 4sur5, Bonus 3), sur les rapports réels."""
+    from api.routes import stats as _stats
+    from api.routes.stats import _quinte_palmares
+    monkeypatch.setattr(_stats, "QUINTE_MODULE_DEPUIS",
+                        _stats.datetime(2026, 9, 23, tzinfo=_stats.timezone.utc))
+    await db.execute(text(_DDL_PROFIL_RUN_LOG))
+    await _course_terminee(db)
+    module = {"disponible": True, "type_pari": "Quinté+ Désordre", "cout_total": 10.0,
+              "couverture": "5 tickets tendus", "chevaux": [],
+              "combinaisons": [[13, 8, 10, 4, 16], [8, 10, 4, 16, 7], [8, 7, 4, 16, 10],
+                               [1, 2, 3, 5, 6], [13, 8, 10, 2, 3]]}
+    await _run(db, "r1", "agressif", {"niveaux": [], "module_quinte": module})
+    await db.commit()
+    q = await _quinte_palmares(db)
+    assert q["nb_tickets"] == 5 and q["nb_courses"] == 1
+    assert q["mise_totale"] == pytest.approx(10.0)
+    # Ordre (ticket joué dans l'ordre d'arrivée), deux Bonus 4sur5, un Bonus 3.
+    assert q["nb_tickets_gagnants"] == 4
+    assert q["retour"] == pytest.approx(2 * 4703.3 + 2 * 2 * 2.4 + 2 * 2.1, abs=0.01)

@@ -37,6 +37,13 @@ export interface ModuleQuinteData {
   gain_potentiel?: number;
   gain_fourchette?: { bas: number; haut: number } | null;
   note?: string;
+  // Profil risqué : plusieurs tickets tendus distincts (2 € chacun).
+  tickets?: {
+    numeros: number[];
+    proba_gain?: number | null;
+    rapport_estime?: number | null;
+    chevaux?: { numero: number; nom: string; rang?: number | null }[];
+  }[];
 }
 
 // Mêmes jetons que le plan de mise (CourseClient) : neutres chauds + ardoise, pour
@@ -105,6 +112,8 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
   const rf = module.rapport_fourchette;
   const principal = module.montant_plan_principal ?? montantTotal - module.cout_total;
   const tendu = (module.nb_combinaisons ?? 1) <= 1;
+  const tickets = module.tickets ?? [];
+  const multi = tickets.length > 1;
 
   return (
     <section aria-label="Quinté+" style={{ borderRadius: 15, overflow: "hidden", background: CX.surf1, border: `1px solid ${CX.slateBd}`, boxShadow: "0 1px 2px rgba(17,24,39,.025)" }}>
@@ -116,10 +125,35 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
       </div>
 
       <div style={{ padding: "13px 14px", display: "flex", flexDirection: "column", gap: 11 }}>
+        {/* Profil risqué : plusieurs tickets tendus distincts, chacun à 2 €. */}
+        {multi && (
+          <div>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: CX.gray500, marginBottom: 6 }}>
+              {tickets.length} tickets différents · {eur(module.mise_unitaire ?? 2)} chacun · joués dans l&apos;ordre du classement IA
+            </div>
+            <ol style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+              {tickets.map((t, i) => (
+                <li key={t.numeros.join("-")} style={{ minWidth: 0, borderRadius: 9, border: `1px solid ${CX.bd2}`, padding: "6px 9px", fontSize: 12, color: CX.ink2 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ fontWeight: 700 }}>Ticket {i + 1}</span>
+                    <span style={{ fontSize: 10.5, color: CX.gray500, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
+                      {t.proba_gain != null ? `${pct(t.proba_gain)} · ` : ""}
+                      {t.rapport_estime != null ? `rapport ~×${t.rapport_estime.toFixed(0)}` : ""}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 4, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, letterSpacing: ".02em", fontVariantNumeric: "tabular-nums" }}>
+                    {t.numeros.join(" - ")}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
         {/* Sélection : numéro + casaque + nom, dans l'ordre du classement de l'IA. */}
         <div>
           <div style={{ fontSize: 10.5, fontWeight: 600, color: CX.gray500, marginBottom: 6 }}>
-            {tendu ? "Les 5 chevaux joués" : `${chevaux.length} chevaux · toutes les combinaisons de 5`}
+            {multi ? `Les ${chevaux.length} chevaux utilisés` : tendu ? "Les 5 chevaux joués" : `${chevaux.length} chevaux · toutes les combinaisons de 5`}
           </div>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 6 }}>
             {chevaux.map((c) => (
@@ -137,11 +171,11 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
 
         {/* Ticket : ce qui est réellement acheté au guichet. */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 6 }}>
-          <Stat label="Formule" value={tendu ? "Tendu" : `Champ ${module.nb_chevaux ?? chevaux.length}`}
+          <Stat label="Formule" value={multi ? `${tickets.length} tendus` : tendu ? "Tendu" : `Champ ${module.nb_chevaux ?? chevaux.length}`}
             sub={`${module.nb_combinaisons ?? 1} combinaison${(module.nb_combinaisons ?? 1) > 1 ? "s" : ""}`} />
-          <Stat label="Mise par combinaison" value={module.mise_unitaire != null ? eur(module.mise_unitaire) : "—"}
+          <Stat label={multi ? "Mise par ticket" : "Mise par combinaison"} value={module.mise_unitaire != null ? eur(module.mise_unitaire) : "—"}
             sub={tendu ? "mise de base PMU" : `${module.nb_combinaisons ?? 1} × ${eur(module.mise_unitaire ?? 2)}, sans Flexi`} />
-          <Stat label="Chance de toucher les 5" value={module.proba_gain != null ? pct(module.proba_gain) : "—"}
+          <Stat label={multi ? "Chance qu'un ticket touche les 5" : "Chance de toucher les 5"} value={module.proba_gain != null ? pct(module.proba_gain) : "—"}
             sub={module.proba_bonus != null ? `+ ${pct(module.proba_bonus)} de retour partiel (Bonus)` : undefined} />
           <Stat label="Si les 5 arrivent"
             value={gf ? (Math.round(gf.bas) === Math.round(gf.haut) ? `~${eurRond(gf.bas)}` : `${eurRond(gf.bas)} à ${eurRond(gf.haut)}`)

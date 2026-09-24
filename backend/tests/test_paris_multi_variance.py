@@ -144,8 +144,11 @@ class TestVarianceCap:
         d = plan_to_dict(plan)
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert paris, "plan risqué vide"
-        # Tout le montant joué : plan principal + Quinté+ pris sur le montant (2026-09-24).
-        assert sum(p["mise"] for p in paris) + d["montant_quinte"] == 10
+        # Risqué sous 12 € : les cinq tickets Quinté+ (10 €) s'AJOUTENT au montant et
+        # le plan principal joue les 10 € saisis en entier (arbitrage 2026-09-24).
+        assert d["module_quinte"]["en_supplement"] is True
+        assert sum(p["mise"] for p in paris) == 10
+        assert sum(p["mise"] for p in paris) + d["montant_quinte"] == d["montant_total"] == 20
         # Le contrat ×10 vs mise TOTALE porte sur TOUS les tickets, sans exception
         # (décision produit 2026-08-20), y compris les tickets d'appoint à 2€.
         for p in paris:
