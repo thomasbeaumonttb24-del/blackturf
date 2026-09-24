@@ -6,7 +6,7 @@
    cheval. Le travail est de rendre chaque chiffre lisible sans légende externe :
    libellés en clair, verdicts en mots (« bon prix », « en progression »), et une
    mise en page propre au téléphone plutôt que des colonnes masquées. */
-import { useId, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import {
   Activity, ArrowDownUp, ChevronDown, Crown, Gauge, HelpCircle, MapPin, Trophy,
   TrendingDown, TrendingUp, Users,
@@ -15,6 +15,7 @@ import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { MusiqueDisplay, RunningStyleBadge } from "@/components/courses/badges";
 import { formatMontantDevise, cn } from "@/lib/utils";
 import { LecturePrix, formatCoteFr, formatCoteJusteFr } from "@/components/courses/classement";
+import { BandeauOnglet, LienOnglet, Pastille, SG, difficulteCourse } from "@/components/courses/course-ui";
 
 const formatCote = (c: number | null | undefined) => (c ? formatCoteFr(c) : "—");
 const formatCoteJuste = (c: number | null | undefined) => (c ? formatCoteJusteFr(c) : "—");
@@ -89,7 +90,6 @@ export type PredictionFiche = {
 type EloChamp = { min: number; max: number; moy: number };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-const SG = { fontFamily: "var(--font-space-grotesk), sans-serif" } as const;
 const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100));
 const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
 const signe = (v: number) => (v >= 0 ? "+" : "−");
@@ -177,14 +177,6 @@ function Barre({ v, ton, className }: { v: number; ton: Ton; className?: string 
   );
 }
 
-function Pastille({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
-  return (
-    <span title={title} className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", className)}>
-      {children}
-    </span>
-  );
-}
-
 function MouvementCote({ mv, compact = false }: { mv: number | null; compact?: boolean }) {
   // mouvement_cote_pct > 0 = la cote a BAISSÉ = le cheval est joué.
   if (mv == null || Math.abs(mv) < 5) return null;
@@ -204,15 +196,38 @@ function MouvementCote({ mv, compact = false }: { mv: number | null; compact?: b
 // ─── Section ─────────────────────────────────────────────────────────────────
 type Tri = "numero" | "ia" | "cote";
 
-export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal }: {
+type OngletLie = "marche" | "plan";
+
+export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal, chevalOuvert, onAller }: {
   partants: PartantFiche[];
   predictions: PredictionFiche[] | null | undefined;
   liveCoteMap: Record<number, number | null>;
   confGlobal: number | null;
+  /** Numéro du cheval dont la fiche s'ouvre à l'arrivée (lien depuis un autre onglet). */
+  chevalOuvert?: number | null;
+  /** Aller à un autre onglet depuis la fiche d'un cheval. */
+  onAller?: (cle: OngletLie) => void;
 }) {
   const avecPreds = !!predictions && predictions.length > 0;
   const [tri, setTri] = useState<Tri>("numero");
-  const [ouvert, setOuvert] = useState<string | null>(null);
+  const [ouvert, setOuvert] = useState<string | null>(
+    () => partants.find((p) => chevalOuvert != null && p.numero === chevalOuvert)?.participation_id ?? null,
+  );
+  // Arrivée depuis un autre onglet : on amène la fiche ouverte à l'écran,
+  // sous la barre d'onglets collante.
+  useEffect(() => {
+    if (chevalOuvert == null) return;
+    const cible = partants.find((p) => p.numero === chevalOuvert);
+    if (!cible) return;
+    setOuvert(cible.participation_id);
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(`partant-${cible.participation_id}`);
+      if (!el) return;
+      window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 130, behavior: "smooth" });
+    }, 80);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chevalOuvert]);
 
   const predPar = useMemo(() => {
     const m = new Map<string, PredictionFiche>();
@@ -247,10 +262,7 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
   }, [partants, tri, predPar, liveCoteMap]);
 
   const nbNP = partants.filter((p) => p.non_partant).length;
-  const difficulte = confGlobal == null ? null
-    : confGlobal >= 70 ? { txt: "Favori clair", cls: "bg-emerald-50 text-emerald-800 ring-emerald-200" }
-    : confGlobal >= 50 ? { txt: "Course ouverte", cls: "bg-amber-50 text-amber-800 ring-amber-200" }
-    : { txt: "Course serrée", cls: "bg-rose-50 text-rose-800 ring-rose-200" };
+  const difficulte = difficulteCourse(confGlobal);
   const favori = avecPreds
     ? partants.find((p) => !p.non_partant && predPar.get(p.participation_id)?.rang_predit === 1)
     : undefined;
@@ -264,57 +276,61 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
 
   return (
     <section aria-labelledby="partants-titre" className="space-y-3">
-      {/* ── En-tête : sobre, blanc ── */}
-      <header className="rounded-[20px] bg-white px-4 py-4 ring-1 ring-[#ECE7DC] shadow-[0_1px_2px_rgba(17,24,39,.04)] sm:px-5">
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-          <div className="min-w-0">
-            <h2 id="partants-titre" className="text-[18px] font-bold leading-tight tracking-tight text-stone-900" style={SG}>Partants</h2>
-            <p className="mt-0.5 text-[12.5px] text-stone-500">
-              <b className="font-semibold text-stone-900">{partants.length - nbNP}</b> au départ
-              {nbNP > 0 ? <> · <b className="font-semibold text-stone-700">{nbNP}</b> non-partant{nbNP > 1 ? "s" : ""}</> : null}
-              <span className="hidden sm:inline"> · touchez un cheval pour sa fiche</span>
-            </p>
-          </div>
-          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:items-center">
+      {/* ── Bandeau d'onglet : panneau teinté et plat, distinct des cartes ── */}
+      <BandeauOnglet
+        id="partants-titre"
+        icone={Users}
+        titre="Partants"
+        className="mb-5"
+        sousTitre={
+          <>
+            <b className="font-semibold text-stone-900">{partants.length - nbNP}</b> au départ
+            {nbNP > 0 ? <> · <b className="font-semibold text-stone-700">{nbNP}</b> non-partant{nbNP > 1 ? "s" : ""}</> : null}
+            <span className="hidden sm:inline"> · touchez un cheval pour sa fiche</span>
+          </>
+        }
+        droite={
+          <>
             {difficulte && (
               <Pastille className={difficulte.cls} title={`Confiance du modèle sur son favori : ${Math.round(confGlobal!)} %`}>
                 {difficulte.txt}
               </Pastille>
             )}
             {favori && probaFavori != null && (
-              <span className="items-center gap-2 rounded-lg bg-stone-50 px-2.5 py-1 ring-1 ring-inset ring-stone-200 inline-flex" title="Le cheval que le modèle voit gagner">
+              <span className="inline-flex items-center gap-2 rounded-lg bg-white px-2.5 py-1 ring-1 ring-inset ring-[#E6DCC6]" title="Le cheval que le modèle voit gagner">
                 <Crown className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
                 <span className="text-[11px] text-stone-500">Favori</span>
                 <span className="text-[12.5px] font-semibold text-stone-900">N°{favori.numero} {favori.nom_cheval}</span>
                 <span className="text-[12.5px] font-bold text-amber-700 tabular-nums">{Math.round(probaFavori * 100)} %</span>
               </span>
             )}
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-3">
-          <div role="group" aria-label="Trier les partants" className="inline-flex items-center gap-1 rounded-lg bg-stone-100 p-0.5">
-            <ArrowDownUp className="ml-1.5 mr-0.5 h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
-            {TRIS.map((t) => (
-              <button
-                key={t.cle}
-                type="button"
-                aria-pressed={tri === t.cle}
-                onClick={() => setTri(t.cle)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
-                  tri === t.cle
-                    ? "bg-white text-stone-900 shadow-sm"
-                    : "text-stone-500 hover:text-stone-900",
-                )}
-              >
-                {t.txt}
-              </button>
-            ))}
-          </div>
-          <Legende avecPreds={avecPreds} />
-        </div>
-      </header>
+          </>
+        }
+        bas={
+          <>
+            <div role="group" aria-label="Trier les partants" className="inline-flex items-center gap-1 rounded-lg bg-white/70 p-0.5 ring-1 ring-inset ring-[#E6DCC6]">
+              <ArrowDownUp className="ml-1.5 mr-0.5 h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
+              {TRIS.map((t) => (
+                <button
+                  key={t.cle}
+                  type="button"
+                  aria-pressed={tri === t.cle}
+                  onClick={() => setTri(t.cle)}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
+                    tri === t.cle
+                      ? "bg-stone-900 text-white shadow-sm"
+                      : "text-stone-500 hover:text-stone-900",
+                  )}
+                >
+                  {t.txt}
+                </button>
+              ))}
+            </div>
+            <Legende avecPreds={avecPreds} />
+          </>
+        }
+      />
 
       {/* ── En-tête des colonnes (ordinateur) ── */}
       <div className={cn(
@@ -345,6 +361,7 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
             eloChamp={eloChamp}
             ouvert={ouvert === p.participation_id}
             onToggle={() => setOuvert(ouvert === p.participation_id ? null : p.participation_id)}
+            onAller={onAller}
           />
         ))}
       </ul>
@@ -417,7 +434,7 @@ function Medaille({ rang }: { rang: number }) {
 
 /** Jauge circulaire de la chance de victoire : l'arc est la VRAIE probabilité
  *  (25 % = un quart de tour), pas une échelle relative au favori. */
-function Anneau({ v, rang, taille }: { v: number; rang: number | undefined; taille: number }) {
+export function Anneau({ v, rang, taille }: { v: number; rang: number | undefined; taille: number }) {
   const id = useId();
   const r = taille / 2 - 4;
   const c = 2 * Math.PI * r;
@@ -473,7 +490,7 @@ function TicketCote({ cote, live, mv, compact = false }: { cote: number | null; 
   );
 }
 
-function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouvert, onToggle }: {
+function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouvert, onToggle, onAller }: {
   partant: PartantFiche;
   pred: PredictionFiche | undefined;
   cote: number | null;
@@ -482,6 +499,7 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
   eloChamp: EloChamp | null;
   ouvert: boolean;
   onToggle: () => void;
+  onAller?: (cle: OngletLie) => void;
 }) {
   const panneauId = useId();
   const carte = useRef<HTMLLIElement>(null);
@@ -570,6 +588,7 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
 
   return (
     <li
+      id={`partant-${p.participation_id}`}
       ref={carte}
       onPointerMove={incliner}
       onPointerLeave={redresser}
@@ -615,6 +634,9 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
                 <span className="flex shrink-0 flex-col items-center md:hidden">
                   <Anneau v={pred.proba_top1} rang={rang} taille={50} />
                   <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-stone-400">Victoire</span>
+                  <span className="mt-0.5 whitespace-nowrap text-[11px] text-stone-500" title="Probabilité de finir dans les trois premiers">
+                    Top 3 <b className="font-bold tabular-nums text-stone-800">{(pred.proba_top3 * 100).toFixed(0)} %</b>
+                  </span>
                 </span>
               )}
               <ChevronDown
@@ -696,6 +718,13 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
         {ouvert && (
           <div className="relative border-t border-[#EFE8D8] bg-[#FAF7EF]/80 px-3 pb-5 pt-4 sm:px-5">
             <FichePartant partant={p} cote={cote} eloChamp={eloChamp} />
+            {onAller && !np && (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className="text-[12px] text-stone-500">Aller plus loin :</span>
+                <LienOnglet onClick={() => onAller("marche")}>Voir le marché</LienOnglet>
+                <LienOnglet onClick={() => onAller("plan")}>Mon plan de mise</LienOnglet>
+              </div>
+            )}
           </div>
         )}
       </div>

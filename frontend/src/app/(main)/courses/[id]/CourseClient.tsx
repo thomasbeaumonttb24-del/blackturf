@@ -25,9 +25,10 @@ import {
   CapacitesAbonnementCard, CtaAbonnementBand,
 } from "@/components/courses/insights";
 import { PronosticEmailPopup } from "@/components/courses/PronosticEmailPopup";
-import { PartantsSection } from "@/components/courses/partants";
+import { Anneau, PartantsSection } from "@/components/courses/partants";
+import { BandeauOnglet, CARTE_CLS, CARTE_STYLE, IconeTuile, LienOnglet, Pastille, PastilleDirect, SuiteOnglets, difficulteCourse } from "@/components/courses/course-ui";
 import {
-  ClassementAlgo, ClassementApercu, ClassementVerrouille, type ClassementSignal,
+  ClassementAlgo, ClassementApercu, ClassementVerrouille, formatCoteFr, type ClassementSignal,
 } from "@/components/courses/classement";
 import { formatCote, formatCoteJuste, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -410,10 +411,13 @@ function ComparateurChevaux({ partants }: { partants: Partant[] }) {
   );
 
   return (
-    <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-      <div style={{ padding: "15px 18px 12px" }}>
-        <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 16, fontWeight: 700, color: CX.ink2 }}>Comparateur</h2>
-        <span style={{ fontSize: 12, color: CX.gray400 }}>— mettez deux chevaux côte à côte</span>
+    <div style={{ ...CARTE_STYLE, overflow: "hidden" }}>
+      <div className="flex items-center gap-2.5" style={{ padding: "15px 18px 12px" }}>
+        <IconeTuile icone={Users} />
+        <div>
+          <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comparateur</h2>
+          <span style={{ fontSize: 12, color: CX.gray400 }}>Mettez deux chevaux côte à côte</span>
+        </div>
       </div>
       <div style={{ display: "flex", gap: 10, padding: "0 18px 14px" }}>
         <Select value={numA} onChange={setNumA} exclude={numB} />
@@ -808,9 +812,9 @@ function PronosticsPresse({ pronostics }: {
   };
 
   return (
-    <details className="group" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
+    <details className="group" style={{ ...CARTE_STYLE, overflow: "hidden" }}>
       <summary className="cursor-pointer select-none" style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px", listStyle: "none" }}>
-        <Newspaper className="h-4 w-4" style={{ color: CX.gray500 }} />
+        <IconeTuile icone={Newspaper} />
         <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Pronostics presse</h3>
         <span style={{ fontSize: 11.5, color: CX.gray400 }}>{pronostics.length} source{pronostics.length > 1 ? "s" : ""}</span>
         <ChevronDown className="ml-auto transition-transform group-open:rotate-180 h-4 w-4" style={{ color: CX.gray400 }} />
@@ -1308,7 +1312,7 @@ function ResultatsSection({ resultats, partants }: {
     : [];
 
   return (
-    <div className="cx-fade" style={{ borderRadius: 20, border: "1px solid rgba(16,185,129,.3)", overflow: "hidden", background: "linear-gradient(180deg,rgba(16,185,129,.06),#FFFFFF 40%)" }}>
+    <div className="cx-fade" style={{ boxShadow: CARTE_STYLE.boxShadow, borderRadius: 16, border: "1px solid rgba(16,185,129,.3)", overflow: "hidden", background: "linear-gradient(180deg,rgba(16,185,129,.06),#FFFFFF 40%)" }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "16px 20px", borderBottom: "1px solid rgba(16,185,129,.18)" }}>
         <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 17, fontWeight: 700, color: CX.ink2 }}>Arrivée officielle</h2>
         {(tempsGagnant != null || resultats.temps_gagnant) && (
@@ -1555,7 +1559,7 @@ function PronosticVerdictSection({ predictions, classement }: {
   const maxP3 = Math.max(...picks.map((p) => p.proba_top3 || 0), 0.01);
 
   return (
-    <div className="cx-fade" style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "20px 20px 22px" }}>
+    <div className="cx-fade" style={{ ...CARTE_STYLE, padding: "20px 20px 22px" }}>
       <header className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
           <h2 className="font-display text-[17px] font-bold leading-tight text-slate-900">Bilan du pronostic</h2>
@@ -2047,7 +2051,7 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
   return (
     <div
       className="cx-fade"
-      style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.3)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 40%)", padding: "20px 20px 22px" }}
+      style={{ boxShadow: CARTE_STYLE.boxShadow, borderRadius: 16, border: "1px solid rgba(245,158,11,.3)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 40%)", padding: "20px 20px 22px" }}
     >
       {/* ── En-tête : ce qu'on regarde, et la garantie d'intégrité ────────── */}
       <header className="mb-5 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
@@ -2350,9 +2354,9 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
   const colorFor = (delta: number) => (delta < -0.001 ? "#10B981" : delta > 0.001 ? "#EF4444" : "#4B5563");
 
   return (
-    <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+    <div style={{ ...CARTE_STYLE, padding: "18px 20px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-        <TrendingUp className="h-4 w-4" style={{ color: CX.goldAmber }} />
+        <IconeTuile icone={TrendingUp} />
         <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Marché des cotes</h3>
         {isLive ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: CX.em, background: CX.emBg, border: `1px solid ${CX.emBd}`, borderRadius: 999, padding: "2px 9px" }}>
@@ -2494,6 +2498,8 @@ export default function CoursePage({
   // synthèse sinon) ; dès que le visiteur choisit, son choix prime.
   type Onglet = "synthese" | "partants" | "marche" | "plan" | "resultats";
   const [onglet, setOnglet] = useState<Onglet | null>(null);
+  // Cheval à ouvrir en arrivant sur « Partants » depuis un autre onglet.
+  const [chevalCible, setChevalCible] = useState<number | null>(null);
   useEffect(() => {
     const lire = () => {
       const h = window.location.hash.replace("#", "");
@@ -2770,6 +2776,32 @@ export default function CoursePage({
       : []),
   ];
   const ongletParDefaut = course.statut === "termine" ? "resultats" : "synthese";
+  const DESC_ONGLET: Record<Onglet, string> = {
+    synthese: "L'essentiel en un coup d'œil",
+    partants: "La fiche détaillée de chaque cheval",
+    marche: "Cotes en direct et argent engagé",
+    plan: "Vos paris selon votre budget",
+    resultats: "Arrivée officielle et rapports",
+  };
+  /** Change d'onglet — depuis la barre, un raccourci ou un lien interne. Avec un
+   *  numéro, la fiche de ce cheval s'ouvre directement dans « Partants ». */
+  const allerA = (cle: Onglet, numero?: number) => {
+    setOnglet(cle);
+    setChevalCible(numero ?? null);
+    // replaceState : changer d'onglet ne doit pas empiler une entrée
+    // d'historique par clic, mais l'URL doit rester partageable.
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `#${cle}`);
+      // REMONTER EN HAUT. Sans ça on garde la position de défilement de
+      // l'onglet précédent, et comme les onglets n'ont pas la même hauteur
+      // on atterrit au milieu — ou en bas quand le nouveau est plus court.
+      // Mesuré en production : depuis 2 550 px sur un onglet de 3 270, un
+      // clic sur « Plan de mise » laissait à 1 002 px sur une page de
+      // 1 722, c'est-à-dire tout en bas. (Un cheval ciblé fait défiler
+      // jusqu'à sa fiche ensuite, cf. PartantsSection.)
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+    }
+  };
   const ongletActif = ONGLETS.some((o) => o.cle === onglet) ? onglet! : ongletParDefaut;
 
   return (
@@ -2941,21 +2973,7 @@ export default function CoursePage({
             <button
               key={o.cle}
               type="button"
-              onClick={() => {
-                setOnglet(o.cle);
-                // replaceState : changer d'onglet ne doit pas empiler une entrée
-                // d'historique par clic, mais l'URL doit rester partageable.
-                if (typeof window !== "undefined") {
-                  window.history.replaceState(null, "", `#${o.cle}`);
-                  // REMONTER EN HAUT. Sans ça on garde la position de défilement de
-                  // l'onglet précédent, et comme les onglets n'ont pas la même hauteur
-                  // on atterrit au milieu — ou en bas quand le nouveau est plus court.
-                  // Mesuré en production : depuis 2 550 px sur un onglet de 3 270, un
-                  // clic sur « Plan de mise » laissait à 1 002 px sur une page de
-                  // 1 722, c'est-à-dire tout en bas.
-                  window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
-                }
-              }}
+              onClick={() => allerA(o.cle)}
               aria-current={actif ? "page" : undefined}
               className={`relative shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-[13px] font-semibold transition-colors sm:px-4 sm:text-[13.5px] ${
                 actif ? "bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,.10)]" : "text-slate-600 hover:bg-white/60 hover:text-slate-700"
@@ -2980,6 +2998,16 @@ export default function CoursePage({
         {/* ═══ SYNTHÈSE — ce qu'il faut retenir, dans l'ordre de lecture ═══ */}
         {ongletActif === "synthese" && (
           <>
+            <BandeauOnglet
+              icone={Sparkles}
+              titre="Synthèse"
+              sousTitre="L'essentiel de la course : favori, valeur, accord des modèles"
+              droite={difficulteCourse(confGlobal) ? (
+                <Pastille className={difficulteCourse(confGlobal)!.cls} title={`Confiance du modèle sur son favori : ${Math.round(confGlobal!)} %`}>
+                  {difficulteCourse(confGlobal)!.txt}
+                </Pastille>
+              ) : undefined}
+            />
             {(!predictions || predictions.length === 0) && (
               <ApercuAnalyseCard
                 apercu={apercu}
@@ -2995,67 +3023,75 @@ export default function CoursePage({
           const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];
           const favCote = liveCoteMap[fav.numero] ?? fav.cote_pmu;
           return (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, marginBottom: 16 }}>
-              {/* Favori algo */}
-              <div className="cx-fade" style={{ position: "relative", overflow: "hidden", borderRadius: 18, border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(135deg,rgba(245,158,11,.09),transparent 70%)", padding: "16px 18px", animationDelay: ".04s" }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gold }}>Favori algo</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><IdentiteCheval numero={fav.numero} nom={fav.nom_cheval} /></div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                  <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.gold, lineHeight: 1 }}>{Math.round(fav.proba_top1 * 100)}%</span>
-                  <span style={{ fontSize: 11, color: CX.gray400 }}>victoire{favCote ? ` · cote ${formatCote(favCote)}` : ""}</span>
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+              {/* Favori algo — même jauge que dans l'onglet Partants */}
+              <button type="button" onClick={() => allerA("partants", fav.numero)} title="Ouvrir sa fiche dans Partants" className={cn(CARTE_CLS, "cx-fade block w-full bg-gradient-to-br from-amber-50/80 via-white to-white p-3.5 text-left transition-transform active:scale-[.985] sm:p-4 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700")} style={{ animationDelay: ".04s" }}>
+                <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.1em] text-amber-700">Favori algo</p>
+                <div className="mt-2 truncate text-[13.5px] font-bold text-stone-900"><IdentiteCheval numero={fav.numero} nom={fav.nom_cheval} /></div>
+                <div className="mt-2.5 flex items-center gap-2.5">
+                  <Anneau v={fav.proba_top1} rang={1} taille={48} />
+                  <span className="text-[11.5px] leading-snug text-stone-500">
+                    victoire
+                    {favCote ? <><br />cote <b className="font-bold tabular-nums text-stone-800">{formatCoteFr(favCote)}</b></> : null}
+                  </span>
                 </div>
-              </div>
+                <span className="mt-2 block text-[11.5px] font-semibold text-amber-800">Voir sa fiche ›</span>
+              </button>
               {/* Pari de valeur */}
-              <div className="cx-fade" style={{ position: "relative", overflow: "hidden", borderRadius: 18, border: topVB ? "1px solid rgba(16,185,129,.28)" : `1px solid ${CX.bd1}`, background: topVB ? "linear-gradient(135deg,rgba(16,185,129,.09),transparent 70%)" : CX.surf1, padding: "16px 18px", animationDelay: ".08s" }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: topVB ? CX.emDeep : CX.gray400 }}>Pari de valeur</div>
+              <div
+                role={topVB ? "button" : undefined}
+                tabIndex={topVB ? 0 : undefined}
+                onClick={topVB ? () => allerA("partants", topVB.numero) : undefined}
+                onKeyDown={topVB ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); allerA("partants", topVB.numero); } } : undefined}
+                title={topVB ? "Ouvrir sa fiche dans Partants" : undefined}
+                className={cn(CARTE_CLS, "cx-fade p-3.5 sm:p-4", topVB && "cursor-pointer bg-gradient-to-br from-emerald-50/80 via-white to-white transition-transform active:scale-[.985] hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700")}
+                style={{ animationDelay: ".08s" }}
+              >
+                <p className={cn("m-0 text-[10.5px] font-bold uppercase tracking-[.1em]", topVB ? "text-emerald-700" : "text-stone-500")}>Pari de valeur</p>
                 {topVB ? (
                   <>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: CX.ink2, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><IdentiteCheval numero={topVB.numero} nom={topVB.nom_cheval} /></div>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                      <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</span>
-                      <span style={{ fontSize: 11, color: CX.gray400 }}>espérance · {etoiles(topVB.value_bet!.niveau)}</span>
+                    <div className="mt-2 truncate text-[13.5px] font-bold text-stone-900"><IdentiteCheval numero={topVB.numero} nom={topVB.nom_cheval} /></div>
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-1.5">
+                      <span className="text-[26px] font-bold leading-none text-emerald-700" style={{ fontFamily: CX.sg }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</span>
+                      <span className="text-[11px] text-stone-500">espérance · {etoiles(topVB.value_bet!.niveau)}</span>
                     </div>
                     {/* L'espérance est celle du cycle, à la cote relevée à la détection :
                         la cote affichée ailleurs sur la page peut avoir bougé depuis. */}
                     {topVB.cote_figee ? (
-                      <div style={{ fontSize: 11, color: CX.gray400, marginTop: 7 }}>détecté à la cote {formatCote(topVB.cote_figee)}</div>
+                      <p className="m-0 mt-1.5 text-[11px] text-stone-500">détecté à la cote {formatCoteFr(topVB.cote_figee)}</p>
                     ) : null}
+                    <span className="mt-2 block text-[11.5px] font-semibold text-emerald-800">Voir sa fiche ›</span>
                   </>
                 ) : (
-                  <p style={{ marginTop: 8, fontSize: 12, color: CX.gray400 }}>Aucun pari de valeur détecté sur cette course.</p>
+                  <p className="m-0 mt-2 text-[12px] leading-snug text-stone-500">Aucun pari de valeur détecté sur cette course.</p>
                 )}
               </div>
-              {/* Confiance algo */}
-              <div className="cx-fade" style={{ borderRadius: 18, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "16px 18px", animationDelay: ".12s" }}>
-                {/* Ce score est un ACCORD (les 3 modèles entre eux, et avec le marché),
-                    pas une chance de gagner. Les deux paragraphes qui l'expliquaient — la
-                    mise en garde, puis le taux de réussite du n°1 à ce niveau d'accord —
-                    ont été retirés : la carte est une pastille de synthèse, pas un cours.
-                    Ce qu'il faut savoir tient dans son titre, et le glossaire de la page
-                    porte le détail pour qui le cherche. */}
-                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gray400 }}>Accord des modèles</div>
+              {/* Accord des modèles — un ACCORD (les modèles entre eux et avec le
+                  marché), pas une chance de gagner ; le glossaire porte le détail. */}
+              <div className={cn(CARTE_CLS, "cx-fade p-3.5 sm:p-4")} style={{ animationDelay: ".12s" }}>
+                <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.1em] text-stone-500">Accord des modèles</p>
                 {confGlobal !== null ? (
                   <>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5 }}>
-                      <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.em, lineHeight: 1 }}>{Math.round(confGlobal)}</span>
-                      <span style={{ fontSize: 11, color: CX.gray400 }}>/ 100 · sur le n°{fav.numero}</span>
+                    <div className="mt-2 flex items-baseline gap-1.5">
+                      <span className="text-[26px] font-bold leading-none text-emerald-700" style={{ fontFamily: CX.sg }}>{Math.round(confGlobal)}</span>
+                      <span className="text-[11px] text-stone-500">/ 100 · sur le n°{fav.numero}</span>
                     </div>
-                    <div style={{ marginTop: 9, height: 6, borderRadius: 999, background: CX.surf5, overflow: "hidden" }}>
+                    <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(0,0,0,.08)]">
                       <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, Math.round(confGlobal)))}%`, borderRadius: 999, background: "linear-gradient(90deg,#F59E0B,#059669)", transformOrigin: "left", animation: "cxBarGrow .7s cubic-bezier(.16,1,.3,1) .3s both" }} />
                     </div>
                   </>
-                ) : <p style={{ marginTop: 8, fontSize: 12, color: CX.gray400 }}>—</p>}
+                ) : <p className="m-0 mt-2 text-[12px] text-stone-500">—</p>}
               </div>
               {/* Le champ */}
-              <div className="cx-fade" style={{ borderRadius: 18, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "16px 18px", animationDelay: ".16s" }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: CX.gray400 }}>Le champ</div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5 }}>
-                  <span style={{ fontFamily: CX.sg, fontSize: 27, fontWeight: 700, color: CX.ink2, lineHeight: 1 }}>{course.nb_partants}</span>
-                  <span style={{ fontSize: 11, color: CX.gray400 }}>partants</span>
+              <div className={cn(CARTE_CLS, "cx-fade p-3.5 sm:p-4")} style={{ animationDelay: ".16s" }}>
+                <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.1em] text-stone-500">Le champ</p>
+                <div className="mt-2 flex items-baseline gap-1.5">
+                  <span className="text-[26px] font-bold leading-none text-stone-900" style={{ fontFamily: CX.sg }}>{course.nb_partants}</span>
+                  <span className="text-[11px] text-stone-500">partants</span>
                 </div>
-                <div style={{ fontSize: 11, color: CX.gray400, marginTop: 7 }}>
-                  {course.nb_partants >= 14 ? "champ ouvert" : course.nb_partants >= 10 ? "champ moyen" : "petit champ"}
-                </div>
+                <p className="m-0 mt-2 text-[11.5px] text-stone-500">
+                  {course.nb_partants >= 14 ? "Champ ouvert" : course.nb_partants >= 10 ? "Champ moyen" : "Petit champ"}
+                </p>
               </div>
             </div>
           );
@@ -3063,7 +3099,7 @@ export default function CoursePage({
 
         {/* Alerte pari de valeur (bandeau or) */}
         {topVBFranc && (
-          <div style={{ display: "flex", alignItems: "center", gap: 9, borderRadius: 14, border: "1px solid rgba(245,158,11,.32)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)", padding: "11px 16px", marginBottom: 20, fontSize: 13, color: CX.gray600 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, borderRadius: 14, border: "1px solid rgba(245,158,11,.32)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)", boxShadow: CARTE_STYLE.boxShadow, padding: "11px 16px", fontSize: 13, color: CX.gray600 }}>
             <Zap className="h-4 w-4 flex-shrink-0" style={{ color: CX.gold }} />
             <span>
               <b style={{ color: CX.goldDeep }}>Pari de valeur exceptionnel</b> — <IdentiteCheval numero={topVBFranc.numero} nom={topVBFranc.nom_cheval} /> · {etoiles(topVBFranc.value_bet!.niveau)} · espérance <b style={{ color: CX.em }}>+{Math.round(topVBFranc.value_bet!.ev_max * 100)}%</b> détectée par l&apos;algorithme.
@@ -3205,7 +3241,7 @@ export default function CoursePage({
               >
                 {/* En-tête collant */}
                 <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${CX.bd2}`, background: "rgba(255,255,255,.96)", backdropFilter: "blur(6px)" }}>
-                  <Brain className="h-4 w-4" style={{ color: CX.gold }} />
+                  <IconeTuile icone={Brain} />
                   <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comment lire l&apos;analyse</h3>
                   <button
                     type="button"
@@ -3364,9 +3400,9 @@ export default function CoursePage({
           {/* Graphique cotes historique */}
           {/* ── Narrative IA (Analyse BlackTurf) ── */}
           {analysis?.narrative && (
-            <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
+            <div style={{ ...CARTE_STYLE, padding: "18px 20px" }}>
               <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
-                <Brain className="h-[17px] w-[17px]" style={{ color: CX.gold }} />
+                <IconeTuile icone={Brain} />
                 <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Analyse BlackTurf</h3>
                 {analysis.field_confidence > 0 && (
                   <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
@@ -3449,16 +3485,17 @@ export default function CoursePage({
                   </div>
                 </div>
               )}
-              <p className="pt-1" style={{ fontSize: 10, color: CX.gray400 }}>
-                Les paris à jouer sont dans le plan de mise.
-              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-3">
+                <span style={{ fontSize: 12, color: CX.gray400 }}>Les paris à jouer sont dans le plan de mise.</span>
+                <LienOnglet onClick={() => allerA("plan")}>Mon plan de mise</LienOnglet>
+              </div>
             </div>
           )}
           {/* ── Course à outsider (carte or/crème) ── */}
           {analysis?.detection_outsider?.course_a_outsider && (
-            <div style={{ borderRadius: 20, border: "1px solid rgba(245,158,11,.22)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 60%)", padding: "18px 20px" }}>
+            <div style={{ boxShadow: CARTE_STYLE.boxShadow, borderRadius: 16, border: "1px solid rgba(245,158,11,.22)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 60%)", padding: "18px 20px" }}>
               <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
-                <Zap className="h-4 w-4" style={{ color: CX.gold }} />
+                <IconeTuile icone={Zap} />
                 <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.goldDeep }}>Course à outsider détectée</h3>
                 <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
                   Score {Math.round(analysis.detection_outsider.score * 100)}/100
@@ -3539,8 +3576,11 @@ export default function CoursePage({
           )}
 
           {/* Infos course */}
-          <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,.03)" }}>
-            <h3 style={{ margin: "0 0 12px", fontFamily: CX.sg, fontSize: 14, fontWeight: 700, color: CX.ink2 }}>Infos course</h3>
+          <div style={{ ...CARTE_STYLE, padding: "18px 20px" }}>
+            <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
+              <IconeTuile icone={Info} />
+              <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Infos course</h3>
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
               {(() => {
                 const rows: Array<{ label: string; val: string }> = [
@@ -3604,6 +3644,8 @@ export default function CoursePage({
             predictions={predictions}
             liveCoteMap={liveCoteMap}
             confGlobal={confGlobal}
+            chevalOuvert={chevalCible}
+            onAller={(cle) => allerA(cle)}
           />
             <ComparateurChevaux partants={course.partants} />
             <ConfrontationsCard courseId={id} />
@@ -3617,15 +3659,21 @@ export default function CoursePage({
         {/* ═══ MARCHÉ — les cotes, l'argent, les formules jouables ═══ */}
         {ongletActif === "marche" && (
           <>
+          <BandeauOnglet
+            icone={TrendingUp}
+            titre="Marché"
+            sousTitre="Cotes en direct, comparaison des bookmakers et argent engagé"
+            droite={course.statut !== "termine" ? <PastilleDirect /> : <Pastille className="bg-stone-100 text-stone-600 ring-stone-200">Cotes finales</Pastille>}
+          />
           {course.statut !== "termine" && (
             <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} connecte={!!user} authLoading={authLoading} />
           )}
 
           {/* ── Comparaison multi-bookmakers — ouverte : c'est le contenu principal de l'onglet Marché ── */}
           {course.partants.some((p) => p.cote_geny || p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_bet365 || p.cote_ladbrokes || p.cote_betfair_exchange) && (
-            <details className="group" open style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, overflow: "hidden" }}>
+            <details className="group" open style={{ ...CARTE_STYLE, overflow: "hidden" }}>
               <summary className="cursor-pointer select-none" style={{ display: "flex", alignItems: "center", gap: 8, padding: "15px 18px", listStyle: "none" }}>
-                <BarChart2 className="h-4 w-4" style={{ color: CX.gray500 }} />
+                <IconeTuile icone={BarChart2} />
                 <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comparaison des cotes</h3>
                 <span style={{ fontSize: 11.5, color: CX.gray400 }}>
                   {(() => {
@@ -3648,14 +3696,18 @@ export default function CoursePage({
 
         {/* ═══ PLAN DE MISE — pleine largeur, c'est l'outil, pas un encart ═══ */}
         {ongletActif === "plan" && (
-          <div className="cx-plan-wide">
+          <div className="cx-plan-wide" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <BandeauOnglet
+            icone={Calculator}
+            titre="Plan de mise"
+            sousTitre="Vos paris pour cette course, taillés sur votre budget et votre profil"
+            droite={difficulteCourse(confGlobal) ? <Pastille className={difficulteCourse(confGlobal)!.cls}>{difficulteCourse(confGlobal)!.txt}</Pastille> : undefined}
+          />
           {/* Calculateur de mise — pleine largeur dans son onglet */}
           <div>
-          <div style={{ borderRadius: 22, border: `1px solid ${CX.bd3}`, background: CX.surf2, overflow: "hidden", boxShadow: "0 14px 32px -24px rgba(17,24,39,.28)" }}>
+          <div style={{ ...CARTE_STYLE, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 22px 16px" }}>
-              <span style={{ width: 34, height: 34, borderRadius: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", color: CX.goldDeep, background: CX.goldBg, border: `1px solid ${CX.goldBd}` }}>
-                <Calculator className="h-4 w-4" aria-hidden="true" />
-              </span>
+              <IconeTuile icone={Calculator} />
               <div>
                 <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Votre plan de mise</h3>
                 <p style={{ margin: "2px 0 0", fontSize: 10.5, color: CX.gray500 }}>Plan personnalisé pour cette course</p>
@@ -3678,6 +3730,11 @@ export default function CoursePage({
         {/* ═══ RÉSULTATS ═══ */}
         {ongletActif === "resultats" && (
           <>
+                <BandeauOnglet
+                  icone={Trophy}
+                  titre="Résultats"
+                  sousTitre="Arrivée officielle, rapports et bilan du pronostic"
+                />
                 {resultats && (
                   <ResultatsSection resultats={resultats} partants={course.partants} />
                 )}
@@ -3700,7 +3757,7 @@ export default function CoursePage({
                   paywall={!user || ["free", "decouverte"].includes(user.plan)}
                 />
                 {!resultats && (
-                  <div style={{ borderRadius: 20, border: `1px solid ${CX.bd1}`, background: CX.surf1, padding: "24px 20px", textAlign: "center", color: CX.gray500, fontSize: 13 }}>
+                  <div style={{ ...CARTE_STYLE, padding: "24px 20px", textAlign: "center", color: CX.gray500, fontSize: 13 }}>
                     <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" style={{ color: CX.gray400 }} />
                     Arrivée officielle en cours de publication…
                   </div>
@@ -3708,6 +3765,12 @@ export default function CoursePage({
             {resultats && <TempsPassageCard courseId={id} />}
           </>
         )}
+
+        <SuiteOnglets
+          onglets={ONGLETS.map((o) => ({ cle: o.cle, label: o.label, icone: o.icone, desc: DESC_ONGLET[o.cle] }))}
+          actif={ongletActif}
+          onAller={(cle) => allerA(cle)}
+        />
       </div>
 
       </div>

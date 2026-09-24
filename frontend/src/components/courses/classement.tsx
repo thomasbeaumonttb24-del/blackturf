@@ -20,6 +20,7 @@
  * rapproché de l'arrivée réelle. Jamais une appréciation inventée.
  */
 
+import { CARTE_CLS } from "@/components/courses/course-ui";
 import { useEffect, useState } from "react";
 import { ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
@@ -504,7 +505,7 @@ export function ClassementAlgo({
   };
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(28,25,23,.04)]">
+    <section className={cn("overflow-hidden", CARTE_CLS)}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 pb-3 pt-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">
@@ -754,7 +755,7 @@ export function ClassementAlgo({
 /** État verrouillé, affiché à la place de la table selon le plan de l'abonné. */
 export function ClassementVerrouille({ titre, texte, action }: { titre: string; texte: string; action: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-7 text-center">
+    <section className={cn("p-7 text-center", CARTE_CLS)}>
       <span className="mx-auto mb-3 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50 text-amber-800 ring-1 ring-amber-200">
         <Lock className="h-4 w-4" aria-hidden="true" />
       </span>
@@ -833,7 +834,7 @@ export function ClassementApercu({
   const GRILLE = "grid-cols-[36px_minmax(0,1fr)_112px] sm:grid-cols-[36px_minmax(0,1fr)_74px_74px_180px]";
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(28,25,23,.04)]">
+    <section className={cn("overflow-hidden", CARTE_CLS)}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 pb-3 pt-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">
