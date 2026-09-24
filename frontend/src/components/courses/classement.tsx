@@ -20,8 +20,8 @@
  * rapproché de l'arrivée réelle. Jamais une appréciation inventée.
  */
 
-import { Anneau, CARTE_CLS, INCLINABLE_CLS, IconeTuile, Reflet, SG, inclinerCarte, redresserCarte } from "@/components/courses/course-ui";
-import { useEffect, useState } from "react";
+import { Anneau, CARTE_CLS, IconeTuile, SG } from "@/components/courses/course-ui";
+import { useState } from "react";
 import { Brain, ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { cn } from "@/lib/utils";
@@ -107,9 +107,6 @@ export function ecartPrix(marche: number | null | undefined, juste: number | nul
       juste == null || !Number.isFinite(juste) || juste <= 0 || juste >= COTE_JUSTE_MAX) return null;
   return marche / juste - 1;
 }
-
-/** Préférence d'affichage des signaux, conservée d'une course à l'autre. */
-const CLE_SIGNAUX = "bt.classement.signaux";
 
 /** Gabarit de colonnes partagé par l'en-tête et les lignes : une seule source,
  *  sinon les deux dérivent au premier ajustement. */
@@ -343,25 +340,51 @@ function Signaux({ signaux }: { signaux: ClassementSignal[] }) {
   );
 }
 
-/** Bandeau de synthèse. Chaque chiffre est une restitution directe des lignes
- *  affichées (somme, écart, rapprochement avec l'arrivée) — jamais un jugement
- *  ajouté par l'interface. */
+/** Bandeau « lecture de la course ». Chaque chiffre est une restitution directe des
+ *  lignes affichées (somme, compte, écart, rapprochement avec l'arrivée) — jamais un
+ *  jugement ajouté par l'interface. Le podium du modèle n'y figure plus : les trois
+ *  premiers sont déjà en tête de la table, avec leur médaille. Le bandeau décrit la
+ *  COURSE — sa physionomie, l'avis du marché, les prix, le périmètre du calcul. */
 function Synthese({
-  lignes, positionsReelles, calculeA, cotesFigees, coteLive, nonPartants,
+  lignes, signauxParNumero, positionsReelles, calculeA, cotesFigees, coteLive, nonPartants,
 }: {
   lignes: ClassementPrediction[];
+  signauxParNumero: Record<number, ClassementSignal[]>;
   positionsReelles?: Record<number, number>;
   calculeA?: string | null;
   cotesFigees?: boolean;
   coteLive?: Record<number, number | null>;
   nonPartants?: Set<number>;
 }) {
-  const fav = lignes[0];
-  const concentration = lignes.slice(0, 3).reduce((s, p) => s + p.proba_top1, 0);
-  const ecarts = lignes.filter((p) => !nonPartants?.has(p.numero))
-    .map((p) => ecartPrix(coteLive?.[p.numero] ?? p.cote_pmu, p.cote_juste))
-    .filter((ecart): ecart is number => ecart != null);
-  const nbEcarts = ecarts.filter((ecart) => ecart >= ECART_MEILLEUR_PRIX).length;
+  const partants = lignes.filter((p) => !nonPartants?.has(p.numero));
+  const nbNonPartants = lignes.length - partants.length;
+  const favModele = partants[0];
+  const marcheDe = (p: ClassementPrediction) => coteLive?.[p.numero] ?? p.cote_pmu;
+
+  // Physionomie : part des chances de victoire des trois premiers, et nombre de
+  // chevaux que le modèle crédite d'au moins une chance sur dix.
+  const concentration = partants.slice(0, 3).reduce((s, p) => s + p.proba_top1, 0);
+  const nbSerieux = partants.filter((p) => p.proba_top1 >= 0.1).length;
+  const physionomie = concentration >= 0.6 ? "course fermée" : concentration >= 0.45 ? "course disputée" : "course ouverte";
+
+  // Favori du marché : la plus petite cote affichée parmi les partants.
+  const favMarche = partants.reduce<{ p: ClassementPrediction; c: number } | null>((best, p) => {
+    const c = marcheDe(p);
+    if (c == null || !Number.isFinite(c) || c <= 0) return best;
+    return best && best.c <= c ? best : { p, c };
+  }, null);
+  const memeFavori = !!favMarche && !!favModele && favMarche.p.numero === favModele.numero;
+
+  // Écarts de prix : même lecture que la colonne « Lecture du prix ».
+  const ecarts = partants
+    .map((p) => ({ p, e: ecartPrix(marcheDe(p), p.cote_juste) }))
+    .filter((x): x is { p: ClassementPrediction; e: number } => x.e != null);
+  const positifs = ecarts.filter((x) => x.e >= ECART_MEILLEUR_PRIX).sort((a, b) => b.e - a.e);
+
+  // Signaux produits par l'analyse, comptés par sens.
+  const tous = partants.flatMap((p) => (signauxParNumero[p.numero] ?? []).filter((s) => nettoie(s.label)));
+  const nbAtouts = tous.filter((s) => s.sens === "positif").length;
+  const nbReserves = tous.filter((s) => s.sens === "negatif").length;
 
   const gagnantNum = positionsReelles
     ? Number(Object.keys(positionsReelles).find((n) => positionsReelles[Number(n)] === 1))
@@ -372,95 +395,140 @@ function Synthese({
     ? new Date(calculeA).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
     : null;
 
-  const top3 = lignes.slice(0, 3);
   const TEINTE_SEG = ["from-amber-300 to-amber-500", "from-slate-300 to-slate-500", "from-orange-300 to-orange-600"];
-  const TUILE = "rounded-2xl bg-white px-3.5 py-3 ring-1 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_10px_22px_-18px_rgba(17,24,39,.4)]";
+  const TUILE = "flex flex-col rounded-2xl bg-white px-3.5 py-3 ring-1 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_10px_22px_-18px_rgba(17,24,39,.4)]";
+  const TITRE = "text-[10px] font-bold uppercase tracking-[.1em] text-stone-500";
+  const CHIFFRE = "text-[22px] font-bold leading-none tabular-nums";
 
   return (
-    <div className="grid gap-2.5 px-4 pb-4 sm:grid-cols-3 sm:px-5">
-      {/* Concentration du top 3 : la part des chances de victoire des trois premiers,
-          dessinée en trois segments — le lecteur voit d'un coup si la course est jouée
-          d'avance ou ouverte. */}
-      <div className={TUILE}>
-        <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Concentration du top 3</p>
-        <p className="mt-1 flex items-baseline gap-1.5">
-          <span className="text-[22px] font-bold leading-none tabular-nums text-stone-900" style={SG}>{pct(concentration)}</span>
-          <span className="text-[11.5px] text-stone-500">
-            {concentration >= 0.6 ? "course serrée" : concentration >= 0.45 ? "course disputée" : "course ouverte"}
-          </span>
-        </p>
-        <div className="mt-2.5 flex h-2.5 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(0,0,0,.08)]" aria-hidden="true">
-          {top3.map((p, i) => (
-            <span
-              key={p.numero}
-              title={`N°${p.numero} : ${pct(p.proba_top1)}`}
-              className={cn("h-full bg-gradient-to-b", TEINTE_SEG[i], i > 0 && "border-l border-white/80")}
-              style={{ width: `${Math.max(1, p.proba_top1 * 100)}%` }}
-            />
-          ))}
+    <div className="px-4 pb-4 sm:px-5">
+      <p className="mb-2.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-amber-700">Lecture de la course</p>
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        {/* 1 · Physionomie : toutes les chances de victoire en une barre — les trois
+            premiers en couleur, le reste du peloton en gris. */}
+        <div className={TUILE}>
+          <p className={TITRE}>Physionomie</p>
+          <p className="mt-1 flex items-baseline gap-1.5">
+            <span className={cn(CHIFFRE, "text-stone-900")} style={SG}>{pct(concentration)}</span>
+            <span className="text-[11.5px] text-stone-500">{physionomie}</span>
+          </p>
+          <div className="mt-2.5 flex h-2.5 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(0,0,0,.08)]" aria-hidden="true">
+            {partants.map((p, i) => (
+              <span
+                key={p.numero}
+                title={`N°${p.numero} : ${pct(p.proba_top1)}`}
+                className={cn("h-full", i < 3 ? cn("bg-gradient-to-b", TEINTE_SEG[i]) : i % 2 ? "bg-stone-300" : "bg-stone-200", i > 0 && "border-l border-white/80")}
+                style={{ width: `${Math.max(0.5, p.proba_top1 * 100)}%` }}
+              />
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10.5px] leading-snug text-stone-500">
+            chances des 3 premiers · <b className="font-semibold tabular-nums text-stone-700">{nbSerieux}</b> cheva{nbSerieux > 1 ? "ux" : "l"} à 10 % ou plus
+          </p>
         </div>
-        <p className="mt-1.5 flex flex-wrap gap-x-2.5 text-[10.5px] tabular-nums text-stone-500">
-          {top3.map((p, i) => (
-            <span key={p.numero} className="inline-flex items-center gap-1">
-              <span className={cn("h-2 w-2 rounded-full bg-gradient-to-b", TEINTE_SEG[i])} />N°{p.numero} {pct(p.proba_top1)}
+
+        {/* 2 · Marché et modèle : désignent-ils le même favori ? */}
+        <div className={TUILE}>
+          <p className={TITRE}>Favori : marché et modèle</p>
+          <div className="mt-1.5 space-y-1.5 text-[12px]">
+            <p className="flex min-w-0 items-center justify-between gap-2">
+              <span className="shrink-0 text-stone-500">Marché</span>
+              {favMarche
+                ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{favMarche.p.numero} <span className="font-normal text-stone-500">à</span> <span className="tabular-nums">{cote(favMarche.c)}</span></span>
+                : <span className="text-stone-400">cotes indisponibles</span>}
+            </p>
+            <p className="flex min-w-0 items-center justify-between gap-2">
+              <span className="shrink-0 text-stone-500">Modèle</span>
+              {favModele
+                ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{favModele.numero} <span className="font-normal text-stone-500">·</span> <span className="tabular-nums text-amber-700">{pct(favModele.proba_top1)}</span></span>
+                : <span className="text-stone-400">—</span>}
+            </p>
+          </div>
+          {favMarche && favModele && (
+            <span className={cn(
+              "mt-auto inline-flex w-fit items-center rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ring-1",
+              memeFavori ? "bg-stone-100 text-stone-600 ring-stone-200" : "bg-amber-50 text-amber-800 ring-amber-200/70",
+            )}>
+              {memeFavori ? "même favori" : "favoris différents"}
             </span>
-          ))}
-        </p>
-      </div>
+          )}
+        </div>
 
-      <div className={TUILE}>
-        {gagnant ? (
-          <>
-            <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Vainqueur</p>
-            <p className="mt-1.5 flex min-w-0 items-center gap-1.5 truncate">
-              <Identite numero={gagnant.numero} nom={gagnant.nom_cheval} taille="grand" />
-            </p>
-            <p className={cn("mt-1 text-[12px] font-semibold", gagnant.rang_predit === 1 ? "text-emerald-700" : gagnant.rang_predit <= 3 ? "text-slate-600" : "text-stone-600")}>
-              classé {ordinal(gagnant.rang_predit)} par le modèle
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Écarts de prix détectés</p>
-            <p className="mt-1 flex items-baseline gap-1.5">
-              <span className={cn("text-[22px] font-bold leading-none tabular-nums", nbEcarts > 0 ? "text-emerald-700" : "text-stone-900")} style={SG}>
-                {ecarts.length ? nbEcarts : "—"}
-              </span>
-              <span className="text-[11.5px] leading-snug text-stone-500">
-                {!ecarts.length ? "cotes indisponibles" : nbEcarts > 1 ? "chevaux payés au-dessus de leur chance" : nbEcarts === 1 ? "cheval payé au-dessus de sa chance" : "aucun écart positif d’au moins 8 %"}
-              </span>
-            </p>
-          </>
-        )}
-      </div>
+        {/* 3 · Prix — ou, la course courue, son vainqueur. */}
+        <div className={TUILE}>
+          {gagnant ? (
+            <>
+              <p className={TITRE}>Vainqueur</p>
+              <p className="mt-1.5 flex min-w-0 items-center gap-1.5 truncate">
+                <Identite numero={gagnant.numero} nom={gagnant.nom_cheval} taille="grand" />
+              </p>
+              <p className={cn("mt-1 text-[12px] font-semibold", gagnant.rang_predit === 1 ? "text-emerald-700" : gagnant.rang_predit <= 3 ? "text-slate-600" : "text-stone-600")}>
+                classé {ordinal(gagnant.rang_predit)} par le modèle
+              </p>
+            </>
+          ) : (
+            <>
+              <p className={TITRE}>Écarts de prix</p>
+              <p className="mt-1 flex items-baseline gap-1.5">
+                <span className={cn(CHIFFRE, positifs.length > 0 ? "text-emerald-700" : "text-stone-900")} style={SG}>
+                  {ecarts.length ? positifs.length : "—"}
+                </span>
+                <span className="text-[11.5px] leading-snug text-stone-500">
+                  {!ecarts.length ? "cotes indisponibles" : positifs.length > 1 ? "chevaux payés au-dessus de leur chance" : positifs.length === 1 ? "cheval payé au-dessus de sa chance" : "aucun écart positif d’au moins 8 %"}
+                </span>
+              </p>
+              {positifs.length > 0 && (
+                <p className="mt-auto flex flex-wrap gap-1 pt-2">
+                  {positifs.slice(0, 3).map(({ p, e }) => (
+                    <span key={p.numero} className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums text-emerald-700 ring-1 ring-emerald-200/70">
+                      N°{p.numero} <span className="font-semibold">+{Math.round(e * 100)} %</span>
+                    </span>
+                  ))}
+                </p>
+              )}
+            </>
+          )}
+        </div>
 
-      <div className={TUILE}>
-        <p className="text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Favori du modèle</p>
-        {fav ? (
-          <p className="mt-1.5 flex min-w-0 items-center gap-1.5 truncate">
-            <Identite numero={fav.numero} nom={fav.nom_cheval} taille="grand" />
-            <span className="shrink-0 text-[13px] font-bold tabular-nums text-amber-700">{pct(fav.proba_top1)}</span>
+        {/* 4 · Périmètre du calcul : partants, signaux, fraîcheur. */}
+        <div className={TUILE}>
+          <p className={TITRE}>Partants et signaux</p>
+          <p className="mt-1 flex items-baseline gap-1.5">
+            <span className={cn(CHIFFRE, "text-stone-900")} style={SG}>{partants.length}</span>
+            <span className="text-[11.5px] text-stone-500">
+              partant{partants.length > 1 ? "s" : ""}{nbNonPartants > 0 ? ` · ${nbNonPartants} non-partant${nbNonPartants > 1 ? "s" : ""}` : ""}
+            </span>
           </p>
-        ) : <p className="mt-1 text-[13px] text-stone-600">—</p>}
-        {horodatage && (
-          <p className="mt-1.5 inline-flex items-center gap-1 text-[10.5px] text-stone-500">
-            <Clock3 className="h-3 w-3" aria-hidden="true" />
-            calculé le {horodatage}{cotesFigees ? " · cotes figées" : ""}
-          </p>
-        )}
+          {(nbAtouts > 0 || nbReserves > 0) && (
+            <p className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] font-semibold tabular-nums">
+              <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-inset", SENS.positif.bg, SENS.positif.fg, SENS.positif.ring)}>
+                <span className="text-[7px]" aria-hidden="true">▲</span>{nbAtouts} atout{nbAtouts > 1 ? "s" : ""}
+              </span>
+              <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-inset", SENS.negatif.bg, SENS.negatif.fg, SENS.negatif.ring)}>
+                <span className="text-[7px]" aria-hidden="true">▼</span>{nbReserves} réserve{nbReserves > 1 ? "s" : ""}
+              </span>
+            </p>
+          )}
+          {horodatage && (
+            <p className="mt-auto inline-flex items-center gap-1 pt-2 text-[10.5px] text-stone-500">
+              <Clock3 className="h-3 w-3" aria-hidden="true" />
+              calculé le {horodatage}{cotesFigees ? " · cotes figées" : ""}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/*  Podium du modèle                                                          */
+/*  Médailles du classement                                                   */
 /* ────────────────────────────────────────────────────────────────────────── */
 
 const PODIUM = {
-  1: { piece: "radial-gradient(circle at 32% 28%,#FFF7D6 0%,#FCD34D 32%,#D97706 72%,#92400E 100%)", fond: "from-amber-50 via-white to-white", ring: "ring-amber-200", libelle: "1er" },
-  2: { piece: "radial-gradient(circle at 32% 28%,#FFFFFF 0%,#E2E8F0 34%,#94A3B8 74%,#475569 100%)", fond: "from-slate-50 via-white to-white", ring: "ring-slate-200", libelle: "2e" },
-  3: { piece: "radial-gradient(circle at 32% 28%,#FFEAD5 0%,#FDBA74 34%,#C2410C 76%,#7C2D12 100%)", fond: "from-orange-50/80 via-white to-white", ring: "ring-orange-200", libelle: "3e" },
+  1: { piece: "radial-gradient(circle at 32% 28%,#FFF7D6 0%,#FCD34D 32%,#D97706 72%,#92400E 100%)" },
+  2: { piece: "radial-gradient(circle at 32% 28%,#FFFFFF 0%,#E2E8F0 34%,#94A3B8 74%,#475569 100%)" },
+  3: { piece: "radial-gradient(circle at 32% 28%,#FFEAD5 0%,#FDBA74 34%,#C2410C 76%,#7C2D12 100%)" },
 } as const;
 
 /** Pièce de podium en relief (or / argent / bronze). */
@@ -486,69 +554,6 @@ function BarreFine({ v, ton }: { v: number; ton: "or" | "podium" | "neutre" | "p
         style={{ width: `${Math.max(2, Math.min(100, v * 100))}%` }}
       />
     </span>
-  );
-}
-
-/** Carte d'un cheval du podium : médaille, jauge victoire, top 3, prix, signaux. */
-function CartePodium({ p, marche, signaux, position, grand = false }: {
-  p: ClassementPrediction;
-  marche: number | null;
-  signaux: ClassementSignal[];
-  position?: number;
-  grand?: boolean;
-}) {
-  const rang = p.rang_predit as 1 | 2 | 3;
-  const m = PODIUM[rang];
-  return (
-    <div
-      onPointerMove={(e) => inclinerCarte(e, grand ? 0.8 : 1)}
-      onPointerLeave={redresserCarte}
-      className={cn(
-        "group/reflet relative flex w-full flex-col overflow-hidden rounded-2xl bg-gradient-to-b p-3.5 ring-1 sm:p-4",
-        m.fond, m.ring, INCLINABLE_CLS,
-        "shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.05),0_18px_36px_-24px_rgba(17,24,39,.55)] hover:shadow-[inset_0_1px_0_#fff,0_4px_8px_rgba(17,24,39,.06),0_28px_48px_-26px_rgba(146,64,14,.55)]",
-      )}
-    >
-      <Reflet />
-      <div className="relative flex items-start gap-2.5">
-        <Piece rang={rang} taille={grand ? 34 : 30} />
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-[.12em] text-stone-500">{m.libelle} du modèle</p>
-          <div className="mt-1 min-w-0"><Identite numero={p.numero} nom={p.nom_cheval} taille="grand" /></div>
-        </div>
-        {position != null && <BadgeArrivee position={position} />}
-      </div>
-
-      <div className="relative mb-3 mt-3 flex items-center gap-3">
-        <Anneau v={p.proba_top1} rang={rang} taille={grand ? 64 : 56} />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div>
-            <p className="flex items-baseline justify-between text-[10.5px] text-stone-500">
-              <span>Victoire</span>
-              <b className="text-[12.5px] font-bold tabular-nums text-stone-900">{pct(p.proba_top1)}</b>
-            </p>
-            <BarreFine v={p.proba_top1} ton={rang === 1 ? "or" : "podium"} />
-          </div>
-          <div>
-            <p className="flex items-baseline justify-between text-[10.5px] text-stone-500">
-              <span>Top 3</span>
-              <b className="text-[12.5px] font-bold tabular-nums text-stone-900">{pct(p.proba_top3)}</b>
-            </p>
-            <BarreFine v={p.proba_top3} ton="place" />
-          </div>
-        </div>
-      </div>
-
-      <div className="relative mt-auto flex flex-wrap items-center gap-1.5 border-t border-black/[.05] pt-2.5 text-[11.5px] text-stone-500">
-        <span>Cote <b className="font-bold tabular-nums text-stone-900">{marche != null ? cote(marche) : "—"}</b></span>
-        {p.cote_juste != null && (
-          <span>· juste <b className="font-semibold tabular-nums text-stone-700">{coteJuste(p.cote_juste)}</b></span>
-        )}
-        <LecturePrix marche={marche} juste={p.cote_juste} />
-        {p.value_bet && <BadgeValeur ev={p.value_bet.ev_max} niveau={p.value_bet.niveau} />}
-      </div>
-      {signaux.length > 0 && <div className="relative mt-2"><PuceSignaux signaux={signaux} max={2} /></div>}
-    </div>
   );
 }
 
@@ -638,23 +643,13 @@ export function ClassementAlgo({
   const grille = aCoteJuste ? COLS.avecJuste : COLS.sansJuste;
   const nbSignaux = lignes.reduce((n, p) => n + (signauxParNumero[p.numero]?.length ?? 0), 0);
 
-  // Les signaux sont repliés par défaut : huit lignes de pastilles écrasaient les
-  // colonnes chiffrées, qui portent la décision. Le choix est mémorisé, sinon le
-  // lecteur qui les veut rouvre le tiroir à chaque course.
+  // Les signaux sont TOUJOURS repliés à l'ouverture (deux pastilles puis « +N ») :
+  // huit lignes de pastilles écrasaient les colonnes chiffrées, qui portent la
+  // décision. Le choix n'est plus mémorisé d'une course à l'autre — un lecteur qui
+  // avait déplié une fois retrouvait sinon toutes les fiches dépliées.
   const [signauxOuverts, setSignauxOuverts] = useState(false);
-  useEffect(() => {
-    try {
-      if (window.localStorage.getItem(CLE_SIGNAUX) === "1") setSignauxOuverts(true);
-    } catch { /* stockage indisponible : on reste sur le repli par défaut */ }
-  }, []);
-  const basculeSignaux = () => {
-    setSignauxOuverts((v) => {
-      try { window.localStorage.setItem(CLE_SIGNAUX, v ? "0" : "1"); } catch { /* idem */ }
-      return !v;
-    });
-  };
+  const basculeSignaux = () => setSignauxOuverts((v) => !v);
 
-  const podium = lignes.filter((p) => p.rang_predit <= 3 && !nonPartants?.has(p.numero)).slice(0, 3);
   const signauxDe = (n: number) => (signauxParNumero[n] ?? []).filter((s) => nettoie(s.label));
 
   return (
@@ -696,29 +691,9 @@ export function ClassementAlgo({
         </div>
       </header>
 
-      {/* ── Podium du modèle : le 1er au centre et plus haut sur ordinateur ── */}
-      {podium.length === 3 && (
-        <div className="px-4 pb-4 sm:px-5">
-          <p className="mb-2.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-amber-700">Podium du modèle</p>
-          {/* Ordre de lecture : 1er à gauche, puis 2e et 3e. Cartes de même hauteur. */}
-          <div className="grid grid-cols-1 gap-2.5 min-[480px]:grid-cols-2 sm:grid-cols-3 [perspective:1200px]">
-            {podium.map((p) => (
-              <div key={p.prediction_id} className={cn("flex", p.rang_predit === 1 && "min-[480px]:col-span-2 sm:col-span-1")}>
-                <CartePodium
-                  p={p}
-                  marche={coteLive?.[p.numero] ?? p.cote_pmu}
-                  signaux={signauxDe(p.numero)}
-                  position={positionsReelles?.[p.numero]}
-                  grand={p.rang_predit === 1}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       <Synthese
         lignes={lignes}
+        signauxParNumero={signauxParNumero}
         positionsReelles={positionsReelles}
         calculeA={calculeA}
         cotesFigees={cotesFigees}

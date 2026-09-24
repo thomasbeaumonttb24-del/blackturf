@@ -776,3 +776,20 @@
   .tr-shine::after, .tr-medal, .tr-floor, .tr-glow { animation: none !important; }
   .tr-ring, .tr-bar, .tr-slide { transition: none !important; }
 }
+
+/* ════════ ACCUEIL — « Comment ça marche » : écrans d'étape ════════ */
+@keyframes etapeScan { from { top: -4rem; } to { top: 100%; } }
+.etape-scan {
+  background: linear-gradient(180deg, transparent, rgba(251,191,36,.07), transparent);
+  animation: etapeScan 4.5s linear infinite;
+}
+@keyframes etapeCaret { 50% { opacity: 0; } }
+.etape-caret { animation: etapeCaret 1s steps(1) infinite; }
+@keyframes etapeImpulsion { from { left: -4rem; } to { left: 100%; } }
+.etape-impulsion { animation: etapeImpulsion 3.2s cubic-bezier(.45,0,.55,1) infinite; }
+@keyframes etapeFleche { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(2px); } }
+.etape-fleche { animation: etapeFleche 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .etape-scan, .etape-caret, .etape-impulsion, .etape-fleche { animation: none !important; }
+  .etape-scan, .etape-impulsion { display: none; }
+}
