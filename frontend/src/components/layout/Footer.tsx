@@ -83,11 +83,11 @@ export function Footer() {
                   alt qui le répète fait lire « BlackTurf BlackTurf » à un lecteur
                   d'écran (règle axe « image-redundant-alt »). L'image est décorative. */}
               <Image
-                src="/logo.png"
+                src="/logo-transparent.png"
                 alt=""
                 width={30}
                 height={30}
-                className="rounded-md object-contain ring-1 ring-amber-200/60"
+                className="object-contain"
               />
               <span className="font-display text-lg font-bold text-gray-900">
                 Black<span className="text-gradient">Turf</span>
