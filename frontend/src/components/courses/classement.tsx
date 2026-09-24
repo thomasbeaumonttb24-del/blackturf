@@ -504,10 +504,9 @@ function CartePodium({ p, marche, signaux, position, grand = false }: {
       onPointerMove={(e) => inclinerCarte(e, grand ? 0.8 : 1)}
       onPointerLeave={redresserCarte}
       className={cn(
-        "group/reflet relative overflow-hidden rounded-2xl bg-gradient-to-b p-3.5 ring-1 sm:p-4",
+        "group/reflet relative flex w-full flex-col overflow-hidden rounded-2xl bg-gradient-to-b p-3.5 ring-1 sm:p-4",
         m.fond, m.ring, INCLINABLE_CLS,
         "shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.05),0_18px_36px_-24px_rgba(17,24,39,.55)] hover:shadow-[inset_0_1px_0_#fff,0_4px_8px_rgba(17,24,39,.06),0_28px_48px_-26px_rgba(146,64,14,.55)]",
-        grand && "sm:-mt-3",
       )}
     >
       <Reflet />
@@ -520,7 +519,7 @@ function CartePodium({ p, marche, signaux, position, grand = false }: {
         {position != null && <BadgeArrivee position={position} />}
       </div>
 
-      <div className="relative mt-3 flex items-center gap-3">
+      <div className="relative mb-3 mt-3 flex items-center gap-3">
         <Anneau v={p.proba_top1} rang={rang} taille={grand ? 64 : 56} />
         <div className="min-w-0 flex-1 space-y-2">
           <div>
@@ -540,7 +539,7 @@ function CartePodium({ p, marche, signaux, position, grand = false }: {
         </div>
       </div>
 
-      <div className="relative mt-3 flex flex-wrap items-center gap-1.5 border-t border-black/[.05] pt-2.5 text-[11.5px] text-stone-500">
+      <div className="relative mt-auto flex flex-wrap items-center gap-1.5 border-t border-black/[.05] pt-2.5 text-[11.5px] text-stone-500">
         <span>Cote <b className="font-bold tabular-nums text-stone-900">{marche != null ? cote(marche) : "—"}</b></span>
         {p.cote_juste != null && (
           <span>· juste <b className="font-semibold tabular-nums text-stone-700">{coteJuste(p.cote_juste)}</b></span>
@@ -701,9 +700,10 @@ export function ClassementAlgo({
       {podium.length === 3 && (
         <div className="px-4 pb-4 sm:px-5">
           <p className="mb-2.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-amber-700">Podium du modèle</p>
-          <div className="grid grid-cols-1 gap-2.5 min-[480px]:grid-cols-2 sm:grid-cols-3 sm:items-end [perspective:1200px]">
-            {[podium[1], podium[0], podium[2]].map((p) => (
-              <div key={p.prediction_id} className={cn(p.rang_predit === 1 ? "order-first min-[480px]:col-span-2 sm:order-none sm:col-span-1" : "")}>
+          {/* Ordre de lecture : 1er à gauche, puis 2e et 3e. Cartes de même hauteur. */}
+          <div className="grid grid-cols-1 gap-2.5 min-[480px]:grid-cols-2 sm:grid-cols-3 [perspective:1200px]">
+            {podium.map((p) => (
+              <div key={p.prediction_id} className={cn("flex", p.rang_predit === 1 && "min-[480px]:col-span-2 sm:col-span-1")}>
                 <CartePodium
                   p={p}
                   marche={coteLive?.[p.numero] ?? p.cote_pmu}
