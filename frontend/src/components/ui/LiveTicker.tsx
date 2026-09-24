@@ -81,7 +81,7 @@ export function LiveTicker() {
             <span className="text-xs font-bold text-emerald-700 font-mono tabular-nums">+{b.gain.toFixed(0)}€</span>
             {b.rapport != null && (
               <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-bold font-mono">
-                ×{b.rapport}
+                ×{b.rapport.toLocaleString("fr-FR", { maximumFractionDigits: 1 })}
               </span>
             )}
             <span className="text-gray-300 text-lg mx-2">|</span>
