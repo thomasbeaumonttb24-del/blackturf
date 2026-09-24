@@ -210,22 +210,24 @@ export async function ResultatsJour({ jour }: { jour: string }) {
         )}
 
         {quinte ? (
-          <Section title={`Arrivée du Quinté+ — ${titleCase(quinte[0].hippodrome_nom)}`}>
-            <CarteArrivee
-              course={quinte[0]}
-              resultats={quinte[1]}
-              verdict={verdicts?.[quinte[0].course_id]}
-              rapportsMax={rapportsQuinte.length}
-              vedette
-            />
-            {estAujourdhui && (
-              <p className="mt-3 text-sm">
-                <Link href="/quinte-du-jour" className="font-medium text-brand-gold-dark hover:underline">
-                  Détail complet du Quinté+ du jour
-                </Link>
-              </p>
-            )}
-          </Section>
+          <div className="mb-8">
+            <Section title={`Arrivée du Quinté+ — ${titleCase(quinte[0].hippodrome_nom)}`}>
+              <CarteArrivee
+                course={quinte[0]}
+                resultats={quinte[1]}
+                verdict={verdicts?.[quinte[0].course_id]}
+                rapportsMax={rapportsQuinte.length}
+                vedette
+              />
+              {estAujourdhui && (
+                <p className="mt-3 text-sm">
+                  <Link href="/quinte-du-jour" className="font-medium text-brand-gold-dark hover:underline">
+                    Détail complet du Quinté+ du jour
+                  </Link>
+                </p>
+              )}
+            </Section>
+          </div>
         ) : null}
 
         <BilanAlgoJour verdicts={verdictsListe} nbCoursesJour={avecArrivee.length} />
