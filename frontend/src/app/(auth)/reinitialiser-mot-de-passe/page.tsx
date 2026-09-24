@@ -71,7 +71,7 @@ function ReinitialiserContent() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-4">
-            <Image src="/logo.png" alt="BlackTurf" width={40} height={40} priority className="rounded-xl object-contain" />
+            <Image src="/logo-transparent.png" alt="BlackTurf" width={40} height={40} priority className="object-contain" />
             <span className="text-2xl font-bold">Black<span className="text-brand-gold-dark">Turf</span></span>
           </Link>
           <h1 className="text-2xl font-bold">Nouveau mot de passe</h1>
