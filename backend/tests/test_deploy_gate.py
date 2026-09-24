@@ -167,11 +167,12 @@ def test_roi_gate_bloque_toujours_une_regression_sans_structurel():
     ) is False
 
 
-# ── Gate marché (diagnostic 2026-08-20) ─────────────────────────────────
-# Le gate ne confrontait le challenger qu'au champion précédent. Deux modèles
-# sous le niveau d'un simple `ORDER BY cote_pmu` pouvaient donc se succéder
-# indéfiniment : mesuré, c'est ce qui s'est produit sur 513 versions, le modèle
-# complet étant à 0,7340 d'AUC intra-course contre 0,7351 pour la cote.
+# ── Gate marché — rebranché sur le produit SERVI (2026-09-24) ────────────
+# Il bloquait sur `rank_delta_market` du modèle NU < marge : négatif sur chaque
+# version depuis v528, il aurait gelé le modèle. Il bloque désormais sur le
+# verdict `marche_servi_bloque` (cf. ml.avantage_marche.mesure_gate_servi) :
+# le classement servi du challenger recule, face à la cote, par rapport au
+# champion. Tests de la mesure : tests/test_gate_marche_servi.py.
 
 BASE_SAINE = dict(
     current_wf=0.70, current_is_synth=False, no_current=False,
@@ -179,55 +180,46 @@ BASE_SAINE = dict(
 )
 
 
-def test_gate_marche_bloque_un_modele_sous_la_cote():
+def test_gate_marche_bloque_un_recul_du_produit_servi():
     assert _should_deploy(
-        0.75, market_gate_enabled=True, rank_delta_market=-0.0011, **BASE_SAINE,
+        0.75, market_gate_enabled=True, marche_servi_bloque=True, **BASE_SAINE,
     ) is False
 
 
-def test_gate_marche_laisse_passer_un_modele_au_dessus():
+def test_gate_marche_laisse_passer_sans_recul():
     assert _should_deploy(
-        0.75, market_gate_enabled=True, rank_delta_market=+0.0011, **BASE_SAINE,
+        0.75, market_gate_enabled=True, marche_servi_bloque=False, **BASE_SAINE,
     ) is True
 
 
-def test_gate_marche_prime_sur_un_remplacement_structurel():
-    """Promouvoir un modèle sous la cote au motif que l'actif est synthétique
-    reviendrait à remplacer un mauvais classeur par un autre."""
-    for motif in ("current_is_synth", "no_current", "current_unreliable", "data_jump"):
-        kwargs = dict(BASE_SAINE)
-        kwargs[motif] = True
-        assert _should_deploy(
-            0.75, market_gate_enabled=True, rank_delta_market=-0.02, **kwargs,
-        ) is False, motif
-
-
-def test_gate_marche_inactif_par_defaut_ne_gele_pas_le_modele():
-    """DÉFAUT OFF assumé : aucun modèle actuel ne bat la cote. Activer le gate
-    aujourd'hui figerait l'apprentissage — exactement le blocage de 48 jours de
-    l'audit 2026-08-16, qu'on ne rejoue pas."""
-    assert _should_deploy(0.75, rank_delta_market=-0.02, **BASE_SAINE) is True
-
-
-def test_mesure_impossible_ne_bloque_pas():
-    """`None` = pas de cote exploitable sur le hold-out. Une absence de mesure
-    n'est pas une preuve d'échec : bloquer dessus figerait le modèle sur une
-    simple panne de collecte de cotes."""
-    assert _should_deploy(
-        0.75, market_gate_enabled=True, rank_delta_market=None, **BASE_SAINE,
-    ) is True
-
-
-def test_marge_exigible_au_dessus_de_la_simple_egalite():
+@pytest.mark.parametrize("motif", ["current_is_synth", "no_current",
+                                   "current_unreliable", "data_jump"])
+def test_gate_marche_cede_devant_un_remplacement_structurel(motif):
+    """Comparer au champion n'a pas de sens quand il est synthétique, absent ou
+    non fiable — même règle que le contrôle du modèle de victoire."""
     kwargs = dict(BASE_SAINE)
-    assert _should_deploy(0.75, market_gate_enabled=True, rank_delta_market=0.005,
-                          market_gate_margin=0.01, **kwargs) is False
-    assert _should_deploy(0.75, market_gate_enabled=True, rank_delta_market=0.02,
-                          market_gate_margin=0.01, **kwargs) is True
+    kwargs[motif] = True
+    assert _should_deploy(
+        0.75, market_gate_enabled=True, marche_servi_bloque=True, **kwargs,
+    ) is True
+
+
+def test_gate_marche_inactif_ne_bloque_rien():
+    """`BT_MARKET_GATE=0` (production) : le verdict est calculé, journalisé,
+    persisté dans l'issue de la nuit, mais n'arbitre rien."""
+    assert _should_deploy(0.75, marche_servi_bloque=True, **BASE_SAINE) is True
+
+
+def test_le_gate_ne_lit_plus_le_delta_du_modele_nu():
+    """Garde contre un recâblage sur le modèle nu, structurellement sous la cote."""
+    import inspect
+    params = inspect.signature(_should_deploy).parameters
+    assert "rank_delta_market" not in params
+    assert "market_gate_margin" not in params
 
 
 def test_plancher_absolu_prime_toujours_sur_le_gate_marche():
-    """Un modèle sous MIN_DEPLOYABLE_AUC reste refusé même s'il bat la cote."""
+    """Un modèle sous MIN_DEPLOYABLE_AUC reste refusé même sans recul servi."""
     assert _should_deploy(
-        0.06, market_gate_enabled=True, rank_delta_market=+0.5, **BASE_SAINE,
+        0.06, market_gate_enabled=True, marche_servi_bloque=False, **BASE_SAINE,
     ) is False

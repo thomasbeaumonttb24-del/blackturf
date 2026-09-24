@@ -178,33 +178,33 @@ class AlgoFlags:
     # sans qu'on regarde le résultat le lendemain.
     market_residual: bool = field(default_factory=lambda: _env_bool("BT_MARKET_RESIDUAL", False))
 
-    # ── Gate marché (diagnostic 2026-08-20) ──────────────────────────────────
-    # Refuse la promotion d'un modèle dont le CLASSEMENT intra-course ne bat pas
-    # un simple `ORDER BY cote_pmu` sur le même hold-out (cf. ml/ranking_metrics).
+    # ── Gate marché — rebranché sur le produit SERVI le 2026-09-24 ───────────
+    # Refuse la promotion d'un modèle qui ferait RECULER, face à la cote, le
+    # classement réellement servi (proba de victoire mélangée à la cote), par
+    # rapport au champion, sur les mêmes courses du hold-out — régression prouvée
+    # (IC 95 % sous zéro) et matérielle (< −market_gate_tolerance). Il n'exige pas
+    # de battre la cote. Calcul : `ml.avantage_marche.mesure_gate_servi`.
     #
-    # DÉFAUT ON depuis le 2026-09-01. Il était OFF pour une raison explicite —
-    # « AUCUN modèle actuel ne passe ce gate : 0,7340 contre 0,7351 pour la cote ;
-    # l'activer gèlerait le modèle indéfiniment » — et cette raison a disparu.
+    # POURQUOI PLUS L'ANCIEN CRITÈRE. Il exigeait que `rank_delta_market` — le
+    # classement de l'ensemble NU sur le hold-out — batte la cote. Il passait sur
+    # v520-v527 (+0,019, mais mesuré sur le walk-forward jetable, pas sur le modèle
+    # déployé) ; depuis que la mesure porte sur le vrai modèle (v528, 07/09), il
+    # est NÉGATIF sur chaque version, de −0,035 à −0,017, pendant que le produit
+    # servi reste à parité avec la cote. Actif, il aurait bloqué les 17 promotions
+    # v528-v544 et gelé le modèle sur v527. NB : `BT_MARKET_RESIDUAL` n'est défini
+    # dans aucun conteneur de production — le modèle « nu » apprend AVEC la cote
+    # (les 7 colonnes de marché portent 34 % de l'importance de v544), et il reste
+    # pourtant sous elle.
     #
-    # Depuis la bascule sur la fenêtre de 12 mois (v520, 2026-08-25), l'avantage sur
-    # le marché est positif sur HUIT versions consécutives :
-    #   v520 +0.0198  v521 +0.0197  v522 +0.0200  v523 +0.0199
-    #   v524 +0.0192  v525 +0.0201  v526 +0.0188  v527 +0.0190
-    # Minimum 0.0188, contre une marge de 0.0. Activer n'aurait bloqué AUCUNE de ces
-    # huit nuits : c'est une protection pure, sans effet sur le régime actuel.
-    #
-    # Ce qu'elle empêche est le seul scénario qui compte : un modèle qui repasserait
-    # sous la cote sans que rien ne l'arrête. Les 513 versions d'avant v520 l'ont fait
-    # sans qu'aucune alerte se déclenche, parce que le gate ne confrontait le
-    # challenger qu'au champion précédent, jamais au marché.
-    #
-    # ⚠ Si le delta redevenait durablement négatif, ce gate FIGERAIT le modèle (blocage
-    # de 48 jours de l'audit 2026-08-16). Le rapport nocturne remonte le delta chaque
-    # nuit : c'est lui qui doit alerter avant que le gel ne s'installe. Repli immédiat
-    # sans redéploiement : BT_MARKET_GATE=0 dans l'environnement.
+    # Le code défaut à ON, mais la PRODUCTION le fixe à 0 (`docker-compose.prod.yml`,
+    # `${BT_MARKET_GATE:-0}`) : l'activer reste une décision humaine. Repli immédiat
+    # sans redéploiement : BT_MARKET_GATE=0.
     market_gate: bool = field(default_factory=lambda: _env_bool("BT_MARKET_GATE", True))
-    # Marge exigée quand le gate est actif. 0.0 = il suffit d'égaler la cote.
-    market_gate_margin: float = field(default_factory=lambda: _env_float("BT_MARKET_GATE_MARGIN", 0.0))
+    # Régression d'AUC servie tolérée avant blocage (même ordre que le contrôle du
+    # modèle de victoire, 0,002). Remplace `BT_MARKET_GATE_MARGIN`, qui portait sur
+    # l'ancien critère et n'est plus lu.
+    market_gate_tolerance: float = field(
+        default_factory=lambda: _env_float("BT_MARKET_GATE_TOLERANCE", 0.002))
 
     # ── Netteté de la distribution servie (2026-09-04) ───────────────────────
     # Applique l'exposant appris par `ml.sharpness_calibration` en toute fin de
@@ -280,7 +280,7 @@ class AlgoFlags:
             "ranker_blend": self.ranker_blend,
             "ranker_blend_weight": self.ranker_blend_weight,
             "market_gate": self.market_gate,
-            "market_gate_margin": self.market_gate_margin,
+            "market_gate_tolerance": self.market_gate_tolerance,
             "sharpness_calibration": self.sharpness_calibration,
             "melange_arrivees": self.melange_arrivees,
             "modele_technique": self.modele_technique,
