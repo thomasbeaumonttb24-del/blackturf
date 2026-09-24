@@ -11,6 +11,9 @@ name: Maintenance ELO
 #   features_12_mois recalcule features_ml des 400 derniers jours (fenêtre du
 #                    retrain), les plus récentes d'abord. Long : tourne en
 #                    arrière-plan sur le serveur, suivi avec l'action `statut`.
+#   retrain          réentraînement complet (même fonction et même verrou que celui
+#                    de 02:00 UTC ; promotion seulement si le gate le valide).
+#                    Arrière-plan, suivi avec `statut`.
 #   statut           dernières lignes des journaux de maintenance.
 #
 # Chaque action tourne dans un conteneur JETABLE du service worker
@@ -24,7 +27,7 @@ on:
         description: "Action"
         required: true
         type: choice
-        options: [elo_a_blanc, elo_grille, elo_appliquer, features_12_mois, statut]
+        options: [elo_a_blanc, elo_grille, elo_appliquer, features_12_mois, retrain, statut]
 
 concurrency:
   group: maintenance-elo
@@ -74,10 +77,22 @@ jobs:
                 docker ps --format '{{.Names}} {{.Status}}' | grep bt_recompute_features || echo "ATTENTION : conteneur absent après 60 s"
                 $DC exec -T worker sh -c "grep recompute-prerace /app/models/recompute-features.log | tail -n 3" || true
                 ;;
+              retrain)
+                if docker ps --format '{{.Names}}' | grep -q '^bt_retrain_manuel$'; then
+                  echo "Réentraînement déjà en cours."; exit 0
+                fi
+                $DC run -d --rm --no-deps --name bt_retrain_manuel worker \
+                  sh -c "python -c 'import asyncio; from ml.pipeline import run_nightly_retraining; asyncio.run(run_nightly_retraining())' >> /app/models/retrain-manuel.log 2>&1"
+                sleep 30
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_retrain_manuel || echo "ATTENTION : conteneur absent après 30 s"
+                ;;
               statut)
                 echo "── ELO ──"; tail -n 30 "$LOGS/maintenance-elo.log" 2>/dev/null || true
                 echo "── features ──"
                 docker ps --format '{{.Names}} {{.Status}}' | grep bt_recompute_features || echo "(aucun recalcul en cours)"
                 $DC exec -T worker sh -c "grep recompute-prerace /app/models/recompute-features.log | tail -n 5" || true
+                echo "── retrain manuel ──"
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_retrain_manuel || echo "(aucun retrain manuel en cours)"
+                $DC exec -T worker sh -c "grep -E 'retrain|promu|rejete|issue|Traceback|Error' /app/models/retrain-manuel.log | tail -n 8" 2>/dev/null || true
                 ;;
             esac
