@@ -20,6 +20,7 @@
  * rapproché de l'arrivée réelle. Jamais une appréciation inventée.
  */
 
+import { CARTE_CLS } from "@/components/courses/course-ui";
 import { useEffect, useState } from "react";
 import { ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
@@ -85,6 +86,9 @@ const SENS = {
  *  passé de 100 à 999 : écraser tous les gros outsiders sur 100 créait des ex æquo
  *  cosmétiques entre des chevaux que le modèle sépare d'un facteur 3. */
 const COTE_JUSTE_MAX = 999;
+
+/** Formats partagés avec la section Partants : mêmes cotes, même écriture. */
+export { cote as formatCoteFr, coteJuste as formatCoteJusteFr };
 
 /** Écart minimal entre la cote affichée et la cote du pronostic pour rappeler
  *  cette dernière. En dessous, le rappel n'apprend rien et alourdit la ligne. */
@@ -218,7 +222,7 @@ function BarreProba({
  *  Le pourcentage est l'écart relatif entre les deux cotes AFFICHÉES, rien de
  *  plus. Il ne remplace pas l'espérance de gain du modèle (badge « valeur »),
  *  qui, elle, tient compte de la calibration et des garde-fous. */
-function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
+export function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
   const ecart = ecartPrix(marche, juste);
   if (marche == null || !Number.isFinite(marche) || marche <= 0 || juste == null || !Number.isFinite(juste) || juste <= 0) {
     return <span className="text-[13px] text-stone-300">—</span>;
@@ -501,7 +505,7 @@ export function ClassementAlgo({
   };
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(28,25,23,.04)]">
+    <section className={cn("overflow-hidden", CARTE_CLS)}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 pb-3 pt-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">
@@ -751,7 +755,7 @@ export function ClassementAlgo({
 /** État verrouillé, affiché à la place de la table selon le plan de l'abonné. */
 export function ClassementVerrouille({ titre, texte, action }: { titre: string; texte: string; action: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-7 text-center">
+    <section className={cn("p-7 text-center", CARTE_CLS)}>
       <span className="mx-auto mb-3 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50 text-amber-800 ring-1 ring-amber-200">
         <Lock className="h-4 w-4" aria-hidden="true" />
       </span>
@@ -830,7 +834,7 @@ export function ClassementApercu({
   const GRILLE = "grid-cols-[36px_minmax(0,1fr)_112px] sm:grid-cols-[36px_minmax(0,1fr)_74px_74px_180px]";
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(28,25,23,.04)]">
+    <section className={cn("overflow-hidden", CARTE_CLS)}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 pb-3 pt-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">
