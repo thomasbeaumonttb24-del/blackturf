@@ -121,6 +121,10 @@ class Mesure:
         # période (ex. snapshots rétro-remplis) trahit un artefact, pas un signal.
         self.par_mois: dict = {}
         self.mois_courant = None
+        # Écart-type des notes DANS chaque course : c'est l'échelle que lit le
+        # modèle (elo_vs_moyenne, elo_vs_max). Un changement d'échelle entre
+        # l'ancien et le nouvel ELO = écart train/serve jusqu'au retrain.
+        self.dispersion = {"ancien": [], "nouveau": []}
 
     def ajouter(self, cle, valides, rating):
         rangs = [(r["position"], rating[r["cheval_id"]]) for r in valides
@@ -136,6 +140,8 @@ class Mesure:
                 self.ok[cle] += 1.0 if devant > derriere else (0.5 if devant == derriere else 0.0)
                 self.n[cle] += 1
         meilleur = max(rangs, key=lambda x: x[1])
+        _moy = sum(r for _, r in rangs) / len(rangs)
+        self.dispersion[cle].append((sum((r - _moy) ** 2 for _, r in rangs) / len(rangs)) ** 0.5)
         if self.mois_courant:
             m = self.par_mois.setdefault(self.mois_courant, {"ancien": [0, 0], "nouveau": [0, 0]})
             m[cle][0] += 1 if meilleur[0] == 1 else 0
@@ -151,6 +157,14 @@ class Mesure:
             z = sum(10 ** ((r - mx) / 400.0) for _, r in rangs)
             self.ll[cle][0] += (vainqueurs[0] - mx) / 400.0 * math.log(10) - math.log(z)
             self.ll[cle][1] += 1
+
+    def rapport_dispersion(self):
+        import statistics
+        d = {k: statistics.median(v) for k, v in self.dispersion.items() if v}
+        if len(d) == 2:
+            print(f"[echelle] écart-type des notes dans une course (médiane) : ancien "
+                  f"{d['ancien']:.1f} · nouveau {d['nouveau']:.1f} · rapport "
+                  f"{d['nouveau'] / max(d['ancien'], 1e-9):.2f}", flush=True)
 
     def rapport_mensuel(self):
         for mois in sorted(self.par_mois):
@@ -343,6 +357,7 @@ async def main(appliquer: bool):
                       vider if appliquer else None, jeter=not appliquer)
         mesure.rapport()
         mesure.rapport_mensuel()
+        mesure.rapport_dispersion()
         await fautifs(s, etat)
 
         if not appliquer:
