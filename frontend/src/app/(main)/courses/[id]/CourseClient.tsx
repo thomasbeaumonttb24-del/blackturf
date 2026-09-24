@@ -25,6 +25,7 @@ import {
   CapacitesAbonnementCard, CtaAbonnementBand,
 } from "@/components/courses/insights";
 import { PronosticEmailPopup } from "@/components/courses/PronosticEmailPopup";
+import { ModuleQuinte, type ModuleQuinteData } from "@/components/courses/ModuleQuinte";
 import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, type ClassementSignal,
 } from "@/components/courses/classement";
@@ -259,6 +260,7 @@ interface MisePlan {
   prono_fige?: boolean;           // sélection figée (T-10) — paris/chevaux/mises immuables
   gains_live_post_gel?: boolean;  // gains ré-évalués sur cotes live MÊME après le gel
   roi_observe?: { roi: number; nb: number; jours: number };  // ROI RÉEL récent du profil (honnêteté vs espérance théorique)
+  module_quinte?: ModuleQuinteData | null; montant_quinte?: number;  // Quinté+ pris SUR le montant
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -572,7 +574,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
         <div aria-hidden="true" style={{ width: 1, height: 38, marginTop: 2, background: CX.bd3 }} />
         <div style={{ textAlign: "right" }}>
           <div style={{ height: 14, marginBottom: 6, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }}>Total misé</div>
-          <div style={{ fontFamily: CX.sg, fontSize: 25, fontWeight: 700, color: CX.ink, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{plan.montant_joue.toFixed(2)}€</div>
+          <div style={{ fontFamily: CX.sg, fontSize: 25, fontWeight: 700, color: CX.ink, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{(plan.montant_joue + (plan.montant_quinte ?? 0)).toFixed(2)}€</div>
           {plan.montant_reserve > 0 && (
             <div style={{ marginTop: 5, fontSize: 10.5, color: CX.gray500, fontVariantNumeric: "tabular-nums" }}>{plan.montant_reserve.toFixed(2)}€ gardés de côté</div>
           )}
@@ -684,6 +686,7 @@ function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onS
           </section>
           );
         })}
+        {plan.module_quinte && <ModuleQuinte module={plan.module_quinte} montantTotal={plan.montant_total} />}
       </div>
 
       {/* Note « champ réduit » — modéré/risqué visent PLUSIEURS petites mises ; s'ils
