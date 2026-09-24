@@ -16,7 +16,7 @@
  * (fournis dans ce même paquet, sous /public)
  */
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useMemo, useCallback, useRef } from "react";
 import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
@@ -32,6 +32,7 @@ import { coursesApi, predictionsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime, cn } from "@/lib/utils";
 import { jourParis } from "@/lib/seo";
+import { CARTE_CLS, Pastille, PastilleDirect, SG } from "@/components/courses/course-ui";
 
 /* ─── Types ─────────────────────────────────────────────── */
 interface CourseSummary {
@@ -120,6 +121,59 @@ function DiscIcon({ discipline, w = 46, h = 30, color }: { discipline: string; w
       }}
     />
   );
+}
+
+/* ─── Compteur animé ──────────────────────────────────────
+ * Le HTML serveur porte la vraie valeur (robots, visiteurs sans JavaScript). Côté
+ * navigateur, on repart de 0 avant la première peinture puis on monte jusqu'à elle —
+ * sauf si le visiteur a demandé moins d'animations. */
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+function useCompteur(cible: number, dureeMs = 900): number {
+  const [v, setV] = useState(cible);
+  const deja = useRef(false);
+  useIsoLayoutEffect(() => {
+    if (deja.current) { setV(cible); return; }
+    deja.current = true;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || cible <= 0) { setV(cible); return; }
+    let raf = 0;
+    const t0 = performance.now();
+    setV(0);
+    const pas = (t: number) => {
+      const k = Math.min(1, (t - t0) / dureeMs);
+      setV(Math.round(cible * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(pas);
+    };
+    raf = requestAnimationFrame(pas);
+    return () => cancelAnimationFrame(raf);
+  }, [cible, dureeMs]);
+  return v;
+}
+
+function TuileCompteur({ n, libelle, ton }: { n: number; libelle: string; ton?: string }) {
+  const v = useCompteur(n);
+  return (
+    <div className="bt-pop rounded-2xl bg-white/85 px-2.5 py-2.5 ring-1 ring-[#E6DCC6] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_10px_22px_-18px_rgba(146,64,14,.5)] backdrop-blur sm:px-4 sm:py-3">
+      <div className={cn("text-[22px] font-bold leading-none tabular-nums text-stone-900 sm:text-[28px]", ton)} style={SG}>{v}</div>
+      <div className="mt-1 text-[11px] font-medium text-stone-500 sm:text-xs">{libelle}</div>
+    </div>
+  );
+}
+
+/* Minutes avant le départ (null au-delà d'une heure ou course partie) — sert à
+ * l'anneau qui se vide autour de l'heure de départ. */
+function useMinutesAvant(targetDate: string, statut: string): number | null {
+  const [m, setM] = useState<number | null>(null);
+  useEffect(() => {
+    if (statut !== "programme" && statut !== "a_venir") { setM(null); return; }
+    const tick = () => {
+      const s = differenceInSeconds(new Date(targetDate), new Date());
+      setM(s > 0 && s < 3600 ? s / 60 : null);
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, [targetDate, statut]);
+  return m;
 }
 
 /* ─── Countdown hook ────────────────────────────────────── */
@@ -227,7 +281,7 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
     if (el) el.scrollLeft = el.scrollWidth;
   }, []);
   return (
-    <div ref={scrollRef} className={cn("flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-0.5", HIDE_SCROLLBAR)}>
+    <div ref={scrollRef} className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 pt-0.5 sm:mx-0 sm:px-0", HIDE_SCROLLBAR)}>
       {days.map((d) => {
         const key = format(d, "yyyy-MM-dd");
         const isSel = key === selKey;
@@ -238,12 +292,12 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
             key={key}
             onClick={() => onSelect(d)}
             className={cn(
-              "group flex flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 min-w-[58px] shrink-0 border transition-all hover:-translate-y-0.5",
+              "group flex min-w-[58px] shrink-0 flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 ring-1 transition-all hover:-translate-y-0.5 active:scale-[.97]",
               isSel
-                ? "bg-gray-900 text-white border-gray-900 shadow-md shadow-gray-900/10"
+                ? "bg-stone-900 text-white ring-stone-900 shadow-[0_8px_18px_-10px_rgba(17,24,39,.7)]"
                 : isToday
-                ? "bg-white text-gray-800 border-amber-300 ring-1 ring-amber-200 hover:border-amber-400"
-                : "bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+                ? "bg-white text-gray-800 ring-amber-300 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_8px_18px_-14px_rgba(146,64,14,.5)]"
+                : "bg-white text-gray-700 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_8px_18px_-14px_rgba(17,24,39,.4)] hover:ring-stone-300",
             )}
           >
             <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-white/70" : isToday ? "text-amber-700" : "text-gray-600")}>
@@ -267,63 +321,93 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
   const isLive = course.statut === "en_cours";
   const countdown = useCountdown(course.date_heure, course.statut);
   const url = `/img/disciplines/${m.mask}`;
+  const fiche = `/courses/${course.course_id}`;
+  const minutes = useMinutesAvant(course.date_heure, course.statut);
+  // Anneau : plein à une heure du départ, vide au départ.
+  const R = 44, C = 2 * Math.PI * R;
+  const part = minutes == null ? (isLive ? 1 : 0) : Math.max(0.02, Math.min(1, minutes / 60));
   return (
-    <div
-      className="relative overflow-hidden rounded-[22px]"
-      style={{ border: "1px solid rgba(255,255,255,.08)", background: "linear-gradient(135deg,#0F1520 0%,#1A2230 100%)", boxShadow: "0 18px 40px -24px rgba(15,21,32,.7)" }}
-    >
-      <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: "linear-gradient(180deg,#F59E0B,#D97706)" }} />
+    // Liseré doré animé : un dégradé conique qui tourne DERRIÈRE la carte, masqué
+    // partout sauf sur 1,5 px de bord.
+    <div className="bt-lisere relative rounded-[18px] p-[1.5px] shadow-[0_22px_44px_-26px_rgba(146,64,14,.55)]">
+    <section aria-label="Prochaine course" className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-50 via-white to-white">
+      <span aria-hidden className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-gradient-to-b from-amber-300 via-amber-500 to-amber-700" />
       <span
         aria-hidden
         className="pointer-events-none absolute max-[767px]:hidden"
         style={{
           // la silhouette reste entièrement dans la carte : aucun sabot rogné par l'overflow
-          right: 200, bottom: 10, width: 300, height: 132, background: "rgba(255,255,255,.07)",
+          right: 210, bottom: 12, width: 280, height: 124, background: m.color, opacity: 0.07,
           WebkitMaskImage: `url(${url})`, maskImage: `url(${url})`,
           WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
           WebkitMaskPosition: "center", maskPosition: "center",
           WebkitMaskSize: "contain", maskSize: "contain",
         }}
       />
-      <div className="relative flex flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-5">
-        <div className="flex-1 min-w-[230px]">
-          <div className="flex items-center gap-2.5 mb-3">
-            <span className="text-[10.5px] font-bold uppercase tracking-[.16em] text-slate-600">Prochaine course</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-              {isLive ? "En piste" : "À venir"}
-            </span>
+      <div className="relative flex flex-wrap items-center gap-4 px-4 py-4 sm:gap-6 sm:px-6 sm:py-5">
+        <div className="min-w-[230px] flex-1">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="bt-brillance bg-clip-text text-[10.5px] font-bold uppercase tracking-[.16em] text-transparent">Prochaine course</span>
+            {isLive ? <PastilleDirect libelle="En piste" /> : countdown ? (
+              <Pastille className="bg-amber-50 text-amber-800 ring-amber-200">{countdown}</Pastille>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className="rounded-md px-2 py-0.5 text-[12px] font-bold tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif", color: "#0F1520", background: "#E2E8F0" }}>
+            <span className="rounded-md bg-stone-900 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white" style={SG}>
               R{reunionNum}C{course.numero}
             </span>
-            <span className="text-lg sm:text-[22px] font-bold text-white tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{course.hippodrome_nom}</span>
+            <span className="text-lg font-bold tracking-tight text-stone-900 sm:text-[22px]" style={SG}>{course.hippodrome_nom}</span>
           </div>
-          {course.nom && <div className="mt-1.5 text-sm font-medium text-slate-300">{course.nom}</div>}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {[titleCase(course.discipline), `${course.distance} m`, `${course.nb_partants} partants`].map((t) => (
-              <span key={t} className="inline-flex items-center rounded-lg px-3 py-1.5 text-[12px] font-semibold text-slate-200" style={{ background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)" }}>{t}</span>
+          {course.nom && <div className="mt-1 text-sm font-medium text-stone-600">{course.nom}</div>}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-semibold ring-1 ring-inset" style={{ color: m.color, background: m.bg, boxShadow: `inset 0 0 0 1px ${m.ring}` }}>
+              <DiscIcon discipline={course.discipline} w={26} h={18} />{titleCase(course.discipline)}
+            </span>
+            {[`${course.distance} m`, `${course.nb_partants} partants`].map((t) => (
+              <span key={t} className="inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-[12px] font-semibold text-stone-700 ring-1 ring-inset ring-[#ECE7DC]">{t}</span>
             ))}
+            {course.est_quinte && <Pastille className="bg-amber-50 text-amber-800 ring-amber-200">Quinté+</Pastille>}
           </div>
         </div>
-        <div className="flex w-full flex-row items-end justify-between gap-3.5 border-t border-white/10 pt-4 sm:w-auto sm:flex-col sm:items-end sm:border-t-0 sm:border-l sm:border-white/10 sm:pt-0 sm:pl-6">
-          <div className="text-left sm:text-right">
-            <div className="text-[10px] font-bold uppercase tracking-[.16em] text-slate-600">Départ</div>
-            <div className="mt-1 text-[26px] sm:text-[30px] font-bold leading-none tracking-tight text-white tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{formatTime(course.date_heure)}</div>
-            {countdown && (
-              <div className="mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.28)" }}>{countdown}</div>
-            )}
+        <div className="flex w-full flex-row items-end justify-between gap-3.5 border-t border-[#EFE8D8] pt-4 sm:w-auto sm:flex-col sm:items-end sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+          <div className="relative flex h-[104px] w-[104px] shrink-0 items-center justify-center" title={minutes != null ? `Départ dans ${Math.ceil(minutes)} min` : undefined}>
+            <svg width="104" height="104" viewBox="0 0 104 104" className="absolute inset-0 -rotate-90" aria-hidden>
+              <defs>
+                <linearGradient id="bt-anneau" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor={isLive ? "#34D399" : "#FCD34D"} />
+                  <stop offset="100%" stopColor={isLive ? "#059669" : "#D97706"} />
+                </linearGradient>
+              </defs>
+              <circle cx="52" cy="52" r={R} fill="none" stroke="#F1EEE6" strokeWidth="6" />
+              <circle cx="52" cy="52" r={R} fill="none" stroke="url(#bt-anneau)" strokeWidth="6" strokeLinecap="round"
+                strokeDasharray={`${part * C} ${C}`} className="transition-[stroke-dasharray] duration-1000 ease-out" />
+            </svg>
+            <div className="relative flex h-[80px] w-[80px] flex-col items-center justify-center rounded-full bg-gradient-to-b from-white to-stone-50 shadow-[inset_0_1px_0_#fff,0_6px_14px_-8px_rgba(17,24,39,.35)]">
+              <span className="text-[9.5px] font-bold uppercase tracking-[.14em] text-stone-500">{isLive ? "En piste" : "Départ"}</span>
+              <span className="text-[21px] font-bold leading-none tracking-tight text-stone-900 tabular-nums" style={SG}>{formatTime(course.date_heure)}</span>
+            </div>
           </div>
           <Link
-            href={`/courses/${course.course_id}`}
-            className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-[13px] font-bold transition-transform hover:-translate-y-0.5"
-            style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)", color: "#0F1520", boxShadow: "0 8px 22px -10px rgba(245,158,11,.6)" }}
+            href={fiche}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-2.5 text-[13px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45),0_8px_18px_-8px_rgba(217,119,6,.65)] transition-transform hover:-translate-y-0.5 active:scale-[.98]"
           >
             Voir la course <ChevronRight className="h-4 w-4" />
           </Link>
         </div>
       </div>
+      {/* Accès directs aux onglets de la fiche : le pronostic, les partants, le plan. */}
+      <nav aria-label="Accès rapide à la course" className="relative flex gap-2 overflow-x-auto border-t border-[#EFE8D8] bg-white/60 px-4 py-2.5 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {[["synthese", "Pronostic"], ["partants", "Partants"], ["plan", "Plan de mise"]].map(([cle, lib]) => (
+          <Link
+            key={cle}
+            href={`${fiche}#${cle}`}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-[12.5px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(146,64,14,.12)] transition-colors hover:bg-amber-50"
+          >
+            {lib}<span aria-hidden>›</span>
+          </Link>
+        ))}
+      </nav>
+    </section>
     </div>
   );
 }
@@ -398,14 +482,14 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
       id={`course-${course.course_id}`}
       onClick={onOuvrir}
       className={cn(
-        "group relative flex scroll-mt-28 items-center gap-2.5 rounded-2xl border px-3 py-2.5 no-underline transition-all duration-200 sm:gap-3 sm:px-4 sm:py-3",
+        "bt-apparition group relative flex scroll-mt-28 items-center gap-2.5 overflow-hidden rounded-2xl px-3 py-3 no-underline ring-1 transition-all duration-200 active:scale-[.99] sm:gap-3 sm:px-4",
         isDone
-          ? "border-[#E9E6DC] hover:border-gray-300"
-          : "border-[#ECE7DC] shadow-[0_1px_2px_rgba(0,0,0,.03)] hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-[0_16px_32px_-14px_rgba(180,83,9,.28)]",
+          ? "ring-[#E9E6DC] hover:ring-stone-300"
+          : "ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_12px_28px_-22px_rgba(17,24,39,.45)] hover:-translate-y-0.5 hover:ring-amber-300 hover:shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.05),0_22px_40px_-24px_rgba(146,64,14,.45)]",
       )}
-      style={{ background: isLive ? "#F0FDF8" : isDone ? "#F5F4EF" : "#FFFFFF", animation: `fadeUp .5s cubic-bezier(.16,1,.3,1) ${delay}s both` }}
+      style={{ background: isLive ? "#F0FDF8" : isDone ? "#F5F4EF" : "#FFFFFF", ["--bt-delai" as string]: `${delay}s` }}
     >
-      <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl" style={{ background: isLive ? "#10B981" : !isDone && course.est_quinte ? "#F59E0B" : "transparent" }} />
+      <span className="absolute inset-y-3 left-0 w-1 rounded-r-full" style={{ background: isLive ? "linear-gradient(180deg,#34D399,#059669)" : !isDone && course.est_quinte ? "linear-gradient(180deg,#FCD34D,#D97706)" : "transparent" }} />
       <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
         <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-700" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
           {formatTime(course.date_heure)}
@@ -448,13 +532,14 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
             Pas de pastille « Analysée » : toutes les courses le sont, elle
             n'apprenait rien et volait la place des deux chiffres qui varient. */}
         {apercu?.analysee && (
-          <div className="mt-1.5 hidden flex-wrap items-center gap-1.5 sm:flex">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {apercu.confiance != null && (
               <span
                 className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 tabular-nums"
                 title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
               >
-                accord des modèles {apercu.confiance}/100
+                <span className="sm:hidden">accord {apercu.confiance}/100</span>
+                <span className="hidden sm:inline">accord des modèles {apercu.confiance}/100</span>
               </span>
             )}
             {apercu.accord_marche === false && (
@@ -462,7 +547,8 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
                 title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
                 className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
               >
-                ne suit pas le marché
+                <span className="sm:hidden">≠ marché</span>
+                <span className="hidden sm:inline">ne suit pas le marché</span>
               </span>
             )}
           </div>
@@ -870,7 +956,7 @@ export default function ProgrammeClient({
           <div className="mb-3.5 flex items-center gap-3.5">
             <div
               className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
-              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 4px 12px -4px rgba(217,119,6,.4)" }}
+              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(180deg,#FBBF24,#D97706)", boxShadow: "inset 0 1px 0 rgba(255,255,255,.45), 0 6px 14px -6px rgba(217,119,6,.6)" }}
             >
               {hour}
             </div>
@@ -903,21 +989,44 @@ export default function ProgrammeClient({
       }}
     >
       {/* @keyframes local (fadeUp) */}
-      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}@media (prefers-reduced-motion:reduce){*{animation:none!important}}`}</style>
+      <style>{`
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+@keyframes btDerive1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,18px) scale(1.12)}}
+@keyframes btDerive2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-36px,-14px) scale(1.08)}}
+@keyframes btDerive3{0%,100%{transform:translate(0,0)}50%{transform:translate(24px,-20px)}}
+@keyframes btTour{to{transform:rotate(360deg)}}
+@keyframes btBrille{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes btPop{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes btPouls{0%{box-shadow:0 0 0 0 rgba(217,119,6,.45)}70%{box-shadow:0 0 0 10px rgba(217,119,6,0)}100%{box-shadow:0 0 0 0 rgba(217,119,6,0)}}
+.bt-halo-a{animation:btDerive1 14s ease-in-out infinite}
+.bt-halo-b{animation:btDerive2 17s ease-in-out infinite}
+.bt-halo-c{animation:btDerive3 12s ease-in-out infinite}
+.bt-brillance{background-image:linear-gradient(90deg,#92400E 0%,#D97706 25%,#F59E0B 50%,#D97706 75%,#92400E 100%);background-size:200% 100%;animation:btBrille 6s linear infinite}
+.bt-pop{animation:btPop .6s cubic-bezier(.16,1,.3,1) both}
+.bt-pop:nth-child(2){animation-delay:.07s}.bt-pop:nth-child(3){animation-delay:.14s}.bt-pop:nth-child(4){animation-delay:.21s}
+.bt-lisere{isolation:isolate;overflow:hidden}
+.bt-lisere::before{content:"";position:absolute;inset:-60%;z-index:-1;background:conic-gradient(from 0deg,#F59E0B,#FDE68A,#ECE7DC 30%,#ECE7DC 55%,#D97706 75%,#F59E0B);animation:btTour 7s linear infinite}
+.bt-maintenant-point{animation:btPouls 2s ease-out infinite}
+.bt-apparition{animation:fadeUp .5s cubic-bezier(.16,1,.3,1) var(--bt-delai,0s) both}
+@supports (animation-timeline: view()){
+  .bt-apparition{animation:fadeUp linear both;animation-timeline:view();animation-range:entry 0% entry 55%}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}.bt-lisere::before{background:#ECE7DC}}
+`}</style>
 
       <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8 lg:px-8">
 
-        {/* ── HERO ── */}
-        <div
-          className="relative overflow-hidden rounded-[28px] px-5 pb-5 pt-6 sm:px-7 sm:pb-6 sm:pt-7"
-          style={{ border: "1px solid rgba(245,158,11,.18)", background: "linear-gradient(180deg,#FFFBF0 0%,#FFFFFF 100%)", boxShadow: "0 1px 3px rgba(0,0,0,.04),0 16px 44px -20px rgba(180,83,9,.18)" }}
-        >
-          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 60% at 12% 8%,rgba(245,158,11,.10),transparent 62%),radial-gradient(55% 55% at 94% 20%,rgba(217,119,6,.07),transparent 60%)" }} />
+        {/* ── EN-TÊTE : panneau teinté et plat, comme les bandeaux de la fiche course ── */}
+        <header className="relative isolate overflow-hidden rounded-[22px] bg-[#F3EDE0] px-4 pb-4 pt-5 ring-1 ring-inset ring-[#E6DCC6] sm:px-6 sm:pb-5 sm:pt-6">
+          {/* Halos dorés qui dérivent lentement : de la vie, sans fond sombre. */}
+          <span aria-hidden className="bt-halo-a pointer-events-none absolute -left-16 -top-20 -z-10 h-56 w-56 rounded-full bg-amber-300/45 blur-3xl" />
+          <span aria-hidden className="bt-halo-b pointer-events-none absolute -bottom-24 right-10 -z-10 h-60 w-60 rounded-full bg-orange-200/60 blur-3xl" />
+          <span aria-hidden className="bt-halo-c pointer-events-none absolute left-1/3 top-6 -z-10 h-40 w-40 rounded-full bg-yellow-200/50 blur-3xl" />
           <span
             aria-hidden
             className="pointer-events-none absolute max-[479px]:hidden"
             style={{
-              right: 30, top: 16, width: 172, height: 104, opacity: 0.11, background: "linear-gradient(120deg,#D97706,#92400E)",
+              right: 26, top: 14, width: 150, height: 92, opacity: 0.1, background: "#92400E",
               WebkitMaskImage: "url(/img/logo-horse.png)", maskImage: "url(/img/logo-horse.png)",
               WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
               WebkitMaskPosition: "center", maskPosition: "center",
@@ -925,7 +1034,7 @@ export default function ProgrammeClient({
             }}
           />
           <div className="relative">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-2.5 flex items-center justify-between gap-3">
               <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.16em] text-amber-700">
                 <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
                 Programme du jour
@@ -933,8 +1042,7 @@ export default function ProgrammeClient({
               {!isToday && (
                 <button
                   onClick={() => selectDate(new Date(`${jourCourant}T12:00:00`))}
-                  className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors"
-                  style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)" }}
+                  className="shrink-0 rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-4 py-2 text-sm font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45),0_6px_14px_-6px_rgba(217,119,6,.6)]"
                 >
                   Aujourd&apos;hui
                 </button>
@@ -947,35 +1055,38 @@ export default function ProgrammeClient({
             {format(selectedDate, "yyyy-MM-dd") < jourCourant && (
               <a
                 href={`/resultats/${format(selectedDate, "yyyy-MM-dd")}`}
-                className="mb-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12.5px] font-medium text-amber-800 transition-colors hover:border-amber-400"
+                className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[12.5px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 transition-colors hover:bg-amber-50"
               >
                 Arrivées et rapports du {format(selectedDate, "d MMMM yyyy", { locale: fr })} →
               </a>
             )}
 
-            {/* Le titre de la page ne disait que la date — « Mercredi 26 août 2026 » —
-                sans nommer ce qu'on y trouve. Le `<title>` annonçait bien « Programme
-                PMU », mais le `h1`, qui est le titre du CONTENU, ne le reprenait nulle
-                part : ni pour un lecteur arrivant par un lien, ni pour un moteur qui y
-                cherche le sujet de la page. Le dégradé porte désormais l'intitulé, la
-                date reste en gris à sa suite. */}
-            <h1 className="text-[27px] sm:text-[38px] font-bold leading-[1.08] sm:leading-[1.04] tracking-tight" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
-              <span style={{ background: "linear-gradient(135deg,#92400E 0%,#D97706 55%,#F59E0B 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent" }}>Programme PMU</span>
-              <span className="text-gray-800"> — {dayName.toLowerCase()} {restDate}</span>
+            {/* Le `h1` nomme le contenu (« Programme PMU ») et porte la date : c'est le
+                titre que lisent un lecteur arrivé par un lien et un moteur de recherche. */}
+            <h1 className="text-[26px] font-bold leading-[1.08] tracking-tight sm:text-[34px] sm:leading-[1.04]" style={SG}>
+              <span className="bt-brillance bg-clip-text text-transparent">Programme PMU</span>
+              <span className="text-stone-800"> — {dayName.toLowerCase()} {restDate}</span>
             </h1>
 
-            {programme && programme.nb_courses > 0 && (
-              <div className="mt-5 flex flex-wrap gap-2.5">
-                {[{ n: programme.nb_courses, l: "Courses" }, { n: programme.reunions.length, l: "Réunions" }].map((s) => (
-                  <div key={s.l} className="min-w-[118px] flex-1 rounded-2xl px-4 py-3.5" style={{ background: "rgba(255,255,255,.72)", backdropFilter: "blur(4px)", border: "1px solid rgba(0,0,0,.06)" }}>
-                    <div className="text-[29px] font-bold leading-none text-gray-900 tabular-nums" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{s.n}</div>
-                    <div className="mt-1.5 text-xs font-medium text-gray-600">{s.l}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {programme && programme.nb_courses > 0 && (() => {
+              const enDirect = allCourses.filter((c) => c.statut === "en_cours").length;
+              const aVenir = allCourses.filter((c) => !estPassee(c) && c.statut !== "en_cours").length;
+              const tuiles: Array<{ n: number; l: string; ton?: string }> = [
+                { n: programme.nb_courses, l: "Courses" },
+                { n: programme.reunions.length, l: "Réunions" },
+                ...(isToday ? [
+                  { n: enDirect, l: "En direct", ton: enDirect > 0 ? "text-emerald-700" : undefined },
+                  { n: aVenir, l: "À venir", ton: "text-amber-700" },
+                ] : []),
+              ];
+              return (
+                <div className={cn("mt-4 grid gap-2", tuiles.length === 4 ? "grid-cols-4" : "grid-cols-2")}>
+                  {tuiles.map((t) => <TuileCompteur key={t.l} n={t.n} libelle={t.l} ton={t.ton} />)}
+                </div>
+              );
+            })()}
           </div>
-        </div>
+        </header>
 
         {/* ── Sélecteur de jour ── */}
         <DayStrip selected={selectedDate} jourCourant={jourCourant} onSelect={selectDate} />
@@ -996,7 +1107,15 @@ export default function ProgrammeClient({
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (
-          <div className="space-y-3">
+          <div className={cn(CARTE_CLS, "space-y-3 p-3.5 sm:p-4")}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="m-0 inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[.1em] text-stone-500">
+                <Filter className="h-3.5 w-3.5" aria-hidden /> Filtrer les courses
+              </p>
+              {(discFilter !== "Tous" || reunionFilter !== "all" || hippoSearch || vbOnly) && (
+                <button onClick={resetFilters} className="text-[12px] font-semibold text-amber-700 hover:underline">Tout effacer</button>
+              )}
+            </div>
             {/* Recherche + valeur */}
             <div className="flex flex-wrap items-center gap-2.5">
               {isPaid && isToday && (
@@ -1016,7 +1135,7 @@ export default function ProgrammeClient({
                   value={hippoSearch}
                   onChange={(e) => setHippoSearch(e.target.value)}
                   placeholder="Rechercher un hippodrome…"
-                  className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-8 text-[13px] outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                  className="w-full rounded-xl border border-[#E6DCC6] bg-[#FCFAF5] py-2.5 pl-9 pr-8 text-[13px] outline-none transition-all focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-100"
                 />
                 {hippoSearch && (
                   <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -1132,7 +1251,7 @@ export default function ProgrammeClient({
                   onClick={() => setTerminesOuverts((v) => !v)}
                   aria-expanded={terminesOuverts}
                   aria-controls="courses-terminees"
-                  className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[#E9E6DC] bg-white/70 px-4 py-3 text-left text-[13px] font-semibold text-gray-700 transition-colors hover:border-gray-300"
+                  className={cn(CARTE_CLS, "flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-[13px] font-semibold text-gray-700 transition-transform active:scale-[.99]")}
                 >
                   <span>
                     {flatTermines.length} course{flatTermines.length > 1 ? "s" : ""} déjà courue{flatTermines.length > 1 ? "s" : ""}
@@ -1148,6 +1267,17 @@ export default function ProgrammeClient({
               </div>
             )}
 
+            {isToday && replierTermines && maintenant && (
+              <div className="relative z-[2] mb-5 flex items-center gap-3" aria-label="Heure actuelle">
+                <span className="bt-maintenant-point flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white ring-2 ring-amber-400 sm:h-[46px] sm:w-[46px] sm:rounded-2xl">
+                  <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                </span>
+                <span className="text-[12px] font-bold uppercase tracking-[.12em] text-amber-800">
+                  Maintenant · <span className="tabular-nums" style={SG}>{format(maintenant, "HH:mm")}</span>
+                </span>
+                <span className="h-px flex-1 bg-gradient-to-r from-amber-400 to-transparent" />
+              </div>
+            )}
             {rendreGroupes(groupesAVenir, true)}
           </div>
         )}
