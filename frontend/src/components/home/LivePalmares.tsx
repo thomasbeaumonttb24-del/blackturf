@@ -112,7 +112,7 @@ export function LivePalmares() {
                     </p>
                     <h3 className="mt-1 font-display text-2xl font-extrabold text-white sm:text-3xl">Les 3 plus gros gains</h3>
                   </div>
-                  <Link href="/track-record" className="inline-flex items-center gap-1 text-sm font-semibold text-amber-300 hover:text-amber-200">
+                  <Link href="/track-record#records" className="inline-flex items-center gap-1 text-sm font-semibold text-amber-300 hover:text-amber-200">
                     Voir les 30 records <ArrowRight className="h-4 w-4" aria-hidden="true" />
                   </Link>
                 </div>

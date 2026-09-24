@@ -591,6 +591,24 @@ export default function TrackRecordPage() {
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
 
+  // Arrivée par `/track-record#records` (lien « Voir les 30 records » de l'accueil) :
+  // la section n'existe qu'une fois le palmarès chargé par SWR, bien après la
+  // tentative de défilement du navigateur — l'ancre seule tombait dans le vide et
+  // laissait le visiteur en haut de page. On déplie donc les 30 records et on
+  // défile nous-mêmes, une seule fois, dès que la section est rendue.
+  const ancreRecordsFaite = useRef(false);
+  const recordsPrets = !!data && !!gagnantsData?.top_gains?.length;
+  useEffect(() => {
+    if (ancreRecordsFaite.current || window.location.hash !== "#records") return;
+    setRecordsLimit(30);
+    if (!recordsPrets) return;
+    ancreRecordsFaite.current = true;
+    // Deux images : la grille dépliée doit être peinte avant de mesurer.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById("records")?.scrollIntoView({ block: "start" });
+    }));
+  }, [recordsPrets]);
+
   // Série 30 j complétée + moyenne pondérée par le volume de courses du jour
   // (une moyenne simple donnerait autant de poids à un jour de 3 courses qu'à un
   // jour de 60 → une journée creuse déformerait la ligne de référence).
@@ -764,8 +782,9 @@ export default function TrackRecordPage() {
         {/* ── 30 meilleurs gains : scène sombre + podium ─────────────────────── */}
         {gagnantsData?.top_gains && gagnantsData.top_gains.length > 0 && (
           <section
+            id="records"
             aria-label="Plus gros gains"
-            className="relative isolate -mx-4 overflow-hidden bg-[#0b1020] px-4 py-12 sm:mx-0 sm:rounded-[2rem] sm:px-8 sm:py-16 lg:px-12"
+            className="relative isolate -mx-4 scroll-mt-20 overflow-hidden bg-[#0b1020] px-4 py-12 sm:mx-0 sm:rounded-[2rem] sm:px-8 sm:py-16 lg:px-12"
           >
             <div className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
               <span className="tr-glow absolute -left-24 top-10 h-80 w-80 rounded-full bg-amber-500/20 blur-[100px]" />
