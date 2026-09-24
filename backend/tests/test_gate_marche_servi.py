@@ -267,10 +267,13 @@ def test_tolerance_par_defaut_et_ancienne_marge_abandonnee(monkeypatch):
     assert "market_gate_tolerance" in f.as_dict()
 
 
-def test_la_production_garde_le_gate_desactive_par_defaut():
-    """L'activation reste une décision de Thomas : chaque service du compose de
-    production doit garder `${BT_MARKET_GATE:-0}`."""
+def test_la_production_active_le_gate_servi_partout():
+    """Activé par Thomas le 2026-09-24 : chaque service du compose de production
+    porte `${BT_MARKET_GATE:-1}`. Une valeur divergente entre services ferait
+    juger une promotion différemment selon le processus qui l'évalue."""
     from ._descripteurs_deploiement import COMPOSE_PROD, exiger
     compose = exiger(COMPOSE_PROD)
     valeurs = re.findall(r"BT_MARKET_GATE=\$\{BT_MARKET_GATE:-(\d)\}", compose)
-    assert valeurs and set(valeurs) == {"0"}
+    assert valeurs and set(valeurs) == {"1"}
+    refit = re.findall(r"BT_REFIT_FULL=\$\{BT_REFIT_FULL:-(\d)\}", compose)
+    assert refit and set(refit) == {"1"}
