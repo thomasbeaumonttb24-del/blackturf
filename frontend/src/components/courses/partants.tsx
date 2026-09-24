@@ -564,23 +564,23 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
   // Téléphone : jockey sur sa ligne, puis âge · repos (le « · » de tête d'une
   // ligne renvoyée à la ligne se lisait comme une erreur).
   const meta = (
-    <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px] text-stone-500">
+    <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-stone-500 sm:gap-x-1.5">
       {p.jockey && <span className={cn("w-full font-medium text-stone-700 sm:w-auto", p.jockey_suspendu && "line-through")}>{p.jockey}</span>}
       {p.entraineur && (
         <span className={cn("hidden sm:inline", p.entraineur_suspendu && "line-through")}>
           <span className="text-stone-300" aria-hidden="true">· </span>{p.entraineur}
         </span>
       )}
-      {(p.age != null || rep) && (
+      {/* Âge et repos en deux morceaux insécables : sur un petit écran le repos
+          passe à la ligne entier, sans « · » orphelin en tête de ligne. */}
+      {p.age != null && (
         <span className="whitespace-nowrap">
-          {p.age != null && (
-            <><span className="hidden text-stone-300 sm:inline" aria-hidden="true">· </span>{p.age} ans{p.sexe ? ` · ${SEXE[p.sexe] ?? p.sexe}` : ""}</>
-          )}
-          {rep && (
-            <span className={rep.cls} title={rep.aide}>
-              <span className={cn("font-normal text-stone-300", p.age == null && "hidden sm:inline")} aria-hidden="true"> · </span>{rep.txt}
-            </span>
-          )}
+          <span className="hidden text-stone-300 sm:inline" aria-hidden="true">· </span>{p.age} ans{p.sexe ? ` · ${SEXE[p.sexe] ?? p.sexe}` : ""}
+        </span>
+      )}
+      {rep && (
+        <span className={cn("whitespace-nowrap", rep.cls)} title={rep.aide}>
+          <span className="hidden font-normal text-stone-300 sm:inline" aria-hidden="true">· </span>{rep.txt}
         </span>
       )}
     </span>
