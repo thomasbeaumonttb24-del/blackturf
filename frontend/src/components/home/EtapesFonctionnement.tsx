@@ -1,267 +1,350 @@
 "use client";
 
 /**
- * « Comment ça marche » (accueil) : trois étapes, chacune avec un petit écran
- * qui montre le geste — le classement d'une course, la répartition d'un
- * budget, le règlement d'un pari.
+ * « Comment ça marche » (accueil) : trois étapes, chacune montrée avec le VRAI
+ * composant du site, posé sur un plan en relief qui se redresse au défilement.
  *
- * Les écrans sont des ILLUSTRATIONS : chiffres d'exemple, marqués comme tels,
- * jamais une course réelle. Même règle que le palmarès : l'état servi est
- * l'état final ; les barres ne se remplissent à l'écran que si le bloc était
- * encore sous la ligne de flottaison quand le script a démarré.
+ *  1. le classement d'une course  → `ClassementAlgo` (table des abonnés) ;
+ *  2. le plan de mise              → `PlanMiseDisplay` (page course) ;
+ *  3. le règlement                 → `BetTicket` (palmarès), alimenté par les
+ *     derniers paris réellement réglés. Sans palmarès, un ticket d'exemple.
+ *
+ * Les étapes 1 et 2 tournent sur une course d'EXEMPLE, marquée comme telle :
+ * aucun cheval réel, aucune cote réelle. L'état servi est l'état FINAL (plan à
+ * plat, tout visible) : l'inclinaison n'est jouée que si le script tourne et que
+ * l'utilisateur n'a pas demandé à réduire les animations.
  */
 
 import Link from "next/link";
-import { ArrowRight, Check, ChevronRight, Coins, ListOrdered, Receipt } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import useSWR from "swr";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { ArrowRight, CheckCircle2, LockKeyhole, Sparkles } from "lucide-react";
+import { statsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Tilt, useReveal } from "@/components/track-record/effets";
+import { ClassementAlgo, type ClassementPrediction, type ClassementSignal } from "@/components/courses/classement";
+import { PlanMiseDisplay, type MisePlan } from "@/components/courses/plan-mise";
+import { BetTicket, type WinningBet } from "@/components/track-record/BetsShowcase";
 
-// ─── Écran commun ───────────────────────────────────────────────
-function Ecran({ titre, badge, children }: { titre: string; badge: ReactNode; children: ReactNode }) {
-  return (
-    <div className="relative isolate flex flex-col overflow-hidden rounded-2xl bg-slate-950 p-3.5 text-white md:min-h-[12.5rem] ring-1 ring-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,.08),0_18px_36px_-22px_rgba(15,23,42,.8)]">
-      <div
-        className="pointer-events-none absolute inset-0 -z-10 opacity-70"
-        style={{
-          backgroundImage: "linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px)",
-          backgroundSize: "18px 18px",
-        }}
-        aria-hidden="true"
-      />
-      <span className="etape-scan pointer-events-none absolute inset-x-0 -z-10 h-16" aria-hidden="true" />
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-rose-400/70" />
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-300/70" />
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-          <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-white/55">{titre}</span>
-        </span>
-        {badge}
-      </div>
-      {/* Même hauteur pour les trois écrans : les titres dessous restent alignés. */}
-      <div className="flex flex-1 flex-col justify-between">{children}</div>
-    </div>
-  );
+// ─── Course d'exemple ───────────────────────────────────────────
+const pred = (numero: number, nom: string, rang: number, p1: number, p3: number, cote: number, conf: number): ClassementPrediction => ({
+  prediction_id: `exemple-${numero}`, numero, nom_cheval: nom, rang_predit: rang,
+  proba_top1: p1, proba_top3: p3, proba_top1_low: null, proba_top1_high: null,
+  confidence_score: conf, cote_pmu: cote, cote_juste: Math.round((1 / p1) * 100) / 100, value_bet: null,
+});
+
+const EXEMPLE_CLASSEMENT: ClassementPrediction[] = [
+  pred(7, "Horizon Doré", 1, 0.34, 0.71, 3.8, 0.78),
+  pred(3, "Belle de Mai", 2, 0.21, 0.55, 4.6, 0.7),
+  pred(11, "Quartz du Val", 3, 0.14, 0.41, 9.5, 0.62),
+  pred(5, "Nuit Blanche", 4, 0.09, 0.3, 8.2, 0.55),
+  pred(1, "Cap Ferret", 5, 0.07, 0.24, 14, 0.5),
+];
+
+const sig = (label: string, detail: string, sens: ClassementSignal["sens"]): ClassementSignal => ({ label, detail, sens, score: 1 });
+const EXEMPLE_SIGNAUX: Record<number, ClassementSignal[]> = {
+  7: [sig("Forme récente", "3 podiums sur ses 4 dernières sorties", "positif"), sig("Terrain favorable", "Déjà gagnant sur terrain souple", "positif")],
+  3: [sig("Jockey en forme", "22 % de réussite sur 30 jours", "positif")],
+  11: [sig("Retour de repos", "Pas couru depuis 70 jours", "negatif")],
+};
+
+const pari = (type: string, nums: number[], mise: number, gain: number, probabilite: number) => ({
+  type, mise, gain_potentiel: gain, probabilite, description: "",
+  chevaux: nums.map((numero) => ({ numero, nom: "" })),
+});
+
+const EXEMPLE_PLAN: MisePlan = {
+  montant_total: 20, montant_joue: 20, montant_reserve: 0, ev_global: 0, kelly_warning: false,
+  profil: "equilibre",
+  resume_ia: "Le n°7 domine le classement : il porte la ligne sécurité. Le n°3 et le n°11 complètent les combinaisons.",
+  avertissement: "Exemple illustratif — sur une vraie course, le plan est calculé sur les cotes du moment.",
+  niveaux: [
+    { niveau: "securite", label: "Sécurité", emoji: "", couleur: "", montant: 10, pct: 50, paris: [pari("Simple Placé", [7], 10, 18, 0.71)] },
+    { niveau: "rendement", label: "Rendement", emoji: "", couleur: "", montant: 6, pct: 30, paris: [pari("Couplé Placé", [7, 3], 6, 33, 0.29)] },
+    { niveau: "coup", label: "Coup à tenter", emoji: "", couleur: "", montant: 4, pct: 20, paris: [pari("Trio", [7, 3, 11], 4, 92, 0.06)] },
+  ],
+};
+
+const EXEMPLE_TICKETS: WinningBet[] = [
+  { profil: "equilibre", course_id: "", code: "R1 · C4", hippodrome: "Course d'exemple", date: "2026-09-20T13:50:00Z", type_pari: "Couplé Placé", chevaux: [7, 3], mise: 6, gain: 33.6, benefice: 27.6, rapport: 5.6, fige_avant_course: true },
+  { profil: "conservateur", course_id: "", code: "R1 · C4", hippodrome: "Course d'exemple", date: "2026-09-20T13:50:00Z", type_pari: "Simple Placé", chevaux: [7], mise: 10, gain: 18, benefice: 8, rapport: 1.8, fige_avant_course: true },
+];
+
+const rien = () => {};
+const rienAsync = async () => 0;
+
+// ─── Scène en relief ────────────────────────────────────────────
+function mouvementReduit() {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-const Exemple = () => (
-  <span className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.14em] text-white/40 ring-1 ring-white/10">exemple</span>
-);
+/**
+ * Le plan part incliné et se redresse à mesure que la scène monte dans l'écran
+ * (`--p` de 0 à 1), puis suit légèrement le pointeur. Tout passe par des
+ * variables CSS : aucun rendu React pendant le défilement.
+ */
+function Scene({ children, sens, halo, puces, label }: {
+  children: ReactNode;
+  sens: 1 | -1;
+  halo: string;
+  puces?: ReactNode;
+  label: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
 
-// ─── 01 · Le classement d'une course ────────────────────────────
-function EcranClassement({ hidden }: { hidden: boolean }) {
-  const lignes = [
-    { n: 7, p: 34, c: "from-amber-300 to-amber-500" },
-    { n: 3, p: 21, c: "from-amber-200/90 to-amber-400/90" },
-    { n: 11, p: 14, c: "from-amber-100/80 to-amber-300/80" },
-    { n: 5, p: 9, c: "from-white/40 to-white/25" },
-  ];
-  return (
-    <Ecran titre="R1 · C4 · classement" badge={<Exemple />}>
-      <div className="space-y-2">
-        {lignes.map((l, i) => (
-          <div key={l.n} className="flex items-center gap-2">
-            <span className="w-3 font-mono text-[9px] text-white/40">{i + 1}</span>
-            <span className={cn(
-              "inline-flex h-5 w-6 items-center justify-center rounded font-mono text-[10px] font-bold",
-              i === 0 ? "bg-amber-400 text-slate-950" : "bg-white/10 text-white/85",
-            )}>{l.n}</span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[.06]">
-              <div
-                className={cn("tr-bar h-full rounded-full bg-gradient-to-r", l.c)}
-                style={{ width: hidden ? 0 : `${(l.p / 40) * 100}%`, transitionDelay: `${i * 120}ms` }}
-              />
-            </div>
-            <span className="w-8 text-right font-mono text-[10px] tabular-nums text-white/75">{l.p} %</span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-2.5 font-mono text-[9px] uppercase tracking-[0.12em] text-white/50">
-        <span>Confiance</span>
-        <span className="flex gap-1" aria-hidden="true">
-          {[0, 1, 2, 3, 4].map((k) => (
-            <span key={k} className={cn("h-1.5 w-3.5 rounded-sm", k < 4 ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,.7)]" : "bg-white/10")} />
-          ))}
-        </span>
-      </div>
-    </Ecran>
-  );
-}
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || mouvementReduit()) return;
+    let raf = 0;
+    const maj = () => {
+      raf = 0;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const p = Math.max(0, Math.min(1, (vh - r.top) / (vh * 0.8)));
+      el.style.setProperty("--p", p.toFixed(3));
+    };
+    const demande = () => { if (!raf) raf = requestAnimationFrame(maj); };
+    maj();
+    window.addEventListener("scroll", demande, { passive: true });
+    window.addEventListener("resize", demande);
+    return () => {
+      window.removeEventListener("scroll", demande);
+      window.removeEventListener("resize", demande);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
 
-// ─── 02 · La répartition d'un budget ────────────────────────────
-function EcranBudget({ hidden }: { hidden: boolean }) {
-  const lignes = [
-    { l: "Sécurité", m: 10, c: "bg-emerald-400", t: "text-emerald-300" },
-    { l: "Rendement", m: 6, c: "bg-amber-400", t: "text-amber-300" },
-    { l: "Coup", m: 4, c: "bg-rose-400", t: "text-rose-300" },
-  ];
-  return (
-    <Ecran titre="Plan de mise" badge={<Exemple />}>
-      <div className="flex items-center justify-between rounded-lg bg-white/[.05] px-2.5 py-1.5 ring-1 ring-amber-300/30">
-        <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-white/50">Budget</span>
-        <span className="font-display text-base font-black tabular-nums text-white">
-          20 €<span className="etape-caret ml-0.5 inline-block h-3.5 w-px translate-y-0.5 bg-amber-300" aria-hidden="true" />
-        </span>
-      </div>
-      {/* Barre empilée : les trois lignes se partagent le budget. */}
-      <div className="mt-3 flex h-2 gap-0.5 overflow-hidden rounded-full bg-white/[.06]" aria-hidden="true">
-        {lignes.map((x, i) => (
-          <span
-            key={x.l}
-            className={cn("tr-bar h-full first:rounded-l-full last:rounded-r-full", x.c)}
-            style={{ width: hidden ? 0 : `${(x.m / 20) * 100}%`, transitionDelay: `${i * 160}ms` }}
-          />
-        ))}
-      </div>
-      <div className="mt-2.5 space-y-1.5">
-        {lignes.map((x) => (
-          <div key={x.l} className="flex items-center justify-between font-mono text-[10px]">
-            <span className="inline-flex items-center gap-1.5 text-white/70">
-              <span className={cn("h-1.5 w-1.5 rounded-full", x.c)} /> {x.l}
-            </span>
-            <span className={cn("tabular-nums font-bold", x.t)}>{x.m} €</span>
-          </div>
-        ))}
-      </div>
-    </Ecran>
-  );
-}
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== "mouse" || mouvementReduit()) return;
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty("--px", (((e.clientX - r.left) / r.width - 0.5) * 2).toFixed(3));
+    el.style.setProperty("--py", (((e.clientY - r.top) / r.height - 0.5) * 2).toFixed(3));
+  };
+  const onLeave = () => {
+    ref.current?.style.setProperty("--px", "0");
+    ref.current?.style.setProperty("--py", "0");
+  };
 
-// ─── 03 · Le règlement au rapport officiel ──────────────────────
-function EcranReglement({ hidden }: { hidden: boolean }) {
-  return (
-    <Ecran titre="Arrivée officielle" badge={<Exemple />}>
-      <div className="flex items-center gap-1.5">
-        {[7, 3, 11].map((n, i) => (
-          <span key={n} className="inline-flex items-center gap-1 rounded-md bg-white/[.06] px-1.5 py-1 ring-1 ring-white/10">
-            <span className="font-mono text-[8px] text-white/40">{i + 1}<sup>{i ? "e" : "er"}</sup></span>
-            <span className="font-mono text-[11px] font-bold text-white">{n}</span>
-          </span>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center justify-between rounded-lg bg-emerald-400/10 px-2.5 py-1.5 ring-1 ring-emerald-400/30">
-        <span className="inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-emerald-200">
-          <Check className="h-3 w-3" aria-hidden="true" /> Réglé au rapport PMU
-        </span>
-        <span className="font-mono text-[10px] font-bold tabular-nums text-emerald-300">+ 12,40 €</span>
-      </div>
-      {/* Courbe de capital : se trace quand le bloc entre à l'écran. */}
-      <svg viewBox="0 0 200 44" className="mt-2.5 h-11 w-full" aria-hidden="true">
-        <defs>
-          <linearGradient id="etape-capital" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#34D399" stopOpacity=".35" />
-            <stop offset="100%" stopColor="#34D399" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d="M0 34 L28 30 L52 36 L80 26 L108 28 L136 18 L164 20 L200 8 L200 44 L0 44 Z" fill="url(#etape-capital)"
-          style={{ opacity: hidden ? 0 : 1, transition: "opacity .8s ease .6s" }} />
-        <path d="M0 34 L28 30 L52 36 L80 26 L108 28 L136 18 L164 20 L200 8" fill="none" stroke="#34D399" strokeWidth="2"
-          strokeLinecap="round" strokeLinejoin="round" pathLength={1} strokeDasharray="1"
-          style={{ strokeDashoffset: hidden ? 1 : 0, transition: "stroke-dashoffset 1.4s cubic-bezier(0.16,1,0.3,1)" }} />
-        <circle cx="200" cy="8" r="3" fill="#fff" style={{ opacity: hidden ? 0 : 1, transition: "opacity .4s ease 1.2s" }} />
-      </svg>
-    </Ecran>
-  );
-}
-
-// ─── Carte d'étape ──────────────────────────────────────────────
-const ETAPES = [
-  {
-    step: "01", icon: ListOrdered, titre: "Ouvrez la course",
-    desc: "Tout le programme PMU du jour est déjà analysé : classement des partants, probabilité de chacun, score de confiance de la course.",
-    Ecran: EcranClassement,
-  },
-  {
-    step: "02", icon: Coins, titre: "Donnez votre budget",
-    desc: "Vous entrez un montant, nous répartissons : une ligne sécurité, une ligne rendement, une ligne coup — selon votre profil de risque.",
-    Ecran: EcranBudget,
-  },
-  {
-    step: "03", icon: Receipt, titre: "Pariez où vous voulez",
-    desc: "Vous jouez chez votre opérateur. À l'arrivée, chaque pari est réglé au rapport officiel et votre capital est mis à jour.",
-    Ecran: EcranReglement,
-  },
-] as const;
-
-function CarteEtape({ e, index }: { e: (typeof ETAPES)[number]; index: number }) {
-  const { ref, hidden } = useReveal<HTMLDivElement>(0.3);
-  const Icone = e.icon;
   return (
     <div
       ref={ref}
-      className={cn("tr-reveal relative h-full", hidden && "tr-armed")}
-      style={{ "--tr-delay": `${index * 110}ms` } as CSSProperties}
+      onPointerMove={onMove}
+      onPointerLeave={onLeave}
+      className="scene3d relative"
+      style={{ "--sens": sens } as CSSProperties}
+      role="img"
+      aria-label={label}
     >
-      <Tilt max={6} className="group h-full overflow-hidden rounded-3xl bg-white p-3 ring-1 ring-stone-200/80 shadow-[0_30px_60px_-40px_rgba(17,24,39,.45)] transition-shadow hover:ring-amber-300/60">
-        <div className="tr-pop">
-          <e.Ecran hidden={hidden} />
+      {/* Ambiance : une lueur douce derrière l'écran, et son ombre portée au sol. */}
+      <div className={cn("scene3d-halo pointer-events-none absolute -inset-10 -z-10 rounded-full blur-3xl", halo)} aria-hidden="true" />
+      <div className="scene3d-plan">
+        <div className="relative overflow-hidden rounded-[1.4rem] bg-white shadow-[0_2px_0_rgba(255,255,255,.9)_inset,0_50px_90px_-40px_rgba(28,25,23,.45),0_18px_36px_-24px_rgba(28,25,23,.25)] ring-1 ring-stone-200/80">
+          <div inert className="pointer-events-none select-none">{children}</div>
+          <div className="scene3d-reflet pointer-events-none absolute inset-0" aria-hidden="true" />
         </div>
-        <div className="relative px-3 pb-3 pt-5">
-          {/* Numéro en filigrane, en contour doré. */}
-          <span
-            className="pointer-events-none absolute right-3 top-2 select-none font-display text-6xl font-black leading-none text-transparent"
-            style={{ WebkitTextStroke: "1.5px rgba(217,119,6,.28)" }}
-            aria-hidden="true"
-          >
-            {e.step}
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-amber-800 ring-1 ring-amber-200">
-            <Icone className="h-3.5 w-3.5" aria-hidden="true" /> Étape {e.step}
-          </span>
-          <h3 className="mt-3 font-display text-lg font-bold text-gray-900">{e.titre}</h3>
-          <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{e.desc}</p>
-        </div>
-      </Tilt>
-
-      {/* Liaison vers l'étape suivante (bureau uniquement). */}
-      {index < ETAPES.length - 1 && (
-        <span
-          className="absolute -right-[22px] top-[5.5rem] z-20 hidden h-9 w-9 items-center justify-center rounded-full bg-white text-amber-600 ring-1 ring-amber-200 shadow-[0_8px_20px_-8px_rgba(180,83,9,.5)] md:inline-flex"
-          aria-hidden="true"
-        >
-          <ChevronRight className="etape-fleche h-4 w-4" />
-        </span>
-      )}
+        {puces}
+      </div>
+      <div className="scene3d-sol pointer-events-none absolute inset-x-[12%] -bottom-8 -z-10 h-10 rounded-[100%] bg-stone-900/20 blur-2xl" aria-hidden="true" />
     </div>
+  );
+}
+
+/** Pastille qui flotte au-dessus du plan (profondeur `z`, en px). */
+function Puce({ children, className, z = 70, delai = 0 }: { children: ReactNode; className?: string; z?: number; delai?: number }) {
+  return (
+    <div
+      className={cn("scene3d-puce absolute z-10 hidden sm:block", className)}
+      style={{ "--z": `${z}px`, animationDelay: `${delai}ms` } as CSSProperties}
+      aria-hidden="true"
+    >
+      <div className="flex items-center gap-2 rounded-2xl bg-white/90 px-3.5 py-2.5 text-sm text-stone-700 shadow-[0_24px_48px_-20px_rgba(28,25,23,.45)] ring-1 ring-stone-200/80 backdrop-blur">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Coupe les longs composants en « écran » avec un fondu en bas. */
+function Fenetre({ children, hauteur }: { children: ReactNode; hauteur: string }) {
+  return (
+    <div className="relative overflow-hidden" style={{ maxHeight: hauteur }}>
+      {children}
+      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white to-transparent" />
+    </div>
+  );
+}
+
+/**
+ * Rend un composant à sa largeur de bureau (`largeur`) puis le réduit pour
+ * tenir dans le cadre — comme une capture du vrai écran. Sous 640 px de
+ * fenêtre, le composant garde sa mise en page mobile, sans réduction.
+ */
+function Echelle({ children, largeur, hauteur }: { children: ReactNode; largeur: number; hauteur: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [k, setK] = useState<number | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const maj = () => setK(window.innerWidth >= 640 ? Math.min(1, el.clientWidth / largeur) : null);
+    maj();
+    const ro = new ResizeObserver(maj);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [largeur]);
+  return (
+    <div ref={ref} className="relative overflow-hidden" style={{ height: k ? hauteur * k : undefined, maxHeight: k ? undefined : "34rem" }}>
+      <div style={k ? { width: largeur, transform: `scale(${k})`, transformOrigin: "top left" } : undefined}>{children}</div>
+      <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-white to-transparent" />
+    </div>
+  );
+}
+
+// ─── Étapes ─────────────────────────────────────────────────────
+function useDerniersTickets() {
+  const { data } = useSWR<{ gagnants: WinningBet[] }>(
+    "palmares-public",
+    () => statsApi.palmaresPublic().then((r) => r.data),
+    { revalidateOnFocus: false },
+  );
+  const reels = (data?.gagnants ?? []).slice(0, 2);
+  return { tickets: reels.length ? reels : EXEMPLE_TICKETS, reels: reels.length > 0 };
+}
+
+function Etape({ n, titre, desc, points, inverse, children }: {
+  n: number; titre: string; desc: string; points: string[]; inverse?: boolean; children: ReactNode;
+}) {
+  return (
+    <li className={cn("grid items-center gap-12 lg:gap-20", inverse ? "lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)]" : "lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]")}>
+      <div className={cn("max-w-md", inverse && "lg:order-2")}>
+        <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-stone-900 font-display text-base font-medium text-white shadow-[0_12px_24px_-12px_rgba(28,25,23,.6)]">
+          {n}
+        </span>
+        <h3 className="mt-6 font-display text-2xl font-medium tracking-tight text-stone-900 sm:text-[2rem] sm:leading-tight">{titre}</h3>
+        <p className="mt-4 text-base leading-relaxed text-stone-500">{desc}</p>
+        <ul className="mt-6 space-y-2.5">
+          {points.map((p) => (
+            <li key={p} className="flex items-start gap-2.5 text-sm text-stone-600">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" /> {p}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className={cn(inverse && "lg:order-1")}>{children}</div>
+    </li>
   );
 }
 
 export function EtapesFonctionnement() {
+  const { tickets, reels } = useDerniersTickets();
+
   return (
     <>
-      <div className="relative">
-        {/* Rail qui relie les trois écrans, avec une impulsion qui le parcourt. */}
-        <div className="pointer-events-none absolute left-[8%] right-[8%] top-[6.6rem] hidden h-px bg-gradient-to-r from-amber-200/0 via-amber-300/70 to-amber-200/0 md:block" aria-hidden="true">
-          <span className="etape-impulsion absolute -top-[3px] h-[7px] w-16 rounded-full bg-gradient-to-r from-transparent via-amber-400 to-transparent blur-[1px]" />
-        </div>
-        <ol className="relative grid gap-5 md:grid-cols-3 md:gap-8">
-          {ETAPES.map((e, i) => (
-            <li key={e.step}><CarteEtape e={e} index={i} /></li>
-          ))}
-        </ol>
-      </div>
+      <ol className="space-y-28 sm:space-y-36">
+        <Etape
+          n={1}
+          titre="Ouvrez la course"
+          desc="Tout le programme PMU du jour est déjà analysé. Chaque partant reçoit une probabilité de victoire et une cote juste, et les chevaux sont classés du plus probable au moins probable."
+          points={["Probabilité de victoire et de podium", "Cote juste face à la cote du marché", "Signaux qui expliquent le classement"]}
+        >
+          <Scene
+            sens={1}
+            halo="bg-amber-200/50"
+            label="Exemple du classement de l'algorithme sur une course fictive"
+            puces={
+              <>
+                <Puce className="-left-10 -bottom-6" z={90}>
+                  <span className="font-display text-lg font-medium text-stone-900">34 %</span> de chances pour le n°7
+                </Puce>
+                <Puce className="-right-6 -top-5" z={60} delai={900}>
+                  <Sparkles className="h-4 w-4 text-amber-600" /> Recalculé à chaque mouvement de cote
+                </Puce>
+              </>
+            }
+          >
+            <Echelle largeur={860} hauteur={720}>
+              <ClassementAlgo predictions={EXEMPLE_CLASSEMENT} signauxParNumero={EXEMPLE_SIGNAUX} onLegende={rien} />
+            </Echelle>
+          </Scene>
+        </Etape>
+
+        <Etape
+          n={2}
+          inverse
+          titre="Donnez votre budget"
+          desc="Vous entrez un montant et choisissez votre profil. Le moteur répartit la mise sur trois lignes, sécurité, rendement et coup à tenter, en ne gardant que les paris au bon prix."
+          points={["Trois profils : prudent, modéré, risqué", "Mise et gain possible pour chaque ticket", "Les paris écartés, avec la raison"]}
+        >
+          <Scene
+            sens={-1}
+            halo="bg-emerald-200/50"
+            label="Exemple d'un plan de mise de 20 euros sur une course fictive"
+            puces={
+              <Puce className="-right-10 bottom-28" z={90}>
+                <span className="font-display text-lg font-medium text-stone-900">20 €</span> répartis en 3 lignes
+              </Puce>
+            }
+          >
+            <Fenetre hauteur="31rem">
+              <div className="mx-auto max-w-[27rem] p-4 sm:p-5">
+                <PlanMiseDisplay
+                  plan={EXEMPLE_PLAN}
+                  profil="equilibre"
+                  switching={false}
+                  onChangeProfil={rien}
+                  onClose={rien}
+                  onSave={rienAsync}
+                />
+              </div>
+            </Fenetre>
+          </Scene>
+        </Etape>
+
+        <Etape
+          n={3}
+          titre="Pariez où vous voulez"
+          desc="Vous jouez chez votre opérateur habituel. À l'arrivée, chaque pari est réglé au rapport PMU officiel et votre capital est mis à jour, gains comme pertes."
+          points={["Pronostic figé avant le départ", "Règlement au rapport officiel", "Capital suivi au centime"]}
+        >
+          <Scene
+            sens={1}
+            halo="bg-sky-200/40"
+            label={reels ? "Les derniers paris réellement réglés par BlackTurf" : "Exemple de paris réglés"}
+            puces={
+              <Puce className="-left-8 -top-5" z={80}>
+                <LockKeyhole className="h-4 w-4 text-emerald-600" />
+                {reels ? "Derniers paris réellement réglés" : "Exemple de règlement"}
+              </Puce>
+            }
+          >
+            <div className="space-y-3 bg-stone-50/70 p-4 sm:p-6">
+              {tickets.map((b, i) => (
+                <div key={`${b.course_id}-${b.type_pari}-${i}`} className="scene3d-ticket" style={{ "--i": i } as CSSProperties}>
+                  <BetTicket b={b} />
+                </div>
+              ))}
+            </div>
+          </Scene>
+        </Etape>
+      </ol>
 
       {/* La page pilier de la méthode n'était atteignable que depuis le pied de page :
           un lien de bas de site ne dit à personne, moteur compris, qu'elle porte le
           sujet principal du site. Elle est citée ici, là où la question se pose. */}
       <Link
         href="/pronostics-ia"
-        className="group mx-auto mt-10 flex max-w-3xl flex-col items-start gap-3 rounded-2xl bg-slate-950 p-4 text-left ring-1 ring-slate-900 transition hover:ring-amber-400/50 sm:flex-row sm:items-center sm:gap-4 sm:p-5"
+        className="group mx-auto mt-28 flex max-w-3xl items-center gap-4 border-y border-stone-200 py-5 text-left transition-colors hover:border-stone-400"
       >
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950 shadow-[inset_0_1px_0_rgba(255,255,255,.4)]">
-          <ListOrdered className="h-5 w-5" aria-hidden="true" />
-        </span>
         <span className="min-w-0 flex-1">
-          <span className="block font-display text-sm font-bold text-white sm:text-base">
+          <span className="block font-display text-base font-medium text-stone-900">
             Comment l&apos;IA calcule une probabilité par cheval
           </span>
-          <span className="mt-0.5 block text-xs leading-relaxed text-white/60 sm:text-sm">
+          <span className="mt-1 block text-sm leading-relaxed text-stone-500">
             Les données sur lesquelles le modèle apprend, son réentraînement quotidien, et la
             façon dont sa justesse est vérifiée.
           </span>
         </span>
-        <ArrowRight className="h-5 w-5 shrink-0 text-amber-300 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+        <ArrowRight className="h-5 w-5 shrink-0 text-stone-400 transition-transform group-hover:translate-x-1 group-hover:text-stone-900" aria-hidden="true" />
       </Link>
     </>
   );
