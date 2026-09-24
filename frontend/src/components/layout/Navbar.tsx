@@ -195,14 +195,15 @@ export function Navbar() {
           <Link href="/" className="flex items-center gap-2 flex-shrink-0" aria-label="BlackTurf — Accueil">
             {/* `alt` vide, volontairement : le lien porte déjà `aria-label` ET le nom
                 écrit à côté. Un alt qui le répète fait annoncer « BlackTurf » deux
-                fois de plus (règle axe « image-redundant-alt »). */}
+                fois de plus (règle axe « image-redundant-alt »).
+                `logo-transparent.png` : logo détouré (fond transparent, marges rognées)
+                pour ne pas laisser voir un carré blanc sur une surface colorée. */}
             <Image
-              src="/logo.png"
+              src="/logo-transparent.png"
               alt=""
-              width={52}
-              height={52}
-              className="w-12 sm:w-[52px] object-contain"
-              style={{ height: "auto" }}
+              width={256}
+              height={251}
+              className="h-10 w-auto sm:h-11 object-contain"
               priority
             />
             <span className="text-xl font-bold tracking-tight text-[#17231f]">
