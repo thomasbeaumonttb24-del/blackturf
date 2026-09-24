@@ -20,7 +20,7 @@ export default function ConfidentialitePage() {
         <h2 className="text-lg font-semibold">1. Responsable du traitement</h2>
         <p className="text-sm text-muted-foreground">
           L&apos;éditeur de BlackTurf — entrepreneur individuel exploitant sous le nom commercial
-          « BlackTurf » (SIREN 907&nbsp;548&nbsp;184).<br />
+          « BlackTurf ».<br />
           Contact données personnelles : <strong>privacy@blackturf.fr</strong><br />
           Hébergement : Union Européenne (Hetzner Online GmbH, Allemagne).
         </p>

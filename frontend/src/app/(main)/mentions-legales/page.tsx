@@ -21,8 +21,6 @@ export default function MentionsLegalesPage() {
         <p className="text-muted-foreground">
           Le site <strong>BlackTurf</strong> (blackturf.fr) est édité par :<br />
           Un entrepreneur individuel (micro-entreprise) exploitant sous le nom commercial « BlackTurf »<br />
-          SIREN : 907&nbsp;548&nbsp;184 — SIRET (siège) : 907&nbsp;548&nbsp;184&nbsp;00023<br />
-          RCS Bordeaux — immatriculé le 01/04/2025<br />
           TVA : non applicable, article 293&nbsp;B du CGI (franchise en base)<br />
           Email : contact@blackturf.fr — Site : https://blackturf.fr
         </p>

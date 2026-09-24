@@ -21,8 +21,7 @@ export default function CGVPage() {
         <p className="text-muted-foreground">
           Les présentes CGV régissent la vente des abonnements au service BlackTurf, édité par
           un entrepreneur individuel (micro-entreprise) exploitant sous le
-          nom commercial « BlackTurf » — SIREN 907&nbsp;548&nbsp;184,
-          RCS Bordeaux. TVA non applicable, art. 293&nbsp;B du CGI. Contact : contact@blackturf.fr.
+          nom commercial « BlackTurf ». TVA non applicable, art. 293&nbsp;B du CGI. Contact : contact@blackturf.fr.
         </p>
       </section>
 

@@ -101,8 +101,8 @@ export const metadata: Metadata = {
 // Données structurées globales (organisation + site) → éligibilité rich results / sitelinks.
 //
 // Tout ce qui est déclaré ici est visible sur la page des mentions légales : rien n'est
-// balisé qui ne soit publié. Ni nom de personne ni adresse postale : l'éditeur ne publie
-// pas son identité personnelle ni son domicile.
+// balisé qui ne soit publié. Ni nom de personne, ni adresse postale, ni SIREN (qui mène
+// aux deux) : l'éditeur ne publie ni son identité personnelle ni son domicile.
 const orgJsonLd = {
   "@context": "https://schema.org",
   "@type": "Organization",
@@ -119,8 +119,6 @@ const orgJsonLd = {
     email: "contact@blackturf.fr",
     availableLanguage: ["fr"],
   },
-  // Identifiant d'entreprise français : c'est la référence vérifiable auprès d'un tiers.
-  identifier: { "@type": "PropertyValue", propertyID: "SIREN", value: "907548184" },
   areaServed: "FR",
   // `sameAs` est ce qui rattache un compte social à CETTE entité plutôt qu'à une marque
   // homonyme. Sans lui, le compte Instagram et le site restaient deux choses sans lien
