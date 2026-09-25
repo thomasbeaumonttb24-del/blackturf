@@ -1259,78 +1259,12 @@ const CAPACITES: Capacite[] = [
   },
 ];
 
-export function CapacitesAbonnementCard({ apercu }: { apercu?: ApercuAnalyse | null }) {
-  // La carte parle de CE champ, pas d'un dépliant : quand le serveur a compté
-  // les signaux de la course, c'est ce nombre qui s'affiche. Absent → le texte
-  // générique reprend la main, on n'écrit jamais « des signaux ».
-  const nbSignaux = apercu?.signaux_course?.total ?? null;
-  // Course courue : tout ce qui suit est DÉJÀ ouvert sur cette page — la course
-  // n'est plus jouable. Garder « sur cette course » se contredirait à l'écran ;
-  // ce que l'abonnement ouvre, ici, ce sont les courses qui restent à courir.
-  const revele = Boolean(apercu?.revele);
-
-  return (
-    <Card
-      title={revele
-        ? "Ce que l'abonnement ouvre sur les courses à venir"
-        : "Ce que l'abonnement ouvre sur cette course"}
-      icon={Lock}
-      aside="Standard 12 € · Expert 19 €"
-    >
-      <div className="grid gap-2.5 sm:grid-cols-2">
-        {CAPACITES.map((c) => {
-          const Icone = c.icone;
-          const expert = c.plan === "Expert";
-          return (
-            <div
-              key={c.titre}
-              className="flex gap-3 rounded-2xl border border-stone-200 bg-stone-50/50 p-3.5 transition-colors hover:border-amber-200 hover:bg-amber-50/30"
-            >
-              <span
-                className={cn(
-                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1",
-                  expert
-                    ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                    : "bg-amber-50 text-amber-800 ring-amber-200",
-                )}
-              >
-                <Icone className="h-[17px] w-[17px]" aria-hidden="true" />
-              </span>
-              <div className="min-w-0">
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="font-display text-[13.5px] font-bold text-slate-900">{c.titre}</span>
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                      expert ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900",
-                    )}
-                  >
-                    {c.plan}
-                  </span>
-                </p>
-                <p className="mt-1 text-[12px] leading-5 text-stone-600">
-                  {c.titre === "Les signaux, pour et contre" && nbSignaux
-                    ? revele
-                      ? `${nbSignaux} signaux ont été retenus sur cette course — autant sur chacune de celles de ce soir.`
-                      : `${nbSignaux} signaux retenus sur cette course : ce qui joue en faveur de chaque cheval et ce qui joue contre lui.`
-                    : c.texte}
-                </p>
-                {c.onglet && <p className="mt-1 text-[11px] text-stone-600">onglet {c.onglet}</p>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
 // ─── Bandeau d'abonnement — le SEUL de la page ────────────────────────────────
 // Trois boutons d'abonnement se disputaient l'onglet Synthèse (aperçu, table du
 // classement, encart de preuve). Aucun ne gagnait, et l'ensemble se lisait comme
 // une page de vente. Un seul appel, placé APRÈS la démonstration : les cartes
 // au-dessus redeviennent de l'information.
-export function CtaAbonnementBand({ connecte, revele }: { connecte: boolean; revele?: boolean }) {
+export function CtaAbonnementBand({ connecte, revele, nbSignaux }: { connecte: boolean; revele?: boolean; nbSignaux?: number | null }) {
   // Preuve chiffrée et RÉELLE : fréquence à laquelle le gagnant sort du top 3 du
   // modèle sur l'historique vérifié. `null` tant qu'elle n'est pas mesurable →
   // la ligne disparaît plutôt que d'afficher un chiffre de repli.
@@ -1344,10 +1278,8 @@ export function CtaAbonnementBand({ connecte, revele }: { connecte: boolean; rev
     ? connecte ? "Voir les courses à venir" : "Essayer 7 jours gratuitement"
     : connecte ? "Débloquer le pronostic — 12 €/mois" : "Voir le pronostic — essai 7 jours gratuit";
 
-  // Ce que débloque l'abonnement, en quatre mots — les mêmes onglets que la page.
-  const inclus = revele
-    ? ["Classement complet avant le départ", "Signaux pour et contre", "Plan de mise sur votre budget", "Alertes de valeur"]
-    : ["Les noms du podium", "Cote juste et chance de chaque cheval", "L'analyse rédigée", "Votre plan de mise"];
+  // Ce que débloque l'abonnement : l'inventaire des capacités réelles (cf.
+  // CAPACITES), une ligne chacune, avec la formule qui l'ouvre.
 
   return (
     <section className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#1C1917] via-[#231F1B] to-[#2B2419] p-5 text-white ring-1 ring-amber-500/20 shadow-[0_24px_48px_-28px_rgba(28,25,23,.9)] sm:p-7">
@@ -1388,15 +1320,29 @@ export function CtaAbonnementBand({ connecte, revele }: { connecte: boolean; rev
         </div>
 
         <div className="rounded-2xl bg-white/[.04] p-4 ring-1 ring-inset ring-white/10 backdrop-blur-sm">
-          <ul className="m-0 space-y-2.5 p-0">
-            {inclus.map((t) => (
-              <li key={t} className="flex items-center gap-2.5 text-[13px] text-stone-100">
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300 ring-1 ring-inset ring-emerald-400/30">
-                  <Check className="h-3 w-3" aria-hidden="true" />
-                </span>
-                {t}
-              </li>
-            ))}
+          <p className="m-0 mb-2.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-stone-400">
+            {revele ? "Sur chaque course à venir" : "Ce que l'abonnement ouvre ici"}
+          </p>
+          <ul className="m-0 space-y-2 p-0">
+            {CAPACITES.map((c) => {
+              const Icone = c.icone;
+              const expert = c.plan === "Expert";
+              const titre = c.titre === "Les signaux, pour et contre" && nbSignaux ? `${nbSignaux} signaux, pour et contre` : c.titre;
+              return (
+                <li key={c.titre} className="flex items-center gap-2.5 text-[13px] text-stone-100" title={c.texte}>
+                  <span className={cn(
+                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset",
+                    expert ? "bg-emerald-400/15 text-emerald-300 ring-emerald-400/30" : "bg-amber-400/15 text-amber-300 ring-amber-400/30",
+                  )}>
+                    <Icone className="h-3.5 w-3.5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1 leading-snug">{titre}</span>
+                  <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold", expert ? "bg-emerald-400/15 text-emerald-300" : "bg-white/10 text-stone-300")}>
+                    {c.plan}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
           {precision != null && (
             <p className="m-0 mt-4 flex flex-wrap items-baseline gap-x-2 border-t border-white/10 pt-3 text-[12px] text-stone-300">

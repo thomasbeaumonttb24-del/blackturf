@@ -21,7 +21,7 @@ import { useCotesLive } from "@/hooks/useWebSocket";
 import {
   ParisDisponiblesCard, ConfrontationsCard, EnjeuxParChevalCard, TempsPassageCard,
   CompteurDepart, ApercuAnalyseCard, PreuvesRecentesCard, useApercuAnalyse,
-  CapacitesAbonnementCard, CtaAbonnementBand,
+  CtaAbonnementBand,
 } from "@/components/courses/insights";
 import { PronosticEmailPopup } from "@/components/courses/PronosticEmailPopup";
 import { CX, PROFILS_MISE, PlanMiseDisplay, type MisePlan } from "@/components/courses/plan-mise";
@@ -265,76 +265,102 @@ function ComparateurChevaux({ partants }: { partants: Partant[] }) {
   const a = jouables.find((p) => p.numero === numA);
   const b = jouables.find((p) => p.numero === numB);
 
-  const Select = ({ value, onChange, exclude }: { value: number | null; onChange: (n: number) => void; exclude: number | null }) => (
-    <select
-      value={value ?? ""}
-      onChange={(e) => onChange(Number(e.target.value))}
-      style={{ flex: 1, minWidth: 0, fontFamily: CX.sg, fontSize: 13, fontWeight: 600, color: CX.ink2, background: CX.surf1, border: `1px solid ${CX.bd1}`, borderRadius: 10, padding: "8px 10px" }}
-    >
-      {jouables.filter((p) => p.numero !== exclude).map((p) => (
-        <option key={p.numero} value={p.numero}>N°{p.numero} — {p.nom_cheval}</option>
-      ))}
-    </select>
+  const Select = ({ value, onChange, exclude, cote }: { value: number | null; onChange: (n: number) => void; exclude: number | null; cote: "a" | "b" }) => (
+    <label className={cn(
+      "relative flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 ring-1 ring-inset transition-colors focus-within:ring-amber-400",
+      cote === "a" ? "bg-gradient-to-br from-amber-50 to-white ring-amber-200" : "bg-gradient-to-br from-sky-50 to-white ring-sky-200",
+    )}>
+      <span className="sr-only">{cote === "a" ? "Premier cheval" : "Second cheval"}</span>
+      <CasaqueNumero numero={value} />
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="min-w-0 flex-1 cursor-pointer appearance-none truncate bg-transparent pr-5 text-[13px] font-bold text-stone-900 outline-none"
+        style={{ fontFamily: CX.sg }}
+      >
+        {jouables.filter((p) => p.numero !== exclude).map((p) => (
+          <option key={p.numero} value={p.numero}>{p.numero} · {p.nom_cheval}</option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 h-4 w-4 text-stone-400" aria-hidden="true" />
+    </label>
   );
 
   type Row = { label: string; va: number | null; vb: number | null; fmt: (v: number) => string; higherIsBetter: boolean };
   const rows: Row[] = a && b ? [
     { label: "Cote actuelle", va: a.cote_pmu, vb: b.cote_pmu, fmt: (v) => formatCote(v), higherIsBetter: false },
     { label: "ELO", va: a.elo_global, vb: b.elo_global, fmt: (v) => Math.round(v).toString(), higherIsBetter: true },
-    { label: "Dans les 3 (forme)", va: a.analyse?.forme.taux_top3 ?? null, vb: b.analyse?.forme.taux_top3 ?? null, fmt: (v) => `${Math.round(v * 100)}%`, higherIsBetter: true },
-    { label: "Victoires / courses", va: a.nb_courses ? (a.nb_victoires ?? 0) / a.nb_courses : null, vb: b.nb_courses ? (b.nb_victoires ?? 0) / b.nb_courses : null, fmt: (v) => `${Math.round(v * 100)}%`, higherIsBetter: true },
+    { label: "Dans les 3 (forme)", va: a.analyse?.forme.taux_top3 ?? null, vb: b.analyse?.forme.taux_top3 ?? null, fmt: (v) => `${Math.round(v * 100)} %`, higherIsBetter: true },
+    { label: "Victoires / courses", va: a.nb_courses ? (a.nb_victoires ?? 0) / a.nb_courses : null, vb: b.nb_courses ? (b.nb_victoires ?? 0) / b.nb_courses : null, fmt: (v) => `${Math.round(v * 100)} %`, higherIsBetter: true },
     { label: "Nombre de courses", va: a.nb_courses, vb: b.nb_courses, fmt: (v) => v.toString(), higherIsBetter: true },
     { label: "Repos (jours)", va: a.jours_depuis_derniere, vb: b.jours_depuis_derniere, fmt: (v) => v.toString(), higherIsBetter: false },
   ] : [];
+  const avantageA = rows.filter((r) => r.va != null && r.vb != null && (r.higherIsBetter ? r.va > r.vb : r.va < r.vb)).length;
+  const avantageB = rows.filter((r) => r.va != null && r.vb != null && (r.higherIsBetter ? r.vb > r.va : r.vb < r.va)).length;
 
-  const Cell = ({ v, fmt, best }: { v: number | null; fmt: (v: number) => string; best: boolean }) => (
-    <div style={{ textAlign: "center", fontFamily: CX.sg, fontSize: 13, fontWeight: best ? 800 : 500, color: v == null ? CX.gray400 : best ? CX.emDeep : CX.gray600 }}>
-      {v == null ? "—" : fmt(v)}
-    </div>
-  );
+  /** Demi-barre : longueur proportionnelle à la valeur rapportée au plus grand
+   *  des deux ; pour « plus bas = mieux », l'échelle est inversée (min / valeur). */
+  const part = (v: number | null, autre: number | null, haut: boolean) => {
+    if (v == null || autre == null || v <= 0 || autre <= 0) return 0;
+    return haut ? v / Math.max(v, autre) : Math.min(v, autre) / v;
+  };
 
   return (
-    <div style={{ ...CARTE_STYLE, overflow: "hidden" }}>
-      <div className="flex items-center gap-2.5" style={{ padding: "15px 18px 12px" }}>
+    <section className={cn(CARTE_CLS, "overflow-hidden")}>
+      <div className="flex items-center gap-2.5 px-4 pb-3 pt-4 sm:px-5">
         <IconeTuile icone={Users} />
-        <div>
-          <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Comparateur</h2>
-          <span style={{ fontSize: 12, color: CX.gray400 }}>Mettez deux chevaux côte à côte</span>
+        <div className="min-w-0">
+          <h2 className="m-0 text-[15px] font-bold leading-tight text-stone-900" style={{ fontFamily: CX.sg }}>Comparateur</h2>
+          <p className="m-0 mt-0.5 text-[12px] text-stone-500">Deux chevaux face à face, critère par critère</p>
         </div>
+        {a && b && (
+          <span className="ml-auto hidden items-center gap-1.5 rounded-full bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-stone-600 ring-1 ring-inset ring-stone-200 sm:inline-flex">
+            <b className="tabular-nums text-amber-700">{avantageA}</b> – <b className="tabular-nums text-sky-700">{avantageB}</b> critères
+          </span>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 10, padding: "0 18px 14px" }}>
-        <Select value={numA} onChange={setNumA} exclude={numB} />
-        <span style={{ alignSelf: "center", fontSize: 11, fontWeight: 700, color: CX.gray400 }}>VS</span>
-        <Select value={numB} onChange={setNumB} exclude={numA} />
+      <div className="flex items-center gap-2 px-4 pb-4 sm:gap-3 sm:px-5">
+        <Select value={numA} onChange={setNumA} exclude={numB} cote="a" />
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-900 text-[10.5px] font-extrabold text-white shadow-[0_4px_10px_-4px_rgba(0,0,0,.5)]">VS</span>
+        <Select value={numB} onChange={setNumB} exclude={numA} cote="b" />
       </div>
       {a && b && (
-        <div style={{ borderTop: `1px solid ${CX.bd4}` }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr", gap: 8, alignItems: "center", padding: "10px 18px", fontFamily: CX.sg, fontSize: 13, fontWeight: 700, color: CX.ink2, background: CX.surf2 }}>
-            <span style={{ textAlign: "right" }}><IdentiteCheval numero={a.numero} nom={a.nom_cheval} /></span>
-            <span />
-            <span><IdentiteCheval numero={b.numero} nom={b.nom_cheval} /></span>
-          </div>
+        <div className="divide-y divide-stone-100 border-t border-stone-100">
           {rows.map((r) => {
             const bestA = r.va != null && r.vb != null && (r.higherIsBetter ? r.va > r.vb : r.va < r.vb);
             const bestB = r.va != null && r.vb != null && (r.higherIsBetter ? r.vb > r.va : r.vb < r.va);
             return (
-              <div key={r.label} style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr", gap: 8, alignItems: "center", padding: "9px 18px", borderTop: `1px solid ${CX.bd4}` }}>
-                <Cell v={r.va} fmt={r.fmt} best={bestA} />
-                <span style={{ textAlign: "center", fontSize: 10.5, color: CX.gray400, textTransform: "uppercase", letterSpacing: ".04em" }}>{r.label}</span>
-                <Cell v={r.vb} fmt={r.fmt} best={bestB} />
+              <div key={r.label} className="px-4 py-2.5 sm:px-5">
+                <p className="m-0 mb-1.5 text-center text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">{r.label}</p>
+                <div className="grid grid-cols-[3.5rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem] items-center gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem]">
+                  <span className={cn("text-right text-[13.5px] tabular-nums", bestA ? "font-extrabold text-amber-700" : "font-semibold text-stone-600")} style={{ fontFamily: CX.sg }}>
+                    {r.va == null ? "—" : r.fmt(r.va)}
+                  </span>
+                  <span className="flex h-2 justify-end overflow-hidden rounded-l-full bg-stone-100">
+                    <span className={cn("h-full rounded-l-full", bestA ? "bg-gradient-to-l from-amber-400 to-amber-600" : "bg-stone-300")} style={{ width: `${part(r.va, r.vb, r.higherIsBetter) * 100}%` }} />
+                  </span>
+                  <span className="flex h-2 overflow-hidden rounded-r-full bg-stone-100">
+                    <span className={cn("h-full rounded-r-full", bestB ? "bg-gradient-to-r from-sky-400 to-sky-600" : "bg-stone-300")} style={{ width: `${part(r.vb, r.va, r.higherIsBetter) * 100}%` }} />
+                  </span>
+                  <span className={cn("text-[13.5px] tabular-nums", bestB ? "font-extrabold text-sky-700" : "font-semibold text-stone-600")} style={{ fontFamily: CX.sg }}>
+                    {r.vb == null ? "—" : r.fmt(r.vb)}
+                  </span>
+                </div>
               </div>
             );
           })}
           {(a.musique || b.musique) && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr", gap: 8, alignItems: "center", padding: "9px 18px", borderTop: `1px solid ${CX.bd4}` }}>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}><MusiqueDisplay musique={a.musique} /></div>
-              <span style={{ textAlign: "center", fontSize: 10.5, color: CX.gray400, textTransform: "uppercase", letterSpacing: ".04em" }}>Musique</span>
-              <div><MusiqueDisplay musique={b.musique} /></div>
+            <div className="px-4 py-3 sm:px-5">
+              <p className="m-0 mb-2 text-center text-[10px] font-bold uppercase tracking-[.1em] text-stone-500">Musique</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex justify-end"><MusiqueDisplay musique={a.musique} /></div>
+                <div><MusiqueDisplay musique={b.musique} /></div>
+              </div>
             </div>
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -387,12 +413,12 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
                 const isBest = val != null && coteMin != null && val === coteMin;
                 return (
                   <div key={s.key} style={{ padding: "9px 8px", fontFamily: CX.sg, fontSize: 12.5, fontWeight: isBest ? 700 : 500, textAlign: "right", color: isBest ? CX.em : val == null ? CX.muted : CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
-                    {val ? val.toFixed(1) : "—"}
+                    {val ? formatCoteFr(val) : "—"}
                   </div>
                 );
               })}
               <div style={{ padding: "9px 12px", fontFamily: CX.sg, fontSize: 12, fontWeight: 600, textAlign: "right", color: mv == null ? CX.muted : mv > 0 ? CX.em : CX.red, borderTop: `1px solid ${CX.bd4}` }}>
-                {mv != null ? `${mv > 0 ? "▼" : "▲"} ${Math.abs(mv).toFixed(1)}%` : "—"}
+                {mv != null ? `${mv > 0 ? "▼" : "▲"} ${Math.abs(mv).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %` : "—"}
               </div>
             </Fragment>
           );
@@ -893,6 +919,16 @@ const RAPPORT_META: Record<string, { label: string; abbr: string; color: string;
   b5:                           { label: "Pick 5 Bonus", abbr: "B5", color: "#4338CA", ordre: 19 },
 };
 
+/** Pièces or / argent / bronze, mêmes dégradés que le podium du classement. */
+const MEDAILLE: Record<number, string> = {
+  1: "radial-gradient(circle at 32% 28%,#FFF7D6 0%,#FCD34D 32%,#D97706 72%,#92400E 100%)",
+  2: "radial-gradient(circle at 32% 28%,#FFFFFF 0%,#E2E8F0 34%,#94A3B8 74%,#475569 100%)",
+  3: "radial-gradient(circle at 32% 28%,#FFEAD5 0%,#FDBA74 34%,#C2410C 76%,#7C2D12 100%)",
+};
+
+/** Rapport PMU en euros, écriture française (« 12,40 »). */
+const euros2 = (v: number) => v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 function _rapportAbbr(key: string): string {
   return key.replace(/^e_/, "").split("_").map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 3) || "•";
 }
@@ -957,7 +993,7 @@ function ResultatsSection({ resultats, partants }: {
     const d = c.temps - tempsGagnant;
     if (d <= 0) return "";
     const longueurs = d / 0.17;
-    return longueurs < 10 ? `+${longueurs.toFixed(1)} long.` : `+${d.toFixed(1)}s`;
+    return longueurs < 10 ? `+${longueurs.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} long.` : `+${d.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`;
   };
   const rowTint = (pos: number) =>
     pos === 1 ? "bg-amber-50/80" : pos === 2 ? "bg-slate-100/70" : pos === 3 ? "bg-orange-50/70" : "";
@@ -972,15 +1008,19 @@ function ResultatsSection({ resultats, partants }: {
     : [];
 
   return (
-    <div className="cx-fade" style={{ boxShadow: CARTE_STYLE.boxShadow, borderRadius: 16, border: "1px solid rgba(16,185,129,.3)", overflow: "hidden", background: "linear-gradient(180deg,rgba(16,185,129,.06),#FFFFFF 40%)" }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "16px 20px", borderBottom: "1px solid rgba(16,185,129,.18)" }}>
-        <h2 style={{ margin: 0, fontFamily: CX.sg, fontSize: 17, fontWeight: 700, color: CX.ink2 }}>Arrivée officielle</h2>
-        {(tempsGagnant != null || resultats.temps_gagnant) && (
-          <span style={{ fontSize: 12, color: CX.gray500 }}>
-            Chrono {tempsGagnant != null ? fmtChrono(tempsGagnant) : resultats.temps_gagnant}
-            {podium[0]?.reduction_km != null ? ` · réd. ${fmtRedKm(podium[0].reduction_km)}/km` : ""}
-          </span>
-        )}
+    <div className={cn(CARTE_CLS, "cx-fade overflow-hidden")}>
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-stone-100 px-4 py-4 sm:px-5">
+        <IconeTuile icone={Trophy} />
+        <div className="min-w-0">
+          <h2 className="m-0 text-[15px] font-bold leading-tight text-stone-900" style={{ fontFamily: CX.sg }}>Arrivée officielle</h2>
+          <p className="m-0 mt-0.5 text-[12px] text-stone-500">
+            {podium.length} classé{podium.length > 1 ? "s" : ""}
+            {(tempsGagnant != null || resultats.temps_gagnant)
+              ? ` · chrono ${tempsGagnant != null ? fmtChrono(tempsGagnant) : resultats.temps_gagnant}${podium[0]?.reduction_km != null ? ` · réd. ${fmtRedKm(podium[0].reduction_km)}/km` : ""}`
+              : ""}
+          </p>
+        </div>
+        <Pastille className="ml-auto bg-emerald-50 text-emerald-800 ring-emerald-200">Officielle PMU</Pastille>
       </div>
 
       {/* Classement */}
@@ -1005,7 +1045,10 @@ function ResultatsSection({ resultats, partants }: {
               return (
                 <tr key={c.numero} className={cn("rounded-lg", rowTint(pos), pos <= 3 && "font-semibold")}>
                   <td className="px-2 py-2">
-                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold tabular-nums", medalBox(pos))}>
+                    <span
+                      className={cn("inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold tabular-nums", pos <= 3 ? "text-white shadow-[inset_0_-2px_2px_rgba(0,0,0,.25),inset_0_2px_2px_rgba(255,255,255,.7),0_3px_8px_-3px_rgba(0,0,0,.35)] [text-shadow:0_1px_1px_rgba(0,0,0,.35)]" : medalBox(pos))}
+                      style={pos <= 3 ? { background: MEDAILLE[pos] } : undefined}
+                    >
                       {pos}
                     </span>
                   </td>
@@ -1017,7 +1060,7 @@ function ResultatsSection({ resultats, partants }: {
                     </td>
                   )}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
-                    {cote != null ? cote.toFixed(1) : "—"}
+                    {cote != null ? formatCoteFr(cote) : "—"}
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
                     {temps}
@@ -1042,7 +1085,7 @@ function ResultatsSection({ resultats, partants }: {
                   </td>
                   {hasTemps && <td className="px-2 py-2 hidden sm:table-cell" />}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
-                    {cote != null ? cote.toFixed(1) : "—"}
+                    {cote != null ? formatCoteFr(cote) : "—"}
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums hidden sm:table-cell">—</td>
                 </tr>
@@ -1115,7 +1158,7 @@ function ResultatsSection({ resultats, partants }: {
                                 ? <>{fmtMulti(r.libelle) && <span className="font-semibold text-foreground">{fmtMulti(r.libelle)}</span>}{fmtMulti(r.libelle) ? " · " : ""}{fmtCombo(r.combinaison)}</>
                                 : (fmtCombo(r.combinaison) || "—")}
                             </span>
-                            <span className="font-bold tabular-nums text-brand-emerald-dark whitespace-nowrap">{r.rapport.toFixed(2)} €</span>
+                            <span className="font-bold tabular-nums text-brand-emerald-dark whitespace-nowrap">{euros2(r.rapport)} €</span>
                           </div>
                         ))}
                         {!isPlaceOrWin && arr.length > rows.length && (
@@ -1144,7 +1187,7 @@ function ResultatsSection({ resultats, partants }: {
                     <div key={k} className="flex items-center gap-2 rounded-lg border border-border bg-white px-2 py-1.5">
                       <span className="flex h-6 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded px-1 text-[10px] font-bold tracking-tight text-white" style={{ background: color }}>{abbr}</span>
                       <span className="flex-1 truncate text-xs text-muted-foreground capitalize">{label}</span>
-                      <span className="font-bold tabular-nums text-brand-emerald-dark">{Number(v).toFixed(2)} €</span>
+                      <span className="font-bold tabular-nums text-brand-emerald-dark">{euros2(Number(v))} €</span>
                     </div>
                   );
                 })}
@@ -1219,13 +1262,16 @@ function PronosticVerdictSection({ predictions, classement }: {
   const maxP3 = Math.max(...picks.map((p) => p.proba_top3 || 0), 0.01);
 
   return (
-    <div className="cx-fade" style={{ ...CARTE_STYLE, padding: "20px 20px 22px" }}>
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div>
-          <h2 className="font-display text-[17px] font-bold leading-tight text-slate-900">Bilan du pronostic</h2>
-          <p className="mt-1 text-[12.5px] text-stone-600">
-            Le classement du modèle, tel qu&apos;il était figé avant le départ, face à l&apos;arrivée officielle.
-          </p>
+    <div className={cn(CARTE_CLS, "cx-fade p-4 sm:p-5")}>
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <IconeTuile icone={Target} />
+          <div className="min-w-0">
+            <h2 className="m-0 text-[15px] font-bold leading-tight text-stone-900" style={{ fontFamily: CX.sg }}>Bilan du pronostic</h2>
+            <p className="m-0 mt-0.5 text-[12px] text-stone-500">
+              Le classement du modèle, figé avant le départ, face à l&apos;arrivée officielle.
+            </p>
+          </div>
         </div>
         <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
           <LockKeyhole className="h-3 w-3" aria-hidden="true" /> Figé avant le départ
@@ -2103,7 +2149,7 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
               </div>
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 9 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-                  <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 23, color: CX.ink2, lineHeight: 1 }}>{r.cur.toFixed(1)}</span>
+                  <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 23, color: CX.ink2, lineHeight: 1 }}>{formatCoteFr(r.cur)}</span>
                   <span style={{ fontSize: 10, color: CX.gray400 }}>cote</span>
                 </div>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 10.5, fontWeight: 700, color: deltaColor, background: deltaBg, borderRadius: 999, padding: "2px 8px" }}>
@@ -2111,7 +2157,7 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 3, fontSize: 10, color: CX.muted, position: "relative", zIndex: 1 }}>
-                <span>Ouv. {r.open.toFixed(1)}</span><span>{r.lo.toFixed(1)}–{r.hi.toFixed(1)}</span>
+                <span>Ouv. {formatCoteFr(r.open)}</span><span>{formatCoteFr(r.lo)}–{formatCoteFr(r.hi)}</span>
               </div>
               <svg viewBox="0 0 100 40" preserveAspectRatio="none" style={{ display: "block", width: "100%", height: 34, marginTop: 2 }}>
                 <polygon points={area} fill={`url(#${fillId})`} />
@@ -2969,30 +3015,10 @@ export default function CoursePage({
             />
           ))}
 
-          {/* ── Bloc funnel — UNIQUEMENT pour qui n'a pas le classement ──────
-              Un abonné a déjà tout : lui montrer l'inventaire de ce qu'il paie
-              et un bouton d'abonnement serait au mieux du bruit. */}
-          {(!predictions || predictions.length === 0) && (
-            <>
-              {/* La carte « Analyse BlackTurf » de l'abonné, contenu réservé. */}
-              {apercu?.disponible && !apercu.revele && <AnalyseVerrouillee connecte={Boolean(user)} />}
-              {/* Ce que l'abonnement ouvre : un inventaire de capacités réelles,
-                  à la place des trois pavés de prose qui le décrivaient. Réservé
-                  aux courses ANALYSÉES : ailleurs, il n'y a rien à ouvrir. */}
-              {apercu?.disponible && <CapacitesAbonnementCard apercu={apercu} />}
-              {/* Preuve concrète : ce que le modèle a dit sur les dernières
-                  courses COURUES. Un prospect ne peut pas juger un pourcentage
-                  global ; il peut ouvrir six courses réelles et vérifier. Vraie
-                  sur toute fiche course, y compris une que le modèle n'a pas
-                  couverte — c'est là qu'un visiteur a le plus besoin d'un
-                  chemin vers ce que le site sait faire. */}
-              <PreuvesRecentesCard />
-              {/* Le bandeau promet « le pronostic de cette course » : il ne
-                  s'affiche donc que si ce pronostic existe. */}
-              {apercu?.disponible && (
-                <CtaAbonnementBand connecte={Boolean(user)} revele={Boolean(apercu.revele)} />
-              )}
-            </>
+          {/* La carte « Analyse BlackTurf » de l'abonné, contenu réservé — à la
+              même place que chez lui, juste sous le classement. */}
+          {(!predictions || predictions.length === 0) && apercu?.disponible && !apercu.revele && (
+            <AnalyseVerrouillee connecte={Boolean(user)} />
           )}
 
           {/* ── Modale LÉGENDE : explique les signaux sans encombrer la carte ── */}
@@ -3401,6 +3427,23 @@ export default function CoursePage({
               </details>
             )}
           </div>
+          {/* ── Bloc funnel — UNIQUEMENT pour qui n'a pas le classement ──────
+              En FIN d'onglet : la page se lit d'abord comme celle de l'abonné
+              (classement, analyse, infos course), la vente vient après. Un
+              abonné a déjà tout, il ne voit rien de ceci. */}
+          {(!predictions || predictions.length === 0) && (
+            <>
+              {/* Preuve concrète : ce que le modèle a dit sur les dernières
+                  courses COURUES — vraie sur toute fiche, analysée ou non. */}
+              <PreuvesRecentesCard />
+              {/* Le bandeau promet « le pronostic de cette course » : il ne
+                  s'affiche donc que si ce pronostic existe. Il porte aussi
+                  l'inventaire de ce que l'abonnement ouvre. */}
+              {apercu?.disponible && (
+                <CtaAbonnementBand connecte={Boolean(user)} revele={Boolean(apercu.revele)} nbSignaux={apercu.signaux_course?.total ?? null} />
+              )}
+            </>
+          )}
           </>
         )}
 

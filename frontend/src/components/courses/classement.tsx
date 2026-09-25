@@ -1142,8 +1142,8 @@ export function ClassementApercu({
           {/* Le reste des lignes masquées : une rangée de probabilités et l'appel. */}
           {resteMasque.length > 0 && (
             <li className="relative overflow-hidden bg-gradient-to-b from-[#FCFAF5] to-white px-4 py-4 sm:px-5">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-                <div className="min-w-0 flex-1">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                <div className="min-w-0 sm:flex-1">
                   <p className="m-0 text-[13px] font-bold text-stone-900" style={SG}>
                     + {resteMasque.length} partants classés du {resteMasque[0].rang}ᵉ au {resteMasque[resteMasque.length - 1].rang}ᵉ
                   </p>
@@ -1157,7 +1157,7 @@ export function ClassementApercu({
                     ))}
                   </div>
                 </div>
-                <BoutonAbonnement connecte={connecte} libelle={connecte ? "Voir le classement nommé" : "Voir le classement — essai 7 jours"} />
+                <BoutonAbonnement className="w-full sm:w-auto" connecte={connecte} libelle={connecte ? "Voir le classement nommé" : "Voir le classement — essai 7 jours"} />
               </div>
             </li>
           )}
